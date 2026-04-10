@@ -1,0 +1,7 @@
+## -*- Mode: python; py-indent-offset: 4; indent-tabs-mode: nil; coding: utf-8; -*-
+def build(bld):
+    if not bld.env['ENABLE_EXAMPLES']:
+        return;	  
+
+    program = bld.create_ns3_program('stats-helper-example', ['applications', 'internet', 'network', 'point-to-point', 'stats', 'magister-stats', 'traffic'])
+    program.source = 'stats-helper-example.cc'

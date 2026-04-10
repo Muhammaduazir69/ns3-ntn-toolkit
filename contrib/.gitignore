@@ -1,5 +1,8 @@
-# Ignore everything by default, contrib sources are coming from other places
-*
-
-# Include specific files that should be tracked by Git
-!.gitignore
+# NTN Toolkit: All integrated modules are tracked
+# Only ignore build artifacts and temp files
+*.o
+*.so
+*.pyc
+__pycache__/
+node_modules/
+package-lock.json

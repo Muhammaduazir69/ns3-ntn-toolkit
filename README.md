@@ -57,17 +57,22 @@ cd ns3-ntn-toolkit
 ./ns3 run mc-twoenbs
 ```
 
-## Adding Research Modules
+## Adding Satellite & Research Modules
 
-Drop additional contrib modules into `contrib/`:
+The SNS3 satellite module (3.7 GB with constellation TLE data) is not bundled in this repo due to size. Clone it separately:
 
 ```bash
-# Example: Add the NTN-CHO handover research framework
 cd contrib/
+
+# Add SNS3 Satellite module (required for NTN constellation simulations)
+git clone https://github.com/sns3/sns3-satellite.git satellite
+
+# Add NTN-CHO handover research framework
 git clone https://github.com/Muhammaduazir69/ntn-cho-framework.git ntn-cho
+
 cd ..
 ./ns3 configure --enable-examples
-./ns3 build ntn-cho
+./ns3 build
 ```
 
 ## Module Structure

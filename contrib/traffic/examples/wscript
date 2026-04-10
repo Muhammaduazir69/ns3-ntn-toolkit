@@ -1,0 +1,12 @@
+## -*- Mode: python; py-indent-offset: 4; indent-tabs-mode: nil; coding: utf-8; -*-
+
+def build(bld):
+    if not bld.env['ENABLE_EXAMPLES']:
+        return;
+    
+    obj = bld.create_ns3_program('nrtv-p2p-example', ['traffic','applications','point-to-point','internet','network'])
+    obj.source = 'nrtv-p2p-example.cc'
+    
+    obj = bld.create_ns3_program('nrtv-variables-plot', ['traffic','applications','point-to-point','internet','network'])
+    obj.source = 'nrtv-variables-plot.cc'
+
