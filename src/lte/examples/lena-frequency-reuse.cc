@@ -1,12 +1,25 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
  */
 
+#include "ns3/config-store.h"
 #include "ns3/core-module.h"
 #include "ns3/lte-module.h"
 #include "ns3/mobility-module.h"
@@ -23,13 +36,13 @@ void
 PrintGnuplottableUeListToFile(std::string filename)
 {
     std::ofstream outFile;
-    outFile.open(filename, std::ios_base::out | std::ios_base::trunc);
+    outFile.open(filename.c_str(), std::ios_base::out | std::ios_base::trunc);
     if (!outFile.is_open())
     {
         NS_LOG_ERROR("Can't open file " << filename);
         return;
     }
-    for (auto it = NodeList::Begin(); it != NodeList::End(); ++it)
+    for (NodeList::Iterator it = NodeList::Begin(); it != NodeList::End(); ++it)
     {
         Ptr<Node> node = *it;
         int nDevs = node->GetNDevices();
@@ -52,13 +65,13 @@ void
 PrintGnuplottableEnbListToFile(std::string filename)
 {
     std::ofstream outFile;
-    outFile.open(filename, std::ios_base::out | std::ios_base::trunc);
+    outFile.open(filename.c_str(), std::ios_base::out | std::ios_base::trunc);
     if (!outFile.is_open())
     {
         NS_LOG_ERROR("Can't open file " << filename);
         return;
     }
-    for (auto it = NodeList::Begin(); it != NodeList::End(); ++it)
+    for (NodeList::Iterator it = NodeList::Begin(); it != NodeList::End(); ++it)
     {
         Ptr<Node> node = *it;
         int nDevs = node->GetNDevices();
@@ -97,13 +110,13 @@ main(int argc, char* argv[])
     bool generateSpectrumTrace = false;
     bool generateRem = false;
     int32_t remRbId = -1;
-    uint16_t bandwidth = 25;
+    uint8_t bandwidth = 25;
     double distance = 1000;
     Box macroUeBox =
         Box(-distance * 0.5, distance * 1.5, -distance * 0.5, distance * 1.5, 1.5, 1.5);
 
     // Command line arguments
-    CommandLine cmd(__FILE__);
+    CommandLine cmd;
     cmd.AddValue("numberOfUes", "Number of random UEs", numberOfRandomUes);
     cmd.AddValue("simTime", "Total duration of the simulation (in seconds)", simTime);
     cmd.AddValue("generateSpectrumTrace",
@@ -313,7 +326,7 @@ main(int argc, char* argv[])
     lteHelper->AttachToClosestEnb(randomUeDevs, enbDevs);
 
     // Activate a data radio bearer
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
     EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(edgeUeDevs, bearer);
     lteHelper->ActivateDataRadioBearer(centerUeDevs, bearer);
@@ -328,8 +341,8 @@ main(int argc, char* argv[])
     {
         Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
         // position of Spectrum Analyzer
-        // positionAlloc->Add (Vector (0.0, 0.0, 0.0));                      // eNB1
-        // positionAlloc->Add (Vector (distance,  0.0, 0.0));                // eNB2
+        //    positionAlloc->Add (Vector (0.0, 0.0, 0.0));                              // eNB1
+        //    positionAlloc->Add (Vector (distance,  0.0, 0.0));                        // eNB2
         positionAlloc->Add(Vector(distance * 0.5, distance * 0.866, 0.0)); // eNB3
 
         MobilityHelper mobility;

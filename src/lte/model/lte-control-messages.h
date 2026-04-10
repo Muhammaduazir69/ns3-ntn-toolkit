@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Giuseppe Piro  <g.piro@poliba.it>
  * Author: Marco Miozzo <marco.miozzo@cttc.es>
@@ -10,9 +22,8 @@
 #ifndef LTE_CONTROL_MESSAGES_H
 #define LTE_CONTROL_MESSAGES_H
 
-#include "ff-mac-common.h"
-#include "lte-rrc-sap.h"
-
+#include <ns3/ff-mac-common.h>
+#include <ns3/lte-rrc-sap.h>
 #include <ns3/ptr.h>
 #include <ns3/simple-ref-count.h>
 
@@ -55,8 +66,8 @@ class LteControlMessage : public SimpleRefCount<LteControlMessage>
         SIB1,          // System Information Block Type 1
     };
 
-    LteControlMessage();
-    virtual ~LteControlMessage();
+    LteControlMessage(void);
+    virtual ~LteControlMessage(void);
 
     /**
      * \brief Set the type of the message
@@ -67,7 +78,7 @@ class LteControlMessage : public SimpleRefCount<LteControlMessage>
      * \brief Get the type of the message
      * \return the type of the message
      */
-    MessageType GetMessageType();
+    MessageType GetMessageType(void);
 
   private:
     MessageType m_type; ///< message type
@@ -83,8 +94,8 @@ class LteControlMessage : public SimpleRefCount<LteControlMessage>
 class DlDciLteControlMessage : public LteControlMessage
 {
   public:
-    DlDciLteControlMessage();
-    ~DlDciLteControlMessage() override;
+    DlDciLteControlMessage(void);
+    virtual ~DlDciLteControlMessage(void);
 
     /**
      * \brief add a DCI into the message
@@ -96,7 +107,7 @@ class DlDciLteControlMessage : public LteControlMessage
      * \brief Get dic information
      * \return dci messages
      */
-    const DlDciListElement_s& GetDci();
+    DlDciListElement_s GetDci(void);
 
   private:
     DlDciListElement_s m_dci; ///< DCI
@@ -112,8 +123,8 @@ class DlDciLteControlMessage : public LteControlMessage
 class UlDciLteControlMessage : public LteControlMessage
 {
   public:
-    UlDciLteControlMessage();
-    ~UlDciLteControlMessage() override;
+    UlDciLteControlMessage(void);
+    virtual ~UlDciLteControlMessage(void);
 
     /**
      * \brief add a DCI into the message
@@ -125,7 +136,7 @@ class UlDciLteControlMessage : public LteControlMessage
      * \brief Get dic information
      * \return dci messages
      */
-    const UlDciListElement_s& GetDci();
+    UlDciListElement_s GetDci(void);
 
   private:
     UlDciListElement_s m_dci; ///< DCI
@@ -141,8 +152,8 @@ class UlDciLteControlMessage : public LteControlMessage
 class DlCqiLteControlMessage : public LteControlMessage
 {
   public:
-    DlCqiLteControlMessage();
-    ~DlCqiLteControlMessage() override;
+    DlCqiLteControlMessage(void);
+    virtual ~DlCqiLteControlMessage(void);
 
     /**
      * \brief add a DL-CQI feedback record into the message.
@@ -154,7 +165,7 @@ class DlCqiLteControlMessage : public LteControlMessage
      * \brief Get DL cqi information
      * \return dlcqi messages
      */
-    CqiListElement_s GetDlCqi();
+    CqiListElement_s GetDlCqi(void);
 
   private:
     CqiListElement_s m_dlCqi; ///< DL CQI
@@ -170,8 +181,8 @@ class DlCqiLteControlMessage : public LteControlMessage
 class BsrLteControlMessage : public LteControlMessage
 {
   public:
-    BsrLteControlMessage();
-    ~BsrLteControlMessage() override;
+    BsrLteControlMessage(void);
+    virtual ~BsrLteControlMessage(void);
 
     /**
      * \brief add a BSR feedback record into the message.
@@ -183,7 +194,7 @@ class BsrLteControlMessage : public LteControlMessage
      * \brief Get BSR information
      * \return BSR message
      */
-    MacCeListElement_s GetBsr();
+    MacCeListElement_s GetBsr(void);
 
   private:
     MacCeListElement_s m_bsr; ///< BSR
@@ -199,8 +210,8 @@ class BsrLteControlMessage : public LteControlMessage
 class DlHarqFeedbackLteControlMessage : public LteControlMessage
 {
   public:
-    DlHarqFeedbackLteControlMessage();
-    ~DlHarqFeedbackLteControlMessage() override;
+    DlHarqFeedbackLteControlMessage(void);
+    virtual ~DlHarqFeedbackLteControlMessage(void);
 
     /**
      * \brief add a DL HARQ feedback record into the message.
@@ -212,7 +223,7 @@ class DlHarqFeedbackLteControlMessage : public LteControlMessage
      * \brief Get DL HARQ information
      * \return DL HARQ message
      */
-    DlInfoListElement_s GetDlHarqFeedback();
+    DlInfoListElement_s GetDlHarqFeedback(void);
 
   private:
     DlInfoListElement_s m_dlInfoListElement; ///< DL info list element
@@ -228,7 +239,7 @@ class DlHarqFeedbackLteControlMessage : public LteControlMessage
 class RachPreambleLteControlMessage : public LteControlMessage
 {
   public:
-    RachPreambleLteControlMessage();
+    RachPreambleLteControlMessage(void);
 
     /**
      * Set the Random Access Preamble Identifier (RAPID), see 3GPP TS 36.321 6.2.2
@@ -257,7 +268,7 @@ class RachPreambleLteControlMessage : public LteControlMessage
 class RarLteControlMessage : public LteControlMessage
 {
   public:
-    RarLteControlMessage();
+    RarLteControlMessage(void);
 
     /**
      *
@@ -324,7 +335,7 @@ class MibLteControlMessage : public LteControlMessage
     /**
      * \brief Create a new instance of MIB control message.
      */
-    MibLteControlMessage();
+    MibLteControlMessage(void);
 
     /**
      * \brief Replace the MIB content of this control message.
@@ -362,7 +373,7 @@ class Sib1LteControlMessage : public LteControlMessage
     /**
      * \brief Create a new instance of SIB1 control message.
      */
-    Sib1LteControlMessage();
+    Sib1LteControlMessage(void);
 
     /**
      * \brief Replace the SIB1 content of this control message.

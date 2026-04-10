@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -19,16 +31,13 @@ NS_LOG_COMPONENT_DEFINE("LteFrHardAlgorithm");
 NS_OBJECT_ENSURE_REGISTERED(LteFrHardAlgorithm);
 
 /// FrHardDownlinkDefaultConfiguration structure
-struct FrHardDownlinkDefaultConfiguration
+static const struct FrHardDownlinkDefaultConfiguration
 {
     uint8_t m_cellId;      ///< cell ID
     uint8_t m_dlBandwidth; ///< DL bandwidth
     uint8_t m_dlOffset;    ///< DL offset
     uint8_t m_dlSubBand;   ///< DL subband
-};
-
-/// The hard downlink default configuration
-static const FrHardDownlinkDefaultConfiguration g_frHardDownlinkDefaultConfiguration[]{
+} g_frHardDownlinkDefaultConfiguration[] = {
     {1, 15, 0, 4},
     {2, 15, 4, 4},
     {3, 15, 8, 6},
@@ -43,20 +52,16 @@ static const FrHardDownlinkDefaultConfiguration g_frHardDownlinkDefaultConfigura
     {3, 75, 48, 27},
     {1, 100, 0, 32},
     {2, 100, 32, 32},
-    {3, 100, 64, 36},
-};
+    {3, 100, 64, 36}}; ///< the hard downlink default configuration
 
 /// FrHardUplinkDefaultConfiguration structure
-struct FrHardUplinkDefaultConfiguration
+static const struct FrHardUplinkDefaultConfiguration
 {
     uint8_t m_cellId;      ///< cell ID
     uint8_t m_ulBandwidth; ///< UL bandwidth
     uint8_t m_ulOffset;    ///< Ul offset
     uint8_t m_ulSubBand;   ///< UL subband
-};
-
-/// The hard uplink default configuration
-static const FrHardUplinkDefaultConfiguration g_frHardUplinkDefaultConfiguration[]{
+} g_frHardUplinkDefaultConfiguration[] = {
     {1, 15, 0, 5},
     {2, 15, 5, 5},
     {3, 15, 10, 5},
@@ -71,8 +76,7 @@ static const FrHardUplinkDefaultConfiguration g_frHardUplinkDefaultConfiguration
     {3, 75, 48, 27},
     {1, 100, 0, 32},
     {2, 100, 32, 32},
-    {3, 100, 64, 36},
-};
+    {3, 100, 64, 36}}; ///< the hard uplink default configuration
 
 /** \returns number of downlink configurations */
 const uint16_t NUM_DOWNLINK_CONFS(sizeof(g_frHardDownlinkDefaultConfiguration) /
@@ -82,8 +86,8 @@ const uint16_t NUM_UPLINK_CONFS(sizeof(g_frHardUplinkDefaultConfiguration) /
                                 sizeof(FrHardUplinkDefaultConfiguration));
 
 LteFrHardAlgorithm::LteFrHardAlgorithm()
-    : m_ffrSapUser(nullptr),
-      m_ffrRrcSapUser(nullptr),
+    : m_ffrSapUser(0),
+      m_ffrRrcSapUser(0),
       m_dlOffset(0),
       m_dlSubBand(0),
       m_ulOffset(0),
@@ -241,7 +245,7 @@ LteFrHardAlgorithm::InitializeDownlinkRbgMaps()
     NS_ASSERT_MSG((m_dlOffset + m_dlSubBand) <= m_dlBandwidth,
                   "(DlOffset+DlSubBand) higher than DlBandwidth");
 
-    for (int i = m_dlOffset / rbgSize; i < (m_dlOffset / rbgSize + m_dlSubBand / rbgSize); i++)
+    for (uint8_t i = m_dlOffset / rbgSize; i < (m_dlOffset / rbgSize + m_dlSubBand / rbgSize); i++)
     {
         m_dlRbgMap[i] = false;
     }
@@ -324,7 +328,7 @@ LteFrHardAlgorithm::DoIsUlRbgAvailableForUe(int rbId, uint16_t rnti)
 
 void
 LteFrHardAlgorithm::DoReportDlCqiInfo(
-    const FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
+    const struct FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
 {
     NS_LOG_FUNCTION(this);
     NS_LOG_WARN("Method should not be called, because it is empty");
@@ -332,7 +336,7 @@ LteFrHardAlgorithm::DoReportDlCqiInfo(
 
 void
 LteFrHardAlgorithm::DoReportUlCqiInfo(
-    const FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
+    const struct FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
 {
     NS_LOG_FUNCTION(this);
     NS_LOG_WARN("Method should not be called, because it is empty");
@@ -353,7 +357,7 @@ LteFrHardAlgorithm::DoGetTpc(uint16_t rnti)
               // Table 5.1.1.1-2
 }
 
-uint16_t
+uint8_t
 LteFrHardAlgorithm::DoGetMinContinuousUlBandwidth()
 {
     NS_LOG_FUNCTION(this);

@@ -1,26 +1,40 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #ifndef EPC_UE_NAS_H
 #define EPC_UE_NAS_H
 
-#include "epc-tft-classifier.h"
-#include "eps-bearer.h"
-#include "lte-as-sap.h"
-
+#include <ns3/epc-tft-classifier.h>
+#include <ns3/lte-as-sap.h>
 #include <ns3/object.h>
-#include <ns3/traced-callback.h>
+#include <ns3/eps-bearer.h>
+#include "lte-enb-net-device.h"
 
 namespace ns3
 {
 
 class EpcHelper;
-class NetDevice;
 
 class EpcUeNas : public Object
 {
@@ -36,15 +50,15 @@ class EpcUeNas : public Object
     /**
      * Destructor
      */
-    ~EpcUeNas() override;
+    virtual ~EpcUeNas();
 
     // inherited from Object
-    void DoDispose() override;
+    virtual void DoDispose(void);
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
     /**
      *
@@ -86,6 +100,13 @@ class EpcUeNas : public Object
     LteAsSapUser* GetAsSapUser();
 
     /**
+     * Set the SAP provider to interact with the MmWave light RRC entity (if set)
+     *
+     * \param s the AS SAP provider
+     */
+    void SetMmWaveAsSapProvider(LteAsSapProvider* s);
+
+    /**
      * set the callback used to forward data packets up the stack
      *
      * \param cb the callback
@@ -117,6 +138,17 @@ class EpcUeNas : public Object
      * RRC to be camped on a specific eNB.
      */
     void Connect(uint16_t cellId, uint32_t dlEarfcn);
+
+    /**
+     * \brief Causes NAS to tell AS to camp to a specific cell and go to ACTIVE
+     *        state. It also specify which is the cellId for the MmWave BS to which
+     *        the UE will connect later on
+     * \param cellId the id of the eNB to camp on
+     * \param dlEarfcn the DL frequency of the eNB
+     * \param mmWaveCellId the id of the MmWave cell
+     *
+     */
+    void ConnectMc(uint16_t cellId, uint16_t dlEarfcn, uint16_t mmWaveCellId);
 
     /**
      * instruct the NAS to disconnect
@@ -173,7 +205,10 @@ class EpcUeNas : public Object
   private:
     // LTE AS SAP methods
     /// Notify successful connection
-    void DoNotifyConnectionSuccessful();
+
+    void DoNotifyConnectionSuccessful(uint16_t rnti);
+    void DoNotifyHandoverSuccessful(uint16_t rnti, uint16_t mmWaveCellId);
+    void DoNotifyConnectToMmWave(uint16_t mmWaveCellId);
     /// Notify connection failed
     void DoNotifyConnectionFailed();
     /// Notify connection released
@@ -183,6 +218,10 @@ class EpcUeNas : public Object
      * \param packet the packet
      */
     void DoRecvData(Ptr<Packet> packet);
+    void DoNotifySecondaryCellHandoverStarted(uint16_t oldRnti,
+                                              uint16_t newRnti,
+                                              uint16_t mmWaveCellId,
+                                              LteRrcSap::RadioResourceConfigDedicated rrcd);
 
     // internal methods
     /**
@@ -220,6 +259,7 @@ class EpcUeNas : public Object
     LteAsSapProvider* m_asSapProvider;
     /// LTE SAP user
     LteAsSapUser* m_asSapUser;
+    LteAsSapProvider* m_mmWaveAsSapProvider;
 
     uint8_t m_bidCounter;             ///< bid counter
     EpcTftClassifier m_tftClassifier; ///< tft classifier
@@ -235,12 +275,8 @@ class EpcUeNas : public Object
 
     std::list<BearerToBeActivated> m_bearersToBeActivatedList; ///< bearers to be activated list
 
-    /**
-     * bearers to be activated list maintained and to be used for reconnecting
-     * an out-of-sync UE
-     *
-     */
-    std::list<BearerToBeActivated> m_bearersToBeActivatedListForReconnection;
+    uint16_t m_mmWaveCellId;
+    uint16_t m_dlEarfcn; // TODO maybe useless
 };
 
 } // namespace ns3

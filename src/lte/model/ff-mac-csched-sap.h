@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -66,17 +78,17 @@ class FfMacCschedSapProvider
             PHICH_R_TWO
         } m_phichResource; ///< PHICH resource
 
-        NormalExtended_e m_phichDuration; ///< PHICH duration
+        enum NormalExtended_e m_phichDuration; ///< PHICH duration
 
         uint8_t m_initialNrOfPdcchOfdmSymbols; ///< initial number of PDCCH OFDM symbols
 
-        SiConfiguration_s m_siConfiguration; ///< SI configuration
+        struct SiConfiguration_s m_siConfiguration; ///< SI configuration
 
-        uint16_t m_ulBandwidth; ///< UL bandwidth
-        uint16_t m_dlBandwidth; ///< DL bandwidth
+        uint8_t m_ulBandwidth; ///< UL bandwidth
+        uint8_t m_dlBandwidth; ///< DL badnwidth
 
-        NormalExtended_e m_ulCyclicPrefixLength; ///< UL cyclic prefix length
-        NormalExtended_e m_dlCyclicPrefixLength; ///< DL cyclic prefix length
+        enum NormalExtended_e m_ulCyclicPrefixLength; ///< UL cyclic prefix length
+        enum NormalExtended_e m_dlCyclicPrefixLength; ///< DL cyclic prefix length
 
         uint8_t m_antennaPortsCount; ///< antenna port count
 
@@ -102,7 +114,7 @@ class FfMacCschedSapProvider
         uint8_t m_deltaPucchShift;              ///< delta pu cch shift
         uint8_t m_nrbCqi;                       ///< nrb CQI
         uint8_t m_ncsAn;                        ///< ncs an
-        uint8_t m_srsSubframeConfiguration;     ///< SRS subframe configuration
+        uint8_t m_srsSubframeConfiguration;     ///< SRS subframe confguration
         uint8_t m_srsSubframeOffset;            ///< SRS subframe offset
         uint8_t m_srsBandwidthConfiguration;    ///< SRS bandwidth configuration
         bool m_srsMaxUpPts;                     ///< SRS maximum up pts
@@ -114,7 +126,8 @@ class FfMacCschedSapProvider
             MOD_64QAM
         } m_enable64Qam; ///< enable64Qam
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendor specific list
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendor specific list
     };
 
     /**
@@ -124,13 +137,13 @@ class FfMacCschedSapProvider
     /// CschedUeConfigReqParameters structure
     struct CschedUeConfigReqParameters
     {
-        uint16_t m_rnti;               ///< RNTI
-        bool m_reconfigureFlag;        ///< reconfigure flag
-        bool m_drxConfigPresent;       ///< drx config present
-        DrxConfig_s m_drxConfig;       ///< drx config
-        uint16_t m_timeAlignmentTimer; ///< time alignment timer
+        uint16_t m_rnti;                ///< RNTI
+        bool m_reconfigureFlag;         ///< reconfigure flag
+        bool m_drxConfigPresent;        ///< drx config present
+        struct DrxConfig_s m_drxConfig; ///< drx config
+        uint16_t m_timeAlignmentTimer;  ///< time alignment timer
 
-        /// MeasGapConfigPattern_e enumeration
+        /// MeasGapConfigPattern_e enumaration
         enum MeasGapConfigPattern_e
         {
             MGP_GP1,
@@ -138,17 +151,17 @@ class FfMacCschedSapProvider
             OFF
         } m_measGapConfigPattern; ///< measGapConfigPattern
 
-        uint8_t m_measGapConfigSubframeOffset;   ///< measure gap config subframe offset
-        bool m_spsConfigPresent;                 ///< SPS config present
-        SpsConfig_s m_spsConfig;                 ///< SPS config
-        bool m_srConfigPresent;                  ///< SR config present
-        SrConfig_s m_srConfig;                   ///< SR config
-        bool m_cqiConfigPresent;                 ///< CQI config present
-        CqiConfig_s m_cqiConfig;                 ///< CQI config
-        uint8_t m_transmissionMode;              ///< transmission mode
-        uint64_t m_ueAggregatedMaximumBitrateUl; ///< UE aggregate maximum bit rate UL
-        uint64_t m_ueAggregatedMaximumBitrateDl; ///< UE aggregate maximum bit rate DL
-        UeCapabilities_s m_ueCapabilities;       ///< UE capabilities
+        uint8_t m_measGapConfigSubframeOffset;    ///< measure gap config subframe offset
+        bool m_spsConfigPresent;                  ///< SPS configu present
+        struct SpsConfig_s m_spsConfig;           ///< SPS config
+        bool m_srConfigPresent;                   ///< SR config present
+        struct SrConfig_s m_srConfig;             ///< SR config
+        bool m_cqiConfigPresent;                  ///< CQI config present
+        struct CqiConfig_s m_cqiConfig;           ///< CQI config
+        uint8_t m_transmissionMode;               ///< transmission mode
+        uint64_t m_ueAggregatedMaximumBitrateUl;  ///< UE aggregate maximum bit rate UL
+        uint64_t m_ueAggregatedMaximumBitrateDl;  ///< UE aggregate maximum bit rate DL
+        struct UeCapabilities_s m_ueCapabilities; ///< UE capabilities
 
         /// OpenClosedLoop_e
         enum OpenClosedLoop_e
@@ -186,7 +199,8 @@ class FfMacCschedSapProvider
 
         uint8_t m_ackNackRepetitionFactor; ///< ackNackRepetitionFactor
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendorSpecificList
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendorSpecificList
     };
 
     /**
@@ -198,10 +212,11 @@ class FfMacCschedSapProvider
         uint16_t m_rnti;        ///< RNTI
         bool m_reconfigureFlag; ///< reconfigure flag
 
-        std::vector<LogicalChannelConfigListElement_s>
+        std::vector<struct LogicalChannelConfigListElement_s>
             m_logicalChannelConfigList; ///< logicalChannelConfigList
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendorSpecificList
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendorSpecificList
     };
 
     /**
@@ -214,7 +229,8 @@ class FfMacCschedSapProvider
 
         std::vector<uint8_t> m_logicalChannelIdentity; ///< logical channel identity
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendorSpecificList
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendorSpecificList
     };
 
     /**
@@ -225,7 +241,8 @@ class FfMacCschedSapProvider
     {
         uint16_t m_rnti; ///< RNTI
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendorSpecificList
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendorSpecificList
     };
 
     //
@@ -238,35 +255,35 @@ class FfMacCschedSapProvider
      *
      * \param params CschedCellConfigReqParameters
      */
-    virtual void CschedCellConfigReq(const CschedCellConfigReqParameters& params) = 0;
+    virtual void CschedCellConfigReq(const struct CschedCellConfigReqParameters& params) = 0;
 
     /**
      * \brief CSCHED_UE_CONFIG_REQ
      *
      * \param params CschedUeConfigReqParameters
      */
-    virtual void CschedUeConfigReq(const CschedUeConfigReqParameters& params) = 0;
+    virtual void CschedUeConfigReq(const struct CschedUeConfigReqParameters& params) = 0;
 
     /**
      * \brief CSCHED_LC_CONFIG_REQ
      *
      * \param params CschedLcConfigReqParameters
      */
-    virtual void CschedLcConfigReq(const CschedLcConfigReqParameters& params) = 0;
+    virtual void CschedLcConfigReq(const struct CschedLcConfigReqParameters& params) = 0;
 
     /**
      * \brief CSCHED_LC_RELEASE_REQ
      *
      * \param params CschedLcReleaseReqParameters
      */
-    virtual void CschedLcReleaseReq(const CschedLcReleaseReqParameters& params) = 0;
+    virtual void CschedLcReleaseReq(const struct CschedLcReleaseReqParameters& params) = 0;
 
     /**
      * \brief CSCHED_UE_RELEASE_REQ
      *
      * \param params CschedUeReleaseReqParameters
      */
-    virtual void CschedUeReleaseReq(const CschedUeReleaseReqParameters& params) = 0;
+    virtual void CschedUeReleaseReq(const struct CschedUeReleaseReqParameters& params) = 0;
 
   private:
 };
@@ -289,9 +306,10 @@ class FfMacCschedSapUser
      */
     struct CschedCellConfigCnfParameters
     {
-        Result_e m_result; ///< result
+        enum Result_e m_result; ///< result
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendorSpecificList
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendorSpecificList
     };
 
     /**
@@ -300,10 +318,11 @@ class FfMacCschedSapUser
      */
     struct CschedUeConfigCnfParameters
     {
-        uint16_t m_rnti;   ///< RNTI
-        Result_e m_result; ///< result
+        uint16_t m_rnti;        ///< RNTI
+        enum Result_e m_result; ///< result
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendorSpecificList
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendorSpecificList
     };
 
     /**
@@ -312,12 +331,13 @@ class FfMacCschedSapUser
      */
     struct CschedLcConfigCnfParameters
     {
-        uint16_t m_rnti;   ///< RNTI
-        Result_e m_result; ///< result
+        uint16_t m_rnti;        ///< RNTI
+        enum Result_e m_result; ///< result
 
         std::vector<uint8_t> m_logicalChannelIdentity; ///< logical channel identity
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendor specific list
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendor specific list
     };
 
     /**
@@ -326,12 +346,13 @@ class FfMacCschedSapUser
      */
     struct CschedLcReleaseCnfParameters
     {
-        uint16_t m_rnti;   ///< RNTI
-        Result_e m_result; ///< result
+        uint16_t m_rnti;        ///< RNTI
+        enum Result_e m_result; ///< result
 
         std::vector<uint8_t> m_logicalChannelIdentity; ///< logical channel identity
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendor specific list
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendor specific list
     };
 
     /**
@@ -340,10 +361,11 @@ class FfMacCschedSapUser
      */
     struct CschedUeReleaseCnfParameters
     {
-        uint16_t m_rnti;   ///< RNTI
-        Result_e m_result; ///< result
+        uint16_t m_rnti;        ///< RNTI
+        enum Result_e m_result; ///< result
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendor specific list
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendor specific list
     };
 
     /**
@@ -352,16 +374,17 @@ class FfMacCschedSapUser
      */
     struct CschedUeConfigUpdateIndParameters
     {
-        uint16_t m_rnti;            ///< RNTI
-        uint8_t m_transmissionMode; ///< transmission mode
-        bool m_spsConfigPresent;    ///< SPS config present
-        SpsConfig_s m_spsConfig;    ///< SPS config
-        bool m_srConfigPresent;     ///< SR config present
-        SrConfig_s m_srConfig;      ///< SR config
-        bool m_cqiConfigPresent;    ///< CQI config present
-        CqiConfig_s m_cqiConfig;    ///< CQI config
+        uint16_t m_rnti;                ///< RNTI
+        uint8_t m_transmissionMode;     ///< transmission mode
+        bool m_spsConfigPresent;        ///< SPS config present
+        struct SpsConfig_s m_spsConfig; ///< SPS config
+        bool m_srConfigPresent;         ///< SR config present
+        struct SrConfig_s m_srConfig;   ///< SR config
+        bool m_cqiConfigPresent;        ///< CQI config present
+        struct CqiConfig_s m_cqiConfig; ///< CQI config
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendor specific list
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendor specific list
     };
 
     /**
@@ -373,7 +396,8 @@ class FfMacCschedSapUser
         uint8_t m_prbUtilizationDl; ///< DL utilization
         uint8_t m_prbUtilizationUl; ///< UL utilization
 
-        std::vector<VendorSpecificListElement_s> m_vendorSpecificList; ///< vendor specific list
+        std::vector<struct VendorSpecificListElement_s>
+            m_vendorSpecificList; ///< vendor specific list
     };
 
     //
@@ -386,49 +410,51 @@ class FfMacCschedSapUser
      *
      * \param params CschedCellConfigCnfParameters
      */
-    virtual void CschedCellConfigCnf(const CschedCellConfigCnfParameters& params) = 0;
+    virtual void CschedCellConfigCnf(const struct CschedCellConfigCnfParameters& params) = 0;
 
     /**
      * \brief CSCHED_UE_CONFIG_CNF
      *
      * \param params CschedUeConfigCnfParameters
      */
-    virtual void CschedUeConfigCnf(const CschedUeConfigCnfParameters& params) = 0;
+    virtual void CschedUeConfigCnf(const struct CschedUeConfigCnfParameters& params) = 0;
 
     /**
      * \brief CSCHED_LC_CONFIG_CNF
      *
      * \param params CschedLcConfigCnfParameters
      */
-    virtual void CschedLcConfigCnf(const CschedLcConfigCnfParameters& params) = 0;
+    virtual void CschedLcConfigCnf(const struct CschedLcConfigCnfParameters& params) = 0;
 
     /**
      * \brief CSCHED_LC_RELEASE_CNF
      *
      * \param params CschedLcReleaseCnfParameters
      */
-    virtual void CschedLcReleaseCnf(const CschedLcReleaseCnfParameters& params) = 0;
+    virtual void CschedLcReleaseCnf(const struct CschedLcReleaseCnfParameters& params) = 0;
 
     /**
      * \brief CSCHED_UE_RELEASE_CNF
      *
      * \param params CschedUeReleaseCnfParameters
      */
-    virtual void CschedUeReleaseCnf(const CschedUeReleaseCnfParameters& params) = 0;
+    virtual void CschedUeReleaseCnf(const struct CschedUeReleaseCnfParameters& params) = 0;
 
     /**
      * \brief CSCHED_UE_UPDATE_IND
      *
      * \param params CschedUeConfigUpdateIndParameters
      */
-    virtual void CschedUeConfigUpdateInd(const CschedUeConfigUpdateIndParameters& params) = 0;
+    virtual void CschedUeConfigUpdateInd(
+        const struct CschedUeConfigUpdateIndParameters& params) = 0;
 
     /**
      * \brief CSCHED_UE_CONFIG_IND
      *
      * \param params CschedCellConfigUpdateIndParameters
      */
-    virtual void CschedCellConfigUpdateInd(const CschedCellConfigUpdateIndParameters& params) = 0;
+    virtual void CschedCellConfigUpdateInd(
+        const struct CschedCellConfigUpdateIndParameters& params) = 0;
 
   private:
 };
@@ -445,19 +471,22 @@ class MemberCschedSapProvider : public FfMacCschedSapProvider
      */
     MemberCschedSapProvider(C* scheduler);
 
-    // Delete default constructor to avoid misuse
-    MemberCschedSapProvider() = delete;
-
     // inherited from FfMacCschedSapProvider
-    void CschedCellConfigReq(const CschedCellConfigReqParameters& params) override;
-    void CschedUeConfigReq(const CschedUeConfigReqParameters& params) override;
-    void CschedLcConfigReq(const CschedLcConfigReqParameters& params) override;
-    void CschedLcReleaseReq(const CschedLcReleaseReqParameters& params) override;
-    void CschedUeReleaseReq(const CschedUeReleaseReqParameters& params) override;
+    virtual void CschedCellConfigReq(const struct CschedCellConfigReqParameters& params);
+    virtual void CschedUeConfigReq(const struct CschedUeConfigReqParameters& params);
+    virtual void CschedLcConfigReq(const struct CschedLcConfigReqParameters& params);
+    virtual void CschedLcReleaseReq(const struct CschedLcReleaseReqParameters& params);
+    virtual void CschedUeReleaseReq(const struct CschedUeReleaseReqParameters& params);
 
   private:
+    MemberCschedSapProvider();
     C* m_scheduler; ///< scheduler class
 };
+
+template <class C>
+MemberCschedSapProvider<C>::MemberCschedSapProvider()
+{
+}
 
 template <class C>
 MemberCschedSapProvider<C>::MemberCschedSapProvider(C* scheduler)
@@ -467,35 +496,35 @@ MemberCschedSapProvider<C>::MemberCschedSapProvider(C* scheduler)
 
 template <class C>
 void
-MemberCschedSapProvider<C>::CschedCellConfigReq(const CschedCellConfigReqParameters& params)
+MemberCschedSapProvider<C>::CschedCellConfigReq(const struct CschedCellConfigReqParameters& params)
 {
     m_scheduler->DoCschedCellConfigReq(params);
 }
 
 template <class C>
 void
-MemberCschedSapProvider<C>::CschedUeConfigReq(const CschedUeConfigReqParameters& params)
+MemberCschedSapProvider<C>::CschedUeConfigReq(const struct CschedUeConfigReqParameters& params)
 {
     m_scheduler->DoCschedUeConfigReq(params);
 }
 
 template <class C>
 void
-MemberCschedSapProvider<C>::CschedLcConfigReq(const CschedLcConfigReqParameters& params)
+MemberCschedSapProvider<C>::CschedLcConfigReq(const struct CschedLcConfigReqParameters& params)
 {
     m_scheduler->DoCschedLcConfigReq(params);
 }
 
 template <class C>
 void
-MemberCschedSapProvider<C>::CschedLcReleaseReq(const CschedLcReleaseReqParameters& params)
+MemberCschedSapProvider<C>::CschedLcReleaseReq(const struct CschedLcReleaseReqParameters& params)
 {
     m_scheduler->DoCschedLcReleaseReq(params);
 }
 
 template <class C>
 void
-MemberCschedSapProvider<C>::CschedUeReleaseReq(const CschedUeReleaseReqParameters& params)
+MemberCschedSapProvider<C>::CschedUeReleaseReq(const struct CschedUeReleaseReqParameters& params)
 {
     m_scheduler->DoCschedUeReleaseReq(params);
 }

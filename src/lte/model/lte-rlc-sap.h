@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -77,22 +89,25 @@ class LteRlcSpecificLteRlcSapProvider : public LteRlcSapProvider
      */
     LteRlcSpecificLteRlcSapProvider(C* rlc);
 
-    // Delete default constructor to avoid misuse
-    LteRlcSpecificLteRlcSapProvider() = delete;
-
     /**
      * Interface implemented from LteRlcSapProvider
      * \param params the TransmitPdcpPduParameters
      */
-    void TransmitPdcpPdu(TransmitPdcpPduParameters params) override;
+    virtual void TransmitPdcpPdu(TransmitPdcpPduParameters params);
 
   private:
+    LteRlcSpecificLteRlcSapProvider();
     C* m_rlc; ///< the RLC
 };
 
 template <class C>
 LteRlcSpecificLteRlcSapProvider<C>::LteRlcSpecificLteRlcSapProvider(C* rlc)
     : m_rlc(rlc)
+{
+}
+
+template <class C>
+LteRlcSpecificLteRlcSapProvider<C>::LteRlcSpecificLteRlcSapProvider()
 {
 }
 
@@ -115,19 +130,22 @@ class LteRlcSpecificLteRlcSapUser : public LteRlcSapUser
      */
     LteRlcSpecificLteRlcSapUser(C* pdcp);
 
-    // Delete default constructor to avoid misuse
-    LteRlcSpecificLteRlcSapUser() = delete;
-
     // Interface implemented from LteRlcSapUser
-    void ReceivePdcpPdu(Ptr<Packet> p) override;
+    virtual void ReceivePdcpPdu(Ptr<Packet> p);
 
   private:
+    LteRlcSpecificLteRlcSapUser();
     C* m_pdcp; ///< the PDCP
 };
 
 template <class C>
 LteRlcSpecificLteRlcSapUser<C>::LteRlcSpecificLteRlcSapUser(C* pdcp)
     : m_pdcp(pdcp)
+{
+}
+
+template <class C>
+LteRlcSpecificLteRlcSapUser<C>::LteRlcSpecificLteRlcSapUser()
 {
 }
 

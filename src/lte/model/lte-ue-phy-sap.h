@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Marco Miozzo <mmiozzo@cttc.es>
  */
@@ -29,31 +41,24 @@ class LteUePhySapProvider
 
     /**
      * \brief Send the MAC PDU to the channel
-     *
      * \param p the MAC PDU to send
+     * \return true if
      */
     virtual void SendMacPdu(Ptr<Packet> p) = 0;
 
     /**
      * \brief Send SendLteControlMessage (PDCCH map, CQI feedbacks) using the ideal control channel
-     *
      * \param msg the Ideal Control Message to send
      */
     virtual void SendLteControlMessage(Ptr<LteControlMessage> msg) = 0;
 
     /**
-     * \brief Send a preamble on the PRACH
+     * send a preamble on the PRACH
      *
      * \param prachId the ID of the preamble
      * \param raRnti the RA RNTI
      */
     virtual void SendRachPreamble(uint32_t prachId, uint32_t raRnti) = 0;
-
-    /**
-     * \brief Notify PHY about the successful RRC connection
-     * establishment.
-     */
-    virtual void NotifyConnectionSuccessful() = 0;
 };
 
 /**
@@ -68,9 +73,7 @@ class LteUePhySapUser
     virtual ~LteUePhySapUser();
 
     /**
-     * \brief Receive Phy Pdu function.
-     *
-     * It is called by the Phy to notify the MAC of the reception of a new PHY-PDU
+     * Called by the Phy to notify the MAC of the reception of a new PHY-PDU
      *
      * \param p
      */
@@ -78,7 +81,6 @@ class LteUePhySapUser
 
     /**
      * \brief Trigger the start from a new frame (input from Phy layer)
-     *
      * \param frameNo frame number
      * \param subframeNo subframe number
      */
@@ -86,9 +88,7 @@ class LteUePhySapUser
 
     /**
      * \brief Receive SendLteControlMessage (PDCCH map, CQI feedbacks) using the ideal control
-     * channel
-     *
-     * \param msg the Ideal Control Message to receive
+     * channel \param msg the Ideal Control Message to receive
      */
     virtual void ReceiveLteControlMessage(Ptr<LteControlMessage> msg) = 0;
 };

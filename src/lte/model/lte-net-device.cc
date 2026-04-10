@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Giuseppe Piro  <g.piro@poliba.it>
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -9,8 +21,9 @@
 
 #include "lte-net-device.h"
 
+#include "lte-amc.h"
+
 #include "ns3/callback.h"
-#include "ns3/channel.h"
 #include "ns3/enum.h"
 #include "ns3/ipv4-header.h"
 #include "ns3/ipv6-header.h"
@@ -25,6 +38,7 @@
 #include <ns3/ipv4-l3-protocol.h>
 #include <ns3/ipv6-l3-protocol.h>
 #include <ns3/log.h>
+#include <ns3/lte-radio-bearer-tag.h>
 
 namespace ns3
 {
@@ -38,10 +52,11 @@ NS_OBJECT_ENSURE_REGISTERED(LteNetDevice);
 ////////////////////////////////
 
 TypeId
-LteNetDevice::GetTypeId()
+LteNetDevice::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::LteNetDevice")
+
             .SetParent<NetDevice>()
 
             .AddAttribute("Mtu",
@@ -52,32 +67,32 @@ LteNetDevice::GetTypeId()
     return tid;
 }
 
-LteNetDevice::LteNetDevice()
+LteNetDevice::LteNetDevice(void)
 {
     NS_LOG_FUNCTION(this);
 }
 
-LteNetDevice::~LteNetDevice()
+LteNetDevice::~LteNetDevice(void)
 {
     NS_LOG_FUNCTION(this);
 }
 
 void
-LteNetDevice::DoDispose()
+LteNetDevice::DoDispose(void)
 {
     NS_LOG_FUNCTION(this);
 
-    m_node = nullptr;
+    m_node = 0;
     NetDevice::DoDispose();
 }
 
 Ptr<Channel>
-LteNetDevice::GetChannel() const
+LteNetDevice::GetChannel(void) const
 {
     NS_LOG_FUNCTION(this);
     // we can't return a meaningful channel here, because LTE devices using FDD have actually two
     // channels.
-    return nullptr;
+    return 0;
 }
 
 void
@@ -88,7 +103,7 @@ LteNetDevice::SetAddress(Address address)
 }
 
 Address
-LteNetDevice::GetAddress() const
+LteNetDevice::GetAddress(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_address;
@@ -102,7 +117,7 @@ LteNetDevice::SetNode(Ptr<Node> node)
 }
 
 Ptr<Node>
-LteNetDevice::GetNode() const
+LteNetDevice::GetNode(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_node;
@@ -126,7 +141,7 @@ LteNetDevice::SendFrom(Ptr<Packet> packet,
 }
 
 bool
-LteNetDevice::SupportsSendFrom() const
+LteNetDevice::SupportsSendFrom(void) const
 {
     NS_LOG_FUNCTION(this);
     return false;
@@ -141,7 +156,7 @@ LteNetDevice::SetMtu(const uint16_t mtu)
 }
 
 uint16_t
-LteNetDevice::GetMtu() const
+LteNetDevice::GetMtu(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_mtu;
@@ -155,56 +170,56 @@ LteNetDevice::SetIfIndex(const uint32_t index)
 }
 
 uint32_t
-LteNetDevice::GetIfIndex() const
+LteNetDevice::GetIfIndex(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_ifIndex;
 }
 
 bool
-LteNetDevice::IsLinkUp() const
+LteNetDevice::IsLinkUp(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_linkUp;
 }
 
 bool
-LteNetDevice::IsBroadcast() const
+LteNetDevice::IsBroadcast(void) const
 {
     NS_LOG_FUNCTION(this);
     return true;
 }
 
 Address
-LteNetDevice::GetBroadcast() const
+LteNetDevice::GetBroadcast(void) const
 {
     NS_LOG_FUNCTION(this);
     return Mac48Address::GetBroadcast();
 }
 
 bool
-LteNetDevice::IsMulticast() const
+LteNetDevice::IsMulticast(void) const
 {
     NS_LOG_FUNCTION(this);
     return false;
 }
 
 bool
-LteNetDevice::IsPointToPoint() const
+LteNetDevice::IsPointToPoint(void) const
 {
     NS_LOG_FUNCTION(this);
     return false;
 }
 
 bool
-LteNetDevice::NeedsArp() const
+LteNetDevice::NeedsArp(void) const
 {
     NS_LOG_FUNCTION(this);
     return false;
 }
 
 bool
-LteNetDevice::IsBridge() const
+LteNetDevice::IsBridge(void) const
 {
     NS_LOG_FUNCTION(this);
     return false;
@@ -219,7 +234,7 @@ LteNetDevice::GetMulticast(Ipv4Address multicastGroup) const
 
     //
     // Implicit conversion (operator Address ()) is defined for Mac48Address, so
-    // use it by just returning the EUI-48 address which is automatically converted
+    // use it by just returning the EUI-48 address which is automagically converted
     // to an Address.
     //
     NS_LOG_LOGIC("multicast address is " << ad);
@@ -255,23 +270,17 @@ void
 LteNetDevice::Receive(Ptr<Packet> p)
 {
     NS_LOG_FUNCTION(this << p);
+    uint8_t ipType;
 
-    Ipv4Header ipv4Header;
-    Ipv6Header ipv6Header;
+    p->CopyData(&ipType, 1);
+    ipType = (ipType >> 4) & 0x0f;
 
-    if (p->PeekHeader(ipv4Header) != 0)
-    {
-        NS_LOG_LOGIC("IPv4 stack...");
+    if (ipType == 0x04)
         m_rxCallback(this, p, Ipv4L3Protocol::PROT_NUMBER, Address());
-    }
-    else if (p->PeekHeader(ipv6Header) != 0)
-    {
-        NS_LOG_LOGIC("IPv6 stack...");
+    else if (ipType == 0x06)
         m_rxCallback(this, p, Ipv6L3Protocol::PROT_NUMBER, Address());
-    }
     else
-    {
         NS_ABORT_MSG("LteNetDevice::Receive - Unknown IP type...");
-    }
 }
+
 } // namespace ns3

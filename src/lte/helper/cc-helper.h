@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2015 Danilo Abrignani
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Danilo Abrignani <danilo.abrignani@unibo.it>
  */
@@ -46,15 +58,15 @@ namespace ns3
 class CcHelper : public Object
 {
   public:
-    CcHelper();
-    ~CcHelper() override;
+    CcHelper(void);
+    virtual ~CcHelper(void);
 
     /**
-     * Register this type.
-     * \return The object TypeId.
+     *  Register this type.
+     *  \return The object TypeId.
      */
-    static TypeId GetTypeId();
-    void DoDispose() override;
+    static TypeId GetTypeId(void);
+    virtual void DoDispose(void);
 
     /**
      * Create single CC.
@@ -63,7 +75,7 @@ class CcHelper : public Object
      * \param dlBandwidth the DL bandwidth
      * \param ulEarfcn the UL EARFCN
      * \param dlEarfcn the DL EARFCN
-     * \param isPrimary true if primary
+     * \param isPrimary ture if primary
      * \returns the component carrier
      */
     ComponentCarrier DoCreateSingleCc(uint16_t ulBandwidth,
@@ -131,35 +143,35 @@ class CcHelper : public Object
      *
      * \returns the number of component carriers
      */
-    uint16_t GetNumberOfComponentCarriers() const;
+    uint16_t GetNumberOfComponentCarriers();
     /**
      * Get UL EARFCN.
      *
      * \returns the UL EARFCN
      */
-    uint32_t GetUlEarfcn() const;
+    uint32_t GetUlEarfcn();
     /**
      * Get DL EARFCN.
      *
      * \returns the DL EARFCN
      */
-    uint32_t GetDlEarfcn() const;
+    uint32_t GetDlEarfcn();
     /**
      * Get DL bandwidth.
      *
      * \returns the DL bandwidth
      */
-    uint16_t GetDlBandwidth() const;
+    uint16_t GetDlBandwidth();
     /**
      * Get UL bandwidth.
      *
      * \returns the UL bandwidth
      */
-    uint16_t GetUlBandwidth() const;
+    uint16_t GetUlBandwidth();
 
   protected:
     // inherited from Object
-    void DoInitialize() override;
+    virtual void DoInitialize(void);
 
   private:
     /**
@@ -169,15 +181,14 @@ class CcHelper : public Object
      * \param dlBandwidth downlink bandwidth for the current CC
      * \param ulEarfcn uplink EARFCN - not control on the validity at this point
      * \param dlEarfcn downlink EARFCN - not control on the validity at this point
-     * \param isPrimary identify if this is the Primary Component Carrier (PCC) - only one
-     * PCC is allowed
-     * \return the component carrier
+     * \param isPrimary identify if this is the Primary Component Carrier (PCC) - only one PCC is
+     * allowed \return the component carrier
      */
     ComponentCarrier CreateSingleCc(uint16_t ulBandwidth,
                                     uint16_t dlBandwidth,
                                     uint32_t ulEarfcn,
                                     uint32_t dlEarfcn,
-                                    bool isPrimary) const;
+                                    bool isPrimary);
 
     /// Factory for each Carrier Component.
     ObjectFactory m_ccFactory;

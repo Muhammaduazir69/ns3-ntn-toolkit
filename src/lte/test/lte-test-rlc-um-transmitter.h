@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -9,9 +21,10 @@
 #ifndef LTE_TEST_RLC_UM_TRANSMITTER_H
 #define LTE_TEST_RLC_UM_TRANSMITTER_H
 
-#include "ns3/nstime.h"
-#include "ns3/ptr.h"
 #include "ns3/test.h"
+#include <ns3/nstime.h>
+#include <ns3/lte-common.h>
+#include <ns3/lte-rlc.h>
 
 namespace ns3
 {
@@ -19,7 +32,6 @@ namespace ns3
 class LteTestRrc;
 class LteTestMac;
 class LteTestPdcp;
-class LteRlc;
 
 } // namespace ns3
 
@@ -27,6 +39,7 @@ using namespace ns3;
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief TestSuite 4.1.1 for RLC UM: Only transmitter part.
  */
@@ -38,6 +51,7 @@ class LteRlcUmTransmitterTestSuite : public TestSuite
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test case used by LteRlcUmTransmitterOneSduTestCase to create topology
  * and to implement functionalities and check if data received corresponds to
@@ -53,18 +67,18 @@ class LteRlcUmTransmitterTestCase : public TestCase
      */
     LteRlcUmTransmitterTestCase(std::string name);
     LteRlcUmTransmitterTestCase();
-    ~LteRlcUmTransmitterTestCase() override;
+    virtual ~LteRlcUmTransmitterTestCase();
 
     /**
      * Check data received function
      * \param time the time to check
-     * \param shouldReceived should have received indicator
+     * \param shouldReceived shoul dhave received indicator
      * \param assertMsg the assert message
      */
     void CheckDataReceived(Time time, std::string shouldReceived, std::string assertMsg);
 
   protected:
-    void DoRun() override;
+    virtual void DoRun(void);
 
     Ptr<LteTestPdcp> txPdcp; ///< the transmit PDCP
     Ptr<LteRlc> txRlc;       ///< the RLC
@@ -81,6 +95,7 @@ class LteRlcUmTransmitterTestCase : public TestCase
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test 4.1.1.1 One SDU, One PDU
  */
@@ -94,14 +109,15 @@ class LteRlcUmTransmitterOneSduTestCase : public LteRlcUmTransmitterTestCase
      */
     LteRlcUmTransmitterOneSduTestCase(std::string name);
     LteRlcUmTransmitterOneSduTestCase();
-    ~LteRlcUmTransmitterOneSduTestCase() override;
+    virtual ~LteRlcUmTransmitterOneSduTestCase();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test 4.1.1.2 Segmentation (One SDU => n PDUs)
  */
@@ -115,14 +131,15 @@ class LteRlcUmTransmitterSegmentationTestCase : public LteRlcUmTransmitterTestCa
      */
     LteRlcUmTransmitterSegmentationTestCase(std::string name);
     LteRlcUmTransmitterSegmentationTestCase();
-    ~LteRlcUmTransmitterSegmentationTestCase() override;
+    virtual ~LteRlcUmTransmitterSegmentationTestCase();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test 4.1.1.3 Concatenation (n SDUs => One PDU)
  */
@@ -136,14 +153,15 @@ class LteRlcUmTransmitterConcatenationTestCase : public LteRlcUmTransmitterTestC
      */
     LteRlcUmTransmitterConcatenationTestCase(std::string name);
     LteRlcUmTransmitterConcatenationTestCase();
-    ~LteRlcUmTransmitterConcatenationTestCase() override;
+    virtual ~LteRlcUmTransmitterConcatenationTestCase();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test 4.1.1.4 Report Buffer Status (test primitive parameters)
  */
@@ -157,10 +175,10 @@ class LteRlcUmTransmitterReportBufferStatusTestCase : public LteRlcUmTransmitter
      */
     LteRlcUmTransmitterReportBufferStatusTestCase(std::string name);
     LteRlcUmTransmitterReportBufferStatusTestCase();
-    ~LteRlcUmTransmitterReportBufferStatusTestCase() override;
+    virtual ~LteRlcUmTransmitterReportBufferStatusTestCase();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 #endif /* LTE_TEST_RLC_UM_TRANSMITTER_H */

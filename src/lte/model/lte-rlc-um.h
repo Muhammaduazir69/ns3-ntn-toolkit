@@ -1,20 +1,35 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #ifndef LTE_RLC_UM_H
 #define LTE_RLC_UM_H
 
-#include "lte-rlc-sequence-number.h"
-#include "lte-rlc.h"
-
+#include "ns3/lte-rlc-sequence-number.h"
+#include "ns3/lte-rlc.h"
+#include <ns3/epc-x2-sap.h>
 #include <ns3/event-id.h>
 
-#include <deque>
 #include <map>
 
 namespace ns3
@@ -27,35 +42,49 @@ class LteRlcUm : public LteRlc
 {
   public:
     LteRlcUm();
-    ~LteRlcUm() override;
+    virtual ~LteRlcUm();
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    void DoDispose() override;
+    static TypeId GetTypeId(void);
+    virtual void DoDispose();
+
+    uint32_t GetMaxBuff();
 
     /**
      * RLC SAP
      *
      * \param p packet
      */
-    void DoTransmitPdcpPdu(Ptr<Packet> p) override;
+    virtual void DoTransmitPdcpPdu(Ptr<Packet> p);
+
+    /**
+     * RLC EPC X2 SAP
+     */
+    virtual void DoSendMcPdcpSdu(EpcX2Sap::UeDataParams params);
 
     /**
      * MAC SAP
      *
      * \param txOpParams the LteMacSapUser::TxOpportunityParameters
      */
-    void DoNotifyTxOpportunity(LteMacSapUser::TxOpportunityParameters txOpParams) override;
-    void DoNotifyHarqDeliveryFailure() override;
-    void DoReceivePdu(LteMacSapUser::ReceivePduParameters rxPduParams) override;
+    virtual void DoNotifyTxOpportunity(LteMacSapUser::TxOpportunityParameters txOpParams);
+    virtual void DoNotifyHarqDeliveryFailure();
+    virtual void DoReceivePdu(LteMacSapUser::ReceivePduParameters rxPduParams);
+
+    std::vector<Ptr<Packet>> GetTxBuffer();
+
+    uint32_t GetTxBufferSize()
+    {
+        return m_txBufferSize;
+    }
 
   private:
     /// Expire reordering timer
-    void ExpireReorderingTimer();
+    void ExpireReorderingTimer(void);
     /// Expire RBS timer
-    void ExpireRbsTimer();
+    void ExpireRbsTimer(void);
 
     /**
      * Is inside reordering window function
@@ -66,7 +95,7 @@ class LteRlcUm : public LteRlc
     bool IsInsideReorderingWindow(SequenceNumber10 seqNumber);
 
     /// Reassemble outside window
-    void ReassembleOutsideWindow();
+    void ReassembleOutsideWindow(void);
     /**
      * Reassemble SN interval function
      *
@@ -81,37 +110,15 @@ class LteRlcUm : public LteRlc
      * \param packet the packet
      */
     void ReassembleAndDeliver(Ptr<Packet> packet);
+    void TriggerReceivePdcpPdu(Ptr<Packet> p);
 
     /// Report buffer status
     void DoReportBufferStatus();
 
   private:
-    uint32_t m_maxTxBufferSize; ///< maximum transmit buffer status
-    uint32_t m_txBufferSize;    ///< transmit buffer size
-
-    /**
-     * \brief Store an incoming (from layer above us) PDU, waiting to transmit it
-     */
-    struct TxPdu
-    {
-        /**
-         * \brief TxPdu default constructor
-         * \param pdu the PDU
-         * \param time the arrival time
-         */
-        TxPdu(const Ptr<Packet>& pdu, const Time& time)
-            : m_pdu(pdu),
-              m_waitingSince(time)
-        {
-        }
-
-        TxPdu() = delete;
-
-        Ptr<Packet> m_pdu;   ///< PDU
-        Time m_waitingSince; ///< Layer arrival time
-    };
-
-    std::deque<TxPdu> m_txBuffer;               ///< Transmission buffer
+    uint32_t m_maxTxBufferSize;                 ///< maximum transmit buffer status
+    uint32_t m_txBufferSize;                    ///< transmit buffer size
+    std::vector<Ptr<Packet>> m_txBuffer;        ///< Transmission buffer
     std::map<uint16_t, Ptr<Packet>> m_rxBuffer; ///< Reception buffer
     std::vector<Ptr<Packet>> m_reasBuffer;      ///< Reassembling buffer
 
@@ -134,22 +141,18 @@ class LteRlcUm : public LteRlc
     /**
      * Timers. See section 7.3 in TS 36.322
      */
-    Time m_reorderingTimerValue;        ///< reordering timer value
-    EventId m_reorderingTimer;          ///< reordering timer
-    EventId m_rbsTimer;                 ///< RBS timer
-    bool m_enablePdcpDiscarding{false}; //!< whether to use the PDCP discarding (perform discarding
-                                        //!< at the moment of passing the PDCP SDU to RLC)
-    uint32_t m_discardTimerMs{0};       //!< the discard timer value in milliseconds
+    EventId m_reorderingTimer; ///< reordering timer
+    EventId m_rbsTimer;        ///< RBS timer
 
     /**
      * Reassembling state
      */
-    enum ReassemblingState_t
+    typedef enum
     {
         NONE = 0,
         WAITING_S0_FULL = 1,
         WAITING_SI_SF = 2
-    };
+    } ReassemblingState_t;
 
     ReassemblingState_t m_reassemblingState; ///< reassembling state
     Ptr<Packet> m_keepS0;                    ///< keep S0
@@ -158,6 +161,9 @@ class LteRlcUm : public LteRlc
      * Expected Sequence Number
      */
     SequenceNumber10 m_expectedSeqNumber;
+
+    Time m_rbsTimerValue;
+    Time m_reorderingTimerValue;
 };
 
 } // namespace ns3

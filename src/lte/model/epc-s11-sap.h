@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.cat>
  */
@@ -9,10 +21,9 @@
 #ifndef EPC_S11_SAP_H
 #define EPC_S11_SAP_H
 
-#include "epc-tft.h"
-#include "eps-bearer.h"
-
 #include <ns3/address.h>
+#include <ns3/epc-tft.h>
+#include <ns3/eps-bearer.h>
 #include <ns3/object.h>
 #include <ns3/ptr.h>
 
@@ -39,6 +50,7 @@ class EpcS11Sap
 
     /**
      * Fully-qualified TEID, see 3GPP TS 29.274 section 8.22
+     *
      */
     struct Fteid
     {
@@ -48,6 +60,7 @@ class EpcS11Sap
 
     /**
      * TS 29.274 8.21  User Location Information (ULI)
+     *
      */
     struct Uli
     {
@@ -66,6 +79,7 @@ class EpcS11SapMme : public EpcS11Sap
   public:
     /**
      * 3GPP TS 29.274 version 8.3.1 Release 8 section 8.28
+     *
      */
     struct BearerContextCreated
     {
@@ -108,8 +122,7 @@ class EpcS11SapMme : public EpcS11Sap
 
     /**
      * \brief As per 3GPP TS 29.274 Release 9 V9.3.0, a Delete Bearer Request message shall be sent
-     * on the S11 interface by PGW to SGW and from SGW to MME
-     * \param msg the message
+     * on the S11 interface by PGW to SGW and from SGW to MME \param msg the message
      */
     virtual void DeleteBearerRequest(DeleteBearerRequestMessage msg) = 0;
 
@@ -125,13 +138,11 @@ class EpcS11SapMme : public EpcS11Sap
             REQUEST_ACCEPTED_PARTIALLY,
             REQUEST_REJECTED,
             CONTEXT_NOT_FOUND
-        };
-
-        Cause cause; ///< the cause
+        } cause; ///< the cause
     };
 
     /**
-     * Send a Modify Bearer Response message
+     * send a Modify Bearer Response message
      *
      * \param msg the message
      */
@@ -168,7 +179,7 @@ class EpcS11SapSgw : public EpcS11Sap
     };
 
     /**
-     * Send a Create Session Request message
+     * send a Create Session Request message
      *
      * \param msg the message
      */
@@ -191,8 +202,7 @@ class EpcS11SapSgw : public EpcS11Sap
 
     /**
      * \brief As per 3GPP TS 29.274 Release 9 V9.3.0, a Delete Bearer Command message shall be sent
-     * on the S11 interface by the MME to the SGW
-     * \param msg the DeleteBearerCommandMessage
+     * on the S11 interface by the MME to the SGW \param msg the DeleteBearerCommandMessage
      */
     virtual void DeleteBearerCommand(DeleteBearerCommandMessage msg) = 0;
 
@@ -213,8 +223,7 @@ class EpcS11SapSgw : public EpcS11Sap
 
     /**
      * \brief As per 3GPP TS 29.274 Release 9 V9.3.0, a Delete Bearer Command message shall be sent
-     * on the S11 interface by the MME to the SGW
-     * \param msg the message
+     * on the S11 interface by the MME to the SGW \param msg the message
      */
     virtual void DeleteBearerResponse(DeleteBearerResponseMessage msg) = 0;
 
@@ -227,7 +236,7 @@ class EpcS11SapSgw : public EpcS11Sap
     };
 
     /**
-     * Send a Modify Bearer Request message
+     * send a Modify Bearer Request message
      *
      * \param msg the message
      */
@@ -237,6 +246,7 @@ class EpcS11SapSgw : public EpcS11Sap
 /**
  * Template for the implementation of the EpcS11SapMme as a member
  * of an owner class of type C to which all methods are forwarded
+ *
  */
 template <class C>
 class MemberEpcS11SapMme : public EpcS11SapMme
@@ -249,21 +259,29 @@ class MemberEpcS11SapMme : public EpcS11SapMme
      */
     MemberEpcS11SapMme(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberEpcS11SapMme() = delete;
-
     // inherited from EpcS11SapMme
-    void CreateSessionResponse(CreateSessionResponseMessage msg) override;
-    void ModifyBearerResponse(ModifyBearerResponseMessage msg) override;
-    void DeleteBearerRequest(DeleteBearerRequestMessage msg) override;
+    virtual void CreateSessionResponse(CreateSessionResponseMessage msg);
+    virtual void ModifyBearerResponse(ModifyBearerResponseMessage msg);
+    virtual void DeleteBearerRequest(DeleteBearerRequestMessage msg);
 
   private:
+    MemberEpcS11SapMme();
     C* m_owner; ///< owner class
 };
 
+/**
+ * Constructor
+ *
+ * \param owner the owner class
+ */
 template <class C>
 MemberEpcS11SapMme<C>::MemberEpcS11SapMme(C* owner)
     : m_owner(owner)
+{
+}
+
+template <class C>
+MemberEpcS11SapMme<C>::MemberEpcS11SapMme()
 {
 }
 
@@ -291,6 +309,7 @@ MemberEpcS11SapMme<C>::ModifyBearerResponse(ModifyBearerResponseMessage msg)
 /**
  * Template for the implementation of the EpcS11SapSgw as a member
  * of an owner class of type C to which all methods are forwarded
+ *
  */
 template <class C>
 class MemberEpcS11SapSgw : public EpcS11SapSgw
@@ -303,22 +322,30 @@ class MemberEpcS11SapSgw : public EpcS11SapSgw
      */
     MemberEpcS11SapSgw(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberEpcS11SapSgw() = delete;
-
     // inherited from EpcS11SapSgw
-    void CreateSessionRequest(CreateSessionRequestMessage msg) override;
-    void ModifyBearerRequest(ModifyBearerRequestMessage msg) override;
-    void DeleteBearerCommand(DeleteBearerCommandMessage msg) override;
-    void DeleteBearerResponse(DeleteBearerResponseMessage msg) override;
+    virtual void CreateSessionRequest(CreateSessionRequestMessage msg);
+    virtual void ModifyBearerRequest(ModifyBearerRequestMessage msg);
+    virtual void DeleteBearerCommand(DeleteBearerCommandMessage msg);
+    virtual void DeleteBearerResponse(DeleteBearerResponseMessage msg);
 
   private:
+    MemberEpcS11SapSgw();
     C* m_owner; ///< owner class
 };
 
+/**
+ * Constructor
+ *
+ * \param owner the owner class
+ */
 template <class C>
 MemberEpcS11SapSgw<C>::MemberEpcS11SapSgw(C* owner)
     : m_owner(owner)
+{
+}
+
+template <class C>
+MemberEpcS11SapSgw<C>::MemberEpcS11SapSgw()
 {
 }
 

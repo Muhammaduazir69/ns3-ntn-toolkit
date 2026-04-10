@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -19,8 +31,8 @@ NS_LOG_COMPONENT_DEFINE("LteFfrDistributedAlgorithm");
 NS_OBJECT_ENSURE_REGISTERED(LteFfrDistributedAlgorithm);
 
 LteFfrDistributedAlgorithm::LteFfrDistributedAlgorithm()
-    : m_ffrSapUser(nullptr),
-      m_ffrRrcSapUser(nullptr)
+    : m_ffrSapUser(0),
+      m_ffrRrcSapUser(0)
 {
     NS_LOG_FUNCTION(this);
     m_ffrSapProvider = new MemberLteFfrSapProvider<LteFfrDistributedAlgorithm>(this);
@@ -70,7 +82,7 @@ LteFfrDistributedAlgorithm::GetTypeId()
                 MakeUintegerAccessor(&LteFfrDistributedAlgorithm::m_rsrpDifferenceThreshold),
                 MakeUintegerChecker<uint8_t>())
             .AddAttribute("CenterPowerOffset",
-                          "PdschConfigDedicated::Pa value for Center Sub-band, default value dB0",
+                          "PdschConfigDedicated::Pa value for Edge Sub-band, default value dB0",
                           UintegerValue(5),
                           MakeUintegerAccessor(&LteFfrDistributedAlgorithm::m_centerPowerOffset),
                           MakeUintegerChecker<uint8_t>())
@@ -236,7 +248,7 @@ LteFfrDistributedAlgorithm::DoIsDlRbgAvailableForUe(int rbgId, uint16_t rnti)
 
     bool edgeRbg = m_dlEdgeRbgMap[rbgId];
 
-    auto it = m_ues.find(rnti);
+    std::map<uint16_t, uint8_t>::iterator it = m_ues.find(rnti);
     if (it == m_ues.end())
     {
         m_ues.insert(std::pair<uint16_t, uint8_t>(rnti, AreaUnset));
@@ -277,7 +289,7 @@ LteFfrDistributedAlgorithm::DoIsUlRbgAvailableForUe(int rbId, uint16_t rnti)
 
     bool edgeRbg = m_ulEdgeRbgMap[rbId];
 
-    auto it = m_ues.find(rnti);
+    std::map<uint16_t, uint8_t>::iterator it = m_ues.find(rnti);
     if (it == m_ues.end())
     {
         m_ues.insert(std::pair<uint16_t, uint8_t>(rnti, AreaUnset));
@@ -295,7 +307,7 @@ LteFfrDistributedAlgorithm::DoIsUlRbgAvailableForUe(int rbId, uint16_t rnti)
 
 void
 LteFfrDistributedAlgorithm::DoReportDlCqiInfo(
-    const FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
+    const struct FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
 {
     NS_LOG_FUNCTION(this);
     NS_LOG_WARN("Method should not be called, because it is empty");
@@ -303,7 +315,7 @@ LteFfrDistributedAlgorithm::DoReportDlCqiInfo(
 
 void
 LteFfrDistributedAlgorithm::DoReportUlCqiInfo(
-    const FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
+    const struct FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
 {
     NS_LOG_FUNCTION(this);
     NS_LOG_WARN("Method should not be called, because it is empty");
@@ -337,7 +349,7 @@ LteFfrDistributedAlgorithm::DoGetTpc(uint16_t rnti)
     //------------------------------------------------
     //  here Absolute mode is used
 
-    auto it = m_ues.find(rnti);
+    std::map<uint16_t, uint8_t>::iterator it = m_ues.find(rnti);
     if (it == m_ues.end())
     {
         return 1;
@@ -355,7 +367,7 @@ LteFfrDistributedAlgorithm::DoGetTpc(uint16_t rnti)
     return 1;
 }
 
-uint16_t
+uint8_t
 LteFfrDistributedAlgorithm::DoGetMinContinuousUlBandwidth()
 {
     NS_LOG_FUNCTION(this);
@@ -380,20 +392,20 @@ LteFfrDistributedAlgorithm::DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults
     NS_LOG_FUNCTION(this << rnti << (uint16_t)measResults.measId);
     NS_LOG_INFO("CellId: " << m_cellId << " RNTI :" << rnti
                            << " MeasId: " << (uint16_t)measResults.measId
-                           << " RSRP: " << (uint16_t)measResults.measResultPCell.rsrpResult
-                           << " RSRQ: " << (uint16_t)measResults.measResultPCell.rsrqResult);
+                           << " RSRP: " << (uint16_t)measResults.rsrpResult
+                           << " RSRQ: " << (uint16_t)measResults.rsrqResult);
 
     if (measResults.measId == m_rsrqMeasId)
     {
         // check if it is center or edge UE
-        auto it = m_ues.find(rnti);
+        std::map<uint16_t, uint8_t>::iterator it = m_ues.find(rnti);
         if (it == m_ues.end())
         {
             m_ues.insert(std::pair<uint16_t, uint8_t>(rnti, AreaUnset));
         }
 
         it = m_ues.find(rnti);
-        if (measResults.measResultPCell.rsrqResult >= m_edgeSubBandRsrqThreshold)
+        if (measResults.rsrqResult >= m_edgeSubBandRsrqThreshold)
         {
             if (it->second != CenterArea)
             {
@@ -420,20 +432,18 @@ LteFfrDistributedAlgorithm::DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults
     }
     else if (measResults.measId == m_rsrpMeasId)
     {
-        auto it = m_ues.find(rnti);
+        std::map<uint16_t, uint8_t>::iterator it = m_ues.find(rnti);
         if (it == m_ues.end())
         {
             m_ues.insert(std::pair<uint16_t, uint8_t>(rnti, AreaUnset));
         }
 
-        UpdateNeighbourMeasurements(rnti,
-                                    m_cellId,
-                                    measResults.measResultPCell.rsrpResult,
-                                    measResults.measResultPCell.rsrqResult);
+        UpdateNeighbourMeasurements(rnti, m_cellId, measResults.rsrpResult, measResults.rsrqResult);
 
         if (measResults.haveMeasResultNeighCells && !measResults.measResultListEutra.empty())
         {
-            for (auto it = measResults.measResultListEutra.begin();
+            for (std::list<LteRrcSap::MeasResultEutra>::iterator it =
+                     measResults.measResultListEutra.begin();
                  it != measResults.measResultListEutra.end();
                  ++it)
             {
@@ -444,16 +454,18 @@ LteFfrDistributedAlgorithm::DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults
                 UpdateNeighbourMeasurements(rnti, it->physCellId, it->rsrpResult, it->rsrqResult);
 
                 bool found = false;
-                for (auto ncIt = m_neighborCell.begin(); ncIt != m_neighborCell.end(); ncIt++)
+                for (std::vector<uint16_t>::iterator ncIt = m_neigborCell.begin();
+                     ncIt != m_neigborCell.end();
+                     ncIt++)
                 {
                     if ((*ncIt) == it->physCellId)
                     {
                         found = true;
                     }
                 }
-                if (!found)
+                if (found == false)
                 {
-                    m_neighborCell.push_back(it->physCellId);
+                    m_neigborCell.push_back(it->physCellId);
                 }
             }
         }
@@ -485,11 +497,14 @@ LteFfrDistributedAlgorithm::Calculate()
     m_ulEdgeRbgMap.clear();
     m_ulEdgeRbgMap.resize(m_ulBandwidth, false);
 
+    MeasurementTable_t::iterator it1;
+    MeasurementRow_t::iterator it2;
     Ptr<UeMeasure> servingCellMeasures;
     Ptr<UeMeasure> neighbourCellMeasures;
 
     uint32_t edgeUeNum = 0;
-    for (auto areaIt = m_ues.begin(); areaIt != m_ues.end(); areaIt++)
+    std::map<uint16_t, uint8_t>::iterator areaIt;
+    for (areaIt = m_ues.begin(); areaIt != m_ues.end(); areaIt++)
     {
         if (areaIt->second == EdgeArea)
         {
@@ -499,18 +514,18 @@ LteFfrDistributedAlgorithm::Calculate()
 
     if (edgeUeNum != 0)
     {
-        for (auto it1 = m_ueMeasures.begin(); it1 != m_ueMeasures.end(); it1++)
+        for (it1 = m_ueMeasures.begin(); it1 != m_ueMeasures.end(); it1++)
         {
-            auto areaIt = m_ues.find(it1->first);
+            std::map<uint16_t, uint8_t>::iterator areaIt = m_ues.find(it1->first);
             if (areaIt->second != EdgeArea)
             {
                 continue;
             }
 
-            servingCellMeasures = nullptr;
-            neighbourCellMeasures = nullptr;
+            servingCellMeasures = 0;
+            neighbourCellMeasures = 0;
 
-            auto it2 = it1->second.find(m_cellId);
+            it2 = it1->second.find(m_cellId);
             if (it2 != it1->second.end())
             {
                 servingCellMeasures = it2->second;
@@ -556,34 +571,35 @@ LteFfrDistributedAlgorithm::Calculate()
             metricA[i] = 0;
         }
 
-        for (auto cellIt = m_cellWeightMap.begin(); cellIt != m_cellWeightMap.end(); cellIt++)
+        std::map<uint16_t, uint32_t>::iterator cellIt;
+        for (cellIt = m_cellWeightMap.begin(); cellIt != m_cellWeightMap.end(); cellIt++)
         {
             NS_LOG_INFO("CellId: " << m_cellId << " NeighborCellId: " << cellIt->first
                                    << " Weight: " << cellIt->second);
 
-            auto rntpIt = m_rntp.find(cellIt->first);
+            std::map<uint16_t, std::vector<bool>>::iterator rntpIt = m_rntp.find(cellIt->first);
             if (rntpIt == m_rntp.end())
             {
                 continue;
             }
 
-            for (uint16_t i = 0; i < rbgNum; i++)
+            for (uint8_t i = 0; i < rbgNum; i++)
             {
-                if (rntpIt->second[i])
-                {
-                    metricA[i] += cellIt->second;
-                }
+                metricA[i] += cellIt->second * rntpIt->second[i];
             }
         }
 
         std::vector<uint16_t> sortedRbgByMetric;
         std::multimap<uint64_t, uint16_t> sortedMetricA;
-        for (auto it = metricA.begin(); it != metricA.end(); ++it)
+        for (std::map<uint16_t, uint64_t>::const_iterator it = metricA.begin(); it != metricA.end();
+             ++it)
         {
             sortedMetricA.insert(std::pair<uint64_t, uint16_t>(it->second, it->first));
         }
 
-        for (auto it = sortedMetricA.begin(); it != sortedMetricA.end(); ++it)
+        for (std::multimap<uint64_t, uint16_t>::const_iterator it = sortedMetricA.begin();
+             it != sortedMetricA.end();
+             ++it)
         {
             sortedRbgByMetric.push_back(it->second);
         }
@@ -604,9 +620,10 @@ LteFfrDistributedAlgorithm::Calculate()
         }
     }
 
-    for (auto ncIt = m_neighborCell.begin(); ncIt != m_neighborCell.end(); ncIt++)
+    for (std::vector<uint16_t>::iterator ncIt = m_neigborCell.begin(); ncIt != m_neigborCell.end();
+         ncIt++)
     {
-        SendLoadInformation(*ncIt);
+        SendLoadInformation((*ncIt));
     }
 }
 
@@ -621,7 +638,8 @@ LteFfrDistributedAlgorithm::SendLoadInformation(uint16_t targetCellId)
         m_currentUlInterferenceOverloadIndicationList;
     std::vector<EpcX2Sap::UlHighInterferenceInformationItem>
         m_currentUlHighInterferenceInformationList;
-    EpcX2Sap::RelativeNarrowbandTxBand m_currentRelativeNarrowbandTxBand;
+    EpcX2Sap::RelativeNarrowbandTxBand m_currentRelativeNarrowbandTxBand =
+        EpcX2Sap::RelativeNarrowbandTxBand{};
 
     m_currentRelativeNarrowbandTxBand.rntpPerPrbList = m_dlEdgeRbgMap;
 
@@ -651,7 +669,7 @@ LteFfrDistributedAlgorithm::DoRecvLoadInformation(EpcX2Sap::LoadInformationParam
     }
 
     uint16_t neighborCellId = params.cellInformationList[0].sourceCellId;
-    auto it = m_rntp.find(neighborCellId);
+    std::map<uint16_t, std::vector<bool>>::iterator it = m_rntp.find(neighborCellId);
     if (it != m_rntp.end())
     {
         it->second = params.cellInformationList[0].relativeNarrowbandTxBand.rntpPerPrbList;
@@ -672,30 +690,35 @@ LteFfrDistributedAlgorithm::UpdateNeighbourMeasurements(uint16_t rnti,
 {
     NS_LOG_FUNCTION(this << rnti << cellId << (uint16_t)rsrq);
 
-    auto it1 = m_ueMeasures.find(rnti);
+    MeasurementTable_t::iterator it1;
+    it1 = m_ueMeasures.find(rnti);
 
     if (it1 == m_ueMeasures.end())
     {
         // insert a new UE entry
         MeasurementRow_t row;
-        auto ret = m_ueMeasures.insert(std::pair<uint16_t, MeasurementRow_t>(rnti, row));
+        std::pair<MeasurementTable_t::iterator, bool> ret;
+        ret = m_ueMeasures.insert(std::pair<uint16_t, MeasurementRow_t>(rnti, row));
         NS_ASSERT(ret.second);
         it1 = ret.first;
     }
 
     NS_ASSERT(it1 != m_ueMeasures.end());
-    auto it2 = it1->second.find(cellId);
+    Ptr<UeMeasure> cellMeasures;
+    std::map<uint16_t, Ptr<UeMeasure>>::iterator it2;
+    it2 = it1->second.find(cellId);
 
     if (it2 != it1->second.end())
     {
-        it2->second->m_cellId = cellId;
-        it2->second->m_rsrp = rsrp;
-        it2->second->m_rsrq = rsrq;
+        cellMeasures = it2->second;
+        cellMeasures->m_cellId = cellId;
+        cellMeasures->m_rsrp = rsrp;
+        cellMeasures->m_rsrq = rsrq;
     }
     else
     {
         // insert a new cell entry
-        Ptr<UeMeasure> cellMeasures = Create<UeMeasure>();
+        cellMeasures = Create<UeMeasure>();
         cellMeasures->m_cellId = cellId;
         cellMeasures->m_rsrp = rsrp;
         cellMeasures->m_rsrq = rsrq;

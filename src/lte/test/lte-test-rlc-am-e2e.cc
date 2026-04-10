@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -12,6 +24,7 @@
 #include "lte-simple-helper.h"
 #include "lte-test-entities.h"
 
+#include "ns3/config-store.h"
 #include "ns3/config.h"
 #include "ns3/error-model.h"
 #include "ns3/log.h"
@@ -35,11 +48,9 @@ LteRlcAmE2eTestSuite::LteRlcAmE2eTestSuite()
     // NS_LOG_INFO ("Creating LteRlcAmE2eTestSuite");
 
     double losses[] = {0.0, 0.05, 0.10, 0.15, 0.25, 0.50, 0.75, 0.90, 0.95};
-    uint32_t runs[] = {
-        1111,  2222,  3333,  4444,  5555,  6666,  7777,  8888,  9999,  11110,
-        12221, 13332, 14443, 15554, 16665, 17776, 18887, 19998, 21109, 22220,
-        23331, 24442, 25553, 26664, 27775, 28886, 29997, 31108, 32219, 33330,
-    };
+    uint32_t runs[] = {1111,  2222,  3333,  4444,  5555,  6666,  7777,  8888,  9999,  11110,
+                       12221, 13332, 14443, 15554, 16665, 17776, 18887, 19998, 21109, 22220,
+                       23331, 24442, 25553, 26664, 27775, 28886, 29997, 31108, 32219, 33330};
 
     for (uint32_t l = 0; l < (sizeof(losses) / sizeof(double)); l++)
     {
@@ -66,18 +77,18 @@ LteRlcAmE2eTestSuite::LteRlcAmE2eTestSuite()
                     break;
                 }
 
-                TestCase::Duration testDuration;
+                Duration testDuration;
                 if (l == 1 && s == 0)
                 {
-                    testDuration = TestCase::Duration::QUICK;
+                    testDuration = Duration::QUICK;
                 }
                 else if (s <= 4)
                 {
-                    testDuration = TestCase::Duration::EXTENSIVE;
+                    testDuration = Duration::EXTENSIVE;
                 }
                 else
                 {
-                    testDuration = TestCase::Duration::TAKES_FOREVER;
+                    testDuration = Duration::TAKES_FOREVER;
                 }
                 AddTestCase(new LteRlcAmE2eTestCase(name.str(), runs[s], losses[l], bulkSduArrival),
                             testDuration);
@@ -86,10 +97,6 @@ LteRlcAmE2eTestSuite::LteRlcAmE2eTestSuite()
     }
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteRlcAmE2eTestSuite lteRlcAmE2eTestSuite;
 
 LteRlcAmE2eTestCase::LteRlcAmE2eTestCase(std::string name,
@@ -125,7 +132,7 @@ LteRlcAmE2eTestCase::UlDropEvent(Ptr<const Packet> p)
 }
 
 void
-LteRlcAmE2eTestCase::DoRun()
+LteRlcAmE2eTestCase::DoRun(void)
 {
     uint16_t numberOfNodes = 1;
 
@@ -144,8 +151,6 @@ LteRlcAmE2eTestCase::DoRun()
     Config::SetDefault("ns3::LteRlcAm::PollRetransmitTimer", TimeValue(MilliSeconds(20)));
     Config::SetDefault("ns3::LteRlcAm::ReorderingTimer", TimeValue(MilliSeconds(10)));
     Config::SetDefault("ns3::LteRlcAm::StatusProhibitTimer", TimeValue(MilliSeconds(40)));
-    // This test was written for an unlimited transmit buffer (special value of 0)
-    Config::SetDefault("ns3::LteRlcAm::MaxTxBufferSize", UintegerValue(0));
 
     Ptr<LteSimpleHelper> lteSimpleHelper = CreateObject<LteSimpleHelper>();
     // lteSimpleHelper->EnableLogComponents ();
@@ -258,7 +263,7 @@ LteRlcAmE2eTestCase::DoRun()
     //      retransmitted is much lower. This effect can be best noteed
     //      at very high loss rates, and can be adjusted by timers and
     //      params.
-    //   2) throughput is not meaningful, you need to evaluate the time
+    //   2) throuhgput is not meaningful, you need to evaluate the time
     //      it takes for all PDUs to be (re)transmitted successfully,
     //      i.e., how long it takes for the TX and reTX queues to deplete.
 
@@ -296,7 +301,7 @@ LteRlcAmE2eTestCase::DoRun()
 
     NS_LOG_INFO("statusFrequency=" << statusFrequency << ", maxDlThroughput=" << maxDlThroughput
                                    << ", maxRetxThroughput=" << maxRetxThroughput << ", totBytes="
-                                   << totBytes << ", stopTime=" << stopTime.As(Time::S));
+                                   << totBytes << ", stopTime=" << stopTime.GetSeconds() << "s");
 
     Simulator::Stop(stopTime);
     Simulator::Run();

@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011, 2012, 2013 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Lluis Parcerisa <lparcerisa@cttc.cat> (TestUtils from test-asn1-encoding.cc)
  *         Nicola Baldo <nbaldo@cttc.es> (actual test)
@@ -16,7 +28,6 @@
 #include <bitset>
 #include <iomanip>
 #include <list>
-#include <vector>
 
 NS_LOG_COMPONENT_DEFINE("TestLteRlcHeader");
 
@@ -25,6 +36,7 @@ namespace ns3
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test Utils
  */
@@ -38,13 +50,15 @@ class TestUtils
      */
     static std::string sprintPacketContentsHex(Ptr<Packet> pkt)
     {
-        std::vector<uint8_t> buffer(pkt->GetSize());
+        uint32_t psize = pkt->GetSize();
+        uint8_t *buffer = new uint8_t[psize];
         std::ostringstream oss(std::ostringstream::out);
-        pkt->CopyData(buffer.data(), buffer.size());
-        for (auto b : buffer)
+        pkt->CopyData(buffer, psize);
+        for (uint32_t i = 0; i < psize; i++)
         {
-            oss << std::setfill('0') << std::setw(2) << std::hex << (uint32_t)b;
+            oss << std::setfill('0') << std::setw(2) << std::hex << (uint32_t)buffer[i];
         }
+        delete[] buffer;
         return oss.str();
     }
 
@@ -55,13 +69,15 @@ class TestUtils
      */
     static std::string sprintPacketContentsBin(Ptr<Packet> pkt)
     {
-        std::vector<uint8_t> buffer(pkt->GetSize());
+        const uint32_t psize = pkt->GetSize();
+        uint8_t *buffer = new uint8_t[psize];
         std::ostringstream oss(std::ostringstream::out);
-        pkt->CopyData(buffer.data(), buffer.size());
-        for (auto b : buffer)
+        pkt->CopyData(buffer, psize);
+        for (uint32_t i = 0; i < psize; i++)
         {
-            oss << (std::bitset<8>(b));
+            oss << (std::bitset<8>(buffer[i]));
         }
+        delete[] buffer;
         return std::string(oss.str() + "\n");
     }
 
@@ -93,6 +109,7 @@ class TestUtils
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Rlc Am Status Pdu Test Case
  */
@@ -111,7 +128,7 @@ class RlcAmStatusPduTestCase : public TestCase
                            std::string hex);
 
   protected:
-    void DoRun() override;
+    virtual void DoRun(void);
 
     SequenceNumber10 m_ackSn;                 ///< ack sequence number
     std::list<SequenceNumber10> m_nackSnList; ///< list of nack sequence numbers
@@ -139,7 +156,8 @@ RlcAmStatusPduTestCase::DoRun()
     LteRlcAmHeader h;
     h.SetControlPdu(LteRlcAmHeader::STATUS_PDU);
     h.SetAckSn(m_ackSn);
-    for (auto it = m_nackSnList.begin(); it != m_nackSnList.end(); ++it)
+    for (std::list<SequenceNumber10>::iterator it = m_nackSnList.begin(); it != m_nackSnList.end();
+         ++it)
     {
         h.PushNack(it->GetValue());
     }
@@ -157,7 +175,8 @@ RlcAmStatusPduTestCase::DoRun()
     SequenceNumber10 ackSn = h2.GetAckSn();
     NS_TEST_ASSERT_MSG_EQ(ackSn, m_ackSn, "deserialized ACK SN differs from test vector");
 
-    for (auto it = m_nackSnList.begin(); it != m_nackSnList.end(); ++it)
+    for (std::list<SequenceNumber10>::iterator it = m_nackSnList.begin(); it != m_nackSnList.end();
+         ++it)
     {
         int nackSn = h2.PopNack();
         NS_TEST_ASSERT_MSG_GT(nackSn, -1, "not enough elements in deserialized NACK list");
@@ -171,6 +190,7 @@ RlcAmStatusPduTestCase::DoRun()
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Lte Rlc Header Test Suite
  */
@@ -189,56 +209,52 @@ LteRlcHeaderTestSuite::LteRlcHeaderTestSuite()
         SequenceNumber10 ackSn(8);
         std::list<SequenceNumber10> nackSnList;
         std::string hex("0020");
-        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), TestCase::Duration::QUICK);
+        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), Duration::QUICK);
     }
 
     {
         SequenceNumber10 ackSn(873);
         std::list<SequenceNumber10> nackSnList;
         std::string hex("0da4");
-        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), TestCase::Duration::QUICK);
+        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), Duration::QUICK);
     }
 
     {
         SequenceNumber10 ackSn(2);
-        const std::list<SequenceNumber10> nackSnList{
-            SequenceNumber10(873),
-        };
+        std::list<SequenceNumber10> nackSnList;
+        nackSnList.push_back(SequenceNumber10(873));
         std::string hex("000bb480");
-        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), TestCase::Duration::QUICK);
+        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), Duration::QUICK);
     }
 
     {
         SequenceNumber10 ackSn(2);
-        const std::list<SequenceNumber10> nackSnList{
-            SequenceNumber10(1021),
-            SequenceNumber10(754),
-        };
+        std::list<SequenceNumber10> nackSnList;
+        nackSnList.push_back(SequenceNumber10(1021));
+        nackSnList.push_back(SequenceNumber10(754));
         std::string hex("000bfed790");
-        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), TestCase::Duration::QUICK);
+        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), Duration::QUICK);
     }
 
     {
         SequenceNumber10 ackSn(2);
-        const std::list<SequenceNumber10> nackSnList{
-            SequenceNumber10(1021),
-            SequenceNumber10(754),
-            SequenceNumber10(947),
-        };
+        std::list<SequenceNumber10> nackSnList;
+        nackSnList.push_back(SequenceNumber10(1021));
+        nackSnList.push_back(SequenceNumber10(754));
+        nackSnList.push_back(SequenceNumber10(947));
         std::string hex("000bfed795d980");
-        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), TestCase::Duration::QUICK);
+        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), Duration::QUICK);
     }
 
     {
         SequenceNumber10 ackSn(2);
-        const std::list<SequenceNumber10> nackSnList{
-            SequenceNumber10(1021),
-            SequenceNumber10(754),
-            SequenceNumber10(947),
-            SequenceNumber10(347),
-        };
+        std::list<SequenceNumber10> nackSnList;
+        nackSnList.push_back(SequenceNumber10(1021));
+        nackSnList.push_back(SequenceNumber10(754));
+        nackSnList.push_back(SequenceNumber10(947));
+        nackSnList.push_back(SequenceNumber10(347));
         std::string hex("000bfed795d9cad8");
-        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), TestCase::Duration::QUICK);
+        AddTestCase(new RlcAmStatusPduTestCase(ackSn, nackSnList, hex), Duration::QUICK);
     }
 }
 

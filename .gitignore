@@ -4,10 +4,41 @@
 *.rej
 
 *.o
+*.so
+*.a
 *.pyc
 *.pyo
 
 *.cwnd
+
+# Build artifacts
+build/
+cmake-cache/
+__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.clangd/
+compile_commands.json
+
+# NS-3 generated
+output-attributes.xml
+
+# Simulation outputs
+ntn-cho-output/
+ntn-cho-figures/
+
+# Node modules
+node_modules/
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
 *.dat
 *.log
 *.mob

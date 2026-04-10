@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -9,9 +21,8 @@
 #ifndef LTE_RLC_HEADER_H
 #define LTE_RLC_HEADER_H
 
-#include "lte-rlc-sequence-number.h"
-
 #include "ns3/header.h"
+#include "ns3/lte-rlc-sequence-number.h"
 
 #include <list>
 
@@ -35,7 +46,7 @@ class LteRlcHeader : public Header
      * Creates a null header
      */
     LteRlcHeader();
-    ~LteRlcHeader() override;
+    ~LteRlcHeader();
 
     /**
      * Set framing info
@@ -81,22 +92,22 @@ class LteRlcHeader : public Header
      *
      * \returns the extension bit
      */
-    uint8_t PopExtensionBit();
+    uint8_t PopExtensionBit(void);
     /**
      * Pop length indicator
      *
      * \returns the length indicator
      */
-    uint16_t PopLengthIndicator();
+    uint16_t PopLengthIndicator(void);
 
     /// ExtensionBit_t typedef
-    enum ExtensionBit_t
+    typedef enum
     {
         DATA_FIELD_FOLLOWS = 0,
         E_LI_FIELDS_FOLLOWS = 1
-    };
+    } ExtensionBit_t; ///< ExtensionBit_t enumeration
 
-    /// FramingInfoByte_t typedef
+    /// FramingInfoByte_t enumeration
     enum FramingInfoByte_t
     {
         FIRST_BYTE = 0x00,
@@ -109,12 +120,12 @@ class LteRlcHeader : public Header
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    void Print(std::ostream& os) const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual void Print(std::ostream& os) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
 
   private:
     uint16_t m_headerLength;           ///< header length

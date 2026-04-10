@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Marco Miozzo <mmiozzo@cttc.es>
  */
@@ -9,9 +21,8 @@
 #ifndef LTE_ENB_PHY_SAP_H
 #define LTE_ENB_PHY_SAP_H
 
-#include "ff-mac-common.h"
-#include "ff-mac-sched-sap.h"
-
+#include <ns3/ff-mac-common.h>
+#include <ns3/ff-mac-sched-sap.h>
 #include <ns3/packet.h>
 
 namespace ns3
@@ -33,6 +44,7 @@ class LteEnbPhySapProvider
     /**
      * \brief Send the MAC PDU to the channel
      * \param p the MAC PDU to send
+     * \return true if
      */
     virtual void SendMacPdu(Ptr<Packet> p) = 0;
 
@@ -76,8 +88,7 @@ class LteEnbPhySapUser
 
     /**
      * \brief Receive SendLteControlMessage (PDCCH map, CQI feedbacks) using the ideal control
-     * channel
-     * \param msg the Ideal Control Message to receive
+     * channel \param msg the Ideal Control Message to receive
      */
     virtual void ReceiveLteControlMessage(Ptr<LteControlMessage> msg) = 0;
 
@@ -95,18 +106,18 @@ class LteEnbPhySapUser
     virtual void UlCqiReport(FfMacSchedSapProvider::SchedUlCqiInfoReqParameters ulcqi) = 0;
 
     /**
-     * Notify the HARQ on the UL transmission status
+     * Notify the HARQ on the UL tranmission status
      *
      * \param params
      */
-    virtual void UlInfoListElementHarqFeedback(UlInfoListElement_s params) = 0;
+    virtual void UlInfoListElementHarqFeeback(UlInfoListElement_s params) = 0;
 
     /**
-     * Notify the HARQ on the DL transmission status
+     * Notify the HARQ on the DL tranmission status
      *
      * \param params
      */
-    virtual void DlInfoListElementHarqFeedback(DlInfoListElement_s params) = 0;
+    virtual void DlInfoListElementHarqFeeback(DlInfoListElement_s params) = 0;
 };
 
 } // namespace ns3

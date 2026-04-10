@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Giuseppe Piro  <g.piro@poliba.it>
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -13,10 +25,10 @@
 
 #include "lte-ue-net-device.h"
 
+#include "epc-tft.h"
 #include "epc-ue-nas.h"
-#include "lte-enb-net-device.h"
+#include "lte-amc.h"
 #include "lte-net-device.h"
-#include "lte-ue-component-carrier-manager.h"
 #include "lte-ue-mac.h"
 #include "lte-ue-phy.h"
 #include "lte-ue-rrc.h"
@@ -28,6 +40,7 @@
 #include "ns3/ipv6-header.h"
 #include "ns3/ipv6.h"
 #include "ns3/llc-snap-header.h"
+#include "ns3/lte-enb-net-device.h"
 #include "ns3/node.h"
 #include "ns3/packet-burst.h"
 #include "ns3/packet.h"
@@ -38,6 +51,7 @@
 #include <ns3/ipv4-l3-protocol.h>
 #include <ns3/ipv6-l3-protocol.h>
 #include <ns3/log.h>
+#include <ns3/lte-ue-component-carrier-manager.h>
 #include <ns3/object-factory.h>
 #include <ns3/object-map.h>
 
@@ -49,7 +63,7 @@ NS_LOG_COMPONENT_DEFINE("LteUeNetDevice");
 NS_OBJECT_ENSURE_REGISTERED(LteUeNetDevice);
 
 TypeId
-LteUeNetDevice::GetTypeId()
+LteUeNetDevice::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::LteUeNetDevice")
@@ -83,7 +97,7 @@ LteUeNetDevice::GetTypeId()
             .AddAttribute(
                 "DlEarfcn",
                 "Downlink E-UTRA Absolute Radio Frequency Channel Number (EARFCN) "
-                "as per 3GPP 36.101 Section 5.7.3.",
+                "as per 3GPP 36.101 Section 5.7.3. ",
                 UintegerValue(100),
                 MakeUintegerAccessor(&LteUeNetDevice::SetDlEarfcn, &LteUeNetDevice::GetDlEarfcn),
                 MakeUintegerChecker<uint32_t>(0, 262143))
@@ -93,7 +107,7 @@ LteUeNetDevice::GetTypeId()
                 "i.e., giving the UE access to cells which belong to this particular CSG. "
                 "This restriction only applies to initial cell selection and EPC-enabled "
                 "simulation. "
-                "This does not revoke the UE's access to non-CSG cells.",
+                "This does not revoke the UE's access to non-CSG cells. ",
                 UintegerValue(0),
                 MakeUintegerAccessor(&LteUeNetDevice::SetCsgId, &LteUeNetDevice::GetCsgId),
                 MakeUintegerChecker<uint32_t>());
@@ -101,28 +115,28 @@ LteUeNetDevice::GetTypeId()
     return tid;
 }
 
-LteUeNetDevice::LteUeNetDevice()
+LteUeNetDevice::LteUeNetDevice(void)
     : m_isConstructed(false)
 {
     NS_LOG_FUNCTION(this);
 }
 
-LteUeNetDevice::~LteUeNetDevice()
+LteUeNetDevice::~LteUeNetDevice(void)
 {
     NS_LOG_FUNCTION(this);
 }
 
 void
-LteUeNetDevice::DoDispose()
+LteUeNetDevice::DoDispose(void)
 {
     NS_LOG_FUNCTION(this);
-    m_targetEnb = nullptr;
+    m_targetEnb = 0;
 
     m_rrc->Dispose();
-    m_rrc = nullptr;
+    m_rrc = 0;
 
     m_nas->Dispose();
-    m_nas = nullptr;
+    m_nas = 0;
     for (uint32_t i = 0; i < m_ccMap.size(); i++)
     {
         m_ccMap.at(i)->Dispose();
@@ -132,7 +146,7 @@ LteUeNetDevice::DoDispose()
 }
 
 void
-LteUeNetDevice::UpdateConfig()
+LteUeNetDevice::UpdateConfig(void)
 {
     NS_LOG_FUNCTION(this);
 
@@ -153,35 +167,35 @@ LteUeNetDevice::UpdateConfig()
 }
 
 Ptr<LteUeMac>
-LteUeNetDevice::GetMac() const
+LteUeNetDevice::GetMac(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_ccMap.at(0)->GetMac();
 }
 
 Ptr<LteUeRrc>
-LteUeNetDevice::GetRrc() const
+LteUeNetDevice::GetRrc(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_rrc;
 }
 
 Ptr<LteUePhy>
-LteUeNetDevice::GetPhy() const
+LteUeNetDevice::GetPhy(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_ccMap.at(0)->GetPhy();
 }
 
 Ptr<LteUeComponentCarrierManager>
-LteUeNetDevice::GetComponentCarrierManager() const
+LteUeNetDevice::GetComponentCarrierManager(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_componentCarrierManager;
 }
 
 Ptr<EpcUeNas>
-LteUeNetDevice::GetNas() const
+LteUeNetDevice::GetNas(void) const
 {
     NS_LOG_FUNCTION(this);
     return m_nas;
@@ -231,7 +245,7 @@ LteUeNetDevice::SetTargetEnb(Ptr<LteEnbNetDevice> enb)
 }
 
 Ptr<LteEnbNetDevice>
-LteUeNetDevice::GetTargetEnb()
+LteUeNetDevice::GetTargetEnb(void)
 {
     NS_LOG_FUNCTION(this);
     return m_targetEnb;
@@ -250,13 +264,14 @@ LteUeNetDevice::SetCcMap(std::map<uint8_t, Ptr<ComponentCarrierUe>> ccm)
 }
 
 void
-LteUeNetDevice::DoInitialize()
+LteUeNetDevice::DoInitialize(void)
 {
     NS_LOG_FUNCTION(this);
     m_isConstructed = true;
     UpdateConfig();
 
-    for (auto it = m_ccMap.begin(); it != m_ccMap.end(); ++it)
+    std::map<uint8_t, Ptr<ComponentCarrierUe>>::iterator it;
+    for (it = m_ccMap.begin(); it != m_ccMap.end(); ++it)
     {
         it->second->GetPhy()->Initialize();
         it->second->GetMac()->Initialize();

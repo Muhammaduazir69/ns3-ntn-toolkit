@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Jaume Nin <jnin@cttc.es>
  * modified by: Marco Miozzo <mmiozzo@cttc.es>
@@ -11,8 +23,7 @@
 #ifndef PHY_TX_STATS_CALCULATOR_H_
 #define PHY_TX_STATS_CALCULATOR_H_
 
-#include "lte-stats-calculator.h"
-
+#include "ns3/lte-stats-calculator.h"
 #include "ns3/nstime.h"
 #include "ns3/uinteger.h"
 #include <ns3/lte-common.h>
@@ -49,14 +60,14 @@ class PhyTxStatsCalculator : public LteStatsCalculator
     /**
      * Destructor
      */
-    ~PhyTxStatsCalculator() override;
+    virtual ~PhyTxStatsCalculator();
 
     // Inherited from ns3::Object
     /**
-     * Register this type.
-     * \return The object TypeId.
+     *  Register this type.
+     *  \return The object TypeId.
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
     /**
      * Set the name of the file where the UL Tx PHY statistics will be stored.
@@ -69,7 +80,7 @@ class PhyTxStatsCalculator : public LteStatsCalculator
      * Get the name of the file where the UL RX PHY statistics will be stored.
      * @return the name of the file where the UL RX PHY statistics will be stored
      */
-    std::string GetUlTxOutputFilename();
+    std::string GetUlTxOutputFilename(void);
 
     /**
      * Set the name of the file where the DL TX PHY statistics will be stored.
@@ -82,7 +93,7 @@ class PhyTxStatsCalculator : public LteStatsCalculator
      * Get the name of the file where the DL TX PHY statistics will be stored.
      * @return the name of the file where the DL TX PHY statistics will be stored
      */
-    std::string GetDlTxOutputFilename();
+    std::string GetDlTxOutputFilename(void);
 
     /**
      * Notifies the stats calculator that an downlink transmission has occurred.
@@ -134,16 +145,6 @@ class PhyTxStatsCalculator : public LteStatsCalculator
      * files have not been opened yet
      */
     bool m_ulTxFirstWrite;
-
-    /**
-     * DL TX PHY statistics output trace file
-     */
-    std::ofstream m_dlTxOutFile;
-
-    /**
-     * UL TX PHY statistics output trace file
-     */
-    std::ofstream m_ulTxOutFile;
 };
 
 } // namespace ns3

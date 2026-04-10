@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  * Modified by: Danilo Abrignani <danilo.abrignani@unibo.it> (Carrier Aggregation - GSoC 2015)
@@ -11,23 +23,23 @@
 #ifndef LTE_HELPER_H
 #define LTE_HELPER_H
 
-#include "mac-stats-calculator.h"
-#include "phy-rx-stats-calculator.h"
-#include "phy-stats-calculator.h"
-#include "phy-tx-stats-calculator.h"
-#include "radio-bearer-stats-calculator.h"
-#include "radio-bearer-stats-connector.h"
-
+#include <ns3/cc-helper.h>
 #include <ns3/component-carrier-enb.h>
 #include <ns3/config.h>
 #include <ns3/epc-tft.h>
 #include <ns3/eps-bearer.h>
+#include <ns3/mac-stats-calculator.h>
 #include <ns3/mobility-model.h>
 #include <ns3/names.h>
 #include <ns3/net-device-container.h>
 #include <ns3/net-device.h>
 #include <ns3/node-container.h>
 #include <ns3/node.h>
+#include <ns3/phy-rx-stats-calculator.h>
+#include <ns3/phy-stats-calculator.h>
+#include <ns3/phy-tx-stats-calculator.h>
+#include <ns3/radio-bearer-stats-calculator.h>
+#include <ns3/radio-bearer-stats-connector.h>
 #include <ns3/simulator.h>
 
 #include <map>
@@ -91,15 +103,15 @@ class SpectrumPropagationLossModel;
 class LteHelper : public Object
 {
   public:
-    LteHelper();
-    ~LteHelper() override;
+    LteHelper(void);
+    virtual ~LteHelper(void);
 
     /**
-     * Register this type.
-     * \return The object TypeId.
+     *  Register this type.
+     *  \return The object TypeId.
      */
-    static TypeId GetTypeId();
-    void DoDispose() override;
+    static TypeId GetTypeId(void);
+    virtual void DoDispose(void);
 
     /**
      * Set the EpcHelper to be used to setup the EPC network in
@@ -392,7 +404,6 @@ class LteHelper : public Object
      * \brief Manual attachment of a UE device to the network via a given eNodeB.
      * \param ueDevice the UE device to be attached
      * \param enbDevice the destination eNodeB device
-     * \param componentCarrierId the destination eNodeB component carrier
      *
      * In addition, the function also instructs the UE to immediately enter
      * CONNECTED mode and activates the default EPS bearer.
@@ -401,7 +412,7 @@ class LteHelper : public Object
      * Note that this function will disable Idle mode initial cell selection
      * procedure.
      */
-    void Attach(Ptr<NetDevice> ueDevice, Ptr<NetDevice> enbDevice, uint8_t componentCarrierId = 0);
+    void Attach(Ptr<NetDevice> ueDevice, Ptr<NetDevice> enbDevice);
 
     /**
      * \brief Manual attachment of a set of UE devices to the network via the
@@ -458,13 +469,12 @@ class LteHelper : public Object
     uint8_t ActivateDedicatedEpsBearer(Ptr<NetDevice> ueDevice, EpsBearer bearer, Ptr<EpcTft> tft);
 
     /**
-     * \brief Manually trigger dedicated bearer de-activation at specific simulation time
-     * \param ueDevice the UE on which dedicated bearer to be de-activated must be of the type
-     * LteUeNetDevice
-     * \param enbDevice eNB, must be of the type LteEnbNetDevice
-     * \param bearerId Bearer Identity which is to be de-activated
+     *  \brief Manually trigger dedicated bearer de-activation at specific simulation time
+     *  \param ueDevice the UE on which dedicated bearer to be de-activated must be of the type
+     * LteUeNetDevice \param enbDevice eNB, must be of the type LteEnbNetDevice \param bearerId
+     * Bearer Identity which is to be de-activated
      *
-     * \warning Requires the use of EPC mode. See SetEpcHelper() method.
+     *  \warning Requires the use of EPC mode. See SetEpcHelper() method.
      */
 
     void DeActivateDedicatedEpsBearer(Ptr<NetDevice> ueDevice,
@@ -558,86 +568,86 @@ class LteHelper : public Object
     /**
      * Enables full-blown logging for major components of the LENA architecture.
      */
-    void EnableLogComponents();
+    void EnableLogComponents(void);
 
     /**
      * Enables trace sinks for PHY, MAC, RLC and PDCP. To make sure all nodes are
      * traced, traces should be enabled once all UEs and eNodeBs are in place and
      * connected, just before starting the simulation.
      */
-    void EnableTraces();
+    void EnableTraces(void);
 
     /**
      * Enable trace sinks for PHY layer.
      */
-    void EnablePhyTraces();
+    void EnablePhyTraces(void);
 
     /**
      * Enable trace sinks for DL PHY layer.
      */
-    void EnableDlPhyTraces();
+    void EnableDlPhyTraces(void);
 
     /**
      * Enable trace sinks for UL PHY layer.
      */
-    void EnableUlPhyTraces();
+    void EnableUlPhyTraces(void);
 
     /**
      * Enable trace sinks for DL transmission PHY layer.
      */
-    void EnableDlTxPhyTraces();
+    void EnableDlTxPhyTraces(void);
 
     /**
      * Enable trace sinks for UL transmission PHY layer.
      */
-    void EnableUlTxPhyTraces();
+    void EnableUlTxPhyTraces(void);
 
     /**
      * Enable trace sinks for DL reception PHY layer.
      */
-    void EnableDlRxPhyTraces();
+    void EnableDlRxPhyTraces(void);
 
     /**
      * Enable trace sinks for UL reception PHY layer.
      */
-    void EnableUlRxPhyTraces();
+    void EnableUlRxPhyTraces(void);
 
     /**
      * Enable trace sinks for MAC layer.
      */
-    void EnableMacTraces();
+    void EnableMacTraces(void);
 
     /**
      * Enable trace sinks for DL MAC layer.
      */
-    void EnableDlMacTraces();
+    void EnableDlMacTraces(void);
 
     /**
      * Enable trace sinks for UL MAC layer.
      */
-    void EnableUlMacTraces();
+    void EnableUlMacTraces(void);
 
     /**
      * Enable trace sinks for RLC layer.
      */
-    void EnableRlcTraces();
+    void EnableRlcTraces(void);
 
     /**
      *
      * \return the RLC stats calculator object
      */
-    Ptr<RadioBearerStatsCalculator> GetRlcStats();
+    Ptr<RadioBearerStatsCalculator> GetRlcStats(void);
 
     /**
      * Enable trace sinks for PDCP layer
      */
-    void EnablePdcpTraces();
+    void EnablePdcpTraces(void);
 
     /**
      *
      * \return the PDCP stats calculator object
      */
-    Ptr<RadioBearerStatsCalculator> GetPdcpStats();
+    Ptr<RadioBearerStatsCalculator> GetPdcpStats(void);
 
     /**
      * Assign a fixed random variable stream number to the random variables used.
@@ -648,7 +658,7 @@ class LteHelper : public Object
      * If TraceFadingLossModel has been set as the fading model type, this method
      * will also assign a stream number to it, if none has been assigned before.
      *
-     * If an EPC has been configured, streams will be assigned on the EPC
+     * * If an EPC has been configured, streams will be assigned on the EPC
      * nodes as well via EpcHelper::AssignStreams ().
      *
      * \param c NetDeviceContainer of the set of net devices for which the
@@ -661,16 +671,16 @@ class LteHelper : public Object
     /**
      * \return a pointer to the SpectrumChannel instance used for the uplink
      */
-    Ptr<SpectrumChannel> GetUplinkSpectrumChannel() const;
+    Ptr<SpectrumChannel> GetUplinkSpectrumChannel(void) const;
 
     /**
      * \return a pointer to the SpectrumChannel instance used for the downlink
      */
-    Ptr<SpectrumChannel> GetDownlinkSpectrumChannel() const;
+    Ptr<SpectrumChannel> GetDownlinkSpectrumChannel(void) const;
 
   protected:
     // inherited from Object
-    void DoInitialize() override;
+    virtual void DoInitialize(void);
 
   private:
     /**
@@ -683,8 +693,8 @@ class LteHelper : public Object
      */
     void DoComponentCarrierConfigure(uint32_t ulEarfcn,
                                      uint32_t dlEarfcn,
-                                     uint16_t ulbw,
-                                     uint16_t dlbw);
+                                     uint8_t ulbw,
+                                     uint8_t dlbw);
     /**
      * Create an eNodeB device (LteEnbNetDevice) on the given node.
      * \param n the node where the device is to be installed
@@ -715,20 +725,20 @@ class LteHelper : public Object
                            uint16_t targetCellId);
 
     /**
-     * \brief The actual function to trigger a manual bearer de-activation
-     * \param ueDevice the UE on which bearer to be de-activated must be of the type LteUeNetDevice
-     * \param enbDevice eNB, must be of the type LteEnbNetDevice
-     * \param bearerId Bearer Identity which is to be de-activated
+     *  \brief The actual function to trigger a manual bearer de-activation
+     *  \param ueDevice the UE on which bearer to be de-activated must be of the type LteUeNetDevice
+     *  \param enbDevice eNB, must be of the type LteEnbNetDevice
+     *  \param bearerId Bearer Identity which is to be de-activated
      *
-     * This method is normally scheduled by DeActivateDedicatedEpsBearer() to run at a specific
-     * time when a manual bearer de-activation is desired by the simulation user.
+     *  This method is normally scheduled by DeActivateDedicatedEpsBearer() to run at a specific
+     *  time when a manual bearer de-activation is desired by the simulation user.
      */
     void DoDeActivateDedicatedEpsBearer(Ptr<NetDevice> ueDevice,
                                         Ptr<NetDevice> enbDevice,
                                         uint8_t bearerId);
 
     /// Function that performs a channel model initialization of all component carriers
-    void ChannelModelInitialization();
+    void ChannelModelInitialization(void);
 
     /**
      * \brief This function create the component carrier based on provided configuration parameters

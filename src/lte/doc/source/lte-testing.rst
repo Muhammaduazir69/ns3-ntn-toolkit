@@ -13,7 +13,7 @@ Overview
 To test and validate the ns-3 LTE module, several test suites are provided which are integrated with the ns-3 test framework.
 To run them, you need to have configured the build of the simulator in this way::
 
-    $ ./ns3 configure --enable-tests --enable-modules=lte --enable-examples
+    $ ./waf configure --enable-tests --enable-modules=lte --enable-examples
     $ ./test.py
 
 The above will run not only the test suites belonging to the LTE module, but also those belonging to all the other ns-3 modules on which the LTE module depends. See the ns-3 manual for generic information on the testing framework.
@@ -947,7 +947,7 @@ where :math:`P_s^i` is the probability of receiving with success the HARQ block 
 
    \mathrm{T_{test-2}} = 0.0 \times 1 + 0.752 \times 2 + 0.248 \times 3 = 2.248
 
-The expected throughput is calculated by counting the number of transmission slots available during the simulation (e.g., the number of TTIs) and the size of the TB in the simulation, in detail:
+The expected throughput is calculted by counting the number of transmission slots available during the simulation (e.g., the number of TTIs) and the size of the TB in the simulation, in detail:
 
 .. math::
 
@@ -1118,7 +1118,7 @@ particular RRC message of choice during the first connection
 attempt. The error is obtained by temporarily moving the UE to a far
 away location; the time of movement has been determined empirically
 for each instance of the test case based on the message that it was
-desired to be in error. The test case checks that at least one of the following
+desired to be in error.  the test case checks that at least one of the following
 conditions is false at the time right before the UE is moved back to
 the original location:
 
@@ -1126,6 +1126,10 @@ the original location:
  - the UE context at the eNB is present
  - the RRC state of the UE Context at the eNB is CONNECTED_NORMALLY
 
+Additionally, all the conditions of the
+``LteRrcConnectionEstablishmentTestCase`` are evaluated - they are
+espected to be true because of the NAS behavior of immediately
+re-attempting the connection establishment if it fails.
 
 
 Initial cell selection
@@ -1181,23 +1185,6 @@ time than the others to compensate for its higher risk of failure.
 The test uses the default Friis path loss model and without any channel fading
 model.
 
-Secondary cell selection
-------------------------
-
-The unit test ``lte-secondary-cell-selection``` tests that a UE can attach to
-any component carrier (not just the 0-th one) during initial cell selection.
-
-Handover with multiple component carriers
------------------------------------------
-The unit test suite ``lte-primary-cell-change`` tests a number of handover
-cases between different component carriers, for both the Ideal RRC and the
-Real RRC.  The following handover cases are tested:
-
-* (inter-eNB) eNB to eNB with one component carrier
-* (inter-eNB) handover between the first carrier of two eNBs
-* (inter-eNB) handover between the second carrier of one eNB to the first carrier of another eNB
-* (inter-eNB) handover between the second carrier of one eNB to the second carrier of another eNB
-* (intra-eNB) three handover cases between component carriers of the same eNB
 
 GTP-U protocol
 --------------
@@ -1422,23 +1409,6 @@ computation, utilizing the fact that the handover will be delayed when this
 computation is broken. In the default simulation configuration, the handover
 delay observed because of a broken RA-RNTI computation is typically 6 ms.
 
-Handover failure
-----------------
-
-The test suite ``lte-handover-failure`` tests the proper operation of a number
-of handover failure cases by inducing the conditions leading to the following
-eight failure modes:
-
-1. Maximum number of RACH transmissions exceeded from UE to target eNB
-2. Non-allocation of non-contention-based preamble at the target eNB, due to the maximum number reached
-3. HANDOVER JOINING timeout before reception of RRC CONNECTION RECONFIGURATION at source eNB
-4. HANDOVER JOINING timeout before completion of non-contention RACH process to target eNB
-5. HANDOVER JOINING timeout before reception of RRC CONNECTION RECONFIGURATION COMPLETE at target eNB
-6. HANDOVER LEAVING timeout before reception of RRC CONNECTION RECONFIGURATION at source eNB
-7. HANDOVER LEAVING timeout before completion of non-contention RACH process to target eNB
-8. HANDOVER LEAVING timeout before reception of RRC CONNECTION RECONFIGURATION COMPLETE attarget eNB
-
-Both Ideal and Real RRC models are checked by this test suite.
 
 Selection of target cell in handover algorithm
 ----------------------------------------------
@@ -1656,79 +1626,3 @@ simulation scenario can be configured with different EARFCNs and Bandwidths. For
 the number of times the hooked trace source ``SCarrierConfigured`` get triggered. As, it reflects how many UEs
 got attached to their respective eNB. If the count is not equal to the number of UEs in the scenario, the test fails,
 which could be the result of improper UE configuration.
-
-
-Radio link failure Test
------------------------
-
-The test suite ``lte-radio-link-failure`` is a system test, which tests the
-radio link failure functionality using Ideal and Real RRC protocols.
-In particular, it tests the following to verify the Radio link
-Failure (RLF) implementation.
-
- #. The state and the configuration of the UE while it is connected to the eNB.
- #. The state of the UE while T310 timer is running at the UE.
- #. The number of out-of-sync and in-synch indications received.
- #. The state of the UE before the simulation end.
- #. The UE context existence at the eNB before the simulation end.
-
-This test simulates only one static UE with EPC performing downlink and uplink
-communication in the following two scenarios:
-
-One eNB using Ideal and Real RRC
-################################
-
-
-.. _fig-lte-test-rlf-one-enb:
-
-.. figure:: figures/lte-test-rlf-one-enb.*
-   :align: center
-
-   RLF scenario with one eNB
-
-In this scenario, the UE is initially placed near to the eNB, and on the
-following instances above conditions are verified against the expected outcome.
-
-**At 0.3 sec:**  It verifies that the UE is well connected, i.e., it is in
-"CONNECTED_NORMALLY" state, and is attached to the eNB with cell id 1. It also
-checks for the match between the configuration of the UE and the UE context at
-the eNB, e.g., IMSI, bandwidth, D/UL EARFCN, number of bearers and the bearer IDs.
-The miss match would result in the test suite failure.
-
-**At 0.4 sec:** The UE jumps far away from the eNB, which causes the DL SINR at
-the UE to fall below -5 dB. In result, the UE PHY after monitoring the SINR for
-20 consecutive frames will send a notification to the UE RRC. In this test, the
-N310 counter is set to 1; thus, the UE RRC will start the T310 (set to 1 sec)
-timer upon the first notification from the PHY layer.
-
-**At 1 sec:** At this stage, it is expected that the T310 timer is still running,
-and the UE is connected to the eNB.
-
-**Upon RLF:** It is expected that the UE RRC will start the T310 timer upon reaching
-the configured, i.e., N310 = 1 number of notification from the eNB. The RRC will
-receive no in-sync indication since the UE stays at far away position.
-
-**Before the end of simulation:**  The expected behavior is that the UE state
-will be in "IDLE_CELL_SEARCH" since there is no eNB available where it has jumped.
-Moreover, the deletion of the UE context from the eNB is also verified.
-
-Two eNBs using Ideal and Real RRC
-#################################
-
-
-.. _fig-lte-test-rlf-two-enb:
-
-.. figure:: figures/lte-test-rlf-two-enb.*
-   :align: center
-
-   RLF scenario with two eNBs
-
-In this scenario, the only difference is the addition of a second eNB near the
-position where the UE jumps away. Therefore, except the outcome before the end
-of the simulation, all the outcomes are similar to that we expected in the first
-scenario.
-
-**Before the end of simulation:**  It is expected that the UE after the RLF will
-connect to the second eNB, i.e., it will be in "CONNECTED_NORMALLY" state, and
-its context exists in the second eNB.
-

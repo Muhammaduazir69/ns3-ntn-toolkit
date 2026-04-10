@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -20,17 +32,14 @@ NS_LOG_COMPONENT_DEFINE("LteFfrSoftAlgorithm");
 NS_OBJECT_ENSURE_REGISTERED(LteFfrSoftAlgorithm);
 
 /// FfrSoftDownlinkDefaultConfiguration structure
-struct FfrSoftDownlinkDefaultConfiguration
+static const struct FfrSoftDownlinkDefaultConfiguration
 {
     uint8_t cellId;               ///< cell ID
     uint8_t dlBandwidth;          ///< DL bandwidth
     uint8_t dlCommonSubBandwidth; ///< DL common subbandwidth
     uint8_t dlEdgeSubBandOffset;  ///< DL edge subband offset
     uint8_t dlEdgeSubBandwidth;   ///< DL edge subbandwidth
-};
-
-/// The soft downlink default configuration
-static const FfrSoftDownlinkDefaultConfiguration g_ffrSoftDownlinkDefaultConfiguration[]{
+} g_ffrSoftDownlinkDefaultConfiguration[] = {
     {1, 15, 2, 0, 4},
     {2, 15, 2, 4, 4},
     {3, 15, 2, 8, 4},
@@ -45,21 +54,17 @@ static const FfrSoftDownlinkDefaultConfiguration g_ffrSoftDownlinkDefaultConfigu
     {3, 75, 36, 24, 15},
     {1, 100, 28, 0, 24},
     {2, 100, 28, 24, 24},
-    {3, 100, 28, 48, 24},
-};
+    {3, 100, 28, 48, 24}}; ///< the soft downlink default configuration
 
 /// FfrSoftUplinkDefaultConfiguration structure
-struct FfrSoftUplinkDefaultConfiguration
+static const struct FfrSoftUplinkDefaultConfiguration
 {
     uint8_t cellId;               ///< cell ID
     uint8_t ulBandwidth;          ///< UL bandwidth
     uint8_t ulCommonSubBandwidth; ///< UL common subbandwidth
     uint8_t ulEdgeSubBandOffset;  ///< UL edge subband offset
     uint8_t ulEdgeSubBandwidth;   ///< edge subbandwidth
-};
-
-/// The soft uplink default configuration
-static const FfrSoftUplinkDefaultConfiguration g_ffrSoftUplinkDefaultConfiguration[]{
+} g_ffrSoftUplinkDefaultConfiguration[] = {
     {1, 15, 3, 0, 4},
     {2, 15, 3, 4, 4},
     {3, 15, 3, 8, 4},
@@ -74,8 +79,7 @@ static const FfrSoftUplinkDefaultConfiguration g_ffrSoftUplinkDefaultConfigurati
     {3, 75, 36, 24, 15},
     {1, 100, 28, 0, 24},
     {2, 100, 28, 24, 24},
-    {3, 100, 28, 48, 24},
-};
+    {3, 100, 28, 48, 24}}; ///< the soft uplink default configuration
 
 /** \returns number of downlink configurations */
 const uint16_t NUM_DOWNLINK_CONFS(sizeof(g_ffrSoftDownlinkDefaultConfiguration) /
@@ -85,8 +89,8 @@ const uint16_t NUM_UPLINK_CONFS(sizeof(g_ffrSoftUplinkDefaultConfiguration) /
                                 sizeof(FfrSoftUplinkDefaultConfiguration));
 
 LteFfrSoftAlgorithm::LteFfrSoftAlgorithm()
-    : m_ffrSapUser(nullptr),
-      m_ffrRrcSapUser(nullptr),
+    : m_ffrSapUser(0),
+      m_ffrRrcSapUser(0),
       m_dlEdgeSubBandOffset(0),
       m_dlEdgeSubBandwidth(0),
       m_ulEdgeSubBandOffset(0),
@@ -331,13 +335,13 @@ LteFfrSoftAlgorithm::InitializeDownlinkRbgMaps()
         (m_dlCommonSubBandwidth + m_dlEdgeSubBandOffset + m_dlEdgeSubBandwidth) <= m_dlBandwidth,
         "(DlCommonSubBandwidth + DlEdgeSubBandOffset+DlEdgeSubBandwidth) higher than DlBandwidth");
 
-    for (int i = 0; i < m_dlCommonSubBandwidth / rbgSize; i++)
+    for (uint8_t i = 0; i < m_dlCommonSubBandwidth / rbgSize; i++)
     {
         m_dlMediumRbgMap[i] = true;
         m_dlCenterRbgMap[i] = false;
     }
 
-    for (int i = (m_dlCommonSubBandwidth + m_dlEdgeSubBandOffset) / rbgSize;
+    for (uint8_t i = (m_dlCommonSubBandwidth + m_dlEdgeSubBandOffset) / rbgSize;
          i < (m_dlCommonSubBandwidth + m_dlEdgeSubBandOffset + m_dlEdgeSubBandwidth) / rbgSize;
          i++)
     {
@@ -377,7 +381,7 @@ LteFfrSoftAlgorithm::InitializeUplinkRbgMaps()
         m_ulCenterRbgMap[i] = false;
     }
 
-    for (int i = (m_ulCommonSubBandwidth + m_ulEdgeSubBandOffset);
+    for (uint8_t i = (m_ulCommonSubBandwidth + m_ulEdgeSubBandOffset);
          i < (m_ulCommonSubBandwidth + m_ulEdgeSubBandOffset + m_ulEdgeSubBandwidth);
          i++)
     {
@@ -413,7 +417,7 @@ LteFfrSoftAlgorithm::DoIsDlRbgAvailableForUe(int rbgId, uint16_t rnti)
     bool isMediumRbg = m_dlMediumRbgMap[rbgId];
     bool isEdgeRbg = m_dlEdgeRbgMap[rbgId];
 
-    auto it = m_ues.find(rnti);
+    std::map<uint16_t, uint8_t>::iterator it = m_ues.find(rnti);
     if (it == m_ues.end())
     {
         m_ues.insert(std::pair<uint16_t, uint8_t>(rnti, AreaUnset));
@@ -474,7 +478,7 @@ LteFfrSoftAlgorithm::DoIsUlRbgAvailableForUe(int rbgId, uint16_t rnti)
     bool isMediumRbg = m_ulMediumRbgMap[rbgId];
     bool isEdgeRbg = m_ulEdgeRbgMap[rbgId];
 
-    auto it = m_ues.find(rnti);
+    std::map<uint16_t, uint8_t>::iterator it = m_ues.find(rnti);
     if (it == m_ues.end())
     {
         m_ues.insert(std::pair<uint16_t, uint8_t>(rnti, AreaUnset));
@@ -510,7 +514,7 @@ LteFfrSoftAlgorithm::DoIsUlRbgAvailableForUe(int rbgId, uint16_t rnti)
 
 void
 LteFfrSoftAlgorithm::DoReportDlCqiInfo(
-    const FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
+    const struct FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
 {
     NS_LOG_FUNCTION(this);
     NS_LOG_WARN("Method should not be called, because it is empty");
@@ -518,7 +522,7 @@ LteFfrSoftAlgorithm::DoReportDlCqiInfo(
 
 void
 LteFfrSoftAlgorithm::DoReportUlCqiInfo(
-    const FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
+    const struct FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
 {
     NS_LOG_FUNCTION(this);
     NS_LOG_WARN("Method should not be called, because it is empty");
@@ -552,7 +556,7 @@ LteFfrSoftAlgorithm::DoGetTpc(uint16_t rnti)
     //------------------------------------------------
     //  here Absolute mode is used
 
-    auto it = m_ues.find(rnti);
+    std::map<uint16_t, uint8_t>::iterator it = m_ues.find(rnti);
     if (it == m_ues.end())
     {
         return 1;
@@ -574,7 +578,7 @@ LteFfrSoftAlgorithm::DoGetTpc(uint16_t rnti)
     return 1;
 }
 
-uint16_t
+uint8_t
 LteFfrSoftAlgorithm::DoGetMinContinuousUlBandwidth()
 {
     NS_LOG_FUNCTION(this);
@@ -588,25 +592,25 @@ LteFfrSoftAlgorithm::DoGetMinContinuousUlBandwidth()
     uint8_t mediumSubBandwidth = 0;
     uint8_t edgeSubBandwidth = 0;
 
-    for (std::size_t i = 0; i < m_ulCenterRbgMap.size(); i++)
+    for (uint8_t i = 0; i < m_ulCenterRbgMap.size(); i++)
     {
-        if (m_ulCenterRbgMap[i])
+        if (m_ulCenterRbgMap[i] == true)
         {
             centerSubBandwidth++;
         }
     }
 
-    for (std::size_t i = 0; i < m_ulMediumRbgMap.size(); i++)
+    for (uint8_t i = 0; i < m_ulMediumRbgMap.size(); i++)
     {
-        if (m_ulMediumRbgMap[i])
+        if (m_ulMediumRbgMap[i] == true)
         {
             mediumSubBandwidth++;
         }
     }
 
-    for (std::size_t i = 0; i < m_ulEdgeRbgMap.size(); i++)
+    for (uint8_t i = 0; i < m_ulEdgeRbgMap.size(); i++)
     {
-        if (m_ulEdgeRbgMap[i])
+        if (m_ulEdgeRbgMap[i] == true)
         {
             edgeSubBandwidth++;
         }
@@ -639,8 +643,8 @@ LteFfrSoftAlgorithm::DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults measRe
 {
     NS_LOG_FUNCTION(this << rnti << (uint16_t)measResults.measId);
     NS_LOG_INFO("RNTI :" << rnti << " MeasId: " << (uint16_t)measResults.measId
-                         << " RSRP: " << (uint16_t)measResults.measResultPCell.rsrpResult
-                         << " RSRQ: " << (uint16_t)measResults.measResultPCell.rsrqResult);
+                         << " RSRP: " << (uint16_t)measResults.rsrpResult
+                         << " RSRQ: " << (uint16_t)measResults.rsrqResult);
 
     NS_ASSERT_MSG(m_centerSubBandThreshold >= m_edgeSubBandThreshold,
                   "CenterSubBandThreshold must be higher than EdgeSubBandThreshold");
@@ -651,14 +655,14 @@ LteFfrSoftAlgorithm::DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults measRe
     }
     else
     {
-        auto it = m_ues.find(rnti);
+        std::map<uint16_t, uint8_t>::iterator it = m_ues.find(rnti);
         if (it == m_ues.end())
         {
             m_ues.insert(std::pair<uint16_t, uint8_t>(rnti, AreaUnset));
         }
 
         it = m_ues.find(rnti);
-        if (measResults.measResultPCell.rsrqResult >= m_centerSubBandThreshold)
+        if (measResults.rsrqResult >= m_centerSubBandThreshold)
         {
             if (it->second != CenterArea)
             {
@@ -670,7 +674,7 @@ LteFfrSoftAlgorithm::DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults measRe
                 m_ffrRrcSapUser->SetPdschConfigDedicated(rnti, pdschConfigDedicated);
             }
         }
-        else if (measResults.measResultPCell.rsrqResult < m_edgeSubBandThreshold)
+        else if (measResults.rsrqResult < m_edgeSubBandThreshold)
         {
             if (it->second != EdgeArea)
             {

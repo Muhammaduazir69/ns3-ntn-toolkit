@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Giuseppe Piro  <g.piro@poliba.it>
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -19,20 +31,10 @@
 namespace std
 {
 
-/**
- * \brief Stream insertion operator.
- *
- * \note This function scope is strictly local, and can not be
- * used in other source files.
- *
- * \param [in] os The reference to the output stream.
- * \param [in] v The std::vector<int>.
- * \returns The reference to the output stream.
- */
 ostream&
 operator<<(ostream& os, const vector<int>& v)
 {
-    auto it = v.begin();
+    vector<int>::const_iterator it = v.begin();
     while (it != v.end())
     {
         os << *it << " ";
@@ -55,7 +57,7 @@ NS_LOG_COMPONENT_DEFINE("LteSpectrumValueHelper");
  * filter: awk '{if ((NR % 7) == 1) printf("{"); printf ("%s",$0); if ((NR % 7) == 0)
  * printf("},\n"); else printf(", ");}' | sed 's/ – /, /g'
  */
-struct EutraChannelNumbers
+static const struct EutraChannelNumbers
 {
     uint8_t band;       ///< band
     double fDlLow;      ///<  DL low
@@ -66,10 +68,7 @@ struct EutraChannelNumbers
     uint32_t nOffsUl;   ///< number offset UL
     uint32_t rangeNul1; ///< range UL 1
     uint32_t rangeNul2; ///< range UL 2
-};
-
-/// Eutra channel numbers
-static const EutraChannelNumbers g_eutraChannelNumbers[]{
+} g_eutraChannelNumbers[] = {
     {1, 2110, 0, 0, 599, 1920, 18000, 18000, 18599},
     {2, 1930, 600, 600, 1199, 1850, 18600, 18600, 19199},
     {3, 1805, 1200, 1200, 1949, 1710, 19200, 19200, 19949},
@@ -96,8 +95,7 @@ static const EutraChannelNumbers g_eutraChannelNumbers[]{
     {37, 1910, 37550, 37550, 37749, 1910, 37550, 37550, 37749},
     {38, 2570, 37750, 37750, 38249, 2570, 37750, 37750, 38249},
     {39, 1880, 38250, 38250, 38649, 1880, 38250, 38250, 38649},
-    {40, 2300, 38650, 38650, 39649, 2300, 38650, 38650, 39649},
-};
+    {40, 2300, 38650, 38650, 39649, 2300, 38650, 38650, 39649}}; ///< eutra channel numbers
 
 /// number of EUTRA bands
 #define NUM_EUTRA_BANDS (sizeof(g_eutraChannelNumbers) / sizeof(EutraChannelNumbers))
@@ -122,7 +120,7 @@ uint16_t
 LteSpectrumValueHelper::GetDownlinkCarrierBand(uint32_t nDl)
 {
     NS_LOG_FUNCTION(nDl);
-    for (uint32_t i = 0; i < NUM_EUTRA_BANDS; ++i)
+    for (uint16_t i = 0; i < NUM_EUTRA_BANDS; ++i)
     {
         if (g_eutraChannelNumbers[i].rangeNdl1 <= nDl && g_eutraChannelNumbers[i].rangeNdl2 >= nDl)
         {
@@ -138,7 +136,7 @@ uint16_t
 LteSpectrumValueHelper::GetUplinkCarrierBand(uint32_t nUl)
 {
     NS_LOG_FUNCTION(nUl);
-    for (uint32_t i = 0; i < NUM_EUTRA_BANDS; ++i)
+    for (uint16_t i = 0; i < NUM_EUTRA_BANDS; ++i)
     {
         if (g_eutraChannelNumbers[i].rangeNul1 <= nUl && g_eutraChannelNumbers[i].rangeNul2 >= nUl)
         {
@@ -177,9 +175,9 @@ LteSpectrumValueHelper::GetUplinkCarrierFrequency(uint32_t nUl)
 }
 
 double
-LteSpectrumValueHelper::GetChannelBandwidth(uint16_t transmissionBandwidth)
+LteSpectrumValueHelper::GetChannelBandwidth(uint8_t transmissionBandwidth)
 {
-    NS_LOG_FUNCTION(transmissionBandwidth);
+    NS_LOG_FUNCTION((uint16_t)transmissionBandwidth);
     switch (transmissionBandwidth)
     {
     case 6:
@@ -195,7 +193,7 @@ LteSpectrumValueHelper::GetChannelBandwidth(uint16_t transmissionBandwidth)
     case 100:
         return 20.0e6;
     default:
-        NS_FATAL_ERROR("invalid bandwidth value " << transmissionBandwidth);
+        NS_FATAL_ERROR("invalid bandwidth value " << (uint16_t)transmissionBandwidth);
     }
 }
 
@@ -209,8 +207,8 @@ struct LteSpectrumModelId
      * \param b bandwidth
      */
     LteSpectrumModelId(uint32_t f, uint8_t b);
-    uint32_t earfcn;    ///< EARFCN
-    uint16_t bandwidth; ///< bandwidth
+    uint32_t earfcn;   ///< EARFCN
+    uint8_t bandwidth; ///< bandwidth
 };
 
 LteSpectrumModelId::LteSpectrumModelId(uint32_t f, uint8_t b)
@@ -236,12 +234,12 @@ static std::map<LteSpectrumModelId, Ptr<SpectrumModel>>
     g_lteSpectrumModelMap; ///< LTE spectrum model map
 
 Ptr<SpectrumModel>
-LteSpectrumValueHelper::GetSpectrumModel(uint32_t earfcn, uint16_t txBandwidthConfiguration)
+LteSpectrumValueHelper::GetSpectrumModel(uint32_t earfcn, uint8_t txBandwidthConfiguration)
 {
-    NS_LOG_FUNCTION(earfcn << txBandwidthConfiguration);
+    NS_LOG_FUNCTION(earfcn << (uint16_t)txBandwidthConfiguration);
     Ptr<SpectrumModel> ret;
     LteSpectrumModelId key(earfcn, txBandwidthConfiguration);
-    auto it = g_lteSpectrumModelMap.find(key);
+    std::map<LteSpectrumModelId, Ptr<SpectrumModel>>::iterator it = g_lteSpectrumModelMap.find(key);
     if (it != g_lteSpectrumModelMap.end())
     {
         ret = it->second;
@@ -253,7 +251,7 @@ LteSpectrumValueHelper::GetSpectrumModel(uint32_t earfcn, uint16_t txBandwidthCo
 
         double f = fc - (txBandwidthConfiguration * 180e3 / 2.0);
         Bands rbs;
-        for (uint16_t numrb = 0; numrb < txBandwidthConfiguration; ++numrb)
+        for (uint8_t numrb = 0; numrb < txBandwidthConfiguration; ++numrb)
         {
             BandInfo rb;
             rb.fl = f;
@@ -272,11 +270,11 @@ LteSpectrumValueHelper::GetSpectrumModel(uint32_t earfcn, uint16_t txBandwidthCo
 
 Ptr<SpectrumValue>
 LteSpectrumValueHelper::CreateTxPowerSpectralDensity(uint32_t earfcn,
-                                                     uint16_t txBandwidthConfiguration,
+                                                     uint8_t txBandwidthConfiguration,
                                                      double powerTx,
                                                      std::vector<int> activeRbs)
 {
-    NS_LOG_FUNCTION(earfcn << txBandwidthConfiguration << powerTx << activeRbs);
+    NS_LOG_FUNCTION(earfcn << (uint16_t)txBandwidthConfiguration << powerTx << activeRbs);
 
     Ptr<SpectrumModel> model = GetSpectrumModel(earfcn, txBandwidthConfiguration);
     Ptr<SpectrumValue> txPsd = Create<SpectrumValue>(model);
@@ -286,7 +284,7 @@ LteSpectrumValueHelper::CreateTxPowerSpectralDensity(uint32_t earfcn,
 
     double txPowerDensity = (powerTxW / (txBandwidthConfiguration * 180000));
 
-    for (auto it = activeRbs.begin(); it != activeRbs.end(); it++)
+    for (std::vector<int>::iterator it = activeRbs.begin(); it != activeRbs.end(); it++)
     {
         int rbId = (*it);
         (*txPsd)[rbId] = txPowerDensity;
@@ -299,12 +297,12 @@ LteSpectrumValueHelper::CreateTxPowerSpectralDensity(uint32_t earfcn,
 
 Ptr<SpectrumValue>
 LteSpectrumValueHelper::CreateTxPowerSpectralDensity(uint32_t earfcn,
-                                                     uint16_t txBandwidthConfiguration,
+                                                     uint8_t txBandwidthConfiguration,
                                                      double powerTx,
                                                      std::map<int, double> powerTxMap,
                                                      std::vector<int> activeRbs)
 {
-    NS_LOG_FUNCTION(earfcn << txBandwidthConfiguration << activeRbs);
+    NS_LOG_FUNCTION(earfcn << (uint16_t)txBandwidthConfiguration << activeRbs);
 
     Ptr<SpectrumModel> model = GetSpectrumModel(earfcn, txBandwidthConfiguration);
     Ptr<SpectrumValue> txPsd = Create<SpectrumValue>(model);
@@ -312,11 +310,11 @@ LteSpectrumValueHelper::CreateTxPowerSpectralDensity(uint32_t earfcn,
     // powerTx is expressed in dBm. We must convert it into natural unit.
     double basicPowerTxW = std::pow(10., (powerTx - 30) / 10);
 
-    for (auto it = activeRbs.begin(); it != activeRbs.end(); it++)
+    for (std::vector<int>::iterator it = activeRbs.begin(); it != activeRbs.end(); it++)
     {
         int rbId = (*it);
 
-        auto powerIt = powerTxMap.find(rbId);
+        std::map<int, double>::iterator powerIt = powerTxMap.find(rbId);
 
         double txPowerDensity;
 
@@ -340,11 +338,11 @@ LteSpectrumValueHelper::CreateTxPowerSpectralDensity(uint32_t earfcn,
 
 Ptr<SpectrumValue>
 LteSpectrumValueHelper::CreateUlTxPowerSpectralDensity(uint16_t earfcn,
-                                                       uint16_t txBandwidthConfiguration,
+                                                       uint8_t txBandwidthConfiguration,
                                                        double powerTx,
                                                        std::vector<int> activeRbs)
 {
-    NS_LOG_FUNCTION(earfcn << txBandwidthConfiguration << powerTx << activeRbs);
+    NS_LOG_FUNCTION(earfcn << (uint16_t)txBandwidthConfiguration << powerTx << activeRbs);
 
     Ptr<SpectrumModel> model = GetSpectrumModel(earfcn, txBandwidthConfiguration);
     Ptr<SpectrumValue> txPsd = Create<SpectrumValue>(model);
@@ -354,7 +352,7 @@ LteSpectrumValueHelper::CreateUlTxPowerSpectralDensity(uint16_t earfcn,
 
     double txPowerDensity = (powerTxW / (activeRbs.size() * 180000));
 
-    for (auto it = activeRbs.begin(); it != activeRbs.end(); it++)
+    for (std::vector<int>::iterator it = activeRbs.begin(); it != activeRbs.end(); it++)
     {
         int rbId = (*it);
         (*txPsd)[rbId] = txPowerDensity;
@@ -367,10 +365,10 @@ LteSpectrumValueHelper::CreateUlTxPowerSpectralDensity(uint16_t earfcn,
 
 Ptr<SpectrumValue>
 LteSpectrumValueHelper::CreateNoisePowerSpectralDensity(uint32_t earfcn,
-                                                        uint16_t txBandwidthConfiguration,
+                                                        uint8_t txBandwidthConfiguration,
                                                         double noiseFigure)
 {
-    NS_LOG_FUNCTION(earfcn << txBandwidthConfiguration << noiseFigure);
+    NS_LOG_FUNCTION(earfcn << (uint16_t)txBandwidthConfiguration << noiseFigure);
     Ptr<SpectrumModel> model = GetSpectrumModel(earfcn, txBandwidthConfiguration);
     return CreateNoisePowerSpectralDensity(noiseFigure, model);
 }

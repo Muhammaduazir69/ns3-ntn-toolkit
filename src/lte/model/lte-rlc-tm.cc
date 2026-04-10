@@ -1,15 +1,32 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011,2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  *         Nicola Baldo <nbaldo@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
-#include "lte-rlc-tm.h"
+#include "ns3/lte-rlc-tm.h"
 
 #include "ns3/log.h"
+#include "ns3/lte-rlc-tag.h"
 #include "ns3/simulator.h"
 
 namespace ns3
@@ -32,7 +49,7 @@ LteRlcTm::~LteRlcTm()
 }
 
 TypeId
-LteRlcTm::GetTypeId()
+LteRlcTm::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::LteRlcTm")
                             .SetParent<LteRlc>()
@@ -67,8 +84,12 @@ LteRlcTm::DoTransmitPdcpPdu(Ptr<Packet> p)
 
     if (m_txBufferSize + p->GetSize() <= m_maxTxBufferSize)
     {
+        /** Store arrival time */
+        RlcTag timeTag(Simulator::Now());
+        p->AddPacketTag(timeTag);
+
         NS_LOG_LOGIC("Tx Buffer: New packet added");
-        m_txBuffer.emplace_back(p, Simulator::Now());
+        m_txBuffer.push_back(p);
         m_txBufferSize += p->GetSize();
         NS_LOG_LOGIC("NumOfBuffers = " << m_txBuffer.size());
         NS_LOG_LOGIC("txBufferSize = " << m_txBufferSize);
@@ -87,6 +108,13 @@ LteRlcTm::DoTransmitPdcpPdu(Ptr<Packet> p)
     m_rbsTimer.Cancel();
 }
 
+void
+LteRlcTm::DoSendMcPdcpSdu(EpcX2Sap::UeDataParams params)
+{
+    NS_LOG_FUNCTION(this);
+    DoTransmitPdcpPdu(params.ueData);
+}
+
 /**
  * MAC SAP
  */
@@ -102,13 +130,13 @@ LteRlcTm::DoNotifyTxOpportunity(LteMacSapUser::TxOpportunityParameters txOpParam
     // When submitting a new TMD PDU to lower layer, the transmitting TM RLC entity shall:
     // - submit a RLC SDU without any modification to lower layer.
 
-    if (m_txBuffer.empty())
+    if (m_txBuffer.size() == 0)
     {
         NS_LOG_LOGIC("No data pending");
         return;
     }
 
-    Ptr<Packet> packet = m_txBuffer.begin()->m_pdu->Copy();
+    Ptr<Packet> packet = (*(m_txBuffer.begin()))->Copy();
 
     if (txOpParams.bytes < packet->GetSize())
     {
@@ -117,9 +145,12 @@ LteRlcTm::DoNotifyTxOpportunity(LteMacSapUser::TxOpportunityParameters txOpParam
         return;
     }
 
-    m_txBufferSize -= packet->GetSize();
+    m_txBufferSize -= (*(m_txBuffer.begin()))->GetSize();
     m_txBuffer.erase(m_txBuffer.begin());
 
+    // Sender timestamp
+    RlcTag rlcTag(Simulator::Now());
+    packet->AddByteTag(rlcTag);
     m_txPdu(m_rnti, m_lcid, packet->GetSize());
 
     // Send RLC PDU to MAC layer
@@ -151,7 +182,14 @@ LteRlcTm::DoReceivePdu(LteMacSapUser::ReceivePduParameters rxPduParams)
 {
     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << rxPduParams.p->GetSize());
 
-    m_rxPdu(m_rnti, m_lcid, rxPduParams.p->GetSize(), 0);
+    // Receiver timestamp
+    RlcTag rlcTag;
+    Time delay;
+    if (rxPduParams.p->FindFirstMatchingByteTag(rlcTag))
+    {
+        delay = Simulator::Now() - rlcTag.GetSenderTimestamp();
+    }
+    m_rxPdu(m_rnti, m_lcid, rxPduParams.p->GetSize(), delay.GetNanoSeconds());
 
     // 5.1.1.2 Receive operations
     // 5.1.1.2.1  General
@@ -162,14 +200,16 @@ LteRlcTm::DoReceivePdu(LteMacSapUser::ReceivePduParameters rxPduParams)
 }
 
 void
-LteRlcTm::DoReportBufferStatus()
+LteRlcTm::DoReportBufferStatus(void)
 {
     Time holDelay(0);
     uint32_t queueSize = 0;
 
     if (!m_txBuffer.empty())
     {
-        holDelay = Simulator::Now() - m_txBuffer.front().m_waitingSince;
+        RlcTag holTimeTag;
+        m_txBuffer.front()->PeekPacketTag(holTimeTag);
+        holDelay = Simulator::Now() - holTimeTag.GetSenderTimestamp();
 
         queueSize = m_txBufferSize; // just data in tx queue (no header overhead for RLC TM)
     }
@@ -183,12 +223,26 @@ LteRlcTm::DoReportBufferStatus()
     r.retxQueueHolDelay = 0;
     r.statusPduSize = 0;
 
+    // from UM low lat
+    for (unsigned i = 0; i < m_txBuffer.size(); i++)
+    {
+        if (i == 20) // only include up to the first 20 packets
+        {
+            break;
+        }
+        r.txPacketSizes.push_back(m_txBuffer[i]->GetSize());
+        RlcTag holTimeTag;
+        m_txBuffer[i]->PeekPacketTag(holTimeTag);
+        holDelay = Simulator::Now() - holTimeTag.GetSenderTimestamp();
+        r.txPacketDelays.push_back(holDelay.GetMicroSeconds());
+    }
+
     NS_LOG_LOGIC("Send ReportBufferStatus = " << r.txQueueSize << ", " << r.txQueueHolDelay);
     m_macSapProvider->ReportBufferStatus(r);
 }
 
 void
-LteRlcTm::ExpireRbsTimer()
+LteRlcTm::ExpireRbsTimer(void)
 {
     NS_LOG_LOGIC("RBS Timer expires");
 

@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Author: Marco Miozzo  <marco.miozzo@cttc.es>
  */
@@ -16,7 +28,7 @@ namespace ns3
 class Tag;
 
 /**
- * Tag used to define the RNTI and LC id for each MAC packet transmitted
+ * Tag used to define the RNTI and LC id for each MAC packet trasmitted
  */
 
 class LteRadioBearerTag : public Tag
@@ -26,8 +38,8 @@ class LteRadioBearerTag : public Tag
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
 
     /**
      * Create an empty LteRadioBearerTag
@@ -70,29 +82,29 @@ class LteRadioBearerTag : public Tag
      */
     void SetLayer(uint8_t layer);
 
-    void Serialize(TagBuffer i) const override;
-    void Deserialize(TagBuffer i) override;
-    uint32_t GetSerializedSize() const override;
-    void Print(std::ostream& os) const override;
+    virtual void Serialize(TagBuffer i) const;
+    virtual void Deserialize(TagBuffer i);
+    virtual uint32_t GetSerializedSize() const;
+    virtual void Print(std::ostream& os) const;
 
     /**
      * Get RNTI function
      *
      * \returns RNTI
      */
-    uint16_t GetRnti() const;
+    uint16_t GetRnti(void) const;
     /**
      * Get LCID function
      *
      * \returns LCID
      */
-    uint8_t GetLcid() const;
+    uint8_t GetLcid(void) const;
     /**
      * Get layer function
      *
      * \returns layer
      */
-    uint8_t GetLayer() const;
+    uint8_t GetLayer(void) const;
 
   private:
     uint16_t m_rnti; ///< RNTI

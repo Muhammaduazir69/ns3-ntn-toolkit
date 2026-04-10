@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2013 Budiarto Herman
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Budiarto Herman <budiarto.herman@magister.fi>
  *
@@ -67,10 +79,10 @@ class LteCellSelectionTestCase : public TestCase
          * \param relPosY relative position to the inter site distance in Y
          * \param isCsgMember if true, simulation is allowed access to CSG cell
          * \param checkPoint the time in the simulation when the UE is verified
-         * \param expectedCellId1 the cell ID that the UE is expected to attach to
-         * (0 means that the UE should not attach to any cell).
-         * \param expectedCellId2 an alternative cell ID that the UE is expected to attach to
-         * (0 means that this no alternative cell is expected).
+         * \param expectedCellId1 ///< The cell ID that the UE is expected to attach to (0 means
+         * that the UE should not attach to any cell). \param expectedCellId2 ///< An alternative
+         * cell ID that the UE is expected to attach to (0 means that this no alternative cell is
+         * expected).
          */
         UeSetup_t(double relPosX,
                   double relPosY,
@@ -96,14 +108,14 @@ class LteCellSelectionTestCase : public TestCase
                              double interSiteDistance,
                              std::vector<UeSetup_t> ueSetupList);
 
-    ~LteCellSelectionTestCase() override;
+    virtual ~LteCellSelectionTestCase();
 
   private:
     /**
      * \brief Setup the simulation according to the configuration set by the
      *        class constructor, run it, and verify the result.
      */
-    void DoRun() override;
+    virtual void DoRun();
 
     /**
      * \brief Verifies if the given UE is attached to either of the given two

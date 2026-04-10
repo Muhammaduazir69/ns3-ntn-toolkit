@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Jaume Nin <jnin@cttc.es>
  */
@@ -16,7 +28,7 @@
 #include <iomanip>
 #include <string>
 #include <vector>
-// #include "ns3/gtk-config-store.h"
+//#include "ns3/gtk-config-store.h"
 
 using namespace ns3;
 
@@ -27,7 +39,7 @@ main(int argc, char* argv[])
     uint32_t nUe = 1;
     uint32_t nFloors = 0;
     double simTime = 1.0;
-    CommandLine cmd(__FILE__);
+    CommandLine cmd;
 
     cmd.AddValue("nEnb", "Number of eNodeBs per floor", nEnbPerFloor);
     cmd.AddValue("nUe", "Number of UEs", nUe);
@@ -173,7 +185,7 @@ main(int argc, char* argv[])
         NetDeviceContainer ueDev = lteHelper->InstallUeDevice(ueNodes.at(i));
         ueDevs.push_back(ueDev);
         lteHelper->Attach(ueDev, enbDevs.Get(i));
-        EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+        enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
         EpsBearer bearer(q);
         lteHelper->ActivateDataRadioBearer(ueDev, bearer);
     }

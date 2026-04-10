@@ -1,19 +1,34 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Giuseppe Piro  <g.piro@poliba.it>
  *         Marco Miozzo <mmiozzo@cttc.es>
  *         Nicola Baldo <nbaldo@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #ifndef LTE_PHY_H
 #define LTE_PHY_H
 
-#include "lte-spectrum-phy.h"
-
 #include <ns3/generic-phy.h>
+#include <ns3/lte-spectrum-phy.h>
 #include <ns3/mobility-model.h>
 #include <ns3/nstime.h>
 #include <ns3/packet.h>
@@ -51,24 +66,24 @@ class LtePhy : public Object
      */
     LtePhy(Ptr<LteSpectrumPhy> dlPhy, Ptr<LteSpectrumPhy> ulPhy);
 
-    ~LtePhy() override;
+    virtual ~LtePhy();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
     /**
      * \brief Set the device where the phy layer is attached
      * \param d the device
      */
-    void SetDevice(Ptr<LteNetDevice> d);
+    void SetDevice(Ptr<NetDevice> d);
     /**
      * \brief Get the device where the phy layer is attached
      * \return the pointer to the device
      */
-    Ptr<LteNetDevice> GetDevice() const;
+    Ptr<NetDevice> GetDevice() const;
 
     /**
      *
@@ -107,7 +122,7 @@ class LtePhy : public Object
      */
     virtual Ptr<SpectrumValue> CreateTxPowerSpectralDensity() = 0;
 
-    void DoDispose() override;
+    void DoDispose();
 
     /**
      * \param tti transmission time interval
@@ -116,7 +131,7 @@ class LtePhy : public Object
     /**
      * \returns transmission time interval
      */
-    double GetTti() const;
+    double GetTti(void) const;
 
     /**
      *
@@ -127,7 +142,7 @@ class LtePhy : public Object
     /**
      * \returns the RB group size according to the bandwidth
      */
-    uint8_t GetRbgSize() const;
+    uint8_t GetRbgSize(void) const;
 
     /**
      * \returns the SRS periodicity (see Table 8.2-1 of 36.213)
@@ -149,7 +164,7 @@ class LtePhy : public Object
     /**
      * \returns the packet burst to be sent
      */
-    Ptr<PacketBurst> GetPacketBurst();
+    Ptr<PacketBurst> GetPacketBurst(void);
 
     /**
      * \param m the control message to be sent
@@ -159,7 +174,7 @@ class LtePhy : public Object
     /**
      * \returns the list of control messages to be sent
      */
-    std::list<Ptr<LteControlMessage>> GetControlMessages();
+    std::list<Ptr<LteControlMessage>> GetControlMessages(void);
 
     /**
      * generate a CQI report based on the given SINR of Ctrl frame
@@ -206,11 +221,11 @@ class LtePhy : public Object
      *
      * \returns the component carrier ID index
      */
-    uint8_t GetComponentCarrierId() const;
+    uint8_t GetComponentCarrierId();
 
   protected:
     /// Pointer to the NetDevice where this PHY layer is attached.
-    Ptr<LteNetDevice> m_netDevice;
+    Ptr<NetDevice> m_netDevice;
 
     /**
      * The downlink LteSpectrumPhy associated to this LtePhy. Also available as
@@ -247,12 +262,12 @@ class LtePhy : public Object
      * The UL bandwidth in number of PRBs.
      * Specified by the upper layer through CPHY SAP.
      */
-    uint16_t m_ulBandwidth;
+    uint8_t m_ulBandwidth;
     /**
      * The DL bandwidth in number of PRBs.
      * Specified by the upper layer through CPHY SAP.
      */
-    uint16_t m_dlBandwidth;
+    uint8_t m_dlBandwidth;
     /// The RB group size according to the bandwidth.
     uint8_t m_rbgSize;
     /**

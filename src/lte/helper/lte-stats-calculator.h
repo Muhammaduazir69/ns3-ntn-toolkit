@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Jaume Nin <jnin@cttc.es>
  */
@@ -36,13 +48,13 @@ class LteStatsCalculator : public Object
     /**
      * Destructor
      */
-    ~LteStatsCalculator() override;
+    virtual ~LteStatsCalculator();
 
     /**
-     * Register this type.
-     * \return The object TypeId.
+     *  Register this type.
+     *  \return The object TypeId.
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
     /**
      * Set the name of the file where the uplink statistics will be stored.
@@ -55,7 +67,7 @@ class LteStatsCalculator : public Object
      * Get the name of the file where the uplink statistics will be stored.
      * @return the name of the file where the uplink statistics will be stored
      */
-    std::string GetUlOutputFilename();
+    std::string GetUlOutputFilename(void);
 
     /**
      * Set the name of the file where the downlink statistics will be stored.
@@ -68,7 +80,7 @@ class LteStatsCalculator : public Object
      * Get the name of the file where the downlink statistics will be stored.
      * @return the name of the file where the downlink statistics will be stored
      */
-    std::string GetDlOutputFilename();
+    std::string GetDlOutputFilename(void);
 
     /**
      * Checks if there is an already stored IMSI for the given path

@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2015 Danilo Abrignani
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Danilo Abrignani <danilo.abrignani@unibo.it>
  *
@@ -10,9 +22,9 @@
 #ifndef SIMPLE_UE_COMPONENT_CARRIER_MANAGER_H
 #define SIMPLE_UE_COMPONENT_CARRIER_MANAGER_H
 
-#include "lte-rrc-sap.h"
-#include "lte-ue-ccm-rrc-sap.h"
-#include "lte-ue-component-carrier-manager.h"
+#include <ns3/lte-rrc-sap.h>
+#include <ns3/lte-ue-ccm-rrc-sap.h>
+#include <ns3/lte-ue-component-carrier-manager.h>
 
 #include <map>
 
@@ -33,7 +45,7 @@ class SimpleUeComponentCarrierManager : public LteUeComponentCarrierManager
     /// Creates a No-op CCS algorithm instance.
     SimpleUeComponentCarrierManager();
 
-    ~SimpleUeComponentCarrierManager() override;
+    virtual ~SimpleUeComponentCarrierManager();
 
     /**
      * \brief Get the type ID.
@@ -42,7 +54,7 @@ class SimpleUeComponentCarrierManager : public LteUeComponentCarrierManager
     static TypeId GetTypeId();
 
     // inherited from LteComponentCarrierManager
-    LteMacSapProvider* GetLteMacSapProvider() override;
+    virtual LteMacSapProvider* GetLteMacSapProvider();
 
     /// let the forwarder class access the protected and private members
     friend class MemberLteUeCcmRrcSapProvider<SimpleUeComponentCarrierManager>;
@@ -55,8 +67,8 @@ class SimpleUeComponentCarrierManager : public LteUeComponentCarrierManager
 
   protected:
     // inherited from Object
-    void DoInitialize() override;
-    void DoDispose() override;
+    virtual void DoInitialize();
+    virtual void DoDispose();
     // inherited from LteCcsAlgorithm as a Component Carrier Management SAP implementation
     /**
      * \brief Report Ue Measure function
@@ -74,7 +86,7 @@ class SimpleUeComponentCarrierManager : public LteUeComponentCarrierManager
      * \brief Report buffer status function
      * \param params LteMacSapProvider::ReportBufferStatusParameters
      */
-    virtual void DoReportBufferStatus(LteMacSapProvider::ReportBufferStatusParameters params);
+    void DoReportBufferStatus(LteMacSapProvider::ReportBufferStatusParameters params);
     /// Notify HARQ deliver failure
     void DoNotifyHarqDeliveryFailure();
     // forwarded from LteMacSapUser
@@ -98,7 +110,7 @@ class SimpleUeComponentCarrierManager : public LteUeComponentCarrierManager
      * \param msu the MSU
      * \returns updated LC config list
      */
-    virtual std::vector<LteUeCcmRrcSapProvider::LcsConfig> DoAddLc(
+    std::vector<LteUeCcmRrcSapProvider::LcsConfig> DoAddLc(
         uint8_t lcId,
         LteUeCmacSapProvider::LogicalChannelConfig lcConfig,
         LteMacSapUser* msu);
@@ -115,17 +127,16 @@ class SimpleUeComponentCarrierManager : public LteUeComponentCarrierManager
      * \param msu the MSU
      * \returns LteMacSapUser *
      */
-    virtual LteMacSapUser* DoConfigureSignalBearer(
-        uint8_t lcId,
-        LteUeCmacSapProvider::LogicalChannelConfig lcConfig,
-        LteMacSapUser* msu);
+    LteMacSapUser* DoConfigureSignalBearer(uint8_t lcId,
+                                           LteUeCmacSapProvider::LogicalChannelConfig lcConfig,
+                                           LteMacSapUser* msu);
     /**
      * \brief Reset LC map
      *
      */
     void DoReset();
 
-  protected:
+  private:
     LteMacSapUser* m_ccmMacSapUser;         //!< Interface to the UE RLC instance.
     LteMacSapProvider* m_ccmMacSapProvider; //!< Receive API calls from the UE RLC instance
 

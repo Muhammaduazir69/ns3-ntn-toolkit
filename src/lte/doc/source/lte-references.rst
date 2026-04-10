@@ -4,7 +4,9 @@
 References
 =================================
 
-.. [TS29274] 3GPP TS 29.274 "GPRS Tunnelling Protocol for Control plane (GTPv2-C)"
+.. [TS25814] 3GPP TS 25.814 "Physical layer aspect for evolved Universal Terrestrial Radio Access"
+
+.. [TS29274] 3GPP TS 29.274 "Tunnelling Protocol for Control plane (GTPv2-C)"
 
 .. [TS36101] 3GPP TS 36.101 "E-UTRA User Equipment (UE) radio transmission and reception"
 
@@ -47,7 +49,7 @@ References
    <http://www.3gpp.org/ftp/tsg_ran/wg4_radio/TSGR4_51/Documents/R4-092042.zip>`_
 
 .. [FFAPI] FemtoForum `"LTE MAC Scheduler Interface Specification v1.11"
-   <https://web.archive.org/web/20141209082506/http://www.smallcellforum.org/smallcellforum_resources/pdfsend05.php?file=LTE%20MAC%20Scheduler%20Interface%20Specification.pdf>`_
+   <http://www.smallcellforum.org/smallcellforum_resources/pdfsend05.php?file=LTE%20MAC%20Scheduler%20Interface%20Specification.pdf>`_
 
 .. [ns3tutorial] `"The ns-3 Tutorial"
    <http://www.nsnam.org/docs/tutorial/singlehtml/index.html>`_
@@ -61,6 +63,10 @@ References
 
 .. [Baldo2009] N. Baldo and M. Miozzo, "Spectrum-aware Channel and PHY layer modeling for ns3",
    Proceedings of ICST NSTools 2009, Pisa, Italy
+
+.. [Piro2010] Giuseppe Piro, Luigi Alfredo Grieco, Gennaro Boggia, and Pietro Camarda,
+   "A Two-level Scheduling Algorithm for QoS Support in the Downlink of LTE Cellular Networks",
+   Proc. of European Wireless, EW2010, Lucca, Italy, Apr., 2010
 
 .. [Holtzman2000] J.M. Holtzman, "CDMA forward link waterfilling power control",
    in Proc. of IEEE VTC Spring, 2000.
@@ -80,10 +86,10 @@ References
    March 2011
 
 .. [PaduaPEM] `"Ns-developers - LTE error model contribution"
-   <http://mailman.isi.edu/pipermail/ns-developers/2011-November/009397.html>`_
+   <http://mailman.isi.edu/pipermail/ns-developers/2011-November/009559.html>`_
 
 .. [ViennaLteSim] `"The Vienna LTE Simulators"
-   <https://www.tuwien.at/etit/tc/en/vienna-simulators/vienna-lte-a-simulators/lte-a-downlink-system-level-simulator/>`_
+   <http://www.nt.tuwien.ac.at/about-us/staff/josep-colom-ikuno/lte-simulators/>`_
 
 .. [LozanoCost] Joan Olmos, Silvia Ruiz, Mario García-Lozano and David Martín-Sacristán,
    "Link Abstraction Models Based on Mutual Information for LTE Downlink",
@@ -98,6 +104,12 @@ References
 .. [CatreuxMIMO] S. Catreux, L.J. Greenstein, V. Erceg,
    "Some results and insights on the performance gains of MIMO systems,"
    Selected Areas in Communications, IEEE Journal on , vol.21, no.5, pp. 839- 847, June 2003
+
+.. [Ikuno2010] J.C. Ikuno, M. Wrulich, M. Rupp, "System Level Simulation of LTE Networks,"
+   Vehicular Technology Conference (VTC 2010-Spring), 2010 IEEE 71st , vol., no., pp.1-5, 16-19 May 2010
+
+.. [Milos2012] J. Milos, "Performance Analysis Of PCFICH LTE Control Channel",
+   Proceedings of the 19th Conference STUDENT EEICT 2012, Brno, CZ, 2012.
 
 .. [FujitsuWhitePaper] "Enhancing LTE Cell-Edge Performance via PDCCH ICIC".
 
@@ -134,7 +146,7 @@ References
 
 .. [Bbojovic2014] B. Bojovic, N. Baldo, `"A new Channel and QoS Aware
    Scheduler to enhance the capacity of Voice over LTE systems"
-   <https://ieeexplore.ieee.org/document/6808890>`_,
+   <http://www.cttc.es/publication/a-new-channel-and-qos-aware-scheduler-to-enhance-the-capacity-of-voice-over-lte-systems/>`_,
    in Proceedings of 11th International Multi-Conference on Systems,
    Signals & Devices (SSD’14), Castelldefels, 11-14 February 2014,
    Castelldefels (Spain).
@@ -142,7 +154,7 @@ References
 .. [Baldo2014] N. Baldo, R. Martínez, P. Dini, R. Vilalta, M. Miozzo,
    R. Casellas, R. Muñoz, `"A Testbed for Fixed Mobile Convergence
    Experimentation: ADRENALINE-LENA Integration"
-   <https://ieeexplore.ieee.org/document/6843180>`_,
+   <http://www.cttc.es/publication/a-testbed-for-fixed-mobile-convergence-experimentation-adrenaline-lena-integration/>`_,
    in Proceedings of European Wireless 2014, 14-16 May 2014, Barcelona
    (Spain).
 

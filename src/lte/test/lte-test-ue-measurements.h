@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -34,6 +46,7 @@ using namespace ns3;
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test that UE Measurements (see 36.214) calculation works fine in a
  * multi-cell interference scenario.
@@ -46,6 +59,7 @@ class LteUeMeasurementsTestSuite : public TestSuite
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test that UE measurements calculation works properly in a scenario
  * with 2 eNodeBs and 2UEs. Test that RSRP and RSRQ of the serving cell and of
@@ -72,7 +86,7 @@ class LteUeMeasurementsTestCase : public TestCase
                               double rsrpDbmUe2,
                               double rsrqDbUe1,
                               double rsrqDbUe2);
-    ~LteUeMeasurementsTestCase() override;
+    virtual ~LteUeMeasurementsTestCase();
 
     /**
      * Report UE measurements function
@@ -101,7 +115,7 @@ class LteUeMeasurementsTestCase : public TestCase
                                LteRrcSap::MeasurementReport meas);
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 
     double m_d1;                    ///< distance between UE and ENB node pair
     double m_d2;                    ///< distance between UE and other ENB node
@@ -115,6 +129,7 @@ class LteUeMeasurementsTestCase : public TestCase
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test suite for generating calls to UE measurements test case
  *        ns3::LteUeMeasurementsPiecewiseTestCase1.
@@ -127,14 +142,15 @@ class LteUeMeasurementsPiecewiseTestSuite1 : public TestSuite
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Testing UE measurements in LTE with simulation of 1 eNodeB and 1 UE in
  *        piecewise configuration and 120 ms report interval. During the simulation
  *        the placement of UE is being changed several times. Four different
  *        cases are considered: UE is very near to eNodeB, UE is near to eNodeB,
  *        UE is far from eNodeB and UE is very far from eNodeB. Test checks
- *        if the measurements correspond to the real conditions of the UE, i.e.
- *        when the signal from serving cell becomes weak, the measurements should
+ *        if the measurments correspond to the real conditions of the UE, i.e.
+ *        wnen the signal from serving cell becomes weak, the measurements should
  *        also start to correspond to the new channel conditions. Additionally, it
  *        is checked if UE detects some neighboring signal, if it does the test
  *        fails because there is no neighbor in this configuration. Also, test
@@ -158,7 +174,7 @@ class LteUeMeasurementsPiecewiseTestCase1 : public TestCase
                                         std::vector<Time> expectedTime,
                                         std::vector<uint8_t> expectedRsrp);
 
-    ~LteUeMeasurementsPiecewiseTestCase1() override;
+    virtual ~LteUeMeasurementsPiecewiseTestCase1();
 
     /**
      * \brief Triggers when eNodeB receives measurement report from UE, then
@@ -189,13 +205,13 @@ class LteUeMeasurementsPiecewiseTestCase1 : public TestCase
      *        `RecvMeasurementReportCallback` function to the
      *        `LteUeRrc::RecvMeasurementReport` trace source.
      */
-    void DoRun() override;
+    virtual void DoRun();
 
     /**
      * \brief Runs at the end of the simulation, verifying that all expected
      *        measurement reports have been examined.
      */
-    void DoTeardown() override;
+    virtual void DoTeardown();
 
     /// Teleport very near function
     void TeleportVeryNear();
@@ -250,6 +266,7 @@ class LteUeMeasurementsPiecewiseTestCase1 : public TestCase
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test suite for generating calls to UE measurements test case
  *        ns3::LteUeMeasurementsPiecewiseTestCase2.
@@ -262,6 +279,7 @@ class LteUeMeasurementsPiecewiseTestSuite2 : public TestSuite
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Testing UE measurements in LTE with simulation of 2 eNodeB and 1 UE in
  *        piecewise configuration and 240 ms report interval.
@@ -293,7 +311,7 @@ class LteUeMeasurementsPiecewiseTestCase2 : public TestCase
                                         std::vector<Time> expectedTime,
                                         std::vector<uint8_t> expectedRsrp);
 
-    ~LteUeMeasurementsPiecewiseTestCase2() override;
+    virtual ~LteUeMeasurementsPiecewiseTestCase2();
 
     /**
      * \brief Triggers when eNodeB receives measurement report from UE, then
@@ -324,13 +342,13 @@ class LteUeMeasurementsPiecewiseTestCase2 : public TestCase
      *        `RecvMeasurementReportCallback` function to the
      *        `LteUeRrc::RecvMeasurementReport` trace source.
      */
-    void DoRun() override;
+    virtual void DoRun();
 
     /**
      * \brief Runs at the end of the simulation, verifying that all expected
      *        measurement reports have been examined.
      */
-    void DoTeardown() override;
+    virtual void DoTeardown();
 
     /// Teleport very near function
     void TeleportVeryNear();
@@ -381,143 +399,11 @@ class LteUeMeasurementsPiecewiseTestCase2 : public TestCase
 
 }; // end of class LteUeMeasurementsPiecewiseTestCase2
 
-// ===== LTE-UE-MEASUREMENTS-PIECEWISE-3 TEST SUITE ======================== //
-
-/**
- * \ingroup lte-test
- *
- * \brief Test suite for generating calls to UE measurements test case
- *        ns3::LteUeMeasurementsPiecewiseTestCase3.
- */
-class LteUeMeasurementsPiecewiseTestSuite3 : public TestSuite
-{
-  public:
-    LteUeMeasurementsPiecewiseTestSuite3();
-};
-
-/**
- * \ingroup lte-test
- *
- * \brief Testing UE measurements in LTE with simulation of 3 eNodeB and 1 UE in
- *        piecewise configuration and 240 ms report interval.
- *        This test is to cover a corner case using event A4, which is not
- *        covered by LteUeMeasurementsPiecewiseTestCase1 and
- *        LteUeMeasurementsPiecewiseTestCase2. In this case, we test that the UE
- *        measurements at eNB are arriving 240 ms apart. Please note, the
- *        scenario simulated is engineered to specifically test the corner case
- *        in which whenever a new neighbour fulfils the entry condition
- *        for event A4, the UE RRC calls VarMeasReportListAdd method to include
- *        the new cell id in cellsTriggeredList, and then it schedules the
- *        SendMeasurementReport for periodic reporting. However, if the UE has
- *        already started the periodic reporting, scheduling the
- *        SendMeasurementReport method again causes following buggy behaviors:
- *
- *        1. It generates an intermediate measurement event, which then leads
- *        to parallel intermediate measurement reports from a UE to its eNB.
- *
- *        2. The old EvenId is overwritten by the new EventId stored in
- *        VarMeasReportList. This makes us lose control over the old EventId
- *        and it is impossible to cancel its events later on.
- *
- *        These buggy behaviors generated an issue reported in
- *        https://gitlab.com/nsnam/ns-3-dev/-/issues/224, where a UE try to
- *        send measurement reports after the RLF, even though all the measurement
- *        events are properly cancelled upon detecting RLF.
- *
- *        The correct behaviour should be that if a UE has already started the
- *        periodic reporting, and once a new neighbour fulfils the entry
- *        condition, we just need to add its cell id in cellsTriggeredList,
- *        without scheduling a new periodic event.
- *
- */
-class LteUeMeasurementsPiecewiseTestCase3 : public TestCase
-{
-  public:
-    /**
-     * Constructor
-     *
-     * \param name the reference name
-     * \param config LteRrcSap::ReportConfigEutra
-     * \param expectedTime the expected time
-     */
-    LteUeMeasurementsPiecewiseTestCase3(std::string name,
-                                        LteRrcSap::ReportConfigEutra config,
-                                        std::vector<Time> expectedTime);
-
-    ~LteUeMeasurementsPiecewiseTestCase3() override;
-
-    /**
-     * \brief Triggers when eNodeB receives measurement report from UE, then
-     *        perform verification on it.
-     *
-     * The trigger is set up beforehand by connecting to the
-     * `LteUeRrc::RecvMeasurementReport` trace source.
-     *
-     * Verification consists of checking whether the report carries the right
-     * value of RSRP or not, and whether it occurs at the expected time or not.
-     *
-     * \param context the context
-     * \param imsi the IMSI
-     * \param cellId the cell ID
-     * \param rnti  the RNTI
-     * \param report LteRrcSap::MeasurementReport
-     */
-    void RecvMeasurementReportCallback(std::string context,
-                                       uint64_t imsi,
-                                       uint16_t cellId,
-                                       uint16_t rnti,
-                                       LteRrcSap::MeasurementReport report);
-
-  private:
-    /**
-     * \brief Setup the simulation with the intended UE measurement reporting
-     *        configuration, run it, and connect the
-     *        `RecvMeasurementReportCallback` function to the
-     *        `LteUeRrc::RecvMeasurementReport` trace source.
-     */
-    void DoRun() override;
-
-    /**
-     * \brief Runs at the end of the simulation, verifying that all expected
-     *        measurement reports have been examined.
-     */
-    void DoTeardown() override;
-
-    /// Teleport the eNb near function
-    void TeleportEnbNear();
-
-    /**
-     * \brief The active report triggering configuration.
-     */
-    LteRrcSap::ReportConfigEutra m_config;
-
-    /**
-     * \brief The list of expected time when measurement reports are received by
-     *        eNodeB.
-     */
-    std::vector<Time> m_expectedTime;
-
-    /**
-     * \brief Pointer to the element of `m_expectedTime` which is expected to
-     *        occur next in the simulation.
-     */
-    std::vector<Time>::iterator m_itExpectedTime;
-
-    /**
-     * \brief The measurement identity being tested. Measurement reports with
-     *        different measurement identity (e.g. from handover algorithm) will
-     *        be ignored.
-     */
-    uint8_t m_expectedMeasId;
-
-    Ptr<MobilityModel> m_enbMobility; ///< the mobility model
-
-}; // end of class LteUeMeasurementsPiecewiseTestCase3
-
 // ===== LTE-UE-MEASUREMENTS-HANDOVER TEST SUITE =========================== //
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test suite for generating calls to UE measurements test case
  *        ns3::LteUeMeasurementsHandoverTestCase.
@@ -530,6 +416,7 @@ class LteUeMeasurementsHandoverTestSuite : public TestSuite
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Testing UE measurements in LTE with simulation of 2 eNodeB and 1 UE in
  *        a handover configuration.
@@ -565,7 +452,7 @@ class LteUeMeasurementsHandoverTestCase : public TestCase
                                       std::vector<uint8_t> expectedRsrp,
                                       Time duration);
 
-    ~LteUeMeasurementsHandoverTestCase() override;
+    virtual ~LteUeMeasurementsHandoverTestCase();
 
     /**
      * \brief Triggers when either one of the eNodeBs receives measurement report
@@ -596,13 +483,13 @@ class LteUeMeasurementsHandoverTestCase : public TestCase
      *        `RecvMeasurementReportCallback` function to the
      *        `LteUeRrc::RecvMeasurementReport` trace source.
      */
-    void DoRun() override;
+    virtual void DoRun();
 
     /**
      * \brief Runs at the end of the simulation, verifying that all expected
      *        measurement reports have been examined.
      */
-    void DoTeardown() override;
+    virtual void DoTeardown();
 
     /**
      * \brief The list of active report triggering configuration for the source

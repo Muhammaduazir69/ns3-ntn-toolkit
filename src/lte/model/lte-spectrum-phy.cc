@@ -1,18 +1,34 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2009, 2011 CTTC
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  *         Giuseppe Piro  <g.piro@poliba.it>
  *         Marco Miozzo <marco.miozzo@cttc.es> (add physical error model)
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #include "lte-spectrum-phy.h"
 
 #include "lte-chunk-processor.h"
-#include "lte-control-messages.h"
-#include "lte-mi-error-model.h"
+#include "lte-net-device.h"
+#include "lte-phy-tag.h"
 #include "lte-radio-bearer-tag.h"
 #include "lte-spectrum-signal-parameters.h"
 
@@ -21,6 +37,8 @@
 #include <ns3/config.h>
 #include <ns3/double.h>
 #include <ns3/log.h>
+#include <ns3/lte-mi-error-model.h>
+#include <ns3/lte-radio-bearer-tag.h>
 #include <ns3/object-factory.h>
 #include <ns3/simulator.h>
 #include <ns3/trace-source-accessor.h>
@@ -43,8 +61,7 @@ static const Time DL_CTRL_DURATION = NanoSeconds(214286 - 1);
 /// Effective coding rate
 static const double EffectiveCodingRate[29] = {
     0.08, 0.1, 0.11, 0.15, 0.19, 0.24, 0.3, 0.37, 0.44, 0.51, 0.3, 0.33, 0.37, 0.42, 0.48,
-    0.54, 0.6, 0.43, 0.45, 0.5,  0.55, 0.6, 0.65, 0.7,  0.75, 0.8, 0.85, 0.89, 0.92,
-};
+    0.54, 0.6, 0.43, 0.45, 0.5,  0.55, 0.6, 0.65, 0.7,  0.75, 0.8, 0.85, 0.89, 0.92};
 
 TbId_t::TbId_t()
 {
@@ -115,13 +132,13 @@ void
 LteSpectrumPhy::DoDispose()
 {
     NS_LOG_FUNCTION(this);
-    m_channel = nullptr;
-    m_mobility = nullptr;
-    m_device = nullptr;
+    m_channel = 0;
+    m_mobility = 0;
+    m_device = 0;
     m_interferenceData->Dispose();
-    m_interferenceData = nullptr;
+    m_interferenceData = 0;
     m_interferenceCtrl->Dispose();
-    m_interferenceCtrl = nullptr;
+    m_interferenceCtrl = 0;
     m_ltePhyRxDataEndErrorCallback = MakeNullCallback<void>();
     m_ltePhyRxDataEndOkCallback = MakeNullCallback<void, Ptr<Packet>>();
     m_ltePhyRxCtrlEndOkCallback = MakeNullCallback<void, std::list<Ptr<LteControlMessage>>>();
@@ -170,7 +187,7 @@ operator<<(std::ostream& os, LteSpectrumPhy::State s)
 }
 
 TypeId
-LteSpectrumPhy::GetTypeId()
+LteSpectrumPhy::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::LteSpectrumPhy")
@@ -300,15 +317,8 @@ LteSpectrumPhy::Reset()
     m_expectedTbs.clear();
     m_txControlMessageList.clear();
     m_rxPacketBurstList.clear();
-    m_txPacketBurst = nullptr;
-    m_rxSpectrumModel = nullptr;
-
-    // Detach from the channel, because receiving any signal without
-    // spectrum model is an error.
-    if (m_channel)
-    {
-        m_channel->RemoveRx(this);
-    }
+    m_txPacketBurst = 0;
+    // m_rxSpectrumModel = 0;
 }
 
 void
@@ -445,10 +455,12 @@ LteSpectrumPhy::StartTxDataFrame(Ptr<PacketBurst> pb,
         m_endTxEvent = Simulator::Schedule(duration, &LteSpectrumPhy::EndTxData, this);
     }
         return false;
+        break;
 
     default:
         NS_FATAL_ERROR("unknown state");
         return true;
+        break;
     }
 }
 
@@ -501,10 +513,12 @@ LteSpectrumPhy::StartTxDlCtrlFrame(std::list<Ptr<LteControlMessage>> ctrlMsgList
         m_endTxEvent = Simulator::Schedule(DL_CTRL_DURATION, &LteSpectrumPhy::EndTxDlCtrl, this);
     }
         return false;
+        break;
 
     default:
         NS_FATAL_ERROR("unknown state");
         return true;
+        break;
     }
 }
 
@@ -555,10 +569,12 @@ LteSpectrumPhy::StartTxUlSrsFrame()
         m_endTxEvent = Simulator::Schedule(UL_SRS_DURATION, &LteSpectrumPhy::EndTxUlSrs, this);
     }
         return false;
+        break;
 
     default:
         NS_FATAL_ERROR("unknown state");
         return true;
+        break;
     }
 }
 
@@ -570,7 +586,7 @@ LteSpectrumPhy::EndTxData()
 
     NS_ASSERT(m_state == TX_DATA);
     m_phyTxEndTrace(m_txPacketBurst);
-    m_txPacketBurst = nullptr;
+    m_txPacketBurst = 0;
     ChangeState(IDLE);
 }
 
@@ -672,7 +688,7 @@ LteSpectrumPhy::StartRxData(Ptr<LteSpectrumSignalParametersDataFrame> params)
                     m_firstRxStart = Simulator::Now();
                     m_firstRxDuration = params->duration;
                     NS_LOG_LOGIC(this << " scheduling EndRx with delay "
-                                      << params->duration.As(Time::S));
+                                      << params->duration.GetSeconds() << "s");
                     m_endRxDataEvent =
                         Simulator::Schedule(params->duration, &LteSpectrumPhy::EndRxData, this);
                 }
@@ -745,7 +761,7 @@ LteSpectrumPhy::StartRxDlCtrl(Ptr<LteSpectrumSignalParametersDlCtrlFrame> lteDlC
 
         // common code for the two states
         // check presence of PSS for UE measuerements
-        if (lteDlCtrlRxParams->pss)
+        if (lteDlCtrlRxParams->pss == true)
         {
             if (!m_ltePhyRxPssCallback.IsNull())
             {
@@ -900,33 +916,16 @@ LteSpectrumPhy::AddExpectedTb(uint16_t rnti,
     TbId_t tbId;
     tbId.m_rnti = rnti;
     tbId.m_layer = layer;
-    auto it = m_expectedTbs.find(tbId);
+    expectedTbs_t::iterator it;
+    it = m_expectedTbs.find(tbId);
     if (it != m_expectedTbs.end())
     {
-        // might be a TB of an unreceived packet (due to high propagation losses)
+        // migth be a TB of an unreceived packet (due to high progpalosses)
         m_expectedTbs.erase(it);
     }
     // insert new entry
     tbInfo_t tbInfo = {ndi, size, mcs, map, harqId, rv, 0.0, downlink, false, false};
     m_expectedTbs.insert(std::pair<TbId_t, tbInfo_t>(tbId, tbInfo));
-}
-
-void
-LteSpectrumPhy::RemoveExpectedTb(uint16_t rnti)
-{
-    NS_LOG_FUNCTION(this << rnti);
-    TbId_t tbId;
-    tbId.m_rnti = rnti;
-    // Remove TB of both the layers
-    for (uint8_t i = 0; i < 2; i++)
-    {
-        tbId.m_layer = i;
-        auto it = m_expectedTbs.find(tbId);
-        if (it != m_expectedTbs.end())
-        {
-            m_expectedTbs.erase(it);
-        }
-    }
 }
 
 void
@@ -942,7 +941,7 @@ LteSpectrumPhy::EndRxData()
     m_interferenceData->EndRx();
     NS_LOG_DEBUG(this << " No. of burts " << m_rxPacketBurstList.size());
     NS_LOG_DEBUG(this << " Expected TBs " << m_expectedTbs.size());
-    auto itTb = m_expectedTbs.begin();
+    expectedTbs_t::iterator itTb = m_expectedTbs.begin();
 
     // apply transmission mode gain
     NS_LOG_DEBUG(this << " txMode " << (uint16_t)m_transmissionMode << " gain "
@@ -952,9 +951,9 @@ LteSpectrumPhy::EndRxData()
 
     while (itTb != m_expectedTbs.end())
     {
-        if (m_dataErrorModelEnabled &&
-            !m_rxPacketBurstList
-                 .empty()) // avoid to check for errors when there is no actual data transmitted
+        if ((m_dataErrorModelEnabled) &&
+            (m_rxPacketBurstList.size() >
+             0)) // avoid to check for errors when there is no actual data transmitted
         {
             // retrieve HARQ info
             HarqProcessInfoList_t harqInfoList;
@@ -1016,9 +1015,11 @@ LteSpectrumPhy::EndRxData()
         itTb++;
     }
     std::map<uint16_t, DlInfoListElement_s> harqDlInfoMap;
-    for (auto i = m_rxPacketBurstList.begin(); i != m_rxPacketBurstList.end(); ++i)
+    for (std::list<Ptr<PacketBurst>>::const_iterator i = m_rxPacketBurstList.begin();
+         i != m_rxPacketBurstList.end();
+         ++i)
     {
-        for (auto j = (*i)->Begin(); j != (*i)->End(); ++j)
+        for (std::list<Ptr<Packet>>::const_iterator j = (*i)->Begin(); j != (*i)->End(); ++j)
         {
             // retrieve TB info of this packet
             LteRadioBearerTag tag;
@@ -1079,7 +1080,8 @@ LteSpectrumPhy::EndRxData()
                     }
                     else
                     {
-                        auto itHarq = harqDlInfoMap.find(tbId.m_rnti);
+                        std::map<uint16_t, DlInfoListElement_s>::iterator itHarq =
+                            harqDlInfoMap.find(tbId.m_rnti);
                         if (itHarq == harqDlInfoMap.end())
                         {
                             DlInfoListElement_s harqDlInfo;
@@ -1154,7 +1156,8 @@ LteSpectrumPhy::EndRxData()
     }
 
     // send DL HARQ feedback to LtePhy
-    for (auto itHarq = harqDlInfoMap.begin(); itHarq != harqDlInfoMap.end(); itHarq++)
+    std::map<uint16_t, DlInfoListElement_s>::iterator itHarq;
+    for (itHarq = harqDlInfoMap.begin(); itHarq != harqDlInfoMap.end(); itHarq++)
     {
         if (!m_ltePhyDlHarqFeedbackCallback.IsNull())
         {
@@ -1296,15 +1299,25 @@ void
 LteSpectrumPhy::SetTxModeGain(uint8_t txMode, double gain)
 {
     NS_LOG_FUNCTION(this << " txmode " << (uint16_t)txMode << " gain " << gain);
-    if (txMode > 0)
+    // convert to linear
+    gain = std::pow(10.0, (gain / 10.0));
+    if (m_txModeGain.size() < txMode)
     {
-        // convert to linear
-        double gainLin = std::pow(10.0, (gain / 10.0));
-        if (m_txModeGain.size() < txMode)
+        m_txModeGain.resize(txMode);
+    }
+    std::vector<double> temp;
+    temp = m_txModeGain;
+    m_txModeGain.clear();
+    for (uint8_t i = 0; i < temp.size(); i++)
+    {
+        if (i == txMode - 1)
         {
-            m_txModeGain.resize(txMode);
+            m_txModeGain.push_back(gain);
         }
-        m_txModeGain.at(txMode - 1) = gainLin;
+        else
+        {
+            m_txModeGain.push_back(temp.at(i));
+        }
     }
 }
 

@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -18,13 +30,13 @@ namespace ns3
 
 NS_LOG_COMPONENT_DEFINE("LteFfrAlgorithm");
 
-/// Type 0 RBG allocation
+/// Type 0 RGB allocation
 static const int Type0AllocationRbg[4] = {
-    10,  // RBG size 1
-    26,  // RBG size 2
-    63,  // RBG size 3
-    110, // RBG size 4
-};       // see table 7.1.6.1-1 of 3GPP TS 36.213
+    10, // RGB size 1
+    26, // RGB size 2
+    63, // RGB size 3
+    110 // RGB size 4
+};      // see table 7.1.6.1-1 of 3GPP TS 36.213
 
 NS_OBJECT_ENSURE_REGISTERED(LteFfrAlgorithm);
 
@@ -67,7 +79,7 @@ LteFfrAlgorithm::DoDispose()
     NS_LOG_FUNCTION(this);
 }
 
-uint16_t
+uint8_t
 LteFfrAlgorithm::GetUlBandwidth() const
 {
     NS_LOG_FUNCTION(this);
@@ -75,9 +87,9 @@ LteFfrAlgorithm::GetUlBandwidth() const
 }
 
 void
-LteFfrAlgorithm::SetUlBandwidth(uint16_t bw)
+LteFfrAlgorithm::SetUlBandwidth(uint8_t bw)
 {
-    NS_LOG_FUNCTION(this << bw);
+    NS_LOG_FUNCTION(this << uint16_t(bw));
     switch (bw)
     {
     case 6:
@@ -90,12 +102,12 @@ LteFfrAlgorithm::SetUlBandwidth(uint16_t bw)
         break;
 
     default:
-        NS_FATAL_ERROR("invalid bandwidth value " << bw);
+        NS_FATAL_ERROR("invalid bandwidth value " << (uint16_t)bw);
         break;
     }
 }
 
-uint16_t
+uint8_t
 LteFfrAlgorithm::GetDlBandwidth() const
 {
     NS_LOG_FUNCTION(this);
@@ -103,9 +115,9 @@ LteFfrAlgorithm::GetDlBandwidth() const
 }
 
 void
-LteFfrAlgorithm::SetDlBandwidth(uint16_t bw)
+LteFfrAlgorithm::SetDlBandwidth(uint8_t bw)
 {
-    NS_LOG_FUNCTION(this << bw);
+    NS_LOG_FUNCTION(this << uint16_t(bw));
     switch (bw)
     {
     case 6:
@@ -118,7 +130,7 @@ LteFfrAlgorithm::SetDlBandwidth(uint16_t bw)
         break;
 
     default:
-        NS_FATAL_ERROR("invalid bandwidth value " << bw);
+        NS_FATAL_ERROR("invalid bandwidth value " << (uint16_t)bw);
         break;
     }
 }
@@ -145,11 +157,11 @@ LteFfrAlgorithm::GetRbgSize(int dlbandwidth)
     {
         if (dlbandwidth < Type0AllocationRbg[i])
         {
-            return i + 1;
+            return (i + 1);
         }
     }
 
-    return -1;
+    return (-1);
 }
 
 void
@@ -160,7 +172,7 @@ LteFfrAlgorithm::DoSetCellId(uint16_t cellId)
 }
 
 void
-LteFfrAlgorithm::DoSetBandwidth(uint16_t ulBandwidth, uint16_t dlBandwidth)
+LteFfrAlgorithm::DoSetBandwidth(uint8_t ulBandwidth, uint8_t dlBandwidth)
 {
     NS_LOG_FUNCTION(this);
     SetDlBandwidth(dlBandwidth);

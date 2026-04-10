@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2013 Budiarto Herman
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Budiarto Herman <budiarto.herman@magister.fi>
  *
@@ -10,7 +22,7 @@
 #ifndef LTE_HANDOVER_MANAGEMENT_SAP_H
 #define LTE_HANDOVER_MANAGEMENT_SAP_H
 
-#include "lte-rrc-sap.h"
+#include <ns3/lte-rrc-sap.h>
 
 namespace ns3
 {
@@ -59,7 +71,7 @@ class LteHandoverManagementSapUser
      * \brief Request a certain reporting configuration to be fulfilled by the UEs
      *        attached to the eNodeB entity.
      * \param reportConfig the UE measurement reporting configuration
-     * \return the measurement identities associated with this newly added
+     * \return the measurement identity associated with this newly added
      *         reporting configuration
      *
      * The eNodeB RRC entity is expected to configure the same reporting
@@ -71,8 +83,7 @@ class LteHandoverManagementSapUser
      *
      * \note This function is only valid before the simulation begins.
      */
-    virtual std::vector<uint8_t> AddUeMeasReportConfigForHandover(
-        LteRrcSap::ReportConfigEutra reportConfig) = 0;
+    virtual uint8_t AddUeMeasReportConfigForHandover(LteRrcSap::ReportConfigEutra reportConfig) = 0;
 
     /**
      * \brief Instruct the eNodeB RRC entity to prepare a handover.
@@ -107,13 +118,11 @@ class MemberLteHandoverManagementSapProvider : public LteHandoverManagementSapPr
      */
     MemberLteHandoverManagementSapProvider(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberLteHandoverManagementSapProvider() = delete;
-
-    // inherited from LteHandoverManagementSapProvider
-    void ReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults measResults) override;
+    // inherited from LteHandoverManagemenrSapProvider
+    virtual void ReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults measResults);
 
   private:
+    MemberLteHandoverManagementSapProvider();
     C* m_owner; ///< the owner class
 
 }; // end of class MemberLteHandoverManagementSapProvider
@@ -148,15 +157,12 @@ class MemberLteHandoverManagementSapUser : public LteHandoverManagementSapUser
      */
     MemberLteHandoverManagementSapUser(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberLteHandoverManagementSapUser() = delete;
-
     // inherited from LteHandoverManagementSapUser
-    std::vector<uint8_t> AddUeMeasReportConfigForHandover(
-        LteRrcSap::ReportConfigEutra reportConfig) override;
-    void TriggerHandover(uint16_t rnti, uint16_t targetCellId) override;
+    virtual uint8_t AddUeMeasReportConfigForHandover(LteRrcSap::ReportConfigEutra reportConfig);
+    virtual void TriggerHandover(uint16_t rnti, uint16_t targetCellId);
 
   private:
+    MemberLteHandoverManagementSapUser();
     C* m_owner; ///< the owner class
 
 }; // end of class MemberLteAnrSapUser
@@ -168,7 +174,7 @@ MemberLteHandoverManagementSapUser<C>::MemberLteHandoverManagementSapUser(C* own
 }
 
 template <class C>
-std::vector<uint8_t>
+uint8_t
 MemberLteHandoverManagementSapUser<C>::AddUeMeasReportConfigForHandover(
     LteRrcSap::ReportConfigEutra reportConfig)
 {

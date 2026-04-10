@@ -1,10 +1,21 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
  *
- * Author: Manuel Requena <manuel.requena@cttc.es>
- * (Based on lte-helper.cc)
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
+ * Author: Manuel Requena <manuel.requena@cttc.es> (Based on lte-helper.cc)
  */
 
 #include "lte-simple-helper.h"
@@ -25,7 +36,7 @@ NS_LOG_COMPONENT_DEFINE("LteSimpleHelper");
 
 NS_OBJECT_ENSURE_REGISTERED(LteSimpleHelper);
 
-LteSimpleHelper::LteSimpleHelper()
+LteSimpleHelper::LteSimpleHelper(void)
 {
     NS_LOG_FUNCTION(this);
     m_enbDeviceFactory.SetTypeId(LteSimpleNetDevice::GetTypeId());
@@ -33,7 +44,7 @@ LteSimpleHelper::LteSimpleHelper()
 }
 
 void
-LteSimpleHelper::DoInitialize()
+LteSimpleHelper::DoInitialize(void)
 {
     NS_LOG_FUNCTION(this);
 
@@ -42,13 +53,13 @@ LteSimpleHelper::DoInitialize()
     Object::DoInitialize();
 }
 
-LteSimpleHelper::~LteSimpleHelper()
+LteSimpleHelper::~LteSimpleHelper(void)
 {
     NS_LOG_FUNCTION(this);
 }
 
 TypeId
-LteSimpleHelper::GetTypeId()
+LteSimpleHelper::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::LteSimpleHelper")
                             .SetParent<Object>()
@@ -56,8 +67,7 @@ LteSimpleHelper::GetTypeId()
                             .AddAttribute("RlcEntity",
                                           "Specify which type of RLC will be used. ",
                                           EnumValue(RLC_UM),
-                                          MakeEnumAccessor<LteRlcEntityType_t>(
-                                              &LteSimpleHelper::m_lteRlcEntityType),
+                                          MakeEnumAccessor<LteRlcEntityType_t>(&LteSimpleHelper::m_lteRlcEntityType),
                                           MakeEnumChecker(RLC_UM, "RlcUm", RLC_AM, "RlcAm"));
     return tid;
 }
@@ -66,12 +76,12 @@ void
 LteSimpleHelper::DoDispose()
 {
     NS_LOG_FUNCTION(this);
-    m_phyChannel = nullptr;
+    m_phyChannel = 0;
 
     m_enbMac->Dispose();
-    m_enbMac = nullptr;
+    m_enbMac = 0;
     m_ueMac->Dispose();
-    m_ueMac = nullptr;
+    m_ueMac = 0;
 
     Object::DoDispose();
 }
@@ -82,7 +92,7 @@ LteSimpleHelper::InstallEnbDevice(NodeContainer c)
     NS_LOG_FUNCTION(this);
     Initialize(); // will run DoInitialize () if necessary
     NetDeviceContainer devices;
-    for (auto i = c.Begin(); i != c.End(); ++i)
+    for (NodeContainer::Iterator i = c.Begin(); i != c.End(); ++i)
     {
         Ptr<Node> node = *i;
         Ptr<NetDevice> device = InstallSingleEnbDevice(node);
@@ -96,7 +106,7 @@ LteSimpleHelper::InstallUeDevice(NodeContainer c)
 {
     NS_LOG_FUNCTION(this);
     NetDeviceContainer devices;
-    for (auto i = c.Begin(); i != c.End(); ++i)
+    for (NodeContainer::Iterator i = c.Begin(); i != c.End(); ++i)
     {
         Ptr<Node> node = *i;
         Ptr<NetDevice> device = InstallSingleUeDevice(node);
@@ -198,9 +208,10 @@ LteSimpleHelper::InstallSingleUeDevice(Ptr<Node> n)
 }
 
 void
-LteSimpleHelper::EnableLogComponents()
+LteSimpleHelper::EnableLogComponents(void)
 {
-    auto level = (LogLevel)(LOG_LEVEL_ALL | LOG_PREFIX_TIME | LOG_PREFIX_NODE | LOG_PREFIX_FUNC);
+    LogLevel level =
+        (LogLevel)(LOG_LEVEL_ALL | LOG_PREFIX_TIME | LOG_PREFIX_NODE | LOG_PREFIX_FUNC);
 
     LogComponentEnable("Config", level);
     LogComponentEnable("LteSimpleHelper", level);
@@ -215,7 +226,7 @@ LteSimpleHelper::EnableLogComponents()
 }
 
 void
-LteSimpleHelper::EnableTraces()
+LteSimpleHelper::EnableTraces(void)
 {
     //   EnableMacTraces ();
     EnableRlcTraces();
@@ -223,7 +234,7 @@ LteSimpleHelper::EnableTraces()
 }
 
 void
-LteSimpleHelper::EnableRlcTraces()
+LteSimpleHelper::EnableRlcTraces(void)
 {
     EnableDlRlcTraces();
     EnableUlRlcTraces();
@@ -276,7 +287,7 @@ LteSimpleHelperDlRxPduCallback(Ptr<RadioBearerStatsCalculator> rlcStats,
 }
 
 void
-LteSimpleHelper::EnableDlRlcTraces()
+LteSimpleHelper::EnableDlRlcTraces(void)
 {
     NS_LOG_FUNCTION_NOARGS();
 
@@ -333,7 +344,7 @@ LteSimpleHelperUlRxPduCallback(Ptr<RadioBearerStatsCalculator> rlcStats,
 }
 
 void
-LteSimpleHelper::EnableUlRlcTraces()
+LteSimpleHelper::EnableUlRlcTraces(void)
 {
     NS_LOG_FUNCTION_NOARGS();
 
@@ -344,14 +355,14 @@ LteSimpleHelper::EnableUlRlcTraces()
 }
 
 void
-LteSimpleHelper::EnablePdcpTraces()
+LteSimpleHelper::EnablePdcpTraces(void)
 {
     EnableDlPdcpTraces();
     EnableUlPdcpTraces();
 }
 
 void
-LteSimpleHelper::EnableDlPdcpTraces()
+LteSimpleHelper::EnableDlPdcpTraces(void)
 {
     NS_LOG_FUNCTION_NOARGS();
 
@@ -362,7 +373,7 @@ LteSimpleHelper::EnableDlPdcpTraces()
 }
 
 void
-LteSimpleHelper::EnableUlPdcpTraces()
+LteSimpleHelper::EnableUlPdcpTraces(void)
 {
     NS_LOG_FUNCTION_NOARGS();
 

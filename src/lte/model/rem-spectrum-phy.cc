@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2009 CTTC
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  * Modified by: Marco Miozzo <mmiozzo@cttc.es> convert to
@@ -10,11 +22,10 @@
 
 #include "rem-spectrum-phy.h"
 
-#include "lte-spectrum-signal-parameters.h"
-
 #include <ns3/antenna-model.h>
 #include <ns3/double.h>
 #include <ns3/log.h>
+#include <ns3/lte-spectrum-signal-parameters.h>
 #include <ns3/object-factory.h>
 #include <ns3/simulator.h>
 #include <ns3/trace-source-accessor.h>
@@ -27,7 +38,7 @@ NS_LOG_COMPONENT_DEFINE("RemSpectrumPhy");
 NS_OBJECT_ENSURE_REGISTERED(RemSpectrumPhy);
 
 RemSpectrumPhy::RemSpectrumPhy()
-    : m_mobility(nullptr),
+    : m_mobility(0),
       m_referenceSignalPower(0),
       m_sumPower(0),
       m_active(true),
@@ -46,12 +57,12 @@ void
 RemSpectrumPhy::DoDispose()
 {
     NS_LOG_FUNCTION(this);
-    m_mobility = nullptr;
+    m_mobility = 0;
     SpectrumPhy::DoDispose();
 }
 
 TypeId
-RemSpectrumPhy::GetTypeId()
+RemSpectrumPhy::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::RemSpectrumPhy")
                             .SetParent<SpectrumPhy>()
@@ -91,7 +102,7 @@ RemSpectrumPhy::GetMobility() const
 Ptr<NetDevice>
 RemSpectrumPhy::GetDevice() const
 {
-    return nullptr;
+    return 0;
 }
 
 Ptr<const SpectrumModel>
@@ -103,7 +114,7 @@ RemSpectrumPhy::GetRxSpectrumModel() const
 Ptr<Object>
 RemSpectrumPhy::GetAntenna() const
 {
-    return nullptr;
+    return 0;
 }
 
 void
@@ -172,7 +183,7 @@ RemSpectrumPhy::SetRxSpectrumModel(Ptr<const SpectrumModel> m)
 }
 
 double
-RemSpectrumPhy::GetSinr(double noisePower) const
+RemSpectrumPhy::GetSinr(double noisePower)
 {
     return m_referenceSignalPower / (m_sumPower - m_referenceSignalPower + noisePower);
 }
@@ -184,7 +195,7 @@ RemSpectrumPhy::Deactivate()
 }
 
 bool
-RemSpectrumPhy::IsActive() const
+RemSpectrumPhy::IsActive()
 {
     return m_active;
 }

@@ -1,48 +1,43 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012-2018 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
 
 #include "ns3/applications-module.h"
+#include "ns3/config-store-module.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/lte-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/point-to-point-module.h"
-// #include "ns3/gtk-config-store.h"
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("LenaX2HandoverExample");
 
-/**
- * UE Connection established notification.
- *
- * \param context The context.
- * \param imsi The IMSI of the connected terminal.
- * \param cellid The Cell ID.
- * \param rnti The RNTI.
- */
 void
 NotifyConnectionEstablishedUe(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti)
 {
-    std::cout << Simulator::Now().As(Time::S) << " " << context << " UE IMSI " << imsi
+    std::cout << Simulator::Now().GetSeconds() << " " << context << " UE IMSI " << imsi
               << ": connected to CellId " << cellid << " with RNTI " << rnti << std::endl;
 }
 
-/**
- * UE Start Handover notification.
- *
- * \param context The context.
- * \param imsi The IMSI of the connected terminal.
- * \param cellid The actual Cell ID.
- * \param rnti The RNTI.
- * \param targetCellId The target Cell ID.
- */
 void
 NotifyHandoverStartUe(std::string context,
                       uint64_t imsi,
@@ -50,51 +45,26 @@ NotifyHandoverStartUe(std::string context,
                       uint16_t rnti,
                       uint16_t targetCellId)
 {
-    std::cout << Simulator::Now().As(Time::S) << " " << context << " UE IMSI " << imsi
+    std::cout << Simulator::Now().GetSeconds() << " " << context << " UE IMSI " << imsi
               << ": previously connected to CellId " << cellid << " with RNTI " << rnti
               << ", doing handover to CellId " << targetCellId << std::endl;
 }
 
-/**
- * UE Handover end successful notification.
- *
- * \param context The context.
- * \param imsi The IMSI of the connected terminal.
- * \param cellid The Cell ID.
- * \param rnti The RNTI.
- */
 void
 NotifyHandoverEndOkUe(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti)
 {
-    std::cout << Simulator::Now().As(Time::S) << " " << context << " UE IMSI " << imsi
+    std::cout << Simulator::Now().GetSeconds() << " " << context << " UE IMSI " << imsi
               << ": successful handover to CellId " << cellid << " with RNTI " << rnti << std::endl;
 }
 
-/**
- * eNB Connection established notification.
- *
- * \param context The context.
- * \param imsi The IMSI of the connected terminal.
- * \param cellid The Cell ID.
- * \param rnti The RNTI.
- */
 void
 NotifyConnectionEstablishedEnb(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti)
 {
-    std::cout << Simulator::Now().As(Time::S) << " " << context << " eNB CellId " << cellid
+    std::cout << Simulator::Now().GetSeconds() << " " << context << " eNB CellId " << cellid
               << ": successful connection of UE with IMSI " << imsi << " RNTI " << rnti
               << std::endl;
 }
 
-/**
- * eNB Start Handover notification.
- *
- * \param context The context.
- * \param imsi The IMSI of the connected terminal.
- * \param cellid The actual Cell ID.
- * \param rnti The RNTI.
- * \param targetCellId The target Cell ID.
- */
 void
 NotifyHandoverStartEnb(std::string context,
                        uint64_t imsi,
@@ -102,39 +72,16 @@ NotifyHandoverStartEnb(std::string context,
                        uint16_t rnti,
                        uint16_t targetCellId)
 {
-    std::cout << Simulator::Now().As(Time::S) << " " << context << " eNB CellId " << cellid
+    std::cout << Simulator::Now().GetSeconds() << " " << context << " eNB CellId " << cellid
               << ": start handover of UE with IMSI " << imsi << " RNTI " << rnti << " to CellId "
               << targetCellId << std::endl;
 }
 
-/**
- * eNB Handover end successful notification.
- *
- * \param context The context.
- * \param imsi The IMSI of the connected terminal.
- * \param cellid The Cell ID.
- * \param rnti The RNTI.
- */
 void
 NotifyHandoverEndOkEnb(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti)
 {
-    std::cout << Simulator::Now().As(Time::S) << " " << context << " eNB CellId " << cellid
+    std::cout << Simulator::Now().GetSeconds() << " " << context << " eNB CellId " << cellid
               << ": completed handover of UE with IMSI " << imsi << " RNTI " << rnti << std::endl;
-}
-
-/**
- * Handover failure notification
- *
- * \param context The context.
- * \param imsi The IMSI of the connected terminal.
- * \param cellid The Cell ID.
- * \param rnti The RNTI.
- */
-void
-NotifyHandoverFailure(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti)
-{
-    std::cout << Simulator::Now().As(Time::S) << " " << context << " eNB CellId " << cellid
-              << " IMSI " << imsi << " RNTI " << rnti << " handover failure" << std::endl;
 }
 
 /**
@@ -150,10 +97,8 @@ main(int argc, char* argv[])
     // LogComponentEnable ("LteHelper", logLevel);
     // LogComponentEnable ("EpcHelper", logLevel);
     // LogComponentEnable ("EpcEnbApplication", logLevel);
-    // LogComponentEnable ("EpcMmeApplication", logLevel);
-    // LogComponentEnable ("EpcPgwApplication", logLevel);
-    // LogComponentEnable ("EpcSgwApplication", logLevel);
     // LogComponentEnable ("EpcX2", logLevel);
+    // LogComponentEnable ("EpcSgwPgwApplication", logLevel);
 
     // LogComponentEnable ("LteEnbRrc", logLevel);
     // LogComponentEnable ("LteEnbNetDevice", logLevel);
@@ -176,7 +121,7 @@ main(int argc, char* argv[])
     Config::SetDefault("ns3::LteHelper::UseIdealRrc", BooleanValue(false));
 
     // Command line arguments
-    CommandLine cmd(__FILE__);
+    CommandLine cmd;
     cmd.AddValue("numberOfUes", "Number of UEs", numberOfUes);
     cmd.AddValue("numberOfEnbs", "Number of eNodeBs", numberOfEnbs);
     cmd.AddValue("simTime", "Total duration of the simulation", simTime);
@@ -361,16 +306,6 @@ main(int argc, char* argv[])
                     MakeCallback(&NotifyHandoverEndOkEnb));
     Config::Connect("/NodeList/*/DeviceList/*/LteUeRrc/HandoverEndOk",
                     MakeCallback(&NotifyHandoverEndOkUe));
-
-    // Hook a trace sink (the same one) to the four handover failure traces
-    Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverFailureNoPreamble",
-                    MakeCallback(&NotifyHandoverFailure));
-    Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverFailureMaxRach",
-                    MakeCallback(&NotifyHandoverFailure));
-    Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverFailureLeaving",
-                    MakeCallback(&NotifyHandoverFailure));
-    Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverFailureJoining",
-                    MakeCallback(&NotifyHandoverFailure));
 
     Simulator::Stop(simTime + MilliSeconds(20));
     Simulator::Run();

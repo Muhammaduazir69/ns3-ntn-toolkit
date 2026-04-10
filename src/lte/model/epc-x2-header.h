@@ -1,16 +1,31 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #ifndef EPC_X2_HEADER_H
 #define EPC_X2_HEADER_H
 
-#include "epc-x2-sap.h"
-
+#include "ns3/epc-x2-sap.h"
 #include "ns3/header.h"
 
 #include <vector>
@@ -22,18 +37,18 @@ class EpcX2Header : public Header
 {
   public:
     EpcX2Header();
-    ~EpcX2Header() override;
+    virtual ~EpcX2Header();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
-    void Print(std::ostream& os) const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
 
     /**
      * Get message type function
@@ -68,15 +83,23 @@ class EpcX2Header : public Header
      */
     void SetNumberOfIes(uint32_t numberOfIes);
 
-    /// Procedure code enumeration 9.3.7
+    /// Procedure code enumeration
     enum ProcedureCode_t
     {
         HandoverPreparation = 0,
-        HandoverCancel = 1,
         LoadIndication = 2,
         SnStatusTransfer = 4,
         UeContextRelease = 5,
-        ResourceStatusReporting = 10
+        ResourceStatusReporting = 10,
+        RlcSetupRequest = 11, // added for MC functionalities
+        RlcSetupCompleted = 12,
+        NotifyMcConnection = 13,
+        UpdateUeSinr = 14,
+        RequestMcHandover = 15,
+        NotifyMmWaveLteHandover = 16,
+        NotifyCoordinatorHandoverFailed = 17,
+        SwitchConnection = 18,
+        SecondaryCellHandoverCompleted = 19
     };
 
     /// Type of message enumeration
@@ -84,7 +107,9 @@ class EpcX2Header : public Header
     {
         InitiatingMessage = 0,
         SuccessfulOutcome = 1,
-        UnsuccessfulOutcome = 2
+        UnsuccessfulOutcome = 2,
+        McForwardDownlinkData = 3, // added for MC functionalities
+        McForwardUplinkData = 4
     };
 
   private:
@@ -102,18 +127,18 @@ class EpcX2HandoverRequestHeader : public Header
 {
   public:
     EpcX2HandoverRequestHeader();
-    ~EpcX2HandoverRequestHeader() override;
+    virtual ~EpcX2HandoverRequestHeader();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
-    void Print(std::ostream& os) const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
 
     /**
      * Get old ENB X2 AP ID function
@@ -136,6 +161,9 @@ class EpcX2HandoverRequestHeader : public Header
      * \param cause
      */
     void SetCause(uint16_t cause);
+
+    bool GetIsMc() const;
+    void SetIsMc(bool isMc);
 
     /**
      * Get target cell id function
@@ -170,24 +198,27 @@ class EpcX2HandoverRequestHeader : public Header
      */
     void SetBearers(std::vector<EpcX2Sap::ErabToBeSetupItem> bearers);
 
+    std::vector<EpcX2Sap::RlcSetupRequest> GetRlcSetupRequests() const;
+    void SetRlcSetupRequests(std::vector<EpcX2Sap::RlcSetupRequest> rlcRequests);
+
     /**
      * Get UE Aggregate Max Bit Rate Downlink function
      * \returns the UE aggregate max bit rate downlink
      */
     uint64_t GetUeAggregateMaxBitRateDownlink() const;
     /**
-     * Set UE Aggregate Max Bit Rate Downlink function
+     * Set UE Aggregrate Max Bit Rate Downlink function
      * \param bitRate the bit rate
      */
     void SetUeAggregateMaxBitRateDownlink(uint64_t bitRate);
 
     /**
-     * Get UE Aggregate Max Bit Rate Uplik function
+     * Get UE Aggregrate Max Bit Rate Uplik function
      * \returns the UE aggregate max bit rate uplink
      */
     uint64_t GetUeAggregateMaxBitRateUplink() const;
     /**
-     * Set UE Aggregate Max Bit Rate Uplik function
+     * Set UE Aggregrate Max Bit Rate Uplik function
      * \param bitRate the bit rate
      */
     void SetUeAggregateMaxBitRateUplink(uint64_t bitRate);
@@ -214,6 +245,202 @@ class EpcX2HandoverRequestHeader : public Header
     uint64_t m_ueAggregateMaxBitRateDownlink; ///< aggregate max bit rate downlink
     uint64_t m_ueAggregateMaxBitRateUplink;   ///< aggregate max bit rate uplink
     std::vector<EpcX2Sap::ErabToBeSetupItem> m_erabsToBeSetupList; ///< ERAB to be setup list
+    std::vector<EpcX2Sap::RlcSetupRequest> m_rlcRequestsList;
+    bool m_isMc;
+};
+
+class EpcX2RlcSetupRequestHeader : public Header
+{
+  public:
+    EpcX2RlcSetupRequestHeader();
+    virtual ~EpcX2RlcSetupRequestHeader();
+
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
+
+    uint16_t GetSourceCellId() const;
+    void SetSourceCellId(uint16_t sourceCellId);
+
+    uint16_t GetTargetCellId() const;
+    void SetTargetCellId(uint16_t targetCellId);
+
+    uint32_t GetGtpTeid() const;
+    void SetGtpTeid(uint32_t gtpTeid);
+
+    uint16_t GetMmWaveRnti() const;
+    void SetMmWaveRnti(uint16_t rnti);
+
+    uint16_t GetLteRnti() const;
+    void SetLteRnti(uint16_t rnti);
+
+    uint8_t GetDrbid() const;
+    void SetDrbid(uint8_t drbid);
+
+    LteEnbCmacSapProvider::LcInfo GetLcInfo() const;
+    void SetLcInfo(LteEnbCmacSapProvider::LcInfo lcInfo);
+
+    LteRrcSap::RlcConfig GetRlcConfig() const;
+    void SetRlcConfig(LteRrcSap::RlcConfig rlcConfig);
+
+    LteRrcSap::LogicalChannelConfig GetLogicalChannelConfig();
+    void SetLogicalChannelConfig(LteRrcSap::LogicalChannelConfig conf);
+
+    uint32_t GetLengthOfIes() const;
+    uint32_t GetNumberOfIes() const;
+
+  private:
+    uint32_t m_numberOfIes;
+    uint32_t m_headerLength;
+
+    uint16_t m_sourceCellId;
+    uint16_t m_targetCellId;
+    uint32_t m_gtpTeid;
+    uint16_t m_mmWaveRnti;
+    uint16_t m_lteRnti;
+    uint8_t m_drbid;
+    LteEnbCmacSapProvider::LcInfo m_lcInfo;
+    LteRrcSap::RlcConfig m_rlcConfig;
+    LteRrcSap::LogicalChannelConfig m_lcConfig;
+};
+
+class EpcX2RlcSetupCompletedHeader : public Header
+{
+  public:
+    EpcX2RlcSetupCompletedHeader();
+    virtual ~EpcX2RlcSetupCompletedHeader();
+
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
+
+    uint16_t GetSourceCellId() const;
+    void SetSourceCellId(uint16_t sourceCellId);
+
+    uint16_t GetTargetCellId() const;
+    void SetTargetCellId(uint16_t targetCellId);
+
+    uint32_t GetGtpTeid() const;
+    void SetGtpTeid(uint32_t gtpTeid);
+
+    uint32_t GetLengthOfIes() const;
+    uint32_t GetNumberOfIes() const;
+
+  private:
+    uint32_t m_numberOfIes;
+    uint32_t m_headerLength;
+
+    uint16_t m_sourceCellId;
+    uint16_t m_targetCellId;
+    uint32_t m_gtpTeid;
+};
+
+class EpcX2McHandoverHeader : public Header
+{
+  public:
+    EpcX2McHandoverHeader();
+    virtual ~EpcX2McHandoverHeader();
+
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
+
+    uint16_t GetTargetCellId() const;
+    void SetTargetCellId(uint16_t targetCellId);
+
+    uint16_t GetOldCellId() const;
+    void SetOldCellId(uint16_t oldCellId);
+
+    uint64_t GetImsi() const;
+    void SetImsi(uint64_t imsi);
+
+    uint32_t GetLengthOfIes() const;
+    uint32_t GetNumberOfIes() const;
+
+  private:
+    uint32_t m_numberOfIes;
+    uint32_t m_headerLength;
+
+    uint16_t m_targetCellId;
+    uint16_t m_oldCellId;
+    uint64_t m_imsi;
+};
+
+class EpcX2SecondaryCellHandoverCompletedHeader : public Header
+{
+  public:
+    EpcX2SecondaryCellHandoverCompletedHeader();
+    virtual ~EpcX2SecondaryCellHandoverCompletedHeader();
+
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
+
+    uint16_t GetMmWaveRnti() const;
+    void SetMmWaveRnti(uint16_t mmWaveRnti);
+
+    uint16_t GetOldEnbUeX2apId() const;
+    void SetOldEnbUeX2apId(uint16_t oldEnbUeX2apId);
+
+    uint64_t GetImsi() const;
+    void SetImsi(uint64_t imsi);
+
+    uint32_t GetLengthOfIes() const;
+    uint32_t GetNumberOfIes() const;
+
+  private:
+    uint32_t m_numberOfIes;
+    uint32_t m_headerLength;
+
+    uint16_t m_mmWaveRnti;
+    uint16_t m_oldEnbUeX2apId;
+    uint64_t m_imsi;
+};
+
+class EpcX2NotifyCoordinatorHandoverFailedHeader : public Header
+{
+  public:
+    EpcX2NotifyCoordinatorHandoverFailedHeader();
+    virtual ~EpcX2NotifyCoordinatorHandoverFailedHeader();
+
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
+
+    uint16_t GetTargetCellId() const;
+    void SetTargetCellId(uint16_t targetCellId);
+
+    uint16_t GetSourceCellId() const;
+    void SetSourceCellId(uint16_t oldCellId);
+
+    uint64_t GetImsi() const;
+    void SetImsi(uint64_t imsi);
+
+    uint32_t GetLengthOfIes() const;
+    uint32_t GetNumberOfIes() const;
+
+  private:
+    uint32_t m_numberOfIes;
+    uint32_t m_headerLength;
+
+    uint16_t m_targetCellId;
+    uint16_t m_sourceCellId;
+    uint64_t m_imsi;
 };
 
 /**
@@ -223,18 +450,18 @@ class EpcX2HandoverRequestAckHeader : public Header
 {
   public:
     EpcX2HandoverRequestAckHeader();
-    ~EpcX2HandoverRequestAckHeader() override;
+    virtual ~EpcX2HandoverRequestAckHeader();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
-    void Print(std::ostream& os) const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
 
     /**
      * Get old ENB UE X2 AP ID function
@@ -308,18 +535,18 @@ class EpcX2HandoverPreparationFailureHeader : public Header
 {
   public:
     EpcX2HandoverPreparationFailureHeader();
-    ~EpcX2HandoverPreparationFailureHeader() override;
+    virtual ~EpcX2HandoverPreparationFailureHeader();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
-    void Print(std::ostream& os) const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
 
     /**
      * Get old ENB UE X2 AP ID function
@@ -381,18 +608,18 @@ class EpcX2SnStatusTransferHeader : public Header
 {
   public:
     EpcX2SnStatusTransferHeader();
-    ~EpcX2SnStatusTransferHeader() override;
+    virtual ~EpcX2SnStatusTransferHeader();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
-    void Print(std::ostream& os) const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
 
     /**
      * Get old ENB UE X2 AP ID function
@@ -457,18 +684,18 @@ class EpcX2UeContextReleaseHeader : public Header
 {
   public:
     EpcX2UeContextReleaseHeader();
-    ~EpcX2UeContextReleaseHeader() override;
+    virtual ~EpcX2UeContextReleaseHeader();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
-    void Print(std::ostream& os) const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
 
     /**
      * Get old ENB UE X2 AP ID function
@@ -518,18 +745,18 @@ class EpcX2LoadInformationHeader : public Header
 {
   public:
     EpcX2LoadInformationHeader();
-    ~EpcX2LoadInformationHeader() override;
+    virtual ~EpcX2LoadInformationHeader();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
-    void Print(std::ostream& os) const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
 
     /**
      * Get cell information list function
@@ -567,18 +794,18 @@ class EpcX2ResourceStatusUpdateHeader : public Header
 {
   public:
     EpcX2ResourceStatusUpdateHeader();
-    ~EpcX2ResourceStatusUpdateHeader() override;
+    virtual ~EpcX2ResourceStatusUpdateHeader();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
-    void Print(std::ostream& os) const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
 
     /**
      * Get ENB1 measurement ID function
@@ -635,77 +862,73 @@ class EpcX2ResourceStatusUpdateHeader : public Header
         m_cellMeasurementResultList; ///< cell measurement result list
 };
 
-/**
- * EpcX2HandoverCancelHeader
- */
-class EpcX2HandoverCancelHeader : public Header
+class EpcX2UeImsiSinrUpdateHeader : public Header
 {
   public:
-    EpcX2HandoverCancelHeader();
-    ~EpcX2HandoverCancelHeader() override;
+    EpcX2UeImsiSinrUpdateHeader();
+    virtual ~EpcX2UeImsiSinrUpdateHeader();
 
-    /**
-     * \brief Get the type ID.
-     * \return the object TypeId
-     */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
-    void Print(std::ostream& os) const override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
 
-    /**
-     * \brief Get old ENB UE X2 AP ID function
-     * \returns the old ENB UE X2 AP ID
-     */
-    uint16_t GetOldEnbUeX2apId() const;
-    /**
-     * \brief Set old ENB UE X2 AP ID function
-     * \param x2apId the old ENB UE X2 AP ID
-     */
-    void SetOldEnbUeX2apId(uint16_t x2apId);
+    std::map<uint64_t, double> GetUeImsiSinrMap() const;
+    void SetUeImsiSinrMap(std::map<uint64_t, double> map);
 
-    /**
-     * \brief Get new ENB UE X2 AP ID function
-     * \returns the new ENB UE X2 AP ID
-     */
-    uint16_t GetNewEnbUeX2apId() const;
-    /**
-     * \brief Set new ENB UE X2 AP ID function
-     * \param x2apId the new ENB UE X2 AP ID
-     */
-    void SetNewEnbUeX2apId(uint16_t x2apId);
+    uint16_t GetSourceCellId() const;
+    void SetSourceCellId(uint16_t sourceCellId);
 
-    /**
-     * \brief Get cause function
-     * \returns the cause
-     */
-    uint16_t GetCause() const;
-    /**
-     * \brief Set cause function
-     * \param cause
-     */
-    void SetCause(uint16_t cause);
-
-    /**
-     * \brief Get length of IEs function
-     * \returns the length of IEs
-     */
     uint32_t GetLengthOfIes() const;
-    /**
-     * \brief Get number of IEs function
-     * \returns the number of IEs
-     */
     uint32_t GetNumberOfIes() const;
 
   private:
-    uint32_t m_numberOfIes;  ///< number of IEs
-    uint32_t m_headerLength; ///< header length
+    uint32_t m_numberOfIes;
+    uint32_t m_headerLength;
 
-    uint16_t m_oldEnbUeX2apId; ///< old ENB UE X2 AP ID
-    uint16_t m_newEnbUeX2apId; ///< new ENB UE X2 AP ID
-    uint16_t m_cause;          ///< cause
+    // from http://beej.us/guide/bgnet/examples/ieee754.c, to convert
+    // uint64_t to double and viceversa according to IEEE754 format
+    static uint64_t pack754(long double f);
+    static long double unpack754(uint64_t i);
+
+    std::map<uint64_t, double> m_map;
+    uint16_t m_sourceCellId;
+};
+
+class EpcX2ConnectionSwitchHeader : public Header
+{
+  public:
+    EpcX2ConnectionSwitchHeader();
+    virtual ~EpcX2ConnectionSwitchHeader();
+
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
+    virtual void Print(std::ostream& os) const;
+
+    uint16_t GetMmWaveRnti() const;
+    void SetMmWaveRnti(uint16_t rnti);
+
+    bool GetUseMmWaveConnection() const;
+    void SetUseMmWaveConnection(bool useMmWaveConnection);
+
+    uint8_t GetDrbid() const;
+    void SetDrbid(uint8_t bid);
+
+    uint32_t GetLengthOfIes() const;
+    uint32_t GetNumberOfIes() const;
+
+  private:
+    uint32_t m_numberOfIes;
+    uint32_t m_headerLength;
+
+    uint16_t m_mmWaveRnti;
+    uint8_t m_drbid;
+    bool m_useMmWaveConnection;
 };
 
 } // namespace ns3

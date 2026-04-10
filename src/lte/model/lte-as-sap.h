@@ -1,14 +1,31 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #ifndef LTE_AS_SAP_H
 #define LTE_AS_SAP_H
 
+#include <ns3/lte-rrc-sap.h>
 #include <ns3/packet.h>
 #include <ns3/ptr.h>
 
@@ -17,12 +34,15 @@
 namespace ns3
 {
 
+class LteEnbNetDevice;
+
 /**
  * This class implements the Access Stratum (AS) Service Access Point
  * (SAP), i.e., the interface between the EpcUeNas and the LteUeRrc.
  * In particular, this class implements the
  * Provider part of the SAP, i.e., the methods exported by the
  * LteUeRrc and called by the EpcUeNas.
+ *
  */
 class LteAsSapProvider
 {
@@ -60,7 +80,7 @@ class LteAsSapProvider
      * attempt to connect at the earliest possible time (e.g. after it camps to a
      * suitable cell).
      */
-    virtual void Connect() = 0;
+    virtual void Connect(void) = 0;
 
     /**
      * \brief Send a data packet.
@@ -72,8 +92,26 @@ class LteAsSapProvider
 
     /**
      * \brief Tell the RRC entity to release the connection.
+     *
      */
     virtual void Disconnect() = 0;
+
+    /**
+     * \brief Tell the RRC that a secondary cell was connected
+     *
+     */
+    virtual void NotifySecondaryCellConnected(uint16_t rnti, uint16_t mmWaveCellId) = 0;
+
+    /**
+     * \brief Tell the LTE RRC in the UE that a secondary cell handover was performed,
+     * and trigger the RLC instances update
+     *
+     */
+    virtual void NotifySecondaryCellHandover(
+        uint16_t oldRnti,
+        uint16_t newRnti,
+        uint16_t mmWaveCellId,
+        LteRrcSap::RadioResourceConfigDedicated radioResourceConfigDedicated) = 0;
 };
 
 /**
@@ -82,6 +120,7 @@ class LteAsSapProvider
  * In particular, this class implements the
  * User part of the SAP, i.e., the methods exported by the
  * EpcUeNas and called by the LteUeRrc.
+ *
  */
 class LteAsSapUser
 {
@@ -90,16 +129,33 @@ class LteAsSapUser
 
     /**
      * \brief Notify the NAS that RRC Connection Establishment was successful.
+     *
      */
-    virtual void NotifyConnectionSuccessful() = 0;
+    virtual void NotifyConnectionSuccessful(uint16_t rnti) = 0;
+
+    virtual void NotifyHandoverSuccessful(uint16_t rnti, uint16_t mmWaveCellId) = 0;
+
+    virtual void NotifySecondaryCellHandoverStarted(
+        uint16_t oldRnti,
+        uint16_t newRnti,
+        uint16_t mmWaveCellId,
+        LteRrcSap::RadioResourceConfigDedicated radioResourceConfigDedicated) = 0;
+
+    /**
+     * \brief Notify the NAS that LTE RRC received an indication to connect to a MmWave eNB
+     *
+     */
+    virtual void NotifyConnectToMmWave(uint16_t mmWaveCellId) = 0;
 
     /**
      * \brief Notify the NAS that RRC Connection Establishment failed.
+     *
      */
     virtual void NotifyConnectionFailed() = 0;
 
     /**
      * Notify the NAS that RRC Connection was released
+     *
      */
     virtual void NotifyConnectionReleased() = 0;
 
@@ -114,6 +170,7 @@ class LteAsSapUser
 /**
  * Template for the implementation of the LteAsSapProvider as a member
  * of an owner class of type C to which all methods are forwarded
+ *
  */
 template <class C>
 class MemberLteAsSapProvider : public LteAsSapProvider
@@ -126,24 +183,33 @@ class MemberLteAsSapProvider : public LteAsSapProvider
      */
     MemberLteAsSapProvider(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberLteAsSapProvider() = delete;
-
     // inherited from LteAsSapProvider
-    void SetCsgWhiteList(uint32_t csgId) override;
-    void StartCellSelection(uint32_t dlEarfcn) override;
-    void ForceCampedOnEnb(uint16_t cellId, uint32_t dlEarfcn) override;
-    void Connect() override;
-    void SendData(Ptr<Packet> packet, uint8_t bid) override;
-    void Disconnect() override;
+    virtual void SetCsgWhiteList(uint32_t csgId);
+    virtual void StartCellSelection(uint32_t dlEarfcn);
+    virtual void ForceCampedOnEnb(uint16_t cellId, uint32_t dlEarfcn);
+    virtual void Connect(void);
+    virtual void SendData(Ptr<Packet> packet, uint8_t bid);
+    virtual void Disconnect();
+    virtual void NotifySecondaryCellConnected(uint16_t rnti, uint16_t mmWaveCellId);
+    virtual void NotifySecondaryCellHandover(
+        uint16_t oldRnti,
+        uint16_t newRnti,
+        uint16_t mmWaveCellId,
+        LteRrcSap::RadioResourceConfigDedicated radioResourceConfigDedicated);
 
   private:
+    MemberLteAsSapProvider();
     C* m_owner; ///< the owner class
 };
 
 template <class C>
 MemberLteAsSapProvider<C>::MemberLteAsSapProvider(C* owner)
     : m_owner(owner)
+{
+}
+
+template <class C>
+MemberLteAsSapProvider<C>::MemberLteAsSapProvider()
 {
 }
 
@@ -189,9 +255,31 @@ MemberLteAsSapProvider<C>::Disconnect()
     m_owner->DoDisconnect();
 }
 
+template <class C>
+void
+MemberLteAsSapProvider<C>::NotifySecondaryCellConnected(uint16_t rnti, uint16_t mmWaveCellId)
+{
+    m_owner->DoNotifySecondaryCellConnected(rnti, mmWaveCellId);
+}
+
+template <class C>
+void
+MemberLteAsSapProvider<C>::NotifySecondaryCellHandover(
+    uint16_t oldRnti,
+    uint16_t newRnti,
+    uint16_t mmWaveCellId,
+    LteRrcSap::RadioResourceConfigDedicated radioResourceConfigDedicated)
+{
+    m_owner->DoNotifySecondaryCellHandover(oldRnti,
+                                           newRnti,
+                                           mmWaveCellId,
+                                           radioResourceConfigDedicated);
+}
+
 /**
  * Template for the implementation of the LteAsSapUser as a member
  * of an owner class of type C to which all methods are forwarded
+ *
  */
 template <class C>
 class MemberLteAsSapUser : public LteAsSapUser
@@ -204,16 +292,21 @@ class MemberLteAsSapUser : public LteAsSapUser
      */
     MemberLteAsSapUser(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberLteAsSapUser() = delete;
-
     // inherited from LteAsSapUser
-    void NotifyConnectionSuccessful() override;
-    void NotifyConnectionFailed() override;
-    void RecvData(Ptr<Packet> packet) override;
-    void NotifyConnectionReleased() override;
+    virtual void NotifyConnectionSuccessful(uint16_t rnti);
+    virtual void NotifyHandoverSuccessful(uint16_t rnti, uint16_t mmWaveCellId);
+    virtual void NotifyConnectToMmWave(uint16_t mmWaveCellId);
+    virtual void NotifyConnectionFailed();
+    virtual void RecvData(Ptr<Packet> packet);
+    virtual void NotifyConnectionReleased();
+    virtual void NotifySecondaryCellHandoverStarted(
+        uint16_t oldRnti,
+        uint16_t newRnti,
+        uint16_t mmWaveCellId,
+        LteRrcSap::RadioResourceConfigDedicated radioResourceConfigDedicated);
 
   private:
+    MemberLteAsSapUser();
     C* m_owner; ///< the owner class
 };
 
@@ -224,10 +317,29 @@ MemberLteAsSapUser<C>::MemberLteAsSapUser(C* owner)
 }
 
 template <class C>
-void
-MemberLteAsSapUser<C>::NotifyConnectionSuccessful()
+MemberLteAsSapUser<C>::MemberLteAsSapUser()
 {
-    m_owner->DoNotifyConnectionSuccessful();
+}
+
+template <class C>
+void
+MemberLteAsSapUser<C>::NotifyConnectionSuccessful(uint16_t rnti)
+{
+    m_owner->DoNotifyConnectionSuccessful(rnti);
+}
+
+template <class C>
+void
+MemberLteAsSapUser<C>::NotifyHandoverSuccessful(uint16_t rnti, uint16_t mmWaveCellId)
+{
+    m_owner->DoNotifyHandoverSuccessful(rnti, mmWaveCellId);
+}
+
+template <class C>
+void
+MemberLteAsSapUser<C>::NotifyConnectToMmWave(uint16_t mmWaveCellId)
+{
+    m_owner->DoNotifyConnectToMmWave(mmWaveCellId);
 }
 
 template <class C>
@@ -249,6 +361,20 @@ void
 MemberLteAsSapUser<C>::NotifyConnectionReleased()
 {
     m_owner->DoNotifyConnectionReleased();
+}
+
+template <class C>
+void
+MemberLteAsSapUser<C>::NotifySecondaryCellHandoverStarted(
+    uint16_t oldRnti,
+    uint16_t newRnti,
+    uint16_t mmWaveCellId,
+    LteRrcSap::RadioResourceConfigDedicated radioResourceConfigDedicated)
+{
+    m_owner->DoNotifySecondaryCellHandoverStarted(oldRnti,
+                                                  newRnti,
+                                                  mmWaveCellId,
+                                                  radioResourceConfigDedicated);
 }
 
 } // namespace ns3

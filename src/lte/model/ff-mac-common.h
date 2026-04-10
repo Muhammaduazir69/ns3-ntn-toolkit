@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -171,7 +183,7 @@ struct VendorSpecificValue : public SimpleRefCount<VendorSpecificValue>
 };
 
 /**
- * \brief See section 4.3.3 vendorSpecificListElement
+ * \brief See section 4.3.3 vendorSpecifiListElement
  * \struct VendorSpecificListElement_s
  */
 struct VendorSpecificListElement_s
@@ -204,7 +216,6 @@ struct LogicalChannelConfigListElement_s
     {
         QBT_NON_GBR,
         QBT_GBR,
-        QBT_DGBR,
         NotValid_QosBearerType
     } m_qosBearerType{NotValid_QosBearerType}; ///< the QOS bearer type
 
@@ -252,14 +263,14 @@ struct RlcPduListElement_s
 };
 
 /**
- * \brief See section 4.3.8 buildDataListElement
+ * \brief See section 4.3.8 builDataListElement
  * \struct BuildDataListElement_s
  */
 struct BuildDataListElement_s
 {
     uint16_t m_rnti{UINT16_MAX};                                       ///< RNTI
     struct DlDciListElement_s m_dci;                                   ///< DCI
-    std::vector<CeBitmap_e> m_ceBitmap;                                ///< CE bitmap
+    std::vector<enum CeBitmap_e> m_ceBitmap;                           ///< CE bitmap
     std::vector<std::vector<struct RlcPduListElement_s>> m_rlcPduList; ///< RLC PDU list
 };
 
@@ -394,13 +405,11 @@ struct SpsConfig_s
  */
 struct SrConfig_s
 {
-    /// Actions
-    enum SetupRelease_e
+    enum SetupRelease_e m_action
     {
         setup
-    };
+    }; ///< action
 
-    SetupRelease_e m_action;            ///< action
     uint8_t m_schedInterval{UINT8_MAX}; ///< sched interval
     uint8_t m_dsrTransMax{UINT8_MAX};   ///< trans max
 };
@@ -410,13 +419,11 @@ struct SrConfig_s
  */
 struct CqiConfig_s
 {
-    /// Actions
-    enum SetupRelease_e
+    enum SetupRelease_e m_action
     {
         setup
-    };
+    }; ///< action
 
-    SetupRelease_e m_action;                 ///< CQI action
     uint16_t m_cqiSchedInterval{UINT16_MAX}; ///< CQI schedule interval
     uint8_t m_riSchedInterval{UINT8_MAX};    ///< RI schedule interval
 };
@@ -468,8 +475,7 @@ struct DlInfoListElement_s
         NACK,
         DTX
     };
-
-    std::vector<HarqStatus_e> m_harqStatus; ///< HARQ status
+    std::vector<enum HarqStatus_e> m_harqStatus; ///< HARQ status
 };
 
 /**

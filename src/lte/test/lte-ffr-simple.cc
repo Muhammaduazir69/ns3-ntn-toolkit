@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -20,8 +32,8 @@ NS_LOG_COMPONENT_DEFINE("LteFfrSimple");
 NS_OBJECT_ENSURE_REGISTERED(LteFfrSimple);
 
 LteFfrSimple::LteFfrSimple()
-    : m_ffrSapUser(nullptr),
-      m_ffrRrcSapUser(nullptr),
+    : m_ffrSapUser(0),
+      m_ffrRrcSapUser(0),
       m_dlOffset(0),
       m_dlSubBand(0),
       m_ulOffset(0),
@@ -154,11 +166,11 @@ LteFfrSimple::SetPdschConfigDedicated(LteRrcSap::PdschConfigDedicated pdschConfi
 }
 
 void
-LteFfrSimple::SetTpc(uint32_t tpc, uint32_t num, bool accumulatedMode)
+LteFfrSimple::SetTpc(uint32_t tpc, uint32_t num, bool acculumatedMode)
 {
     m_tpc = tpc;
     m_tpcNum = num;
-    m_accumulatedMode = accumulatedMode;
+    m_accumulatedMode = acculumatedMode;
 }
 
 std::vector<bool>
@@ -213,13 +225,15 @@ LteFfrSimple::DoIsUlRbgAvailableForUe(int i, uint16_t rnti)
 }
 
 void
-LteFfrSimple::DoReportDlCqiInfo(const FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
+LteFfrSimple::DoReportDlCqiInfo(
+    const struct FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
 {
     NS_LOG_FUNCTION(this);
 }
 
 void
-LteFfrSimple::DoReportUlCqiInfo(const FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
+LteFfrSimple::DoReportUlCqiInfo(
+    const struct FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
 {
     NS_LOG_FUNCTION(this);
 }
@@ -256,7 +270,7 @@ LteFfrSimple::DoGetTpc(uint16_t rnti)
               // Table 5.1.1.1-2
 }
 
-uint16_t
+uint8_t
 LteFfrSimple::DoGetMinContinuousUlBandwidth()
 {
     NS_LOG_FUNCTION(this);
@@ -268,7 +282,9 @@ LteFfrSimple::DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults measResults)
 {
     NS_LOG_FUNCTION(this << rnti << (uint16_t)measResults.measId);
 
-    auto it = m_ues.find(rnti);
+    std::map<uint16_t, LteRrcSap::PdschConfigDedicated>::iterator it;
+
+    it = m_ues.find(rnti);
 
     if (it == m_ues.end())
     {
@@ -289,7 +305,8 @@ LteFfrSimple::UpdatePdschConfigDedicated()
 {
     NS_LOG_FUNCTION(this);
 
-    for (auto it = m_ues.begin(); it != m_ues.end(); it++)
+    std::map<uint16_t, LteRrcSap::PdschConfigDedicated>::iterator it;
+    for (it = m_ues.begin(); it != m_ues.end(); it++)
     {
         if (it->second.pa != m_pdschConfigDedicated.pa)
         {

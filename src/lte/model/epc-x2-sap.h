@@ -1,20 +1,37 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #ifndef EPC_X2_SAP_H
 #define EPC_X2_SAP_H
 
-#include "eps-bearer.h"
-
 #include "ns3/ipv4-address.h"
 #include "ns3/packet.h"
+#include <ns3/lte-enb-cmac-sap.h>
+#include <ns3/lte-rrc-sap.h>
 
 #include <bitset>
+#include <map>
 
 namespace ns3
 {
@@ -211,6 +228,25 @@ class EpcX2Sap
     };
 
     /**
+     * \brief Parameters of the RlcSetupRequest to handle MC connectivity
+     *
+     * Forward UE params during the MC setup
+     */
+    struct RlcSetupRequest
+    {
+        uint16_t sourceCellId;
+        uint16_t targetCellId;
+        uint32_t gtpTeid;
+        uint16_t mmWaveRnti;
+        uint16_t lteRnti;
+        uint8_t drbid;
+        LteEnbCmacSapProvider::LcInfo lcinfo;
+        LteRrcSap::RlcConfig rlcConfig;
+        LteRrcSap::LogicalChannelConfig logicalChannelConfig;
+        TypeId rlcType;
+    };
+
+    /**
      * \brief Parameters of the HANDOVER REQUEST message.
      *
      * See section 9.1.1.1 for further info about the parameters
@@ -222,10 +258,13 @@ class EpcX2Sap
         uint16_t sourceCellId;                  ///< source cell ID
         uint16_t targetCellId;                  ///< target cell ID
         uint32_t mmeUeS1apId;                   ///< MME UE S1 AP ID
-        uint64_t ueAggregateMaxBitRateDownlink; ///< UE aggregate max bit rate downlink
-        uint64_t ueAggregateMaxBitRateUplink;   ///< UE aggregate max bit rate uplink
+        uint64_t ueAggregateMaxBitRateDownlink; ///< UE aggregrate max bit rate downlink
+        uint64_t ueAggregateMaxBitRateUplink;   ///< UE aggregrate max bit rate uplink
+        bool isMc;
         std::vector<ErabToBeSetupItem> bearers; ///< bearers
-        Ptr<Packet> rrcContext;                 ///< RRC context
+        // list of RlcSetupRequest for secondary cell handovers (otherwise empty)
+        std::vector<RlcSetupRequest> rlcRequests;
+        Ptr<Packet> rrcContext; ///< RRC context
     };
 
     /**
@@ -293,7 +332,7 @@ class EpcX2Sap
      */
     struct LoadInformationParams
     {
-        uint16_t targetCellId{UINT16_MAX};                    ///< target cell ID
+        uint16_t targetCellId;                                ///< target cell ID
         std::vector<CellInformationItem> cellInformationList; ///< cell information list
     };
 
@@ -325,19 +364,103 @@ class EpcX2Sap
         Ptr<Packet> ueData;    ///< UE data
     };
 
-    /**
-     * \brief Parameters of the HANDOVER CANCEL message.
-     *
-     * See section 9.1.1.6 for further info about the parameters
-     */
-    struct HandoverCancelParams
+    struct SecondaryHandoverParams
     {
-        uint16_t oldEnbUeX2apId; ///< old ENB UE X2 AP ID
-        uint16_t newEnbUeX2apId; ///< new ENB UE X2 AP ID
-        uint16_t sourceCellId;   ///< source cell ID
-        uint16_t targetCellId;   ///< target cell ID
-        uint16_t cause;          ///< cause
+        uint64_t imsi;
+        uint16_t oldCellId;
+        uint16_t targetCellId;
     };
+
+    struct SecondaryHandoverCompletedParams
+    {
+        uint64_t imsi;
+        uint16_t mmWaveRnti;
+        uint16_t cellId;
+        uint16_t oldEnbUeX2apId;
+    };
+
+    struct UeImsiSinrParams
+    {
+        uint16_t sourceCellId;
+        uint16_t targetCellId;
+        std::map<uint64_t, double> ueImsiSinrMap;
+    };
+
+    struct HandoverFailedParams
+    {
+        uint64_t imsi;
+        uint16_t coordinatorId;
+        uint16_t sourceCellId;
+        uint16_t targetCellId;
+    };
+
+    struct SwitchConnectionParams
+    {
+        uint32_t mmWaveRnti;
+        uint16_t mmWaveCellId;
+        uint8_t drbid;
+        bool useMmWaveConnection;
+    };
+};
+
+/**
+ * MC primitives. Part of X2 entity, called by PDCP
+ */
+class EpcX2PdcpProvider : public EpcX2Sap
+{
+  public:
+    virtual ~EpcX2PdcpProvider();
+
+    /*
+     * Service primitives
+     */
+    // X2 sends a Pdcp PDU in downlink to the MmWave eNB for transmission to the UE
+    virtual void SendMcPdcpPdu(UeDataParams params) = 0;
+};
+
+/**
+ * MC primitives. Part of PDCP entity, called by X2
+ */
+class EpcX2PdcpUser : public EpcX2Sap
+{
+  public:
+    virtual ~EpcX2PdcpUser();
+
+    /*
+     * Service primitives
+     */
+    // Receive a PDCP PDU in uplink from the MmWave eNB for transmission to CN
+    virtual void ReceiveMcPdcpPdu(UeDataParams params) = 0;
+};
+
+/**
+ * MC primitives. Part of X2 entity, called by RLC
+ */
+class EpcX2RlcProvider : public EpcX2Sap
+{
+  public:
+    virtual ~EpcX2RlcProvider();
+
+    /*
+     * Service primitives
+     */
+    // Receive a PDCP SDU from RLC for uplink transmission to PDCP in LTE eNB
+    virtual void ReceiveMcPdcpSdu(UeDataParams params) = 0;
+};
+
+/**
+ * MC primitives. Part of RLC entity, called by X2
+ */
+class EpcX2RlcUser : public EpcX2Sap
+{
+  public:
+    virtual ~EpcX2RlcUser();
+
+    /*
+     * Service primitives
+     */
+    // X2 sends a PDCP SDU to RLC for downlink transmission to the UE
+    virtual void SendMcPdcpSdu(UeDataParams params) = 0;
 };
 
 /**
@@ -347,65 +470,57 @@ class EpcX2Sap
 class EpcX2SapProvider : public EpcX2Sap
 {
   public:
-    ~EpcX2SapProvider() override;
-
-    //
-    // Service primitives
-    //
+    virtual ~EpcX2SapProvider();
 
     /**
-     * Send handover request function
-     * \param params handover request parameters
+     * Service primitives
      */
+
     virtual void SendHandoverRequest(HandoverRequestParams params) = 0;
 
-    /**
-     * Send handover request ack function
-     * \param params the handover request ack parameters
-     */
     virtual void SendHandoverRequestAck(HandoverRequestAckParams params) = 0;
 
-    /**
-     * Send handover preparation failure function
-     * \param params the handover preparation failure
-     */
     virtual void SendHandoverPreparationFailure(HandoverPreparationFailureParams params) = 0;
 
-    /**
-     * Send SN status transfer function
-     * \param params the SN status transfer parameters
-     */
     virtual void SendSnStatusTransfer(SnStatusTransferParams params) = 0;
 
-    /**
-     * Send UE context release function
-     * \param params the UE context release parameters
-     */
     virtual void SendUeContextRelease(UeContextReleaseParams params) = 0;
 
-    /**
-     * Send load information function
-     * \param params the load information parameters
-     */
     virtual void SendLoadInformation(LoadInformationParams params) = 0;
 
-    /**
-     * Send resource status update function
-     * \param params the resource statue update parameters
-     */
     virtual void SendResourceStatusUpdate(ResourceStatusUpdateParams params) = 0;
 
-    /**
-     * Send UE data function
-     * \param params the UE data parameters
-     */
     virtual void SendUeData(UeDataParams params) = 0;
 
-    /**
-     * \brief Send handover Cancel to the target eNB
-     * \param params the handover cancel parameters
-     */
-    virtual void SendHandoverCancel(HandoverCancelParams params) = 0;
+    virtual void SetEpcX2PdcpUser(uint32_t teid, EpcX2PdcpUser* s) = 0;
+
+    virtual void SetEpcX2RlcUser(uint32_t teid, EpcX2RlcUser* s) = 0;
+
+    virtual void SendRlcSetupRequest(RlcSetupRequest params) = 0;
+
+    virtual void SendRlcSetupCompleted(UeDataParams params) = 0;
+
+    virtual void SendUeSinrUpdate(UeImsiSinrParams params) = 0;
+
+    virtual void NotifyLteMmWaveHandoverCompleted(SecondaryHandoverParams params) = 0;
+
+    virtual void NotifyCoordinatorHandoverFailed(HandoverFailedParams params) = 0;
+
+    // send the switch command to the mmwave eNB
+    virtual void SendSwitchConnectionToMmWave(SwitchConnectionParams params) = 0;
+
+    // for secondary cell HO
+    // the coordinator requests to a mmWave eNB to start an handover
+    virtual void SendMcHandoverRequest(SecondaryHandoverParams params) = 0;
+    // notify the coordinator that the secondary cell handover is completed
+    virtual void SendSecondaryCellHandoverCompleted(SecondaryHandoverCompletedParams params) = 0;
+    // notify the EpcX2 class that packets for a certain TEID must be forwarded to the targetCell
+    virtual void AddTeidToBeForwarded(uint32_t gtpTeid, uint16_t targetCellId) = 0;
+    // notify the EpcX2 class that packets for a certain TEID must not be forwarded anymore
+    virtual void RemoveTeidToBeForwarded(uint32_t gtpTeid) = 0;
+    // to forward the packets in the RLC buffers in the source cell as if they were generated by a
+    // PDCP
+    virtual void ForwardRlcPdu(UeDataParams params) = 0;
 };
 
 /**
@@ -415,7 +530,7 @@ class EpcX2SapProvider : public EpcX2Sap
 class EpcX2SapUser : public EpcX2Sap
 {
   public:
-    ~EpcX2SapUser() override;
+    virtual ~EpcX2SapUser();
 
     /*
      * Service primitives
@@ -463,18 +578,25 @@ class EpcX2SapUser : public EpcX2Sap
      */
     virtual void RecvResourceStatusUpdate(ResourceStatusUpdateParams params) = 0;
 
+    virtual void RecvRlcSetupRequest(RlcSetupRequest params) = 0;
+
+    virtual void RecvRlcSetupCompleted(UeDataParams params) = 0;
+
     /**
      * Receive UE data function
      * \param params UE data parameters
      */
     virtual void RecvUeData(UeDataParams params) = 0;
 
-    /**
-     * Receive handover cancel function
-     * \param params the receive handover cancel parameters
-     *
-     */
-    virtual void RecvHandoverCancel(HandoverCancelParams params) = 0;
+    virtual void RecvUeSinrUpdate(UeImsiSinrParams params) = 0;
+
+    virtual void RecvMcHandoverRequest(SecondaryHandoverParams params) = 0;
+
+    virtual void RecvLteMmWaveHandoverCompleted(SecondaryHandoverParams params) = 0;
+
+    virtual void RecvConnectionSwitchToMmWave(SwitchConnectionParams params) = 0;
+
+    virtual void RecvSecondaryCellHandoverCompleted(SecondaryHandoverCompletedParams params) = 0;
 };
 
 ///////////////////////////////////////
@@ -493,74 +615,97 @@ class EpcX2SpecificEpcX2SapProvider : public EpcX2SapProvider
      */
     EpcX2SpecificEpcX2SapProvider(C* x2);
 
-    // Delete default constructor to avoid misuse
-    EpcX2SpecificEpcX2SapProvider() = delete;
-
     //
     // Interface implemented from EpcX2SapProvider
     //
 
     /**
      * Send handover request function
-     * \param params the handover request parameters
+     * \param params the hadnover request parameters
      */
-    void SendHandoverRequest(HandoverRequestParams params) override;
+    virtual void SendHandoverRequest(HandoverRequestParams params);
 
     /**
      * Send handover request ack function
-     * \param params the handover request ack parameters
+     * \param params the handover request ack pararameters
      */
-    void SendHandoverRequestAck(HandoverRequestAckParams params) override;
+    virtual void SendHandoverRequestAck(HandoverRequestAckParams params);
 
     /**
      * Send handover preparation failure function
      * \param params the handover preparation failure parameters
      */
-    void SendHandoverPreparationFailure(HandoverPreparationFailureParams params) override;
+    virtual void SendHandoverPreparationFailure(HandoverPreparationFailureParams params);
 
     /**
      * Send SN status transfer function
      * \param params the SN status transfer parameters
      */
-    void SendSnStatusTransfer(SnStatusTransferParams params) override;
+    virtual void SendSnStatusTransfer(SnStatusTransferParams params);
 
     /**
      * Send UE context release function
      * \param params the UE context release parameters
      */
-    void SendUeContextRelease(UeContextReleaseParams params) override;
+    virtual void SendUeContextRelease(UeContextReleaseParams params);
 
     /**
      * Send load information function
      * \param params the load information parameters
      */
-    void SendLoadInformation(LoadInformationParams params) override;
+    virtual void SendLoadInformation(LoadInformationParams params);
 
     /**
      * Send resource status update function
      * \param params the resource status update parameters
      */
-    void SendResourceStatusUpdate(ResourceStatusUpdateParams params) override;
+    virtual void SendResourceStatusUpdate(ResourceStatusUpdateParams params);
 
     /**
      * Send UE data function
      * \param params the UE data parameters
      */
-    void SendUeData(UeDataParams params) override;
+    virtual void SendUeData(UeDataParams params);
 
-    /**
-     * \brief Send handover Cancel to the target eNB
-     * \param params the handover cancel parameters
-     */
-    void SendHandoverCancel(HandoverCancelParams params) override;
+    virtual void SetEpcX2PdcpUser(uint32_t teid, EpcX2PdcpUser* s);
+
+    virtual void SetEpcX2RlcUser(uint32_t teid, EpcX2RlcUser* s);
+
+    virtual void SendRlcSetupRequest(RlcSetupRequest params);
+
+    virtual void SendRlcSetupCompleted(UeDataParams params);
+
+    virtual void SendUeSinrUpdate(UeImsiSinrParams params);
+
+    virtual void SendMcHandoverRequest(SecondaryHandoverParams params);
+
+    virtual void NotifyLteMmWaveHandoverCompleted(SecondaryHandoverParams params);
+
+    virtual void NotifyCoordinatorHandoverFailed(HandoverFailedParams params);
+
+    virtual void SendSwitchConnectionToMmWave(SwitchConnectionParams params);
+
+    virtual void SendSecondaryCellHandoverCompleted(SecondaryHandoverCompletedParams params);
+
+    virtual void AddTeidToBeForwarded(uint32_t gtpTeid, uint16_t targetCellId);
+
+    virtual void RemoveTeidToBeForwarded(uint32_t gtpTeid);
+
+    virtual void ForwardRlcPdu(UeDataParams params);
 
   private:
+    EpcX2SpecificEpcX2SapProvider();
     C* m_x2; ///< owner class
 };
 
 template <class C>
 EpcX2SpecificEpcX2SapProvider<C>::EpcX2SpecificEpcX2SapProvider(C* x2)
     : m_x2(x2)
+{
+}
+
+template <class C>
+EpcX2SpecificEpcX2SapProvider<C>::EpcX2SpecificEpcX2SapProvider()
 {
 }
 
@@ -621,16 +766,103 @@ EpcX2SpecificEpcX2SapProvider<C>::SendUeData(UeDataParams params)
     m_x2->DoSendUeData(params);
 }
 
-template <class C>
-void
-EpcX2SpecificEpcX2SapProvider<C>::SendHandoverCancel(HandoverCancelParams params)
-{
-    m_x2->DoSendHandoverCancel(params);
-}
-
 /**
  * EpcX2SpecificEpcX2SapUser
  */
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::SetEpcX2RlcUser(uint32_t teid, EpcX2RlcUser* s)
+{
+    m_x2->SetMcEpcX2RlcUser(teid, s);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::SetEpcX2PdcpUser(uint32_t teid, EpcX2PdcpUser* s)
+{
+    m_x2->SetMcEpcX2PdcpUser(teid, s);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::SendRlcSetupRequest(RlcSetupRequest params)
+{
+    m_x2->DoSendRlcSetupRequest(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::SendRlcSetupCompleted(UeDataParams params)
+{
+    m_x2->DoSendRlcSetupCompleted(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::SendUeSinrUpdate(UeImsiSinrParams params)
+{
+    m_x2->DoSendUeSinrUpdate(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::SendMcHandoverRequest(SecondaryHandoverParams params)
+{
+    m_x2->DoSendMcHandoverRequest(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::NotifyLteMmWaveHandoverCompleted(SecondaryHandoverParams params)
+{
+    m_x2->DoNotifyLteMmWaveHandoverCompleted(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::NotifyCoordinatorHandoverFailed(HandoverFailedParams params)
+{
+    m_x2->DoNotifyCoordinatorHandoverFailed(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::SendSwitchConnectionToMmWave(SwitchConnectionParams params)
+{
+    m_x2->DoSendSwitchConnectionToMmWave(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::SendSecondaryCellHandoverCompleted(
+    SecondaryHandoverCompletedParams params)
+{
+    m_x2->DoSendSecondaryCellHandoverCompleted(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::AddTeidToBeForwarded(uint32_t gtpTeid, uint16_t targetCellId)
+{
+    m_x2->DoAddTeidToBeForwarded(gtpTeid, targetCellId);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::RemoveTeidToBeForwarded(uint32_t gtpTeid)
+{
+    m_x2->DoRemoveTeidToBeForwarded(gtpTeid);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapProvider<C>::ForwardRlcPdu(UeDataParams params)
+{
+    m_x2->DoSendMcPdcpPdu(params);
+}
+
+///////////////////////////////////////
+
 template <class C>
 class EpcX2SpecificEpcX2SapUser : public EpcX2SapUser
 {
@@ -642,9 +874,6 @@ class EpcX2SpecificEpcX2SapUser : public EpcX2SapUser
      */
     EpcX2SpecificEpcX2SapUser(C* rrc);
 
-    // Delete default constructor to avoid misuse
-    EpcX2SpecificEpcX2SapUser() = delete;
-
     //
     // Interface implemented from EpcX2SapUser
     //
@@ -653,64 +882,77 @@ class EpcX2SpecificEpcX2SapUser : public EpcX2SapUser
      * Receive handover request function
      * \param params the receive handover request parameters
      */
-    void RecvHandoverRequest(HandoverRequestParams params) override;
+    virtual void RecvHandoverRequest(HandoverRequestParams params);
 
     /**
      * Receive handover request ack function
      * \param params the receive handover request ack parameters
      */
-    void RecvHandoverRequestAck(HandoverRequestAckParams params) override;
+    virtual void RecvHandoverRequestAck(HandoverRequestAckParams params);
 
     /**
      * Receive handover preparation failure function
      * \param params the receive handover preparation failure parameters
      */
-    void RecvHandoverPreparationFailure(HandoverPreparationFailureParams params) override;
+    virtual void RecvHandoverPreparationFailure(HandoverPreparationFailureParams params);
 
     /**
      * Receive SN status transfer function
      * \param params the SN status transfer parameters
      */
-    void RecvSnStatusTransfer(SnStatusTransferParams params) override;
+    virtual void RecvSnStatusTransfer(SnStatusTransferParams params);
 
     /**
      * Receive UE context release function
      * \param params the UE context release parameters
      */
-    void RecvUeContextRelease(UeContextReleaseParams params) override;
+    virtual void RecvUeContextRelease(UeContextReleaseParams params);
 
     /**
      * Receive load information function
      * \param params the load information parameters
      */
-    void RecvLoadInformation(LoadInformationParams params) override;
+    virtual void RecvLoadInformation(LoadInformationParams params);
 
     /**
      * Receive resource status update function
      * \param params the receive resource status update
      */
-    void RecvResourceStatusUpdate(ResourceStatusUpdateParams params) override;
+    virtual void RecvResourceStatusUpdate(ResourceStatusUpdateParams params);
+
+    virtual void RecvRlcSetupRequest(RlcSetupRequest params);
+
+    virtual void RecvRlcSetupCompleted(UeDataParams params);
 
     /**
      * Receive UE data function
      * \param params the UE data parameters
      */
-    void RecvUeData(UeDataParams params) override;
+    virtual void RecvUeData(UeDataParams params);
 
-    /**
-     * Receive handover cancel function
-     * \param params the receive handover cancel parameters
-     *
-     */
-    void RecvHandoverCancel(HandoverCancelParams params) override;
+    virtual void RecvUeSinrUpdate(UeImsiSinrParams params);
+
+    virtual void RecvMcHandoverRequest(SecondaryHandoverParams params);
+
+    virtual void RecvLteMmWaveHandoverCompleted(SecondaryHandoverParams params);
+
+    virtual void RecvConnectionSwitchToMmWave(SwitchConnectionParams params);
+
+    virtual void RecvSecondaryCellHandoverCompleted(SecondaryHandoverCompletedParams params);
 
   private:
+    EpcX2SpecificEpcX2SapUser();
     C* m_rrc; ///< owner class
 };
 
 template <class C>
 EpcX2SpecificEpcX2SapUser<C>::EpcX2SpecificEpcX2SapUser(C* rrc)
     : m_rrc(rrc)
+{
+}
+
+template <class C>
+EpcX2SpecificEpcX2SapUser<C>::EpcX2SpecificEpcX2SapUser()
 {
 }
 
@@ -766,6 +1008,20 @@ EpcX2SpecificEpcX2SapUser<C>::RecvResourceStatusUpdate(ResourceStatusUpdateParam
 
 template <class C>
 void
+EpcX2SpecificEpcX2SapUser<C>::RecvRlcSetupRequest(RlcSetupRequest params)
+{
+    m_rrc->DoRecvRlcSetupRequest(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapUser<C>::RecvRlcSetupCompleted(UeDataParams params)
+{
+    m_rrc->DoRecvRlcSetupCompleted(params);
+}
+
+template <class C>
+void
 EpcX2SpecificEpcX2SapUser<C>::RecvUeData(UeDataParams params)
 {
     m_rrc->DoRecvUeData(params);
@@ -773,9 +1029,170 @@ EpcX2SpecificEpcX2SapUser<C>::RecvUeData(UeDataParams params)
 
 template <class C>
 void
-EpcX2SpecificEpcX2SapUser<C>::RecvHandoverCancel(HandoverCancelParams params)
+EpcX2SpecificEpcX2SapUser<C>::RecvUeSinrUpdate(UeImsiSinrParams params)
 {
-    m_rrc->DoRecvHandoverCancel(params);
+    m_rrc->DoRecvUeSinrUpdate(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapUser<C>::RecvMcHandoverRequest(SecondaryHandoverParams params)
+{
+    m_rrc->DoRecvMcHandoverRequest(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapUser<C>::RecvLteMmWaveHandoverCompleted(SecondaryHandoverParams params)
+{
+    m_rrc->DoRecvLteMmWaveHandoverCompleted(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapUser<C>::RecvConnectionSwitchToMmWave(SwitchConnectionParams params)
+{
+    m_rrc->DoRecvConnectionSwitchToMmWave(params);
+}
+
+template <class C>
+void
+EpcX2SpecificEpcX2SapUser<C>::RecvSecondaryCellHandoverCompleted(
+    SecondaryHandoverCompletedParams params)
+{
+    m_rrc->DoRecvSecondaryCellHandoverCompleted(params);
+}
+
+/////////////////////////////////////////////
+template <class C>
+class EpcX2PdcpSpecificProvider : public EpcX2PdcpProvider
+{
+  public:
+    EpcX2PdcpSpecificProvider(C* x2);
+
+    // Inherited
+    virtual void SendMcPdcpPdu(UeDataParams params);
+
+  private:
+    EpcX2PdcpSpecificProvider();
+    C* m_x2;
+};
+
+template <class C>
+EpcX2PdcpSpecificProvider<C>::EpcX2PdcpSpecificProvider(C* x2)
+    : m_x2(x2)
+{
+}
+
+template <class C>
+EpcX2PdcpSpecificProvider<C>::EpcX2PdcpSpecificProvider()
+{
+}
+
+template <class C>
+void
+EpcX2PdcpSpecificProvider<C>::SendMcPdcpPdu(UeDataParams params)
+{
+    m_x2->DoSendMcPdcpPdu(params);
+}
+
+/////////////////////////////////////////////
+template <class C>
+class EpcX2RlcSpecificProvider : public EpcX2RlcProvider
+{
+  public:
+    EpcX2RlcSpecificProvider(C* x2);
+
+    // Inherited
+    virtual void ReceiveMcPdcpSdu(UeDataParams params);
+
+  private:
+    EpcX2RlcSpecificProvider();
+    C* m_x2;
+};
+
+template <class C>
+EpcX2RlcSpecificProvider<C>::EpcX2RlcSpecificProvider(C* x2)
+    : m_x2(x2)
+{
+}
+
+template <class C>
+EpcX2RlcSpecificProvider<C>::EpcX2RlcSpecificProvider()
+{
+}
+
+template <class C>
+void
+EpcX2RlcSpecificProvider<C>::ReceiveMcPdcpSdu(UeDataParams params)
+{
+    m_x2->DoReceiveMcPdcpSdu(params);
+}
+
+/////////////////////////////////////////////
+template <class C>
+class EpcX2PdcpSpecificUser : public EpcX2PdcpUser
+{
+  public:
+    EpcX2PdcpSpecificUser(C* pdcp);
+
+    // Inherited
+    virtual void ReceiveMcPdcpPdu(UeDataParams params);
+
+  private:
+    EpcX2PdcpSpecificUser();
+    C* m_pdcp;
+};
+
+template <class C>
+EpcX2PdcpSpecificUser<C>::EpcX2PdcpSpecificUser(C* pdcp)
+    : m_pdcp(pdcp)
+{
+}
+
+template <class C>
+EpcX2PdcpSpecificUser<C>::EpcX2PdcpSpecificUser()
+{
+}
+
+template <class C>
+void
+EpcX2PdcpSpecificUser<C>::ReceiveMcPdcpPdu(UeDataParams params)
+{
+    m_pdcp->DoReceiveMcPdcpPdu(params);
+}
+
+/////////////////////////////////////////////
+template <class C>
+class EpcX2RlcSpecificUser : public EpcX2RlcUser
+{
+  public:
+    EpcX2RlcSpecificUser(C* rlc);
+
+    // Inherited
+    virtual void SendMcPdcpSdu(UeDataParams params);
+
+  private:
+    EpcX2RlcSpecificUser();
+    C* m_rlc;
+};
+
+template <class C>
+EpcX2RlcSpecificUser<C>::EpcX2RlcSpecificUser(C* rlc)
+    : m_rlc(rlc)
+{
+}
+
+template <class C>
+EpcX2RlcSpecificUser<C>::EpcX2RlcSpecificUser()
+{
+}
+
+template <class C>
+void
+EpcX2RlcSpecificUser<C>::SendMcPdcpSdu(UeDataParams params)
+{
+    m_rlc->DoSendMcPdcpSdu(params);
 }
 
 } // namespace ns3

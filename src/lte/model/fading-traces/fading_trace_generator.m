@@ -8,7 +8,7 @@ delays_vehicularEVA = [0 30e-9 150e-9 310e-9 370e-9 710e-9 1090e-9 1730e-9 2510e
 delays_urbanETU = [0 50e-9 120e-9 200e-9 230e-9 500e-9 1600e-9 2300e-9 5000e-9];
 Td = 100/c;
 
-% Relative power of taps (according to 3GPP TS 36.104 Annex B.2)
+% Realtive power of taps (according to 3GPP TS 36.104 Annex B.2)
 power_pedestrianEPA = [0.0 -1.0 -2.0 -3.0 -8.0 -17.2 -20.8];
 power_vehicularEVA = [0.0 -1.5 -1.4 -3.6 -0.6 -9.1 -7.0 -12.0 -16.9];
 power_urbanETU = [-1.0 -1.0 -1.0 0.0 0.0 0.0 -3.0 -5.0 -7.0];
@@ -31,7 +31,7 @@ fd = v_m_s / lambda; % doppler shift
 % when working with an FFT, the normalized frequency w is
 % w = 2 * pi * (f/fs) * t
 % hence the max normalized frequency w=2*pi corresponds to f = fs,
-% hence fs is also the max frequency of our PowerSpectralDensity
+% hence fs is also the max frequecy of our PowerSpectralDensity
 fs = 20e6;
 
 % sampling period must be determined corresponding to the sampling
@@ -42,9 +42,12 @@ ts = 1/fs; % sampling period (i.e., 1 subframe duration)
 
 
 % create the channel object
-c = comm.RayleighChannel('SampleRate', 1/ts, 'MaximumDopplerShift', fd, 'PathDelays', delays_pedestrianEPA, 'AveragePathGains', power_pedestrianEPA);
-%c = comm.RayleighChannel('SampleRate', 1/ts, 'MaximumDopplerShift', fd, 'PathDelays', delays_vehicularEVA, 'AveragePathGains', power_vehicularEVA);
-%c = comm.RayleighChannel('SampleRate', 1/ts, 'MaximumDopplerShift', fd, 'PathDelays', delays_urbanETU, 'AveragePathGains', power_urbanETU);
+c = rayleighchan(ts, fd, delays_pedestrianEPA, power_pedestrianEPA);
+%c = rayleighchan(ts, fd, delays_vehicularEVA, power_vehicularEVA);
+%c = rayleighchan(ts, fd, delays_urbanETU, power_urbanETU);
+%c.StorePathGains = 1;
+c.ResetBeforeFiltering = 0;
+c.NormalizePathGains = 1;
 
 TTI = 0.001;
 
@@ -64,7 +67,7 @@ sig(1) = 1; % dirac impulse
 for ii=1:round((traceDuration/TTI))
 
     % y is the frequency response of the channel
-    y = c(sig);
+    y = filter(c,sig);
 
 %     [Pxx,F] = PWELCH(X,WINDOW,NOVERLAP,NFFT,Fs) returns a PSD computed as
 %     a function of physical frequency (Hz).  Fs is the sampling frequency

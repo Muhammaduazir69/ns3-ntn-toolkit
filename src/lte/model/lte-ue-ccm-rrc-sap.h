@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2015 Danilo Abrignani
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Danilo Abrignani <danilo.abrignani@unibo.it>
  *
@@ -10,8 +22,10 @@
 #ifndef LTE_UE_CCM_RRC_SAP_H
 #define LTE_UE_CCM_RRC_SAP_H
 
-#include "lte-mac-sap.h"
-#include "lte-ue-cmac-sap.h"
+#include <ns3/eps-bearer.h>
+#include <ns3/lte-mac-sap.h>
+#include <ns3/lte-rrc-sap.h>
+#include <ns3/lte-ue-cmac-sap.h>
 
 #include <map>
 
@@ -49,8 +63,7 @@ class LteUeCcmRrcSapProvider
      *
      * \param lcId is the Logical Channel Id
      * \param lcConfig is a single structure contains logical Channel Id, Logical Channel config and
-     * Component Carrier Id
-     * \param msu is the pointer to LteMacSapUser related to the Rlc instance
+     * Component Carrier Id \param msu is the pointer to LteMacSapUser related to the Rlc instance
      * \return vector of LcsConfig contains the lc configuration for each Mac
      *                the size of the vector is equal to the number of component
      *                carrier enabled.
@@ -82,7 +95,7 @@ class LteUeCcmRrcSapProvider
      * \brief Add the Signal Bearer for a specific Ue in LteUeComponenCarrierManager
      * \param lcid the Logical Channel Id
      * \param lcConfig this structure it is hard-coded in the LteEnbRrc
-     * \param msu it is the MacSapUser of the Rlc instance
+     * \param msu it is the MacSapUser of the Rlc istance
      * \return the LteMacSapUser of the ComponentCarrierManager
      *
      */
@@ -106,16 +119,17 @@ class MemberLteUeCcmRrcSapProvider : public LteUeCcmRrcSapProvider
     MemberLteUeCcmRrcSapProvider(C* owner);
 
     // inherited from LteUeCcmRrcSapProvider
-    std::vector<uint16_t> RemoveLc(uint8_t lcid) override;
-    void Reset() override;
-    std::vector<LteUeCcmRrcSapProvider::LcsConfig> AddLc(
+    virtual std::vector<uint16_t> RemoveLc(uint8_t lcid);
+    virtual void Reset();
+    virtual std::vector<LteUeCcmRrcSapProvider::LcsConfig> AddLc(
         uint8_t lcId,
         LteUeCmacSapProvider::LogicalChannelConfig lcConfig,
-        LteMacSapUser* msu) override;
-    void NotifyConnectionReconfigurationMsg() override;
-    LteMacSapUser* ConfigureSignalBearer(uint8_t lcid,
-                                         LteUeCmacSapProvider::LogicalChannelConfig lcConfig,
-                                         LteMacSapUser* msu) override;
+        LteMacSapUser* msu);
+    virtual void NotifyConnectionReconfigurationMsg();
+    virtual LteMacSapUser* ConfigureSignalBearer(
+        uint8_t lcid,
+        LteUeCmacSapProvider::LogicalChannelConfig lcConfig,
+        LteMacSapUser* msu);
 
   private:
     C* m_owner; ///< the owner class
@@ -207,8 +221,8 @@ class MemberLteUeCcmRrcSapUser : public LteUeCcmRrcSapUser
      */
     MemberLteUeCcmRrcSapUser(C* owner);
     // inherited from LteUeCcmRrcSapUser
-    void ComponentCarrierEnabling(std::vector<uint8_t> componentCarrierList) override;
-    void SetNumberOfComponentCarriers(uint16_t noOfComponentCarriers) override;
+    virtual void ComponentCarrierEnabling(std::vector<uint8_t> componentCarrierList);
+    virtual void SetNumberOfComponentCarriers(uint16_t noOfComponentCarriers);
 
   private:
     C* m_owner; ///< the owner class

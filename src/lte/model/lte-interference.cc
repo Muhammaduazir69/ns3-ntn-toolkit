@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2009 CTTC
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
@@ -38,14 +50,14 @@ LteInterference::DoDispose()
     m_rsPowerChunkProcessorList.clear();
     m_sinrChunkProcessorList.clear();
     m_interfChunkProcessorList.clear();
-    m_rxSignal = nullptr;
-    m_allSignals = nullptr;
-    m_noise = nullptr;
+    m_rxSignal = 0;
+    m_allSignals = 0;
+    m_noise = 0;
     Object::DoDispose();
 }
 
 TypeId
-LteInterference::GetTypeId()
+LteInterference::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::LteInterference").SetParent<Object>().SetGroupName("Lte");
     return tid;
@@ -55,23 +67,30 @@ void
 LteInterference::StartRx(Ptr<const SpectrumValue> rxPsd)
 {
     NS_LOG_FUNCTION(this << *rxPsd);
-    if (!m_receiving)
+    if (m_receiving == false)
     {
         NS_LOG_LOGIC("first signal");
         m_rxSignal = rxPsd->Copy();
         m_lastChangeTime = Now();
         m_receiving = true;
-        for (auto it = m_rsPowerChunkProcessorList.begin(); it != m_rsPowerChunkProcessorList.end();
+        for (std::list<Ptr<LteChunkProcessor>>::const_iterator it =
+                 m_rsPowerChunkProcessorList.begin();
+             it != m_rsPowerChunkProcessorList.end();
              ++it)
         {
             (*it)->Start();
         }
-        for (auto it = m_interfChunkProcessorList.begin(); it != m_interfChunkProcessorList.end();
+        for (std::list<Ptr<LteChunkProcessor>>::const_iterator it =
+                 m_interfChunkProcessorList.begin();
+             it != m_interfChunkProcessorList.end();
              ++it)
         {
             (*it)->Start();
         }
-        for (auto it = m_sinrChunkProcessorList.begin(); it != m_sinrChunkProcessorList.end(); ++it)
+        for (std::list<Ptr<LteChunkProcessor>>::const_iterator it =
+                 m_sinrChunkProcessorList.begin();
+             it != m_sinrChunkProcessorList.end();
+             ++it)
         {
             (*it)->Start();
         }
@@ -91,7 +110,7 @@ void
 LteInterference::EndRx()
 {
     NS_LOG_FUNCTION(this);
-    if (!m_receiving)
+    if (m_receiving != true)
     {
         NS_LOG_INFO("EndRx was already evaluated or RX was aborted");
     }
@@ -99,17 +118,24 @@ LteInterference::EndRx()
     {
         ConditionallyEvaluateChunk();
         m_receiving = false;
-        for (auto it = m_rsPowerChunkProcessorList.begin(); it != m_rsPowerChunkProcessorList.end();
+        for (std::list<Ptr<LteChunkProcessor>>::const_iterator it =
+                 m_rsPowerChunkProcessorList.begin();
+             it != m_rsPowerChunkProcessorList.end();
              ++it)
         {
             (*it)->End();
         }
-        for (auto it = m_interfChunkProcessorList.begin(); it != m_interfChunkProcessorList.end();
+        for (std::list<Ptr<LteChunkProcessor>>::const_iterator it =
+                 m_interfChunkProcessorList.begin();
+             it != m_interfChunkProcessorList.end();
              ++it)
         {
             (*it)->End();
         }
-        for (auto it = m_sinrChunkProcessorList.begin(); it != m_sinrChunkProcessorList.end(); ++it)
+        for (std::list<Ptr<LteChunkProcessor>>::const_iterator it =
+                 m_sinrChunkProcessorList.begin();
+             it != m_sinrChunkProcessorList.end();
+             ++it)
         {
             (*it)->End();
         }
@@ -176,16 +202,23 @@ LteInterference::ConditionallyEvaluateChunk()
 
         SpectrumValue sinr = (*m_rxSignal) / interf;
         Time duration = Now() - m_lastChangeTime;
-        for (auto it = m_sinrChunkProcessorList.begin(); it != m_sinrChunkProcessorList.end(); ++it)
+        for (std::list<Ptr<LteChunkProcessor>>::const_iterator it =
+                 m_sinrChunkProcessorList.begin();
+             it != m_sinrChunkProcessorList.end();
+             ++it)
         {
             (*it)->EvaluateChunk(sinr, duration);
         }
-        for (auto it = m_interfChunkProcessorList.begin(); it != m_interfChunkProcessorList.end();
+        for (std::list<Ptr<LteChunkProcessor>>::const_iterator it =
+                 m_interfChunkProcessorList.begin();
+             it != m_interfChunkProcessorList.end();
              ++it)
         {
             (*it)->EvaluateChunk(interf, duration);
         }
-        for (auto it = m_rsPowerChunkProcessorList.begin(); it != m_rsPowerChunkProcessorList.end();
+        for (std::list<Ptr<LteChunkProcessor>>::const_iterator it =
+                 m_rsPowerChunkProcessorList.begin();
+             it != m_rsPowerChunkProcessorList.end();
              ++it)
         {
             (*it)->EvaluateChunk(*m_rxSignal, duration);
@@ -203,7 +236,7 @@ LteInterference::SetNoisePowerSpectralDensity(Ptr<const SpectrumValue> noisePsd)
     // reset m_allSignals (will reset if already set previously)
     // this is needed since this method can potentially change the SpectrumModel
     m_allSignals = Create<SpectrumValue>(noisePsd->GetSpectrumModel());
-    if (m_receiving)
+    if (m_receiving == true)
     {
         // abort rx
         m_receiving = false;

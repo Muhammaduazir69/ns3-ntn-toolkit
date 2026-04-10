@@ -1,12 +1,24 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
 
-#include "lte-rlc-am-header.h"
+#include "ns3/lte-rlc-am-header.h"
 
 #include "ns3/log.h"
 
@@ -46,7 +58,7 @@ LteRlcAmHeader::~LteRlcAmHeader()
 }
 
 void
-LteRlcAmHeader::SetDataPdu()
+LteRlcAmHeader::SetDataPdu(void)
 {
     m_headerLength = 4;
     m_dataControlBit = DATA_PDU;
@@ -61,15 +73,15 @@ LteRlcAmHeader::SetControlPdu(uint8_t controlPduType)
 }
 
 bool
-LteRlcAmHeader::IsDataPdu() const
+LteRlcAmHeader::IsDataPdu(void) const
 {
-    return m_dataControlBit == DATA_PDU;
+    return (m_dataControlBit == DATA_PDU) ? true : false;
 }
 
 bool
-LteRlcAmHeader::IsControlPdu() const
+LteRlcAmHeader::IsControlPdu(void) const
 {
-    return m_dataControlBit == CONTROL_PDU;
+    return (m_dataControlBit == CONTROL_PDU) ? true : false;
 }
 
 void
@@ -120,7 +132,7 @@ LteRlcAmHeader::PushLengthIndicator(uint16_t lengthIndicator)
 }
 
 uint8_t
-LteRlcAmHeader::PopExtensionBit()
+LteRlcAmHeader::PopExtensionBit(void)
 {
     uint8_t extensionBit = m_extensionBits.front();
     m_extensionBits.pop_front();
@@ -129,7 +141,7 @@ LteRlcAmHeader::PopExtensionBit()
 }
 
 uint16_t
-LteRlcAmHeader::PopLengthIndicator()
+LteRlcAmHeader::PopLengthIndicator(void)
 {
     uint16_t lengthIndicator = m_lengthIndicators.front();
     m_lengthIndicators.pop_front();
@@ -156,7 +168,7 @@ LteRlcAmHeader::SetPollingBit(uint8_t pollingBit)
 }
 
 uint8_t
-LteRlcAmHeader::GetPollingBit() const
+LteRlcAmHeader::GetPollingBit(void) const
 {
     return m_pollingBit;
 }
@@ -168,7 +180,7 @@ LteRlcAmHeader::SetLastSegmentFlag(uint8_t lsf)
 }
 
 uint8_t
-LteRlcAmHeader::GetLastSegmentFlag() const
+LteRlcAmHeader::GetLastSegmentFlag(void) const
 {
     return m_lastSegmentFlag;
 }
@@ -180,13 +192,13 @@ LteRlcAmHeader::SetSegmentOffset(uint16_t segmentOffset)
 }
 
 uint16_t
-LteRlcAmHeader::GetSegmentOffset() const
+LteRlcAmHeader::GetSegmentOffset(void) const
 {
     return m_segmentOffset;
 }
 
 uint16_t
-LteRlcAmHeader::GetLastOffset() const
+LteRlcAmHeader::GetLastOffset(void) const
 {
     return m_lastOffset;
 }
@@ -237,7 +249,8 @@ LteRlcAmHeader::IsNackPresent(SequenceNumber10 nack)
     NS_LOG_FUNCTION(this);
     NS_ASSERT_MSG(m_dataControlBit == CONTROL_PDU && m_controlPduType == LteRlcAmHeader::STATUS_PDU,
                   "method allowed only for STATUS PDUs");
-    for (auto nackIt = m_nackSnList.begin(); nackIt != m_nackSnList.end(); ++nackIt)
+    for (std::list<int>::iterator nackIt = m_nackSnList.begin(); nackIt != m_nackSnList.end();
+         ++nackIt)
     {
         if ((*nackIt) == nack.GetValue())
         {
@@ -248,7 +261,7 @@ LteRlcAmHeader::IsNackPresent(SequenceNumber10 nack)
 }
 
 int
-LteRlcAmHeader::PopNack()
+LteRlcAmHeader::PopNack(void)
 {
     NS_LOG_FUNCTION(this);
     NS_ASSERT_MSG(m_dataControlBit == CONTROL_PDU && m_controlPduType == LteRlcAmHeader::STATUS_PDU,
@@ -265,13 +278,13 @@ LteRlcAmHeader::PopNack()
 }
 
 SequenceNumber10
-LteRlcAmHeader::GetAckSn() const
+LteRlcAmHeader::GetAckSn(void) const
 {
     return m_ackSn;
 }
 
 TypeId
-LteRlcAmHeader::GetTypeId()
+LteRlcAmHeader::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::LteRlcAmHeader")
                             .SetParent<Header>()
@@ -281,7 +294,7 @@ LteRlcAmHeader::GetTypeId()
 }
 
 TypeId
-LteRlcAmHeader::GetInstanceTypeId() const
+LteRlcAmHeader::GetInstanceTypeId(void) const
 {
     return GetTypeId();
 }
@@ -289,9 +302,9 @@ LteRlcAmHeader::GetInstanceTypeId() const
 void
 LteRlcAmHeader::Print(std::ostream& os) const
 {
-    auto it1 = m_extensionBits.begin();
-    auto it2 = m_lengthIndicators.begin();
-    auto it3 = m_nackSnList.begin();
+    std::list<uint8_t>::const_iterator it1 = m_extensionBits.begin();
+    std::list<uint16_t>::const_iterator it2 = m_lengthIndicators.begin();
+    std::list<int>::const_iterator it3 = m_nackSnList.begin();
 
     os << "Len=" << m_headerLength;
     os << " D/C=" << (uint16_t)m_dataControlBit;
@@ -340,7 +353,7 @@ LteRlcAmHeader::Print(std::ostream& os) const
 }
 
 uint32_t
-LteRlcAmHeader::GetSerializedSize() const
+LteRlcAmHeader::GetSerializedSize(void) const
 {
     return m_headerLength;
 }
@@ -350,9 +363,9 @@ LteRlcAmHeader::Serialize(Buffer::Iterator start) const
 {
     Buffer::Iterator i = start;
 
-    auto it1 = m_extensionBits.begin();
-    auto it2 = m_lengthIndicators.begin();
-    auto it3 = m_nackSnList.begin();
+    std::list<uint8_t>::const_iterator it1 = m_extensionBits.begin();
+    std::list<uint16_t>::const_iterator it2 = m_lengthIndicators.begin();
+    std::list<int>::const_iterator it3 = m_nackSnList.begin();
 
     if (m_dataControlBit == DATA_PDU)
     {
@@ -366,10 +379,8 @@ LteRlcAmHeader::Serialize(Buffer::Iterator start) const
 
         while (it1 != m_extensionBits.end() && it2 != m_lengthIndicators.end())
         {
-            uint16_t oddLi;
-            uint16_t evenLi;
-            uint8_t oddE;
-            uint8_t evenE;
+            uint16_t oddLi, evenLi;
+            uint8_t oddE, evenE;
 
             oddE = *it1;
             oddLi = *it2;
@@ -393,7 +404,7 @@ LteRlcAmHeader::Serialize(Buffer::Iterator start) const
             else
             {
                 i.WriteU8(((oddE << 7) & 0x80) | ((oddLi >> 4) & 0x007F));
-                i.WriteU8((oddLi << 4) & 0x00F0); // Padding is implicit
+                i.WriteU8(((oddLi << 4) & 0x00F0)); // Padding is implicit
             }
         }
     }
@@ -409,7 +420,7 @@ LteRlcAmHeader::Serialize(Buffer::Iterator start) const
             NS_LOG_LOGIC(this << " no NACKs");
             // If there are no NACKs then this line adds the rest of the ACK
             // along with 0x00, indicating an E1 value of 0 or no NACKs follow.
-            i.WriteU8((m_ackSn.GetValue() << 2) & 0xFC);
+            i.WriteU8(((m_ackSn.GetValue() << 2) & 0xFC));
         }
         else
         {
@@ -429,7 +440,7 @@ LteRlcAmHeader::Serialize(Buffer::Iterator start) const
                 // either the setup to enter this loop or the previous loop would
                 // have written the highest order bit to the previous octet.
                 // Write the next set of bits (2 - 9) into the next octet
-                i.WriteU8((oddNack >> 1) & 0xFF);
+                i.WriteU8(((oddNack >> 1) & 0xFF));
 
                 // Next check to see if there is going to be another NACK after
                 // this
@@ -455,13 +466,13 @@ LteRlcAmHeader::Serialize(Buffer::Iterator start) const
                     else
                     {
                         // No, there are no more NACKs
-                        i.WriteU8((evenNack << 3) & 0xF8);
+                        i.WriteU8(((evenNack << 3) & 0xF8));
                     }
                 }
                 else
                 {
                     // No, this is the last NACK so E1 will be 0
-                    i.WriteU8((oddNack << 7) & 0x80);
+                    i.WriteU8(((oddNack << 7) & 0x80));
                 }
             }
         }
@@ -495,20 +506,24 @@ LteRlcAmHeader::Deserialize(Buffer::Iterator start)
         m_sequenceNumber = ((byte_1 & 0x03) << 8) | byte_2;
 
         m_lastSegmentFlag = (byte_3 & 0x80) >> 7;
-        m_segmentOffset = (byte_3 & 0x7F) | byte_4;
+        m_segmentOffset = ((byte_3 & 0x7F) << 8) | byte_4;
 
         extensionBit = (byte_1 & 0x04) >> 2;
         m_extensionBits.push_back(extensionBit);
+
+        if (m_resegmentationFlag == SEGMENT)
+        {
+            // initialize m_lastOffset
+            m_lastOffset = m_segmentOffset + start.GetSize() - m_headerLength;
+        }
 
         if (extensionBit == DATA_FIELD_FOLLOWS)
         {
             return GetSerializedSize();
         }
 
-        uint16_t oddLi;
-        uint16_t evenLi;
-        uint8_t oddE;
-        uint8_t evenE;
+        uint16_t oddLi, evenLi;
+        uint8_t oddE, evenE;
         bool moreLiFields = (extensionBit == E_LI_FIELDS_FOLLOWS);
 
         while (moreLiFields)
@@ -541,6 +556,7 @@ LteRlcAmHeader::Deserialize(Buffer::Iterator start)
 
         if (m_resegmentationFlag == SEGMENT)
         {
+            // update m_lastOffset
             m_lastOffset = m_segmentOffset + start.GetSize() - m_headerLength;
         }
     }

@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
@@ -17,6 +29,7 @@ NS_LOG_COMPONENT_DEFINE("LteTestSpectrumValueHelper");
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test checks if lte spectrum model is generated properly. Different
  * test cases are configured by defining different frequency and banwidth.
@@ -29,18 +42,18 @@ class LteSpectrumModelTestCase : public TestCase
      *
      * \param str the test reference name
      * \param earfcn the central carrier frequency
-     * \param bw bandwidth the bandwidth
+     * \param bw bandwidth tha bandwidth
      * \param fcs the expected spectrum model
      */
     LteSpectrumModelTestCase(const char* str, uint16_t earfcn, uint8_t bw, std::vector<double> fcs);
-    ~LteSpectrumModelTestCase() override;
+    virtual ~LteSpectrumModelTestCase();
 
   protected:
     Ptr<SpectrumModel> m_actual;   ///< actual spectrum model
     Ptr<SpectrumModel> m_expected; ///< expected spectrum model
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 LteSpectrumModelTestCase::LteSpectrumModelTestCase(const char* str,
@@ -59,7 +72,7 @@ LteSpectrumModelTestCase::~LteSpectrumModelTestCase()
 }
 
 void
-LteSpectrumModelTestCase::DoRun()
+LteSpectrumModelTestCase::DoRun(void)
 {
     NS_LOG_FUNCTION(this);
     NS_TEST_ASSERT_MSG_SPECTRUM_MODEL_EQ_TOL((*m_actual),
@@ -70,6 +83,7 @@ LteSpectrumModelTestCase::DoRun()
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test that the function for creation of LTE noise power spectral
  * density is working properly.
@@ -91,14 +105,14 @@ class LteNoisePsdTestCase : public TestCase
                         uint8_t bw,
                         double noiseFigureDb,
                         SpectrumValue& expected);
-    ~LteNoisePsdTestCase() override;
+    virtual ~LteNoisePsdTestCase();
 
   protected:
     Ptr<SpectrumValue> m_actual;   ///< actual spectrum value
     Ptr<SpectrumValue> m_expected; ///< expected spectrum value
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 LteNoisePsdTestCase::LteNoisePsdTestCase(const char* str,
@@ -118,7 +132,7 @@ LteNoisePsdTestCase::~LteNoisePsdTestCase()
 }
 
 void
-LteNoisePsdTestCase::DoRun()
+LteNoisePsdTestCase::DoRun(void)
 {
     NS_TEST_ASSERT_MSG_EQ(m_actual->GetSpectrumModelUid(),
                           m_expected->GetSpectrumModelUid(),
@@ -131,6 +145,7 @@ LteNoisePsdTestCase::DoRun()
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test that the funtcion for the creation of the Lte transmission power
  * spectral density is working as expected.
@@ -144,7 +159,7 @@ class LteTxPsdTestCase : public TestCase
      * \param str the reference name
      * \param earfcn
      * \param bw bandwidth
-     * \param txPowerDbm transmit power in dBm
+     * \param txPowerDbm tranmit power in dBm
      * \param activeRbs active RBs
      * \param expected executed spectrum value
      */
@@ -154,14 +169,14 @@ class LteTxPsdTestCase : public TestCase
                      double txPowerDbm,
                      std::vector<int> activeRbs,
                      SpectrumValue& expected);
-    ~LteTxPsdTestCase() override;
+    virtual ~LteTxPsdTestCase();
 
   protected:
     Ptr<SpectrumValue> m_actual;   ///< actual spectrum value
     Ptr<SpectrumValue> m_expected; ///< expected spectrum value
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 LteTxPsdTestCase::LteTxPsdTestCase(const char* str,
@@ -183,7 +198,7 @@ LteTxPsdTestCase::~LteTxPsdTestCase()
 }
 
 void
-LteTxPsdTestCase::DoRun()
+LteTxPsdTestCase::DoRun(void)
 {
     NS_TEST_ASSERT_MSG_EQ(m_actual->GetSpectrumModelUid(),
                           m_expected->GetSpectrumModelUid(),
@@ -196,6 +211,7 @@ LteTxPsdTestCase::DoRun()
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test suite for LteSpectrumValueHelper. Test suite is
  * checking different functionalities of LteSpectrumValueHelper.
@@ -206,10 +222,6 @@ class LteSpectrumValueHelperTestSuite : public TestSuite
     LteSpectrumValueHelperTestSuite();
 };
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteSpectrumValueHelperTestSuite g_lteSpectrumValueHelperTestSuite;
 
 LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
@@ -229,8 +241,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc2160nrb6[3] = 2.160090000000e+09;
     fc2160nrb6[4] = 2.160270000000e+09;
     fc2160nrb6[5] = 2.160450000000e+09;
-    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb6", 500, 6, fc2160nrb6),
-                TestCase::Duration::QUICK);
+    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb6", 500, 6, fc2160nrb6), Duration::QUICK);
 
     std::vector<double> fc2160nrb15(15);
     fc2160nrb15[0] = 2.158740000000e+09;
@@ -248,8 +259,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc2160nrb15[12] = 2.160900000000e+09;
     fc2160nrb15[13] = 2.161080000000e+09;
     fc2160nrb15[14] = 2.161260000000e+09;
-    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb15", 500, 15, fc2160nrb15),
-                TestCase::Duration::QUICK);
+    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb15", 500, 15, fc2160nrb15), Duration::QUICK);
 
     std::vector<double> fc2160nrb25(25);
     fc2160nrb25[0] = 2.157840000000e+09;
@@ -277,8 +287,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc2160nrb25[22] = 2.161800000000e+09;
     fc2160nrb25[23] = 2.161980000000e+09;
     fc2160nrb25[24] = 2.162160000000e+09;
-    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb25", 500, 25, fc2160nrb25),
-                TestCase::Duration::QUICK);
+    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb25", 500, 25, fc2160nrb25), Duration::QUICK);
 
     std::vector<double> fc2160nrb50(50);
     fc2160nrb50[0] = 2.155590000000e+09;
@@ -331,8 +340,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc2160nrb50[47] = 2.164050000000e+09;
     fc2160nrb50[48] = 2.164230000000e+09;
     fc2160nrb50[49] = 2.164410000000e+09;
-    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb50", 500, 50, fc2160nrb50),
-                TestCase::Duration::QUICK);
+    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb50", 500, 50, fc2160nrb50), Duration::QUICK);
 
     std::vector<double> fc2160nrb75(75);
     fc2160nrb75[0] = 2.153340000000e+09;
@@ -410,8 +418,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc2160nrb75[72] = 2.166300000000e+09;
     fc2160nrb75[73] = 2.166480000000e+09;
     fc2160nrb75[74] = 2.166660000000e+09;
-    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb75", 500, 75, fc2160nrb75),
-                TestCase::Duration::QUICK);
+    AddTestCase(new LteSpectrumModelTestCase("fc2160nrb75", 500, 75, fc2160nrb75), Duration::QUICK);
 
     std::vector<double> fc2160nrb100(100);
     fc2160nrb100[0] = 2.151090000000e+09;
@@ -515,7 +522,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc2160nrb100[98] = 2.168730000000e+09;
     fc2160nrb100[99] = 2.168910000000e+09;
     AddTestCase(new LteSpectrumModelTestCase("fc2160nrb100", 500, 100, fc2160nrb100),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<double> fc1730nrb6(6);
     fc1730nrb6[0] = 1.729550000000e+09;
@@ -524,8 +531,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc1730nrb6[3] = 1.730090000000e+09;
     fc1730nrb6[4] = 1.730270000000e+09;
     fc1730nrb6[5] = 1.730450000000e+09;
-    AddTestCase(new LteSpectrumModelTestCase("fc1730nrb6", 19400, 6, fc1730nrb6),
-                TestCase::Duration::QUICK);
+    AddTestCase(new LteSpectrumModelTestCase("fc1730nrb6", 19400, 6, fc1730nrb6), Duration::QUICK);
 
     std::vector<double> fc1730nrb15(15);
     fc1730nrb15[0] = 1.728740000000e+09;
@@ -544,7 +550,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc1730nrb15[13] = 1.731080000000e+09;
     fc1730nrb15[14] = 1.731260000000e+09;
     AddTestCase(new LteSpectrumModelTestCase("fc1730nrb15", 19400, 15, fc1730nrb15),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<double> fc1730nrb25(25);
     fc1730nrb25[0] = 1.727840000000e+09;
@@ -573,7 +579,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc1730nrb25[23] = 1.731980000000e+09;
     fc1730nrb25[24] = 1.732160000000e+09;
     AddTestCase(new LteSpectrumModelTestCase("fc1730nrb25", 19400, 25, fc1730nrb25),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<double> fc1730nrb50(50);
     fc1730nrb50[0] = 1.725590000000e+09;
@@ -627,7 +633,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc1730nrb50[48] = 1.734230000000e+09;
     fc1730nrb50[49] = 1.734410000000e+09;
     AddTestCase(new LteSpectrumModelTestCase("fc1730nrb50", 19400, 50, fc1730nrb50),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<double> fc1730nrb75(75);
     fc1730nrb75[0] = 1.723340000000e+09;
@@ -706,7 +712,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc1730nrb75[73] = 1.736480000000e+09;
     fc1730nrb75[74] = 1.736660000000e+09;
     AddTestCase(new LteSpectrumModelTestCase("fc1730nrb75", 19400, 75, fc1730nrb75),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<double> fc1730nrb100(100);
     fc1730nrb100[0] = 1.721090000000e+09;
@@ -810,7 +816,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     fc1730nrb100[98] = 1.738730000000e+09;
     fc1730nrb100[99] = 1.738910000000e+09;
     AddTestCase(new LteSpectrumModelTestCase("fc1730nrb100", 19400, 100, fc1730nrb100),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     SpectrumValue nfdB0earfcn500nrb6(LteSpectrumValueHelper::GetSpectrumModel(500, 6));
     nfdB0earfcn500nrb6[0] = 4.002000000000e-21;
@@ -820,7 +826,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     nfdB0earfcn500nrb6[4] = 4.002000000000e-21;
     nfdB0earfcn500nrb6[5] = 4.002000000000e-21;
     AddTestCase(new LteNoisePsdTestCase("nfdB0earfcn500nrb6", 500, 6, 0.000000, nfdB0earfcn500nrb6),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     SpectrumValue nfdB5earfcn500nrb6(LteSpectrumValueHelper::GetSpectrumModel(500, 6));
     nfdB5earfcn500nrb6[0] = 1.265543519599e-20;
@@ -830,7 +836,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     nfdB5earfcn500nrb6[4] = 1.265543519599e-20;
     nfdB5earfcn500nrb6[5] = 1.265543519599e-20;
     AddTestCase(new LteNoisePsdTestCase("nfdB5earfcn500nrb6", 500, 6, 5.000000, nfdB5earfcn500nrb6),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     SpectrumValue nfdB10earfcn500nrb6(LteSpectrumValueHelper::GetSpectrumModel(500, 6));
     nfdB10earfcn500nrb6[0] = 4.002000000000e-20;
@@ -841,7 +847,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     nfdB10earfcn500nrb6[5] = 4.002000000000e-20;
     AddTestCase(
         new LteNoisePsdTestCase("nfdB10earfcn500nrb6", 500, 6, 10.000000, nfdB10earfcn500nrb6),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
 
     SpectrumValue nfdB0earfcn500nrb15(LteSpectrumValueHelper::GetSpectrumModel(500, 15));
     nfdB0earfcn500nrb15[0] = 4.002000000000e-21;
@@ -861,7 +867,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     nfdB0earfcn500nrb15[14] = 4.002000000000e-21;
     AddTestCase(
         new LteNoisePsdTestCase("nfdB0earfcn500nrb15", 500, 15, 0.000000, nfdB0earfcn500nrb15),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
 
     SpectrumValue nfdB5earfcn500nrb15(LteSpectrumValueHelper::GetSpectrumModel(500, 15));
     nfdB5earfcn500nrb15[0] = 1.265543519599e-20;
@@ -881,7 +887,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
     nfdB5earfcn500nrb15[14] = 1.265543519599e-20;
     AddTestCase(
         new LteNoisePsdTestCase("nfdB5earfcn500nrb15", 500, 15, 5.000000, nfdB5earfcn500nrb15),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
 
     SpectrumValue nfdB10earfcn500nrb15(LteSpectrumValueHelper::GetSpectrumModel(500, 15));
     nfdB10earfcn500nrb15[0] = 4.002000000000e-20;
@@ -917,7 +923,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      10.000000,
                                      activeRbs_txpowdB10nrb6run1earfcn500,
                                      spectrumValue_txpowdB10nrb6run1earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB30nrb6run1earfcn500(1);
     activeRbs_txpowdB30nrb6run1earfcn500[0] = 5.000000000000e+00;
@@ -935,7 +941,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      30.000000,
                                      activeRbs_txpowdB30nrb6run1earfcn500,
                                      spectrumValue_txpowdB30nrb6run1earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB10nrb25run1earfcn500(8);
     activeRbs_txpowdB10nrb25run1earfcn500[0] = 1.000000000000e+00;
@@ -979,7 +985,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      10.000000,
                                      activeRbs_txpowdB10nrb25run1earfcn500,
                                      spectrumValue_txpowdB10nrb25run1earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB30nrb25run1earfcn500(13);
     activeRbs_txpowdB30nrb25run1earfcn500[0] = 0.000000000000e+00;
@@ -1028,7 +1034,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      30.000000,
                                      activeRbs_txpowdB30nrb25run1earfcn500,
                                      spectrumValue_txpowdB30nrb25run1earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB10nrb100run1earfcn500(60);
     activeRbs_txpowdB10nrb100run1earfcn500[0] = 0.000000000000e+00;
@@ -1199,7 +1205,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      10.000000,
                                      activeRbs_txpowdB10nrb100run1earfcn500,
                                      spectrumValue_txpowdB10nrb100run1earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB30nrb100run1earfcn500(39);
     activeRbs_txpowdB30nrb100run1earfcn500[0] = 0.000000000000e+00;
@@ -1349,7 +1355,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      30.000000,
                                      activeRbs_txpowdB30nrb100run1earfcn500,
                                      spectrumValue_txpowdB30nrb100run1earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB10nrb6run2earfcn500(3);
     activeRbs_txpowdB10nrb6run2earfcn500[0] = 1.000000000000e+00;
@@ -1369,7 +1375,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      10.000000,
                                      activeRbs_txpowdB10nrb6run2earfcn500,
                                      spectrumValue_txpowdB10nrb6run2earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB30nrb6run2earfcn500(3);
     activeRbs_txpowdB30nrb6run2earfcn500[0] = 3.000000000000e+00;
@@ -1389,7 +1395,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      30.000000,
                                      activeRbs_txpowdB30nrb6run2earfcn500,
                                      spectrumValue_txpowdB30nrb6run2earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB10nrb25run2earfcn500(15);
     activeRbs_txpowdB10nrb25run2earfcn500[0] = 0.000000000000e+00;
@@ -1440,7 +1446,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      10.000000,
                                      activeRbs_txpowdB10nrb25run2earfcn500,
                                      spectrumValue_txpowdB10nrb25run2earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB30nrb25run2earfcn500(13);
     activeRbs_txpowdB30nrb25run2earfcn500[0] = 0.000000000000e+00;
@@ -1489,7 +1495,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      30.000000,
                                      activeRbs_txpowdB30nrb25run2earfcn500,
                                      spectrumValue_txpowdB30nrb25run2earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB10nrb100run2earfcn500(48);
     activeRbs_txpowdB10nrb100run2earfcn500[0] = 2.000000000000e+00;
@@ -1648,7 +1654,7 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      10.000000,
                                      activeRbs_txpowdB10nrb100run2earfcn500,
                                      spectrumValue_txpowdB10nrb100run2earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     std::vector<int> activeRbs_txpowdB30nrb100run2earfcn500(52);
     activeRbs_txpowdB30nrb100run2earfcn500[0] = 0.000000000000e+00;
@@ -1811,5 +1817,5 @@ LteSpectrumValueHelperTestSuite::LteSpectrumValueHelperTestSuite()
                                      30.000000,
                                      activeRbs_txpowdB30nrb100run2earfcn500,
                                      spectrumValue_txpowdB30nrb100run2earfcn500),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 }

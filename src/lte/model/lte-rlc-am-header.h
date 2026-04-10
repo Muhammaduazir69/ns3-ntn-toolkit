@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -9,9 +21,8 @@
 #ifndef LTE_RLC_AM_HEADER_H
 #define LTE_RLC_AM_HEADER_H
 
-#include "lte-rlc-sequence-number.h"
-
 #include "ns3/header.h"
+#include "ns3/lte-rlc-sequence-number.h"
 
 #include <list>
 
@@ -35,10 +46,10 @@ class LteRlcAmHeader : public Header
      * Creates a null header
      */
     LteRlcAmHeader();
-    ~LteRlcAmHeader() override;
+    ~LteRlcAmHeader();
 
     /// Set data PDU function
-    void SetDataPdu();
+    void SetDataPdu(void);
     /**
      * Set control PDU function
      *
@@ -49,22 +60,25 @@ class LteRlcAmHeader : public Header
      * Is data PDU function
      * \returns true if data PDU
      */
-    bool IsDataPdu() const;
+    bool IsDataPdu(void) const;
     /**
      * Is control PDU function
      * \returns true if control PDU
      */
-    bool IsControlPdu() const;
+    bool IsControlPdu(void) const;
 
     /// DataControlPdu_t enumeration
-    enum DataControlPdu_t
+    typedef enum
     {
         CONTROL_PDU = 0,
         DATA_PDU = 1
-    };
+    } DataControlPdu_t; ///< DataControlPdu_t typedef
 
-    /// Control PDU type status
-    static constexpr uint8_t STATUS_PDU{0};
+    /// ControlPduType_t enumeration
+    typedef enum
+    {
+        STATUS_PDU = 000,
+    } ControPduType_t; ///< ControPduType_t typedef
 
     //
     // DATA PDU
@@ -123,20 +137,20 @@ class LteRlcAmHeader : public Header
      *
      * \returns the extension bit
      */
-    uint8_t PopExtensionBit();
+    uint8_t PopExtensionBit(void);
     /**
      * Pop length indicator function
      *
      * \returns the length indicator
      */
-    uint16_t PopLengthIndicator();
+    uint16_t PopLengthIndicator(void);
 
     /// ExtensionBit_t typedef
-    enum ExtensionBit_t
+    typedef enum
     {
         DATA_FIELD_FOLLOWS = 0,
         E_LI_FIELDS_FOLLOWS = 1
-    };
+    } ExtensionBit_t; ///< ExtensionBit_t typedef
 
     /**
      * Pop extension bit function
@@ -152,11 +166,11 @@ class LteRlcAmHeader : public Header
     uint8_t GetResegmentationFlag() const;
 
     /// ResegmentationFlag_t typedef
-    enum ResegmentationFlag_t
+    typedef enum
     {
         PDU = 0,
         SEGMENT = 1
-    };
+    } ResegmentationFlag_t; ///< ResegmentationFlag_t typedef
 
     /**
      * Set polling bit function
@@ -172,11 +186,11 @@ class LteRlcAmHeader : public Header
     uint8_t GetPollingBit() const;
 
     /// PollingBit_t enumeration
-    enum PollingBit_t
+    typedef enum
     {
         STATUS_REPORT_NOT_REQUESTED = 0,
         STATUS_REPORT_IS_REQUESTED = 1
-    };
+    } PollingBit_t; ///< PollingBit_t typedef
 
     /**
      * Set last segment flag function
@@ -192,11 +206,11 @@ class LteRlcAmHeader : public Header
     uint8_t GetLastSegmentFlag() const;
 
     /// LastSegmentFlag_t typedef
-    enum LastSegmentFlag_t
+    typedef enum
     {
         NO_LAST_PDU_SEGMENT = 0,
         LAST_PDU_SEGMENT = 1
-    };
+    } LastSegmentFlag_t; ///< LastSegmentFlag_t enumeration
 
     /**
      * Set segment offset function
@@ -230,7 +244,7 @@ class LteRlcAmHeader : public Header
     /**
      * Get ack sn function
      *
-     * \returns sequence number
+     * \returns sequence numbr
      */
     SequenceNumber10 GetAckSn() const;
 
@@ -238,12 +252,12 @@ class LteRlcAmHeader : public Header
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    void Print(std::ostream& os) const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual void Print(std::ostream& os) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
 
     /**
      *
@@ -276,7 +290,7 @@ class LteRlcAmHeader : public Header
      *
      * \return the SN  >= 0 of the next nack; returns -1 if no NACK is left
      */
-    int PopNack();
+    int PopNack(void);
 
   private:
     uint16_t m_headerLength;  ///< header length

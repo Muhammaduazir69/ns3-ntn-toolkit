@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -10,23 +22,19 @@
 #ifndef LTE_TEST_UPLINK_POWER_CONTROL_H
 #define LTE_TEST_UPLINK_POWER_CONTROL_H
 
-#include "ns3/nstime.h"
-#include "ns3/ptr.h"
 #include "ns3/spectrum-test.h"
 #include "ns3/spectrum-value.h"
 #include "ns3/test.h"
+#include <ns3/nstime.h>
+#include <ns3/mobility-model.h>
+#include <ns3/lte-ue-power-control.h>
+#include "lte-ffr-simple.h"
 
 using namespace ns3;
 
-namespace ns3
-{
-class LteFfrSimple;
-class LteUePowerControl;
-class MobilityModel;
-} // namespace ns3
-
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test 1.1 Uplink Power Control
  */
@@ -38,6 +46,7 @@ class LteUplinkPowerControlTestSuite : public TestSuite
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Lte Uplink Power Control Test Case
  */
@@ -50,7 +59,7 @@ class LteUplinkPowerControlTestCase : public TestCase
      * \param name the reference name
      */
     LteUplinkPowerControlTestCase(std::string name);
-    ~LteUplinkPowerControlTestCase() override;
+    virtual ~LteUplinkPowerControlTestCase();
 
     /**
      * Teleport UE funcction
@@ -108,7 +117,7 @@ class LteUplinkPowerControlTestCase : public TestCase
     void SrsTxPowerTrace(uint16_t cellId, uint16_t rnti, double txPower);
 
   protected:
-    void DoRun() override;
+    virtual void DoRun(void);
 
     Ptr<MobilityModel> m_ueMobility; ///< UE mobility model
     Time m_teleportTime;             ///< teleport time
@@ -125,6 +134,7 @@ class LteUplinkPowerControlTestCase : public TestCase
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Lte Uplink Open Loop Power Control Test Case
  */
@@ -137,14 +147,15 @@ class LteUplinkOpenLoopPowerControlTestCase : public LteUplinkPowerControlTestCa
      * \param name the reference name
      */
     LteUplinkOpenLoopPowerControlTestCase(std::string name);
-    ~LteUplinkOpenLoopPowerControlTestCase() override;
+    virtual ~LteUplinkOpenLoopPowerControlTestCase();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Lte Uplink Closed Loop Power Control Absolute Mode Test Case
  */
@@ -157,14 +168,15 @@ class LteUplinkClosedLoopPowerControlAbsoluteModeTestCase : public LteUplinkPowe
      * \param name the reference name
      */
     LteUplinkClosedLoopPowerControlAbsoluteModeTestCase(std::string name);
-    ~LteUplinkClosedLoopPowerControlAbsoluteModeTestCase() override;
+    virtual ~LteUplinkClosedLoopPowerControlAbsoluteModeTestCase();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Lte Uplink Closed Loop Power Control Accumulated Mode Test Case
  */
@@ -177,10 +189,10 @@ class LteUplinkClosedLoopPowerControlAccumulatedModeTestCase : public LteUplinkP
      * \param name the reference name
      */
     LteUplinkClosedLoopPowerControlAccumulatedModeTestCase(std::string name);
-    ~LteUplinkClosedLoopPowerControlAccumulatedModeTestCase() override;
+    virtual ~LteUplinkClosedLoopPowerControlAccumulatedModeTestCase();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 };
 
 #endif /* LTE_TEST_UPLINK_POWER_CONTROL_H */

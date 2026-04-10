@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011-2013 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Marco Miozzo <marco.miozzo@cttc.es>
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -62,19 +74,16 @@ LenaTestPhyErrorModelSuite::LenaTestPhyErrorModelSuite()
 
         // 1 interfering eNB SINR -2.0 BLER 0.007 TB size 217
         AddTestCase(new LenaDlCtrlPhyErrorModelTestCase(2, 1078, 0.007, 9, Seconds(0.04), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::QUICK : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::QUICK : TestCase::Duration::TAKES_FOREVER);
         // 2 interfering eNBs SINR -4.0 BLER 0.037 TB size 217
         AddTestCase(new LenaDlCtrlPhyErrorModelTestCase(3, 1040, 0.045, 21, Seconds(0.04), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::EXTENSIVE
-                                  : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::EXTENSIVE : TestCase::Duration::TAKES_FOREVER);
         // 3 interfering eNBs SINR -6.0 BLER 0.21 TB size 133
         AddTestCase(new LenaDlCtrlPhyErrorModelTestCase(4, 1250, 0.206, 40, Seconds(0.12), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::EXTENSIVE
-                                  : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::EXTENSIVE : TestCase::Duration::TAKES_FOREVER);
         // 4 interfering eNBs SINR -7.0 BLER 0.34 TB size 133
         AddTestCase(new LenaDlCtrlPhyErrorModelTestCase(5, 1260, 0.343, 47, Seconds(0.12), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::EXTENSIVE
-                                  : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::EXTENSIVE : TestCase::Duration::TAKES_FOREVER);
 
         // Tests on DL Data channels (PDSCH)
         // the tolerance is calculated with the following octave code:
@@ -86,35 +95,26 @@ LenaTestPhyErrorModelSuite::LenaTestPhyErrorModelSuite()
 
         // MCS 2 TB size of 256 bits BLER 0.33 SINR -5.51
         AddTestCase(new LenaDataPhyErrorModelTestCase(4, 1800, 0.33, 39, Seconds(0.04), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::QUICK : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::QUICK : TestCase::Duration::TAKES_FOREVER);
         // MCS 2 TB size of 528 bits BLER 0.11 SINR -5.51
         AddTestCase(new LenaDataPhyErrorModelTestCase(2, 1800, 0.11, 26, Seconds(0.04), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::EXTENSIVE
-                                  : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::EXTENSIVE : TestCase::Duration::TAKES_FOREVER);
         // MCS 2 TB size of 1088 bits BLER 0.02 SINR -5.51
         AddTestCase(new LenaDataPhyErrorModelTestCase(1, 1800, 0.02, 33, Seconds(0.04), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::EXTENSIVE
-                                  : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::EXTENSIVE : TestCase::Duration::TAKES_FOREVER);
         // MCS 12 TB size of 4800 bits  BLER 0.3  SINR 4.43
         AddTestCase(new LenaDataPhyErrorModelTestCase(1, 600, 0.3, 38, Seconds(0.04), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::EXTENSIVE
-                                  : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::EXTENSIVE : TestCase::Duration::TAKES_FOREVER);
         // MCS 12 TB size of 1632 bits  BLER 0.55  SINR 4.43
         AddTestCase(new LenaDataPhyErrorModelTestCase(3, 600, 0.55, 40, Seconds(0.04), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::EXTENSIVE
-                                  : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::EXTENSIVE : TestCase::Duration::TAKES_FOREVER);
         // MCS 16 TB size of 7272 bits (3648 x 3584) BLER 0.14 SINR 8.48
         // BLER 0.14 = 1 - ((1-0.075)*(1-0.075))
         AddTestCase(new LenaDataPhyErrorModelTestCase(1, 470, 0.14, 29, Seconds(0.04), rngRun),
-                    (rngRun == 1) ? TestCase::Duration::EXTENSIVE
-                                  : TestCase::Duration::TAKES_FOREVER);
+                    (rngRun == 1) ? Duration::EXTENSIVE : TestCase::Duration::TAKES_FOREVER);
     }
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LenaTestPhyErrorModelSuite lenaTestPhyErrorModelSuite;
 
 std::string
@@ -146,7 +146,7 @@ LenaDataPhyErrorModelTestCase::~LenaDataPhyErrorModelTestCase()
 }
 
 void
-LenaDataPhyErrorModelTestCase::DoRun()
+LenaDataPhyErrorModelTestCase::DoRun(void)
 {
     double ber = 0.03;
     Config::SetDefault("ns3::LteAmc::Ber", DoubleValue(ber));
@@ -155,11 +155,6 @@ LenaDataPhyErrorModelTestCase::DoRun()
     Config::SetDefault("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue(true));
     Config::SetDefault("ns3::RrFfMacScheduler::HarqEnabled", BooleanValue(false));
     Config::SetGlobal("RngRun", UintegerValue(m_rngRun));
-
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::DlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("DlRlcStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::UlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("UlRlcStats.txt")));
 
     // Disable Uplink Power Control
     Config::SetDefault("ns3::LteUePhy::EnableUplinkPowerControl", BooleanValue(false));
@@ -192,6 +187,10 @@ LenaDataPhyErrorModelTestCase::DoRun()
     lena->SetPathlossModelAttribute("ShadowSigmaIndoor", DoubleValue(0.0));
     lena->SetPathlossModelAttribute("ShadowSigmaExtWalls", DoubleValue(0.0));
 
+    // set DL and UL bandwidth
+    lena->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
+    lena->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(25));
+
     // Create Devices and install them in the Nodes (eNB and UE)
     NetDeviceContainer enbDevs;
     NetDeviceContainer ueDevs;
@@ -207,7 +206,7 @@ LenaDataPhyErrorModelTestCase::DoRun()
     lena->Attach(ueDevs, enbDevs.Get(0));
 
     // Activate an EPS bearer
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
     EpsBearer bearer(q);
     lena->ActivateDataRadioBearer(ueDevs, bearer);
 
@@ -251,7 +250,7 @@ LenaDataPhyErrorModelTestCase::DoRun()
 
         double dlRxPackets = rlcStats->GetDlRxPackets(imsi, lcId);
         double dlTxPackets = rlcStats->GetDlTxPackets(imsi, lcId);
-        double dlBler [[maybe_unused]] = 1.0 - (dlRxPackets / dlTxPackets);
+        [[maybe_unused]] double dlBler = 1.0 - (dlRxPackets / dlTxPackets);
         double expectedDlRxPackets = dlTxPackets - dlTxPackets * m_blerRef;
         NS_LOG_INFO("\tUser " << i << " imsi " << imsi << " DOWNLINK"
                               << " pkts rx " << dlRxPackets << " tx " << dlTxPackets << " BLER "
@@ -262,7 +261,7 @@ LenaDataPhyErrorModelTestCase::DoRun()
 
         // sanity check for whether the tx packets reported by the stats are correct
         // we expect one packet per TTI
-        auto expectedDlTxPackets = static_cast<double>(statsDuration.GetMilliSeconds());
+        double expectedDlTxPackets = static_cast<double>(statsDuration.GetMilliSeconds());
         NS_TEST_ASSERT_MSG_EQ_TOL(dlTxPackets,
                                   expectedDlTxPackets,
                                   expectedDlTxPackets * 0.005,
@@ -307,7 +306,7 @@ LenaDlCtrlPhyErrorModelTestCase::~LenaDlCtrlPhyErrorModelTestCase()
 }
 
 void
-LenaDlCtrlPhyErrorModelTestCase::DoRun()
+LenaDlCtrlPhyErrorModelTestCase::DoRun(void)
 {
     double ber = 0.03;
     Config::SetDefault("ns3::LteAmc::Ber", DoubleValue(ber));
@@ -316,11 +315,6 @@ LenaDlCtrlPhyErrorModelTestCase::DoRun()
     Config::SetDefault("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue(false));
     Config::SetDefault("ns3::RrFfMacScheduler::HarqEnabled", BooleanValue(false));
     Config::SetGlobal("RngRun", UintegerValue(m_rngRun));
-
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::DlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("DlRlcStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::UlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("UlRlcStats.txt")));
 
     // Disable Uplink Power Control
     Config::SetDefault("ns3::LteUePhy::EnableUplinkPowerControl", BooleanValue(false));
@@ -353,6 +347,10 @@ LenaDlCtrlPhyErrorModelTestCase::DoRun()
     lena->SetPathlossModelAttribute("ShadowSigmaIndoor", DoubleValue(0.0));
     lena->SetPathlossModelAttribute("ShadowSigmaExtWalls", DoubleValue(0.0));
 
+    // set DL and UL bandwidth
+    lena->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
+    lena->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(25));
+
     // Create Devices and install them in the Nodes (eNB and UE)
     NetDeviceContainer enbDevs;
     NetDeviceContainer ueDevs;
@@ -368,7 +366,7 @@ LenaDlCtrlPhyErrorModelTestCase::DoRun()
     lena->Attach(ueDevs, enbDevs.Get(0));
 
     // Activate an EPS bearer
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
     EpsBearer bearer(q);
     lena->ActivateDataRadioBearer(ueDevs, bearer);
 
@@ -413,7 +411,7 @@ LenaDlCtrlPhyErrorModelTestCase::DoRun()
         uint8_t lcId = 3;
         double dlRxPackets = rlcStats->GetDlRxPackets(imsi, lcId);
         double dlTxPackets = rlcStats->GetDlTxPackets(imsi, lcId);
-        double dlBler [[maybe_unused]] = 1.0 - (dlRxPackets / dlTxPackets);
+        [[maybe_unused]] double dlBler = 1.0 - (dlRxPackets / dlTxPackets);
         double expectedDlRxPackets = dlTxPackets - dlTxPackets * m_blerRef;
         NS_LOG_INFO("\tUser " << i << " imsi " << imsi << " DOWNLINK"
                               << " pkts rx " << dlRxPackets << " tx " << dlTxPackets << " BLER "
@@ -424,7 +422,7 @@ LenaDlCtrlPhyErrorModelTestCase::DoRun()
 
         // sanity check for whether the tx packets reported by the stats are correct
         // we expect one packet per TTI
-        auto expectedDlTxPackets = static_cast<double>(statsDuration.GetMilliSeconds());
+        double expectedDlTxPackets = static_cast<double>(statsDuration.GetMilliSeconds());
         NS_TEST_ASSERT_MSG_EQ_TOL(dlTxPackets,
                                   expectedDlTxPackets,
                                   expectedDlTxPackets * 0.005,

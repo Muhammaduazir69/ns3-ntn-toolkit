@@ -1,8 +1,20 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2015 Danilo Abrignani
  * Copyright (c) 2016 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Authors: Danilo Abrignani <danilo.abrignani@unibo.it>
  *          Biljana Bojovic <biljana.bojovic@cttc.es>
@@ -10,8 +22,6 @@
  */
 
 #include "no-op-component-carrier-manager.h"
-
-#include "lte-common.h"
 
 #include <ns3/log.h>
 #include <ns3/random-variable-stream.h>
@@ -28,7 +38,7 @@ NoOpComponentCarrierManager::NoOpComponentCarrierManager()
     m_ccmRrcSapProvider = new MemberLteCcmRrcSapProvider<NoOpComponentCarrierManager>(this);
     m_ccmMacSapUser = new MemberLteCcmMacSapUser<NoOpComponentCarrierManager>(this);
     m_macSapProvider = new EnbMacMemberLteMacSapProvider<NoOpComponentCarrierManager>(this);
-    m_ccmRrcSapUser = nullptr;
+    m_ccmRrcSapUser = 0;
 }
 
 NoOpComponentCarrierManager::~NoOpComponentCarrierManager()
@@ -70,9 +80,11 @@ void
 NoOpComponentCarrierManager::DoTransmitPdu(LteMacSapProvider::TransmitPduParameters params)
 {
     NS_LOG_FUNCTION(this);
-    auto it = m_macSapProvidersMap.find(params.componentCarrierId);
+    std::map<uint8_t, LteMacSapProvider*>::iterator it =
+        m_macSapProvidersMap.find(params.componentCarrierId);
     NS_ASSERT_MSG(it != m_macSapProvidersMap.end(),
-                  "could not find Sap for ComponentCarrier " << params.componentCarrierId);
+                  "could not find Sap for ComponentCarrier "
+                      << (uint32_t)params.componentCarrierId);
     // with this algorithm all traffic is on Primary Carrier
     it->second->TransmitPdu(params);
 }
@@ -83,7 +95,8 @@ NoOpComponentCarrierManager::DoReportBufferStatus(
 {
     NS_LOG_FUNCTION(this);
     auto ueManager = m_ccmRrcSapUser->GetUeManager(params.rnti);
-    auto it = m_macSapProvidersMap.find(ueManager->GetComponentCarrierId());
+    std::map<uint8_t, LteMacSapProvider*>::iterator it =
+        m_macSapProvidersMap.find(ueManager->GetComponentCarrierId());
     NS_ASSERT_MSG(it != m_macSapProvidersMap.end(), "could not find Sap for ComponentCarrier ");
     it->second->ReportBufferStatus(params);
 }
@@ -93,19 +106,29 @@ NoOpComponentCarrierManager::DoNotifyTxOpportunity(
     LteMacSapUser::TxOpportunityParameters txOpParams)
 {
     NS_LOG_FUNCTION(this);
-    NS_LOG_DEBUG(this << " rnti= " << txOpParams.rnti << " lcid= " << +txOpParams.lcid << " layer= "
-                      << +txOpParams.layer << " ccId=" << +txOpParams.componentCarrierId);
-    m_ueInfo.at(txOpParams.rnti).m_ueAttached.at(txOpParams.lcid)->NotifyTxOpportunity(txOpParams);
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator rntiIt =
+        m_ueAttached.find(txOpParams.rnti);
+    NS_ASSERT_MSG(rntiIt != m_ueAttached.end(), "could not find RNTI" << txOpParams.rnti);
+    std::map<uint8_t, LteMacSapUser*>::iterator lcidIt = rntiIt->second.find(txOpParams.lcid);
+    NS_ASSERT_MSG(lcidIt != rntiIt->second.end(),
+                  "could not find LCID " << (uint16_t)txOpParams.lcid);
+    NS_LOG_DEBUG(this << " rnti= " << txOpParams.rnti << " lcid= " << (uint32_t)txOpParams.lcid
+                      << " layer= " << (uint32_t)txOpParams.layer
+                      << " ccId=" << (uint32_t)txOpParams.componentCarrierId);
+    (*lcidIt).second->NotifyTxOpportunity(txOpParams);
 }
 
 void
 NoOpComponentCarrierManager::DoReceivePdu(LteMacSapUser::ReceivePduParameters rxPduParams)
 {
     NS_LOG_FUNCTION(this);
-    auto lcidIt = m_ueInfo.at(rxPduParams.rnti).m_ueAttached.find(rxPduParams.lcid);
-    if (lcidIt != m_ueInfo.at(rxPduParams.rnti).m_ueAttached.end())
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator rntiIt =
+        m_ueAttached.find(rxPduParams.rnti);
+    NS_ASSERT_MSG(rntiIt != m_ueAttached.end(), "could not find RNTI" << rxPduParams.rnti);
+    std::map<uint8_t, LteMacSapUser*>::iterator lcidIt = rntiIt->second.find(rxPduParams.lcid);
+    if (lcidIt != rntiIt->second.end())
     {
-        lcidIt->second->ReceivePdu(rxPduParams);
+        (*lcidIt).second->ReceivePdu(rxPduParams);
     }
 }
 
@@ -125,26 +148,56 @@ void
 NoOpComponentCarrierManager::DoAddUe(uint16_t rnti, uint8_t state)
 {
     NS_LOG_FUNCTION(this << rnti << (uint16_t)state);
-    auto ueInfoIt = m_ueInfo.find(rnti);
-    if (ueInfoIt == m_ueInfo.end())
+    std::map<uint16_t, uint8_t>::iterator stateIt;
+    std::map<uint16_t, uint8_t>::iterator eccIt; // m_enabledComponentCarrier iterator
+    stateIt = m_ueState.find(rnti);
+    if (stateIt == m_ueState.end())
     {
+        //      NS_ASSERT_MSG ((stateIt == m_ueState.end () && state == 3), " ERROR: Ue was not
+        //      indexed and current state is CONNECTED_NORMALLY" << (uint16_t) state);
         NS_LOG_DEBUG(this << " UE " << rnti << " was not found, now it is added in the map");
-        UeInfo info;
-        info.m_ueState = state;
+        m_ueState.insert(std::pair<uint16_t, uint8_t>(rnti, state));
+        eccIt = m_enabledComponentCarrier.find(rnti);
+        // if ((state == 7 || state == 0) && eccIt == m_enabledComponentCarrier.end ())
+        if (eccIt == m_enabledComponentCarrier.end())
+        {
+            // the Primary carrier (PC) is enabled by default
+            // on the PC the SRB0 and SRB1 are enabled when the Ue is connected
+            // these are hard-coded and the configuration not pass through the
+            // Component Carrier Manager which is responsible of configure
+            // only DataRadioBearer on the different Component Carrier
+            m_enabledComponentCarrier.insert(std::pair<uint16_t, uint8_t>(rnti, 1));
+        }
+        else
+        {
+            NS_FATAL_ERROR(this << " Ue " << rnti
+                                << " had Component Carrier enabled before join the network"
+                                << (uint16_t)state);
+        }
+        // preparing the rnti,lcid,LteMacSapUser map
+        std::map<uint8_t, LteMacSapUser*> empty;
+        std::pair<std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator, bool> ret =
+            m_ueAttached.insert(
+                std::pair<uint16_t, std::map<uint8_t, LteMacSapUser*>>(rnti, empty));
+        NS_LOG_DEBUG(this << "AddUe: UE Pointer LteMacSapUser Map " << rnti << " added "
+                          << (uint16_t)ret.second);
+        NS_ASSERT_MSG(ret.second, "element already present, RNTI already existed");
 
-        // the Primary carrier (PC) is enabled by default
-        // on the PC the SRB0 and SRB1 are enabled when the Ue is connected
-        // these are hard-coded and the configuration not pass through the
-        // Component Carrier Manager which is responsible of configure
-        // only DataRadioBearer on the different Component Carrier
-        info.m_enabledComponentCarrier = 1;
-        m_ueInfo.emplace(rnti, info);
+        // add new rnti in the map
+        std::map<uint8_t, LteEnbCmacSapProvider::LcInfo> emptyA;
+        std::pair<std::map<uint16_t, std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>>::iterator,
+                  bool>
+            retA = m_rlcLcInstantiated.insert(
+                std::pair<uint16_t, std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>>(rnti,
+                                                                                      emptyA));
+        NS_ASSERT_MSG(retA.second, "element already present, RNTI already existed");
+        NS_LOG_DEBUG(this << "AddUe: UE " << rnti << " added " << (uint16_t)retA.second);
     }
     else
     {
         NS_LOG_DEBUG(this << " UE " << rnti << "found, updating the state from "
-                          << +ueInfoIt->second.m_ueState << " to " << +state);
-        ueInfoIt->second.m_ueState = state;
+                          << (uint16_t)stateIt->second << " to " << (uint16_t)state);
+        stateIt->second = state;
     }
 }
 
@@ -152,16 +205,23 @@ void
 NoOpComponentCarrierManager::DoAddLc(LteEnbCmacSapProvider::LcInfo lcInfo, LteMacSapUser* msu)
 {
     NS_LOG_FUNCTION(this);
-    m_ueInfo.at(lcInfo.rnti).m_rlcLcInstantiated.emplace(lcInfo.lcId, lcInfo);
+    NS_ASSERT_MSG(m_rlcLcInstantiated.find(lcInfo.rnti) != m_rlcLcInstantiated.end(),
+                  "Adding lc for a user that was not yet added to component carrier manager list.");
+    m_rlcLcInstantiated.find(lcInfo.rnti)
+        ->second.insert(std::pair<uint8_t, LteEnbCmacSapProvider::LcInfo>(lcInfo.lcId, lcInfo));
 }
 
 void
 NoOpComponentCarrierManager::DoRemoveUe(uint16_t rnti)
 {
     NS_LOG_FUNCTION(this);
-    auto rntiIt = m_ueInfo.find(rnti);
-    NS_ASSERT_MSG(rntiIt != m_ueInfo.end(), "request to remove UE info with unknown RNTI " << rnti);
-    m_ueInfo.erase(rntiIt);
+    std::map<uint16_t, uint8_t>::iterator stateIt;
+    std::map<uint16_t, uint8_t>::iterator eccIt; // m_enabledComponentCarrier iterator
+    stateIt = m_ueState.find(rnti);
+    eccIt = m_enabledComponentCarrier.find(rnti);
+    NS_ASSERT_MSG(stateIt != m_ueState.end(), "request to remove UE info with unknown rnti ");
+    NS_ASSERT_MSG(eccIt != m_enabledComponentCarrier.end(),
+                  "request to remove UE info with unknown rnti ");
 }
 
 std::vector<LteCcmRrcSapProvider::LcsConfig>
@@ -173,11 +233,13 @@ NoOpComponentCarrierManager::DoSetupDataRadioBearer(EpsBearer bearer,
                                                     LteMacSapUser* msu)
 {
     NS_LOG_FUNCTION(this << rnti);
-    auto rntiIt = m_ueInfo.find(rnti);
-    NS_ASSERT_MSG(rntiIt != m_ueInfo.end(), "SetupDataRadioBearer on unknown RNTI " << rnti);
+    std::map<uint16_t, uint8_t>::iterator eccIt; // m_enabledComponentCarrier iterator
+    eccIt = m_enabledComponentCarrier.find(rnti);
+    NS_ASSERT_MSG(eccIt != m_enabledComponentCarrier.end(),
+                  "SetupDataRadioBearer on unknown rnti ");
 
     // enable by default all carriers
-    rntiIt->second.m_enabledComponentCarrier = m_noOfComponentCarriers;
+    eccIt->second = m_noOfComponentCarriers;
 
     std::vector<LteCcmRrcSapProvider::LcsConfig> res;
     LteCcmRrcSapProvider::LcsConfig entry;
@@ -193,7 +255,7 @@ NoOpComponentCarrierManager::DoSetupDataRadioBearer(EpsBearer bearer,
         lci.qci = bearer.qci;
         if (ncc == 0)
         {
-            lci.resourceType = bearer.GetResourceType();
+            lci.isGbr = bearer.IsGbr();
             lci.mbrUl = bearer.gbrQosInfo.mbrUl;
             lci.mbrDl = bearer.gbrQosInfo.mbrDl;
             lci.gbrUl = bearer.gbrQosInfo.gbrUl;
@@ -201,7 +263,7 @@ NoOpComponentCarrierManager::DoSetupDataRadioBearer(EpsBearer bearer,
         }
         else
         {
-            lci.resourceType = 0;
+            lci.isGbr = 0;
             lci.mbrUl = 0;
             lci.mbrDl = 0;
             lci.gbrUl = 0;
@@ -215,20 +277,46 @@ NoOpComponentCarrierManager::DoSetupDataRadioBearer(EpsBearer bearer,
         res.push_back(entry);
     } // end for
 
-    auto lcidIt = rntiIt->second.m_rlcLcInstantiated.find(lcid);
-    if (lcidIt == rntiIt->second.m_rlcLcInstantiated.end())
+    // preparing the rnti,lcid,LcInfo map
+    std::map<uint16_t, std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>>::iterator rntiIter =
+        m_rlcLcInstantiated.find(rnti);
+    rntiIter = m_rlcLcInstantiated.begin();
+    // while (rntiIter != m_rlcLcInstantiated.end ())
+    //   {
+    //     ++rntiIter;
+    //   }
+    // if (rntiIt == m_rlcLcInstantiated.end ())
+    //   {
+    //     //add new rnti in the map
+    //     std::map<uint8_t, LteEnbCmacSapProvider::LcInfo> empty;
+    //     std::pair <std::map <uint16_t, std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>
+    //     >::iterator, bool>
+    //       ret = m_rlcLcInstantiated.insert (std::pair <uint16_t,  std::map<uint8_t,
+    //       LteEnbCmacSapProvider::LcInfo> >
+    //                                         (rnti, empty));
+    //     NS_LOG_DEBUG (this << " UE " << rnti << " added " << (uint16_t) ret.second);
+    //   }
+
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator sapIt = m_ueAttached.find(rnti);
+    NS_ASSERT_MSG(sapIt != m_ueAttached.end(), "RNTI not found");
+    rntiIter = m_rlcLcInstantiated.find(rnti);
+    std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>::iterator lcidIt = rntiIter->second.find(lcid);
+    // std::map<uint8_t, LteMacSapUser*>::iterator lcidIt = sapIt->second.find (lcinfo.lcId);
+    NS_ASSERT_MSG(rntiIter != m_rlcLcInstantiated.end(), "RNTI not found");
+    if (lcidIt == rntiIter->second.end())
     {
         lcinfo.rnti = rnti;
         lcinfo.lcId = lcid;
         lcinfo.lcGroup = lcGroup;
         lcinfo.qci = bearer.qci;
-        lcinfo.resourceType = bearer.GetResourceType();
+        lcinfo.isGbr = bearer.IsGbr();
         lcinfo.mbrUl = bearer.gbrQosInfo.mbrUl;
         lcinfo.mbrDl = bearer.gbrQosInfo.mbrDl;
         lcinfo.gbrUl = bearer.gbrQosInfo.gbrUl;
         lcinfo.gbrDl = bearer.gbrQosInfo.gbrDl;
-        rntiIt->second.m_rlcLcInstantiated.emplace(lcinfo.lcId, lcinfo);
-        rntiIt->second.m_ueAttached.emplace(lcinfo.lcId, msu);
+        rntiIter->second.insert(
+            std::pair<uint8_t, LteEnbCmacSapProvider::LcInfo>(lcinfo.lcId, lcinfo));
+        sapIt->second.insert(std::pair<uint8_t, LteMacSapUser*>(lcinfo.lcId, msu));
     }
     else
     {
@@ -240,30 +328,36 @@ NoOpComponentCarrierManager::DoSetupDataRadioBearer(EpsBearer bearer,
 std::vector<uint8_t>
 NoOpComponentCarrierManager::DoReleaseDataRadioBearer(uint16_t rnti, uint8_t lcid)
 {
-    NS_LOG_FUNCTION(this << rnti << +lcid);
-
-    // Here we receive directly the RNTI and the LCID, instead of only DRB ID
-    // DRB ID are mapped as DRBID = LCID + 2
-    auto rntiIt = m_ueInfo.find(rnti);
-    NS_ASSERT_MSG(rntiIt != m_ueInfo.end(),
-                  "request to Release Data Radio Bearer on UE with unknown RNTI " << rnti);
-
-    NS_LOG_DEBUG(this << " remove LCID " << +lcid << " for RNTI " << rnti);
+    NS_LOG_FUNCTION(this);
+    // here we receive directly the rnti and the lcid, instead of only drbid
+    // drbid are mapped as drbid = lcid + 2
+    std::map<uint16_t, uint8_t>::iterator eccIt; // m_enabledComponentCarrier iterator
+    eccIt = m_enabledComponentCarrier.find(rnti);
+    NS_ASSERT_MSG(eccIt != m_enabledComponentCarrier.end(),
+                  "request to Release Data Radio Bearer on Ue without Component Carrier Enabled");
+    std::map<uint16_t, std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>>::iterator lcsIt;
+    lcsIt = m_rlcLcInstantiated.find(rnti);
+    NS_ASSERT_MSG(lcsIt != m_rlcLcInstantiated.end(),
+                  "request to Release Data Radio Bearer on Ue without Logical Channels enabled");
+    std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>::iterator lcIt;
+    NS_LOG_DEBUG(this << " remove lcid " << (uint16_t)lcid << " for rnti " << rnti);
+    lcIt = lcsIt->second.find(lcid);
+    NS_ASSERT_MSG(lcIt != lcsIt->second.end(), " Logical Channel not found");
     std::vector<uint8_t> res;
-    for (uint16_t i = 0; i < rntiIt->second.m_enabledComponentCarrier; i++)
+    for (uint16_t i = 0; i < eccIt->second; i++)
     {
         res.insert(res.end(), i);
     }
-
-    auto lcIt = rntiIt->second.m_ueAttached.find(lcid);
-    NS_ASSERT_MSG(lcIt != rntiIt->second.m_ueAttached.end(), "Logical Channel not found");
-    rntiIt->second.m_ueAttached.erase(lcIt);
-
-    auto rlcInstancesIt = rntiIt->second.m_rlcLcInstantiated.find(rnti);
-    NS_ASSERT_MSG(rlcInstancesIt != rntiIt->second.m_rlcLcInstantiated.end(),
-                  "Logical Channel not found");
-    rntiIt->second.m_rlcLcInstantiated.erase(rlcInstancesIt);
-
+    // Find user based on rnti and then erase lcid stored against the same
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator rntiIt =
+        m_ueAttached.find(rnti);
+    rntiIt->second.erase(lcid);
+    std::map<uint16_t, std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>>::iterator rlcInstancesIt =
+        m_rlcLcInstantiated.find(rnti);
+    std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>::iterator rclLcIt;
+    lcIt = rlcInstancesIt->second.find(lcid);
+    NS_ASSERT_MSG(lcIt != lcsIt->second.end(), " Erasing: Logical Channel not found");
+    lcsIt->second.erase(lcid);
     return res;
 }
 
@@ -272,15 +366,17 @@ NoOpComponentCarrierManager::DoConfigureSignalBearer(LteEnbCmacSapProvider::LcIn
                                                      LteMacSapUser* msu)
 {
     NS_LOG_FUNCTION(this);
-
-    auto rntiIt = m_ueInfo.find(lcinfo.rnti);
-    NS_ASSERT_MSG(rntiIt != m_ueInfo.end(),
-                  "request to add a signal bearer to unknown RNTI " << lcinfo.rnti);
-
-    auto lcidIt = rntiIt->second.m_ueAttached.find(lcinfo.lcId);
-    if (lcidIt == rntiIt->second.m_ueAttached.end())
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator itSapUserAtCcm;
+    itSapUserAtCcm = m_ueAttached.find(lcinfo.rnti);
+    NS_ASSERT_MSG(itSapUserAtCcm != m_ueAttached.end(),
+                  "request to Add a SignalBearer to unknown rnti");
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator rntiIt =
+        m_ueAttached.find(lcinfo.rnti);
+    NS_ASSERT_MSG(rntiIt != m_ueAttached.end(), "RNTI not found");
+    std::map<uint8_t, LteMacSapUser*>::iterator lcidIt = rntiIt->second.find(lcinfo.lcId);
+    if (lcidIt == rntiIt->second.end())
     {
-        rntiIt->second.m_ueAttached.emplace(lcinfo.lcId, msu);
+        rntiIt->second.insert(std::pair<uint8_t, LteMacSapUser*>(lcinfo.lcId, msu));
     }
     else
     {
@@ -346,18 +442,6 @@ NoOpComponentCarrierManager::DoUlReceiveMacCe(MacCeListElement_s bsr, uint8_t co
     }
 }
 
-void
-NoOpComponentCarrierManager::DoUlReceiveSr(uint16_t rnti, uint8_t componentCarrierId)
-{
-    NS_LOG_FUNCTION(this);
-
-    auto sapIt = m_ccmMacSapProviderMap.find(componentCarrierId);
-    NS_ABORT_MSG_IF(sapIt == m_ccmMacSapProviderMap.end(),
-                    "Sap not found in the CcmMacSapProviderMap");
-
-    sapIt->second->ReportSrToScheduler(rnti);
-}
-
 //////////////////////////////////////////
 
 NS_OBJECT_ENSURE_REGISTERED(RrComponentCarrierManager);
@@ -388,7 +472,10 @@ RrComponentCarrierManager::DoReportBufferStatus(
 {
     NS_LOG_FUNCTION(this);
 
-    uint32_t numberOfCarriersForUe = m_ueInfo.at(params.rnti).m_enabledComponentCarrier;
+    NS_ASSERT_MSG(m_enabledComponentCarrier.find(params.rnti) != m_enabledComponentCarrier.end(),
+                  " UE with provided RNTI not found. RNTI:" << params.rnti);
+
+    uint32_t numberOfCarriersForUe = m_enabledComponentCarrier.find(params.rnti)->second;
     if (params.lcid == 0 || params.lcid == 1 || numberOfCarriersForUe == 1)
     {
         NS_LOG_INFO("Buffer status forwarded to the primary carrier.");
@@ -399,11 +486,21 @@ RrComponentCarrierManager::DoReportBufferStatus(
     {
         params.retxQueueSize /= numberOfCarriersForUe;
         params.txQueueSize /= numberOfCarriersForUe;
-        for (uint32_t i = 0; i < numberOfCarriersForUe; i++)
+        for (uint16_t i = 0; i < numberOfCarriersForUe; i++)
         {
             NS_ASSERT_MSG(m_macSapProvidersMap.find(i) != m_macSapProvidersMap.end(),
                           "Mac sap provider does not exist.");
-            m_macSapProvidersMap.at(i)->ReportBufferStatus(params);
+            if (i == 0)
+            {
+                // only the PCC sends STATUS PDUs
+                m_macSapProvidersMap.find(i)->second->ReportBufferStatus(params);
+            }
+            else
+            {
+                LteMacSapProvider::ReportBufferStatusParameters newParams = params;
+                newParams.statusPduSize = 0;
+                m_macSapProvidersMap.find(i)->second->ReportBufferStatus(newParams);
+            }
         }
     }
 }
@@ -419,7 +516,7 @@ RrComponentCarrierManager::DoUlReceiveMacCe(MacCeListElement_s bsr, uint8_t comp
                   "Received a Control Message not allowed " << bsr.m_macCeType);
 
     // split traffic in uplink equally among carriers
-    uint32_t numberOfCarriersForUe = m_ueInfo.at(bsr.m_rnti).m_enabledComponentCarrier;
+    uint32_t numberOfCarriersForUe = m_enabledComponentCarrier.find(bsr.m_rnti)->second;
 
     if (bsr.m_macCeType == MacCeListElement_s::BSR)
     {
@@ -448,7 +545,7 @@ RrComponentCarrierManager::DoUlReceiveMacCe(MacCeListElement_s bsr, uint8_t comp
                 BufferSizeLevelBsr::BufferSize2BsrId(bufferSize / numberOfCarriersForUe);
         }
         // notify MAC of each component carrier that is enabled for this UE
-        for (uint32_t i = 0; i < numberOfCarriersForUe; i++)
+        for (uint16_t i = 0; i < numberOfCarriersForUe; i++)
         {
             NS_ASSERT_MSG(m_ccmMacSapProviderMap.find(i) != m_ccmMacSapProviderMap.end(),
                           "Mac sap provider does not exist.");
@@ -459,22 +556,6 @@ RrComponentCarrierManager::DoUlReceiveMacCe(MacCeListElement_s bsr, uint8_t comp
     {
         auto ueManager = m_ccmRrcSapUser->GetUeManager(bsr.m_rnti);
         m_ccmMacSapProviderMap.at(ueManager->GetComponentCarrierId())->ReportMacCeToScheduler(bsr);
-    }
-}
-
-void
-RrComponentCarrierManager::DoUlReceiveSr(uint16_t rnti, uint8_t /* componentCarrierId */)
-{
-    NS_LOG_FUNCTION(this);
-    // split traffic in uplink equally among carriers
-    uint32_t numberOfCarriersForUe = m_ueInfo.at(rnti).m_enabledComponentCarrier;
-
-    m_ccmMacSapProviderMap.find(m_lastCcIdForSr)->second->ReportSrToScheduler(rnti);
-
-    m_lastCcIdForSr++;
-    if (m_lastCcIdForSr > numberOfCarriersForUe - 1)
-    {
-        m_lastCcIdForSr = 0;
     }
 }
 

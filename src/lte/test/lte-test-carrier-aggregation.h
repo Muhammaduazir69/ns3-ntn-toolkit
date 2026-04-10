@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2016 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Biljana Bojovic <biljana.bojovic@cttc.es>
  *
@@ -11,17 +23,17 @@
 #define TEST_CARRIER_AGGREGATION_H
 
 #include "fcntl.h"
-
-#include "ns3/lte-common.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
+#include <ns3/lte-common.h>
 
 #include <map>
 
 using namespace ns3;
 
 /**
- * \ingroup lte-test
+ * \ingroup wifi-test
+ * \ingroup tests wifi-test wifi module tests
  *
  * \brief This system test program creates different test cases with a single eNB and
  * several UEs, all having the same Radio Bearer specification. In each test
@@ -53,14 +65,14 @@ class CarrierAggregationTestCase : public TestCase
                                uint32_t dlbandwidth,
                                uint32_t ulBandwidth,
                                uint32_t numberOfComponentCarriers);
-    ~CarrierAggregationTestCase() override;
+    virtual ~CarrierAggregationTestCase();
     /**
      * DL Scheduling function that is used in this test as callback function of DL scheduling trace
      * \param dlInfo the DL scheduling callback info
      */
     void DlScheduling(DlSchedulingCallbackInfo dlInfo);
     /**
-     * UL Scheduling function that is used in this test as callback function of UL scheduling trace
+     * UL Scheduling function that is used in this test as callback function of UL sceduling trace
      * \param frameNo the frame number
      * \param subframeNo the subframe number
      * \param rnti the RNTI
@@ -75,10 +87,10 @@ class CarrierAggregationTestCase : public TestCase
                       uint16_t sizeTb,
                       uint8_t componentCarrierId);
     /// Write result to file function
-    void WriteResultToFile() const;
+    void WriteResultToFile();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
     /**
      * Builds the test name string based on provided parameter values
      * \param nUser number of users
@@ -96,8 +108,8 @@ class CarrierAggregationTestCase : public TestCase
 
     uint16_t m_nUser;                     ///< the number of users
     uint16_t m_dist;                      ///< the distance
-    uint16_t m_dlBandwidth;               ///< DL bandwidth
-    uint16_t m_ulBandwidth;               ///< UL bandwidth
+    uint32_t m_dlBandwidth;               ///< DL bandwidth
+    uint32_t m_ulBandwidth;               ///< UL bandwidth
     uint32_t m_numberOfComponentCarriers; ///< number of component carriers
 
     std::map<uint8_t, uint32_t> m_ccDownlinkTraffic; ///< CC DL traffic
@@ -108,7 +120,8 @@ class CarrierAggregationTestCase : public TestCase
 };
 
 /**
- * \ingroup lte-test
+ * \ingroup wifi-test
+ * \ingroup tests
  *
  * \brief Test Carrier Aggregation Suite
  */

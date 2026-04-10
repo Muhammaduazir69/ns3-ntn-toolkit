@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Jaume Nin <jnin@cttc.es>
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -10,10 +22,9 @@
 #ifndef RADIO_BEARER_STATS_CALCULATOR_H_
 #define RADIO_BEARER_STATS_CALCULATOR_H_
 
-#include "lte-stats-calculator.h"
-
 #include "ns3/basic-data-calculators.h"
 #include "ns3/lte-common.h"
+#include "ns3/lte-stats-calculator.h"
 #include "ns3/object.h"
 #include "ns3/uinteger.h"
 
@@ -66,35 +77,33 @@ class RadioBearerStatsCalculator : public LteStatsCalculator
 
     /**
      * Class constructor
-     * \param protocolType the name of the protocol type
      */
     RadioBearerStatsCalculator(std::string protocolType);
 
     /**
      * Class destructor
      */
-
-    ~RadioBearerStatsCalculator() override;
+    virtual ~RadioBearerStatsCalculator();
 
     // Inherited from ns3::Object
     /**
-     * Register this type.
-     * \return The object TypeId.
+     *  Register this type.
+     *  \return The object TypeId.
      */
-    static TypeId GetTypeId();
-    void DoDispose() override;
+    static TypeId GetTypeId(void);
+    void DoDispose();
 
     /**
      * Get the name of the file where the uplink statistics will be stored.
      * @return the name of the file where the uplink statistics will be stored
      */
-    std::string GetUlOutputFilename();
+    std::string GetUlOutputFilename(void);
 
     /**
      * Get the name of the file where the downlink statistics will be stored.
      * @return the name of the file where the downlink statistics will be stored
      */
-    std::string GetDlOutputFilename();
+    std::string GetDlOutputFilename(void);
 
     /**
      * Set the name of the file where the uplink PDCP statistics will be stored.
@@ -107,7 +116,7 @@ class RadioBearerStatsCalculator : public LteStatsCalculator
      * Get the name of the file where the uplink PDCP statistics will be stored.
      * @return the name of the file where the uplink PDCP statistics will be stored
      */
-    std::string GetUlPdcpOutputFilename();
+    std::string GetUlPdcpOutputFilename(void);
 
     /**
      * Set the name of the file where the downlink PDCP statistics will be stored.
@@ -120,7 +129,7 @@ class RadioBearerStatsCalculator : public LteStatsCalculator
      * Get the name of the file where the downlink PDCP statistics will be stored.
      * @return the name of the file where the downlink PDCP statistics will be stored
      */
-    std::string GetDlPdcpOutputFilename();
+    std::string GetDlPdcpOutputFilename(void);
 
     /**
      *
@@ -333,7 +342,7 @@ class RadioBearerStatsCalculator : public LteStatsCalculator
      * it opens output files and write columns descriptions.
      * During next calls it opens output files in append mode.
      */
-    void ShowResults();
+    void ShowResults(void);
 
     /**
      * Writes collected statistics to UL output file and
@@ -352,7 +361,7 @@ class RadioBearerStatsCalculator : public LteStatsCalculator
     /**
      * Erases collected statistics
      */
-    void ResetResults();
+    void ResetResults(void);
 
     /**
      * Reschedules EndEpoch event. Usually used after
@@ -365,7 +374,7 @@ class RadioBearerStatsCalculator : public LteStatsCalculator
      * ShowResults() to write statistics to output files
      * and ResetResults() to clear collected statistics.
      */
-    void EndEpoch();
+    void EndEpoch(void);
 
     EventId m_endEpochEvent; //!< Event id for next end epoch event
 

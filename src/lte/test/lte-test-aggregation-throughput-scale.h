@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2017 Alexander Krotov
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Alexander Krotov <krotov@iitp.ru>
  *
@@ -41,24 +53,18 @@ class LteAggregationThroughputScaleTestCase : public TestCase
      */
     LteAggregationThroughputScaleTestCase(std::string name);
 
-    ~LteAggregationThroughputScaleTestCase() override;
+    virtual ~LteAggregationThroughputScaleTestCase();
 
   private:
     /**
      * \brief Setup the simulation, run it, and verify the result.
      */
-    void DoRun() override;
+    virtual void DoRun();
 
-    /**
-     * \brief Get throughput function
-     *
-     * \param numberOfComponentCarriers Number of component carriers
-     * \return The total data received (in Megabits)
-     */
     double GetThroughput(uint8_t numberOfComponentCarriers);
 
-    uint16_t m_expectedCellId; ///< Cell ID UE is expected to attach to
-    uint16_t m_actualCellId;   ///< Cell ID UE has attached to
+    uint16_t m_expectedCellId; //< Cell ID UE is expected to attach to
+    uint16_t m_actualCellId;   //< Cell ID UE has attached to
 };
 
 #endif /* LTE_AGGREGATION_THROUGHPUT_SCALE_H */

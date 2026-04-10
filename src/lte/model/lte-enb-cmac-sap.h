@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  *         Marco Miozzo <mmiozzo@cttc.es>
@@ -10,6 +22,9 @@
 #ifndef LTE_ENB_CMAC_SAP_H
 #define LTE_ENB_CMAC_SAP_H
 
+#include <ns3/eps-bearer.h>
+#include <ns3/ff-mac-common.h>
+#include <ns3/lte-common.h>
 #include <ns3/packet.h>
 
 namespace ns3
@@ -34,7 +49,7 @@ class LteEnbCmacSapProvider
      * @param ulBandwidth
      * @param dlBandwidth
      */
-    virtual void ConfigureMac(uint16_t ulBandwidth, uint16_t dlBandwidth) = 0;
+    virtual void ConfigureMac(uint8_t ulBandwidth, uint8_t dlBandwidth) = 0;
 
     /**
      * Add UE function
@@ -56,16 +71,15 @@ class LteEnbCmacSapProvider
      */
     struct LcInfo
     {
-        uint16_t rnti;        /**< C-RNTI identifying the UE */
-        uint8_t lcId;         /**< logical channel identifier */
-        uint8_t lcGroup;      /**< logical channel group */
-        uint8_t qci;          /**< QoS Class Identifier */
-        uint8_t resourceType; /**< 0 if the bearer is NON-GBR, 1 if the bearer
-                                   is GBR, 2 if the bearer in DC-GBR */
-        uint64_t mbrUl;       /**< maximum bitrate in uplink */
-        uint64_t mbrDl;       /**< maximum bitrate in downlink */
-        uint64_t gbrUl;       /**< guaranteed bitrate in uplink */
-        uint64_t gbrDl;       /**< guaranteed bitrate in downlink */
+        uint16_t rnti;   /**< C-RNTI identifying the UE */
+        uint8_t lcId;    /**< logical channel identifier */
+        uint8_t lcGroup; /**< logical channel group */
+        uint8_t qci;     /**< QoS Class Identifier */
+        bool isGbr;      /**< true if the bearer is GBR, false if the bearer is NON-GBR */
+        uint64_t mbrUl;  /**< maximum bitrate in uplink */
+        uint64_t mbrDl;  /**< maximum bitrate in downlink */
+        uint64_t gbrUl;  /**< guaranteed bitrate in uplink */
+        uint64_t gbrDl;  /**< guaranteed bitrate in downlink */
     };
 
     /**
@@ -122,7 +136,6 @@ class LteEnbCmacSapProvider
         uint8_t numberOfRaPreambles;  ///< number of RA preambles
         uint8_t preambleTransMax;     ///< preamble transmit maximum
         uint8_t raResponseWindowSize; ///< RA response window size
-        uint8_t connEstFailCount;     ///< the counter value for T300 timer expiration
     };
 
     /**
@@ -202,20 +215,6 @@ class LteEnbCmacSapUser
      * \param params
      */
     virtual void RrcConfigurationUpdateInd(UeConfig params) = 0;
-
-    /**
-     * \brief Is random access completed function
-     *
-     * This method is executed to decide if the non contention based
-     * preamble has to be reused or not upon preamble expiry. If the random access
-     * in connected mode is completed, then the preamble can be reused by other UEs.
-     * If not, the same UE retains the preamble and other available preambles are
-     * assigned to the required UEs.
-     *
-     * \param rnti the C-RNTI identifying the user
-     * \return true if the random access in connected mode is completed
-     */
-    virtual bool IsRandomAccessCompleted(uint16_t rnti) = 0;
 };
 
 } // namespace ns3

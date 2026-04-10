@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
@@ -9,6 +21,9 @@
 #ifndef LTE_UE_CMAC_SAP_H
 #define LTE_UE_CMAC_SAP_H
 
+#include <ns3/eps-bearer.h>
+#include <ns3/ff-mac-common.h>
+#include <ns3/lte-common.h>
 #include <ns3/packet.h>
 
 namespace ns3
@@ -33,7 +48,6 @@ class LteUeCmacSapProvider
         uint8_t numberOfRaPreambles;  ///< number of RA preambles
         uint8_t preambleTransMax;     ///< preamble transmit maximum
         uint8_t raResponseWindowSize; ///< RA response window size
-        uint8_t connEstFailCount;     ///< the counter value for T300 timer expiration
     };
 
     /**
@@ -98,18 +112,6 @@ class LteUeCmacSapProvider
      * \param rnti the cell-specific UE identifier
      */
     virtual void SetRnti(uint16_t rnti) = 0;
-
-    /**
-     * \brief Notify MAC about the successful RRC connection
-     * establishment.
-     */
-    virtual void NotifyConnectionSuccessful() = 0;
-
-    /**
-     * \brief A method call by UE RRC to communicate the IMSI to the UE MAC
-     * \param imsi the IMSI of the UE
-     */
-    virtual void SetImsi(uint64_t imsi) = 0;
 };
 
 /**

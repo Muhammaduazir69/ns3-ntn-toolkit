@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -92,7 +104,7 @@ LteDownlinkPowerControlTestSuite::LteDownlinkPowerControlTestSuite()
                         powerTxMap,
                         activeRbs_txpowdB30nrb6run1earfcn500,
                         spectrumValue_txpowdB30nrb6run1earfcn500),
-                    TestCase::Duration::QUICK);
+                    Duration::QUICK);
     }
     {
         // if power for RB not present, but RB is active, use powerTx
@@ -135,7 +147,7 @@ LteDownlinkPowerControlTestSuite::LteDownlinkPowerControlTestSuite()
                         powerTxMap,
                         activeRbs_txpowdB30nrb6run1earfcn500,
                         spectrumValue_txpowdB30nrb6run1earfcn500),
-                    TestCase::Duration::QUICK);
+                    Duration::QUICK);
     }
     {
         std::vector<int> activeRbs_txpowdB30nrb25run1earfcn500(15);
@@ -228,7 +240,7 @@ LteDownlinkPowerControlTestSuite::LteDownlinkPowerControlTestSuite()
                         powerTxMap,
                         activeRbs_txpowdB30nrb25run1earfcn500,
                         spectrumValue_txpowdB30nrb25run1earfcn500),
-                    TestCase::Duration::QUICK);
+                    Duration::QUICK);
     }
     {
         // if power for RB not present, but RB is active, use powerTx
@@ -312,56 +324,56 @@ LteDownlinkPowerControlTestSuite::LteDownlinkPowerControlTestSuite()
                         powerTxMap,
                         activeRbs_txpowdB30nrb25run1earfcn500,
                         spectrumValue_txpowdB30nrb25run1earfcn500),
-                    TestCase::Duration::QUICK);
+                    Duration::QUICK);
     }
 
     // Downlink DATA and CONTROL channels power comparison
     AddTestCase(new LteDownlinkPowerControlTestCase(false,
                                                     LteRrcSap::PdschConfigDedicated::dB0,
                                                     "DataCtrlPowerDifference_noChange"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkPowerControlTestCase(true,
                                                     LteRrcSap::PdschConfigDedicated::dB_6,
                                                     "DataCtrlPowerDifference_dB_6"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkPowerControlTestCase(true,
                                                     LteRrcSap::PdschConfigDedicated::dB_4dot77,
                                                     "DataCtrlPowerDifference_dB_4dot77"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkPowerControlTestCase(true,
                                                     LteRrcSap::PdschConfigDedicated::dB_3,
                                                     "DataCtrlPowerDifference_dB_3"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkPowerControlTestCase(true,
                                                     LteRrcSap::PdschConfigDedicated::dB_1dot77,
                                                     "DataCtrlPowerDifference_dB_1dot77"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkPowerControlTestCase(true,
                                                     LteRrcSap::PdschConfigDedicated::dB0,
                                                     "DataCtrlPowerDifference_dB0"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkPowerControlTestCase(true,
                                                     LteRrcSap::PdschConfigDedicated::dB1,
                                                     "DataCtrlPowerDifference_dB1"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkPowerControlTestCase(true,
                                                     LteRrcSap::PdschConfigDedicated::dB2,
                                                     "DataCtrlPowerDifference_dB2"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkPowerControlTestCase(true,
                                                     LteRrcSap::PdschConfigDedicated::dB3,
                                                     "DataCtrlPowerDifference_dB3"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     // RrcConnectionReconfiguration test
     AddTestCase(
         new LteDownlinkPowerControlRrcConnectionReconfigurationTestCase(false,
                                                                         "RrcConnReconf-IdealRrc"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
     AddTestCase(
         new LteDownlinkPowerControlRrcConnectionReconfigurationTestCase(true,
                                                                         "RrcConnReconf-RealRrc"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
 }
 
 double
@@ -375,10 +387,6 @@ LteDownlinkPowerControlTestSuite::CalculateRbTxPower(double txPower, uint8_t pa)
     return rbTxpower;
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteDownlinkPowerControlTestSuite lteDownlinkPowerControlTestSuite;
 
 /**
@@ -388,7 +396,7 @@ static LteDownlinkPowerControlTestSuite lteDownlinkPowerControlTestSuite;
 LteDownlinkPowerControlSpectrumValueTestCase::LteDownlinkPowerControlSpectrumValueTestCase(
     std::string name,
     uint16_t earfcn,
-    uint16_t bw,
+    uint8_t bw,
     double powerTx,
     std::map<int, double> powerTxMap,
     std::vector<int> activeRbs,
@@ -409,7 +417,7 @@ LteDownlinkPowerControlSpectrumValueTestCase::~LteDownlinkPowerControlSpectrumVa
 }
 
 void
-LteDownlinkPowerControlSpectrumValueTestCase::DoRun()
+LteDownlinkPowerControlSpectrumValueTestCase::DoRun(void)
 {
     NS_LOG_INFO("Creating LteDownlinkPowerControlSpectrumValueTestCase");
     NS_TEST_ASSERT_MSG_EQ(m_actual->GetSpectrumModelUid(),
@@ -437,7 +445,7 @@ LteDownlinkPowerControlTestCase::~LteDownlinkPowerControlTestCase()
 }
 
 void
-LteDownlinkPowerControlTestCase::DoRun()
+LteDownlinkPowerControlTestCase::DoRun(void)
 {
     Config::Reset();
     Config::SetDefault("ns3::LteHelper::UseIdealRrc", BooleanValue(false));
@@ -478,7 +486,7 @@ LteDownlinkPowerControlTestCase::DoRun()
     simpleFfrAlgorithm->SetPdschConfigDedicated(m_pdschConfigDedicated);
 
     // Activate the default EPS bearer
-    EpsBearer::Qci q = EpsBearer::NGBR_VIDEO_TCP_DEFAULT;
+    enum EpsBearer::Qci q = EpsBearer::NGBR_VIDEO_TCP_DEFAULT;
     EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs, bearer);
 
@@ -605,7 +613,7 @@ LteDownlinkPowerControlRrcConnectionReconfigurationTestCase::ChangePdschConfigDe
 }
 
 void
-LteDownlinkPowerControlRrcConnectionReconfigurationTestCase::DoRun()
+LteDownlinkPowerControlRrcConnectionReconfigurationTestCase::DoRun(void)
 {
     Config::Reset();
     Config::SetDefault("ns3::LteHelper::UseIdealRrc", BooleanValue(m_useIdealRrc));
@@ -648,7 +656,7 @@ LteDownlinkPowerControlRrcConnectionReconfigurationTestCase::DoRun()
     simpleFfrAlgorithm->SetPdschConfigDedicated(pdschConfigDedicated);
 
     // Activate the default EPS bearer
-    EpsBearer::Qci q = EpsBearer::NGBR_VIDEO_TCP_DEFAULT;
+    enum EpsBearer::Qci q = EpsBearer::NGBR_VIDEO_TCP_DEFAULT;
     EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs, bearer);
 

@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Giuseppe Piro  <g.piro@poliba.it>
  */
@@ -79,12 +91,12 @@ class LteSpectrumValueHelper
     /**
      *
      *
-     * \param txBandwidthConf the transmission bandwidth
+     * \param txBandwidthConf the tranmission bandwidth
      * configuration in number of resource blocks
      *
      * \return the nominal channel bandwidth in Hz as per 3GPP TS 36.101
      */
-    static double GetChannelBandwidth(uint16_t txBandwidthConf);
+    static double GetChannelBandwidth(uint8_t txBandwidthConf);
 
     /**
      *
@@ -98,7 +110,7 @@ class LteSpectrumValueHelper
      * configuration. If such SpectrumModel does not exist, it is
      * created.
      */
-    static Ptr<SpectrumModel> GetSpectrumModel(uint32_t earfcn, uint16_t bandwidth);
+    static Ptr<SpectrumModel> GetSpectrumModel(uint32_t earfcn, uint8_t bandwidth);
 
     /**
      * create a spectrum value representing the power spectral
@@ -115,7 +127,7 @@ class LteSpectrumValueHelper
      * Density in W/Hz for each Resource Block
      */
     static Ptr<SpectrumValue> CreateTxPowerSpectralDensity(uint32_t earfcn,
-                                                           uint16_t bandwidth,
+                                                           uint8_t bandwidth,
                                                            double powerTx,
                                                            std::vector<int> activeRbs);
 
@@ -137,7 +149,7 @@ class LteSpectrumValueHelper
      * Density in W/Hz for each Resource Block
      */
     static Ptr<SpectrumValue> CreateTxPowerSpectralDensity(uint32_t earfcn,
-                                                           uint16_t bandwidth,
+                                                           uint8_t bandwidth,
                                                            double powerTx,
                                                            std::map<int, double> powerTxMap,
                                                            std::vector<int> activeRbs);
@@ -158,7 +170,7 @@ class LteSpectrumValueHelper
      * Density in W/Hz for each Resource Block
      */
     static Ptr<SpectrumValue> CreateUlTxPowerSpectralDensity(uint16_t earfcn,
-                                                             uint16_t bandwidth,
+                                                             uint8_t bandwidth,
                                                              double powerTx,
                                                              std::vector<int> activeRbs);
 
@@ -175,7 +187,7 @@ class LteSpectrumValueHelper
      * Density in W/Hz for each Resource Block
      */
     static Ptr<SpectrumValue> CreateNoisePowerSpectralDensity(uint32_t earfcn,
-                                                              uint16_t bandwidth,
+                                                              uint8_t bandwidth,
                                                               double noiseFigure);
 
     /**

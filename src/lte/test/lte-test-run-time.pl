@@ -13,12 +13,12 @@ my @nEnb = (1, 2, 4, 6, 8, 12, 14, 18, 22);
 my @nFloors = (0, 1);
 my @simTime = (5, 10);
 
-# Configure and compile first the program to avoid counting compilation time as running time
-my $launch = "CXXFLAGS=\"-O3 -w\" ./ns3 configure -d optimized --enable-static --enable-examples --enable-modules=lte";
+# Configure and complite first the program to avoid counting compilation time as running time
+my $launch = "CXXFLAGS=\"-O3 -w\" ./waf -d optimized configure --enable-static --enable-examples --enable-modules=lte";
 my $out;
 my $err;
 capture { system($launch ) } \$out, \$err;
-$launch = "./ns3 run \'lena-profiling --simTime=0.1 --nUe=1 --nEnb=1 --nFloors=0\'";
+$launch = "./waf --run \'lena-profiling --simTime=0.1 --nUe=1 --nEnb=1 --nFloors=0\'";
 capture { system($launch ) } \$out, \$err;
 
 foreach my $time (@simTime)
@@ -32,10 +32,10 @@ foreach my $time (@simTime)
             my $timeStats = Statistics::Descriptive::Full->new();
             for ( my $iteration = 0 ; $iteration < $nIterations ; $iteration++ )
             {
-               $launch = "time -f \"real%E\" ./ns3 run \'lena-profiling --simTime=$time --nUe=$ue --nEnb=$enb --nFloors=$floor\'";
+               $launch = "time ./waf --run \'lena-profiling --simTime=$time --nUe=$ue --nEnb=$enb --nFloors=$floor\'";
                print "$launch\n";
                capture { system($launch ) } \$out, \$err;
-               $err =~ /real(.+):(.+)/;
+               $err =~ /real(.+)m(.+)s/;
                my $minutes = $1;
                my $seconds = $minutes * 60 + $2;
                $timeStats->add_data($seconds);

@@ -1,22 +1,36 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2015 Danilo Abrignani
+ * Copyright (c) 2018, University of Padova, Dep. of Information Engineering, SIGNET lab.
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Danilo Abrignani <danilo.abrignani@unibo.it>
  *
+ * Modified by: Tommaso Zugno <tommasozugno@gmail.com>
+ *                 Integration of Carrier Aggregation for the mmWave module
  */
 
 #ifndef LTE_ENB_COMPONENT_CARRIER_MANAGER_H
 #define LTE_ENB_COMPONENT_CARRIER_MANAGER_H
 
-#include "lte-ccm-mac-sap.h"
-#include "lte-ccm-rrc-sap.h"
-#include "lte-enb-cmac-sap.h"
-#include "lte-enb-rrc.h"
-#include "lte-mac-sap.h"
-#include "lte-rrc-sap.h"
-
+#include <ns3/lte-ccm-mac-sap.h>
+#include <ns3/lte-ccm-rrc-sap.h>
+#include <ns3/lte-enb-cmac-sap.h>
+#include <ns3/lte-enb-rrc.h>
+#include <ns3/lte-mac-sap.h>
+#include <ns3/lte-rrc-sap.h>
 #include <ns3/object.h>
 
 #include <map>
@@ -69,7 +83,7 @@ class LteEnbComponentCarrierManager : public Object
 {
   public:
     LteEnbComponentCarrierManager();
-    ~LteEnbComponentCarrierManager() override;
+    virtual ~LteEnbComponentCarrierManager();
     /**
      * \brief Get the type ID.
      * \return the object TypeId
@@ -140,9 +154,11 @@ class LteEnbComponentCarrierManager : public Object
      */
     virtual void SetNumberOfComponentCarriers(uint16_t noOfComponentCarriers);
 
+    virtual void SetBandwidthMap(std::map<uint8_t, double> bandwidthMap);
+
   protected:
     // inherited from Object
-    void DoDispose() override;
+    virtual void DoDispose();
 
     /**
      * \brief Implementation of ReportUeMeas.
@@ -152,22 +168,18 @@ class LteEnbComponentCarrierManager : public Object
      */
     virtual void DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults measResults) = 0;
 
-    /**
-     * \brief Structure to represent UE info
-     */
-    struct UeInfo
-    {
-        std::map<uint8_t, LteMacSapUser*>
-            m_ueAttached; //!< Map from LCID to SAP of the RLC instance.
-        std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>
-            m_rlcLcInstantiated; //!< Logical channel configuration per flow Id (rnti, lcid).
-        uint8_t m_enabledComponentCarrier; //!< The number of enabled component carriers.
-        uint8_t m_ueState;                 //!< RRC states of UE, e.g. CONNECTED_NORMALLY
-    };
-
-    std::map<uint16_t, UeInfo> m_ueInfo; //!< The map from RNTI to UE information.
-    uint16_t m_noOfComponentCarriers;    //!< The number component of carriers that are supported by
-                                         //!< this eNb.
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>
+        m_ueAttached; //!< The map that contains the rnti, lcid, SAP of the RLC instance
+    std::map<uint16_t, std::map<uint8_t, LteEnbCmacSapProvider::LcInfo>>
+        m_rlcLcInstantiated; //!< This map contains logical channel configuration per flow Id (rnti,
+                             //!< lcid).
+    std::map<uint16_t, uint8_t>
+        m_enabledComponentCarrier; //!< This map tells for each RNTI the number of enabled component
+                                   //!< carriers.
+    std::map<uint16_t, uint8_t>
+        m_ueState; //!< Map of RRC states per UE (rnti, state), e.g. CONNECTED_NORMALLY
+    uint16_t m_noOfComponentCarriers; //!< The number component of carriers that are supported by
+                                      //!< this eNb.
     // pointer to RRC object for direct function calls, e.g. when CCM needs to obtain
     // a pointer to RLC object of a specific flow
     Ptr<LteEnbRrc> m_rrc; //!< A pointer to the RRC instance of this eNb.
@@ -211,6 +223,7 @@ class LteEnbComponentCarrierManager : public Object
         m_ccmRrcSapProvider; //!< A pointer to the SAP interface of the CCM instance to receive API
                              //!< calls from the eNodeB RRC instance.
 
+    std::map<uint8_t, double> m_bandwidthMap;
 }; // end of class LteEnbComponentCarrierManager
 
 } // end of namespace ns3

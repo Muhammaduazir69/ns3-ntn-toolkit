@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -10,7 +22,8 @@
 #ifndef LTE_FFR_SAP_H
 #define LTE_FFR_SAP_H
 
-#include "ff-mac-sched-sap.h"
+#include <ns3/ff-mac-sched-sap.h>
+#include <ns3/lte-rrc-sap.h>
 
 #include <map>
 
@@ -89,14 +102,14 @@ class LteFfrSapProvider
      * \param params the struct FfMacSchedSapProvider::SchedDlCqiInfoReqParameters
      */
     virtual void ReportDlCqiInfo(
-        const FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params) = 0;
+        const struct FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params) = 0;
 
     /**
      * \brief ReportUlCqiInfo
      * \param params the struct FfMacSchedSapProvider::SchedUlCqiInfoReqParameters
      */
     virtual void ReportUlCqiInfo(
-        const FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params) = 0;
+        const struct FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params) = 0;
 
     /**
      * \brief ReportUlCqiInfo
@@ -115,7 +128,7 @@ class LteFfrSapProvider
      * \brief Get the minimum continuous Ul bandwidth
      * \returns the minimum continuous UL bandwidth
      */
-    virtual uint16_t GetMinContinuousUlBandwidth() = 0;
+    virtual uint8_t GetMinContinuousUlBandwidth() = 0;
 }; // end of class LteFfrSapProvider
 
 /**
@@ -148,21 +161,21 @@ class MemberLteFfrSapProvider : public LteFfrSapProvider
      */
     MemberLteFfrSapProvider(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberLteFfrSapProvider() = delete;
-
     // inherited from LteFfrSapProvider
-    std::vector<bool> GetAvailableDlRbg() override;
-    bool IsDlRbgAvailableForUe(int i, uint16_t rnti) override;
-    std::vector<bool> GetAvailableUlRbg() override;
-    bool IsUlRbgAvailableForUe(int i, uint16_t rnti) override;
-    void ReportDlCqiInfo(const FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params) override;
-    void ReportUlCqiInfo(const FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params) override;
-    void ReportUlCqiInfo(std::map<uint16_t, std::vector<double>> ulCqiMap) override;
-    uint8_t GetTpc(uint16_t rnti) override;
-    uint16_t GetMinContinuousUlBandwidth() override;
+    virtual std::vector<bool> GetAvailableDlRbg();
+    virtual bool IsDlRbgAvailableForUe(int i, uint16_t rnti);
+    virtual std::vector<bool> GetAvailableUlRbg();
+    virtual bool IsUlRbgAvailableForUe(int i, uint16_t rnti);
+    virtual void ReportDlCqiInfo(
+        const struct FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params);
+    virtual void ReportUlCqiInfo(
+        const struct FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params);
+    virtual void ReportUlCqiInfo(std::map<uint16_t, std::vector<double>> ulCqiMap);
+    virtual uint8_t GetTpc(uint16_t rnti);
+    virtual uint8_t GetMinContinuousUlBandwidth();
 
   private:
+    MemberLteFfrSapProvider();
     C* m_owner; ///< the owner class
 
 }; // end of class MemberLteFfrSapProvider
@@ -204,7 +217,7 @@ MemberLteFfrSapProvider<C>::IsUlRbgAvailableForUe(int i, uint16_t rnti)
 template <class C>
 void
 MemberLteFfrSapProvider<C>::ReportDlCqiInfo(
-    const FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
+    const struct FfMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)
 {
     m_owner->DoReportDlCqiInfo(params);
 }
@@ -212,7 +225,7 @@ MemberLteFfrSapProvider<C>::ReportDlCqiInfo(
 template <class C>
 void
 MemberLteFfrSapProvider<C>::ReportUlCqiInfo(
-    const FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
+    const struct FfMacSchedSapProvider::SchedUlCqiInfoReqParameters& params)
 {
     m_owner->DoReportUlCqiInfo(params);
 }
@@ -232,7 +245,7 @@ MemberLteFfrSapProvider<C>::GetTpc(uint16_t rnti)
 }
 
 template <class C>
-uint16_t
+uint8_t
 MemberLteFfrSapProvider<C>::GetMinContinuousUlBandwidth()
 {
     return m_owner->DoGetMinContinuousUlBandwidth();
@@ -254,10 +267,9 @@ class MemberLteFfrSapUser : public LteFfrSapUser
      */
     MemberLteFfrSapUser(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberLteFfrSapUser() = delete;
-
+    // inherited from LteFfrSapUser
   private:
+    MemberLteFfrSapUser();
     C* m_owner; ///< the owner class
 
 }; // end of class LteFfrSapUser

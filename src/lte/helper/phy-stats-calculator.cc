@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Jaume Nin <jnin@cttc.es>
  *         Danilo Abrignani <danilo.abrignani@unibo.it> (Modification due to new Architecture -
@@ -32,24 +44,10 @@ PhyStatsCalculator::PhyStatsCalculator()
 PhyStatsCalculator::~PhyStatsCalculator()
 {
     NS_LOG_FUNCTION(this);
-    if (m_interferenceOutFile.is_open())
-    {
-        m_interferenceOutFile.close();
-    }
-
-    if (m_rsrpOutFile.is_open())
-    {
-        m_rsrpOutFile.close();
-    }
-
-    if (m_ueSinrOutFile.is_open())
-    {
-        m_ueSinrOutFile.close();
-    }
 }
 
 TypeId
-PhyStatsCalculator::GetTypeId()
+PhyStatsCalculator::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::PhyStatsCalculator")
@@ -81,7 +79,7 @@ PhyStatsCalculator::SetCurrentCellRsrpSinrFilename(std::string filename)
 }
 
 std::string
-PhyStatsCalculator::GetCurrentCellRsrpSinrFilename()
+PhyStatsCalculator::GetCurrentCellRsrpSinrFilename(void)
 {
     return m_RsrpSinrFilename;
 }
@@ -93,7 +91,7 @@ PhyStatsCalculator::SetUeSinrFilename(std::string filename)
 }
 
 std::string
-PhyStatsCalculator::GetUeSinrFilename()
+PhyStatsCalculator::GetUeSinrFilename(void)
 {
     return m_ueSinrFilename;
 }
@@ -105,7 +103,7 @@ PhyStatsCalculator::SetInterferenceFilename(std::string filename)
 }
 
 std::string
-PhyStatsCalculator::GetInterferenceFilename()
+PhyStatsCalculator::GetInterferenceFilename(void)
 {
     return m_interferenceFilename;
 }
@@ -119,28 +117,39 @@ PhyStatsCalculator::ReportCurrentCellRsrpSinr(uint16_t cellId,
                                               uint8_t componentCarrierId)
 {
     NS_LOG_FUNCTION(this << cellId << imsi << rnti << rsrp << sinr);
-    NS_LOG_INFO("Write RSRP/SINR Phy Stats in " << GetCurrentCellRsrpSinrFilename());
+    NS_LOG_INFO("Write RSRP/SINR Phy Stats in " << GetCurrentCellRsrpSinrFilename().c_str());
 
-    if (m_RsrpSinrFirstWrite)
+    std::ofstream outFile;
+    if (m_RsrpSinrFirstWrite == true)
     {
-        m_rsrpOutFile.open(GetCurrentCellRsrpSinrFilename());
-        if (!m_rsrpOutFile.is_open())
+        outFile.open(GetCurrentCellRsrpSinrFilename().c_str());
+        if (!outFile.is_open())
         {
-            NS_LOG_ERROR("Can't open file " << GetCurrentCellRsrpSinrFilename());
+            NS_LOG_ERROR("Can't open file " << GetCurrentCellRsrpSinrFilename().c_str());
             return;
         }
         m_RsrpSinrFirstWrite = false;
-        m_rsrpOutFile << "% time\tcellId\tIMSI\tRNTI\trsrp\tsinr\tComponentCarrierId";
-        m_rsrpOutFile << "\n";
+        outFile << "% time\tcellId\tIMSI\tRNTI\trsrp\tsinr\tComponentCarrierId";
+        outFile << std::endl;
+    }
+    else
+    {
+        outFile.open(GetCurrentCellRsrpSinrFilename().c_str(), std::ios_base::app);
+        if (!outFile.is_open())
+        {
+            NS_LOG_ERROR("Can't open file " << GetCurrentCellRsrpSinrFilename().c_str());
+            return;
+        }
     }
 
-    m_rsrpOutFile << Simulator::Now().GetSeconds() << "\t";
-    m_rsrpOutFile << cellId << "\t";
-    m_rsrpOutFile << imsi << "\t";
-    m_rsrpOutFile << rnti << "\t";
-    m_rsrpOutFile << rsrp << "\t";
-    m_rsrpOutFile << sinr << "\t";
-    m_rsrpOutFile << (uint32_t)componentCarrierId << std::endl;
+    outFile << Simulator::Now().GetNanoSeconds() / (double)1e9 << "\t";
+    outFile << cellId << "\t";
+    outFile << imsi << "\t";
+    outFile << rnti << "\t";
+    outFile << rsrp << "\t";
+    outFile << sinr << "\t";
+    outFile << (uint32_t)componentCarrierId << std::endl;
+    outFile.close();
 }
 
 void
@@ -151,50 +160,73 @@ PhyStatsCalculator::ReportUeSinr(uint16_t cellId,
                                  uint8_t componentCarrierId)
 {
     NS_LOG_FUNCTION(this << cellId << imsi << rnti << sinrLinear);
-    NS_LOG_INFO("Write SINR Linear Phy Stats in " << GetUeSinrFilename());
+    NS_LOG_INFO("Write SINR Linear Phy Stats in " << GetUeSinrFilename().c_str());
 
-    if (m_UeSinrFirstWrite)
+    std::ofstream outFile;
+    if (m_UeSinrFirstWrite == true)
     {
-        m_ueSinrOutFile.open(GetUeSinrFilename());
-        if (!m_ueSinrOutFile.is_open())
+        outFile.open(GetUeSinrFilename().c_str());
+        if (!outFile.is_open())
         {
-            NS_LOG_ERROR("Can't open file " << GetUeSinrFilename());
+            NS_LOG_ERROR("Can't open file " << GetUeSinrFilename().c_str());
             return;
         }
         m_UeSinrFirstWrite = false;
-        m_ueSinrOutFile << "% time\tcellId\tIMSI\tRNTI\tsinrLinear\tcomponentCarrierId";
-        m_ueSinrOutFile << "\n";
+        outFile << "% time\tcellId\tIMSI\tRNTI\tsinrLinear\tcomponentCarrierId";
+        outFile << std::endl;
     }
-    m_ueSinrOutFile << Simulator::Now().GetSeconds() << "\t";
-    m_ueSinrOutFile << cellId << "\t";
-    m_ueSinrOutFile << imsi << "\t";
-    m_ueSinrOutFile << rnti << "\t";
-    m_ueSinrOutFile << sinrLinear << "\t";
-    m_ueSinrOutFile << (uint32_t)componentCarrierId << std::endl;
+    else
+    {
+        outFile.open(GetUeSinrFilename().c_str(), std::ios_base::app);
+        if (!outFile.is_open())
+        {
+            NS_LOG_ERROR("Can't open file " << GetUeSinrFilename().c_str());
+            return;
+        }
+    }
+
+    outFile << Simulator::Now().GetNanoSeconds() / (double)1e9 << "\t";
+    outFile << cellId << "\t";
+    outFile << imsi << "\t";
+    outFile << rnti << "\t";
+    outFile << sinrLinear << "\t";
+    outFile << (uint32_t)componentCarrierId << std::endl;
+    outFile.close();
 }
 
 void
 PhyStatsCalculator::ReportInterference(uint16_t cellId, Ptr<SpectrumValue> interference)
 {
     NS_LOG_FUNCTION(this << cellId << interference);
-    NS_LOG_INFO("Write Interference Phy Stats in " << GetInterferenceFilename());
+    NS_LOG_INFO("Write Interference Phy Stats in " << GetInterferenceFilename().c_str());
 
-    if (m_InterferenceFirstWrite)
+    std::ofstream outFile;
+    if (m_InterferenceFirstWrite == true)
     {
-        m_interferenceOutFile.open(GetInterferenceFilename());
-        if (!m_interferenceOutFile.is_open())
+        outFile.open(GetInterferenceFilename().c_str());
+        if (!outFile.is_open())
         {
-            NS_LOG_ERROR("Can't open file " << GetInterferenceFilename());
+            NS_LOG_ERROR("Can't open file " << GetInterferenceFilename().c_str());
             return;
         }
         m_InterferenceFirstWrite = false;
-        m_interferenceOutFile << "% time\tcellId\tInterference";
-        m_interferenceOutFile << "\n";
+        outFile << "% time\tcellId\tInterference";
+        outFile << std::endl;
+    }
+    else
+    {
+        outFile.open(GetInterferenceFilename().c_str(), std::ios_base::app);
+        if (!outFile.is_open())
+        {
+            NS_LOG_ERROR("Can't open file " << GetInterferenceFilename().c_str());
+            return;
+        }
     }
 
-    m_interferenceOutFile << Simulator::Now().GetSeconds() << "\t";
-    m_interferenceOutFile << cellId << "\t";
-    m_interferenceOutFile << *interference;
+    outFile << Simulator::Now().GetNanoSeconds() / (double)1e9 << "\t";
+    outFile << cellId << "\t";
+    outFile << *interference;
+    outFile.close();
 }
 
 void
@@ -209,7 +241,7 @@ PhyStatsCalculator::ReportCurrentCellRsrpSinrCallback(Ptr<PhyStatsCalculator> ph
     NS_LOG_FUNCTION(phyStats << path);
     uint64_t imsi = 0;
     std::string pathUePhy = path.substr(0, path.find("/ComponentCarrierMapUe"));
-    if (phyStats->ExistsImsiPath(pathUePhy))
+    if (phyStats->ExistsImsiPath(pathUePhy) == true)
     {
         imsi = phyStats->GetImsiPath(pathUePhy);
     }
@@ -237,7 +269,7 @@ PhyStatsCalculator::ReportUeSinr(Ptr<PhyStatsCalculator> phyStats,
     pathAndRnti << path << "/" << rnti;
     std::string pathEnbMac = path.substr(0, path.find("/ComponentCarrierMap"));
     pathEnbMac += "/LteEnbMac/DlScheduling";
-    if (phyStats->ExistsImsiPath(pathAndRnti.str()))
+    if (phyStats->ExistsImsiPath(pathAndRnti.str()) == true)
     {
         imsi = phyStats->GetImsiPath(pathAndRnti.str());
     }

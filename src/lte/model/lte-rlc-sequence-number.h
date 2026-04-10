@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -14,6 +26,8 @@
 #include <iostream>
 #include <limits>
 #include <stdint.h>
+
+// #include "ns3/lte-rlc.h"
 
 namespace ns3
 {
@@ -133,7 +147,7 @@ class SequenceNumber10
     uint16_t operator-(const SequenceNumber10& other) const
     {
         uint16_t diff = m_value - other.m_value;
-        return diff;
+        return (diff);
     }
 
     /**
@@ -144,9 +158,9 @@ class SequenceNumber10
     bool operator>(const SequenceNumber10& other) const
     {
         NS_ASSERT(m_modulusBase == other.m_modulusBase);
-        uint16_t v1 = (m_value - m_modulusBase) % 1024;
-        uint16_t v2 = (other.m_value - other.m_modulusBase) % 1024;
-        return v1 > v2;
+        SequenceNumber10 v1((m_value - m_modulusBase) % 1024);
+        SequenceNumber10 v2((other.m_value - other.m_modulusBase) % 1024);
+        return (v1.GetValue() > v2.GetValue());
     }
 
     /**

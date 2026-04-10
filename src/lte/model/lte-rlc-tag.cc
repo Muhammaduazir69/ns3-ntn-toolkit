@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 CTTC
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Jaume Nin <jaume.nin@cttc.es>
  */
@@ -30,7 +42,7 @@ RlcTag::RlcTag(Time senderTimestamp)
 }
 
 TypeId
-RlcTag::GetTypeId()
+RlcTag::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::RlcTag").SetParent<Tag>().SetGroupName("Lte").AddConstructor<RlcTag>();
@@ -38,13 +50,13 @@ RlcTag::GetTypeId()
 }
 
 TypeId
-RlcTag::GetInstanceTypeId() const
+RlcTag::GetInstanceTypeId(void) const
 {
     return GetTypeId();
 }
 
 uint32_t
-RlcTag::GetSerializedSize() const
+RlcTag::GetSerializedSize(void) const
 {
     return sizeof(Time);
 }

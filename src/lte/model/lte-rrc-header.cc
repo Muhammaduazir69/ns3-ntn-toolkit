@@ -1,15 +1,31 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Lluis Parcerisa <lparcerisa@cttc.cat>
  * Modified by:
  *          Danilo Abrignani <danilo.abrignani@unibo.it> (Carrier Aggregation - GSoC 2015)
  *          Biljana Bojovic <biljana.bojovic@cttc.es> (Carrier Aggregation)
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
-#include "lte-rrc-header.h"
+#include "ns3/lte-rrc-header.h"
 
 #include "ns3/log.h"
 
@@ -42,26 +58,26 @@ RrcAsn1Header::RrcAsn1Header()
 }
 
 TypeId
-RrcAsn1Header::GetTypeId()
+RrcAsn1Header::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::RrcAsn1Header").SetParent<Header>().SetGroupName("Lte");
     return tid;
 }
 
 TypeId
-RrcAsn1Header::GetInstanceTypeId() const
+RrcAsn1Header::GetInstanceTypeId(void) const
 {
     return GetTypeId();
 }
 
 int
-RrcAsn1Header::GetMessageType() const
+RrcAsn1Header::GetMessageType()
 {
     return m_messageType;
 }
 
 int
-RrcAsn1Header::BandwidthToEnum(uint16_t bandwidth) const
+RrcAsn1Header::BandwidthToEnum(uint8_t bandwidth) const
 {
     int n;
     switch (bandwidth)
@@ -85,15 +101,15 @@ RrcAsn1Header::BandwidthToEnum(uint16_t bandwidth) const
         n = 5;
         break;
     default:
-        NS_FATAL_ERROR("Wrong bandwidth: " << bandwidth);
+        NS_FATAL_ERROR("Wrong bandwidth: " << (uint16_t)bandwidth);
     }
     return n;
 }
 
-uint16_t
+uint8_t
 RrcAsn1Header::EnumToBandwidth(int n) const
 {
-    uint16_t bw;
+    uint8_t bw;
     switch (n)
     {
     case 0:
@@ -127,17 +143,17 @@ RrcAsn1Header::SerializeDrbToAddModList(std::list<LteRrcSap::DrbToAddMod> drbToA
     SerializeSequenceOf(drbToAddModList.size(), MAX_DRB, 1);
 
     // Serialize the elements in the sequence-of list
-    auto it = drbToAddModList.begin();
+    std::list<LteRrcSap::DrbToAddMod>::iterator it = drbToAddModList.begin();
     for (; it != drbToAddModList.end(); it++)
     {
         // Serialize DRB-ToAddMod sequence
-        // 5 optional fields. Extension marker is present.
+        // 5 otional fields. Extension marker is present.
         std::bitset<5> drbToAddModListOptionalFieldsPresent = std::bitset<5>();
-        drbToAddModListOptionalFieldsPresent.set(4, true);  // eps-BearerIdentity present
-        drbToAddModListOptionalFieldsPresent.set(3, false); // pdcp-Config not present
-        drbToAddModListOptionalFieldsPresent.set(2, true);  // rlc-Config present
-        drbToAddModListOptionalFieldsPresent.set(1, true);  // logicalChannelIdentity present
-        drbToAddModListOptionalFieldsPresent.set(0, true);  // logicalChannelConfig present
+        drbToAddModListOptionalFieldsPresent.set(4, 1); // eps-BearerIdentity present
+        drbToAddModListOptionalFieldsPresent.set(3, 0); // pdcp-Config not present
+        drbToAddModListOptionalFieldsPresent.set(2, 1); // rlc-Config present
+        drbToAddModListOptionalFieldsPresent.set(1, 1); // logicalChannelIdentity present
+        drbToAddModListOptionalFieldsPresent.set(0, 1); // logicalChannelConfig present
         SerializeSequence(drbToAddModListOptionalFieldsPresent, true);
 
         // Serialize eps-BearerIdentity::=INTEGER (0..15)
@@ -205,6 +221,9 @@ RrcAsn1Header::SerializeDrbToAddModList(std::list<LteRrcSap::DrbToAddMod> drbToA
 
         // Serialize logicalChannelConfig
         SerializeLogicalChannelConfig(it->logicalChannelConfig);
+
+        // MmWave MC functionalities: is_mc field
+        SerializeBoolean(it->is_mc);
     }
 }
 
@@ -215,14 +234,14 @@ RrcAsn1Header::SerializeSrbToAddModList(std::list<LteRrcSap::SrbToAddMod> srbToA
     SerializeSequenceOf(srbToAddModList.size(), 2, 1);
 
     // Serialize the elements in the sequence-of list
-    auto it = srbToAddModList.begin();
+    std::list<LteRrcSap::SrbToAddMod>::iterator it = srbToAddModList.begin();
     for (; it != srbToAddModList.end(); it++)
     {
         // Serialize SRB-ToAddMod sequence
-        // 2 optional fields. Extension marker is present.
+        // 2 otional fields. Extension marker is present.
         std::bitset<2> srbToAddModListOptionalFieldsPresent = std::bitset<2>();
-        srbToAddModListOptionalFieldsPresent.set(1, false); // rlc-Config not present
-        srbToAddModListOptionalFieldsPresent.set(0, true);  // logicalChannelConfig present
+        srbToAddModListOptionalFieldsPresent.set(1, 0); // rlc-Config not present
+        srbToAddModListOptionalFieldsPresent.set(0, 1); // logicalChannelConfig present
         SerializeSequence(srbToAddModListOptionalFieldsPresent, true);
 
         // Serialize srb-Identity ::= INTEGER (1..2)
@@ -322,19 +341,19 @@ RrcAsn1Header::SerializePhysicalConfigDedicated(
     optionalFieldsPhysicalConfigDedicated.set(
         9,
         physicalConfigDedicated.havePdschConfigDedicated); // pdsch-ConfigDedicated
-    optionalFieldsPhysicalConfigDedicated.set(8, false);   // pucch-ConfigDedicated not present
-    optionalFieldsPhysicalConfigDedicated.set(7, false);   // pusch-ConfigDedicated not present
-    optionalFieldsPhysicalConfigDedicated.set(6, false); // uplinkPowerControlDedicated not present
-    optionalFieldsPhysicalConfigDedicated.set(5, false); // tpc-PDCCH-ConfigPUCCH not present
-    optionalFieldsPhysicalConfigDedicated.set(4, false); // tpc-PDCCH-ConfigPUSCH not present
-    optionalFieldsPhysicalConfigDedicated.set(3, false); // cqi-ReportConfig not present
+    optionalFieldsPhysicalConfigDedicated.set(8, 0);       // pucch-ConfigDedicated not present
+    optionalFieldsPhysicalConfigDedicated.set(7, 0);       // pusch-ConfigDedicated not present
+    optionalFieldsPhysicalConfigDedicated.set(6, 0); // uplinkPowerControlDedicated not present
+    optionalFieldsPhysicalConfigDedicated.set(5, 0); // tpc-PDCCH-ConfigPUCCH not present
+    optionalFieldsPhysicalConfigDedicated.set(4, 0); // tpc-PDCCH-ConfigPUSCH not present
+    optionalFieldsPhysicalConfigDedicated.set(3, 0); // cqi-ReportConfig not present
     optionalFieldsPhysicalConfigDedicated.set(
         2,
         physicalConfigDedicated.haveSoundingRsUlConfigDedicated); // soundingRS-UL-ConfigDedicated
     optionalFieldsPhysicalConfigDedicated.set(
         1,
         physicalConfigDedicated.haveAntennaInfoDedicated); // antennaInfo
-    optionalFieldsPhysicalConfigDedicated.set(0, false);   // schedulingRequestConfig not present
+    optionalFieldsPhysicalConfigDedicated.set(0, 0);       // schedulingRequestConfig not present
     SerializeSequence(optionalFieldsPhysicalConfigDedicated, true);
 
     if (physicalConfigDedicated.havePdschConfigDedicated)
@@ -432,9 +451,10 @@ RrcAsn1Header::SerializeRadioResourceConfigDedicated(
     optionalFieldsPresent.set(5, isSrbToAddModListPresent);  // srb-ToAddModList present
     optionalFieldsPresent.set(4, isDrbToAddModListPresent);  // drb-ToAddModList present
     optionalFieldsPresent.set(3, isDrbToReleaseListPresent); // drb-ToReleaseList present
-    optionalFieldsPresent.set(2, false);                     // mac-MainConfig not present
-    optionalFieldsPresent.set(1, false);                     // sps-Config not present
-    optionalFieldsPresent.set(0, radioResourceConfigDedicated.havePhysicalConfigDedicated);
+    optionalFieldsPresent.set(2, 0);                         // mac-MainConfig not present
+    optionalFieldsPresent.set(1, 0);                         // sps-Config not present
+    optionalFieldsPresent.set(0,
+                              (radioResourceConfigDedicated.havePhysicalConfigDedicated) ? 1 : 0);
     SerializeSequence(optionalFieldsPresent, true);
 
     // Serialize srbToAddModList
@@ -453,7 +473,7 @@ RrcAsn1Header::SerializeRadioResourceConfigDedicated(
     if (isDrbToReleaseListPresent)
     {
         SerializeSequenceOf(radioResourceConfigDedicated.drbToReleaseList.size(), MAX_DRB, 1);
-        auto it = radioResourceConfigDedicated.drbToReleaseList.begin();
+        std::list<uint8_t>::iterator it = radioResourceConfigDedicated.drbToReleaseList.begin();
         for (; it != radioResourceConfigDedicated.drbToReleaseList.end(); it++)
         {
             // DRB-Identity ::= INTEGER (1..32)
@@ -473,9 +493,9 @@ RrcAsn1Header::SerializeSystemInformationBlockType1(
 {
     // 3 optional fields, no extension marker.
     std::bitset<3> sysInfoBlk1Opts;
-    sysInfoBlk1Opts.set(2, false); // p-Max absent
-    sysInfoBlk1Opts.set(1, false); // tdd-Config absent
-    sysInfoBlk1Opts.set(0, false); // nonCriticalExtension absent
+    sysInfoBlk1Opts.set(2, 0); // p-Max absent
+    sysInfoBlk1Opts.set(1, 0); // tdd-Config absent
+    sysInfoBlk1Opts.set(0, 0); // nonCriticalExtension absent
     SerializeSequence(sysInfoBlk1Opts, false);
 
     // Serialize cellAccessRelatedInfo
@@ -536,15 +556,15 @@ RrcAsn1Header::SerializeRadioResourceConfigCommon(
 {
     // 9 optional fields. Extension marker yes.
     std::bitset<9> rrCfgCmmOpts;
-    rrCfgCmmOpts.set(8, true);  // rach-ConfigCommon is present
-    rrCfgCmmOpts.set(7, false); // pdsch-ConfigCommon not present
-    rrCfgCmmOpts.set(6, false); // phich-Config not present
-    rrCfgCmmOpts.set(5, false); // pucch-ConfigCommon  not present
-    rrCfgCmmOpts.set(4, false); // soundingRS-UL-ConfigCommon not present
-    rrCfgCmmOpts.set(3, false); // uplinkPowerControlCommon not present
-    rrCfgCmmOpts.set(2, false); // antennaInfoCommon not present
-    rrCfgCmmOpts.set(1, false); // p-Max not present
-    rrCfgCmmOpts.set(0, false); // tdd-Config not present
+    rrCfgCmmOpts.set(8, 1); // rach-ConfigCommon is present
+    rrCfgCmmOpts.set(7, 0); // pdsch-ConfigCommon not present
+    rrCfgCmmOpts.set(6, 0); // phich-Config not present
+    rrCfgCmmOpts.set(5, 0); // pucch-ConfigCommon  not present
+    rrCfgCmmOpts.set(4, 0); // soundingRS-UL-ConfigCommon not present
+    rrCfgCmmOpts.set(3, 0); // uplinkPowerControlCommon not present
+    rrCfgCmmOpts.set(2, 0); // antennaInfoCommon not present
+    rrCfgCmmOpts.set(1, 0); // p-Max not present
+    rrCfgCmmOpts.set(0, 0); // tdd-Config not present
 
     SerializeSequence(rrCfgCmmOpts, true);
 
@@ -663,7 +683,29 @@ RrcAsn1Header::SerializeSystemInformationBlockType2(
     // freqInfo
     SerializeSequence(std::bitset<2>(3), false);
     SerializeInteger((int)systemInformationBlockType2.freqInfo.ulCarrierFreq, 0, MAX_EARFCN);
-    SerializeEnum(6, BandwidthToEnum(systemInformationBlockType2.freqInfo.ulBandwidth));
+    switch (systemInformationBlockType2.freqInfo.ulBandwidth)
+    {
+    case 6:
+        SerializeEnum(6, 0);
+        break;
+    case 15:
+        SerializeEnum(6, 1);
+        break;
+    case 25:
+        SerializeEnum(6, 2);
+        break;
+    case 50:
+        SerializeEnum(6, 3);
+        break;
+    case 75:
+        SerializeEnum(6, 4);
+        break;
+    case 100:
+        SerializeEnum(6, 5);
+        break;
+    default:
+        SerializeEnum(6, 0);
+    }
 
     SerializeInteger(29, 1, 32); // additionalSpectrumEmission
     // timeAlignmentTimerCommon
@@ -680,7 +722,7 @@ RrcAsn1Header::SerializeMeasResults(LteRrcSap::MeasResults measResults) const
     }
 
     std::bitset<4> measResultOptional;
-    measResultOptional.set(3, measResults.haveMeasResultServFreqList);
+    measResultOptional.set(3, measResults.haveScellsMeas);
     measResultOptional.set(2, false); // LocationInfo-r10
     measResultOptional.set(1, false); // MeasResultForECID-r9
     measResultOptional.set(0, measResults.haveMeasResultNeighCells);
@@ -689,14 +731,14 @@ RrcAsn1Header::SerializeMeasResults(LteRrcSap::MeasResults measResults) const
     // Serialize measId
     SerializeInteger(measResults.measId, 1, MAX_MEAS_ID);
 
-    // Serialize measResultPCell sequence
+    // Serialize measResultServCell sequence
     SerializeSequence(std::bitset<0>(0), false);
 
     // Serialize rsrpResult
-    SerializeInteger(measResults.measResultPCell.rsrpResult, 0, 97);
+    SerializeInteger(measResults.rsrpResult, 0, 97);
 
     // Serialize rsrqResult
-    SerializeInteger(measResults.measResultPCell.rsrqResult, 0, 34);
+    SerializeInteger(measResults.rsrqResult, 0, 34);
 
     if (measResults.haveMeasResultNeighCells)
     {
@@ -707,7 +749,8 @@ RrcAsn1Header::SerializeMeasResults(LteRrcSap::MeasResults measResults) const
         SerializeSequenceOf(measResults.measResultListEutra.size(), MAX_CELL_REPORT, 1);
 
         // serialize MeasResultEutra elements in the list
-        for (auto it = measResults.measResultListEutra.begin();
+        std::list<LteRrcSap::MeasResultEutra>::iterator it;
+        for (it = measResults.measResultListEutra.begin();
              it != measResults.measResultListEutra.end();
              it++)
         {
@@ -733,7 +776,8 @@ RrcAsn1Header::SerializeMeasResults(LteRrcSap::MeasResults measResults) const
                 if (!it->cgiInfo.plmnIdentityList.empty())
                 {
                     SerializeSequenceOf(it->cgiInfo.plmnIdentityList.size(), 5, 1);
-                    for (auto it2 = it->cgiInfo.plmnIdentityList.begin();
+                    std::list<uint32_t>::iterator it2;
+                    for (it2 = it->cgiInfo.plmnIdentityList.begin();
                          it2 != it->cgiInfo.plmnIdentityList.end();
                          it2++)
                     {
@@ -759,46 +803,45 @@ RrcAsn1Header::SerializeMeasResults(LteRrcSap::MeasResults measResults) const
             }
         }
     }
-
-    // measResultServFreqList-r10 serialization
-    if (measResults.haveMeasResultServFreqList)
+    if (measResults.haveScellsMeas)
     {
-        // Serialize measResultServFreqList-r10
-        SerializeSequenceOf(measResults.measResultServFreqList.size(), MAX_SCELL_REPORT, 1);
+        // Serialize measResultNeighCells
+        SerializeSequenceOf(measResults.measScellResultList.measResultScell.size(),
+                            MAX_SCELL_REPORT,
+                            1);
         // serialize MeasResultServFreqList-r10 elements in the list
-        for (const auto& it : measResults.measResultServFreqList)
+        std::list<LteRrcSap::MeasResultScell>::iterator it;
+        for (it = measResults.measScellResultList.measResultScell.begin();
+             it != measResults.measScellResultList.measResultScell.end();
+             it++)
         {
-            // Serialize MeasResultServFreq-r10
-            std::bitset<2> measResultServFreqPresent;
-            measResultServFreqPresent[0] = it.haveMeasResultSCell;
-            measResultServFreqPresent[1] = it.haveMeasResultBestNeighCell;
-            SerializeSequence(measResultServFreqPresent, true);
+            // Serialize measId
+            SerializeInteger(it->servFreqId,
+                             0,
+                             MAX_MEAS_ID); // ToDo: change with FreqId, currently is the
+                                           // componentCarrierId Serialize MeasResultServFreqList
+            std::bitset<2> measResultScellPresent;
+            measResultScellPresent[0] =
+                measResults.measScellResultList.haveMeasurementResultsServingSCells;
+            measResultScellPresent[1] =
+                measResults.measScellResultList.haveMeasurementResultsNeighCell; // Not implemented
+            SerializeSequence(measResultScellPresent, true);
 
-            // Serialize servFreqId-r10
-            SerializeInteger(it.servFreqId, 0, 7);
+            // Serialize measResult
+            std::bitset<2> measResultScellFieldsPresent;
+            measResultScellFieldsPresent[1] = it->haveRsrpResult;
+            measResultScellFieldsPresent[0] = it->haveRsrqResult;
+            SerializeSequence(measResultScellFieldsPresent, true);
 
-            if (it.haveMeasResultSCell)
+            if (it->haveRsrpResult)
             {
-                // Serialize rsrpResultSCell-r10
-                SerializeInteger(it.measResultSCell.rsrpResult, 0, 97);
-
-                // Serialize rsrqResultSCell-r10
-                SerializeInteger(it.measResultSCell.rsrqResult, 0, 34);
+                SerializeInteger(it->rsrpResult, 0, 97);
             }
 
-            if (it.haveMeasResultBestNeighCell)
+            if (it->haveRsrqResult)
             {
-                // Serialize physCellId-r10
-                SerializeInteger(it.measResultBestNeighCell.physCellId, 0, 503);
-
-                // Serialize rsrpResultNCell-r10
-                SerializeInteger(it.measResultBestNeighCell.rsrpResult, 0, 97);
-
-                // Serialize rsrqResultNCell-r10
-                SerializeInteger(it.measResultBestNeighCell.rsrqResult, 0, 34);
+                SerializeInteger(it->rsrqResult, 0, 34);
             }
-
-            NS_ASSERT(!it.haveMeasResultBestNeighCell); // Not implemented
         }
     }
 }
@@ -885,7 +928,7 @@ RrcAsn1Header::SerializeRachConfigCommon(LteRrcSap::RachConfigCommon rachConfigC
         SerializeEnum(16, 15);
         break;
     default:
-        NS_FATAL_ERROR("Wrong numberOfRA-Preambles value");
+        SerializeEnum(16, 0);
     }
 
     SerializeSequence(std::bitset<0>(0), false); // powerRampingParameters
@@ -966,25 +1009,6 @@ RrcAsn1Header::SerializeRachConfigCommon(LteRrcSap::RachConfigCommon rachConfigC
 
     SerializeEnum(8, 0);       // mac-ContentionResolutionTimer
     SerializeInteger(1, 1, 8); // maxHARQ-Msg3Tx
-
-    // connEstFailCount
-    switch (rachConfigCommon.txFailParam.connEstFailCount)
-    {
-    case 1:
-        SerializeEnum(8, 1);
-        break;
-    case 2:
-        SerializeEnum(8, 2);
-        break;
-    case 3:
-        SerializeEnum(8, 3);
-        break;
-    case 4:
-        SerializeEnum(8, 4);
-        break;
-    default:
-        SerializeEnum(8, 1);
-    }
 }
 
 void
@@ -1128,7 +1152,7 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
     if (!measConfig.measObjectToRemoveList.empty())
     {
         SerializeSequenceOf(measConfig.measObjectToRemoveList.size(), MAX_OBJECT_ID, 1);
-        for (auto it = measConfig.measObjectToRemoveList.begin();
+        for (std::list<uint8_t>::iterator it = measConfig.measObjectToRemoveList.begin();
              it != measConfig.measObjectToRemoveList.end();
              it++)
         {
@@ -1139,7 +1163,8 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
     if (!measConfig.measObjectToAddModList.empty())
     {
         SerializeSequenceOf(measConfig.measObjectToAddModList.size(), MAX_OBJECT_ID, 1);
-        for (auto it = measConfig.measObjectToAddModList.begin();
+        for (std::list<LteRrcSap::MeasObjectToAddMod>::iterator it =
+                 measConfig.measObjectToAddModList.begin();
              it != measConfig.measObjectToAddModList.end();
              it++)
         {
@@ -1160,7 +1185,29 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
             SerializeInteger(it->measObjectEutra.carrierFreq, 0, MAX_EARFCN);
 
             // Serialize  allowedMeasBandwidth
-            SerializeEnum(6, BandwidthToEnum(it->measObjectEutra.allowedMeasBandwidth));
+            switch (it->measObjectEutra.allowedMeasBandwidth)
+            {
+            case 6:
+                SerializeEnum(6, 0);
+                break;
+            case 15:
+                SerializeEnum(6, 1);
+                break;
+            case 25:
+                SerializeEnum(6, 2);
+                break;
+            case 50:
+                SerializeEnum(6, 3);
+                break;
+            case 75:
+                SerializeEnum(6, 4);
+                break;
+            case 100:
+                SerializeEnum(6, 5);
+                break;
+            default:
+                SerializeEnum(6, 0);
+            }
 
             SerializeBoolean(it->measObjectEutra.presenceAntennaPort1);
             SerializeBitstring(std::bitset<2>(it->measObjectEutra.neighCellConfig));
@@ -1169,7 +1216,8 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
             if (!it->measObjectEutra.cellsToRemoveList.empty())
             {
                 SerializeSequenceOf(it->measObjectEutra.cellsToRemoveList.size(), MAX_CELL_MEAS, 1);
-                for (auto it2 = it->measObjectEutra.cellsToRemoveList.begin();
+                for (std::list<uint8_t>::iterator it2 =
+                         it->measObjectEutra.cellsToRemoveList.begin();
                      it2 != it->measObjectEutra.cellsToRemoveList.end();
                      it2++)
                 {
@@ -1180,7 +1228,8 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
             if (!it->measObjectEutra.cellsToAddModList.empty())
             {
                 SerializeSequenceOf(it->measObjectEutra.cellsToAddModList.size(), MAX_CELL_MEAS, 1);
-                for (auto it2 = it->measObjectEutra.cellsToAddModList.begin();
+                for (std::list<LteRrcSap::CellsToAddMod>::iterator it2 =
+                         it->measObjectEutra.cellsToAddModList.begin();
                      it2 != it->measObjectEutra.cellsToAddModList.end();
                      it2++)
                 {
@@ -1202,7 +1251,8 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
                 SerializeSequenceOf(it->measObjectEutra.blackCellsToRemoveList.size(),
                                     MAX_CELL_MEAS,
                                     1);
-                for (auto it2 = it->measObjectEutra.blackCellsToRemoveList.begin();
+                for (std::list<uint8_t>::iterator it2 =
+                         it->measObjectEutra.blackCellsToRemoveList.begin();
                      it2 != it->measObjectEutra.blackCellsToRemoveList.end();
                      it2++)
                 {
@@ -1215,7 +1265,8 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
                 SerializeSequenceOf(it->measObjectEutra.blackCellsToAddModList.size(),
                                     MAX_CELL_MEAS,
                                     1);
-                for (auto it2 = it->measObjectEutra.blackCellsToAddModList.begin();
+                for (std::list<LteRrcSap::BlackCellsToAddMod>::iterator it2 =
+                         it->measObjectEutra.blackCellsToAddModList.begin();
                      it2 != it->measObjectEutra.blackCellsToAddModList.end();
                      it2++)
                 {
@@ -1224,7 +1275,7 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
 
                     // Serialize PhysCellIdRange
                     // range optional
-                    std::bitset<1> rangePresent(it2->physCellIdRange.haveRange);
+                    std::bitset<1> rangePresent = std::bitset<1>(it2->physCellIdRange.haveRange);
                     SerializeSequence(rangePresent, false);
                     SerializeInteger(it2->physCellIdRange.start, 0, 503);
                     if (it2->physCellIdRange.haveRange)
@@ -1290,7 +1341,7 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
     if (!measConfig.reportConfigToRemoveList.empty())
     {
         SerializeSequenceOf(measConfig.reportConfigToRemoveList.size(), MAX_REPORT_CONFIG_ID, 1);
-        for (auto it = measConfig.reportConfigToRemoveList.begin();
+        for (std::list<uint8_t>::iterator it = measConfig.reportConfigToRemoveList.begin();
              it != measConfig.reportConfigToRemoveList.end();
              it++)
         {
@@ -1301,7 +1352,8 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
     if (!measConfig.reportConfigToAddModList.empty())
     {
         SerializeSequenceOf(measConfig.reportConfigToAddModList.size(), MAX_REPORT_CONFIG_ID, 1);
-        for (auto it = measConfig.reportConfigToAddModList.begin();
+        for (std::list<LteRrcSap::ReportConfigToAddMod>::iterator it =
+                 measConfig.reportConfigToAddModList.begin();
              it != measConfig.reportConfigToAddModList.end();
              it++)
         {
@@ -1526,7 +1578,7 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
     if (!measConfig.measIdToRemoveList.empty())
     {
         SerializeSequenceOf(measConfig.measIdToRemoveList.size(), MAX_MEAS_ID, 1);
-        for (auto it = measConfig.measIdToRemoveList.begin();
+        for (std::list<uint8_t>::iterator it = measConfig.measIdToRemoveList.begin();
              it != measConfig.measIdToRemoveList.end();
              it++)
         {
@@ -1537,7 +1589,8 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
     if (!measConfig.measIdToAddModList.empty())
     {
         SerializeSequenceOf(measConfig.measIdToAddModList.size(), MAX_MEAS_ID, 1);
-        for (auto it = measConfig.measIdToAddModList.begin();
+        for (std::list<LteRrcSap::MeasIdToAddMod>::iterator it =
+                 measConfig.measIdToAddModList.begin();
              it != measConfig.measIdToAddModList.end();
              it++)
         {
@@ -1552,7 +1605,7 @@ RrcAsn1Header::SerializeMeasConfig(LteRrcSap::MeasConfig measConfig) const
         // QuantityConfig sequence
         // 4 optional fields, only first (EUTRA) present. Extension marker yes.
         std::bitset<4> quantityConfigOpts(0);
-        quantityConfigOpts.set(3, true);
+        quantityConfigOpts.set(3, 1);
         SerializeSequence(quantityConfigOpts, true);
         SerializeSequence(std::bitset<0>(), false);
 
@@ -1797,59 +1850,53 @@ RrcAsn1Header::SerializeNonCriticalExtensionConfiguration(
 {
     // 3 optional fields. Extension marker not present.
     std::bitset<3> noncriticalExtension_v1020;
-    noncriticalExtension_v1020.set(
-        2,
-        !nonCriticalExtension.sCellToReleaseList.empty()); // sCellToReleaseList-r10
-    noncriticalExtension_v1020.set(
-        1,
-        !nonCriticalExtension.sCellToAddModList.empty()); // sCellToAddModList-r10
+    noncriticalExtension_v1020.set(2, 0); // No sCellToRealeaseList-r10
+    noncriticalExtension_v1020.set(1, 1); // sCellToAddModList-r10
     noncriticalExtension_v1020.set(
         0,
-        false); // No nonCriticalExtension RRCConnectionReconfiguration-v1130-IEs
+        0); // No nonCriticalExtension RRCConnectionReconfiguration-v1130-IEs
     SerializeSequence(noncriticalExtension_v1020, false);
-
-    if (!nonCriticalExtension.sCellToReleaseList.empty())
+    if (!nonCriticalExtension.sCellsToAddModList.empty())
     {
-        SerializeSequenceOf(nonCriticalExtension.sCellToReleaseList.size(), MAX_OBJECT_ID, 1);
-        for (uint8_t sCellIndex : nonCriticalExtension.sCellToReleaseList)
-        {
-            SerializeInteger(sCellIndex, 1, 7); // sCellIndex-r10
-        }
-    }
-
-    if (!nonCriticalExtension.sCellToAddModList.empty())
-    {
-        SerializeSequenceOf(nonCriticalExtension.sCellToAddModList.size(), MAX_OBJECT_ID, 1);
-        for (auto& it : nonCriticalExtension.sCellToAddModList)
+        SerializeSequenceOf(nonCriticalExtension.sCellsToAddModList.size(), MAX_OBJECT_ID, 1);
+        for (std::list<LteRrcSap::SCellToAddMod>::iterator it =
+                 nonCriticalExtension.sCellsToAddModList.begin();
+             it != nonCriticalExtension.sCellsToAddModList.end();
+             it++)
         {
             std::bitset<4> sCellToAddMod_r10;
-            sCellToAddMod_r10.set(3, true); // sCellIndex
-            sCellToAddMod_r10.set(2, true); // CellIdentification
-            sCellToAddMod_r10.set(1, true); // RadioResourceConfigCommonSCell
+            sCellToAddMod_r10.set(3, 1); // sCellIndex
+            sCellToAddMod_r10.set(2, 1); // CellIdentification
+            sCellToAddMod_r10.set(1, 1); // RadioResourceConfigCommonSCell
             sCellToAddMod_r10.set(
                 0,
-                it.haveRadioResourceConfigDedicatedSCell); // No nonCriticalExtension RRC
+                it->haveRadioResourceConfigDedicatedSCell); // No nonCriticalExtension RRC
             SerializeSequence(sCellToAddMod_r10, false);
-            SerializeInteger(it.sCellIndex, 1, 7); // sCellIndex-r10
+            SerializeInteger(it->sCellIndex, 1, MAX_OBJECT_ID); // sCellIndex
 
             // Serialize CellIdentification
             std::bitset<2> cellIdentification_r10;
-            cellIdentification_r10.set(1, true); // phyCellId-r10
-            cellIdentification_r10.set(0, true); // dl-CarrierFreq-r10
+            cellIdentification_r10.set(1, 1); // phyCellId-r10
+            cellIdentification_r10.set(0, 1); // dl-CarrierFreq-r10
             SerializeSequence(cellIdentification_r10, false);
 
-            SerializeInteger(it.cellIdentification.physCellId, 1, 65536);
-            SerializeInteger(it.cellIdentification.dlCarrierFreq, 1, MAX_EARFCN);
+            SerializeInteger(it->cellIdentification.physCellId, 1, 65536);
+            SerializeInteger(it->cellIdentification.dlCarrierFreq, 1, MAX_EARFCN);
 
             // Serialize RadioResourceConfigCommonSCell
-            SerializeRadioResourceConfigCommonSCell(it.radioResourceConfigCommonSCell);
+            SerializeRadioResourceConfigCommonSCell(it->radioResourceConfigCommonSCell);
 
-            if (it.haveRadioResourceConfigDedicatedSCell)
+            if (it->haveRadioResourceConfigDedicatedSCell)
             {
                 // Serialize RadioResourceConfigDedicatedSCell
-                SerializeRadioResourceDedicatedSCell(it.radioResourceConfigDedicatedSCell);
+                SerializeRadioResourceDedicatedSCell(it->radioResourceConfigDedicateSCell);
             }
         }
+    }
+    else
+    {
+        //        NS_ASSERT_MSG ( this << "NonCriticalExtension.sCellsToAddModList cannot be empty
+        //        ", false);
     }
 }
 
@@ -1867,23 +1914,23 @@ RrcAsn1Header::SerializeRadioResourceConfigCommonSCell(
     {
         // 5 optional fields. Extension marker not present.
         std::bitset<5> nonUlConfiguration_r10;
-        nonUlConfiguration_r10.set(4, true);  // Dl- bandwidth --> convert in enum
-        nonUlConfiguration_r10.set(3, true);  // AntennaInfoCommon-r10
-        nonUlConfiguration_r10.set(2, false); // phich-Config-r10 Not Implemented
-        nonUlConfiguration_r10.set(1, true);  // pdschConfigCommon
-        nonUlConfiguration_r10.set(0, false); // Tdd-Config-r10 Not Implemented
+        nonUlConfiguration_r10.set(4, 1); // Dl- bandwidth --> convert in enum
+        nonUlConfiguration_r10.set(3, 1); // AntennaInfoCommon-r10
+        nonUlConfiguration_r10.set(2, 0); // phich-Config-r10 Not Implemented
+        nonUlConfiguration_r10.set(1, 1); // pdschConfigCommon
+        nonUlConfiguration_r10.set(0, 0); // Tdd-Config-r10 Not Implemented
         SerializeSequence(nonUlConfiguration_r10, false);
 
         SerializeInteger(rrccsc.nonUlConfiguration.dlBandwidth, 6, 100);
 
         std::bitset<1> antennaInfoCommon_r10;
-        antennaInfoCommon_r10.set(0, true);
+        antennaInfoCommon_r10.set(0, 1);
         SerializeSequence(antennaInfoCommon_r10, false);
         SerializeInteger(rrccsc.nonUlConfiguration.antennaInfoCommon.antennaPortsCount, 0, 65536);
 
         std::bitset<2> pdschConfigCommon_r10;
-        pdschConfigCommon_r10.set(1, true);
-        pdschConfigCommon_r10.set(0, true);
+        pdschConfigCommon_r10.set(1, 1);
+        pdschConfigCommon_r10.set(0, 1);
         SerializeSequence(pdschConfigCommon_r10, false);
 
         SerializeInteger(rrccsc.nonUlConfiguration.pdschConfigCommon.referenceSignalPower, -60, 50);
@@ -1894,29 +1941,29 @@ RrcAsn1Header::SerializeRadioResourceConfigCommonSCell(
         // Serialize Ul Configuration
         //  7 optional fields. Extension marker present.
         std::bitset<7> UlConfiguration_r10;
-        UlConfiguration_r10.set(6, true);  // ul-Configuration-r10
-        UlConfiguration_r10.set(5, false); // p-Max-r10 Not Implemented
-        UlConfiguration_r10.set(4, true);  // uplinkPowerControlCommonSCell-r10
-        UlConfiguration_r10.set(3, false); // soundingRS-UL-ConfigCommon-r10
-        UlConfiguration_r10.set(2, false); // ul-CyclicPrefixLength-r10
-        UlConfiguration_r10.set(1, true);  // prach-ConfigSCell-r10
-        UlConfiguration_r10.set(0, false); // pusch-ConfigCommon-r10 Not Implemented
+        UlConfiguration_r10.set(6, 1); // ul-Configuration-r10
+        UlConfiguration_r10.set(5, 0); // p-Max-r10 Not Implemented
+        UlConfiguration_r10.set(4, 1); // uplinkPowerControlCommonSCell-r10
+        UlConfiguration_r10.set(3, 0); // soundingRS-UL-ConfigCommon-r10
+        UlConfiguration_r10.set(2, 0); // ul-CyclicPrefixLength-r10
+        UlConfiguration_r10.set(1, 1); // prach-ConfigSCell-r10
+        UlConfiguration_r10.set(0, 0); // pusch-ConfigCommon-r10 Not Implemented
         SerializeSequence(UlConfiguration_r10, true);
 
         // Serialize ulFreqInfo
         std::bitset<3> FreqInfo_r10;
-        FreqInfo_r10.set(2, true);  // ulCarrierFreq
-        FreqInfo_r10.set(1, true);  // UlBandwidth
-        FreqInfo_r10.set(0, false); // additionalSpectrumEmissionSCell-r10 Not Implemented
+        FreqInfo_r10.set(2, 1); // ulCarrierFreq
+        FreqInfo_r10.set(1, 1); // UlBandwidth
+        FreqInfo_r10.set(0, 0); // additionalSpectrumEmissionSCell-r10 Not Implemented
         SerializeSequence(FreqInfo_r10, false);
 
         SerializeInteger(rrccsc.ulConfiguration.ulFreqInfo.ulCarrierFreq, 0, MAX_EARFCN);
         SerializeInteger(rrccsc.ulConfiguration.ulFreqInfo.ulBandwidth, 6, 100);
 
-        // Serialize UlPowerControlCommonSCell
+        // Serialize UlPowerControllCommonSCell
         std::bitset<2> UlPowerControlCommonSCell_r10;
-        UlPowerControlCommonSCell_r10.set(1, false); // p0-NominalPUSCH-r10 Not Implemented
-        UlPowerControlCommonSCell_r10.set(0, true);  // alpha
+        UlPowerControlCommonSCell_r10.set(1, 0); // p0-NominalPUSCH-r10 Not Implemented
+        UlPowerControlCommonSCell_r10.set(0, 1); // alpha
         SerializeSequence(UlPowerControlCommonSCell_r10, false);
 
         SerializeInteger(rrccsc.ulConfiguration.ulPowerControlCommonSCell.alpha, 0, 65536);
@@ -1926,7 +1973,7 @@ RrcAsn1Header::SerializeRadioResourceConfigCommonSCell(
 
         // Serialize PrachConfigSCell
         std::bitset<1> prachConfigSCell_r10;
-        prachConfigSCell_r10.set(0, true);
+        prachConfigSCell_r10.set(0, 1);
         SerializeSequence(prachConfigSCell_r10, false);
         SerializeInteger(rrccsc.ulConfiguration.prachConfigSCell.index, 0, 256);
     }
@@ -1938,7 +1985,7 @@ RrcAsn1Header::SerializeRadioResourceDedicatedSCell(
 {
     // Serialize RadioResourceConfigDedicatedSCell
     std::bitset<1> RadioResourceConfigDedicatedSCell_r10;
-    RadioResourceConfigDedicatedSCell_r10.set(0, true);
+    RadioResourceConfigDedicatedSCell_r10.set(0, 1);
     SerializeSequence(RadioResourceConfigDedicatedSCell_r10, false);
 
     LteRrcSap::PhysicalConfigDedicatedSCell pcdsc = rrcdsc.physicalConfigDedicatedSCell;
@@ -1959,8 +2006,8 @@ RrcAsn1Header::SerializePhysicalConfigDedicatedSCell(
         // Serialize NonUl configuration
         std::bitset<4> nulOpt;
         nulOpt.set(3, pcdsc.haveAntennaInfoDedicated);
-        nulOpt.set(2, false); // crossCarrierSchedulingConfig-r10 Not Implemented
-        nulOpt.set(1, false); // csi-RS-Config-r10 Not Implemented
+        nulOpt.set(2, 0); // crossCarrierSchedulingConfig-r10 Not Implemented
+        nulOpt.set(1, 0); // csi-RS-Config-r10 Not Implemented
         nulOpt.set(0, pcdsc.havePdschConfigDedicated); // pdsch-ConfigDedicated-r10
         SerializeSequence(nulOpt, false);
 
@@ -2003,12 +2050,12 @@ RrcAsn1Header::SerializePhysicalConfigDedicatedSCell(
         // Serialize Ul Configuration
         std::bitset<7> ulOpt;
         ulOpt.set(6, pcdsc.haveAntennaInfoUlDedicated); // antennaInfoUL-r10
-        ulOpt.set(5, false); // pusch-ConfigDedicatedSCell-r10 not present
-        ulOpt.set(4, false); // uplinkPowerControlDedicatedSCell-r10 not present
-        ulOpt.set(3, false); // cqi-ReportConfigSCell-r10 not present
+        ulOpt.set(5, 0); // pusch-ConfigDedicatedSCell-r10 not present
+        ulOpt.set(4, 0); // uplinkPowerControlDedicatedSCell-r10 not present
+        ulOpt.set(3, 0); // cqi-ReportConfigSCell-r10 not present
         ulOpt.set(2, pcdsc.haveSoundingRsUlConfigDedicated); // soundingRS-UL-ConfigDedicated-r10
-        ulOpt.set(1, false); // soundingRS-UL-ConfigDedicated-v1020 not present
-        ulOpt.set(0, false); // soundingRS-UL-ConfigDedicatedAperiodic-r10 not present
+        ulOpt.set(1, 0); // soundingRS-UL-ConfigDedicated-v1020 not present
+        ulOpt.set(0, 0); // soundingRS-UL-ConfigDedicatedAperiodic-r10 not present
         SerializeSequence(ulOpt, false);
 
         if (pcdsc.haveAntennaInfoUlDedicated)
@@ -2081,8 +2128,7 @@ Buffer::Iterator
 RrcAsn1Header::DeserializeThresholdEutra(LteRrcSap::ThresholdEutra* thresholdEutra,
                                          Buffer::Iterator bIterator)
 {
-    int thresholdEutraChoice;
-    int range;
+    int thresholdEutraChoice, range;
     bIterator = DeserializeChoice(2, false, &thresholdEutraChoice, bIterator);
 
     switch (thresholdEutraChoice)
@@ -2423,6 +2469,8 @@ RrcAsn1Header::DeserializeDrbToAddModList(std::list<LteRrcSap::DrbToAddMod>* drb
                 DeserializeLogicalChannelConfig(&drbToAddMod.logicalChannelConfig, bIterator);
         }
 
+        bIterator = DeserializeBoolean(&drbToAddMod.is_mc, bIterator);
+
         drbToAddModList->insert(drbToAddModList->end(), drbToAddMod);
     }
     return bIterator;
@@ -2696,74 +2744,51 @@ RrcAsn1Header::DeserializeNonCriticalExtensionConfig(
         bIterator = DeserializeSequence(&nonCriticalExtension_v920, false, bIterator);
         if (nonCriticalExtension_v920[0])
         {
-            // Continue to deserialize future Release optional fields
+            // Continue to deserialize futere Release optional fields
             std::bitset<3> nonCriticalExtension_v1020;
             bIterator = DeserializeSequence(&nonCriticalExtension_v1020, false, bIterator);
-
-            if (nonCriticalExtension_v1020[2])
-            {
-                // sCellToReleaseList-r10
-                int numElems;
-
-                bIterator = DeserializeSequenceOf(&numElems, MAX_OBJECT_ID, 1, bIterator);
-                nonCriticalExtension->sCellToReleaseList.clear();
-
-                for (int i = 0; i < numElems; i++)
-                {
-                    // Deserialize SCellIndex-r10
-                    int sCellIndex;
-                    bIterator = DeserializeInteger(&sCellIndex, 1, 7, bIterator);
-                    nonCriticalExtension->sCellToReleaseList.push_back(sCellIndex);
-                }
-            }
-
-            if (nonCriticalExtension_v1020[1])
-            {
-                // sCellToAddModList-r10
-
-                int numElems;
-                bIterator = DeserializeSequenceOf(&numElems, MAX_OBJECT_ID, 1, bIterator);
-                nonCriticalExtension->sCellToAddModList.clear();
-                // Deserialize SCellToAddMod
-                for (int i = 0; i < numElems; i++)
-                {
-                    std::bitset<4> sCellToAddMod_r10;
-                    bIterator = DeserializeSequence(&sCellToAddMod_r10, false, bIterator);
-
-                    LteRrcSap::SCellToAddMod sctam;
-                    // Deserialize sCellIndex
-                    NS_ASSERT(sCellToAddMod_r10[3]); // sCellIndex
-                    int n;
-                    bIterator = DeserializeInteger(&n, 1, 7, bIterator);
-                    sctam.sCellIndex = n;
-                    // Deserialize CellIdentification
-                    NS_ASSERT(sCellToAddMod_r10[2]); // CellIdentification
-                    bIterator = DeserializeCellIdentification(&sctam.cellIdentification, bIterator);
-
-                    // Deserialize RadioResourceConfigCommonSCell
-                    NS_ASSERT(sCellToAddMod_r10[1]);
-                    bIterator = DeserializeRadioResourceConfigCommonSCell(
-                        &sctam.radioResourceConfigCommonSCell,
-                        bIterator);
-                    if (sCellToAddMod_r10[0])
-                    {
-                        sctam.haveRadioResourceConfigDedicatedSCell = true;
-                        // Deserialize RadioResourceConfigDedicatedSCell
-                        bIterator = DeserializeRadioResourceConfigDedicatedSCell(
-                            &sctam.radioResourceConfigDedicatedSCell,
-                            bIterator);
-                    }
-                    else
-                    {
-                        sctam.haveRadioResourceConfigDedicatedSCell = false;
-                    }
-
-                    nonCriticalExtension->sCellToAddModList.push_back(sctam);
-                }
-            }
-
+            NS_ASSERT(!nonCriticalExtension_v1020[2]); // No sCellToRealeaseList-r10
+            NS_ASSERT(nonCriticalExtension_v1020[1]);  // sCellToAddModList-r10
             NS_ASSERT(!nonCriticalExtension_v1020[0]); // No nonCriticalExtension
                                                        // RRCConnectionReconfiguration-v1130-IEs
+
+            int numElems;
+            bIterator = DeserializeSequenceOf(&numElems, MAX_OBJECT_ID, 1, bIterator);
+            nonCriticalExtension->sCellsToAddModList.clear();
+            // Deserialize SCellToAddMod
+            for (int i = 0; i < numElems; i++)
+            {
+                std::bitset<4> sCellToAddMod_r10;
+                bIterator = DeserializeSequence(&sCellToAddMod_r10, false, bIterator);
+
+                LteRrcSap::SCellToAddMod sctam;
+                // Deserialize sCellIndex
+                NS_ASSERT(sCellToAddMod_r10[3]); // sCellIndex
+                int n;
+                bIterator = DeserializeInteger(&n, 1, MAX_OBJECT_ID, bIterator);
+                sctam.sCellIndex = n;
+                // Deserialize CellIdentification
+                NS_ASSERT(sCellToAddMod_r10[2]); // CellIdentification
+                bIterator = DeserializeCellIdentification(&sctam.cellIdentification, bIterator);
+
+                // Deserialize RadioResourceConfigCommonSCell
+                NS_ASSERT(sCellToAddMod_r10[1]);
+                bIterator =
+                    DeserializeRadioResourceConfigCommonSCell(&sctam.radioResourceConfigCommonSCell,
+                                                              bIterator);
+                sctam.haveRadioResourceConfigDedicatedSCell = sCellToAddMod_r10[0];
+                if (sCellToAddMod_r10[0])
+                {
+                    // Deserialize RadioResourceConfigDedicatedSCell
+                    bIterator = DeserializeRadioResourceConfigDedicatedSCell(
+                        &sctam.radioResourceConfigDedicateSCell,
+                        bIterator);
+                }
+
+                nonCriticalExtension->sCellsToAddModList.insert(
+                    nonCriticalExtension->sCellsToAddModList.end(),
+                    sctam);
+            }
         }
     }
 
@@ -3047,7 +3072,8 @@ RrcAsn1Header::Print(std::ostream& os,
                      LteRrcSap::RadioResourceConfigDedicated radioResourceConfigDedicated) const
 {
     os << "   srbToAddModList: " << std::endl;
-    auto it = radioResourceConfigDedicated.srbToAddModList.begin();
+    std::list<LteRrcSap::SrbToAddMod>::iterator it =
+        radioResourceConfigDedicated.srbToAddModList.begin();
     for (; it != radioResourceConfigDedicated.srbToAddModList.end(); it++)
     {
         os << "      srbIdentity: " << (int)it->srbIdentity << std::endl;
@@ -3063,7 +3089,8 @@ RrcAsn1Header::Print(std::ostream& os,
     os << std::endl;
 
     os << "   drbToAddModList: " << std::endl;
-    auto it2 = radioResourceConfigDedicated.drbToAddModList.begin();
+    std::list<LteRrcSap::DrbToAddMod>::iterator it2 =
+        radioResourceConfigDedicated.drbToAddModList.begin();
     for (; it2 != radioResourceConfigDedicated.drbToAddModList.end(); it2++)
     {
         os << "      epsBearerIdentity: " << (int)it2->epsBearerIdentity << std::endl;
@@ -3082,7 +3109,7 @@ RrcAsn1Header::Print(std::ostream& os,
     os << std::endl;
 
     os << "   drbToReleaseList: ";
-    auto it3 = radioResourceConfigDedicated.drbToReleaseList.begin();
+    std::list<uint8_t>::iterator it3 = radioResourceConfigDedicated.drbToReleaseList.begin();
     for (; it3 != radioResourceConfigDedicated.drbToReleaseList.end(); it3++)
     {
         os << (int)*it3 << ", ";
@@ -3577,26 +3604,6 @@ RrcAsn1Header::DeserializeRachConfigCommon(LteRrcSap::RachConfigCommon* rachConf
 
     bIterator = DeserializeEnum(8, &n, bIterator);       // mac-ContentionResolutionTimer
     bIterator = DeserializeInteger(&n, 1, 8, bIterator); // maxHARQ-Msg3Tx
-
-    // connEstFailCount
-    bIterator = DeserializeEnum(8, &n, bIterator);
-    switch (n)
-    {
-    case 1:
-        rachConfigCommon->txFailParam.connEstFailCount = 1;
-        break;
-    case 2:
-        rachConfigCommon->txFailParam.connEstFailCount = 2;
-        break;
-    case 3:
-        rachConfigCommon->txFailParam.connEstFailCount = 3;
-        break;
-    case 4:
-        rachConfigCommon->txFailParam.connEstFailCount = 4;
-        break;
-    default:
-        rachConfigCommon->txFailParam.connEstFailCount = 1;
-    }
     return bIterator;
 }
 
@@ -3731,14 +3738,14 @@ RrcAsn1Header::DeserializeMeasResults(LteRrcSap::MeasResults* measResults,
 
     // Deserialize rsrpResult
     bIterator = DeserializeInteger(&n, 0, 97, bIterator);
-    measResults->measResultPCell.rsrpResult = n;
+    measResults->rsrpResult = n;
 
     // Deserialize rsrqResult
     bIterator = DeserializeInteger(&n, 0, 34, bIterator);
-    measResults->measResultPCell.rsrqResult = n;
+    measResults->rsrqResult = n;
 
     measResults->haveMeasResultNeighCells = measResultOptionalPresent[0];
-    measResults->haveMeasResultServFreqList = measResultOptionalPresent[3];
+    measResults->haveScellsMeas = measResultOptionalPresent[3];
     if (measResults->haveMeasResultNeighCells)
     {
         int measResultNeighCellsChoice;
@@ -3842,51 +3849,50 @@ RrcAsn1Header::DeserializeMeasResults(LteRrcSap::MeasResults* measResults,
             // ...
         }
     }
-    if (measResults->haveMeasResultServFreqList)
+    if (measResults->haveScellsMeas)
     {
         int numElems;
         bIterator = DeserializeSequenceOf(&numElems, MAX_SCELL_REPORT, 1, bIterator);
         for (int i = 0; i < numElems; i++)
         {
-            LteRrcSap::MeasResultServFreq measResultServFreq;
-
-            // Deserialize MeasResultServFreq-r10
+            LteRrcSap::MeasResultScell measResultScell;
+            int measScellId;
+            // Deserialize measId
+            bIterator = DeserializeInteger(&measScellId, 1, MAX_SCELL_REPORT, bIterator);
+            measResultScell.servFreqId = measScellId;
             std::bitset<2> measResultScellPresent;
             bIterator = DeserializeSequence(&measResultScellPresent, true, bIterator);
-            measResultServFreq.haveMeasResultSCell = measResultScellPresent[0];
-            measResultServFreq.haveMeasResultBestNeighCell = measResultScellPresent[1];
-
-            // Deserialize servFreqId-r10
-            int servFreqId;
-            bIterator = DeserializeInteger(&servFreqId, 0, 7, bIterator);
-            measResultServFreq.servFreqId = servFreqId;
-
-            if (measResultServFreq.haveMeasResultSCell)
+            measResults->measScellResultList.haveMeasurementResultsServingSCells =
+                measResultScellPresent[0];
+            measResults->measScellResultList.haveMeasurementResultsNeighCell =
+                measResultScellPresent[1];
+            if (measResults->measScellResultList.haveMeasurementResultsServingSCells)
             {
-                // Deserialize rsrpResult
-                bIterator = DeserializeInteger(&n, 0, 97, bIterator);
-                measResultServFreq.measResultSCell.rsrpResult = n;
+                // Deserialize measResult
+                std::bitset<2> measResultOpts;
+                bIterator = DeserializeSequence(&measResultOpts, true, bIterator);
 
-                // Deserialize rsrqResult
-                bIterator = DeserializeInteger(&n, 0, 34, bIterator);
-                measResultServFreq.measResultSCell.rsrqResult = n;
+                measResultScell.haveRsrpResult = measResultOpts[1];
+                if (measResultOpts[1])
+                {
+                    // Deserialize rsrpResult
+                    bIterator = DeserializeInteger(&n, 0, 97, bIterator);
+                    measResultScell.rsrpResult = n;
+                }
+
+                measResultScell.haveRsrqResult = measResultOpts[0];
+                if (measResultOpts[0])
+                {
+                    // Deserialize rsrqResult
+                    bIterator = DeserializeInteger(&n, 0, 34, bIterator);
+                    measResultScell.rsrqResult = n;
+                }
             }
-
-            if (measResultServFreq.haveMeasResultBestNeighCell)
+            if (measResults->measScellResultList.haveMeasurementResultsNeighCell)
             {
-                // Deserialize physCellId-r10
-                bIterator = DeserializeInteger(&n, 0, 503, bIterator);
-                measResultServFreq.measResultBestNeighCell.physCellId = n;
-
-                // Deserialize rsrpResultNCell-r10
-                bIterator = DeserializeInteger(&n, 0, 97, bIterator);
-                measResultServFreq.measResultBestNeighCell.rsrpResult = n;
-
-                // Deserialize rsrqResultNCell-r10
-                bIterator = DeserializeInteger(&n, 0, 34, bIterator);
-                measResultServFreq.measResultBestNeighCell.rsrqResult = n;
+                // Deserialize measResultBestNeighCell
             }
-            measResults->measResultServFreqList.push_back(measResultServFreq);
+            measResults->measScellResultList.measResultScell.push_back(measResultScell);
         }
     }
     return bIterator;
@@ -3972,10 +3978,12 @@ RrcAsn1Header::DeserializeMeasConfig(LteRrcSap::MeasConfig* measConfig, Buffer::
             case 1:
                 // Deserialize measObjectUTRA
                 // ...
+                break;
 
             case 2:
                 // Deserialize measObjectGERAN
                 // ...
+                break;
 
             case 3:
                 // Deserialize measObjectCDMA2000
@@ -3994,7 +4002,28 @@ RrcAsn1Header::DeserializeMeasConfig(LteRrcSap::MeasConfig* measConfig, Buffer::
 
                 // allowedMeasBandwidth
                 bIterator = DeserializeEnum(6, &n, bIterator);
-                elem.measObjectEutra.allowedMeasBandwidth = EnumToBandwidth(n);
+                switch (n)
+                {
+                case 0:
+                    elem.measObjectEutra.allowedMeasBandwidth = 6;
+                    break;
+                case 1:
+                    elem.measObjectEutra.allowedMeasBandwidth = 15;
+                    break;
+                case 2:
+                    elem.measObjectEutra.allowedMeasBandwidth = 25;
+                    break;
+                case 3:
+                    elem.measObjectEutra.allowedMeasBandwidth = 50;
+                    break;
+                case 4:
+                    elem.measObjectEutra.allowedMeasBandwidth = 75;
+                    break;
+                case 5:
+                default:
+                    elem.measObjectEutra.allowedMeasBandwidth = 100;
+                    break;
+                }
 
                 // presenceAntennaPort1
                 bIterator =
@@ -4759,10 +4788,10 @@ RrcAsn1Header::DeserializeMeasConfig(LteRrcSap::MeasConfig* measConfig, Buffer::
 RrcConnectionRequestHeader::RrcConnectionRequestHeader()
     : RrcUlCcchMessage()
 {
-    m_mmec = std::bitset<8>(0UL);
-    m_mTmsi = std::bitset<32>(0UL);
+    m_mmec = std::bitset<8>(0ul);
+    m_mTmsi = std::bitset<32>(0ul);
     m_establishmentCause = MO_SIGNALLING;
-    m_spare = std::bitset<1>(0UL);
+    m_spare = std::bitset<1>(0ul);
 }
 
 // Destructor
@@ -4771,7 +4800,7 @@ RrcConnectionRequestHeader::~RrcConnectionRequestHeader()
 }
 
 TypeId
-RrcConnectionRequestHeader::GetTypeId()
+RrcConnectionRequestHeader::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::RrcConnectionRequestHeader").SetParent<Header>().SetGroupName("Lte");
@@ -4824,7 +4853,7 @@ RrcConnectionRequestHeader::PreSerialize() const
     SerializeEnum(8, m_establishmentCause);
 
     // Serialize spare : BIT STRING (SIZE (1))
-    SerializeBitstring(std::bitset<1>());
+    SerializeBitstring(m_spare);
 
     // Finish serialization
     FinalizeSerialization();
@@ -4833,7 +4862,7 @@ RrcConnectionRequestHeader::PreSerialize() const
 uint32_t
 RrcConnectionRequestHeader::Deserialize(Buffer::Iterator bIterator)
 {
-    std::bitset<1> dummy;
+    // std::bitset<1> dummy;
     std::bitset<0> optionalOrDefaultMask;
     int selectedOption;
 
@@ -4864,7 +4893,7 @@ RrcConnectionRequestHeader::Deserialize(Buffer::Iterator bIterator)
     bIterator = DeserializeEnum(8, &selectedOption, bIterator);
 
     // Deserialize spare
-    bIterator = DeserializeBitstring(&dummy, bIterator);
+    bIterator = DeserializeBitstring(&m_spare, bIterator);
 
     return GetSerializedSize();
 }
@@ -4874,6 +4903,7 @@ RrcConnectionRequestHeader::SetMessage(LteRrcSap::RrcConnectionRequest msg)
 {
     m_mTmsi = std::bitset<32>((uint32_t)msg.ueIdentity);
     m_mmec = std::bitset<8>((uint32_t)(msg.ueIdentity >> 32));
+    m_spare = std::bitset<1>(msg.isMc);
     m_isDataSerialized = false;
 }
 
@@ -4882,7 +4912,7 @@ RrcConnectionRequestHeader::GetMessage() const
 {
     LteRrcSap::RrcConnectionRequest msg;
     msg.ueIdentity = (((uint64_t)m_mmec.to_ulong()) << 32) | (m_mTmsi.to_ulong());
-
+    msg.isMc = (bool)m_spare[0];
     return msg;
 }
 
@@ -4896,6 +4926,152 @@ std::bitset<32>
 RrcConnectionRequestHeader::GetMtmsi() const
 {
     return m_mTmsi;
+}
+
+std::bitset<1>
+RrcConnectionRequestHeader::GetIsMc() const
+{
+    return m_spare;
+}
+
+//////////////////// RrcConnectionRequest class ////////////////////////
+
+// Constructor
+RrcConnectToMmWaveHeader::RrcConnectToMmWaveHeader()
+    : RrcDlCcchMessage()
+{
+    m_mmWaveId = std::bitset<16>(0ul);
+}
+
+// Destructor
+RrcConnectToMmWaveHeader::~RrcConnectToMmWaveHeader()
+{
+}
+
+TypeId
+RrcConnectToMmWaveHeader::GetTypeId(void)
+{
+    static TypeId tid =
+        TypeId("ns3::RrcConnectToMmWaveHeader").SetParent<Header>().SetGroupName("Lte");
+    return tid;
+}
+
+void
+RrcConnectToMmWaveHeader::Print(std::ostream& os) const
+{
+    os << "MmWaveId:" << m_mmWaveId << std::endl;
+}
+
+void
+RrcConnectToMmWaveHeader::PreSerialize() const
+{
+    m_serializationResult = Buffer();
+
+    SerializeDlCcchMessage(4);
+
+    // Serialize mmWaveId : MMEC ::= BIT STRING (SIZE (16))
+    SerializeBitstring(m_mmWaveId);
+
+    // Finish serialization
+    FinalizeSerialization();
+}
+
+uint32_t
+RrcConnectToMmWaveHeader::Deserialize(Buffer::Iterator bIterator)
+{
+    bIterator = DeserializeDlCcchMessage(bIterator);
+
+    // Deserialize mmWaveId
+    bIterator = DeserializeBitstring(&m_mmWaveId, bIterator);
+
+    return GetSerializedSize();
+}
+
+void
+RrcConnectToMmWaveHeader::SetMessage(uint16_t mmWaveId)
+{
+    m_mmWaveId = std::bitset<16>((uint16_t)mmWaveId);
+    m_isDataSerialized = false;
+}
+
+uint16_t
+RrcConnectToMmWaveHeader::GetMessage() const
+{
+    uint16_t mmWaveId = (uint16_t)(m_mmWaveId.to_ulong());
+    return mmWaveId;
+}
+
+//////////////////// RrcNotifySecondaryConnectedHeader class ////////////////////////
+
+// Constructor
+RrcNotifySecondaryConnectedHeader::RrcNotifySecondaryConnectedHeader()
+{
+    m_mmWaveId = std::bitset<16>(0ul);
+    m_mmWaveRnti = std::bitset<16>(0ul);
+}
+
+// Destructor
+RrcNotifySecondaryConnectedHeader::~RrcNotifySecondaryConnectedHeader()
+{
+}
+
+TypeId
+RrcNotifySecondaryConnectedHeader::GetTypeId(void)
+{
+    static TypeId tid =
+        TypeId("ns3::RrcNotifySecondaryConnectedHeader").SetParent<Header>().SetGroupName("Lte");
+    return tid;
+}
+
+void
+RrcNotifySecondaryConnectedHeader::Print(std::ostream& os) const
+{
+    os << "MmWaveId:" << m_mmWaveId << std::endl;
+    os << "MmWaveRnti:" << m_mmWaveRnti << std::endl;
+}
+
+void
+RrcNotifySecondaryConnectedHeader::PreSerialize() const
+{
+    m_serializationResult = Buffer();
+
+    SerializeUlDcchMessage(5);
+
+    // Serialize mmWaveId : MMEC ::= BIT STRING (SIZE (16))
+    SerializeBitstring(m_mmWaveId);
+    SerializeBitstring(m_mmWaveRnti);
+
+    // Finish serialization
+    FinalizeSerialization();
+}
+
+uint32_t
+RrcNotifySecondaryConnectedHeader::Deserialize(Buffer::Iterator bIterator)
+{
+    bIterator = DeserializeUlDcchMessage(bIterator);
+
+    // Deserialize mmWaveId
+    bIterator = DeserializeBitstring(&m_mmWaveId, bIterator);
+    bIterator = DeserializeBitstring(&m_mmWaveRnti, bIterator);
+
+    return GetSerializedSize();
+}
+
+void
+RrcNotifySecondaryConnectedHeader::SetMessage(uint16_t mmWaveId, uint16_t mmWaveRnti)
+{
+    m_mmWaveRnti = std::bitset<16>((uint16_t)mmWaveRnti);
+    m_mmWaveId = std::bitset<16>((uint16_t)mmWaveId);
+    m_isDataSerialized = false;
+}
+
+std::pair<uint16_t, uint16_t>
+RrcNotifySecondaryConnectedHeader::GetMessage() const
+{
+    uint16_t mmWaveId = (uint16_t)(m_mmWaveId.to_ulong());
+    uint16_t mmWaveRnti = (uint16_t)(m_mmWaveRnti.to_ulong());
+
+    return std::pair<uint16_t, uint16_t>(mmWaveId, mmWaveRnti);
 }
 
 //////////////////// RrcConnectionSetup class ////////////////////////
@@ -5274,6 +5450,91 @@ RrcConnectionReconfigurationCompleteHeader::GetRrcTransactionIdentifier() const
     return m_rrcTransactionIdentifier;
 }
 
+//////////////////// RrcConnectionSwitchHeader class ////////////////////////
+
+RrcConnectionSwitchHeader::RrcConnectionSwitchHeader()
+{
+}
+
+RrcConnectionSwitchHeader::~RrcConnectionSwitchHeader()
+{
+}
+
+void
+RrcConnectionSwitchHeader::PreSerialize() const
+{
+    m_serializationResult = Buffer();
+
+    // Serialize DCCH message
+    SerializeDlDcchMessage(6);
+
+    // Serialize rrc-TransactionIdentifier
+    SerializeInteger(m_msg.rrcTransactionIdentifier, 0, 3);
+
+    // Serialize the number of brbId
+    SerializeInteger(m_msg.drbidList.size(), 0, 255);
+
+    std::vector<uint8_t>::iterator drbIt = m_msg.drbidList.begin();
+    for (; drbIt != m_msg.drbidList.end(); ++drbIt)
+    {
+        SerializeInteger(*drbIt, 0, 255);
+    }
+
+    SerializeInteger(m_msg.useMmWaveConnection, 0, 65535);
+
+    // Finish serialization
+    FinalizeSerialization();
+}
+
+uint32_t
+RrcConnectionSwitchHeader::Deserialize(Buffer::Iterator bIterator)
+{
+    int n;
+    bIterator = DeserializeDlDcchMessage(bIterator);
+    bIterator = DeserializeInteger(&n, 0, 3, bIterator);
+    m_msg.rrcTransactionIdentifier = (uint8_t)n;
+
+    bIterator = DeserializeInteger(&n, 0, 255, bIterator);
+    int listSize = n;
+
+    for (int i = 0; i < listSize; i++)
+    {
+        bIterator = DeserializeInteger(&n, 0, 255, bIterator);
+        uint8_t drb = (uint8_t)n;
+        m_msg.drbidList.push_back(drb);
+    }
+
+    bIterator = DeserializeInteger(&n, 0, 65535, bIterator);
+    m_msg.useMmWaveConnection = (uint16_t)n;
+
+    return GetSerializedSize();
+}
+
+void
+RrcConnectionSwitchHeader::Print(std::ostream& os) const
+{
+    os << "rrcTransactionIdentifier: " << (int)m_msg.rrcTransactionIdentifier << std::endl;
+}
+
+void
+RrcConnectionSwitchHeader::SetMessage(LteRrcSap::RrcConnectionSwitch msg)
+{
+    m_msg = msg;
+    m_isDataSerialized = false;
+}
+
+LteRrcSap::RrcConnectionSwitch
+RrcConnectionSwitchHeader::GetMessage() const
+{
+    return m_msg;
+}
+
+uint8_t
+RrcConnectionSwitchHeader::GetRrcTransactionIdentifier() const
+{
+    return m_msg.rrcTransactionIdentifier;
+}
+
 //////////////////// RrcConnectionReconfigurationHeader class ////////////////////////
 
 RrcConnectionReconfigurationHeader::RrcConnectionReconfigurationHeader()
@@ -5311,9 +5572,9 @@ RrcConnectionReconfigurationHeader::PreSerialize() const
     std::bitset<6> options;
     options.set(5, m_haveMeasConfig);
     options.set(4, m_haveMobilityControlInfo);
-    options.set(3, false); // No dedicatedInfoNASList
+    options.set(3, 0); // No dedicatedInfoNASList
     options.set(2, m_haveRadioResourceConfigDedicated);
-    options.set(1, false);                      // No securityConfigHO
+    options.set(1, 0);                          // No securityConfigHO
     options.set(0, m_haveNonCriticalExtension); // Implemented nonCriticalExtension because
                                                 // compatibility with R10 - CA
     SerializeSequence(options, false);
@@ -5331,7 +5592,7 @@ RrcConnectionReconfigurationHeader::PreSerialize() const
         std::bitset<4> mobCtrlIntoOptional;
         mobCtrlIntoOptional.set(3, m_mobilityControlInfo.haveCarrierFreq);
         mobCtrlIntoOptional.set(2, m_mobilityControlInfo.haveCarrierBandwidth);
-        mobCtrlIntoOptional.set(1, false); // No additionalSpectrumEmission
+        mobCtrlIntoOptional.set(1, 0); // No additionalSpectrumEmission
         mobCtrlIntoOptional.set(0, m_mobilityControlInfo.haveRachConfigDedicated);
         SerializeSequence(mobCtrlIntoOptional, true);
 
@@ -5359,7 +5620,7 @@ RrcConnectionReconfigurationHeader::PreSerialize() const
         // Serialize t304
         SerializeEnum(8, 0);
 
-        // Serialize newUE-Identity
+        // Serialize newUE-Identitiy
         SerializeBitstring(std::bitset<16>(m_mobilityControlInfo.newUeIdentity));
 
         // Serialize radioResourceConfigCommon
@@ -5384,7 +5645,7 @@ RrcConnectionReconfigurationHeader::PreSerialize() const
         // Serialize NonCriticalExtension RRCConnectionReconfiguration-v890-IEs sequence:
         // 2 optional fields. Extension marker not present.
         std::bitset<2> noncriticalExtension_v890;
-        noncriticalExtension_v890.set(1, false); // No lateNonCriticalExtension
+        noncriticalExtension_v890.set(1, 0); // No lateNonCriticalExtension
         noncriticalExtension_v890.set(
             0,
             m_haveNonCriticalExtension); // Implemented nonCriticalExtension because compatibility
@@ -5395,8 +5656,8 @@ RrcConnectionReconfigurationHeader::PreSerialize() const
         // Serialize NonCriticalExtension RRCConnectionReconfiguration-v920-IEs sequence:
         // 3 optional fields. Extension marker not present.
         std::bitset<3> noncriticalExtension_v920;
-        noncriticalExtension_v920.set(1, false); // No otherConfig-r9
-        noncriticalExtension_v920.set(1, false); // No fullConfig-r9
+        noncriticalExtension_v920.set(1, 0); // No otehrConfig-r9
+        noncriticalExtension_v920.set(1, 0); // No fullConfig-r9
         // Enable RRCCoonectionReconfiguration-v1020-IEs
         noncriticalExtension_v920.set(
             0,
@@ -5576,7 +5837,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
         {
             os << "  measObjectToRemoveList: ";
             std::list<uint8_t> auxList = m_measConfig.measObjectToRemoveList;
-            auto it = auxList.begin();
+            std::list<uint8_t>::iterator it = auxList.begin();
             for (; it != auxList.end(); it++)
             {
                 os << (int)*it << ", ";
@@ -5587,7 +5848,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
         {
             os << "  reportConfigToRemoveList: ";
             std::list<uint8_t> auxList = m_measConfig.reportConfigToRemoveList;
-            auto it = auxList.begin();
+            std::list<uint8_t>::iterator it = auxList.begin();
             for (; it != auxList.end(); it++)
             {
                 os << (int)*it << ", ";
@@ -5598,7 +5859,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
         {
             os << "  measIdToRemoveList: ";
             std::list<uint8_t> auxList = m_measConfig.measIdToRemoveList;
-            auto it = auxList.begin();
+            std::list<uint8_t>::iterator it = auxList.begin();
             for (; it != auxList.end(); it++)
             {
                 os << (int)*it << ", ";
@@ -5610,7 +5871,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
         {
             os << "  measObjectToAddMod: " << std::endl;
             std::list<LteRrcSap::MeasObjectToAddMod> auxList = m_measConfig.measObjectToAddModList;
-            auto it = auxList.begin();
+            std::list<LteRrcSap::MeasObjectToAddMod>::iterator it = auxList.begin();
             for (; it != auxList.end(); it++)
             {
                 os << "    measObjectId: " << (int)it->measObjectId << std::endl;
@@ -5627,7 +5888,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
                 {
                     os << "    cellsToRemoveList: ";
                     std::list<uint8_t> auxList = it->measObjectEutra.cellsToRemoveList;
-                    auto it = auxList.begin();
+                    std::list<uint8_t>::iterator it = auxList.begin();
                     for (; it != auxList.end(); it++)
                     {
                         os << (int)*it << ", ";
@@ -5639,7 +5900,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
                 {
                     os << "    blackCellsToRemoveList: ";
                     std::list<uint8_t> auxList = it->measObjectEutra.blackCellsToRemoveList;
-                    auto it = auxList.begin();
+                    std::list<uint8_t>::iterator it = auxList.begin();
                     for (; it != auxList.end(); it++)
                     {
                         os << (int)*it << ", ";
@@ -5652,7 +5913,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
                     os << "    cellsToAddModList: " << std::endl;
                     std::list<LteRrcSap::CellsToAddMod> auxList =
                         it->measObjectEutra.cellsToAddModList;
-                    auto it = auxList.begin();
+                    std::list<LteRrcSap::CellsToAddMod>::iterator it = auxList.begin();
                     for (; it != auxList.end(); it++)
                     {
                         os << "      cellIndex: " << (int)it->cellIndex << std::endl;
@@ -5668,7 +5929,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
                     os << "    blackCellsToAddModList: " << std::endl;
                     std::list<LteRrcSap::BlackCellsToAddMod> auxList =
                         it->measObjectEutra.blackCellsToAddModList;
-                    auto it = auxList.begin();
+                    std::list<LteRrcSap::BlackCellsToAddMod>::iterator it = auxList.begin();
                     for (; it != auxList.end(); it++)
                     {
                         os << "      cellIndex: " << (int)it->cellIndex << std::endl;
@@ -5695,7 +5956,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
             os << "  reportConfigToAddModList: " << std::endl;
             std::list<LteRrcSap::ReportConfigToAddMod> auxList =
                 m_measConfig.reportConfigToAddModList;
-            auto it = auxList.begin();
+            std::list<LteRrcSap::ReportConfigToAddMod>::iterator it = auxList.begin();
             for (; it != auxList.end(); it++)
             {
                 os << "    reportConfigId: " << (int)it->reportConfigId << std::endl;
@@ -5753,7 +6014,7 @@ RrcConnectionReconfigurationHeader::Print(std::ostream& os) const
         {
             os << "  measIdToAddModList: " << std::endl;
             std::list<LteRrcSap::MeasIdToAddMod> auxList = m_measConfig.measIdToAddModList;
-            auto it = auxList.begin();
+            std::list<LteRrcSap::MeasIdToAddMod>::iterator it = auxList.begin();
             for (; it != auxList.end(); it++)
             {
                 os << "    measId: " << (int)it->measId << std::endl;
@@ -5865,7 +6126,7 @@ RrcConnectionReconfigurationHeader::SetMessage(LteRrcSap::RrcConnectionReconfigu
 LteRrcSap::RrcConnectionReconfiguration
 RrcConnectionReconfigurationHeader::GetMessage() const
 {
-    LteRrcSap::RrcConnectionReconfiguration msg{};
+    LteRrcSap::RrcConnectionReconfiguration msg;
 
     msg.rrcTransactionIdentifier = m_rrcTransactionIdentifier;
     msg.haveMeasConfig = m_haveMeasConfig;
@@ -5887,7 +6148,7 @@ RrcConnectionReconfigurationHeader::GetRrcTransactionIdentifier() const
 }
 
 bool
-RrcConnectionReconfigurationHeader::GetHaveMeasConfig() const
+RrcConnectionReconfigurationHeader::GetHaveMeasConfig()
 {
     return m_haveMeasConfig;
 }
@@ -5899,7 +6160,7 @@ RrcConnectionReconfigurationHeader::GetMeasConfig()
 }
 
 bool
-RrcConnectionReconfigurationHeader::GetHaveMobilityControlInfo() const
+RrcConnectionReconfigurationHeader::GetHaveMobilityControlInfo()
 {
     return m_haveMobilityControlInfo;
 }
@@ -5911,7 +6172,7 @@ RrcConnectionReconfigurationHeader::GetMobilityControlInfo()
 }
 
 bool
-RrcConnectionReconfigurationHeader::GetHaveRadioResourceConfigDedicated() const
+RrcConnectionReconfigurationHeader::GetHaveRadioResourceConfigDedicated()
 {
     return m_haveRadioResourceConfigDedicated;
 }
@@ -5923,7 +6184,7 @@ RrcConnectionReconfigurationHeader::GetRadioResourceConfigDedicated()
 }
 
 bool
-RrcConnectionReconfigurationHeader::GetHaveNonCriticalExtensionConfig() const
+RrcConnectionReconfigurationHeader::GetHaveNonCriticalExtensionConfig()
 {
     return m_haveNonCriticalExtension;
 }
@@ -5990,10 +6251,10 @@ HandoverPreparationInfoHeader::PreSerialize() const
     // Serialize HandoverPreparationInformation-r8-IEs sequence
     // 4 optional fields, no extension marker.
     std::bitset<4> handoverPrepInfoOpts;
-    handoverPrepInfoOpts.set(3, true);  // as-Config present
-    handoverPrepInfoOpts.set(2, false); // rrm-Config not present
-    handoverPrepInfoOpts.set(1, false); // as-Context not present
-    handoverPrepInfoOpts.set(0, false); // nonCriticalExtension not present
+    handoverPrepInfoOpts.set(3, 1); // as-Config present
+    handoverPrepInfoOpts.set(2, 0); // rrm-Config not present
+    handoverPrepInfoOpts.set(1, 0); // as-Context not present
+    handoverPrepInfoOpts.set(0, 0); // nonCriticalExtension not present
     SerializeSequence(handoverPrepInfoOpts, false);
 
     // Serialize ue-RadioAccessCapabilityInfo
@@ -6233,7 +6494,7 @@ RrcConnectionReestablishmentRequestHeader::PreSerialize() const
 
     SerializeUlCcchMessage(0);
 
-    // Serialize RrcConnectionReestablishmentRequest sequence:
+    // Serialize RrcConnectionReestablishmentReques sequence:
     // no default or optional fields. Extension marker not present.
     SerializeSequence(std::bitset<0>(), false);
 
@@ -7026,10 +7287,8 @@ void
 MeasurementReportHeader::Print(std::ostream& os) const
 {
     os << "measId = " << (int)m_measurementReport.measResults.measId << std::endl;
-    os << "rsrpResult = " << (int)m_measurementReport.measResults.measResultPCell.rsrpResult
-       << std::endl;
-    os << "rsrqResult = " << (int)m_measurementReport.measResults.measResultPCell.rsrqResult
-       << std::endl;
+    os << "rsrpResult = " << (int)m_measurementReport.measResults.rsrpResult << std::endl;
+    os << "rsrqResult = " << (int)m_measurementReport.measResults.rsrqResult << std::endl;
     os << "haveMeasResultNeighCells = "
        << (int)m_measurementReport.measResults.haveMeasResultNeighCells << std::endl;
 
@@ -7037,7 +7296,7 @@ MeasurementReportHeader::Print(std::ostream& os) const
     {
         std::list<LteRrcSap::MeasResultEutra> measResultListEutra =
             m_measurementReport.measResults.measResultListEutra;
-        auto it = measResultListEutra.begin();
+        std::list<LteRrcSap::MeasResultEutra>::iterator it = measResultListEutra.begin();
         for (; it != measResultListEutra.end(); it++)
         {
             os << "   physCellId =" << (int)it->physCellId << std::endl;
@@ -7051,7 +7310,7 @@ MeasurementReportHeader::Print(std::ostream& os) const
                    << std::endl;
                 if (!it->cgiInfo.plmnIdentityList.empty())
                 {
-                    for (auto it2 = it->cgiInfo.plmnIdentityList.begin();
+                    for (std::list<uint32_t>::iterator it2 = it->cgiInfo.plmnIdentityList.begin();
                          it2 != it->cgiInfo.plmnIdentityList.end();
                          it2++)
                     {
@@ -7260,7 +7519,7 @@ RrcUlCcchMessage::DeserializeUlCcchMessage(Buffer::Iterator bIterator)
     else if (n == 0)
     {
         // Deserialize c1
-        bIterator = DeserializeChoice(2, false, &m_messageType, bIterator);
+        bIterator = DeserializeChoice(3, false, &m_messageType, bIterator);
     }
 
     return bIterator;
@@ -7273,7 +7532,7 @@ RrcUlCcchMessage::SerializeUlCcchMessage(int messageType) const
     // Choose c1
     SerializeChoice(2, 0, false);
     // Choose message type
-    SerializeChoice(2, messageType, false);
+    SerializeChoice(3, messageType, false);
 }
 
 ///////////////////  RrcDlCcchMessage //////////////////////////////////
@@ -7322,7 +7581,7 @@ RrcDlCcchMessage::DeserializeDlCcchMessage(Buffer::Iterator bIterator)
     else if (n == 0)
     {
         // Deserialize c1
-        bIterator = DeserializeChoice(4, false, &m_messageType, bIterator);
+        bIterator = DeserializeChoice(5, false, &m_messageType, bIterator);
     }
 
     return bIterator;
@@ -7335,7 +7594,7 @@ RrcDlCcchMessage::SerializeDlCcchMessage(int messageType) const
     // Choose c1
     SerializeChoice(2, 0, false);
     // Choose message type
-    SerializeChoice(4, messageType, false);
+    SerializeChoice(5, messageType, false);
 }
 
 } // namespace ns3

@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Jaume Nin <jnin@cttc.es>
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -45,7 +57,7 @@ RadioBearerStatsCalculator::~RadioBearerStatsCalculator()
 }
 
 TypeId
-RadioBearerStatsCalculator::GetTypeId()
+RadioBearerStatsCalculator::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::RadioBearerStatsCalculator")
@@ -178,7 +190,7 @@ RadioBearerStatsCalculator::UlRxPdu(uint16_t cellId,
         m_ulRxPackets[p]++;
         m_ulRxData[p] += packetSize;
 
-        auto it = m_ulDelay.find(p);
+        Uint64StatsMap::iterator it = m_ulDelay.find(p);
         if (it == m_ulDelay.end())
         {
             NS_LOG_DEBUG(this << " Creating UL stats calculators for IMSI " << p.m_imsi
@@ -209,7 +221,7 @@ RadioBearerStatsCalculator::DlRxPdu(uint16_t cellId,
         m_dlRxPackets[p]++;
         m_dlRxData[p] += packetSize;
 
-        auto it = m_dlDelay.find(p);
+        Uint64StatsMap::iterator it = m_dlDelay.find(p);
         if (it == m_dlDelay.end())
         {
             NS_LOG_DEBUG(this << " Creating DL stats calculators for IMSI " << p.m_imsi
@@ -224,28 +236,28 @@ RadioBearerStatsCalculator::DlRxPdu(uint16_t cellId,
 }
 
 void
-RadioBearerStatsCalculator::ShowResults()
+RadioBearerStatsCalculator::ShowResults(void)
 {
-    NS_LOG_FUNCTION(this << GetUlOutputFilename() << GetDlOutputFilename());
-    NS_LOG_INFO("Write Rlc Stats in " << GetUlOutputFilename() << " and in "
-                                      << GetDlOutputFilename());
+    NS_LOG_FUNCTION(this << GetUlOutputFilename().c_str() << GetDlOutputFilename().c_str());
+    NS_LOG_INFO("Write Rlc Stats in " << GetUlOutputFilename().c_str() << " and in "
+                                      << GetDlOutputFilename().c_str());
 
     std::ofstream ulOutFile;
     std::ofstream dlOutFile;
 
-    if (m_firstWrite)
+    if (m_firstWrite == true)
     {
-        ulOutFile.open(GetUlOutputFilename());
+        ulOutFile.open(GetUlOutputFilename().c_str());
         if (!ulOutFile.is_open())
         {
-            NS_LOG_ERROR("Can't open file " << GetUlOutputFilename());
+            NS_LOG_ERROR("Can't open file " << GetUlOutputFilename().c_str());
             return;
         }
 
-        dlOutFile.open(GetDlOutputFilename());
+        dlOutFile.open(GetDlOutputFilename().c_str());
         if (!dlOutFile.is_open())
         {
-            NS_LOG_ERROR("Can't open file " << GetDlOutputFilename());
+            NS_LOG_ERROR("Can't open file " << GetDlOutputFilename().c_str());
             return;
         }
         m_firstWrite = false;
@@ -260,17 +272,17 @@ RadioBearerStatsCalculator::ShowResults()
     }
     else
     {
-        ulOutFile.open(GetUlOutputFilename(), std::ios_base::app);
+        ulOutFile.open(GetUlOutputFilename().c_str(), std::ios_base::app);
         if (!ulOutFile.is_open())
         {
-            NS_LOG_ERROR("Can't open file " << GetUlOutputFilename());
+            NS_LOG_ERROR("Can't open file " << GetUlOutputFilename().c_str());
             return;
         }
 
-        dlOutFile.open(GetDlOutputFilename(), std::ios_base::app);
+        dlOutFile.open(GetDlOutputFilename().c_str(), std::ios_base::app);
         if (!dlOutFile.is_open())
         {
-            NS_LOG_ERROR("Can't open file " << GetDlOutputFilename());
+            NS_LOG_ERROR("Can't open file " << GetDlOutputFilename().c_str());
             return;
         }
     }
@@ -285,17 +297,10 @@ RadioBearerStatsCalculator::WriteUlResults(std::ofstream& outFile)
 {
     NS_LOG_FUNCTION(this);
 
-    // Get the unique IMSI/LCID pairs list
-    std::vector<ImsiLcidPair_t> pairVector;
-    for (auto it = m_ulTxPackets.begin(); it != m_ulTxPackets.end(); ++it)
-    {
-        if (find(pairVector.begin(), pairVector.end(), (*it).first) == pairVector.end())
-        {
-            pairVector.push_back((*it).first);
-        }
-    }
+    // Get the unique IMSI / LCID list
 
-    for (auto it = m_ulRxPackets.begin(); it != m_ulRxPackets.end(); ++it)
+    std::vector<ImsiLcidPair_t> pairVector;
+    for (Uint32Map::iterator it = m_ulTxPackets.begin(); it != m_ulTxPackets.end(); ++it)
     {
         if (find(pairVector.begin(), pairVector.end(), (*it).first) == pairVector.end())
         {
@@ -304,18 +309,22 @@ RadioBearerStatsCalculator::WriteUlResults(std::ofstream& outFile)
     }
 
     Time endTime = m_startTime + m_epochDuration;
-    for (auto it = pairVector.begin(); it != pairVector.end(); ++it)
+    for (std::vector<ImsiLcidPair_t>::iterator it = pairVector.begin(); it != pairVector.end();
+         ++it)
     {
         ImsiLcidPair_t p = *it;
-        auto flowIdIt = m_flowId.find(p);
-        NS_ASSERT_MSG(flowIdIt != m_flowId.end(),
-                      "FlowId (imsi " << p.m_imsi << " lcid " << (uint32_t)p.m_lcId
-                                      << ") is missing");
+        FlowIdMap::const_iterator flowIdIt = m_flowId.find(p);
+        // \TODO Temporary workaround until traces are connected correctly in LteEnbRrc and LteUeRrc
+        if (flowIdIt == m_flowId.end())
+            continue;
+        //       NS_ASSERT_MSG (flowIdIt != m_flowId.end (),
+        //                      "FlowId (imsi " << p.m_imsi << " lcid " << (uint32_t) p.m_lcId << ")
+        //                      is missing");
         LteFlowId_t flowId = flowIdIt->second;
         NS_ASSERT_MSG(flowId.m_lcId == p.m_lcId, "lcid mismatch");
 
-        outFile << m_startTime.GetSeconds() << "\t";
-        outFile << endTime.GetSeconds() << "\t";
+        outFile << m_startTime.GetNanoSeconds() / 1.0e9 << "\t";
+        outFile << endTime.GetNanoSeconds() / 1.0e9 << "\t";
         outFile << GetUlCellId(p.m_imsi, p.m_lcId) << "\t";
         outFile << p.m_imsi << "\t";
         outFile << flowId.m_rnti << "\t";
@@ -325,12 +334,12 @@ RadioBearerStatsCalculator::WriteUlResults(std::ofstream& outFile)
         outFile << GetUlRxPackets(p.m_imsi, p.m_lcId) << "\t";
         outFile << GetUlRxData(p.m_imsi, p.m_lcId) << "\t";
         std::vector<double> stats = GetUlDelayStats(p.m_imsi, p.m_lcId);
-        for (auto it = stats.begin(); it != stats.end(); ++it)
+        for (std::vector<double>::iterator it = stats.begin(); it != stats.end(); ++it)
         {
             outFile << (*it) * 1e-9 << "\t";
         }
         stats = GetUlPduSizeStats(p.m_imsi, p.m_lcId);
-        for (auto it = stats.begin(); it != stats.end(); ++it)
+        for (std::vector<double>::iterator it = stats.begin(); it != stats.end(); ++it)
         {
             outFile << (*it) << "\t";
         }
@@ -345,17 +354,9 @@ RadioBearerStatsCalculator::WriteDlResults(std::ofstream& outFile)
 {
     NS_LOG_FUNCTION(this);
 
-    // Get the unique IMSI/LCID pairs list
+    // Get the unique IMSI list
     std::vector<ImsiLcidPair_t> pairVector;
-    for (auto it = m_dlTxPackets.begin(); it != m_dlTxPackets.end(); ++it)
-    {
-        if (find(pairVector.begin(), pairVector.end(), (*it).first) == pairVector.end())
-        {
-            pairVector.push_back((*it).first);
-        }
-    }
-
-    for (auto it = m_dlRxPackets.begin(); it != m_dlRxPackets.end(); ++it)
+    for (Uint32Map::iterator it = m_dlTxPackets.begin(); it != m_dlTxPackets.end(); ++it)
     {
         if (find(pairVector.begin(), pairVector.end(), (*it).first) == pairVector.end())
         {
@@ -364,18 +365,22 @@ RadioBearerStatsCalculator::WriteDlResults(std::ofstream& outFile)
     }
 
     Time endTime = m_startTime + m_epochDuration;
-    for (auto pair = pairVector.begin(); pair != pairVector.end(); ++pair)
+    for (std::vector<ImsiLcidPair_t>::iterator pair = pairVector.begin(); pair != pairVector.end();
+         ++pair)
     {
         ImsiLcidPair_t p = *pair;
-        auto flowIdIt = m_flowId.find(p);
-        NS_ASSERT_MSG(flowIdIt != m_flowId.end(),
-                      "FlowId (imsi " << p.m_imsi << " lcid " << (uint32_t)p.m_lcId
-                                      << ") is missing");
+        FlowIdMap::const_iterator flowIdIt = m_flowId.find(p);
+        // \TODO Temporary workaround until traces are connected correctly in LteEnbRrc and LteUeRrc
+        if (flowIdIt == m_flowId.end())
+            continue;
+        //       NS_ASSERT_MSG (flowIdIt != m_flowId.end (),
+        //                      "FlowId (imsi " << p.m_imsi << " lcid " << (uint32_t) p.m_lcId << ")
+        //                      is missing");
         LteFlowId_t flowId = flowIdIt->second;
         NS_ASSERT_MSG(flowId.m_lcId == p.m_lcId, "lcid mismatch");
 
-        outFile << m_startTime.GetSeconds() << "\t";
-        outFile << endTime.GetSeconds() << "\t";
+        outFile << m_startTime.GetNanoSeconds() / 1.0e9 << "\t";
+        outFile << endTime.GetNanoSeconds() / 1.0e9 << "\t";
         outFile << GetDlCellId(p.m_imsi, p.m_lcId) << "\t";
         outFile << p.m_imsi << "\t";
         outFile << flowId.m_rnti << "\t";
@@ -385,12 +390,12 @@ RadioBearerStatsCalculator::WriteDlResults(std::ofstream& outFile)
         outFile << GetDlRxPackets(p.m_imsi, p.m_lcId) << "\t";
         outFile << GetDlRxData(p.m_imsi, p.m_lcId) << "\t";
         std::vector<double> stats = GetDlDelayStats(p.m_imsi, p.m_lcId);
-        for (auto it = stats.begin(); it != stats.end(); ++it)
+        for (std::vector<double>::iterator it = stats.begin(); it != stats.end(); ++it)
         {
             outFile << (*it) * 1e-9 << "\t";
         }
         stats = GetDlPduSizeStats(p.m_imsi, p.m_lcId);
-        for (auto it = stats.begin(); it != stats.end(); ++it)
+        for (std::vector<double>::iterator it = stats.begin(); it != stats.end(); ++it)
         {
             outFile << (*it) << "\t";
         }
@@ -401,7 +406,7 @@ RadioBearerStatsCalculator::WriteDlResults(std::ofstream& outFile)
 }
 
 void
-RadioBearerStatsCalculator::ResetResults()
+RadioBearerStatsCalculator::ResetResults(void)
 {
     NS_LOG_FUNCTION(this);
 
@@ -421,7 +426,7 @@ RadioBearerStatsCalculator::ResetResults()
 }
 
 void
-RadioBearerStatsCalculator::RescheduleEndEpoch()
+RadioBearerStatsCalculator::RescheduleEndEpoch(void)
 {
     NS_LOG_FUNCTION(this);
     m_endEpochEvent.Cancel();
@@ -432,7 +437,7 @@ RadioBearerStatsCalculator::RescheduleEndEpoch()
 }
 
 void
-RadioBearerStatsCalculator::EndEpoch()
+RadioBearerStatsCalculator::EndEpoch(void)
 {
     NS_LOG_FUNCTION(this);
     ShowResults();
@@ -479,7 +484,7 @@ RadioBearerStatsCalculator::GetUlDelay(uint64_t imsi, uint8_t lcid)
 {
     NS_LOG_FUNCTION(this << imsi << (uint16_t)lcid);
     ImsiLcidPair_t p(imsi, lcid);
-    auto it = m_ulDelay.find(p);
+    Uint64StatsMap::iterator it = m_ulDelay.find(p);
     if (it == m_ulDelay.end())
     {
         NS_LOG_ERROR("UL delay for " << imsi << " - " << (uint16_t)lcid << " not found");
@@ -494,7 +499,7 @@ RadioBearerStatsCalculator::GetUlDelayStats(uint64_t imsi, uint8_t lcid)
     NS_LOG_FUNCTION(this << imsi << (uint16_t)lcid);
     ImsiLcidPair_t p(imsi, lcid);
     std::vector<double> stats;
-    auto it = m_ulDelay.find(p);
+    Uint64StatsMap::iterator it = m_ulDelay.find(p);
     if (it == m_ulDelay.end())
     {
         stats.push_back(0.0);
@@ -516,7 +521,7 @@ RadioBearerStatsCalculator::GetUlPduSizeStats(uint64_t imsi, uint8_t lcid)
     NS_LOG_FUNCTION(this << imsi << (uint16_t)lcid);
     ImsiLcidPair_t p(imsi, lcid);
     std::vector<double> stats;
-    auto it = m_ulPduSize.find(p);
+    Uint32StatsMap::iterator it = m_ulPduSize.find(p);
     if (it == m_ulPduSize.end())
     {
         stats.push_back(0.0);
@@ -585,7 +590,7 @@ RadioBearerStatsCalculator::GetDlDelay(uint64_t imsi, uint8_t lcid)
 {
     NS_LOG_FUNCTION(this << imsi << (uint16_t)lcid);
     ImsiLcidPair_t p(imsi, lcid);
-    auto it = m_dlDelay.find(p);
+    Uint64StatsMap::iterator it = m_dlDelay.find(p);
     if (it == m_dlDelay.end())
     {
         NS_LOG_ERROR("DL delay for " << imsi << " not found");
@@ -600,7 +605,7 @@ RadioBearerStatsCalculator::GetDlDelayStats(uint64_t imsi, uint8_t lcid)
     NS_LOG_FUNCTION(this << imsi << (uint16_t)lcid);
     ImsiLcidPair_t p(imsi, lcid);
     std::vector<double> stats;
-    auto it = m_dlDelay.find(p);
+    Uint64StatsMap::iterator it = m_dlDelay.find(p);
     if (it == m_dlDelay.end())
     {
         stats.push_back(0.0);
@@ -622,7 +627,7 @@ RadioBearerStatsCalculator::GetDlPduSizeStats(uint64_t imsi, uint8_t lcid)
     NS_LOG_FUNCTION(this << imsi << (uint16_t)lcid);
     ImsiLcidPair_t p(imsi, lcid);
     std::vector<double> stats;
-    auto it = m_dlPduSize.find(p);
+    Uint32StatsMap::iterator it = m_dlPduSize.find(p);
     if (it == m_dlPduSize.end())
     {
         stats.push_back(0.0);
@@ -639,7 +644,7 @@ RadioBearerStatsCalculator::GetDlPduSizeStats(uint64_t imsi, uint8_t lcid)
 }
 
 std::string
-RadioBearerStatsCalculator::GetUlOutputFilename()
+RadioBearerStatsCalculator::GetUlOutputFilename(void)
 {
     if (m_protocolType == "RLC")
     {
@@ -652,7 +657,7 @@ RadioBearerStatsCalculator::GetUlOutputFilename()
 }
 
 std::string
-RadioBearerStatsCalculator::GetDlOutputFilename()
+RadioBearerStatsCalculator::GetDlOutputFilename(void)
 {
     if (m_protocolType == "RLC")
     {
@@ -671,7 +676,7 @@ RadioBearerStatsCalculator::SetUlPdcpOutputFilename(std::string outputFilename)
 }
 
 std::string
-RadioBearerStatsCalculator::GetUlPdcpOutputFilename()
+RadioBearerStatsCalculator::GetUlPdcpOutputFilename(void)
 {
     return m_ulPdcpOutputFilename;
 }
@@ -683,7 +688,7 @@ RadioBearerStatsCalculator::SetDlPdcpOutputFilename(std::string outputFilename)
 }
 
 std::string
-RadioBearerStatsCalculator::GetDlPdcpOutputFilename()
+RadioBearerStatsCalculator::GetDlPdcpOutputFilename(void)
 {
     return m_dlPdcpOutputFilename;
 }

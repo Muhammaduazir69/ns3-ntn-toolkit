@@ -1,15 +1,32 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #include "lte-radio-bearer-info.h"
 
 #include "lte-pdcp.h"
 #include "lte-rlc.h"
+#include "lte-ue-rrc.h"
 
 #include <ns3/log.h>
 
@@ -18,16 +35,16 @@ namespace ns3
 
 NS_OBJECT_ENSURE_REGISTERED(LteRadioBearerInfo);
 
-LteRadioBearerInfo::LteRadioBearerInfo()
+LteRadioBearerInfo::LteRadioBearerInfo(void)
 {
 }
 
-LteRadioBearerInfo::~LteRadioBearerInfo()
+LteRadioBearerInfo::~LteRadioBearerInfo(void)
 {
 }
 
 TypeId
-LteRadioBearerInfo::GetTypeId()
+LteRadioBearerInfo::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::LteRadioBearerInfo").SetParent<Object>().AddConstructor<LteRadioBearerInfo>();
@@ -35,7 +52,7 @@ LteRadioBearerInfo::GetTypeId()
 }
 
 TypeId
-LteDataRadioBearerInfo::GetTypeId()
+LteDataRadioBearerInfo::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::LteDataRadioBearerInfo")
@@ -73,7 +90,7 @@ LteDataRadioBearerInfo::GetTypeId()
 }
 
 TypeId
-LteSignalingRadioBearerInfo::GetTypeId()
+LteSignalingRadioBearerInfo::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::LteSignalingRadioBearerInfo")
@@ -95,6 +112,28 @@ LteSignalingRadioBearerInfo::GetTypeId()
                           PointerValue(),
                           MakePointerAccessor(&LteRadioBearerInfo::m_pdcp),
                           MakePointerChecker<LtePdcp>());
+    return tid;
+}
+
+RlcBearerInfo::RlcBearerInfo(void)
+{
+}
+
+RlcBearerInfo::~RlcBearerInfo(void)
+{
+}
+
+TypeId
+RlcBearerInfo::GetTypeId(void)
+{
+    static TypeId tid = TypeId("ns3::RlcBearerInfo")
+                            .SetParent<Object>()
+                            .AddConstructor<RlcBearerInfo>()
+                            .AddAttribute("LteRlc",
+                                          "RLC instance of the secondary connection.",
+                                          PointerValue(),
+                                          MakePointerAccessor(&RlcBearerInfo::m_rlc),
+                                          MakePointerChecker<LteRlc>());
     return tid;
 }
 

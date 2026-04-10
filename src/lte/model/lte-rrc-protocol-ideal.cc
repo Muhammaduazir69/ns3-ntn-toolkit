@@ -1,9 +1,25 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #include "lte-rrc-protocol-ideal.h"
@@ -36,8 +52,8 @@ static const Time RRC_IDEAL_MSG_DELAY = MilliSeconds(0);
 NS_OBJECT_ENSURE_REGISTERED(LteUeRrcProtocolIdeal);
 
 LteUeRrcProtocolIdeal::LteUeRrcProtocolIdeal()
-    : m_ueRrcSapProvider(nullptr),
-      m_enbRrcSapProvider(nullptr)
+    : m_ueRrcSapProvider(0),
+      m_enbRrcSapProvider(0)
 {
     m_ueRrcSapUser = new MemberLteUeRrcSapUser<LteUeRrcProtocolIdeal>(this);
 }
@@ -51,11 +67,11 @@ LteUeRrcProtocolIdeal::DoDispose()
 {
     NS_LOG_FUNCTION(this);
     delete m_ueRrcSapUser;
-    m_rrc = nullptr;
+    m_rrc = 0;
 }
 
 TypeId
-LteUeRrcProtocolIdeal::GetTypeId()
+LteUeRrcProtocolIdeal::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::LteUeRrcProtocolIdeal")
                             .SetParent<Object>()
@@ -163,26 +179,15 @@ LteUeRrcProtocolIdeal::DoSendMeasurementReport(LteRrcSap::MeasurementReport msg)
 }
 
 void
-LteUeRrcProtocolIdeal::DoSendIdealUeContextRemoveRequest(uint16_t rnti)
+LteUeRrcProtocolIdeal::DoSendNotifySecondaryCellConnected(uint16_t mmWaveRnti,
+                                                          uint16_t mmWaveCellId)
 {
-    NS_LOG_FUNCTION(this);
-
-    uint16_t cellId = m_rrc->GetCellId();
-    // re-initialize the RNTI and get the EnbLteRrcSapProvider for the
-    // eNB we are currently attached to or attempting random access to
-    // a target eNB
-    m_rnti = m_rrc->GetRnti();
-
-    NS_LOG_DEBUG("RNTI " << rnti << " sending UE context remove request to cell id " << cellId);
-    NS_ABORT_MSG_IF(m_rnti != rnti, "RNTI mismatch");
-
-    SetEnbRrcSapProvider(); // the provider has to be reset since the cell might have changed due to
-                            // handover
-    // ideally informing eNB
     Simulator::Schedule(RRC_IDEAL_MSG_DELAY,
-                        &LteEnbRrcSapProvider::RecvIdealUeContextRemoveRequest,
+                        &LteEnbRrcSapProvider::RecvRrcSecondaryCellInitialAccessSuccessful,
                         m_enbRrcSapProvider,
-                        m_rnti);
+                        m_rnti,
+                        mmWaveRnti,
+                        mmWaveCellId);
 }
 
 void
@@ -195,9 +200,9 @@ LteUeRrcProtocolIdeal::SetEnbRrcSapProvider()
 
     // walk list of all nodes to get the peer eNB
     Ptr<LteEnbNetDevice> enbDev;
-    auto listEnd = NodeList::End();
+    NodeList::Iterator listEnd = NodeList::End();
     bool found = false;
-    for (auto i = NodeList::Begin(); (i != listEnd) && (!found); ++i)
+    for (NodeList::Iterator i = NodeList::Begin(); (i != listEnd) && (!found); ++i)
     {
         Ptr<Node> node = *i;
         int nDevs = node->GetNDevices();
@@ -228,7 +233,7 @@ LteUeRrcProtocolIdeal::SetEnbRrcSapProvider()
 NS_OBJECT_ENSURE_REGISTERED(LteEnbRrcProtocolIdeal);
 
 LteEnbRrcProtocolIdeal::LteEnbRrcProtocolIdeal()
-    : m_enbRrcSapProvider(nullptr)
+    : m_enbRrcSapProvider(0)
 {
     NS_LOG_FUNCTION(this);
     m_enbRrcSapUser = new MemberLteEnbRrcSapUser<LteEnbRrcProtocolIdeal>(this);
@@ -247,7 +252,7 @@ LteEnbRrcProtocolIdeal::DoDispose()
 }
 
 TypeId
-LteEnbRrcProtocolIdeal::GetTypeId()
+LteEnbRrcProtocolIdeal::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::LteEnbRrcProtocolIdeal")
                             .SetParent<Object>()
@@ -277,7 +282,8 @@ LteEnbRrcProtocolIdeal::SetCellId(uint16_t cellId)
 LteUeRrcSapProvider*
 LteEnbRrcProtocolIdeal::GetUeRrcSapProvider(uint16_t rnti)
 {
-    auto it = m_enbRrcSapProviderMap.find(rnti);
+    std::map<uint16_t, LteUeRrcSapProvider*>::const_iterator it;
+    it = m_enbRrcSapProviderMap.find(rnti);
     NS_ASSERT_MSG(it != m_enbRrcSapProviderMap.end(), "could not find RNTI = " << rnti);
     return it->second;
 }
@@ -285,12 +291,11 @@ LteEnbRrcProtocolIdeal::GetUeRrcSapProvider(uint16_t rnti)
 void
 LteEnbRrcProtocolIdeal::SetUeRrcSapProvider(uint16_t rnti, LteUeRrcSapProvider* p)
 {
-    auto it = m_enbRrcSapProviderMap.find(rnti);
-    // assign UE RRC only if the RNTI is found at eNB
-    if (it != m_enbRrcSapProviderMap.end())
-    {
-        it->second = p;
-    }
+    std::map<uint16_t, LteUeRrcSapProvider*>::iterator it;
+    it = m_enbRrcSapProviderMap.find(rnti);
+    NS_ASSERT_MSG(it != m_enbRrcSapProviderMap.end(),
+                  "Cell id " << m_cellId << " could not find RNTI = " << rnti);
+    it->second = p;
 }
 
 void
@@ -318,8 +323,8 @@ LteEnbRrcProtocolIdeal::DoSetupUe(uint16_t rnti, LteEnbRrcSapUser::SetupUeParame
     //             ueRrc = ueDev->GetRrc ();
     //             if ((ueRrc->GetRnti () == rnti) && (ueRrc->GetCellId () == m_cellId))
     //               {
-    //                 found = true;
-    //                 break;
+    //            found = true;
+    //            break;
     //               }
     //           }
     //       }
@@ -330,7 +335,7 @@ LteEnbRrcProtocolIdeal::DoSetupUe(uint16_t rnti, LteEnbRrcSapUser::SetupUeParame
     // just create empty entry, the UeRrcSapProvider will be set by the
     // ue upon connection request or connection reconfiguration
     // completed
-    m_enbRrcSapProviderMap[rnti] = nullptr;
+    m_enbRrcSapProviderMap[rnti] = 0;
 }
 
 void
@@ -346,7 +351,7 @@ LteEnbRrcProtocolIdeal::DoSendSystemInformation(uint16_t cellId, LteRrcSap::Syst
     NS_LOG_FUNCTION(this << cellId);
     // walk list of all nodes to get UEs with this cellId
     Ptr<LteUeRrc> ueRrc;
-    for (auto i = NodeList::Begin(); i != NodeList::End(); ++i)
+    for (NodeList::Iterator i = NodeList::Begin(); i != NodeList::End(); ++i)
     {
         Ptr<Node> node = *i;
         int nDevs = node->GetNDevices();
@@ -433,6 +438,24 @@ LteEnbRrcProtocolIdeal::DoSendRrcConnectionReject(uint16_t rnti, LteRrcSap::RrcC
                         msg);
 }
 
+void
+LteEnbRrcProtocolIdeal::DoSendRrcConnectionSwitch(uint16_t rnti, LteRrcSap::RrcConnectionSwitch msg)
+{
+    Simulator::Schedule(RRC_IDEAL_MSG_DELAY,
+                        &LteUeRrcSapProvider::RecvRrcConnectionSwitch,
+                        GetUeRrcSapProvider(rnti),
+                        msg);
+}
+
+void
+LteEnbRrcProtocolIdeal::DoSendRrcConnectToMmWave(uint16_t rnti, uint16_t mmWaveCellId)
+{
+    Simulator::Schedule(RRC_IDEAL_MSG_DELAY,
+                        &LteUeRrcSapProvider::RecvRrcConnectToMmWave,
+                        GetUeRrcSapProvider(rnti),
+                        mmWaveCellId);
+}
+
 /*
  * The purpose of LteEnbRrcProtocolIdeal is to avoid encoding
  * messages. In order to do so, we need to have some form of encoding for
@@ -463,7 +486,7 @@ class IdealHandoverPreparationInfoHeader : public Header
      *
      * \returns the message ID
      */
-    uint32_t GetMsgId() const;
+    uint32_t GetMsgId();
     /**
      * Set the message ID function
      *
@@ -474,19 +497,19 @@ class IdealHandoverPreparationInfoHeader : public Header
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    void Print(std::ostream& os) const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual void Print(std::ostream& os) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
 
   private:
     uint32_t m_msgId; ///< message ID
 };
 
 uint32_t
-IdealHandoverPreparationInfoHeader::GetMsgId() const
+IdealHandoverPreparationInfoHeader::GetMsgId()
 {
     return m_msgId;
 }
@@ -498,7 +521,7 @@ IdealHandoverPreparationInfoHeader::SetMsgId(uint32_t id)
 }
 
 TypeId
-IdealHandoverPreparationInfoHeader::GetTypeId()
+IdealHandoverPreparationInfoHeader::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::IdealHandoverPreparationInfoHeader")
                             .SetParent<Header>()
@@ -508,7 +531,7 @@ IdealHandoverPreparationInfoHeader::GetTypeId()
 }
 
 TypeId
-IdealHandoverPreparationInfoHeader::GetInstanceTypeId() const
+IdealHandoverPreparationInfoHeader::GetInstanceTypeId(void) const
 {
     return GetTypeId();
 }
@@ -520,7 +543,7 @@ IdealHandoverPreparationInfoHeader::Print(std::ostream& os) const
 }
 
 uint32_t
-IdealHandoverPreparationInfoHeader::GetSerializedSize() const
+IdealHandoverPreparationInfoHeader::GetSerializedSize(void) const
 {
     return 4;
 }
@@ -563,7 +586,8 @@ LteEnbRrcProtocolIdeal::DoDecodeHandoverPreparationInformation(Ptr<Packet> p)
     p->RemoveHeader(h);
     uint32_t msgId = h.GetMsgId();
     NS_LOG_INFO(" decoding msgId = " << msgId);
-    auto it = g_handoverPreparationInfoMsgMap.find(msgId);
+    std::map<uint32_t, LteRrcSap::HandoverPreparationInfo>::iterator it =
+        g_handoverPreparationInfoMsgMap.find(msgId);
     NS_ASSERT_MSG(it != g_handoverPreparationInfoMsgMap.end(), "msgId " << msgId << " not found");
     LteRrcSap::HandoverPreparationInfo msg = it->second;
     g_handoverPreparationInfoMsgMap.erase(it);
@@ -587,7 +611,7 @@ class IdealHandoverCommandHeader : public Header
      *
      * \returns the message ID
      */
-    uint32_t GetMsgId() const;
+    uint32_t GetMsgId();
     /**
      * Set the message ID function
      *
@@ -598,19 +622,19 @@ class IdealHandoverCommandHeader : public Header
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
-    TypeId GetInstanceTypeId() const override;
-    void Print(std::ostream& os) const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator start) const override;
-    uint32_t Deserialize(Buffer::Iterator start) override;
+    static TypeId GetTypeId(void);
+    virtual TypeId GetInstanceTypeId(void) const;
+    virtual void Print(std::ostream& os) const;
+    virtual uint32_t GetSerializedSize(void) const;
+    virtual void Serialize(Buffer::Iterator start) const;
+    virtual uint32_t Deserialize(Buffer::Iterator start);
 
   private:
     uint32_t m_msgId; ///< message ID
 };
 
 uint32_t
-IdealHandoverCommandHeader::GetMsgId() const
+IdealHandoverCommandHeader::GetMsgId()
 {
     return m_msgId;
 }
@@ -622,7 +646,7 @@ IdealHandoverCommandHeader::SetMsgId(uint32_t id)
 }
 
 TypeId
-IdealHandoverCommandHeader::GetTypeId()
+IdealHandoverCommandHeader::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::IdealHandoverCommandHeader")
                             .SetParent<Header>()
@@ -632,7 +656,7 @@ IdealHandoverCommandHeader::GetTypeId()
 }
 
 TypeId
-IdealHandoverCommandHeader::GetInstanceTypeId() const
+IdealHandoverCommandHeader::GetInstanceTypeId(void) const
 {
     return GetTypeId();
 }
@@ -644,7 +668,7 @@ IdealHandoverCommandHeader::Print(std::ostream& os) const
 }
 
 uint32_t
-IdealHandoverCommandHeader::GetSerializedSize() const
+IdealHandoverCommandHeader::GetSerializedSize(void) const
 {
     return 4;
 }
@@ -685,7 +709,8 @@ LteEnbRrcProtocolIdeal::DoDecodeHandoverCommand(Ptr<Packet> p)
     p->RemoveHeader(h);
     uint32_t msgId = h.GetMsgId();
     NS_LOG_INFO(" decoding msgId = " << msgId);
-    auto it = g_handoverCommandMsgMap.find(msgId);
+    std::map<uint32_t, LteRrcSap::RrcConnectionReconfiguration>::iterator it =
+        g_handoverCommandMsgMap.find(msgId);
     NS_ASSERT_MSG(it != g_handoverCommandMsgMap.end(), "msgId " << msgId << " not found");
     LteRrcSap::RrcConnectionReconfiguration msg = it->second;
     g_handoverCommandMsgMap.erase(it);

@@ -1,20 +1,32 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
+ *
+ * Modified by: Gabriel Arrobo <gab.arrobo@gmail.com>
+ *          Added 5G QCIs for the mmWave module as per TS 23.203 V15.3.0 (2018-06)
  */
 
 #include "eps-bearer.h"
 
-#include <ns3/attribute-construction-list.h>
 #include <ns3/fatal-error.h>
 
 namespace ns3
 {
-
-NS_OBJECT_ENSURE_REGISTERED(EpsBearer);
 
 GbrQosInformation::GbrQosInformation()
     : gbrDl(0),
@@ -31,206 +43,217 @@ AllocationRetentionPriority::AllocationRetentionPriority()
 {
 }
 
-TypeId
-EpsBearer::GetTypeId()
-{
-    static TypeId tid =
-        TypeId("ns3::EpsBearer")
-            .SetParent<ObjectBase>()
-            .SetGroupName("Lte")
-            .AddConstructor<EpsBearer>()
-            .AddAttribute(
-                "Release",
-                "Change from 11 to 18 if you need bearer definition as per newer Releases."
-                " Reference document: TS 23.203. The change does not impact other LTE code than "
-                " bearers definition.",
-                UintegerValue(11),
-                MakeUintegerAccessor(&EpsBearer::GetRelease, &EpsBearer::SetRelease),
-                MakeUintegerChecker<uint32_t>());
-    return tid;
-}
-
-TypeId
-EpsBearer::GetInstanceTypeId() const
-{
-    return EpsBearer::GetTypeId();
-}
-
 EpsBearer::EpsBearer()
-    : ObjectBase(),
-      qci(NGBR_VIDEO_TCP_DEFAULT)
+    : qci(NGBR_VIDEO_TCP_DEFAULT)
 {
-    ObjectBase::ConstructSelf(AttributeConstructionList());
 }
 
 EpsBearer::EpsBearer(Qci x)
-    : ObjectBase(),
-      qci(x)
+    : qci(x)
 {
-    ObjectBase::ConstructSelf(AttributeConstructionList());
 }
 
-EpsBearer::EpsBearer(Qci x, GbrQosInformation y)
-    : ObjectBase(),
-      qci(x),
+EpsBearer::EpsBearer(Qci x, struct GbrQosInformation y)
+    : qci(x),
       gbrQosInfo(y)
 {
-    ObjectBase::ConstructSelf(AttributeConstructionList());
 }
 
-EpsBearer::EpsBearer(const EpsBearer& o)
-    : ObjectBase(o)
+bool
+EpsBearer::IsGbr() const
 {
-    qci = o.qci;
-    gbrQosInfo = o.gbrQosInfo;
-    ObjectBase::ConstructSelf(AttributeConstructionList());
-}
-
-void
-EpsBearer::SetRelease(uint8_t release)
-{
-    switch (release)
+    // 3GPP 23.203 Section 6.1.7.2
+    switch (qci)
     {
-    case 8:
-    case 9:
-    case 10:
-    case 11:
-        m_requirements = GetRequirementsRel11();
-        break;
-    case 15:
-        m_requirements = GetRequirementsRel15();
-        break;
-    case 18:
-        m_requirements = GetRequirementsRel18();
-        break;
+    case GBR_CONV_VOICE:
+    case GBR_CONV_VIDEO:
+    case GBR_GAMING:
+    case GBR_NON_CONV_VIDEO:
+    case GBR_MCPTT:
+    case GBR_NON_MCPTT:
+    case GBR_MC_VIDEO:
+    case GBR_V2X_MESSAGES:
+    case GBR_DISC_AUTO_S_PACKETS:
+    case GBR_DISC_AUTO_B_PACKETS:
+    case GBR_INTEL_TRANSPORT_SYS:
+    case GBR_ELECTRIC_DIST_HV:
+        return true;
+    case NGBR_IMS:
+    case NGBR_VIDEO_TCP_OPERATOR:
+    case NGBR_VOICE_VIDEO_GAMING:
+    case NGBR_VIDEO_TCP_PREMIUM:
+    case NGBR_VIDEO_TCP_DEFAULT:
+    case NGBR_MC_DELAY_SENSI_SIG:
+    case NGBR_MC_DATA:
+    case NGBR_V2X_MESSAGES:
+    case NGBR_LOW_LAT_EMBB_AR:
+        return false;
     default:
-        NS_FATAL_ERROR("Not recognized release " << static_cast<uint32_t>(release)
-                                                 << " please choose a value between"
-                                                    " 8 and 11, or 15 or 18");
+        NS_FATAL_ERROR("unknown QCI value " << qci);
+        return false;
     }
-    m_release = release;
-}
-
-uint8_t
-EpsBearer::GetResourceType() const
-{
-    return GetResourceType(m_requirements, qci);
 }
 
 uint8_t
 EpsBearer::GetPriority() const
 {
-    return GetPriority(m_requirements, qci);
+    // 3GPP 23.203 Section 6.1.7.2
+    switch (qci)
+    {
+    case GBR_CONV_VOICE:
+        return 20;
+    case GBR_CONV_VIDEO:
+        return 40;
+    case GBR_GAMING:
+        return 30;
+    case GBR_NON_CONV_VIDEO:
+        return 50;
+    case GBR_MCPTT:
+        return 7;
+    case GBR_NON_MCPTT:
+        return 20;
+    case GBR_MC_VIDEO:
+        return 15;
+    case GBR_V2X_MESSAGES:
+        return 25;
+    case NGBR_IMS:
+        return 10;
+    case NGBR_VIDEO_TCP_OPERATOR:
+        return 60;
+    case NGBR_VOICE_VIDEO_GAMING:
+        return 70;
+    case NGBR_VIDEO_TCP_PREMIUM:
+        return 80;
+    case NGBR_VIDEO_TCP_DEFAULT:
+        return 90;
+    case NGBR_MC_DELAY_SENSI_SIG:
+        return 5;
+    case NGBR_MC_DATA:
+        return 55;
+    case NGBR_V2X_MESSAGES:
+        return 65;
+    case NGBR_LOW_LAT_EMBB_AR:
+        return 68;
+    case GBR_DISC_AUTO_S_PACKETS:
+        return 19;
+    case GBR_DISC_AUTO_B_PACKETS:
+        return 22;
+    case GBR_INTEL_TRANSPORT_SYS:
+        return 24;
+    case GBR_ELECTRIC_DIST_HV:
+        return 21;
+    default:
+        NS_FATAL_ERROR("unknown QCI value " << qci);
+        return 0;
+    }
 }
 
 uint16_t
 EpsBearer::GetPacketDelayBudgetMs() const
 {
-    return GetPacketDelayBudgetMs(m_requirements, qci);
+    // 3GPP 23.203 Section 6.1.7.2
+    switch (qci)
+    {
+    case GBR_CONV_VOICE:
+        return 100;
+    case GBR_CONV_VIDEO:
+        return 150;
+    case GBR_GAMING:
+        return 50;
+    case GBR_NON_CONV_VIDEO:
+        return 300;
+    case GBR_MCPTT:
+        return 75;
+    case GBR_NON_MCPTT:
+        return 100;
+    case GBR_MC_VIDEO:
+        return 100;
+    case GBR_V2X_MESSAGES:
+        return 50;
+    case NGBR_IMS:
+        return 100;
+    case NGBR_VIDEO_TCP_OPERATOR:
+        return 300;
+    case NGBR_VOICE_VIDEO_GAMING:
+        return 100;
+    case NGBR_VIDEO_TCP_PREMIUM:
+        return 300;
+    case NGBR_VIDEO_TCP_DEFAULT:
+        return 300;
+    case NGBR_MC_DELAY_SENSI_SIG:
+        return 60;
+    case NGBR_MC_DATA:
+        return 200;
+    case NGBR_V2X_MESSAGES:
+        return 50;
+    case NGBR_LOW_LAT_EMBB_AR:
+        return 10;
+    case GBR_DISC_AUTO_S_PACKETS:
+        return 10;
+    case GBR_DISC_AUTO_B_PACKETS:
+        return 10;
+    case GBR_INTEL_TRANSPORT_SYS:
+        return 30;
+    case GBR_ELECTRIC_DIST_HV:
+        return 5;
+    default:
+        NS_FATAL_ERROR("unknown QCI value " << qci);
+        return 0;
+    }
 }
 
 double
 EpsBearer::GetPacketErrorLossRate() const
 {
-    return GetPacketErrorLossRate(m_requirements, qci);
-}
-
-const EpsBearer::BearerRequirementsMap&
-EpsBearer::GetRequirementsRel11()
-{
-    /* Needed to support GCC 4.9. Otherwise, use list constructors, for example:
-     * EpsBearer::BearerRequirementsMap
-     * EpsBearer::GetRequirementsRel15 ()
-     * {
-     *   return
-     *     {
-     *       { GBR_CONV_VOICE          , { 1,  20, 100, 1.0e-2,    0, 2000} },
-     *       ...
-     *     };
-     * }
-     */
-    static EpsBearer::BearerRequirementsMap ret{
-        {GBR_CONV_VOICE, std::make_tuple(1, 2, 100, 1.0e-2, 0, 0)},
-        {GBR_CONV_VIDEO, std::make_tuple(1, 4, 150, 1.0e-3, 0, 0)},
-        {GBR_GAMING, std::make_tuple(1, 3, 50, 1.0e-3, 0, 0)},
-        {GBR_NON_CONV_VIDEO, std::make_tuple(1, 5, 300, 1.0e-6, 0, 0)},
-        {NGBR_IMS, std::make_tuple(0, 1, 100, 1.0e-6, 0, 0)},
-        {NGBR_VIDEO_TCP_OPERATOR, std::make_tuple(0, 6, 300, 1.0e-6, 0, 0)},
-        {NGBR_VOICE_VIDEO_GAMING, std::make_tuple(0, 7, 100, 1.0e-3, 0, 0)},
-        {NGBR_VIDEO_TCP_PREMIUM, std::make_tuple(0, 8, 300, 1.0e-6, 0, 0)},
-        {NGBR_VIDEO_TCP_DEFAULT, std::make_tuple(0, 9, 300, 1.0e-6, 0, 0)},
-    };
-    return ret;
-}
-
-const EpsBearer::BearerRequirementsMap&
-EpsBearer::GetRequirementsRel15()
-{
-    // Needed to support GCC 4.9. Otherwise, use list constructors (see GetRequirementsRel10)
-    static EpsBearer::BearerRequirementsMap ret{
-        {GBR_CONV_VOICE, std::make_tuple(1, 20, 100, 1.0e-2, 0, 2000)},
-        {GBR_CONV_VIDEO, std::make_tuple(1, 40, 150, 1.0e-3, 0, 2000)},
-        {GBR_GAMING, std::make_tuple(1, 30, 50, 1.0e-3, 0, 2000)},
-        {GBR_NON_CONV_VIDEO, std::make_tuple(1, 50, 300, 1.0e-6, 0, 2000)},
-        {GBR_MC_PUSH_TO_TALK, std::make_tuple(1, 7, 75, 1.0e-2, 0, 2000)},
-        {GBR_NMC_PUSH_TO_TALK, std::make_tuple(1, 20, 100, 1.0e-2, 0, 2000)},
-        {GBR_MC_VIDEO, std::make_tuple(1, 15, 100, 1.0e-3, 0, 2000)},
-        {GBR_V2X, std::make_tuple(1, 25, 50, 1.0e-2, 0, 2000)},
-        {NGBR_IMS, std::make_tuple(0, 10, 100, 1.0e-6, 0, 0)},
-        {NGBR_VIDEO_TCP_OPERATOR, std::make_tuple(0, 60, 300, 1.0e-6, 0, 0)},
-        {NGBR_VOICE_VIDEO_GAMING, std::make_tuple(0, 70, 100, 1.0e-3, 0, 0)},
-        {NGBR_VIDEO_TCP_PREMIUM, std::make_tuple(0, 80, 300, 1.0e-6, 0, 0)},
-        {NGBR_VIDEO_TCP_DEFAULT, std::make_tuple(0, 90, 300, 1.0e-6, 0, 0)},
-        {NGBR_MC_DELAY_SIGNAL, std::make_tuple(0, 5, 60, 1.0e-6, 0, 0)},
-        {NGBR_MC_DATA, std::make_tuple(0, 55, 200, 1.0e-6, 0, 0)},
-        {NGBR_V2X, std::make_tuple(0, 65, 5, 1.0e-2, 0, 0)},
-        {NGBR_LOW_LAT_EMBB, std::make_tuple(0, 68, 10, 1.0e-6, 0, 0)},
-        {DGBR_DISCRETE_AUT_SMALL, std::make_tuple(2, 19, 10, 1.0e-4, 255, 2000)},
-        {DGBR_DISCRETE_AUT_LARGE, std::make_tuple(2, 22, 10, 1.0e-4, 1358, 2000)},
-        {DGBR_ITS, std::make_tuple(2, 24, 30, 1.0e-5, 1354, 2000)},
-        {DGBR_ELECTRICITY, std::make_tuple(2, 21, 5, 1.0e-5, 255, 2000)},
-    };
-    return ret;
-}
-
-const EpsBearer::BearerRequirementsMap&
-EpsBearer::GetRequirementsRel18()
-{
-    // Needed to support GCC 4.9. Otherwise, use list constructors (see GetRequirementsRel10)
-    static EpsBearer::BearerRequirementsMap ret{
-        {GBR_CONV_VOICE, std::make_tuple(1, 20, 100, 1.0e-2, 0, 2000)},
-        {GBR_CONV_VIDEO, std::make_tuple(1, 40, 150, 1.0e-3, 0, 2000)},
-        {GBR_GAMING, std::make_tuple(1, 30, 50, 1.0e-3, 0, 2000)},
-        {GBR_NON_CONV_VIDEO, std::make_tuple(1, 50, 300, 1.0e-6, 0, 2000)},
-        {GBR_MC_PUSH_TO_TALK, std::make_tuple(1, 7, 75, 1.0e-2, 0, 2000)},
-        {GBR_NMC_PUSH_TO_TALK, std::make_tuple(1, 20, 100, 1.0e-2, 0, 2000)},
-        {GBR_MC_VIDEO, std::make_tuple(1, 15, 100, 1.0e-3, 0, 2000)},
-        {GBR_V2X, std::make_tuple(1, 25, 50, 1.0e-2, 0, 2000)},
-        {NGBR_IMS, std::make_tuple(0, 10, 100, 1.0e-6, 0, 0)},
-        {NGBR_VIDEO_TCP_OPERATOR, std::make_tuple(0, 60, 300, 1.0e-6, 0, 0)},
-        {NGBR_VOICE_VIDEO_GAMING, std::make_tuple(0, 70, 100, 1.0e-3, 0, 0)},
-        {NGBR_VIDEO_TCP_PREMIUM, std::make_tuple(0, 80, 300, 1.0e-6, 0, 0)},
-        {NGBR_VIDEO_TCP_DEFAULT, std::make_tuple(0, 90, 300, 1.0e-6, 0, 0)},
-        {NGBR_MC_DELAY_SIGNAL, std::make_tuple(0, 5, 60, 1.0e-6, 0, 0)},
-        {NGBR_MC_DATA, std::make_tuple(0, 55, 200, 1.0e-6, 0, 0)},
-        {NGBR_V2X, std::make_tuple(0, 65, 5, 1.0e-2, 0, 0)},
-        {NGBR_LOW_LAT_EMBB, std::make_tuple(0, 68, 10, 1.0e-6, 0, 0)},
-        {GBR_LIVE_UL_71, std::make_tuple(1, 56, 150, 1.0e-6, 0, 0)},
-        {GBR_LIVE_UL_72, std::make_tuple(1, 56, 300, 1.0e-4, 0, 0)},
-        {GBR_LIVE_UL_73, std::make_tuple(1, 56, 300, 1.0e-8, 0, 0)},
-        {GBR_LIVE_UL_74, std::make_tuple(1, 56, 500, 1.0e-8, 0, 0)},
-        {GBR_LIVE_UL_76, std::make_tuple(1, 56, 500, 1.0e-4, 0, 0)},
-        {DGBR_DISCRETE_AUT_SMALL, std::make_tuple(2, 19, 10, 1.0e-4, 255, 2000)},
-        {DGBR_DISCRETE_AUT_LARGE, std::make_tuple(2, 22, 10, 1.0e-4, 1358, 2000)},
-        {DGBR_ITS, std::make_tuple(2, 24, 30, 1.0e-5, 1354, 2000)},
-        {DGBR_ELECTRICITY, std::make_tuple(2, 21, 5, 1.0e-5, 255, 2000)},
-        {DGBR_V2X, std::make_tuple(2, 18, 5, 1.0e-4, 1354, 2000)},
-        {DGBR_INTER_SERV_87, std::make_tuple(2, 25, 5, 1.0e-3, 500, 2000)},
-        {DGBR_INTER_SERV_88, std::make_tuple(2, 25, 10, 1.0e-3, 1125, 2000)},
-        {DGBR_VISUAL_CONTENT_89, std::make_tuple(2, 25, 15, 1.0e-4, 17000, 2000)},
-        {DGBR_VISUAL_CONTENT_90, std::make_tuple(2, 25, 20, 1.0e-4, 63000, 2000)},
-    };
-    return ret;
+    // 3GPP 23.203 Section 6.1.7.2
+    switch (qci)
+    {
+    case GBR_CONV_VOICE:
+        return 1.0e-2;
+    case GBR_CONV_VIDEO:
+        return 1.0e-3;
+    case GBR_GAMING:
+        return 1.0e-3;
+    case GBR_NON_CONV_VIDEO:
+        return 1.0e-6;
+    case GBR_MCPTT:
+        return 1.0e-2;
+    case GBR_NON_MCPTT:
+        return 1.0e-2;
+    case GBR_MC_VIDEO:
+        return 1.0e-3;
+    case GBR_V2X_MESSAGES:
+        return 1.0e-2;
+    case NGBR_IMS:
+        return 1.0e-6;
+    case NGBR_VIDEO_TCP_OPERATOR:
+        return 1.0e-6;
+    case NGBR_VOICE_VIDEO_GAMING:
+        return 1.0e-3;
+    case NGBR_VIDEO_TCP_PREMIUM:
+        return 1.0e-6;
+    case NGBR_VIDEO_TCP_DEFAULT:
+        return 1.0e-6;
+    case NGBR_MC_DELAY_SENSI_SIG:
+        return 1.0e-6;
+    case NGBR_MC_DATA:
+        return 1.0e-6;
+    case NGBR_V2X_MESSAGES:
+        return 1.0e-2;
+    case NGBR_LOW_LAT_EMBB_AR:
+        return 1.0e-6;
+    case GBR_DISC_AUTO_S_PACKETS:
+        return 1.0e-4;
+    case GBR_DISC_AUTO_B_PACKETS:
+        return 1.0e-4;
+    case GBR_INTEL_TRANSPORT_SYS:
+        return 1.0e-5;
+    case GBR_ELECTRIC_DIST_HV:
+        return 1.0e-5;
+    default:
+        NS_FATAL_ERROR("unknown QCI value " << qci);
+        return 0;
+    }
 }
 
 } // namespace ns3

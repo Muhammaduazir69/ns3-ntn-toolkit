@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -30,7 +42,7 @@ main(int argc, char* argv[])
     double radius = 10.0;
     uint32_t numUes = 1;
 
-    CommandLine cmd(__FILE__);
+    CommandLine cmd;
     cmd.AddValue("enbDist", "distance between the two eNBs", enbDist);
     cmd.AddValue("radius", "the radius of the disc where UEs are placed around an eNB", radius);
     cmd.AddValue("numUes", "how many UEs are attached to each eNB", numUes);
@@ -73,8 +85,7 @@ main(int argc, char* argv[])
 
     // Create Nodes: eNodeB and UE
     NodeContainer enbNodes;
-    NodeContainer ueNodes1;
-    NodeContainer ueNodes2;
+    NodeContainer ueNodes1, ueNodes2;
     enbNodes.Create(2);
     ueNodes1.Create(numUes);
     ueNodes2.Create(numUes);
@@ -125,7 +136,7 @@ main(int argc, char* argv[])
     lteHelper->Attach(ueDevs2, enbDevs.Get(1));
 
     // Activate an EPS bearer on all UEs
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
     EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs1, bearer);
     lteHelper->ActivateDataRadioBearer(ueDevs2, bearer);

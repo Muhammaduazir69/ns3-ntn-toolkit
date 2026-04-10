@@ -1,27 +1,38 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author:  Biljana Bojovic<bbojovic@cttc.es>
  *          Dizhi Zhou <dizhi.zhou@gmail.com>
- *          Marco Miozzo <marco.miozzo@cttc.es>,
+ *       Marco Miozzo <marco.miozzo@cttc.es>,
  *          Nicola Baldo <nbaldo@cttc.es>
  *
  */
 
 #include "lte-test-cqa-ff-mac-scheduler.h"
 
+#include "ns3/applications-module.h"
 #include "ns3/double.h"
 #include "ns3/internet-module.h"
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/network-module.h"
-#include "ns3/packet-sink-helper.h"
 #include "ns3/point-to-point-epc-helper.h"
 #include "ns3/point-to-point-helper.h"
 #include "ns3/radio-bearer-stats-calculator.h"
 #include "ns3/string.h"
-#include "ns3/udp-client-server-helper.h"
 #include <ns3/boolean.h>
 #include <ns3/constant-position-mobility-model.h>
 #include <ns3/enum.h>
@@ -73,7 +84,7 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     //    UDP traffic: payload size = 200 bytes, interval = 1 ms
     //    UDP rate in scheduler: (payload + RLC header + PDCP header + IP header + UDP header) *
     //    1000 byte/sec -> 232000 byte/rate
-    //  Total bandwidth: 24 PRB at Itbs 26 -> 2196 -> 2196000 byte/sec
+    //  Totol bandwidth: 24 PRB at Itbs 26 -> 2196 -> 2196000 byte/sec
     //  1 user -> 232000 * 1 = 232000 < 2196000 -> throughput = 232000 byte/sec
     //  3 user -> 232000 * 3 = 696000 < 2196000 -> througphut = 232000 byte/sec
     //  6 user -> 232000 * 6 = 139200 < 2196000 -> throughput = 232000 byte/sec
@@ -84,11 +95,11 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     //  6 users -> 4 PRB at Itbs 26 -> 373 -> 373000 > 232000 -> throughput = 232000 bytes/sec
     //  12 users -> 2 PRB at Itbs 26 -> 185 -> 185000 < 232000 -> throughput = 185000 bytes/sec
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(1, 0, 232000, 232000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(3, 0, 232000, 232000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(6, 0, 232000, 232000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
 
     // AddTestCase (new LenaCqaFfMacSchedulerTestCase1 (12,0,183000,185000,200,1,errorModel));//
     // simulation time = 1.5, otherwise, ul test will fail
@@ -98,7 +109,7 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     //   UDP traffic: payload size = 200 bytes, interval = 1 ms
     //   UDP rate in scheduler: (payload + RLC header + PDCP header + IP header + UDP header) * 1000
     //   byte/sec -> 232000 byte/rate
-    // Total bandwidth: 24 PRB at Itbs 20 -> 1383 -> 1383000 byte/sec
+    // Totol bandwidth: 24 PRB at Itbs 20 -> 1383 -> 1383000 byte/sec
     // 1 user -> 903000 * 1 = 232000 < 1383000 -> throughput = 232000 byte/sec
     // 3 user -> 232000 * 3 = 696000 < 1383000 -> througphut = 232000 byte/sec
     // 6 user -> 232000 * 6 = 139200 > 1383000 -> throughput = 1383000 / 6 = 230500 byte/sec
@@ -111,11 +122,11 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     // 12 users -> 3 PRB at Itbs 13 -> 93  bytes * 8/12 UE/TTI  -> 62000 < 232000 -> throughput =
     // 62000  bytes/sec
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(1, 4800, 232000, 232000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(3, 4800, 232000, 232000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(6, 4800, 230500, 125000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     // AddTestCase (new LenaCqaFfMacSchedulerTestCase1 (12,4800,115250,62000,200,1,errorModel)); //
     // simulation time = 1.5, otherwise, ul test will fail
 
@@ -124,7 +135,7 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     //   UDP traffic: payload size = 200 bytes, interval = 1 ms
     //   UDP rate in scheduler: (payload + RLC header + PDCP header + IP header + UDP header) * 1000
     //   byte/sec -> 232000 byte/rate
-    // Total bandwidth: 24 PRB at Itbs 18 -> 1191 -> 1191000 byte/sec
+    // Totol bandwidth: 24 PRB at Itbs 18 -> 1191 -> 1191000 byte/sec
     // 1 user -> 903000 * 1 = 232000 < 1191000 -> throughput = 232000 byte/sec
     // 3 user -> 232000 * 3 = 696000 < 1191000 -> througphut = 232000 byte/sec
     // 6 user -> 232000 * 6 = 1392000 > 1191000 -> throughput = 1191000 / 6 = 198500 byte/sec
@@ -138,11 +149,11 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     // 12 users -> 3 PRB at Itbs 11 -> 73 bytes * 8/12 UE/TTI -> 48667 < 232000 -> throughput =
     // 48667 bytes/sec
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(1, 6000, 232000, 232000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(3, 6000, 232000, 201000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(6, 6000, 198500, 97000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     // AddTestCase (new LenaCqaFfMacSchedulerTestCase1 (12,6000,99250,48667,200,1, errorModel)); //
     // simulation time = 1.5, otherwise, ul test will fail
 
@@ -151,7 +162,7 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     //   UDP traffic: payload size = 200 bytes, interval = 1 ms
     //   UDP rate in scheduler: (payload + RLC header + PDCP header + IP header + UDP header) * 1000
     //   byte/sec -> 232000 byte/rate
-    // Total bandwidth: 24 PRB at Itbs 13 -> 775 -> 775000 byte/sec
+    // Totol bandwidth: 24 PRB at Itbs 13 -> 775 -> 775000 byte/sec
     // 1 user -> 903000 * 1 = 232000 < 775000 -> throughput = 232000 byte/sec
     // 3 user -> 232000 * 3 = 696000 > 775000 -> througphut = 232000 byte/sec
     // 6 user -> 232000 * 6 = 139200 > 775000 -> throughput = 775000 / 6 = 129166 byte/sec
@@ -164,18 +175,18 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     // 12 users -> 3 PRB at Itbs 8 -> 49 bytes * 8/12 UE/TTI -> 32667 < 232000 -> throughput = 32667
     // bytes/sec
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(1, 10000, 232000, 232000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(3, 10000, 232000, 137000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(6, 10000, 129166, 67000, 200, 1, errorModel),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     // AddTestCase (new LenaCqaFfMacSchedulerTestCase1 (12,10000,64583,32667,200,1,errorModel));//
     // simulation time = 1.5, otherwise, ul test will fail
 
     // DOWNLINK - DISTANCE 100000 -> CQI == 0 -> out of range -> 0 bytes/sec
     // UPLINK - DISTANCE 100000 -> CQI == 0 -> out of range -> 0 bytes/sec
     AddTestCase(new LenaCqaFfMacSchedulerTestCase1(1, 100000, 0, 0, 200, 1, errorModel),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     // Test Case 2: homogeneous flow test in CQA (different distance)
     // Traffic1 info
@@ -200,7 +211,7 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     estThrCqaDl1.push_back(132000); // User 2 estimated TTI throughput from CQA
     estThrCqaDl1.push_back(132000); // User 3 estimated TTI throughput from CQA
     AddTestCase(new LenaCqaFfMacSchedulerTestCase2(dist1, estThrCqaDl1, packetSize1, 1, errorModel),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     // Traffic2 info
     //   UDP traffic: payload size = 200 bytes, interval = 1 ms
@@ -225,7 +236,7 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     estThrCqaDl2.push_back(230000); // User 2 estimated TTI throughput from CQA
     estThrCqaDl2.push_back(230000); // User 3 estimated TTI throughput from CQA
     AddTestCase(new LenaCqaFfMacSchedulerTestCase2(dist2, estThrCqaDl2, packetSize2, 1, errorModel),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     // Test Case 3: heterogeneous flow test in CQA
     //   UDP traffic: payload size = [100,200,300] bytes, interval = 1 ms
@@ -247,13 +258,9 @@ LenaTestCqaFfMacSchedulerSuite::LenaTestCqaFfMacSchedulerSuite()
     estThrCqaDl3.push_back(232000); // User 1 estimated TTI throughput from CQA
     estThrCqaDl3.push_back(332000); // User 2 estimated TTI throughput from CQA
     AddTestCase(new LenaCqaFfMacSchedulerTestCase2(dist3, estThrCqaDl3, packetSize3, 1, errorModel),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LenaTestCqaFfMacSchedulerSuite lenaTestCqaFfMacSchedulerSuite;
 
 // --------------- T E S T - C A S E   # 1 ------------------------------
@@ -289,7 +296,7 @@ LenaCqaFfMacSchedulerTestCase1::~LenaCqaFfMacSchedulerTestCase1()
 }
 
 void
-LenaCqaFfMacSchedulerTestCase1::DoRun()
+LenaCqaFfMacSchedulerTestCase1::DoRun(void)
 {
     NS_LOG_FUNCTION(this << GetName());
 
@@ -300,14 +307,8 @@ LenaCqaFfMacSchedulerTestCase1::DoRun()
     }
 
     Config::SetDefault("ns3::LteHelper::UseIdealRrc", BooleanValue(true));
-    Config::SetDefault("ns3::MacStatsCalculator::DlOutputFilename",
-                       StringValue(CreateTempDirFilename("DlMacStats.txt")));
-    Config::SetDefault("ns3::MacStatsCalculator::UlOutputFilename",
-                       StringValue(CreateTempDirFilename("UlMacStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::DlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("DlRlcStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::UlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("UlRlcStats.txt")));
+    Config::SetDefault("ns3::PointToPointEpcHelper::S1apLinkDelay", TimeValue(Seconds(0)));
+    Config::SetDefault("ns3::LteEnbRrc::SrsPeriodicity", UintegerValue(40));
 
     Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
     Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
@@ -421,7 +422,7 @@ LenaCqaFfMacSchedulerTestCase1::DoRun()
         qos.mbrDl = 0;
         qos.mbrUl = 0;
 
-        EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+        enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
         EpsBearer bearer(q, qos);
         lteHelper->ActivateDedicatedEpsBearer(ueDevice, bearer, EpcTft::Default());
     }
@@ -497,7 +498,7 @@ LenaCqaFfMacSchedulerTestCase1::DoRun()
     }
 
     /**
-     * Check that the uplink assignment is done in a "round robin" manner
+     * Check that the uplink assignation is done in a "round robin" manner
      */
 
     NS_LOG_INFO("UL - Test with " << m_nUser << " user(s) at distance " << m_dist);
@@ -531,7 +532,7 @@ LenaCqaFfMacSchedulerTestCase2::BuildNameString(uint16_t nUser, std::vector<doub
 {
     std::ostringstream oss;
     oss << "distances (m) = [ ";
-    for (auto it = dist.begin(); it != dist.end(); ++it)
+    for (std::vector<double>::iterator it = dist.begin(); it != dist.end(); ++it)
     {
         oss << *it << " ";
     }
@@ -559,7 +560,7 @@ LenaCqaFfMacSchedulerTestCase2::~LenaCqaFfMacSchedulerTestCase2()
 }
 
 void
-LenaCqaFfMacSchedulerTestCase2::DoRun()
+LenaCqaFfMacSchedulerTestCase2::DoRun(void)
 {
     if (!m_errorModelEnabled)
     {
@@ -568,14 +569,8 @@ LenaCqaFfMacSchedulerTestCase2::DoRun()
     }
 
     Config::SetDefault("ns3::LteHelper::UseIdealRrc", BooleanValue(true));
-    Config::SetDefault("ns3::MacStatsCalculator::DlOutputFilename",
-                       StringValue(CreateTempDirFilename("DlMacStats.txt")));
-    Config::SetDefault("ns3::MacStatsCalculator::UlOutputFilename",
-                       StringValue(CreateTempDirFilename("UlMacStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::DlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("DlRlcStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::UlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("UlRlcStats.txt")));
+    Config::SetDefault("ns3::PointToPointEpcHelper::S1apLinkDelay", TimeValue(Seconds(0)));
+    Config::SetDefault("ns3::LteEnbRrc::SrsPeriodicity", UintegerValue(40));
 
     Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
     Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
@@ -680,7 +675,7 @@ LenaCqaFfMacSchedulerTestCase2::DoRun()
         qos.mbrDl = qos.gbrDl;
         qos.mbrUl = qos.gbrUl;
 
-        EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+        enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
         EpsBearer bearer(q, qos);
         lteHelper->ActivateDedicatedEpsBearer(ueDevice, bearer, EpcTft::Default());
     }

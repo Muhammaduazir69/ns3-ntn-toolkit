@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2013 Budiarto Herman
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Budiarto Herman <budiarto.herman@magister.fi>
  *
@@ -9,12 +21,10 @@
 
 #include "a3-rsrp-handover-algorithm.h"
 
-#include "lte-common.h"
-
 #include <ns3/double.h>
 #include <ns3/log.h>
+#include <ns3/lte-common.h>
 
-#include <algorithm>
 #include <list>
 
 namespace ns3
@@ -25,7 +35,7 @@ NS_LOG_COMPONENT_DEFINE("A3RsrpHandoverAlgorithm");
 NS_OBJECT_ENSURE_REGISTERED(A3RsrpHandoverAlgorithm);
 
 A3RsrpHandoverAlgorithm::A3RsrpHandoverAlgorithm()
-    : m_handoverManagementSapUser(nullptr)
+    : m_handoverManagementSapUser(0)
 {
     NS_LOG_FUNCTION(this);
     m_handoverManagementSapProvider =
@@ -86,7 +96,7 @@ A3RsrpHandoverAlgorithm::DoInitialize()
     uint8_t hysteresisIeValue = EutranMeasurementMapping::ActualHysteresis2IeValue(m_hysteresisDb);
     NS_LOG_LOGIC(this << " requesting Event A3 measurements"
                       << " (hysteresis=" << (uint16_t)hysteresisIeValue << ")"
-                      << " (ttt=" << m_timeToTrigger.As(Time::MS) << ")");
+                      << " (ttt=" << m_timeToTrigger.GetMilliSeconds() << ")");
 
     LteRrcSap::ReportConfigEutra reportConfig;
     reportConfig.eventId = LteRrcSap::ReportConfigEutra::EVENT_A3;
@@ -96,7 +106,7 @@ A3RsrpHandoverAlgorithm::DoInitialize()
     reportConfig.reportOnLeave = false;
     reportConfig.triggerQuantity = LteRrcSap::ReportConfigEutra::RSRP;
     reportConfig.reportInterval = LteRrcSap::ReportConfigEutra::MS1024;
-    m_measIds = m_handoverManagementSapUser->AddUeMeasReportConfigForHandover(reportConfig);
+    m_measId = m_handoverManagementSapUser->AddUeMeasReportConfigForHandover(reportConfig);
 
     LteHandoverAlgorithm::DoInitialize();
 }
@@ -113,50 +123,52 @@ A3RsrpHandoverAlgorithm::DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults me
 {
     NS_LOG_FUNCTION(this << rnti << (uint16_t)measResults.measId);
 
-    if (std::find(begin(m_measIds), end(m_measIds), measResults.measId) == std::end(m_measIds))
+    if (measResults.measId != m_measId)
     {
         NS_LOG_WARN("Ignoring measId " << (uint16_t)measResults.measId);
-        return;
-    }
-
-    if (measResults.haveMeasResultNeighCells && !measResults.measResultListEutra.empty())
-    {
-        uint16_t bestNeighbourCellId = 0;
-        uint8_t bestNeighbourRsrp = 0;
-
-        for (auto it = measResults.measResultListEutra.begin();
-             it != measResults.measResultListEutra.end();
-             ++it)
-        {
-            if (it->haveRsrpResult)
-            {
-                if ((bestNeighbourRsrp < it->rsrpResult) && IsValidNeighbour(it->physCellId))
-                {
-                    bestNeighbourCellId = it->physCellId;
-                    bestNeighbourRsrp = it->rsrpResult;
-                }
-            }
-            else
-            {
-                NS_LOG_WARN("RSRP measurement is missing from cell ID " << it->physCellId);
-            }
-        }
-
-        if (bestNeighbourCellId > 0)
-        {
-            NS_LOG_LOGIC("Trigger Handover to cellId " << bestNeighbourCellId);
-            NS_LOG_LOGIC("target cell RSRP " << (uint16_t)bestNeighbourRsrp);
-            NS_LOG_LOGIC("serving cell RSRP " << (uint16_t)measResults.measResultPCell.rsrpResult);
-
-            // Inform eNodeB RRC about handover
-            m_handoverManagementSapUser->TriggerHandover(rnti, bestNeighbourCellId);
-        }
     }
     else
     {
-        NS_LOG_WARN(
-            this << " Event A3 received without measurement results from neighbouring cells");
-    }
+        if (measResults.haveMeasResultNeighCells && !measResults.measResultListEutra.empty())
+        {
+            uint16_t bestNeighbourCellId = 0;
+            uint8_t bestNeighbourRsrp = 0;
+
+            for (std::list<LteRrcSap::MeasResultEutra>::iterator it =
+                     measResults.measResultListEutra.begin();
+                 it != measResults.measResultListEutra.end();
+                 ++it)
+            {
+                if (it->haveRsrpResult)
+                {
+                    if ((bestNeighbourRsrp < it->rsrpResult) && IsValidNeighbour(it->physCellId))
+                    {
+                        bestNeighbourCellId = it->physCellId;
+                        bestNeighbourRsrp = it->rsrpResult;
+                    }
+                }
+                else
+                {
+                    NS_LOG_WARN("RSRP measurement is missing from cell ID " << it->physCellId);
+                }
+            }
+
+            if (bestNeighbourCellId > 0)
+            {
+                NS_LOG_LOGIC("Trigger Handover to cellId " << bestNeighbourCellId);
+                NS_LOG_LOGIC("target cell RSRP " << (uint16_t)bestNeighbourRsrp);
+                NS_LOG_LOGIC("serving cell RSRP " << (uint16_t)measResults.rsrpResult);
+
+                // Inform eNodeB RRC about handover
+                m_handoverManagementSapUser->TriggerHandover(rnti, bestNeighbourCellId);
+            }
+        }
+        else
+        {
+            NS_LOG_WARN(
+                this << " Event A3 received without measurement results from neighbouring cells");
+        }
+    } // end of else of if (measResults.measId != m_measId)
 
 } // end of DoReportUeMeas
 

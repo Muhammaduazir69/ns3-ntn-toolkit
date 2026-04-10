@@ -1,10 +1,146 @@
-# The Network Simulator, Version 3
+# NS3-NTN-Toolkit
 
-[![codecov](https://codecov.io/gh/nsnam/ns-3-dev-git/branch/master/graph/badge.svg)](https://codecov.io/gh/nsnam/ns-3-dev-git/branch/master/)
-[![Gitlab CI](https://gitlab.com/nsnam/ns-3-dev/badges/master/pipeline.svg)](https://gitlab.com/nsnam/ns-3-dev/-/pipelines)
-[![Github CI](https://github.com/nsnam/ns-3-dev-git/actions/workflows/per_commit.yml/badge.svg)](https://github.com/nsnam/ns-3-dev-git/actions)
+**An Integrated NS-3.43 Simulation Platform for 6G Non-Terrestrial Networks**
 
-[![Latest Release](https://gitlab.com/nsnam/ns-3-dev/-/badges/release.svg)](https://gitlab.com/nsnam/ns-3-dev/-/releases)
+[![ns-3 version](https://img.shields.io/badge/ns--3-v3.43-blue.svg)](https://www.nsnam.org)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
+[![Platform](https://img.shields.io/badge/Platform-Linux-green.svg)]()
+
+---
+
+## What is NS3-NTN-Toolkit?
+
+A **ready-to-use** ns-3.43 simulation platform for 6G Non-Terrestrial Network (NTN) research. Clone, build, run -- no manual module patching required.
+
+This toolkit integrates three major modules into a single pre-configured package:
+
+| Module | Location | Capabilities |
+|--------|----------|-------------|
+| **mmWave (5G-NR)** | `contrib/mmwave/` | NR PHY/MAC (numerology 2/3), EESM error models, SVD/DFT/Codebook beamforming, HARQ, carrier aggregation, LTE-NR dual connectivity via McUeNetDevice |
+| **SNS3 Satellite** | `contrib/satellite/` | SGP4 orbit propagation, 72 spot beams/sat, ISL routing, DVB-RCS2, mega-constellation support (Starlink 1584-sat, Kuiper 1156-sat, Iridium 66-sat with real TLE data) |
+| **3GPP NTN Channel** | `src/propagation/` | TR 38.811 path loss and channel condition models for Dense Urban, Urban, Suburban, and Rural NTN scenarios |
+
+### Key Integration: Patched LTE Module
+
+The LTE module (`src/lte/`) is patched with dual-connectivity extensions enabling seamless LTE-NR-Satellite interworking:
+
+- X2 PDCP/RLC providers for multi-connectivity (`EpcX2PdcpProvider`, `EpcX2RlcProvider`)
+- RRC connection switching (`RrcConnectionSwitch`)
+- Inter-RAT handover support between LTE and mmWave
+- `MmWaveComponentCarrierConf` for mmWave carrier configuration
+- `McEnbPdcp` / `McUePdcp` for multi-connectivity PDCP
+- `LteRlcUmLowLat` for low-latency RLC
+
+---
+
+## Quick Start
+
+```bash
+# Clone
+git clone https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
+cd ns3-ntn-toolkit
+
+# Configure and build
+./ns3 configure --enable-examples --enable-tests
+./ns3 build
+
+# Verify modules are available
+./ns3 show profile   # Should list: mmwave, satellite, lte, ...
+
+# Run mmWave example
+./ns3 run mmwave-simple-epc
+
+# Run satellite constellation example
+./ns3 run sat-constellation-example
+
+# Run dual-connectivity example (LTE + mmWave)
+./ns3 run mc-twoenbs
+```
+
+## Adding Research Modules
+
+Drop additional contrib modules into `contrib/`:
+
+```bash
+# Example: Add the NTN-CHO handover research framework
+cd contrib/
+git clone https://github.com/Muhammaduazir69/ntn-cho-framework.git ntn-cho
+cd ..
+./ns3 configure --enable-examples
+./ns3 build ntn-cho
+```
+
+## Module Structure
+
+```
+ns3-ntn-toolkit/
+├── src/
+│   ├── lte/              # Patched LTE with dual-connectivity extensions
+│   ├── propagation/      # 3GPP NTN propagation models (TR 38.811)
+│   ├── spectrum/          # NTN channel example
+│   ├── mobility/         # GeocentricConstantPositionMobilityModel
+│   └── ...               # All standard ns-3.43 modules
+├── contrib/
+│   ├── mmwave/           # 5G-NR mmWave module (16 examples, all build)
+│   ├── satellite/        # SNS3 satellite module (LEO/MEO/GEO constellations)
+│   ├── magister-stats/   # Satellite statistics helpers
+│   └── traffic/          # Traffic generation helpers
+└── scratch/              # Your simulation scripts
+```
+
+## Supported Constellation Data
+
+Pre-configured TLE data for real satellite constellations:
+
+| Constellation | Satellites | Altitude | Inclination | Data Path |
+|--------------|-----------|----------|-------------|-----------|
+| Iridium NEXT | 66 | 780 km | 86.4 deg | `contrib/satellite/data/scenarios/constellation-iridium-next-66-sats/` |
+| Starlink | 1,584 | 550 km | 53.0 deg | `contrib/satellite/data/scenarios/constellation-starlink-1584-sats/` |
+| Kuiper | 1,156 | 630 km | 51.9 deg | `contrib/satellite/data/scenarios/constellation-kuiper-1156-sats/` |
+| Telesat | 351 | 1,015 km | 98.98 deg | `contrib/satellite/data/scenarios/constellation-telesat-351-sats/` |
+| Custom LEO | 2 | ISS orbit | 51.6 deg | `contrib/satellite/data/scenarios/constellation-leo-2-satellites/` |
+
+## System Requirements
+
+- **OS**: Ubuntu 22.04+ / Debian 12+ / Fedora 38+
+- **Compiler**: GCC 11+ or Clang 14+
+- **CMake**: 3.16+
+- **Python**: 3.8+ (for ns3 tool)
+- **RAM**: 4 GB minimum, 8 GB recommended for large constellations
+
+## What Was Modified from Upstream ns-3.43
+
+Only 3 minimal changes to integrate mmWave with ns-3.43:
+
+1. **`src/lte/`**: Replaced with mmWave project's patched LTE module (adds dual-connectivity APIs)
+2. **`src/lte/model/lte-spectrum-value-helper.h`**: Added `#include <map>` (missing in mmWave's version)
+3. **`src/lte/test/lte-test-carrier-aggregation.h`**: Added `#include <map>` (ns-3.43 stricter includes)
+
+All other ns-3.43 modules are **unmodified** from upstream.
+
+## Credits & Upstream Sources
+
+- **ns-3.43**: [nsnam/ns-3-dev](https://gitlab.com/nsnam/ns-3-dev) (GPL-2.0)
+- **mmWave module**: [NYU Wireless / CTTC](https://github.com/nyuwireless-unipd/ns3-mmwave) (GPL-2.0)
+- **SNS3 satellite module**: [SNS3/sns3-satellite](https://github.com/sns3/sns3-satellite) (GPL-2.0)
+- **Integration & NTN patches**: Muhammad Uzair
+
+## Citation
+
+If you use this toolkit in your research, please cite:
+
+```bibtex
+@software{ns3_ntn_toolkit_2026,
+  author = {Muhammad Uzair},
+  title = {NS3-NTN-Toolkit: An Integrated NS-3.43 Platform for 6G Non-Terrestrial Network Simulation},
+  year = {2026},
+  url = {https://github.com/Muhammaduazir69/ns3-ntn-toolkit}
+}
+```
+
+---
+
+# Original NS-3 README
 
 ## License
 

@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Marco Miozzo <marco.miozzo@cttc.es>,
  *         Nicola Baldo <nbaldo@cttc.es>
@@ -18,6 +30,7 @@ using namespace ns3;
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief This system test program creates different test cases with a single eNB and
  * several UEs, all having the same Radio Bearer specification. In each test
@@ -48,7 +61,7 @@ class LenaFdTbfqFfMacSchedulerTestCase1 : public TestCase
                                       uint16_t packetSize,
                                       uint16_t interval,
                                       bool errorModelEnabled);
-    ~LenaFdTbfqFfMacSchedulerTestCase1() override;
+    virtual ~LenaFdTbfqFfMacSchedulerTestCase1();
 
   private:
     /**
@@ -59,7 +72,7 @@ class LenaFdTbfqFfMacSchedulerTestCase1 : public TestCase
      * \returns name string
      */
     static std::string BuildNameString(uint16_t nUser, double dist);
-    void DoRun() override;
+    virtual void DoRun(void);
     uint16_t m_nUser;         ///< number of UE nodes
     double m_dist;            ///< distance between the nodes
     uint16_t m_packetSize;    ///< packet size in bytes
@@ -71,8 +84,9 @@ class LenaFdTbfqFfMacSchedulerTestCase1 : public TestCase
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
- * \brief Test case is similar to the one defined in
+ * \brief Test case is simillar to the one defined in
  * LenaFdTbfqFfMacSchedulerTestCase1, with the difference that UEs are
  * placed in such a way to experience different SINRs from eNodeB.
  */
@@ -93,7 +107,7 @@ class LenaFdTbfqFfMacSchedulerTestCase2 : public TestCase
                                       std::vector<uint16_t> packetSize,
                                       uint16_t interval,
                                       bool errorModelEnabled);
-    ~LenaFdTbfqFfMacSchedulerTestCase2() override;
+    virtual ~LenaFdTbfqFfMacSchedulerTestCase2();
 
   private:
     /**
@@ -104,7 +118,7 @@ class LenaFdTbfqFfMacSchedulerTestCase2 : public TestCase
      * \returns name string
      */
     static std::string BuildNameString(uint16_t nUser, std::vector<double> dist);
-    void DoRun() override;
+    virtual void DoRun(void);
     uint16_t m_nUser;                       ///< number of UE nodes
     std::vector<double> m_dist;             ///< distance between the nodes
     std::vector<uint16_t> m_packetSize;     ///< packet size in bytes
@@ -115,6 +129,7 @@ class LenaFdTbfqFfMacSchedulerTestCase2 : public TestCase
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test suit for FdTbfqFfMacScheduler test.
  */

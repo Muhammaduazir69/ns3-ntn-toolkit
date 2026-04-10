@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -9,18 +21,15 @@
 #ifndef LTE_TEST_RLC_UM_E2E_H
 #define LTE_TEST_RLC_UM_E2E_H
 
-#include "ns3/ptr.h"
 #include "ns3/test.h"
-
-namespace ns3
-{
-class Packet;
-}
+#include <ns3/ptr.h>
+#include <ns3/packet.h>
 
 using namespace ns3;
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test suite for RlcUmE2eTestCase
  */
@@ -32,6 +41,7 @@ class LteRlcUmE2eTestSuite : public TestSuite
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Test end-to-end flow when RLC UM is being used.
  */
@@ -47,10 +57,10 @@ class LteRlcUmE2eTestCase : public TestCase
      */
     LteRlcUmE2eTestCase(std::string name, uint32_t seed, double losses);
     LteRlcUmE2eTestCase();
-    ~LteRlcUmE2eTestCase() override;
+    virtual ~LteRlcUmE2eTestCase();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 
     /**
      * DL drop event

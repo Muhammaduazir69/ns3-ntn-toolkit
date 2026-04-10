@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
@@ -40,7 +52,7 @@ class LteMacSapProvider
         uint8_t harqProcessId; /**< the HARQ process id that was passed by the MAC in the call to
                                   NotifyTxOpportunity that generated this PDU */
         uint8_t componentCarrierId; /**< the component carrier id corresponding to the sending Mac
-                                       instance */
+                                       istance */
     };
 
     /**
@@ -64,6 +76,13 @@ class LteMacSapProvider
         uint16_t retxQueueHolDelay; /**<  the Head Of Line delay of the retransmission queue */
         uint16_t
             statusPduSize; /**< the current size of the pending STATUS RLC  PDU message in bytes */
+
+        // RDF: Added for MmWave low-latency schedulers
+        std::list<uint32_t> txPacketSizes;
+        std::list<uint32_t> retxPacketSizes;
+        std::list<double> txPacketDelays;
+        std::list<double> retxPacketDelays;
+        double arrivalRate; // average bits per s
     };
 
     /**
@@ -92,37 +111,6 @@ class LteMacSapUser
      */
     struct TxOpportunityParameters
     {
-        /**
-         * \brief TxOpportunityParameters constructor
-         * \param bytes Bytes
-         * \param layer Layer
-         * \param harqId HarqID
-         * \param ccId Component carrier ID
-         * \param rnti RNTI
-         * \param lcId Logical Channel ID
-         */
-        TxOpportunityParameters(uint32_t bytes,
-                                uint8_t layer,
-                                uint8_t harqId,
-                                uint8_t ccId,
-                                uint16_t rnti,
-                                uint8_t lcId)
-        {
-            this->bytes = bytes;
-            this->layer = layer;
-            this->harqId = harqId;
-            this->componentCarrierId = ccId;
-            this->rnti = rnti;
-            this->lcid = lcId;
-        }
-
-        /**
-         * \brief TxOpportunityParameters default constructor (DEPRECATED)
-         */
-        TxOpportunityParameters()
-        {
-        }
-
         uint32_t bytes;             /**< the number of bytes to transmit */
         uint8_t layer;              /**<  the layer of transmission (MIMO) */
         uint8_t harqId;             /**< the HARQ ID */
@@ -147,32 +135,16 @@ class LteMacSapUser
      */
     virtual void NotifyHarqDeliveryFailure() = 0;
 
+    virtual void NotifyDlHarqDeliveryFailure(uint8_t harqId);
+
+    virtual void NotifyUlHarqDeliveryFailure(uint8_t harqId);
+
     /**
      * Parameters for LteMacSapUser::ReceivePdu
      *
      */
     struct ReceivePduParameters
     {
-        /**
-         * \brief ReceivePduParameters default constructor (DEPRECATED)
-         */
-        ReceivePduParameters()
-        {
-        }
-
-        /**
-         * \brief ReceivePduParameters constructor
-         * \param p Packet
-         * \param rnti RNTI
-         * \param lcid Logical Channel ID
-         */
-        ReceivePduParameters(const Ptr<Packet>& p, uint16_t rnti, uint8_t lcid)
-        {
-            this->p = p;
-            this->rnti = rnti;
-            this->lcid = lcid;
-        }
-
         Ptr<Packet> p; /**< the RLC PDU to be received */
         uint16_t rnti; /**< the C-RNTI identifying the UE */
         uint8_t lcid;  /**< the logical channel id */
@@ -199,8 +171,8 @@ class EnbMacMemberLteMacSapProvider : public LteMacSapProvider
     EnbMacMemberLteMacSapProvider(C* mac);
 
     // inherited from LteMacSapProvider
-    void TransmitPdu(TransmitPduParameters params) override;
-    void ReportBufferStatus(ReportBufferStatusParameters params) override;
+    virtual void TransmitPdu(TransmitPduParameters params);
+    virtual void ReportBufferStatus(ReportBufferStatusParameters params);
 
   private:
     C* m_mac; ///< the MAC class

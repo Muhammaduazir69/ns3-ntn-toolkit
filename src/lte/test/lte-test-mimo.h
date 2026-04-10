@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Marco Miozzo <marco.miozzo@cttc.es>
  */
@@ -11,16 +23,13 @@
 
 #include "ns3/simulator.h"
 #include "ns3/test.h"
-
-namespace ns3
-{
-class RadioBearerStatsCalculator;
-}
+#include <ns3/radio-bearer-stats-calculator.h>
 
 using namespace ns3;
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief This system test program creates different test cases with a
  * single eNB and single UE. The traffic is configured to be in saturation
@@ -42,10 +51,10 @@ class LenaMimoTestCase : public TestCase
                      std::vector<uint32_t> estThrDl,
                      std::string schedulerType,
                      bool useIdealRrc);
-    ~LenaMimoTestCase() override;
+    virtual ~LenaMimoTestCase();
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 
     /**
      * Get RLC buffer sample
@@ -73,6 +82,7 @@ class LenaMimoTestCase : public TestCase
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Lena Test Mimo Suite
  */

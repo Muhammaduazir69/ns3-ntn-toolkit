@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Marco Miozzo <marco.miozzo@cttc.es>
  */
@@ -49,9 +61,15 @@ NS_LOG_COMPONENT_DEFINE("LtePathlossModelTest");
 void
 LteTestPathlossDlSchedCallback(LtePathlossModelSystemTestCase* testcase,
                                std::string path,
-                               DlSchedulingCallbackInfo dlInfo)
+                               uint32_t frameNo,
+                               uint32_t subframeNo,
+                               uint16_t rnti,
+                               uint8_t mcsTb1,
+                               uint16_t sizeTb1,
+                               uint8_t mcsTb2,
+                               uint16_t sizeTb2)
 {
-    testcase->DlScheduling(dlInfo);
+    testcase->DlScheduling(frameNo, subframeNo, rnti, mcsTb1, sizeTb1, mcsTb2, sizeTb2);
 }
 
 LtePathlossModelTestSuite::LtePathlossModelTestSuite()
@@ -126,14 +144,10 @@ LtePathlossModelTestSuite::LtePathlossModelTestSuite()
         name << " snr= " << sinrDb << " dB, "
              << " mcs= " << snrEfficiencyMcs[i].mcsIndex;
         AddTestCase(new LtePathlossModelSystemTestCase(name.str(), sinrDb, dist[i], mcs),
-                    TestCase::Duration::QUICK);
+                    Duration::QUICK);
     }
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LtePathlossModelTestSuite ltePathlossModelTestSuite;
 
 LtePathlossModelSystemTestCase::LtePathlossModelSystemTestCase(std::string name,
@@ -145,8 +159,7 @@ LtePathlossModelSystemTestCase::LtePathlossModelSystemTestCase(std::string name,
       m_distance(dist),
       m_mcsIndex(mcsIndex)
 {
-    std::ostringstream sstream1;
-    std::ostringstream sstream2;
+    std::ostringstream sstream1, sstream2;
     sstream1 << " snr=" << snrDb << " mcs=" << mcsIndex << " distance=" << dist;
 
     NS_LOG_INFO("Creating LtePathlossModelSystemTestCase: " + sstream1.str());
@@ -157,16 +170,8 @@ LtePathlossModelSystemTestCase::~LtePathlossModelSystemTestCase()
 }
 
 void
-LtePathlossModelSystemTestCase::DoRun()
+LtePathlossModelSystemTestCase::DoRun(void)
 {
-    Config::SetDefault("ns3::MacStatsCalculator::DlOutputFilename",
-                       StringValue(CreateTempDirFilename("DlMacStats.txt")));
-    Config::SetDefault("ns3::MacStatsCalculator::UlOutputFilename",
-                       StringValue(CreateTempDirFilename("UlMacStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::DlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("DlRlcStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::UlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("UlRlcStats.txt")));
     /**
      * Simulation Topology
      */
@@ -175,13 +180,17 @@ LtePathlossModelSystemTestCase::DoRun()
 
     Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
     //   lteHelper->EnableLogComponents ();
+    lteHelper->EnableMacTraces();
+    lteHelper->EnableRlcTraces();
     lteHelper->SetAttribute("PathlossModel",
                             StringValue("ns3::HybridBuildingsPropagationLossModel"));
 
     // set frequency. This is important because it changes the behavior of the path loss model
     lteHelper->SetEnbDeviceAttribute("DlEarfcn", UintegerValue(200));
-    lteHelper->SetEnbDeviceAttribute("UlEarfcn", UintegerValue(18200));
     lteHelper->SetUeDeviceAttribute("DlEarfcn", UintegerValue(200));
+    // set DL bandwidth. This is important because it changes the value of the noise power in the
+    // SINR
+    lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
 
     // remove shadowing component
     lteHelper->SetPathlossModelAttribute("ShadowSigmaOutdoor", DoubleValue(0.0));
@@ -227,7 +236,7 @@ LtePathlossModelSystemTestCase::DoRun()
     lteHelper->Attach(ueDevs, enbDevs.Get(0));
 
     // Activate an EPS bearer
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
     EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs, bearer);
 
@@ -243,9 +252,6 @@ LtePathlossModelSystemTestCase::DoRun()
     //   Config::Connect ("/NodeList/0/DeviceList/0/LteEnbMac/DlScheduling",
     //                    MakeBoundCallback (&LteTestPathlossDlSchedCallback, this));
 
-    lteHelper->EnableMacTraces();
-    lteHelper->EnableRlcTraces();
-
     Simulator::Stop(Seconds(0.035));
     Simulator::Run();
 
@@ -257,7 +263,13 @@ LtePathlossModelSystemTestCase::DoRun()
 }
 
 void
-LtePathlossModelSystemTestCase::DlScheduling(DlSchedulingCallbackInfo dlInfo)
+LtePathlossModelSystemTestCase::DlScheduling(uint32_t frameNo,
+                                             uint32_t subframeNo,
+                                             uint16_t rnti,
+                                             uint8_t mcsTb1,
+                                             uint16_t sizeTb1,
+                                             uint8_t mcsTb2,
+                                             uint16_t sizeTb2)
 {
     static bool firstTime = true;
 
@@ -270,8 +282,8 @@ LtePathlossModelSystemTestCase::DlScheduling(DlSchedulingCallbackInfo dlInfo)
     // need to allow for RRC connection establishment + SRS transmission
     if (Simulator::Now() > MilliSeconds(21))
     {
-        NS_LOG_INFO(m_snrDb << "\t" << m_mcsIndex << "\t" << (uint16_t)dlInfo.mcsTb1);
+        NS_LOG_INFO(m_snrDb << "\t" << m_mcsIndex << "\t" << (uint16_t)mcsTb1);
 
-        NS_TEST_ASSERT_MSG_EQ((uint16_t)dlInfo.mcsTb1, m_mcsIndex, "Wrong MCS index");
+        NS_TEST_ASSERT_MSG_EQ((uint16_t)mcsTb1, m_mcsIndex, "Wrong MCS index");
     }
 }

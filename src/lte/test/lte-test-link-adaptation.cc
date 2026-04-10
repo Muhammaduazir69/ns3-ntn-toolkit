@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -90,14 +102,10 @@ LteLinkAdaptationTestSuite::LteLinkAdaptationTestSuite()
                                                   snrEfficiencyMcs[i].snrDb,
                                                   lossDb,
                                                   snrEfficiencyMcs[i].mcsIndex),
-                    TestCase::Duration::QUICK);
+                    Duration::QUICK);
     }
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteLinkAdaptationTestSuite lteLinkAdaptationTestSuite;
 
 /**
@@ -113,8 +121,7 @@ LteLinkAdaptationTestCase::LteLinkAdaptationTestCase(std::string name,
       m_loss(loss),
       m_mcsIndex(mcsIndex)
 {
-    std::ostringstream sstream1;
-    std::ostringstream sstream2;
+    std::ostringstream sstream1, sstream2;
     sstream1 << " snr=" << snrDb << " mcs=" << mcsIndex;
 
     NS_LOG_INFO("Creating LteLinkAdaptationTestCase: " + sstream1.str());
@@ -125,21 +132,13 @@ LteLinkAdaptationTestCase::~LteLinkAdaptationTestCase()
 }
 
 void
-LteLinkAdaptationTestCase::DoRun()
+LteLinkAdaptationTestCase::DoRun(void)
 {
     Config::Reset();
     Config::SetDefault("ns3::LteAmc::AmcModel", EnumValue(LteAmc::PiroEW2010));
     Config::SetDefault("ns3::LteAmc::Ber", DoubleValue(0.00005));
     Config::SetDefault("ns3::LteEnbRrc::SrsPeriodicity", UintegerValue(2));
     Config::SetDefault("ns3::LteHelper::UseIdealRrc", BooleanValue(true));
-    Config::SetDefault("ns3::MacStatsCalculator::DlOutputFilename",
-                       StringValue(CreateTempDirFilename("DlMacStats.txt")));
-    Config::SetDefault("ns3::MacStatsCalculator::UlOutputFilename",
-                       StringValue(CreateTempDirFilename("UlMacStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::DlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("DlRlcStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::UlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("UlRlcStats.txt")));
 
     // Disable Uplink Power Control
     Config::SetDefault("ns3::LteUePhy::EnableUplinkPowerControl", BooleanValue(false));
@@ -150,10 +149,15 @@ LteLinkAdaptationTestCase::DoRun()
 
     Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
     //   lteHelper->EnableLogComponents ();
+    lteHelper->EnableMacTraces();
+    lteHelper->EnableRlcTraces();
     lteHelper->SetAttribute("PathlossModel",
                             StringValue("ns3::ConstantSpectrumPropagationLossModel"));
     NS_LOG_INFO("SNR = " << m_snrDb << "  LOSS = " << m_loss);
     lteHelper->SetPathlossModelAttribute("Loss", DoubleValue(m_loss));
+
+    // set DL bandwidth.
+    lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
 
     // Create Nodes: eNodeB and UE
     NodeContainer enbNodes;
@@ -178,7 +182,7 @@ LteLinkAdaptationTestCase::DoRun()
     lteHelper->Attach(ueDevs, enbDevs.Get(0));
 
     // Activate the default EPS bearer
-    EpsBearer::Qci q = EpsBearer::NGBR_VIDEO_TCP_DEFAULT;
+    enum EpsBearer::Qci q = EpsBearer::NGBR_VIDEO_TCP_DEFAULT;
     EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs, bearer);
 
@@ -192,9 +196,6 @@ LteLinkAdaptationTestCase::DoRun()
 
     Config::Connect("/NodeList/0/DeviceList/0/ComponentCarrierMap/*/LteEnbMac/DlScheduling",
                     MakeBoundCallback(&LteTestDlSchedulingCallback, this));
-
-    lteHelper->EnableMacTraces();
-    lteHelper->EnableRlcTraces();
 
     Simulator::Stop(Seconds(0.040));
     Simulator::Run();

@@ -1,18 +1,29 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011-2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
 
-#include "lte-pdcp.h"
-
-#include "lte-pdcp-header.h"
-#include "lte-pdcp-sap.h"
-#include "lte-pdcp-tag.h"
+#include "ns3/lte-pdcp.h"
 
 #include "ns3/log.h"
+#include "ns3/lte-pdcp-header.h"
+#include "ns3/lte-pdcp-sap.h"
+#include "ns3/lte-pdcp-tag.h"
 #include "ns3/simulator.h"
 
 namespace ns3
@@ -32,7 +43,7 @@ class LtePdcpSpecificLteRlcSapUser : public LteRlcSapUser
     LtePdcpSpecificLteRlcSapUser(LtePdcp* pdcp);
 
     // Interface provided to lower RLC entity (implemented from LteRlcSapUser)
-    void ReceivePdcpPdu(Ptr<Packet> p) override;
+    virtual void ReceivePdcpPdu(Ptr<Packet> p);
 
   private:
     LtePdcpSpecificLteRlcSapUser();
@@ -59,8 +70,8 @@ LtePdcpSpecificLteRlcSapUser::ReceivePdcpPdu(Ptr<Packet> p)
 NS_OBJECT_ENSURE_REGISTERED(LtePdcp);
 
 LtePdcp::LtePdcp()
-    : m_pdcpSapUser(nullptr),
-      m_rlcSapProvider(nullptr),
+    : m_pdcpSapUser(0),
+      m_rlcSapProvider(0),
       m_rnti(0),
       m_lcid(0),
       m_txSequenceNumber(0),
@@ -77,7 +88,7 @@ LtePdcp::~LtePdcp()
 }
 
 TypeId
-LtePdcp::GetTypeId()
+LtePdcp::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::LtePdcp")
                             .SetParent<Object>()
@@ -144,7 +155,7 @@ LtePdcp::GetLteRlcSapUser()
 }
 
 LtePdcp::Status
-LtePdcp::GetStatus() const
+LtePdcp::GetStatus()
 {
     Status s;
     s.txSn = m_txSequenceNumber;
@@ -162,13 +173,9 @@ LtePdcp::SetStatus(Status s)
 ////////////////////////////////////////
 
 void
-LtePdcp::DoTransmitPdcpSdu(LtePdcpSapProvider::TransmitPdcpSduParameters params)
+LtePdcp::DoTransmitPdcpSdu(Ptr<Packet> p)
 {
-    NS_LOG_FUNCTION(this << m_rnti << static_cast<uint16_t>(m_lcid) << params.pdcpSdu->GetSize());
-    Ptr<Packet> p = params.pdcpSdu;
-
-    // Sender timestamp
-    PdcpTag pdcpTag(Simulator::Now());
+    NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << p->GetSize());
 
     LtePdcpHeader pdcpHeader;
     pdcpHeader.SetSequenceNumber(m_txSequenceNumber);
@@ -180,18 +187,21 @@ LtePdcp::DoTransmitPdcpSdu(LtePdcpSapProvider::TransmitPdcpSduParameters params)
     }
 
     pdcpHeader.SetDcBit(LtePdcpHeader::DATA_PDU);
-    p->AddHeader(pdcpHeader);
-    p->AddByteTag(pdcpTag, 1, pdcpHeader.GetSerializedSize());
 
+    NS_LOG_LOGIC("PDCP header: " << pdcpHeader);
+    p->AddHeader(pdcpHeader);
+
+    // Sender timestamp
+    PdcpTag pdcpTag(Simulator::Now());
+    p->AddByteTag(pdcpTag);
     m_txPdu(m_rnti, m_lcid, p->GetSize());
 
-    LteRlcSapProvider::TransmitPdcpPduParameters txParams;
-    txParams.rnti = m_rnti;
-    txParams.lcid = m_lcid;
-    txParams.pdcpPdu = p;
+    LteRlcSapProvider::TransmitPdcpPduParameters params;
+    params.rnti = m_rnti;
+    params.lcid = m_lcid;
+    params.pdcpPdu = p;
 
-    NS_LOG_INFO("Transmitting PDCP PDU with header: " << pdcpHeader);
-    m_rlcSapProvider->TransmitPdcpPdu(txParams);
+    m_rlcSapProvider->TransmitPdcpPdu(params);
 }
 
 void
@@ -202,8 +212,10 @@ LtePdcp::DoReceivePdu(Ptr<Packet> p)
     // Receiver timestamp
     PdcpTag pdcpTag;
     Time delay;
-    p->FindFirstMatchingByteTag(pdcpTag);
-    delay = Simulator::Now() - pdcpTag.GetSenderTimestamp();
+    if (p->FindFirstMatchingByteTag(pdcpTag))
+    {
+        delay = Simulator::Now() - pdcpTag.GetSenderTimestamp();
+    }
     m_rxPdu(m_rnti, m_lcid, p->GetSize(), delay.GetNanoSeconds());
 
     LtePdcpHeader pdcpHeader;

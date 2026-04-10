@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -12,13 +24,12 @@
 #include "lte-ffr-simple.h"
 #include "lte-simple-spectrum-phy.h"
 
+#include "ns3/applications-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/lte-helper.h"
 #include "ns3/mobility-helper.h"
-#include "ns3/packet-sink-helper.h"
 #include "ns3/point-to-point-epc-helper.h"
 #include "ns3/point-to-point-module.h"
-#include "ns3/udp-client-server-helper.h"
 #include <ns3/boolean.h>
 #include <ns3/callback.h>
 #include <ns3/config.h>
@@ -75,7 +86,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHardFrTestCase("DownlinkHardFrPf2",
                                       5,
                                       "ns3::PfFfMacScheduler",
@@ -87,7 +98,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHardFrTestCase("DownlinkHardFrPss1",
                                       1,
                                       "ns3::PssFfMacScheduler",
@@ -99,7 +110,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHardFrTestCase("DownlinkHardFrPss2",
                                       5,
                                       "ns3::PssFfMacScheduler",
@@ -111,7 +122,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHardFrTestCase("DownlinkHardFrCqa1",
                                       1,
                                       "ns3::CqaFfMacScheduler",
@@ -123,7 +134,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHardFrTestCase("DownlinkHardFrCqa2",
                                       5,
                                       "ns3::CqaFfMacScheduler",
@@ -135,7 +146,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHardFrTestCase("DownlinkHardFrFdTbfq1",
                                       1,
                                       "ns3::FdTbfqFfMacScheduler",
@@ -147,7 +158,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHardFrTestCase("DownlinkHardFrFdTbfq2",
                                       5,
                                       "ns3::FdTbfqFfMacScheduler",
@@ -159,7 +170,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHardFrTestCase("DownlinkHardFrTdTbfq1",
                                       1,
                                       "ns3::TdTbfqFfMacScheduler",
@@ -171,7 +182,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHardFrTestCase("DownlinkHardFrTdTbfq2",
                                       5,
                                       "ns3::TdTbfqFfMacScheduler",
@@ -183,7 +194,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                       12,
                                       availableDlRb,
                                       availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     availableDlRb.clear();
     availableUlRb.clear();
@@ -221,7 +232,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteStrictFrTestCase("DownlinkStrictFrPf2",
                                         5,
                                         "ns3::PfFfMacScheduler",
@@ -235,7 +246,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteStrictFrTestCase("DownlinkStrictFrPss1",
                                         1,
                                         "ns3::PssFfMacScheduler",
@@ -249,7 +260,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteStrictFrTestCase("DownlinkStrictFrPss2",
                                         5,
                                         "ns3::PssFfMacScheduler",
@@ -263,7 +274,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteStrictFrTestCase("DownlinkStrictFrCqa1",
                                         1,
                                         "ns3::CqaFfMacScheduler",
@@ -277,7 +288,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteStrictFrTestCase("DownlinkStrictFrCqa2",
                                         5,
                                         "ns3::CqaFfMacScheduler",
@@ -291,7 +302,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteStrictFrTestCase("DownlinkStrictFrCqaFdTbfq1",
                                         1,
                                         "ns3::FdTbfqFfMacScheduler",
@@ -305,7 +316,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteStrictFrTestCase("DownlinkStrictFrCqaFdTbfq2",
                                         5,
                                         "ns3::FdTbfqFfMacScheduler",
@@ -319,7 +330,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteStrictFrTestCase("DownlinkStrictFrCqaTdTbfq1",
                                         1,
                                         "ns3::TdTbfqFfMacScheduler",
@@ -333,7 +344,7 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteStrictFrTestCase("DownlinkStrictFrCqaTdTbfq2",
                                         5,
                                         "ns3::TdTbfqFfMacScheduler",
@@ -347,107 +358,103 @@ LteFrequencyReuseTestSuite::LteFrequencyReuseTestSuite()
                                         6,
                                         availableDlRb,
                                         availableUlRb),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     AddTestCase(new LteStrictFrAreaTestCase("LteStrictFrAreaTestCasePf1", "ns3::PfFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(
         new LteStrictFrAreaTestCase("LteStrictFrAreaTestCasePss1", "ns3::PssFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
     AddTestCase(
         new LteStrictFrAreaTestCase("LteStrictFrAreaTestCaseCqa1", "ns3::CqaFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
     AddTestCase(
         new LteStrictFrAreaTestCase("LteStrictFrAreaTestCaseFdTbfq1", "ns3::FdTbfqFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
     AddTestCase(
         new LteStrictFrAreaTestCase("LteStrictFrAreaTestCaseTdTbfq1", "ns3::TdTbfqFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
 
     AddTestCase(new LteSoftFrAreaTestCase("LteSoftFrAreaTestCasePf1", "ns3::PfFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteSoftFrAreaTestCase("LteSoftFrAreaTestCasePss1", "ns3::PssFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteSoftFrAreaTestCase("LteSoftFrAreaTestCaseCqa1", "ns3::CqaFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(
         new LteSoftFrAreaTestCase("LteSoftFrAreaTestCaseFdTbfq1", "ns3::FdTbfqFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
     AddTestCase(
         new LteSoftFrAreaTestCase("LteSoftFrAreaTestCaseTdTbfq1", "ns3::TdTbfqFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
 
     AddTestCase(new LteSoftFfrAreaTestCase("LteSoftFfrAreaTestCasePf1", "ns3::PfFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteSoftFfrAreaTestCase("LteSoftFfrAreaTestCasePss1", "ns3::PssFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteSoftFfrAreaTestCase("LteSoftFfrAreaTestCaseCqa1", "ns3::CqaFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(
         new LteSoftFfrAreaTestCase("LteSoftFfrAreaTestCaseFdTbfq1", "ns3::FdTbfqFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
     AddTestCase(
         new LteSoftFfrAreaTestCase("LteSoftFfrAreaTestCaseTdTbfq1", "ns3::TdTbfqFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
 
     AddTestCase(
         new LteEnhancedFfrAreaTestCase("LteEnhancedFfrAreaTestCasePf1", "ns3::PfFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
     AddTestCase(
         new LteEnhancedFfrAreaTestCase("LteEnhancedFfrAreaTestCasePss1", "ns3::PssFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
     AddTestCase(
         new LteEnhancedFfrAreaTestCase("LteEnhancedFfrAreaTestCaseCqa1", "ns3::CqaFfMacScheduler"),
-        TestCase::Duration::QUICK);
+        Duration::QUICK);
     AddTestCase(new LteEnhancedFfrAreaTestCase("LteEnhancedFfrAreaTestCaseFdTbfq1",
                                                "ns3::FdTbfqFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteEnhancedFfrAreaTestCase("LteEnhancedFfrAreaTestCaseTdTbfq1",
                                                "ns3::TdTbfqFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     AddTestCase(new LteDistributedFfrAreaTestCase("LteDistributedFfrAreaTestCasePf1",
                                                   "ns3::PfFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDistributedFfrAreaTestCase("LteDistributedFfrAreaTestCasePss1",
                                                   "ns3::PssFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDistributedFfrAreaTestCase("LteDistributedFfrAreaTestCaseCqa1",
                                                   "ns3::CqaFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDistributedFfrAreaTestCase("LteDistributedFfrAreaTestCaseFdTbfq1",
                                                   "ns3::FdTbfqFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDistributedFfrAreaTestCase("LteDistributedFfrAreaTestCaseTdTbfq1",
                                                   "ns3::TdTbfqFfMacScheduler"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteFrequencyReuseTestSuite lteFrequencyReuseTestSuite;
 
 /**
  * TestCase Data
  */
 void
-DlDataRxStartNotification(LteFrTestCase* testcase, Ptr<const SpectrumValue> spectrumValue)
+DlDataRxStartNofitication(LteFrTestCase* testcase, Ptr<const SpectrumValue> spectrumValue)
 {
     testcase->DlDataRxStart(spectrumValue);
 }
 
 void
-UlDataRxStartNotification(LteFrTestCase* testcase, Ptr<const SpectrumValue> spectrumValue)
+UlDataRxStartNofitication(LteFrTestCase* testcase, Ptr<const SpectrumValue> spectrumValue)
 {
     testcase->UlDataRxStart(spectrumValue);
 }
 
 LteFrTestCase::LteFrTestCase(std::string name,
                              uint32_t userNum,
-                             uint16_t dlBandwidth,
-                             uint16_t ulBandwidth,
+                             uint8_t dlBandwidth,
+                             uint8_t ulBandwidth,
                              std::vector<bool> availableDlRb,
                              std::vector<bool> availableUlRb)
     : TestCase("Test: " + name),
@@ -469,14 +476,15 @@ void
 LteFrTestCase::DlDataRxStart(Ptr<const SpectrumValue> spectrumValue)
 {
     NS_LOG_DEBUG("DL DATA Power allocation :");
+    Values::const_iterator it;
     uint32_t i = 0;
-    for (auto it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
+    for (it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
     {
         double power = (*it) * (m_dlBandwidth * 180000);
         NS_LOG_DEBUG("RB " << i << " POWER: "
                            << " " << power << " isAvailable: " << m_availableDlRb[i]);
 
-        if (!m_availableDlRb[i] && power > 0)
+        if (m_availableDlRb[i] == false && power > 0)
         {
             m_usedMutedDlRbg = true;
         }
@@ -488,14 +496,15 @@ void
 LteFrTestCase::UlDataRxStart(Ptr<const SpectrumValue> spectrumValue)
 {
     NS_LOG_DEBUG("UL DATA Power allocation :");
+    Values::const_iterator it;
     uint32_t i = 0;
-    for (auto it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
+    for (it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
     {
         double power = (*it) * (m_ulBandwidth * 180000);
         NS_LOG_DEBUG("RB " << i << " POWER: "
                            << " " << power << " isAvailable: " << m_availableUlRb[i]);
 
-        if (!m_availableUlRb[i] && power > 0)
+        if (m_availableUlRb[i] == false && power > 0)
         {
             m_usedMutedUlRbg = true;
         }
@@ -504,19 +513,19 @@ LteFrTestCase::UlDataRxStart(Ptr<const SpectrumValue> spectrumValue)
 }
 
 void
-LteFrTestCase::DoRun()
+LteFrTestCase::DoRun(void)
 {
 }
 
 LteHardFrTestCase::LteHardFrTestCase(std::string name,
                                      uint32_t userNum,
                                      std::string schedulerType,
-                                     uint16_t dlBandwidth,
-                                     uint16_t ulBandwidth,
+                                     uint8_t dlBandwidth,
+                                     uint8_t ulBandwidth,
                                      uint8_t dlSubBandOffset,
-                                     uint16_t dlSubBandwidth,
+                                     uint8_t dlSubBandwidth,
                                      uint8_t ulSubBandOffset,
-                                     uint16_t ulSubBandwidth,
+                                     uint8_t ulSubBandwidth,
                                      std::vector<bool> availableDlRb,
                                      std::vector<bool> availableUlRb)
     : LteFrTestCase(name, userNum, dlBandwidth, ulBandwidth, availableDlRb, availableUlRb),
@@ -534,7 +543,7 @@ LteHardFrTestCase::~LteHardFrTestCase()
 }
 
 void
-LteHardFrTestCase::DoRun()
+LteHardFrTestCase::DoRun(void)
 {
     NS_LOG_DEBUG("LteFrTestCase");
 
@@ -570,6 +579,11 @@ LteHardFrTestCase::DoRun()
     NetDeviceContainer enbDevs;
     NetDeviceContainer ueDevs;
     lteHelper->SetSchedulerType(m_schedulerType);
+
+    // set DL and UL bandwidth
+    lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
+    lteHelper->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(25));
+
     enbDevs = lteHelper->InstallEnbDevice(enbNodes);
     ueDevs = lteHelper->InstallUeDevice(ueNodes);
 
@@ -577,17 +591,8 @@ LteHardFrTestCase::DoRun()
     lteHelper->Attach(ueDevs, enbDevs.Get(0));
 
     // Activate the default EPS bearer
-    // Since this test includes the Token Bank Fair Queue Scheduler
-    //(ns3::FdTbfqFfMacScheduler) we have to treat the default
-    // bearer as the dedicated bearer with QoS.
-    GbrQosInformation qos;
-    qos.mbrUl = 1e6;
-    qos.mbrDl = 1e6;
-    qos.gbrUl = 1e4;
-    qos.gbrDl = 1e4;
-
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
-    EpsBearer bearer(q, qos);
+    enum EpsBearer::Qci q = EpsBearer::NGBR_VIDEO_TCP_DEFAULT;
+    EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs, bearer);
 
     // Test SpectrumPhy to get signals form DL channel
@@ -606,7 +611,7 @@ LteHardFrTestCase::DoRun()
 
     testDlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&DlDataRxStartNotification, this));
+        MakeBoundCallback(&DlDataRxStartNofitication, this));
 
     // Test SpectrumPhy to get signals form UL channel
     Ptr<LteSpectrumPhy> ueUlSpectrumPhy = ueDevs.Get(0)
@@ -623,7 +628,7 @@ LteHardFrTestCase::DoRun()
 
     testUlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&UlDataRxStartNotification, this));
+        MakeBoundCallback(&UlDataRxStartNofitication, this));
 
     Simulator::Stop(Seconds(0.500));
     Simulator::Run();
@@ -638,14 +643,14 @@ LteHardFrTestCase::DoRun()
 LteStrictFrTestCase::LteStrictFrTestCase(std::string name,
                                          uint32_t userNum,
                                          std::string schedulerType,
-                                         uint16_t dlBandwidth,
-                                         uint16_t ulBandwidth,
-                                         uint16_t dlCommonSubBandwidth,
+                                         uint8_t dlBandwidth,
+                                         uint8_t ulBandwidth,
+                                         uint8_t dlCommonSubBandwidth,
                                          uint8_t dlEdgeSubBandOffset,
-                                         uint16_t dlEdgeSubBandwidth,
-                                         uint16_t ulCommonSubBandwidth,
+                                         uint8_t dlEdgeSubBandwidth,
+                                         uint8_t ulCommonSubBandwidth,
                                          uint8_t ulEdgeSubBandOffset,
-                                         uint16_t ulEdgeSubBandwidth,
+                                         uint8_t ulEdgeSubBandwidth,
                                          std::vector<bool> availableDlRb,
                                          std::vector<bool> availableUlRb)
     : LteFrTestCase(name, userNum, dlBandwidth, ulBandwidth, availableDlRb, availableUlRb),
@@ -665,7 +670,7 @@ LteStrictFrTestCase::~LteStrictFrTestCase()
 }
 
 void
-LteStrictFrTestCase::DoRun()
+LteStrictFrTestCase::DoRun(void)
 {
     NS_LOG_DEBUG("LteFrTestCase");
 
@@ -707,6 +712,11 @@ LteStrictFrTestCase::DoRun()
     NetDeviceContainer enbDevs;
     NetDeviceContainer ueDevs;
     lteHelper->SetSchedulerType(m_schedulerType);
+
+    // set DL and UL bandwidth
+    lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
+    lteHelper->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(25));
+
     enbDevs = lteHelper->InstallEnbDevice(enbNodes);
     ueDevs = lteHelper->InstallUeDevice(ueNodes);
 
@@ -714,18 +724,8 @@ LteStrictFrTestCase::DoRun()
     lteHelper->Attach(ueDevs, enbDevs.Get(0));
 
     // Activate the default EPS bearer
-    // Since this test includes the Token Bank Fair Queue Scheduler
-    //(ns3::FdTbfqFfMacScheduler) we have to treat the default
-    // bearer as the dedicated bearer with QoS.
-
-    GbrQosInformation qos;
-    qos.mbrUl = 1e6;
-    qos.mbrDl = 1e6;
-    qos.gbrUl = 1e4;
-    qos.gbrDl = 1e4;
-
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
-    EpsBearer bearer(q, qos);
+    enum EpsBearer::Qci q = EpsBearer::NGBR_VIDEO_TCP_DEFAULT;
+    EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs, bearer);
 
     // Test SpectrumPhy to get signals form DL channel
@@ -744,7 +744,7 @@ LteStrictFrTestCase::DoRun()
 
     testDlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&DlDataRxStartNotification, this));
+        MakeBoundCallback(&DlDataRxStartNofitication, this));
 
     // Test SpectrumPhy to get signals form UL channel
     Ptr<LteSpectrumPhy> ueUlSpectrumPhy = ueDevs.Get(0)
@@ -761,7 +761,7 @@ LteStrictFrTestCase::DoRun()
 
     testUlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&UlDataRxStartNotification, this));
+        MakeBoundCallback(&UlDataRxStartNofitication, this));
 
     Simulator::Stop(Seconds(0.500));
     Simulator::Run();
@@ -774,13 +774,13 @@ LteStrictFrTestCase::DoRun()
 }
 
 void
-DlDataRxStartNotificationArea(LteFrAreaTestCase* testcase, Ptr<const SpectrumValue> spectrumValue)
+DlDataRxStartNofiticationArea(LteFrAreaTestCase* testcase, Ptr<const SpectrumValue> spectrumValue)
 {
     testcase->DlDataRxStart(spectrumValue);
 }
 
 void
-UlDataRxStartNotificationArea(LteFrAreaTestCase* testcase, Ptr<const SpectrumValue> spectrumValue)
+UlDataRxStartNofiticationArea(LteFrAreaTestCase* testcase, Ptr<const SpectrumValue> spectrumValue)
 {
     testcase->UlDataRxStart(spectrumValue);
 }
@@ -809,8 +809,9 @@ LteFrAreaTestCase::DlDataRxStart(Ptr<const SpectrumValue> spectrumValue)
     }
 
     NS_LOG_DEBUG("DL DATA Power allocation :");
+    Values::const_iterator it;
     uint32_t i = 0;
-    for (auto it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
+    for (it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
     {
         double power = (*it) * (m_dlBandwidth * 180000);
         NS_LOG_DEBUG("RB " << i << " POWER: "
@@ -819,11 +820,11 @@ LteFrAreaTestCase::DlDataRxStart(Ptr<const SpectrumValue> spectrumValue)
                            << " " << power << " Available: " << m_expectedDlRb[i]
                            << " Expected Power: " << m_expectedDlPower);
 
-        if (!m_expectedDlRb[i] && power > 0)
+        if (m_expectedDlRb[i] == false && power > 0)
         {
             m_usedWrongDlRbg = true;
         }
-        else if (m_expectedDlRb[i] && power > 0)
+        else if (m_expectedDlRb[i] == true && power > 0)
         {
             NS_TEST_ASSERT_MSG_EQ_TOL(power,
                                       m_expectedDlPower,
@@ -844,6 +845,7 @@ LteFrAreaTestCase::UlDataRxStart(Ptr<const SpectrumValue> spectrumValue)
     }
 
     NS_LOG_DEBUG("UL DATA Power allocation :");
+    Values::const_iterator it;
     uint32_t i = 0;
     uint32_t numActiveRbs = 0;
 
@@ -851,11 +853,11 @@ LteFrAreaTestCase::UlDataRxStart(Ptr<const SpectrumValue> spectrumValue)
     // of active RBs. This method is independent of the bandwidth
     // configuration done in a test scenario, thus, it requires
     // minimum change to the script.
-    for (auto it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
+    for (it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
     {
         // Count the RB as active if it is part of
         // the expected UL RBs and has Power Spectral Density (PSD) > 0
-        if (m_expectedUlRb[numActiveRbs] && (*it) > 0)
+        if (m_expectedUlRb[numActiveRbs] == true && (*it) > 0)
         {
             numActiveRbs++;
         }
@@ -864,22 +866,22 @@ LteFrAreaTestCase::UlDataRxStart(Ptr<const SpectrumValue> spectrumValue)
 
     // The uplink power control and the uplink PSD
     // calculation only consider active resource blocks.
-    for (auto it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
+    for (it = spectrumValue->ConstValuesBegin(); it != spectrumValue->ConstValuesEnd(); it++)
     {
         double power = (*it) * (numActiveRbs * 180000);
         NS_LOG_DEBUG("RB " << i << " POWER: " << power
                            << " expectedUlPower: " << m_expectedUlPower);
-        if (!m_expectedUlRb[i] && power > 0)
+        if (m_expectedUlRb[i] == false && power > 0)
         {
             m_usedWrongUlRbg = true;
         }
-        else if (m_expectedUlRb[i] && power > 0)
+        else if (m_expectedUlRb[i] == true && power > 0)
         {
             NS_TEST_ASSERT_MSG_EQ_TOL(power,
                                       m_expectedUlPower,
                                       0.01,
                                       "Wrong Data Channel UL Power level"
-                                          << Simulator::Now().As(Time::S));
+                                          << Simulator::Now().GetSeconds());
         }
         i++;
     }
@@ -942,7 +944,7 @@ LteFrAreaTestCase::SetUlExpectedValues(double expectedUlPower, std::vector<bool>
 }
 
 void
-LteFrAreaTestCase::DoRun()
+LteFrAreaTestCase::DoRun(void)
 {
 }
 
@@ -957,7 +959,7 @@ LteStrictFrAreaTestCase::~LteStrictFrAreaTestCase()
 }
 
 void
-LteStrictFrAreaTestCase::DoRun()
+LteStrictFrAreaTestCase::DoRun(void)
 {
     NS_LOG_DEBUG("LteStrictFrAreaTestCase");
 
@@ -1016,6 +1018,10 @@ LteStrictFrAreaTestCase::DoRun()
     NetDeviceContainer ueDevs2;
     lteHelper->SetSchedulerType(m_schedulerType);
 
+    // set DL and UL bandwidth
+    lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
+    lteHelper->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(25));
+
     lteHelper->SetFfrAlgorithmType("ns3::LteFrStrictAlgorithm");
     lteHelper->SetFfrAlgorithmAttribute("RsrqThreshold", UintegerValue(25));
     lteHelper->SetFfrAlgorithmAttribute("CenterPowerOffset",
@@ -1042,19 +1048,9 @@ LteStrictFrAreaTestCase::DoRun()
     lteHelper->Attach(ueDevs1, enbDevs.Get(0));
     lteHelper->Attach(ueDevs2, enbDevs.Get(1));
 
-    // Activate the default EPS bearer
-    // Since this test includes the Token Bank Fair Queue Scheduler
-    //(ns3::FdTbfqFfMacScheduler) we have to treat the default
-    // bearer as the dedicated bearer with QoS.
-    GbrQosInformation qos;
-    qos.mbrUl = 1e6;
-    qos.mbrDl = 1e6;
-    qos.gbrUl = 1e4;
-    qos.gbrDl = 1e4;
-
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
-    EpsBearer bearer(q, qos);
-
+    // Activate an EPS bearer
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs1, bearer);
     lteHelper->ActivateDataRadioBearer(ueDevs2, bearer);
 
@@ -1076,7 +1072,7 @@ LteStrictFrAreaTestCase::DoRun()
 
     testDlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&DlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&DlDataRxStartNofiticationArea, this));
 
     // Test SpectrumPhy to get signals form UL channel
     Ptr<LteSpectrumPhy> ueUlSpectrumPhy = ueDevs1.Get(0)
@@ -1095,7 +1091,7 @@ LteStrictFrAreaTestCase::DoRun()
 
     testUlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&UlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&UlDataRxStartNofiticationArea, this));
 
     std::vector<bool> expectedDlRbCenterArea;
     expectedDlRbCenterArea.resize(m_dlBandwidth, false);
@@ -1176,7 +1172,7 @@ LteSoftFrAreaTestCase::~LteSoftFrAreaTestCase()
 }
 
 void
-LteSoftFrAreaTestCase::DoRun()
+LteSoftFrAreaTestCase::DoRun(void)
 {
     NS_LOG_DEBUG("LteSoftFrAreaTestCase");
 
@@ -1235,6 +1231,10 @@ LteSoftFrAreaTestCase::DoRun()
     NetDeviceContainer ueDevs2;
     lteHelper->SetSchedulerType(m_schedulerType);
 
+    // set DL and UL bandwidth
+    lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
+    lteHelper->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(25));
+
     lteHelper->SetFfrAlgorithmType("ns3::LteFrSoftAlgorithm");
     lteHelper->SetFfrAlgorithmAttribute("AllowCenterUeUseEdgeSubBand", BooleanValue(false));
     lteHelper->SetFfrAlgorithmAttribute("RsrqThreshold", UintegerValue(25));
@@ -1259,18 +1259,9 @@ LteSoftFrAreaTestCase::DoRun()
     lteHelper->Attach(ueDevs1, enbDevs.Get(0));
     lteHelper->Attach(ueDevs2, enbDevs.Get(1));
 
-    // Activate the default EPS bearer
-    // Since this test includes the Token Bank Fair Queue Scheduler
-    //(ns3::FdTbfqFfMacScheduler) we have to treat the default
-    // bearer as the dedicated bearer with QoS.
-    GbrQosInformation qos;
-    qos.mbrUl = 1e6;
-    qos.mbrDl = 1e6;
-    qos.gbrUl = 1e4;
-    qos.gbrDl = 1e4;
-
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
-    EpsBearer bearer(q, qos);
+    // Activate an EPS bearer
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs1, bearer);
     lteHelper->ActivateDataRadioBearer(ueDevs2, bearer);
 
@@ -1292,7 +1283,7 @@ LteSoftFrAreaTestCase::DoRun()
 
     testDlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&DlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&DlDataRxStartNofiticationArea, this));
 
     // Test SpectrumPhy to get signals form UL channel
     Ptr<LteSpectrumPhy> ueUlSpectrumPhy = ueDevs1.Get(0)
@@ -1311,7 +1302,7 @@ LteSoftFrAreaTestCase::DoRun()
 
     testUlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&UlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&UlDataRxStartNofiticationArea, this));
 
     std::vector<bool> expectedDlRbCenterArea;
     expectedDlRbCenterArea.resize(m_dlBandwidth, false);
@@ -1400,7 +1391,7 @@ LteSoftFfrAreaTestCase::~LteSoftFfrAreaTestCase()
 }
 
 void
-LteSoftFfrAreaTestCase::DoRun()
+LteSoftFfrAreaTestCase::DoRun(void)
 {
     NS_LOG_DEBUG("LteSoftFfrAreaTestCase");
 
@@ -1459,6 +1450,10 @@ LteSoftFfrAreaTestCase::DoRun()
     NetDeviceContainer ueDevs2;
     lteHelper->SetSchedulerType(m_schedulerType);
 
+    // set DL and UL bandwidth
+    lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
+    lteHelper->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(25));
+
     lteHelper->SetFfrAlgorithmType("ns3::LteFfrSoftAlgorithm");
     lteHelper->SetFfrAlgorithmAttribute("CenterRsrqThreshold", UintegerValue(28));
     lteHelper->SetFfrAlgorithmAttribute("EdgeRsrqThreshold", UintegerValue(18));
@@ -1488,18 +1483,9 @@ LteSoftFfrAreaTestCase::DoRun()
     lteHelper->Attach(ueDevs1, enbDevs.Get(0));
     lteHelper->Attach(ueDevs2, enbDevs.Get(1));
 
-    // Activate the default EPS bearer
-    // Since this test includes the Token Bank Fair Queue Scheduler
-    //(ns3::FdTbfqFfMacScheduler) we have to treat the default
-    // bearer as the dedicated bearer with QoS.
-    GbrQosInformation qos;
-    qos.mbrUl = 1e6;
-    qos.mbrDl = 1e6;
-    qos.gbrUl = 1e4;
-    qos.gbrDl = 1e4;
-
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
-    EpsBearer bearer(q, qos);
+    // Activate an EPS bearer
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs1, bearer);
     lteHelper->ActivateDataRadioBearer(ueDevs2, bearer);
 
@@ -1521,7 +1507,7 @@ LteSoftFfrAreaTestCase::DoRun()
 
     testDlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&DlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&DlDataRxStartNofiticationArea, this));
 
     // Test SpectrumPhy to get signals form UL channel
     Ptr<LteSpectrumPhy> ueUlSpectrumPhy = ueDevs1.Get(0)
@@ -1540,7 +1526,7 @@ LteSoftFfrAreaTestCase::DoRun()
 
     testUlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&UlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&UlDataRxStartNofiticationArea, this));
 
     double expectedDlPowerCenterArea = 0.5;
     std::vector<bool> expectedDlRbCenterArea;
@@ -1666,7 +1652,7 @@ LteEnhancedFfrAreaTestCase::~LteEnhancedFfrAreaTestCase()
 }
 
 void
-LteEnhancedFfrAreaTestCase::DoRun()
+LteEnhancedFfrAreaTestCase::DoRun(void)
 {
     NS_LOG_DEBUG("LteEnhancedFfrAreaTestCase");
 
@@ -1759,18 +1745,9 @@ LteEnhancedFfrAreaTestCase::DoRun()
     lteHelper->Attach(ueDevs1, enbDevs.Get(0));
     lteHelper->Attach(ueDevs2, enbDevs.Get(1));
 
-    // Activate the default EPS bearer
-    // Since this test includes the Token Bank Fair Queue Scheduler
-    //(ns3::FdTbfqFfMacScheduler) we have to treat the default
-    // bearer as the dedicated bearer with QoS.
-    GbrQosInformation qos;
-    qos.mbrUl = 1e6;
-    qos.mbrDl = 1e6;
-    qos.gbrUl = 1e4;
-    qos.gbrDl = 1e4;
-
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
-    EpsBearer bearer(q, qos);
+    // Activate an EPS bearer
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs1, bearer);
     lteHelper->ActivateDataRadioBearer(ueDevs2, bearer);
 
@@ -1792,7 +1769,7 @@ LteEnhancedFfrAreaTestCase::DoRun()
 
     testDlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&DlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&DlDataRxStartNofiticationArea, this));
 
     // Test SpectrumPhy to get signals form UL channel
     Ptr<LteSpectrumPhy> ueUlSpectrumPhy = ueDevs1.Get(0)
@@ -1811,7 +1788,7 @@ LteEnhancedFfrAreaTestCase::DoRun()
 
     testUlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&UlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&UlDataRxStartNofiticationArea, this));
 
     double expectedDlPowerCenterArea = 0.251189;
     std::vector<bool> expectedDlRbCenterArea;
@@ -1943,7 +1920,7 @@ LteDistributedFfrAreaTestCase::~LteDistributedFfrAreaTestCase()
 }
 
 void
-LteDistributedFfrAreaTestCase::DoRun()
+LteDistributedFfrAreaTestCase::DoRun(void)
 {
     NS_LOG_DEBUG("LteDistributedFfrAreaTestCase");
 
@@ -1965,7 +1942,7 @@ LteDistributedFfrAreaTestCase::DoRun()
     Config::SetDefault("ns3::LteEnbRrc::RsrpFilterCoefficient", UintegerValue(0));
     Config::SetDefault("ns3::LteEnbRrc::RsrqFilterCoefficient", UintegerValue(0));
 
-    uint16_t bandwidth = 25;
+    uint8_t bandwidth = 25;
 
     Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
     Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
@@ -2136,17 +2113,7 @@ LteDistributedFfrAreaTestCase::DoRun()
             ulpf.remotePortStart = ulPort;
             ulpf.remotePortEnd = ulPort;
             tft->Add(ulpf);
-            // Since this test includes the Token Bank Fair Queue Scheduler
-            //(ns3::FdTbfqFfMacScheduler) we have to use GBR bearer with
-            // certain QoS.
-            GbrQosInformation qos;
-            qos.mbrUl = 1e6;
-            qos.mbrDl = 1e6;
-            qos.gbrUl = 1e4;
-            qos.gbrDl = 1e4;
-
-            EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
-            EpsBearer bearer(q, qos);
+            EpsBearer bearer(EpsBearer::NGBR_VIDEO_TCP_DEFAULT);
             lteHelper->ActivateDedicatedEpsBearer(ueLteDevs.Get(u), bearer, tft);
 
             Time startTime = Seconds(startTimeSeconds->GetValue());
@@ -2173,7 +2140,7 @@ LteDistributedFfrAreaTestCase::DoRun()
 
     testDlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&DlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&DlDataRxStartNofiticationArea, this));
 
     // Test SpectrumPhy to get signals form UL channel
     Ptr<LteSpectrumPhy> ueUlSpectrumPhy = ueDevs1.Get(0)
@@ -2192,7 +2159,7 @@ LteDistributedFfrAreaTestCase::DoRun()
 
     testUlSpectrumPhy->TraceConnectWithoutContext(
         "RxStart",
-        MakeBoundCallback(&UlDataRxStartNotificationArea, this));
+        MakeBoundCallback(&UlDataRxStartNofiticationArea, this));
 
     double expectedDlPowerCenterArea = 1.0;
     std::vector<bool> expectedDlRbCenterArea;

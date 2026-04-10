@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2009 CTTC
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  *         Giuseppe Piro  <g.piro@poliba.it>
@@ -11,20 +23,19 @@
 #ifndef LTE_SPECTRUM_PHY_H
 #define LTE_SPECTRUM_PHY_H
 
-#include "ff-mac-common.h"
-#include "lte-common.h"
-#include "lte-harq-phy.h"
-#include "lte-interference.h"
-
+#include "ns3/random-variable-stream.h"
 #include <ns3/data-rate.h>
 #include <ns3/event-id.h>
+#include <ns3/ff-mac-common.h>
 #include <ns3/generic-phy.h>
+#include <ns3/lte-common.h>
+#include <ns3/lte-harq-phy.h>
+#include <ns3/lte-interference.h>
 #include <ns3/mobility-model.h>
 #include <ns3/net-device.h>
 #include <ns3/nstime.h>
 #include <ns3/packet-burst.h>
 #include <ns3/packet.h>
-#include <ns3/random-variable-stream.h>
 #include <ns3/spectrum-channel.h>
 #include <ns3/spectrum-interference.h>
 #include <ns3/spectrum-phy.h>
@@ -78,6 +89,14 @@ class LteControlMessage;
 struct LteSpectrumSignalParametersDataFrame;
 struct LteSpectrumSignalParametersDlCtrlFrame;
 struct LteSpectrumSignalParametersUlSrsFrame;
+
+/**
+ * this method is invoked by the LteSpectrumPhy to notify the PHY that the
+ * transmission of a given packet has been completed.
+ *
+ * @param packet the Packet whose TX has been completed.
+ */
+typedef Callback<void, Ptr<const Packet>> LtePhyTxEndCallback;
 
 /**
  * This method is used by the LteSpectrumPhy to notify the PHY that a
@@ -139,7 +158,7 @@ class LteSpectrumPhy : public SpectrumPhy
 {
   public:
     LteSpectrumPhy();
-    ~LteSpectrumPhy() override;
+    virtual ~LteSpectrumPhy();
 
     /**
      *  PHY states
@@ -159,19 +178,19 @@ class LteSpectrumPhy : public SpectrumPhy
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
     // inherited from Object
-    void DoDispose() override;
+    virtual void DoDispose();
 
     // inherited from SpectrumPhy
-    void SetChannel(Ptr<SpectrumChannel> c) override;
-    void SetMobility(Ptr<MobilityModel> m) override;
-    void SetDevice(Ptr<NetDevice> d) override;
-    Ptr<MobilityModel> GetMobility() const override;
-    Ptr<NetDevice> GetDevice() const override;
-    Ptr<const SpectrumModel> GetRxSpectrumModel() const override;
-    Ptr<Object> GetAntenna() const override;
-    void StartRx(Ptr<SpectrumSignalParameters> params) override;
+    void SetChannel(Ptr<SpectrumChannel> c);
+    void SetMobility(Ptr<MobilityModel> m);
+    void SetDevice(Ptr<NetDevice> d);
+    Ptr<MobilityModel> GetMobility() const;
+    Ptr<NetDevice> GetDevice() const;
+    Ptr<const SpectrumModel> GetRxSpectrumModel() const;
+    Ptr<Object> GetAntenna() const;
+    void StartRx(Ptr<SpectrumSignalParameters> params);
     /**
      * \brief Start receive data function
      * \param params Ptr<LteSpectrumSignalParametersDataFrame>
@@ -254,6 +273,14 @@ class LteSpectrumPhy : public SpectrumPhy
      * started, false otherwise.
      */
     bool StartTxUlSrsFrame();
+
+    /**
+     * set the callback for the end of a TX, as part of the
+     * interconnections between the PHY and the MAC
+     *
+     * @param c the callback
+     */
+    void SetLtePhyTxEndCallback(LtePhyTxEndCallback c);
 
     /**
      * set the callback for the end of a RX in error, as part of the
@@ -398,18 +425,6 @@ class LteSpectrumPhy : public SpectrumPhy
                        uint8_t harqId,
                        uint8_t rv,
                        bool downlink);
-    /**
-     * \brief Remove expected transport block.
-     *
-     * When UE context at eNodeB is removed and if UL TB is expected to be received
-     * but not transmitted due to break in radio link. The TB with different rnti or lcid
-     * remains during the transmission of a new TB and causes problems with
-     * m_ulPhyReception trace, since the UE context was already removed. TB has to be
-     * removed when ue context at eNodeB is removed
-     *
-     * \param rnti The RNTI of the UE
-     */
-    void RemoveExpectedTb(uint16_t rnti);
 
     /**
      *

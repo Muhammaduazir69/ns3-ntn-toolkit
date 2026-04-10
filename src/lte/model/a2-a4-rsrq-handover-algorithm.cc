@@ -1,24 +1,34 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  * Copyright (c) 2013 Budiarto Herman
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Original work authors (from lte-enb-rrc.cc):
- *   Nicola Baldo <nbaldo@cttc.es>
- *   Marco Miozzo <mmiozzo@cttc.es>
- *   Manuel Requena <manuel.requena@cttc.es>
+ * - Nicola Baldo <nbaldo@cttc.es>
+ * - Marco Miozzo <mmiozzo@cttc.es>
+ * - Manuel Requena <manuel.requena@cttc.es>
  *
  * Converted to handover algorithm interface by:
- *   Budiarto Herman <budiarto.herman@magister.fi>
+ * - Budiarto Herman <budiarto.herman@magister.fi>
  */
 
 #include "a2-a4-rsrq-handover-algorithm.h"
 
 #include <ns3/log.h>
 #include <ns3/uinteger.h>
-
-#include <algorithm>
 
 namespace ns3
 {
@@ -32,9 +42,11 @@ NS_OBJECT_ENSURE_REGISTERED(A2A4RsrqHandoverAlgorithm);
 ///////////////////////////////////////////
 
 A2A4RsrqHandoverAlgorithm::A2A4RsrqHandoverAlgorithm()
-    : m_servingCellThreshold(30),
+    : m_a2MeasId(0),
+      m_a4MeasId(0),
+      m_servingCellThreshold(30),
       m_neighbourCellOffset(1),
-      m_handoverManagementSapUser(nullptr)
+      m_handoverManagementSapUser(0)
 {
     NS_LOG_FUNCTION(this);
     m_handoverManagementSapProvider =
@@ -99,7 +111,7 @@ A2A4RsrqHandoverAlgorithm::DoInitialize()
     reportConfigA2.threshold1.range = m_servingCellThreshold;
     reportConfigA2.triggerQuantity = LteRrcSap::ReportConfigEutra::RSRQ;
     reportConfigA2.reportInterval = LteRrcSap::ReportConfigEutra::MS240;
-    m_a2MeasIds = m_handoverManagementSapUser->AddUeMeasReportConfigForHandover(reportConfigA2);
+    m_a2MeasId = m_handoverManagementSapUser->AddUeMeasReportConfigForHandover(reportConfigA2);
 
     NS_LOG_LOGIC(this << " requesting Event A4 measurements"
                       << " (threshold=0)");
@@ -109,7 +121,7 @@ A2A4RsrqHandoverAlgorithm::DoInitialize()
     reportConfigA4.threshold1.range = 0; // intentionally very low threshold
     reportConfigA4.triggerQuantity = LteRrcSap::ReportConfigEutra::RSRQ;
     reportConfigA4.reportInterval = LteRrcSap::ReportConfigEutra::MS480;
-    m_a4MeasIds = m_handoverManagementSapUser->AddUeMeasReportConfigForHandover(reportConfigA4);
+    m_a4MeasId = m_handoverManagementSapUser->AddUeMeasReportConfigForHandover(reportConfigA4);
 
     LteHandoverAlgorithm::DoInitialize();
 }
@@ -126,19 +138,18 @@ A2A4RsrqHandoverAlgorithm::DoReportUeMeas(uint16_t rnti, LteRrcSap::MeasResults 
 {
     NS_LOG_FUNCTION(this << rnti << (uint16_t)measResults.measId);
 
-    if (std::find(begin(m_a2MeasIds), end(m_a2MeasIds), measResults.measId) !=
-        std::end(m_a2MeasIds))
+    if (measResults.measId == m_a2MeasId)
     {
-        NS_ASSERT_MSG(measResults.measResultPCell.rsrqResult <= m_servingCellThreshold,
+        NS_ASSERT_MSG(measResults.rsrqResult <= m_servingCellThreshold,
                       "Invalid UE measurement report");
-        EvaluateHandover(rnti, measResults.measResultPCell.rsrqResult);
+        EvaluateHandover(rnti, measResults.rsrqResult);
     }
-    else if (std::find(begin(m_a4MeasIds), end(m_a4MeasIds), measResults.measId) !=
-             std::end(m_a4MeasIds))
+    else if (measResults.measId == m_a4MeasId)
     {
         if (measResults.haveMeasResultNeighCells && !measResults.measResultListEutra.empty())
         {
-            for (auto it = measResults.measResultListEutra.begin();
+            for (std::list<LteRrcSap::MeasResultEutra>::iterator it =
+                     measResults.measResultListEutra.begin();
                  it != measResults.measResultListEutra.end();
                  ++it)
             {
@@ -165,7 +176,8 @@ A2A4RsrqHandoverAlgorithm::EvaluateHandover(uint16_t rnti, uint8_t servingCellRs
 {
     NS_LOG_FUNCTION(this << rnti << (uint16_t)servingCellRsrq);
 
-    auto it1 = m_neighbourCellMeasures.find(rnti);
+    MeasurementTable_t::iterator it1;
+    it1 = m_neighbourCellMeasures.find(rnti);
 
     if (it1 == m_neighbourCellMeasures.end())
     {
@@ -178,7 +190,8 @@ A2A4RsrqHandoverAlgorithm::EvaluateHandover(uint16_t rnti, uint8_t servingCellRs
         NS_LOG_LOGIC("Number of neighbour cells = " << it1->second.size());
         uint16_t bestNeighbourCellId = 0;
         uint8_t bestNeighbourRsrq = 0;
-        for (auto it2 = it1->second.begin(); it2 != it1->second.end(); ++it2)
+        MeasurementRow_t::iterator it2;
+        for (it2 = it1->second.begin(); it2 != it1->second.end(); ++it2)
         {
             if ((it2->second->m_rsrq > bestNeighbourRsrq) && IsValidNeighbour(it2->first))
             {
@@ -225,20 +238,23 @@ void
 A2A4RsrqHandoverAlgorithm::UpdateNeighbourMeasurements(uint16_t rnti, uint16_t cellId, uint8_t rsrq)
 {
     NS_LOG_FUNCTION(this << rnti << cellId << (uint16_t)rsrq);
-    auto it1 = m_neighbourCellMeasures.find(rnti);
+    MeasurementTable_t::iterator it1;
+    it1 = m_neighbourCellMeasures.find(rnti);
 
     if (it1 == m_neighbourCellMeasures.end())
     {
         // insert a new UE entry
         MeasurementRow_t row;
-        auto ret = m_neighbourCellMeasures.insert(std::pair<uint16_t, MeasurementRow_t>(rnti, row));
+        std::pair<MeasurementTable_t::iterator, bool> ret;
+        ret = m_neighbourCellMeasures.insert(std::pair<uint16_t, MeasurementRow_t>(rnti, row));
         NS_ASSERT(ret.second);
         it1 = ret.first;
     }
 
     NS_ASSERT(it1 != m_neighbourCellMeasures.end());
     Ptr<UeMeasure> neighbourCellMeasures;
-    auto it2 = it1->second.find(cellId);
+    std::map<uint16_t, Ptr<UeMeasure>>::iterator it2;
+    it2 = it1->second.find(cellId);
 
     if (it2 != it1->second.end())
     {

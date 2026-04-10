@@ -1,17 +1,28 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
 
 #include "lte-hex-grid-enb-topology-helper.h"
 
-#include "epc-helper.h"
-
 #include <ns3/abort.h>
 #include <ns3/double.h>
+#include <ns3/epc-helper.h>
 #include <ns3/log.h>
 #include <ns3/pointer.h>
 
@@ -29,13 +40,13 @@ LteHexGridEnbTopologyHelper::LteHexGridEnbTopologyHelper()
     NS_LOG_FUNCTION(this);
 }
 
-LteHexGridEnbTopologyHelper::~LteHexGridEnbTopologyHelper()
+LteHexGridEnbTopologyHelper::~LteHexGridEnbTopologyHelper(void)
 {
     NS_LOG_FUNCTION(this);
 }
 
 TypeId
-LteHexGridEnbTopologyHelper::GetTypeId()
+LteHexGridEnbTopologyHelper::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::LteHexGridEnbTopologyHelper")

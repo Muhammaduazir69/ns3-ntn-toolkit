@@ -1,15 +1,25 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
 
 #include "lte-test-rlc-um-transmitter.h"
-
 #include "lte-test-entities.h"
-
 #include "ns3/log.h"
 #include "ns3/lte-rlc-header.h"
 #include "ns3/lte-rlc-um.h"
@@ -31,20 +41,13 @@ LteRlcUmTransmitterTestSuite::LteRlcUmTransmitterTestSuite()
 
     // NS_LOG_INFO ("Creating LteRlcUmTransmitterTestSuite");
 
-    AddTestCase(new LteRlcUmTransmitterOneSduTestCase("One SDU, one PDU"),
-                TestCase::Duration::QUICK);
-    AddTestCase(new LteRlcUmTransmitterSegmentationTestCase("Segmentation"),
-                TestCase::Duration::QUICK);
-    AddTestCase(new LteRlcUmTransmitterConcatenationTestCase("Concatenation"),
-                TestCase::Duration::QUICK);
+    AddTestCase(new LteRlcUmTransmitterOneSduTestCase("One SDU, one PDU"), Duration::QUICK);
+    AddTestCase(new LteRlcUmTransmitterSegmentationTestCase("Segmentation"), Duration::QUICK);
+    AddTestCase(new LteRlcUmTransmitterConcatenationTestCase("Concatenation"), Duration::QUICK);
     AddTestCase(new LteRlcUmTransmitterReportBufferStatusTestCase("ReportBufferStatus primitive"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteRlcUmTransmitterTestSuite lteRlcUmTransmitterTestSuite;
 
 LteRlcUmTransmitterTestCase::LteRlcUmTransmitterTestCase(std::string name)
@@ -58,7 +61,7 @@ LteRlcUmTransmitterTestCase::~LteRlcUmTransmitterTestCase()
 }
 
 void
-LteRlcUmTransmitterTestCase::DoRun()
+LteRlcUmTransmitterTestCase::DoRun(void)
 {
     // LogLevel logLevel = (LogLevel)(LOG_PREFIX_FUNC | LOG_PREFIX_TIME | LOG_LEVEL_ALL);
     // LogComponentEnable ("LteRlcUmTransmitterTest", logLevel);
@@ -125,7 +128,7 @@ LteRlcUmTransmitterOneSduTestCase::~LteRlcUmTransmitterOneSduTestCase()
 }
 
 void
-LteRlcUmTransmitterOneSduTestCase::DoRun()
+LteRlcUmTransmitterOneSduTestCase::DoRun(void)
 {
     // Create topology
     LteRlcUmTransmitterTestCase::DoRun();
@@ -158,7 +161,7 @@ LteRlcUmTransmitterSegmentationTestCase::~LteRlcUmTransmitterSegmentationTestCas
 }
 
 void
-LteRlcUmTransmitterSegmentationTestCase::DoRun()
+LteRlcUmTransmitterSegmentationTestCase::DoRun(void)
 {
     // Create topology
     LteRlcUmTransmitterTestCase::DoRun();
@@ -200,7 +203,7 @@ LteRlcUmTransmitterConcatenationTestCase::~LteRlcUmTransmitterConcatenationTestC
 }
 
 void
-LteRlcUmTransmitterConcatenationTestCase::DoRun()
+LteRlcUmTransmitterConcatenationTestCase::DoRun(void)
 {
     // Create topology
     LteRlcUmTransmitterTestCase::DoRun();
@@ -236,7 +239,7 @@ LteRlcUmTransmitterReportBufferStatusTestCase::~LteRlcUmTransmitterReportBufferS
 }
 
 void
-LteRlcUmTransmitterReportBufferStatusTestCase::DoRun()
+LteRlcUmTransmitterReportBufferStatusTestCase::DoRun(void)
 {
     // Create topology
     LteRlcUmTransmitterTestCase::DoRun();

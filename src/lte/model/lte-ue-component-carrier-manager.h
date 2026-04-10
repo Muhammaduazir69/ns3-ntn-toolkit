@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2015 Danilo Abrignani
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Danilo Abrignani <danilo.abrignani@unibo.it>
  *
@@ -10,13 +22,16 @@
 #ifndef LTE_UE_COMPONENT_CARRIER_MANAGER_H
 #define LTE_UE_COMPONENT_CARRIER_MANAGER_H
 
-#include "lte-mac-sap.h"
-#include "lte-ue-ccm-rrc-sap.h"
-
+#include <ns3/lte-mac-sap.h>
+#include <ns3/lte-rrc-sap.h>
+#include <ns3/lte-ue-ccm-rrc-sap.h>
 #include <ns3/object.h>
 
 #include <map>
 #include <vector>
+
+#define MIN_NO_CC 1
+#define MAX_NO_CC 5 // this is the maximum number of carrier components allowed by 3GPP up to R13
 
 namespace ns3
 {
@@ -36,7 +51,7 @@ class LteUeComponentCarrierManager : public Object
 {
   public:
     LteUeComponentCarrierManager();
-    ~LteUeComponentCarrierManager() override;
+    virtual ~LteUeComponentCarrierManager();
 
     /**
      * \brief Get the type ID.
@@ -82,7 +97,7 @@ class LteUeComponentCarrierManager : public Object
 
   protected:
     // inherited from Object
-    void DoDispose() override;
+    virtual void DoDispose();
 
     LteUeCcmRrcSapUser* m_ccmRrcSapUser;         //!< Interface to the UE RRC instance.
     LteUeCcmRrcSapProvider* m_ccmRrcSapProvider; //!< Receive API calls from the UE RRC instance.
@@ -90,8 +105,9 @@ class LteUeComponentCarrierManager : public Object
     std::map<uint8_t, LteMacSapUser*> m_lcAttached; //!< Map of pointers to SAP interfaces of the
                                                     //!< RLC instance of the flows of this UE.
     std::map<uint8_t, std::map<uint8_t, LteMacSapProvider*>>
-        m_componentCarrierLcMap;     //!< Flow configuration per flow Id of this UE.
-    uint8_t m_noOfComponentCarriers; //!< The number of component carriers that this UE can support.
+        m_componentCarrierLcMap; //!< Flow configuration per flow Id of this UE.
+    uint16_t
+        m_noOfComponentCarriers; //!<// The number of component carriers that this UE can support.
     std::map<uint8_t, LteMacSapProvider*>
         m_macSapProvidersMap; //!< Map of pointers to SAP to interfaces of the MAC instance if the
                               //!< flows of this UE.

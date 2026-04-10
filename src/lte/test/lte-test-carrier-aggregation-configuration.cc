@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2018 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Zoraze Ali <zoraze.ali@cttc.es>
  *
@@ -49,32 +61,25 @@ using namespace ns3;
  * is not static, as reported in BUG 2840.
  */
 
-/// ConfigToCheck structure
 struct ConfigToCheck
 {
-    uint16_t m_dlBandwidth; ///< Downlink bandwidth
-    uint16_t m_ulBandwidth; ///< Uplink bandwidth
-    uint32_t m_dlEarfcn;    ///< Downlink EARFCN
-    uint32_t m_ulEarfcn;    ///< Uplink EARFCN
+    uint16_t m_dlBandwidth;
+    uint16_t m_ulBandwidth;
+    uint32_t m_dlEarfcn;
+    uint32_t m_ulEarfcn;
 };
 
 NS_LOG_COMPONENT_DEFINE("TestCarrierAggregationConfig");
 
-/**
- * \ingroup lte-test
- *
- * \brief Carrier aggregation configuration test case.
- */
 class CarrierAggregationConfigTestCase : public TestCase
 {
   public:
     /**
      * Constructor
      *
-     * \param numberOfNodes Total Number of eNBs and UEs
-     * \param numberOfComponentCarriers  Total number of component carriers
-     * \param configToCheck Vector containing all the configurations to check
-     * \param simulationDuration Duration of the simulation
+     * \param numberOfNodes, Total Number of eNBs and UEs
+     * \param configToCheck, Vector containing all the configurations to check
+     * \param simulationDuration, Duration of the simulation
      */
     CarrierAggregationConfigTestCase(uint32_t numberOfNodes,
                                      uint16_t numberOfComponentCarriers,
@@ -93,47 +98,23 @@ class CarrierAggregationConfigTestCase : public TestCase
     }
 
   private:
-    void DoRun() override;
+    virtual void DoRun(void);
 
-    /**
-     * Build name string function
-     *
-     * \param numberOfNodes Total Number of eNBs and UEs
-     * \param numberOfComponentCarriers  Total number of component carriers
-     * \param configToCheck Vector containing all the configurations to check
-     * \param simulationDuration Duration of the simulation
-     * \returns the name string
-     */
     std::string BuildNameString(uint32_t numberOfNodes,
                                 uint16_t numberOfComponentCarriers,
                                 std::vector<ConfigToCheck> configToCheck,
                                 Time simulationDuration);
-    /**
-     * Evaluate function
-     *
-     * \param context The context
-     * \param ueRrc Pointer to the UE RRC
-     * \param sCellToAddModList List of the configuration parameters for secondary cell
-     */
     void Evaluate(std::string context,
                   Ptr<LteUeRrc> ueRrc,
                   std::list<LteRrcSap::SCellToAddMod> sCellToAddModList);
-    /**
-     * Equally spaced component carriers function
-     *
-     * \return Vector of maps containing the per component carrier configuration
-     */
     std::vector<std::map<uint16_t, ConfigToCheck>> EquallySpacedCcs();
 
-    uint32_t m_numberOfNodes;             ///< Number of nodes
-    uint16_t m_numberOfComponentCarriers; ///< Number of component carriers
-    std::vector<ConfigToCheck>
-        m_configToCheck;          ///< Vector containing all the configurations to check
-    uint32_t m_connectionCounter; ///< Connection counter
-    Time m_simulationDuration;    ///< Simulation duration
-    std::vector<std::map<uint16_t, ConfigToCheck>>
-        m_configToCheckContainer; ///< Vector of maps containing the per component carrier
-                                  ///< configuration
+    uint32_t m_numberOfNodes;
+    uint16_t m_numberOfComponentCarriers;
+    std::vector<ConfigToCheck> m_configToCheck;
+    uint32_t m_connectionCounter;
+    Time m_simulationDuration;
+    std::vector<std::map<uint16_t, ConfigToCheck>> m_configToCheckContainer;
 };
 
 std::string
@@ -313,7 +294,7 @@ CarrierAggregationConfigTestCase::DoRun()
 
     // Install Mobility Model
     Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
-    for (uint32_t i = 0; i < totalNumberOfNodes; i++)
+    for (uint16_t i = 0; i < totalNumberOfNodes; i++)
     {
         positionAlloc->Add(Vector(2 * i, 0, 0));
     }
@@ -359,7 +340,7 @@ CarrierAggregationConfigTestCase::DoRun()
     }
 
     // Activate a data radio bearer
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
     EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs, bearer);
 
@@ -374,11 +355,6 @@ CarrierAggregationConfigTestCase::DoRun()
     Simulator::Destroy();
 }
 
-/**
- * \ingroup lte-test
- *
- * \brief Carrier aggregation configuration test suite.
- */
 class CarrierAggregationConfigTestSuite : public TestSuite
 {
   public:
@@ -408,7 +384,7 @@ CarrierAggregationConfigTestSuite::CarrierAggregationConfigTestSuite()
                                                      numberOfComponentCarriers,
                                                      configToCheck,
                                                      simulationDuration),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     //   configToCheck.erase(configToCheck.begin(), configToCheck.end());
     configToCheck.clear();
@@ -435,11 +411,7 @@ CarrierAggregationConfigTestSuite::CarrierAggregationConfigTestSuite()
                                                      numberOfComponentCarriers,
                                                      configToCheck,
                                                      simulationDuration),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static CarrierAggregationConfigTestSuite g_carrierAggregationConfigTestSuite;

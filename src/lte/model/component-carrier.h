@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2015 Danilo Abrignani
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Danilo Abrignani <danilo.abrignani@unibo.it>
  */
@@ -9,7 +21,12 @@
 #ifndef COMPONENT_CARRIER_H
 #define COMPONENT_CARRIER_H
 
+#include "ns3/lte-phy.h"
+#include <ns3/lte-enb-phy.h>
+#include <ns3/nstime.h>
 #include <ns3/object.h>
+#include <ns3/packet.h>
+#include <ns3/pointer.h>
 
 namespace ns3
 {
@@ -18,11 +35,12 @@ namespace ns3
  * \ingroup lte
  *
  * ComponentCarrier Object, it defines a single Carrier
- * This is the parent class for both ComponentCarrierBaseStation
+ * This is the parent class for both ComponentCarrierEnb
  * and ComponentCarrierUe.
  * This class contains the main physical configuration
  * parameters for a carrier. Does not contain pointers to
  * the MAC/PHY objects of the carrier.
+
  */
 class ComponentCarrier : public Object
 {
@@ -31,32 +49,32 @@ class ComponentCarrier : public Object
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
     ComponentCarrier();
 
-    ~ComponentCarrier() override;
-    void DoDispose() override;
+    virtual ~ComponentCarrier(void);
+    virtual void DoDispose(void);
 
     /**
      * \return the uplink bandwidth in RBs
      */
-    uint16_t GetUlBandwidth() const;
+    uint8_t GetUlBandwidth() const;
 
     /**
      * \param bw the uplink bandwidth in RBs
      */
-    virtual void SetUlBandwidth(uint16_t bw);
+    void SetUlBandwidth(uint8_t bw);
 
     /**
      * \return the downlink bandwidth in RBs
      */
-    uint16_t GetDlBandwidth() const;
+    uint8_t GetDlBandwidth() const;
 
     /**
      * \param bw the downlink bandwidth in RBs
      */
-    virtual void SetDlBandwidth(uint16_t bw);
+    void SetDlBandwidth(uint8_t bw);
 
     /**
      * \return the downlink carrier frequency (EARFCN)
@@ -135,58 +153,21 @@ class ComponentCarrier : public Object
      */
     bool IsPrimary() const;
 
-  protected:
-    uint32_t m_csgId{0};         ///< CSG ID
-    bool m_csgIndication{false}; ///< CSG indication
+    uint8_t m_dlBandwidth; /**< downlink bandwidth in RBs */
+    uint8_t m_ulBandwidth; /**< uplink bandwidth in RBs */
 
-    bool m_primaryCarrier{false}; ///< whether the carrier is primary
-
-    uint16_t m_dlBandwidth{0}; ///< downlink bandwidth in RBs */
-    uint16_t m_ulBandwidth{0}; ///< uplink bandwidth in RBs */
-
-    uint32_t m_dlEarfcn{0}; ///< downlink carrier frequency */
-    uint32_t m_ulEarfcn{0}; ///< uplink carrier frequency */
-};
-
-/**
- * \ingroup lte
- *
- * Defines a Base station, that is a ComponentCarrier but with a cell Id.
- *
- */
-class ComponentCarrierBaseStation : public ComponentCarrier
-{
-  public:
-    /**
-     * \brief Get the type ID.
-     * \return the object TypeId
-     */
-    static TypeId GetTypeId();
-
-    /**
-     * \brief Constructor
-     */
-    ComponentCarrierBaseStation();
-
-    /**
-     * \brief ~ComponentCarrierBaseStation
-     */
-    ~ComponentCarrierBaseStation() override;
-
-    /**
-     * Get cell identifier
-     * \return cell identifier
-     */
-    uint16_t GetCellId() const;
-
-    /**
-     * Set physical cell identifier
-     * \param cellId cell identifier
-     */
-    void SetCellId(uint16_t cellId);
+    uint32_t m_dlEarfcn; /**< downlink carrier frequency */
+    uint32_t m_ulEarfcn; /**< uplink carrier frequency */
 
   protected:
-    uint16_t m_cellId{0}; ///< Cell identifier
+    // inherited from Object
+    virtual void DoInitialize(void);
+    uint16_t m_csgId;     ///< CSG ID
+    bool m_csgIndication; ///< CSG indication
+
+    bool m_primaryCarrier; ///< whether the carrier is primary
+    bool m_isConstructed;  ///< whether the instance is constructed
+    //    bool m_isConfigured;
 };
 
 } // namespace ns3

@@ -1,15 +1,30 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Giuseppe Piro  <g.piro@poliba.it>
  *         Marco Miozzo <mmiozzo@cttc.es>
+ *
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
 #include "lte-phy.h"
 
-#include "lte-control-messages.h"
 #include "lte-net-device.h"
 
 #include "ns3/spectrum-error-model.h"
@@ -40,8 +55,6 @@ LtePhy::LtePhy(Ptr<LteSpectrumPhy> dlPhy, Ptr<LteSpectrumPhy> ulPhy)
       m_ulBandwidth(0),
       m_dlBandwidth(0),
       m_rbgSize(0),
-      m_dlEarfcn(0),
-      m_ulEarfcn(0),
       m_macChTtiDelay(0),
       m_cellId(0),
       m_componentCarrierId(0)
@@ -50,7 +63,7 @@ LtePhy::LtePhy(Ptr<LteSpectrumPhy> dlPhy, Ptr<LteSpectrumPhy> ulPhy)
 }
 
 TypeId
-LtePhy::GetTypeId()
+LtePhy::GetTypeId(void)
 {
     static TypeId tid = TypeId("ns3::LtePhy").SetParent<Object>().SetGroupName("Lte");
     return tid;
@@ -68,21 +81,21 @@ LtePhy::DoDispose()
     m_packetBurstQueue.clear();
     m_controlMessagesQueue.clear();
     m_downlinkSpectrumPhy->Dispose();
-    m_downlinkSpectrumPhy = nullptr;
+    m_downlinkSpectrumPhy = 0;
     m_uplinkSpectrumPhy->Dispose();
-    m_uplinkSpectrumPhy = nullptr;
-    m_netDevice = nullptr;
+    m_uplinkSpectrumPhy = 0;
+    m_netDevice = 0;
     Object::DoDispose();
 }
 
 void
-LtePhy::SetDevice(Ptr<LteNetDevice> d)
+LtePhy::SetDevice(Ptr<NetDevice> d)
 {
     NS_LOG_FUNCTION(this << d);
     m_netDevice = d;
 }
 
-Ptr<LteNetDevice>
+Ptr<NetDevice>
 LtePhy::GetDevice() const
 {
     NS_LOG_FUNCTION(this);
@@ -123,7 +136,7 @@ LtePhy::SetTti(double tti)
 }
 
 double
-LtePhy::GetTti() const
+LtePhy::GetTti(void) const
 {
     NS_LOG_FUNCTION(this << m_tti);
     return m_tti;
@@ -166,7 +179,7 @@ LtePhy::GetSrsSubframeOffset(uint16_t srcCi) const
 }
 
 uint8_t
-LtePhy::GetRbgSize() const
+LtePhy::GetRbgSize(void) const
 {
     return m_rbgSize;
 }
@@ -178,20 +191,20 @@ LtePhy::SetMacPdu(Ptr<Packet> p)
 }
 
 Ptr<PacketBurst>
-LtePhy::GetPacketBurst()
+LtePhy::GetPacketBurst(void)
 {
     if (m_packetBurstQueue.at(0)->GetSize() > 0)
     {
         Ptr<PacketBurst> ret = m_packetBurstQueue.at(0)->Copy();
         m_packetBurstQueue.erase(m_packetBurstQueue.begin());
         m_packetBurstQueue.push_back(CreateObject<PacketBurst>());
-        return ret;
+        return (ret);
     }
     else
     {
         m_packetBurstQueue.erase(m_packetBurstQueue.begin());
         m_packetBurstQueue.push_back(CreateObject<PacketBurst>());
-        return nullptr;
+        return (0);
     }
 }
 
@@ -204,16 +217,16 @@ LtePhy::SetControlMessages(Ptr<LteControlMessage> m)
 }
 
 std::list<Ptr<LteControlMessage>>
-LtePhy::GetControlMessages()
+LtePhy::GetControlMessages(void)
 {
     NS_LOG_FUNCTION(this);
-    if (!m_controlMessagesQueue.at(0).empty())
+    if (m_controlMessagesQueue.at(0).size() > 0)
     {
         std::list<Ptr<LteControlMessage>> ret = m_controlMessagesQueue.at(0);
         m_controlMessagesQueue.erase(m_controlMessagesQueue.begin());
         std::list<Ptr<LteControlMessage>> newlist;
         m_controlMessagesQueue.push_back(newlist);
-        return ret;
+        return (ret);
     }
     else
     {
@@ -221,7 +234,7 @@ LtePhy::GetControlMessages()
         std::list<Ptr<LteControlMessage>> newlist;
         m_controlMessagesQueue.push_back(newlist);
         std::list<Ptr<LteControlMessage>> emptylist;
-        return emptylist;
+        return (emptylist);
     }
 }
 
@@ -242,7 +255,7 @@ LtePhy::SetComponentCarrierId(uint8_t index)
 }
 
 uint8_t
-LtePhy::GetComponentCarrierId() const
+LtePhy::GetComponentCarrierId()
 {
     return m_componentCarrierId;
 }

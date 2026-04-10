@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2013 Budiarto Herman
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Budiarto Herman <budiarto.herman@magister.fi>
  *
@@ -10,7 +22,7 @@
 #ifndef LTE_ANR_SAP_H
 #define LTE_ANR_SAP_H
 
-#include "lte-rrc-sap.h"
+#include <ns3/lte-rrc-sap.h>
 
 namespace ns3
 {
@@ -119,17 +131,15 @@ class MemberLteAnrSapProvider : public LteAnrSapProvider
      */
     MemberLteAnrSapProvider(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberLteAnrSapProvider() = delete;
-
     // inherited from LteAnrSapProvider
-    void ReportUeMeas(LteRrcSap::MeasResults measResults) override;
-    void AddNeighbourRelation(uint16_t cellId) override;
-    bool GetNoRemove(uint16_t cellId) const override;
-    bool GetNoHo(uint16_t cellId) const override;
-    bool GetNoX2(uint16_t cellId) const override;
+    virtual void ReportUeMeas(LteRrcSap::MeasResults measResults);
+    virtual void AddNeighbourRelation(uint16_t cellId);
+    virtual bool GetNoRemove(uint16_t cellId) const;
+    virtual bool GetNoHo(uint16_t cellId) const;
+    virtual bool GetNoX2(uint16_t cellId) const;
 
   private:
+    MemberLteAnrSapProvider();
     C* m_owner; ///< the owner class
 
 }; // end of class MemberLteAnrSapProvider
@@ -190,13 +200,11 @@ class MemberLteAnrSapUser : public LteAnrSapUser
      */
     MemberLteAnrSapUser(C* owner);
 
-    // Delete default constructor to avoid misuse
-    MemberLteAnrSapUser() = delete;
-
     // inherited from LteAnrSapUser
-    uint8_t AddUeMeasReportConfigForAnr(LteRrcSap::ReportConfigEutra reportConfig) override;
+    virtual uint8_t AddUeMeasReportConfigForAnr(LteRrcSap::ReportConfigEutra reportConfig);
 
   private:
+    MemberLteAnrSapUser();
     C* m_owner; ///< the owner class
 
 }; // end of class MemberLteAnrSapUser

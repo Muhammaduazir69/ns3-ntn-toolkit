@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 SIGNET LAB. Department of Information Engineering (DEI), University of Padua
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  *
  * Original Work Authors:
@@ -20,8 +32,7 @@
 #ifndef LTE_MI_ERROR_MODEL_H
 #define LTE_MI_ERROR_MODEL_H
 
-#include "lte-harq-phy.h"
-
+#include <ns3/lte-harq-phy.h>
 #include <ns3/ptr.h>
 #include <ns3/spectrum-value.h>
 
@@ -68,11 +79,8 @@ class LteMiErrorModel
   public:
     /**
      * \brief find the mmib (mean mutual information per bit) for different modulations of the
-     * specified TB
-     * \param sinr the perceived sinr values in the whole bandwidth in Watt
-     * \param map the active RBs for the TB
-     * \param mcs the MCS of the TB
-     * \return the mmib
+     * specified TB \param sinr the perceived sinr values in the whole bandwidth \param map the
+     * active RBs for the TB \param mcs the MCS of the TB \return the mmib
      */
     static double Mib(const SpectrumValue& sinr, const std::vector<int>& map, uint8_t mcs);
     /**
@@ -86,7 +94,7 @@ class LteMiErrorModel
 
     /**
      * \brief run the error-model algorithm for the specified TB
-     * \param sinr the perceived sinr values in the whole bandwidth in Watt
+     * \param sinr the perceived sinr values in the whole bandwidth
      * \param map the active RBs for the TB
      * \param size the size in bytes of the TB
      * \param mcs the MCS of the TB
@@ -101,7 +109,7 @@ class LteMiErrorModel
 
     /**
      * \brief run the error-model algorithm for the specified PCFICH+PDCCH channels
-     * \param sinr the perceived sinr values in the whole bandwidth in Watt
+     * \param sinr the perceived sinr values in the whole bandwidth
      * \return the decodification error of the PCFICH+PDCCH channels
      */
     static double GetPcfichPdcchError(const SpectrumValue& sinr);

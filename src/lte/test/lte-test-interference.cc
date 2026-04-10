@@ -1,14 +1,25 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  *         Nicola Baldo <nbaldo@cttc.es>
  */
 
 #include "lte-test-interference.h"
-
 #include "ns3/boolean.h"
 #include "ns3/double.h"
 #include "ns3/ff-mac-scheduler.h"
@@ -23,6 +34,7 @@
 #include "ns3/string.h"
 #include <ns3/enum.h>
 #include <ns3/lte-chunk-processor.h>
+#include <ns3/lte-common.h>
 
 using namespace ns3;
 
@@ -60,9 +72,9 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
     // range)
     // TODO: update the test conditions to handle out-of-range correctly
     // AddTestCase (new LteInterferenceTestCase ("d1=50, d2=10",  50.000000, 10.000000,  0.040000,
-    // 0.040000,  0.010399, 0.010399, 0, 0), TestCase::Duration::QUICK); AddTestCase (new
+    // 0.040000,  0.010399, 0.010399, 0, 0), Duration::QUICK); AddTestCase (new
     // LteInterferenceTestCase ("d1=50, d2=20",  50.000000, 20.000000,  0.160000, 0.159998,
-    // 0.041154, 0.041153, 0, 0), TestCase::Duration::QUICK);
+    // 0.041154, 0.041153, 0, 0), Duration::QUICK);
 
     AddTestCase(new LteInterferenceTestCase("d1=3000, d2=6000",
                                             3000.000000,
@@ -73,7 +85,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             0.389662,
                                             6,
                                             4),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=50, d2=50",
                                             50.000000,
                                             50.000000,
@@ -83,7 +95,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             0.239808,
                                             2,
                                             2),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=50, d2=100",
                                             50.000000,
                                             100.000000,
@@ -93,7 +105,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             0.785042,
                                             6,
                                             6),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=50, d2=200",
                                             50.000000,
                                             200.000000,
@@ -103,7 +115,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             1.959533,
                                             14,
                                             14),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=50, d2=500",
                                             50.000000,
                                             500.000000,
@@ -113,7 +125,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             4.241793,
                                             22,
                                             22),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=50, d2=1000",
                                             50.000000,
                                             1000.000000,
@@ -123,7 +135,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             6.144825,
                                             28,
                                             28),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=50, d2=10000",
                                             50.000000,
                                             10000.000000,
@@ -133,7 +145,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             10.588084,
                                             28,
                                             28),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=50, d2=100000",
                                             50.000000,
                                             100000.000000,
@@ -143,7 +155,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             10.928917,
                                             28,
                                             28),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=50, d2=1000000",
                                             50.000000,
                                             1000000.000000,
@@ -153,7 +165,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             10.932767,
                                             28,
                                             28),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=4500, d2=12600",
                                             4500.000000,
                                             12600.000000,
@@ -163,7 +175,7 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             0.270399,
                                             8,
                                             2),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteInterferenceTestCase("d1=5400, d2=12600",
                                             5400.000000,
                                             12600.000000,
@@ -173,13 +185,9 @@ LteInterferenceTestSuite::LteInterferenceTestSuite()
                                             0.193019,
                                             6,
                                             0),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteInterferenceTestSuite lteLinkAdaptationWithInterferenceTestSuite;
 
 /**
@@ -210,7 +218,7 @@ LteInterferenceTestCase::~LteInterferenceTestCase()
 }
 
 void
-LteInterferenceTestCase::DoRun()
+LteInterferenceTestCase::DoRun(void)
 {
     NS_LOG_INFO(this << GetName());
 
@@ -259,6 +267,11 @@ LteInterferenceTestCase::DoRun()
     NetDeviceContainer ueDevs2;
     lteHelper->SetSchedulerType("ns3::RrFfMacScheduler");
     lteHelper->SetSchedulerAttribute("UlCqiFilter", EnumValue(FfMacScheduler::PUSCH_UL_CQI));
+
+    // set DL and UL bandwidth
+    lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
+    lteHelper->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(25));
+
     enbDevs = lteHelper->InstallEnbDevice(enbNodes);
     ueDevs1 = lteHelper->InstallUeDevice(ueNodes1);
     ueDevs2 = lteHelper->InstallUeDevice(ueNodes2);
@@ -267,7 +280,7 @@ LteInterferenceTestCase::DoRun()
     lteHelper->Attach(ueDevs2, enbDevs.Get(1));
 
     // Activate an EPS bearer
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
     EpsBearer bearer(q);
     lteHelper->ActivateDataRadioBearer(ueDevs1, bearer);
     lteHelper->ActivateDataRadioBearer(ueDevs2, bearer);

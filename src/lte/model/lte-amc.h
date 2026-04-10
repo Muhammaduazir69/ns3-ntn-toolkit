@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Original Author: Giuseppe Piro  <g.piro@poliba.it>
  * Modified by:     Nicola Baldo   <nbaldo@cttc.es>
@@ -34,10 +46,10 @@ class LteAmc : public Object
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
     LteAmc();
-    ~LteAmc() override;
+    virtual ~LteAmc();
 
     /// Types of AMC model.
     enum AmcModel
@@ -66,19 +78,15 @@ class LteAmc : public Object
 
     /**
      * \brief Get the Transport Block Size for a selected MCS and number of PRB (table 7.1.7.2.1-1
-     * of 36.213)
-     * \param mcs the MCS index
-     * \param nprb the no. of PRB
-     * \return the Transport Block Size in bits
+     * of 36.213) \param mcs the MCS index \param nprb the no. of PRB \return the Transport Block
+     * Size in bits
      */
     int GetDlTbSizeFromMcs(int mcs, int nprb);
 
     /**
      * \brief Get the Transport Block Size for a selected MCS and number of PRB (table 8.6.1-1
-     * of 36.213)
-     * \param mcs the MCS index
-     * \param nprb the no. of PRB
-     * \return the Transport Block Size in bits
+     * of 36.213) \param mcs the MCS index \param nprb the no. of PRB \return the Transport Block
+     * Size in bits
      */
     int GetUlTbSizeFromMcs(int mcs, int nprb);
 

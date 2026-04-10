@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
@@ -37,25 +49,25 @@ class LteSimpleSpectrumPhy : public SpectrumPhy
 {
   public:
     LteSimpleSpectrumPhy();
-    ~LteSimpleSpectrumPhy() override;
+    virtual ~LteSimpleSpectrumPhy();
 
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
     // inherited from Object
-    void DoDispose() override;
+    virtual void DoDispose();
 
     // inherited from SpectrumPhy
-    void SetChannel(Ptr<SpectrumChannel> c) override;
-    void SetMobility(Ptr<MobilityModel> m) override;
-    void SetDevice(Ptr<NetDevice> d) override;
-    Ptr<MobilityModel> GetMobility() const override;
-    Ptr<NetDevice> GetDevice() const override;
-    Ptr<const SpectrumModel> GetRxSpectrumModel() const override;
-    Ptr<Object> GetAntenna() const override;
-    void StartRx(Ptr<SpectrumSignalParameters> params) override;
+    void SetChannel(Ptr<SpectrumChannel> c);
+    void SetMobility(Ptr<MobilityModel> m);
+    void SetDevice(Ptr<NetDevice> d);
+    Ptr<MobilityModel> GetMobility() const;
+    Ptr<NetDevice> GetDevice() const;
+    Ptr<const SpectrumModel> GetRxSpectrumModel() const;
+    Ptr<Object> GetAntenna() const;
+    void StartRx(Ptr<SpectrumSignalParameters> params);
 
     /**
      * \brief Set receive spectrum model.

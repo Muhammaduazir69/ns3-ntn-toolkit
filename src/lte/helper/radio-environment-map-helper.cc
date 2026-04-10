@@ -1,7 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2012 CTTC
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
@@ -19,7 +31,6 @@
 #include <ns3/lte-spectrum-value-helper.h>
 #include <ns3/mobility-building-info.h>
 #include <ns3/node.h>
-#include <ns3/pointer.h>
 #include <ns3/rem-spectrum-phy.h>
 #include <ns3/simulator.h>
 #include <ns3/spectrum-channel.h>
@@ -51,7 +62,7 @@ RadioEnvironmentMapHelper::DoDispose()
 }
 
 TypeId
-RadioEnvironmentMapHelper::GetTypeId()
+RadioEnvironmentMapHelper::GetTypeId(void)
 {
     NS_LOG_FUNCTION("RadioEnvironmentMapHelper::GetTypeId");
     static TypeId tid =
@@ -60,19 +71,8 @@ RadioEnvironmentMapHelper::GetTypeId()
             .SetGroupName("Lte")
             .AddConstructor<RadioEnvironmentMapHelper>()
             .AddAttribute(
-                "Channel",
-                "The DL spectrum channel for which the RadioEnvironment Map is to be generated. "
-                "Alternatively ChannelPath attribute can be used."
-                "Only one of the two (Channel or ChannelPath) should be set.",
-                PointerValue(nullptr),
-                MakePointerAccessor(&RadioEnvironmentMapHelper::m_channel),
-                MakePointerChecker<SpectrumChannel>())
-            .AddAttribute(
                 "ChannelPath",
-                "The path to the channel for which the Radio Environment Map is to be generated."
-                "This attribute is an alternative to Channel attribute and is only used if Channel "
-                "is not set (equal to nullptr). "
-                "Only one of the two (Channel or ChannelPath) should be set.",
+                "The path to the channel for which the Radio Environment Map is to be generated",
                 StringValue("/ChannelList/0"),
                 MakeStringAccessor(&RadioEnvironmentMapHelper::m_channelPath),
                 MakeStringChecker())
@@ -137,7 +137,7 @@ RadioEnvironmentMapHelper::GetTypeId()
                           MakeUintegerChecker<uint32_t>(1, std::numeric_limits<uint32_t>::max()))
             .AddAttribute("Earfcn",
                           "E-UTRA Absolute Radio Frequency Channel Number (EARFCN) "
-                          "as per 3GPP 36.101 Section 5.7.3.",
+                          "as per 3GPP 36.101 Section 5.7.3. ",
                           UintegerValue(100),
                           MakeUintegerAccessor(&RadioEnvironmentMapHelper::m_earfcn),
                           MakeUintegerChecker<uint16_t>())
@@ -149,12 +149,12 @@ RadioEnvironmentMapHelper::GetTypeId()
                                                &RadioEnvironmentMapHelper::GetBandwidth),
                           MakeUintegerChecker<uint16_t>())
             .AddAttribute("UseDataChannel",
-                          "If true, REM will be generated for PDSCH and for PDCCH otherwise",
+                          "If true, REM will be generated for PDSCH and for PDCCH otherwise ",
                           BooleanValue(false),
                           MakeBooleanAccessor(&RadioEnvironmentMapHelper::m_useDataChannel),
                           MakeBooleanChecker())
             .AddAttribute("RbId",
-                          "Resource block Id, for which REM will be generated, "
+                          "Resource block Id, for which REM will be generated,"
                           "default value is -1, what means REM will be averaged from all RBs",
                           IntegerValue(-1),
                           MakeIntegerAccessor(&RadioEnvironmentMapHelper::m_rbId),
@@ -196,18 +196,13 @@ RadioEnvironmentMapHelper::Install()
     {
         NS_FATAL_ERROR("only one REM supported per instance of RadioEnvironmentMapHelper");
     }
-
-    if (!m_channel) // if Channel attribute is not set, then use the ChannelPath attribute
+    Config::MatchContainer match = Config::LookupMatches(m_channelPath);
+    if (match.GetN() != 1)
     {
-        Config::MatchContainer match = Config::LookupMatches(m_channelPath);
-        if (match.GetN() != 1)
-        {
-            NS_FATAL_ERROR("Lookup " << m_channelPath << " should have exactly one match");
-        }
-        m_channel = match.Get(0)->GetObject<SpectrumChannel>();
-        NS_ABORT_MSG_IF(!m_channel,
-                        "object at " << m_channelPath << " is not of type SpectrumChannel");
+        NS_FATAL_ERROR("Lookup " << m_channelPath << " should have exactly one match");
     }
+    m_channel = match.Get(0)->GetObject<SpectrumChannel>();
+    NS_ABORT_MSG_IF(!m_channel, "object at " << m_channelPath << "is not of type SpectrumChannel");
 
     m_outFile.open(m_outputFile.c_str());
     if (!m_outFile.is_open())
@@ -295,7 +290,7 @@ void
 RadioEnvironmentMapHelper::RunOneIteration(double xMin, double xMax, double yMin, double yMax)
 {
     NS_LOG_FUNCTION(this << xMin << xMax << yMin << yMax);
-    auto remIt = m_rem.begin();
+    std::list<RemPoint>::iterator remIt = m_rem.begin();
     double x = 0.0;
     double y = 0.0;
     for (x = xMin; x < xMax + 0.5 * m_xStep; x += m_xStep)
@@ -331,7 +326,7 @@ RadioEnvironmentMapHelper::PrintAndReset()
 {
     NS_LOG_FUNCTION(this);
 
-    for (auto it = m_rem.begin(); it != m_rem.end(); ++it)
+    for (std::list<RemPoint>::iterator it = m_rem.begin(); it != m_rem.end(); ++it)
     {
         if (!(it->phy->IsActive()))
         {

@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  */
@@ -22,6 +34,7 @@ namespace ns3
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief This class implements a testing RRC entity
  */
@@ -40,11 +53,11 @@ class LteTestRrc : public Object
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
-    LteTestRrc();
-    ~LteTestRrc() override;
-    void DoDispose() override;
+    LteTestRrc(void);
+    virtual ~LteTestRrc(void);
+    virtual void DoDispose(void);
 
     /**
      * \brief Set the PDCP SAP provider
@@ -55,7 +68,7 @@ class LteTestRrc : public Object
      * \brief Get the PDCP SAP user
      * \return a pointer to the SAP user of the RLC
      */
-    LtePdcpSapUser* GetLtePdcpSapUser();
+    LtePdcpSapUser* GetLtePdcpSapUser(void);
 
     /// Start function
     void Start();
@@ -72,40 +85,40 @@ class LteTestRrc : public Object
      * \brief Get data received function
      * \returns the received data string
      */
-    std::string GetDataReceived();
+    std::string GetDataReceived(void);
 
     // Stats
     /**
      * \brief Get the transmit PDUs
      * \return the number of transmit PDUS
      */
-    uint32_t GetTxPdus();
+    uint32_t GetTxPdus(void);
     /**
      * \brief Get the transmit bytes
      * \return the number of bytes transmitted
      */
-    uint32_t GetTxBytes();
+    uint32_t GetTxBytes(void);
     /**
      * \brief Get the receive PDUs
      * \return the number of receive PDUS
      */
-    uint32_t GetRxPdus();
+    uint32_t GetRxPdus(void);
     /**
      * \brief Get the receive bytes
      * \return the number of bytes received
      */
-    uint32_t GetRxBytes();
+    uint32_t GetRxBytes(void);
 
     /**
      * \brief Get the last transmit time
      * \return the time of the last transmit
      */
-    Time GetTxLastTime();
+    Time GetTxLastTime(void);
     /**
      * \brief Get the last receive time
      * \return the time of the last receive
      */
-    Time GetRxLastTime();
+    Time GetRxLastTime(void);
 
     /**
      * \brief Set the arrival time
@@ -154,6 +167,7 @@ class LteTestRrc : public Object
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief This class implements a testing PDCP entity
  */
@@ -167,11 +181,11 @@ class LteTestPdcp : public Object
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
-    LteTestPdcp();
-    ~LteTestPdcp() override;
-    void DoDispose() override;
+    LteTestPdcp(void);
+    virtual ~LteTestPdcp(void);
+    virtual void DoDispose(void);
 
     /**
      * \brief Set the RLC SAP provider
@@ -182,7 +196,7 @@ class LteTestPdcp : public Object
      * \brief Get the RLC SAP user
      * \return a pointer to the SAP user of the RLC
      */
-    LteRlcSapUser* GetLteRlcSapUser();
+    LteRlcSapUser* GetLteRlcSapUser(void);
 
     /// Start function
     void Start();
@@ -197,7 +211,7 @@ class LteTestPdcp : public Object
      * \brief Get data received function
      * \returns the received data string
      */
-    std::string GetDataReceived();
+    std::string GetDataReceived(void);
 
   private:
     /**
@@ -216,6 +230,7 @@ class LteTestPdcp : public Object
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief This class implements a testing loopback MAC layer
  */
@@ -233,11 +248,11 @@ class LteTestMac : public Object
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
-    LteTestMac();
-    ~LteTestMac() override;
-    void DoDispose() override;
+    LteTestMac(void);
+    virtual ~LteTestMac(void);
+    virtual void DoDispose(void);
 
     /**
      * \brief Set the device function
@@ -255,7 +270,7 @@ class LteTestMac : public Object
      * \brief Get data received function
      * \returns the received data string
      */
-    std::string GetDataReceived();
+    std::string GetDataReceived(void);
 
     /**
      * \brief the Receive function
@@ -276,7 +291,7 @@ class LteTestMac : public Object
      * \brief Get the MAC SAP provider
      * \return a pointer to the SAP provider of the MAC
      */
-    LteMacSapProvider* GetLteMacSapProvider();
+    LteMacSapProvider* GetLteMacSapProvider(void);
 
     /**
      * \brief Set the other side of the MAC Loopback
@@ -297,11 +312,11 @@ class LteTestMac : public Object
     void SetRlcHeaderType(uint8_t rlcHeaderType);
 
     /// RCL Header Type enumeration
-    enum RlcHeaderType_t
+    typedef enum
     {
         UM_RLC_HEADER = 0,
         AM_RLC_HEADER = 1,
-    };
+    } RlcHeaderType_t; ///< the RLC header type
 
     /**
      * Set transmit opportunity mode
@@ -310,12 +325,12 @@ class LteTestMac : public Object
     void SetTxOpportunityMode(uint8_t mode);
 
     /// Transmit opportunity mode enumeration
-    enum TxOpportunityMode_t
+    typedef enum
     {
         MANUAL_MODE = 0,
         AUTOMATIC_MODE = 1,
         RANDOM_MODE = 2
-    };
+    } TxOpportunityMode_t; ///< transmit opportunity mode
 
     /**
      * Set transmit opportunity time
@@ -333,22 +348,22 @@ class LteTestMac : public Object
      * \brief Get the transmit PDUs
      * \return the number of transmit PDUS
      */
-    uint32_t GetTxPdus();
+    uint32_t GetTxPdus(void);
     /**
      * \brief Get the transmit bytes
      * \return the number of bytes transmitted
      */
-    uint32_t GetTxBytes();
+    uint32_t GetTxBytes(void);
     /**
      * \brief Get the receive PDUs
      * \return the number of receive PDUS
      */
-    uint32_t GetRxPdus();
+    uint32_t GetRxPdus(void);
     /**
      * \brief Get the receive bytes
      * \return the number of bytes received
      */
-    uint32_t GetRxBytes();
+    uint32_t GetRxBytes(void);
 
   private:
     // forwarded from LteMacSapProvider
@@ -390,6 +405,7 @@ class LteTestMac : public Object
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief RRC stub providing a testing S1 SAP user to be used with the EpcEnbApplication
  */
@@ -400,15 +416,15 @@ class EpcTestRrc : public Object
 
   public:
     EpcTestRrc();
-    ~EpcTestRrc() override;
+    virtual ~EpcTestRrc();
 
     // inherited from Object
-    void DoDispose() override;
+    virtual void DoDispose(void);
     /**
      * \brief Get the type ID.
      * \return the object TypeId
      */
-    static TypeId GetTypeId();
+    static TypeId GetTypeId(void);
 
     /**
      * Set the S1 SAP Provider
@@ -425,11 +441,6 @@ class EpcTestRrc : public Object
 
   private:
     // S1 SAP methods
-    /**
-     * Initial context setup request
-     * \param params EpcEnbS1SapUser::InitialContextSetupRequestParameters
-     */
-    void DoInitialContextSetupRequest(EpcEnbS1SapUser::InitialContextSetupRequestParameters params);
     /**
      * Data radio bearer setup request
      * \param params EpcEnbS1SapUser::DataRadioBearerSetupRequestParameters

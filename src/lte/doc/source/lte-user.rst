@@ -57,14 +57,14 @@ Here is the minimal simulation program that is needed to do an LTE-only simulati
 
     using namespace ns3;
 
-    int main(int argc, char *argv[])
+    int main (int argc, char *argv[])
     {
       // the rest of the simulation program follows
 
 
 #. Create an ``LteHelper`` object::
 
-      Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
+      Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
 
    This will instantiate some common
    objects (e.g., the Channel object) and provide the methods to add
@@ -73,9 +73,9 @@ Here is the minimal simulation program that is needed to do an LTE-only simulati
 #. Create ``Node`` objects for the eNB(s) and the UEs::
 
       NodeContainer enbNodes;
-      enbNodes.Create(1);
+      enbNodes.Create (1);
       NodeContainer ueNodes;
-      ueNodes.Create(2);
+      ueNodes.Create (2);
 
    Note that the above Node instances at this point still don't have
    an LTE protocol stack installed; they're just empty nodes.
@@ -83,10 +83,10 @@ Here is the minimal simulation program that is needed to do an LTE-only simulati
 #. Configure the Mobility model for all the nodes::
 
       MobilityHelper mobility;
-      mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-      mobility.Install(enbNodes);
-      mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-      mobility.Install(ueNodes);
+      mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+      mobility.Install (enbNodes);
+      mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+      mobility.Install (ueNodes);
 
    The above will place all nodes at the coordinates (0,0,0). Please
    refer to the documentation of the ns-3 mobility model for how to
@@ -95,31 +95,31 @@ Here is the minimal simulation program that is needed to do an LTE-only simulati
 #. Install an LTE protocol stack on the eNB(s)::
 
       NetDeviceContainer enbDevs;
-      enbDevs = lteHelper->InstallEnbDevice(enbNodes);
+      enbDevs = lteHelper->InstallEnbDevice (enbNodes);
 
 #. Install an LTE protocol stack on the UEs::
 
       NetDeviceContainer ueDevs;
-      ueDevs = lteHelper->InstallUeDevice(ueNodes);
+      ueDevs = lteHelper->InstallUeDevice (ueNodes);
 
 
 #. Attach the UEs to an eNB. This will configure each UE according to
    the eNB configuration, and create an RRC connection between them::
 
-      lteHelper->Attach(ueDevs, enbDevs.Get(0));
+      lteHelper->Attach (ueDevs, enbDevs.Get (0));
 
 #. Activate a data radio bearer between each UE and the eNB it is attached to::
 
       enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
-      EpsBearer bearer(q);
-      lteHelper->ActivateDataRadioBearer(ueDevs, bearer);
+      EpsBearer bearer (q);
+      lteHelper->ActivateDataRadioBearer (ueDevs, bearer);
 
    this method will also activate two saturation traffic generators for
    that bearer, one in uplink and one in downlink.
 
 #. Set the stop time::
 
-       Simulator::Stop(Seconds(0.005));
+       Simulator::Stop (Seconds (0.005));
 
    This is needed otherwise the simulation will last forever, because
    (among others) the start-of-subframe event is scheduled repeatedly, and the
@@ -127,11 +127,12 @@ Here is the minimal simulation program that is needed to do an LTE-only simulati
 
 #. Run the simulation::
 
-       Simulator::Run();
+       Simulator::Run ();
 
 #. Cleanup and exit::
 
-       Simulator::Destroy();
+
+       Simulator::Destroy ();
        return 0;
        }
 
@@ -151,12 +152,12 @@ how to do it using input files together with the ns-3 ConfigStore.
 First of all, you need to put the following in your simulation
 program, right after ``main ()`` starts::
 
-      CommandLine cmd(__FILE__);
-      cmd.Parse(argc, argv);
+      CommandLine cmd;
+      cmd.Parse (argc, argv);
       ConfigStore inputConfig;
-      inputConfig.ConfigureDefaults();
+      inputConfig.ConfigureDefaults ();
       // parse again so you can override default values from the command line
-      cmd.Parse(argc, argv);
+      cmd.Parse (argc, argv);
 
 for the above to work, make sure you also ``#include "ns3/config-store.h"``.
 Now create a text file named (for example) ``input-defaults.txt``
@@ -177,17 +178,13 @@ Supposing your simulation program is called
 ``src/lte/examples/lte-sim-with-input``, you can now pass these
 settings to the simulation program in the following way::
 
-   ./ns3 run src/lte/examples/lte-sim-with-input
-   --command-template="%s --ns3::ConfigStore::Filename=input-defaults.txt
-   --ns3::ConfigStore::Mode=Load --ns3::ConfigStore::FileFormat=RawText"
+   ./waf --command-template="%s --ns3::ConfigStore::Filename=input-defaults.txt --ns3::ConfigStore::Mode=Load --ns3::ConfigStore::FileFormat=RawText" --run src/lte/examples/lte-sim-with-input
 
 
 Furthermore, you can generate a template input file with the following
 command::
 
-   ./ns3 run src/lte/examples/lte-sim-with-input
-   --command-template="%s --ns3::ConfigStore::Filename=input-defaults.txt
-   --ns3::ConfigStore::Mode=Save --ns3::ConfigStore::FileFormat=RawText"
+   ./waf --command-template="%s --ns3::ConfigStore::Filename=input-defaults.txt --ns3::ConfigStore::Mode=Save --ns3::ConfigStore::FileFormat=RawText" --run src/lte/examples/lte-sim-with-input
 
 note that the above will put in the file ``input-defaults.txt`` *all*
 the default values that are registered in your particular build of the
@@ -198,29 +195,29 @@ Configure LTE MAC Scheduler
 
 There are several types of LTE MAC scheduler user can choose here. User can use following codes to define scheduler type::
 
- Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
- lteHelper->SetSchedulerType("ns3::FdMtFfMacScheduler");    // FD-MT scheduler
- lteHelper->SetSchedulerType("ns3::TdMtFfMacScheduler");    // TD-MT scheduler
- lteHelper->SetSchedulerType("ns3::TtaFfMacScheduler");     // TTA scheduler
- lteHelper->SetSchedulerType("ns3::FdBetFfMacScheduler");   // FD-BET scheduler
- lteHelper->SetSchedulerType("ns3::TdBetFfMacScheduler");   // TD-BET scheduler
- lteHelper->SetSchedulerType("ns3::FdTbfqFfMacScheduler");  // FD-TBFQ scheduler
- lteHelper->SetSchedulerType("ns3::TdTbfqFfMacScheduler");  // TD-TBFQ scheduler
- lteHelper->SetSchedulerType("ns3::PssFfMacScheduler");     //PSS scheduler
+ Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+ lteHelper->SetSchedulerType ("ns3::FdMtFfMacScheduler");    // FD-MT scheduler
+ lteHelper->SetSchedulerType ("ns3::TdMtFfMacScheduler");    // TD-MT scheduler
+ lteHelper->SetSchedulerType ("ns3::TtaFfMacScheduler");     // TTA scheduler
+ lteHelper->SetSchedulerType ("ns3::FdBetFfMacScheduler");   // FD-BET scheduler
+ lteHelper->SetSchedulerType ("ns3::TdBetFfMacScheduler");   // TD-BET scheduler
+ lteHelper->SetSchedulerType ("ns3::FdTbfqFfMacScheduler");  // FD-TBFQ scheduler
+ lteHelper->SetSchedulerType ("ns3::TdTbfqFfMacScheduler");  // TD-TBFQ scheduler
+ lteHelper->SetSchedulerType ("ns3::PssFfMacScheduler");     //PSS scheduler
 
 TBFQ and PSS have more parameters than other schedulers. Users can define those parameters in following way::
 
  * TBFQ scheduler::
 
-  Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-  lteHelper->SetSchedulerAttribute("DebtLimit", IntegerValue(yourvalue)); // default value -625000 bytes(-5Mb)
-  lteHelper->SetSchedulerAttribute("CreditLimit", UintegerValue(yourvalue)); // default value 625000 bytes(5Mb)
+  Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+  lteHelper->SetSchedulerAttribute("DebtLimit", IntegerValue(yourvalue)); // default value -625000 bytes (-5Mb)
+  lteHelper->SetSchedulerAttribute("CreditLimit", UintegerValue(yourvalue)); // default value 625000 bytes (5Mb)
   lteHelper->SetSchedulerAttribute("TokenPoolSize", UintegerValue(yourvalue)); // default value 1 byte
   lteHelper->SetSchedulerAttribute("CreditableThreshold", UintegerValue(yourvalue)); // default value 0
 
  * PSS scheduler::
 
-  Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
+  Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
   lteHelper->SetSchedulerAttribute("nMux", UIntegerValue(yourvalue)); // the maximum number of UE selected by TD scheduler
   lteHelper->SetSchedulerAttribute("PssFdSchedulerType", StringValue("CoItA")); // PF scheduler type in PSS
 
@@ -231,15 +228,15 @@ PSS will set this value to half of total UE. The default FD scheduler is PFsch.
 In addition, token generation rate in TBFQ and target bit rate in PSS need to be configured by Guarantee Bit Rate (GBR) or
 Maximum Bit Rate (MBR) in epc bearer QoS parameters. Users can use following codes to define GBR and MBR in both downlink and uplink::
 
-  Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
+  Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
   enum EpsBearer::Qci q = EpsBearer::yourvalue;  // define Qci type
   GbrQosInformation qos;
   qos.gbrDl = yourvalue; // Downlink GBR
   qos.gbrUl = yourvalue; // Uplink GBR
   qos.mbrDl = yourvalue; // Downlink MBR
   qos.mbrUl = yourvalue; // Uplink MBR
-  EpsBearer bearer(q, qos);
-  lteHelper->ActivateDedicatedEpsBearer(ueDevs, bearer, EpcTft::Default());
+  EpsBearer bearer (q, qos);
+  lteHelper->ActivateDedicatedEpsBearer (ueDevs, bearer, EpcTft::Default ());
 
 In PSS, TBR is obtained from GBR in bearer level QoS parameters. In TBFQ, token generation rate is obtained from the MBR
 setting in bearer level QoS parameters, which therefore needs to be configured consistently.
@@ -257,16 +254,16 @@ print a list of the attributes of a given object together with their
 description and default value passing ``--PrintAttributes=`` to a simulation
 program, like this::
 
-     ./ns3 run lena-simple --command-template="%s --PrintAttributes=ns3::LteHelper"
+     ./waf --run lena-simple --command-template="%s --PrintAttributes=ns3::LteHelper"
 
 
 You can try also with other LTE and EPC objects, like this::
 
-     ./ns3 run lena-simple --command-template="%s --PrintAttributes=ns3::LteEnbNetDevice"
-     ./ns3 run lena-simple --command-template="%s --PrintAttributes=ns3::LteEnbMac"
-     ./ns3 run lena-simple --command-template="%s --PrintAttributes=ns3::LteEnbPhy"
-     ./ns3 run lena-simple --command-template="%s --PrintAttributes=ns3::LteUePhy"
-     ./ns3 run lena-simple --command-template="%s --PrintAttributes=ns3::PointToPointEpcHelper"
+     ./waf --run lena-simple --command-template="%s --PrintAttributes=ns3::LteEnbNetDevice"
+     ./waf --run lena-simple --command-template="%s --PrintAttributes=ns3::LteEnbMac"
+     ./waf --run lena-simple --command-template="%s --PrintAttributes=ns3::LteEnbPhy"
+     ./waf --run lena-simple --command-template="%s --PrintAttributes=ns3::LteUePhy"
+     ./waf --run lena-simple --command-template="%s --PrintAttributes=ns3::PointToPointEpcHelper"
 
 
 
@@ -279,16 +276,16 @@ The ns-3 LTE model currently supports the output to file of PHY, MAC, RLC
 and PDCP level Key Performance Indicators (KPIs). You can enable it in
 the following way::
 
-      Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
+      Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
 
       // configure all the simulation scenario here...
 
-      lteHelper->EnablePhyTraces();
-      lteHelper->EnableMacTraces();
-      lteHelper->EnableRlcTraces();
-      lteHelper->EnablePdcpTraces();
+      lteHelper->EnablePhyTraces ();
+      lteHelper->EnableMacTraces ();
+      lteHelper->EnableRlcTraces ();
+      lteHelper->EnablePdcpTraces ();
 
-      Simulator::Run();
+      Simulator::Run ();
 
 
 RLC and PDCP KPIs are calculated over a time interval and stored on ASCII
@@ -341,8 +338,6 @@ for uplink and downlink):
   18. Maximum PDCP PDU size
 
 
-**Note:** The PDCP traces for data radio bearers are not generated when
-:ref:`sec-sm-rlc` is used.
 
 MAC KPIs are basically a trace of the resource allocation reported by
 the scheduler upon the start of every subframe. They are stored in
@@ -432,10 +427,6 @@ And finally, in UL and DL reception files the parameters included are:
   10. New Data Indicator flag
   11. Correctness in the reception of the TB
 
-**Note:** The traces generated by simulating the scenarios involving the RLF
-will have a discontinuity in time from the moment of the RLF event until the UE
-connects again to an eNB.
-
 
 Fading Trace Usage
 ------------------
@@ -475,16 +466,16 @@ The default configuration of the matlab script provides a trace 10 seconds long,
 
 In order to activate the fading module (which is not active by default) the following code should be included in the simulation program::
 
-  Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
+  Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
   lteHelper->SetFadingModel("ns3::TraceFadingLossModel");
 
 And for setting the parameters::
 
-  lteHelper->SetFadingModelAttribute("TraceFilename", StringValue("src/lte/model/fading-traces/fading_trace_EPA_3kmph.fad"));
-  lteHelper->SetFadingModelAttribute("TraceLength", TimeValue(Seconds(10.0)));
-  lteHelper->SetFadingModelAttribute("SamplesNum", UintegerValue(10000));
-  lteHelper->SetFadingModelAttribute("WindowSize", TimeValue(Seconds(0.5)));
-  lteHelper->SetFadingModelAttribute("RbNum", UintegerValue(100));
+  lteHelper->SetFadingModelAttribute ("TraceFilename", StringValue ("src/lte/model/fading-traces/fading_trace_EPA_3kmph.fad"));
+  lteHelper->SetFadingModelAttribute ("TraceLength", TimeValue (Seconds (10.0)));
+  lteHelper->SetFadingModelAttribute ("SamplesNum", UintegerValue (10000));
+  lteHelper->SetFadingModelAttribute ("WindowSize", TimeValue (Seconds (0.5)));
+  lteHelper->SetFadingModelAttribute ("RbNum", UintegerValue (100));
 
 It has to be noted that, ``TraceFilename`` does not have a default value, therefore is has to be always set explicitly.
 
@@ -532,23 +523,23 @@ We now explain by examples how to use the buildings model (in particular, the ``
 
 #. Pathloss model selection::
 
-    Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
+    Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
 
-    lteHelper->SetAttribute("PathlossModel", StringValue("ns3::BuildingsPropagationLossModel"));
+    lteHelper->SetAttribute ("PathlossModel", StringValue ("ns3::BuildingsPropagationLossModel"));
 
 #. EUTRA Band Selection
 
 The selection of the working frequency of the propagation model has to be done with the standard ns-3 attribute system as described in the correspond section ("Configuration of LTE model parameters") by means of the DlEarfcn and UlEarfcn parameters, for instance::
 
-   lteHelper->SetEnbDeviceAttribute("DlEarfcn", UintegerValue(100));
-   lteHelper->SetEnbDeviceAttribute("UlEarfcn", UintegerValue(18100));
+   lteHelper->SetEnbDeviceAttribute ("DlEarfcn", UintegerValue (100));
+   lteHelper->SetEnbDeviceAttribute ("UlEarfcn", UintegerValue (18100));
 
 It is to be noted that using other means to configure the frequency used by the propagation model (i.e., configuring the corresponding BuildingsPropagationLossModel attributes directly) might generates conflicts in the frequencies definition in the modules during the simulation, and is therefore not advised.
 
 #. Mobility model selection::
 
     MobilityHelper mobility;
-    mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
 
     It is to be noted that any mobility model can be used.
 
@@ -560,31 +551,31 @@ It is to be noted that using other means to configure the frequency used by the 
     double y_max = 20.0;
     double z_min = 0.0;
     double z_max = 10.0;
-    Ptr<Building> b = CreateObject<Building>();
-    b->SetBoundaries(Box(x_min, x_max, y_min, y_max, z_min, z_max));
-    b->SetBuildingType(Building::Residential);
-    b->SetExtWallsType(Building::ConcreteWithWindows);
-    b->SetNFloors(3);
-    b->SetNRoomsX(3);
-    b->SetNRoomsY(2);
+    Ptr<Building> b = CreateObject <Building> ();
+    b->SetBoundaries (Box (x_min, x_max, y_min, y_max, z_min, z_max));
+    b->SetBuildingType (Building::Residential);
+    b->SetExtWallsType (Building::ConcreteWithWindows);
+    b->SetNFloors (3);
+    b->SetNRoomsX (3);
+    b->SetNRoomsY (2);
 
    This will instantiate a residential building with base of 10 x 20 meters and height of 10 meters whose external walls are of concrete with windows; the building has three floors and has an internal 3 x 2  grid of rooms of equal size.
 
 #. Node creation and positioning::
 
-    ueNodes.Create(2);
-    mobility.Install(ueNodes);
-    BuildingsHelper::Install(ueNodes);
+    ueNodes.Create (2);
+    mobility.Install (ueNodes);
+    BuildingsHelper::Install (ueNodes);
     NetDeviceContainer ueDevs;
-    ueDevs = lteHelper->InstallUeDevice(ueNodes);
-    Ptr<ConstantPositionMobilityModel> mm0 = enbNodes.Get(0)->GetObject<ConstantPositionMobilityModel>();
-    Ptr<ConstantPositionMobilityModel> mm1 = enbNodes.Get(1)->GetObject<ConstantPositionMobilityModel>();
-    mm0->SetPosition(Vector(5.0, 5.0, 1.5));
-    mm1->SetPosition(Vector(30.0, 40.0, 1.5));
+    ueDevs = lteHelper->InstallUeDevice (ueNodes);
+    Ptr<ConstantPositionMobilityModel> mm0 = enbNodes.Get (0)->GetObject<ConstantPositionMobilityModel> ();
+    Ptr<ConstantPositionMobilityModel> mm1 = enbNodes.Get (1)->GetObject<ConstantPositionMobilityModel> ();
+    mm0->SetPosition (Vector (5.0, 5.0, 1.5));
+    mm1->SetPosition (Vector (30.0, 40.0, 1.5));
 
 #. Finalize the building and mobility model configuration::
 
-    BuildingsHelper::MakeMobilityModelConsistent();
+    BuildingsHelper::MakeMobilityModelConsistent ();
 
 See the documentation of the *buildings* module for more detailed information.
 
@@ -594,8 +585,8 @@ PHY Error Model
 
 The Physical error model consists of the data error model and the downlink control error model, both of them active by default. It is possible to deactivate them with the ns3 attribute system, in detail::
 
-  Config::SetDefault("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue(false));
-  Config::SetDefault("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue(false));
+  Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
+  Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
 
 
 
@@ -615,21 +606,21 @@ Is this subsection we illustrate how to configure the MIMO parameters. LTE defin
 
 According to model implemented, the simulator includes the first three transmission modes types. The default one is the Transmission Mode 1 (SISO). In order to change the default Transmission Mode to be used, the attribute ``DefaultTransmissionMode`` of the ``LteEnbRrc`` can be used, as shown in the following::
 
-  Config::SetDefault("ns3::LteEnbRrc::DefaultTransmissionMode", UintegerValue(0)); // SISO
-  Config::SetDefault("ns3::LteEnbRrc::DefaultTransmissionMode", UintegerValue(1)); // MIMO Tx diversity(1 layer)
-  Config::SetDefault("ns3::LteEnbRrc::DefaultTransmissionMode", UintegerValue(2)); // MIMO Spatial Multiplexity(2 layers)
+  Config::SetDefault ("ns3::LteEnbRrc::DefaultTransmissionMode", UintegerValue (0)); // SISO
+  Config::SetDefault ("ns3::LteEnbRrc::DefaultTransmissionMode", UintegerValue (1)); // MIMO Tx diversity (1 layer)
+  Config::SetDefault ("ns3::LteEnbRrc::DefaultTransmissionMode", UintegerValue (2)); // MIMO Spatial Multiplexity (2 layers)
 
 For changing the transmission mode of a certain user during the simulation a specific interface has been implemented in both standard schedulers::
 
-  void TransmissionModeConfigurationUpdate(uint16_t rnti, uint8_t txMode);
+  void TransmissionModeConfigurationUpdate (uint16_t rnti, uint8_t txMode);
 
 This method can be used both for developing transmission mode decision engine (i.e., for optimizing the transmission mode according to channel condition and/or user's requirements) and for manual switching from simulation script. In the latter case, the switching can be done as shown in the following::
 
-  Ptr<LteEnbNetDevice> lteEnbDev = enbDevs.Get(0)->GetObject<LteEnbNetDevice>();
+  Ptr<LteEnbNetDevice> lteEnbDev = enbDevs.Get (0)->GetObject<LteEnbNetDevice> ();
   PointerValue ptrval;
-  enbNetDev->GetAttribute("FfMacScheduler", ptrval);
-  Ptr<RrFfMacScheduler> rrsched = ptrval.Get<RrFfMacScheduler>();
-  Simulator::Schedule(Seconds(0.2), &RrFfMacScheduler::TransmissionModeConfigurationUpdate, rrsched, rnti, 1);
+  enbNetDev->GetAttribute ("FfMacScheduler", ptrval);
+  Ptr<RrFfMacScheduler> rrsched = ptrval.Get<RrFfMacScheduler> ();
+  Simulator::Schedule (Seconds (0.2), &RrFfMacScheduler::TransmissionModeConfigurationUpdate, rrsched, rnti, 1);
 
 Finally, the model implemented can be reconfigured according to different MIMO models by updating the gain values (the only constraints is that the gain has to be constant during simulation run-time and common for the layers). The gain of each Transmission Mode can be changed according to the standard ns3 attribute system, where the attributes are: ``TxMode1Gain``, ``TxMode2Gain``, ``TxMode3Gain``, ``TxMode4Gain``, ``TxMode5Gain``, ``TxMode6Gain`` and ``TxMode7Gain``. By default only ``TxMode1Gain``, ``TxMode2Gain`` and ``TxMode3Gain`` have a meaningful value, that are the ones derived by _[CatreuxMIMO] (i.e., respectively 0.0, 4.2 and -2.8 dB).
 
@@ -648,10 +639,10 @@ antenna module. The configuration of the eNB is to be done via the
 ``LteHelper`` instance right before the creation of the
 ``EnbNetDevice``, as shown in the following::
 
-  lteHelper->SetEnbAntennaModelType("ns3::CosineAntennaModel");
-  lteHelper->SetEnbAntennaModelAttribute("Orientation", DoubleValue(0));
-  lteHelper->SetEnbAntennaModelAttribute("Beamwidth",   DoubleValue(60));
-  lteHelper->SetEnbAntennaModelAttribute("MaxGain",     DoubleValue(0.0));
+  lteHelper->SetEnbAntennaModelType ("ns3::CosineAntennaModel");
+  lteHelper->SetEnbAntennaModelAttribute ("Orientation", DoubleValue (0));
+  lteHelper->SetEnbAntennaModelAttribute ("Beamwidth",   DoubleValue (60);
+  lteHelper->SetEnbAntennaModelAttribute ("MaxGain",     DoubleValue (0.0));
 
 the above code will generate an antenna model with a 60 degrees
 beamwidth pointing along the X axis. The orientation is measured
@@ -680,21 +671,21 @@ can set the RbId, for which REM will be generated. Default RbId is -1, what
 means that REM will generated with averaged Signal-to-noise ratio from all RBs.
 
 To do this, you just need to add the following code to your simulation
-program towards the end, right before the call to Simulator::Run()::
+program towards the end, right before the call to Simulator::Run ()::
 
-  Ptr<RadioEnvironmentMapHelper> remHelper = CreateObject<RadioEnvironmentMapHelper>();
-  remHelper->SetAttribute("Channel", PointerValue(lteHelper->GetDownlinkSpectrumChannel()));
-  remHelper->SetAttribute("OutputFile", StringValue("rem.out"));
-  remHelper->SetAttribute("XMin", DoubleValue(-400.0));
-  remHelper->SetAttribute("XMax", DoubleValue(400.0));
-  remHelper->SetAttribute("XRes", UintegerValue(100));
-  remHelper->SetAttribute("YMin", DoubleValue(-300.0));
-  remHelper->SetAttribute("YMax", DoubleValue(300.0));
-  remHelper->SetAttribute("YRes", UintegerValue(75));
-  remHelper->SetAttribute("Z", DoubleValue(0.0));
-  remHelper->SetAttribute("UseDataChannel", BooleanValue(true));
-  remHelper->SetAttribute("RbId", IntegerValue(10));
-  remHelper->Install();
+  Ptr<RadioEnvironmentMapHelper> remHelper = CreateObject<RadioEnvironmentMapHelper> ();
+  remHelper->SetAttribute ("ChannelPath", StringValue ("/ChannelList/0"));
+  remHelper->SetAttribute ("OutputFile", StringValue ("rem.out"));
+  remHelper->SetAttribute ("XMin", DoubleValue (-400.0));
+  remHelper->SetAttribute ("XMax", DoubleValue (400.0));
+  remHelper->SetAttribute ("XRes", UintegerValue (100));
+  remHelper->SetAttribute ("YMin", DoubleValue (-300.0));
+  remHelper->SetAttribute ("YMax", DoubleValue (300.0));
+  remHelper->SetAttribute ("YRes", UintegerValue (75));
+  remHelper->SetAttribute ("Z", DoubleValue (0.0));
+  remHelper->SetAttribute ("UseDataChannel", BooleanValue (true));
+  remHelper->SetAttribute ("RbId", IntegerValue (10));
+  remHelper->Install ();
 
 By configuring the attributes of the ``RadioEnvironmentMapHelper`` object
 as shown above, you can tune the parameters of the REM to be
@@ -769,15 +760,15 @@ correspondingly the generation of the CQIs. The first one is based on the GSoC m
 and works per RB basis. This model can be activated with the ns3 attribute system, as presented in
 the following::
 
-  Config::SetDefault("ns3::LteAmc::AmcModel", EnumValue(LteAmc::PiroEW2010));
+  Config::SetDefault ("ns3::LteAmc::AmcModel", EnumValue (LteAmc::PiroEW2010));
 
 While, the solution based on the physical error model can be controlled with::
 
-  Config::SetDefault("ns3::LteAmc::AmcModel", EnumValue(LteAmc::MiErrorModel));
+  Config::SetDefault ("ns3::LteAmc::AmcModel", EnumValue (LteAmc::MiErrorModel));
 
-Finally, the required efficiency of the ``PiroEW2010`` AMC module can be tuned thanks to the ``Ber`` attribute(), for instance::
+Finally, the required efficiency of the ``PiroEW2010`` AMC module can be tuned thanks to the ``Ber`` attribute (), for instance::
 
-  Config::SetDefault("ns3::LteAmc::Ber", DoubleValue(0.00005));
+  Config::SetDefault ("ns3::LteAmc::Ber", DoubleValue (0.00005));
 
 
 
@@ -803,12 +794,12 @@ this example we will consider ``PointToPointEpcHelper``, which
 implements an EPC based on point-to-point links. To use it, you need
 first to insert this code in your simulation program::
 
-  Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-  Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
+  Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+  Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper> ();
 
 Then, you need to tell the LTE helper that the EPC will be used::
 
-  lteHelper->SetEpcHelper(epcHelper);
+  lteHelper->SetEpcHelper (epcHelper);
 
 the above step is necessary so that the LTE helper will trigger the
 appropriate EPC configuration in correspondence with some important
@@ -818,7 +809,7 @@ automatically take care of the necessary setup, such as S1 link
 creation and S1 bearer setup. All this will be done without the
 intervention of the user.
 
-Calling ``lteHelper->SetEpcHelper(epcHelper)`` enables the use of
+Calling ``lteHelper->SetEpcHelper (epcHelper)`` enables the use of
 EPC, and has the side effect that any new ``LteEnbRrc`` that is
 created will have the ``EpsBearerToRlcMapping`` attribute set to
 ``RLC_UM_ALWAYS`` instead of ``RLC_SM_ALWAYS`` if the latter was
@@ -833,33 +824,31 @@ IPv4/IPv6 networks (e.g., the internet, another EPC). Here is a very
 simple example about how to connect a single remote host (IPv4 type)
 to the PGW via a point-to-point link::
 
-  Ptr<Node> pgw = epcHelper->GetPgwNode();
+  Ptr<Node> pgw = epcHelper->GetPgwNode ();
 
-  // Create a single RemoteHost
+   // Create a single RemoteHost
   NodeContainer remoteHostContainer;
-  remoteHostContainer.Create(1);
-  Ptr<Node> remoteHost = remoteHostContainer.Get(0);
+  remoteHostContainer.Create (1);
+  Ptr<Node> remoteHost = remoteHostContainer.Get (0);
   InternetStackHelper internet;
-  internet.Install(remoteHostContainer);
+  internet.Install (remoteHostContainer);
 
   // Create the internet
   PointToPointHelper p2ph;
-  p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-  p2ph.SetDeviceAttribute("Mtu", UintegerValue(1500));
-  p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.010)));
-  NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
+  p2ph.SetDeviceAttribute ("DataRate", DataRateValue (DataRate ("100Gb/s")));
+  p2ph.SetDeviceAttribute ("Mtu", UintegerValue (1500));
+  p2ph.SetChannelAttribute ("Delay", TimeValue (Seconds (0.010)));
+  NetDeviceContainer internetDevices = p2ph.Install (pgw, remoteHost);
   Ipv4AddressHelper ipv4h;
-  ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-  Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
+  ipv4h.SetBase ("1.0.0.0", "255.0.0.0");
+  Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign (internetDevices);
   // interface 0 is localhost, 1 is the p2p device
-  Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress(1);
+  Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress (1);
 
 
   Ipv4StaticRoutingHelper ipv4RoutingHelper;
-  Ptr<Ipv4StaticRouting> remoteHostStaticRouting;
-  remoteHostStaticRouting = ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-  remoteHostStaticRouting->AddNetworkRouteTo(epcHelper->GetEpcIpv4NetworkAddress(),
-                                             Ipv4Mask("255.255.0.0"), 1);
+  Ptr<Ipv4StaticRouting> remoteHostStaticRouting = ipv4RoutingHelper.GetStaticRouting (remoteHost->GetObject<Ipv4> ());
+  remoteHostStaticRouting->AddNetworkRouteTo (epcHelper->GetEpcIpv4NetworkAddress (), Ipv4Mask ("255.255.0.0"), 1);
 
 Now, you should go on and create LTE eNBs and UEs as explained in the
 previous sections. You can of course configure other LTE aspects such
@@ -867,55 +856,52 @@ as pathloss and fading models. Right after you created the UEs, you
 should also configure them for IP networking. This is done as
 follows. We assume you have a container for UE and eNodeB nodes like this::
 
-  NodeContainer ueNodes;
-  NodeContainer enbNodes;
+      NodeContainer ueNodes;
+      NodeContainer enbNodes;
+
 
 to configure an LTE-only simulation, you would then normally do
 something like this::
 
-  NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice(ueNodes);
-  lteHelper->Attach(ueLteDevs, enbLteDevs.Get(0));
+      NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
+      lteHelper->Attach (ueLteDevs, enbLteDevs.Get (0));
 
 in order to configure the UEs for IP networking, you just need to
 additionally do like this::
 
-  // we install the IP stack on the UEs
-  InternetStackHelper internet;
-  internet.Install(ueNodes);
+      // we install the IP stack on the UEs
+      InternetStackHelper internet;
+      internet.Install (ueNodes);
 
-  // assign IP address to UEs
-  for (uint32_t u = 0; u < ueNodes.GetN(); ++u)
-    {
-      Ptr<Node> ue = ueNodes.Get(u);
-      Ptr<NetDevice> ueLteDevice = ueLteDevs.Get(u);
-      Ipv4InterfaceContainer ueIpIface;
-      ueIpIface = epcHelper->AssignUeIpv4Address(NetDeviceContainer(ueLteDevice));
-      // set the default gateway for the UE
-      Ptr<Ipv4StaticRouting> ueStaticRouting;
-      ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(ue->GetObject<Ipv4>());
-      ueStaticRouting->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
+      // assign IP address to UEs
+      for (uint32_t u = 0; u < ueNodes.GetN (); ++u)
+        {
+          Ptr<Node> ue = ueNodes.Get (u);
+          Ptr<NetDevice> ueLteDevice = ueLteDevs.Get (u);
+          Ipv4InterfaceContainer ueIpIface = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteDevice));
+          // set the default gateway for the UE
+          Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ue->GetObject<Ipv4> ());
+          ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
+        }
 
 The activation of bearers is done in a slightly different way with
 respect to what done for an LTE-only simulation. First, the method
 ActivateDataRadioBearer is not to be used when the EPC is
 used. Second, when EPC is used, the default EPS bearer will be
-activated automatically when you call ``LteHelper::Attach()``. Third, if
+activated automatically when you call LteHelper::Attach (). Third, if
 you want to setup dedicated EPS bearer, you can do so using the method
-``LteHelper::ActivateDedicatedEpsBearer()``. This method takes as a
-parameter the Traffic Flow Template(TFT), which is a struct that
+LteHelper::ActivateDedicatedEpsBearer (). This method takes as a
+parameter the Traffic Flow Template (TFT), which is a struct that
 identifies the type of traffic that will be mapped to the dedicated
 EPS bearer. Here is an example for how to setup a dedicated bearer
 for an application at the UE communicating on port 1234::
 
-  Ptr<EpcTft> tft = Create<EpcTft>();
-  EpcTft::PacketFilter pf;
-  pf.localPortStart = 1234;
-  pf.localPortEnd = 1234;
-  tft->Add(pf);
-  lteHelper->ActivateDedicatedEpsBearer(ueLteDevs,
-                                        EpsBearer(EpsBearer::NGBR_VIDEO_TCP_DEFAULT),
-                                        tft);
+      Ptr<EpcTft> tft = Create<EpcTft> ();
+      EpcTft::PacketFilter pf;
+      pf.localPortStart = 1234;
+      pf.localPortEnd = 1234;
+      tft->Add (pf);
+      lteHelper->ActivateDedicatedEpsBearer (ueLteDevs, EpsBearer (EpsBearer::NGBR_VIDEO_TCP_DEFAULT), tft);
 
 you can of course use custom EpsBearer and EpcTft configurations,
 please refer to the doxygen documentation for how to do it.
@@ -928,19 +914,19 @@ remoteHost, here is how to setup downlink communication, with an
 UdpClient application on the remote host, and a PacketSink on the LTE UE
 (using the same variable names of the previous code snippets) ::
 
-  uint16_t dlPort = 1234;
-  PacketSinkHelper packetSinkHelper("ns3::UdpSocketFactory",
-                                    InetSocketAddress(Ipv4Address::GetAny(), dlPort));
-  ApplicationContainer serverApps = packetSinkHelper.Install(ue);
-  serverApps.Start(Seconds(0.01));
-  UdpClientHelper client(ueIpIface.GetAddress(0), dlPort);
-  ApplicationContainer clientApps = client.Install(remoteHost);
-  clientApps.Start(Seconds(0.01));
+       uint16_t dlPort = 1234;
+       PacketSinkHelper packetSinkHelper ("ns3::UdpSocketFactory",
+                                          InetSocketAddress (Ipv4Address::GetAny (), dlPort));
+       ApplicationContainer serverApps = packetSinkHelper.Install (ue);
+       serverApps.Start (Seconds (0.01));
+       UdpClientHelper client (ueIpIface.GetAddress (0), dlPort);
+       ApplicationContainer clientApps = client.Install (remoteHost);
+       clientApps.Start (Seconds (0.01));
 
 That's all! You can now start your simulation as usual::
 
-  Simulator::Stop(Seconds(10.0));
-  Simulator::Run();
+  Simulator::Stop (Seconds (10.0));
+  Simulator::Run ();
 
 
 
@@ -949,10 +935,10 @@ Using the EPC with emulation mode
 
 In the previous section we used PointToPoint links for the connection between the eNBs and the SGW (S1-U interface) and among eNBs (X2-U and X2-C interfaces). The LTE module supports using emulated links instead of PointToPoint links. This is achieved by just replacing the creation of ``LteHelper`` and ``EpcHelper`` with the following code::
 
-  Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-  Ptr<EmuEpcHelper>  epcHelper = CreateObject<EmuEpcHelper>();
-  lteHelper->SetEpcHelper(epcHelper);
-  epcHelper->Initialize();
+  Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+  Ptr<EmuEpcHelper>  epcHelper = CreateObject<EmuEpcHelper> ();
+  lteHelper->SetEpcHelper (epcHelper);
+  epcHelper->Initialize ();
 
 
 The attributes ``ns3::EmuEpcHelper::sgwDeviceName`` and ``ns3::EmuEpcHelper::enbDeviceName`` are used to set the name of the devices used for transporting the S1-U, X2-U and X2-C interfaces at the SGW and eNB, respectively. We will now show how this is done in an example where we execute the example program ``lena-simple-epc-emu`` using two virtual ethernet interfaces.
@@ -960,10 +946,10 @@ The attributes ``ns3::EmuEpcHelper::sgwDeviceName`` and ``ns3::EmuEpcHelper::enb
 First of all we build ns-3 appropriately::
 
   # configure
-  ./ns3 configure --enable-sudo --enable-modules=lte,fd-net-device --enable-examples
+  ./waf configure --enable-sudo --enable-modules=lte,fd-net-device --enable-examples
 
   # build
-  ./ns3
+  ./waf
 
 
 Then we setup two virtual ethernet interfaces, and start wireshark to look at the traffic going through::
@@ -989,8 +975,7 @@ Then we setup two virtual ethernet interfaces, and start wireshark to look at th
 
 We can now run the example program with the simulated clock::
 
-  ./ns3 run lena-simple-epc-emu --command="%s --ns3::EmuEpcHelper::sgwDeviceName=veth0
-  --ns3::EmuEpcHelper::enbDeviceName=veth1"
+  ./waf --run lena-simple-epc-emu --command="%s --ns3::EmuEpcHelper::sgwDeviceName=veth0 --ns3::EmuEpcHelper::enbDeviceName=veth1"
 
 
 Using wireshark, you should see ARP resolution first, then some GTP
@@ -998,13 +983,12 @@ packets exchanged both in uplink and downlink.
 
 The default setting of the example program is 1 eNB and 1UE. You can change this via command line parameters, e.g.::
 
-  ./ns3 run lena-simple-epc-emu --command="%s --ns3::EmuEpcHelper::sgwDeviceName=veth0
-  --ns3::EmuEpcHelper::enbDeviceName=veth1 --nEnbs=2 --nUesPerEnb=2"
+  ./waf --run lena-simple-epc-emu --command="%s --ns3::EmuEpcHelper::sgwDeviceName=veth0 --ns3::EmuEpcHelper::enbDeviceName=veth1 --nEnbs=2 --nUesPerEnb=2"
 
 
 To get a list of the available parameters::
 
-  ./ns3 run lena-simple-epc-emu --command="%s --PrintHelp"
+  ./waf --run lena-simple-epc-emu --command="%s --PrintHelp"
 
 
 
@@ -1015,16 +999,12 @@ with the BestEffort mode is not a good idea: something can go wrong
 So you need a decent hardware and the optimized build with statically
 linked modules::
 
-  ./ns3 configure -d optimized --enable-static --enable-modules=lte --enable-examples
-  --enable-sudo
+  ./waf configure -d optimized --enable-static --enable-modules=lte --enable-examples --enable-sudo
 
 
 Then run the example program like this::
 
-  ./ns3 run lena-simple-epc-emu --command="%s --ns3::EmuEpcHelper::sgwDeviceName=veth0
-  --ns3::EmuEpcHelper::enbDeviceName=veth1
-  --SimulatorImplementationType=ns3::RealtimeSimulatorImpl
-  --ns3::RealtimeSimulatorImpl::SynchronizationMode=HardLimit"
+  ./waf --run lena-simple-epc-emu --command="%s --ns3::EmuEpcHelper::sgwDeviceName=veth0 --ns3::EmuEpcHelper::enbDeviceName=veth1 --simulatorImplementationType=ns3::RealtimeSimulatorImpl --ns3::RealtimeSimulatorImpl::SynchronizationMode=HardLimit"
 
 
 note the HardLimit setting, which will cause the program to terminate
@@ -1035,111 +1015,6 @@ net device. For instance, [Baldo2014]_ describes how it was used to
 run an emulated LTE-EPC network over a real multi-layer packet-optical
 transport network.
 
-
-
-.. _sec-custom-backhaul:
-
-Custom Backhaul
----------------
-
-In the previous sections, :ref:`sec-evolved-packet-core`, we explained how to write a simulation
-program using EPC with a predefined backhaul network between the RAN and the EPC. We used the
-``PointToPointEpcHelper``. This ``EpcHelper`` creates point-to-point links between the eNBs and the SGW.
-
-We now explain how to write a simulation program that allows the simulator user to create any kind
-of backhaul network in the simulation program.
-
-First of all, in addition to ``LteHelper``, you need to use the ``NoBackhaulEpcHelper`` class, which
-implements an EPC but without connecting the eNBs with the core network. It just creates the network
-elements of the core network::
-
-  Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-  Ptr<NoBackhaulEpcHelper> epcHelper = CreateObject<NoBackhaulEpcHelper>();
-
-
-Then, as usual, you need to tell the LTE helper that the EPC will be used::
-
-  lteHelper->SetEpcHelper(epcHelper);
-
-
-Now, you should create the backhaul network. Here we create point-to-point links as it is done
-by the ``PointToPointEpcHelper``. We assume you have a container for eNB nodes like this::
-
-  NodeContainer enbNodes;
-
-We get the SGW node::
-
-  Ptr<Node> sgw = epcHelper->GetSgwNode();
-
-And we connect every eNB from the container with the SGW with a point-to-point link. We also assign
-IPv4 addresses to the interfaces of eNB and SGW with ``s1uIpv4AddressHelper.Assign(sgwEnbDevices)``
-and finally we tell the EpcHelper that this ``enb`` has a new S1 interface with
-``epcHelper->AddS1Interface(enb, enbS1uAddress, sgwS1uAddress)``, where ``enbS1uAddress`` and
-``sgwS1uAddress`` are the IPv4 addresses of the eNB and the SGW, respectively::
-
-  Ipv4AddressHelper s1uIpv4AddressHelper;
-
-  // Create networks of the S1 interfaces
-  s1uIpv4AddressHelper.SetBase("10.0.0.0", "255.255.255.252");
-
-  for (uint16_t i = 0; i < enbNodes.GetN(); ++i)
-    {
-      Ptr<Node> enb = enbNodes.Get(i);
-
-      // Create a point to point link between the eNB and the SGW with
-      // the corresponding new NetDevices on each side
-      PointToPointHelper p2ph;
-      DataRate s1uLinkDataRate = DataRate("10Gb/s");
-      uint16_t s1uLinkMtu = 2000;
-      Time s1uLinkDelay = Time(0);
-      p2ph.SetDeviceAttribute("DataRate", DataRateValue(s1uLinkDataRate));
-      p2ph.SetDeviceAttribute("Mtu", UintegerValue(s1uLinkMtu));
-      p2ph.SetChannelAttribute("Delay", TimeValue(s1uLinkDelay));
-      NetDeviceContainer sgwEnbDevices = p2ph.Install(sgw, enb);
-
-      Ipv4InterfaceContainer sgwEnbIpIfaces = s1uIpv4AddressHelper.Assign(sgwEnbDevices);
-      s1uIpv4AddressHelper.NewNetwork();
-
-      Ipv4Address sgwS1uAddress = sgwEnbIpIfaces.GetAddress(0);
-      Ipv4Address enbS1uAddress = sgwEnbIpIfaces.GetAddress(1);
-
-      // Create S1 interface between the SGW and the eNB
-      epcHelper->AddS1Interface(enb, enbS1uAddress, sgwS1uAddress);
-    }
-
-This is just an example how to create a custom backhaul network. In this other example, we connect
-all eNBs and the SGW to the same CSMA network::
-
-    // Create networks of the S1 interfaces
-    s1uIpv4AddressHelper.SetBase("10.0.0.0", "255.255.255.0");
-
-    NodeContainer sgwEnbNodes;
-    sgwEnbNodes.Add(sgw);
-    sgwEnbNodes.Add(enbNodes);
-
-    CsmaHelper csmah;
-    NetDeviceContainer sgwEnbDevices = csmah.Install(sgwEnbNodes);
-    Ptr<NetDevice> sgwDev = sgwEnbDevices.Get(0);
-
-    Ipv4InterfaceContainer sgwEnbIpIfaces = s1uIpv4AddressHelper.Assign(sgwEnbDevices);
-    Ipv4Address sgwS1uAddress = sgwEnbIpIfaces.GetAddress(0);
-
-    for (uint16_t i = 0; i < enbNodes.GetN(); ++i)
-      {
-        Ptr<Node> enb = enbNodes.Get(i);
-        Ipv4Address enbS1uAddress = sgwEnbIpIfaces.GetAddress(i + 1);
-
-        // Create S1 interface between the SGW and the eNB
-        epcHelper->AddS1Interface(enb, enbS1uAddress, sgwS1uAddress);
-      }
-
-As you can see, apart from how you create the backhaul network, i.e. the point-to-point links or
-the CSMA network, the important point is to tell the ``EpcHelper`` that an ``eNB`` has a new S1 interface.
-
-Now, you should continue configuring your simulation program as it is explained in
-:ref:`sec-evolved-packet-core` subsection. This configuration includes: the internet, installing the LTE eNBs
-and possibly configuring other LTE aspects, installing the LTE UEs and configuring them as IP nodes,
-activation of the dedicated EPS bearers and installing applications on the LTE UEs and on the remote hosts.
 
 
 
@@ -1162,7 +1037,7 @@ This method uses the ``LteHelper::Attach`` function mentioned above. It has been
 the only available network attachment method in earlier versions of LTE module.
 It is typically invoked before the simulation begins::
 
-   lteHelper->Attach(ueDevs, enbDev); // attach one or more UEs to a single eNodeB
+   lteHelper->Attach (ueDevs, enbDev); // attach one or more UEs to a single eNodeB
 
 ``LteHelper::InstallEnbDevice`` and ``LteHelper::InstallUeDevice`` functions
 must have been called before attaching. In an EPC-enabled simulation, it is also
@@ -1195,7 +1070,7 @@ the best cell to attach to. The use of this criterion is implemented in the
 `initial cell selection` process, which can be invoked by calling another
 version of the ``LteHelper::Attach`` function, as shown below::
 
-   lteHelper->Attach(ueDevs); // attach one or more UEs to a strongest cell
+   lteHelper->Attach (ueDevs); // attach one or more UEs to a strongest cell
 
 The difference with the manual method is that the destination eNodeB is not
 specified. The procedure will find the best cell for the UEs, based on several
@@ -1225,19 +1100,19 @@ same CSG ID. This is done through the attributes in both eNodeB and UE, for
 example using the following ``LteHelper`` functions::
 
    // label the following eNodeBs with CSG identity of 1 and CSG indication enabled
-   lteHelper->SetEnbDeviceAttribute("CsgId", UintegerValue(1));
-   lteHelper->SetEnbDeviceAttribute("CsgIndication", BooleanValue(true));
+   lteHelper->SetEnbDeviceAttribute ("CsgId", UintegerValue (1));
+   lteHelper->SetEnbDeviceAttribute ("CsgIndication", BooleanValue (true));
 
    // label one or more UEs with CSG identity of 1
-   lteHelper->SetUeDeviceAttribute("CsgId", UintegerValue(1));
+   lteHelper->SetUeDeviceAttribute ("CsgId", UintegerValue (1));
 
    // install the eNodeBs and UEs
-   NetDeviceContainer csgEnbDevs = lteHelper->InstallEnbDevice(csgEnbNodes);
-   NetDeviceContainer csgUeDevs = lteHelper->InstallUeDevice(csgUeNodes);
+   NetDeviceContainer csgEnbDevs = lteHelper->InstallEnbDevice (csgEnbNodes);
+   NetDeviceContainer csgUeDevs = lteHelper->InstallUeDevice (csgUeNodes);
 
 Then enable the initial cell selection procedure on the UEs::
 
-   lteHelper->Attach(csgUeDevs);
+   lteHelper->Attach (csgUeDevs);
 
 This is necessary because the CSG restriction only works with automatic method
 of network attachment, but not in the manual method.
@@ -1293,18 +1168,18 @@ within the container ``devs``::
    std::vector<uint8_t> measIdList;
 
    NetDeviceContainer::Iterator it;
-   for (it = devs.Begin(); it != devs.End(); it++)
+   for (it = devs.Begin (); it != devs.End (); it++)
    {
      Ptr<NetDevice> dev = *it;
-     Ptr<LteEnbNetDevice> enbDev = dev->GetObject<LteEnbNetDevice>();
-     Ptr<LteEnbRrc> enbRrc = enbDev->GetRrc();
+     Ptr<LteEnbNetDevice> enbDev = dev->GetObject<LteEnbNetDevice> ();
+     Ptr<LteEnbRrc> enbRrc = enbDev->GetRrc ();
 
-     uint8_t measId = enbRrc->AddUeMeasReportConfig(config);
-     measIdList.push_back(measId); // remember the measId created
+     uint8_t measId = enbRrc->AddUeMeasReportConfig (config);
+     measIdList.push_back (measId); // remember the measId created
 
-     enbRrc->TraceConnect("RecvMeasurementReport",
-                          "context",
-                          MakeCallback(&RecvMeasurementReportCallback));
+     enbRrc->TraceConnect ("RecvMeasurementReport",
+                           "context",
+                           MakeCallback (&RecvMeasurementReportCallback));
    }
 
 Note that thresholds are expressed as range. In the example above, the range 41
@@ -1315,11 +1190,11 @@ class has several static functions that can be used for this purpose.
 The corresponding callback function would have a definition similar as below::
 
    void
-   RecvMeasurementReportCallback(std::string context,
-                                 uint64_t imsi,
-                                 uint16_t cellId,
-                                 uint16_t rnti,
-                                 LteRrcSap::MeasurementReport measReport);
+   RecvMeasurementReportCallback (std::string context,
+                                  uint64_t imsi,
+                                  uint16_t cellId,
+                                  uint16_t rnti,
+                                  LteRrcSap::MeasurementReport measReport);
 
 This method will register the callback function as a consumer of UE
 measurements. In the case where there are more than one consumers in the
@@ -1370,7 +1245,7 @@ simulation (see :ref:`sec-evolved-packet-core`).
 Secondly, an X2 interface must be configured between the two eNodeBs, which
 needs to be done explicitly within the simulation program::
 
-   lteHelper->AddX2Interface(enbNodes);
+   lteHelper->AddX2Interface (enbNodes);
 
 where ``enbNodes`` is a ``NodeContainer`` that contains the two eNodeBs between
 which the X2 interface is to be configured. If the container has more than two
@@ -1383,7 +1258,7 @@ cases. However, users may set the eNodeB to "closed" by setting the boolean
 attribute ``LteEnbRrc::AdmitHandoverRequest`` to `false`. As an example, you can
 run the ``lena-x2-handover`` program and setting the attribute in this way::
 
-   NS_LOG=EpcX2:LteEnbRrc ./ns3 run lena-x2-handover --command="%s --ns3::LteEnbRrc::AdmitHandoverRequest=false"
+   NS_LOG=EpcX2:LteEnbRrc ./waf --run lena-x2-handover --command="%s --ns3::LteEnbRrc::AdmitHandoverRequest=false"
 
 After the above three requirements are fulfilled, the handover procedure can be
 triggered manually or automatically. Each will be presented in the following
@@ -1401,10 +1276,10 @@ is to be handed over, and that ``enbLteDevs`` is another ``NetDeviceContainer``
 that contains the source and the target eNB. Then, a handover at 0.1s can be
 scheduled like this::
 
-   lteHelper->HandoverRequest(Seconds(0.100),
-                              ueLteDevs.Get(0),
-                              enbLteDevs.Get(0),
-                              enbLteDevs.Get(1));
+   lteHelper->HandoverRequest (Seconds (0.100),
+                               ueLteDevs.Get (0),
+                               enbLteDevs.Get (0),
+                               enbLteDevs.Get (1));
 
 Note that the UE needs to be already connected to the source eNB, otherwise the
 simulation will terminate with an error message.
@@ -1429,16 +1304,16 @@ Design Documentation.
 Selecting a handover algorithm is done via the ``LteHelper`` object and its
 ``SetHandoverAlgorithmType`` method as shown below::
 
-   Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-   lteHelper->SetHandoverAlgorithmType("ns3::A2A4RsrqHandoverAlgorithm");
+   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+   lteHelper->SetHandoverAlgorithmType ("ns3::A2A4RsrqHandoverAlgorithm");
 
 The selected handover algorithm may also provide several configurable
 attributes, which can be set as follows::
 
-   lteHelper->SetHandoverAlgorithmAttribute("ServingCellThreshold",
-                                            UintegerValue(30));
-   lteHelper->SetHandoverAlgorithmAttribute("NeighbourCellOffset",
-                                            UintegerValue(1));
+   lteHelper->SetHandoverAlgorithmAttribute ("ServingCellThreshold",
+                                             UintegerValue (30));
+   lteHelper->SetHandoverAlgorithmAttribute ("NeighbourCellOffset",
+                                             UintegerValue (1));
 
 Three options of handover algorithm are included in the LTE module. The
 *A2-A4-RSRQ* handover algorithm (named as ``ns3::A2A4RsrqHandoverAlgorithm``) is
@@ -1448,11 +1323,11 @@ Another option is the *strongest cell* handover algorithm (named as
 ``ns3::A3RsrpHandoverAlgorithm``), which can be selected and configured by the
 following code::
 
-   lteHelper->SetHandoverAlgorithmType("ns3::A3RsrpHandoverAlgorithm");
-   lteHelper->SetHandoverAlgorithmAttribute("Hysteresis",
-                                            DoubleValue(3.0));
-   lteHelper->SetHandoverAlgorithmAttribute("TimeToTrigger",
-                                            TimeValue(MilliSeconds(256)));
+   lteHelper->SetHandoverAlgorithmType ("ns3::A3RsrpHandoverAlgorithm");
+   lteHelper->SetHandoverAlgorithmAttribute ("Hysteresis",
+                                             DoubleValue (3.0));
+   lteHelper->SetHandoverAlgorithmAttribute ("TimeToTrigger",
+                                             TimeValue (MilliSeconds (256)));
 
 The last option is a special one, called the *no-op* handover algorithm, which
 basically disables automatic handover trigger. This is useful for example in
@@ -1460,7 +1335,7 @@ cases where manual handover trigger need an exclusive control of all handover
 decision. It does not have any configurable attributes. The usage is as
 follows::
 
-   lteHelper->SetHandoverAlgorithmType("ns3::NoOpHandoverAlgorithm");
+   lteHelper->SetHandoverAlgorithmType ("ns3::NoOpHandoverAlgorithm");
 
 For more information on each handover algorithm's decision policy and their
 attributes, please refer to their respective subsections in Section
@@ -1471,7 +1346,7 @@ instance of the selected handover algorithm for each eNodeB device. In other
 words, make sure to select the right handover algorithm before finalizing it in
 the following line of code::
 
-   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice(enbNodes);
+   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
 
 Example with full source code of using automatic handover trigger can be found
 in the ``lena-x2-handover-measures`` example program.
@@ -1525,8 +1400,8 @@ successfully, regardless of distance and channel condition. However, it will
 also affect all other data or control packets not related to handover, which may
 be an unwanted side effect. Otherwise, it can be done as follows::
 
-   Config::SetDefault("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue(false));
-   Config::SetDefault("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue(false));
+   Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
+   Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
 
 By using the above code, we disable the error model in both control and data
 channels and in both directions (downlink and uplink). This is necessary because
@@ -1549,13 +1424,13 @@ handover execution phase at both the UE and eNB side. As an example,
 in your simulation program you can declare the following methods::
 
    void
-   NotifyHandoverStartUe(std::string context,
-                         uint64_t imsi,
-                         uint16_t cellId,
-                         uint16_t rnti,
-                         uint16_t targetCellId)
+   NotifyHandoverStartUe (std::string context,
+                          uint64_t imsi,
+                          uint16_t cellId,
+                          uint16_t rnti,
+                          uint16_t targetCellId)
    {
-     std::cout << Simulator::Now().GetSeconds() << " " << context
+     std::cout << Simulator::Now ().GetSeconds () << " " << context
                << " UE IMSI " << imsi
                << ": previously connected to CellId " << cellId
                << " with RNTI " << rnti
@@ -1564,12 +1439,12 @@ in your simulation program you can declare the following methods::
    }
 
    void
-   NotifyHandoverEndOkUe(std::string context,
-                         uint64_t imsi,
-                         uint16_t cellId,
-                         uint16_t rnti)
+   NotifyHandoverEndOkUe (std::string context,
+                          uint64_t imsi,
+                          uint16_t cellId,
+                          uint16_t rnti)
    {
-     std::cout << Simulator::Now().GetSeconds() << " " << context
+     std::cout << Simulator::Now ().GetSeconds () << " " << context
                << " UE IMSI " << imsi
                << ": successful handover to CellId " << cellId
                << " with RNTI " << rnti
@@ -1577,13 +1452,13 @@ in your simulation program you can declare the following methods::
    }
 
    void
-   NotifyHandoverStartEnb(std::string context,
-                          uint64_t imsi,
-                          uint16_t cellId,
-                          uint16_t rnti,
-                          uint16_t targetCellId)
+   NotifyHandoverStartEnb (std::string context,
+                           uint64_t imsi,
+                           uint16_t cellId,
+                           uint16_t rnti,
+                           uint16_t targetCellId)
    {
-     std::cout << Simulator::Now().GetSeconds() << " " << context
+     std::cout << Simulator::Now ().GetSeconds () << " " << context
                << " eNB CellId " << cellId
                << ": start handover of UE with IMSI " << imsi
                << " RNTI " << rnti
@@ -1592,12 +1467,12 @@ in your simulation program you can declare the following methods::
    }
 
    void
-   NotifyHandoverEndOkEnb(std::string context,
-                          uint64_t imsi,
-                          uint16_t cellId,
-                          uint16_t rnti)
+   NotifyHandoverEndOkEnb (std::string context,
+                           uint64_t imsi,
+                           uint16_t cellId,
+                           uint16_t rnti)
    {
-     std::cout << Simulator::Now().GetSeconds() << " " << context
+     std::cout << Simulator::Now ().GetSeconds () << " " << context
                << " eNB CellId " << cellId
                << ": completed handover of UE with IMSI " << imsi
                << " RNTI " << rnti
@@ -1607,48 +1482,26 @@ in your simulation program you can declare the following methods::
 Then, you can hook up these methods to the corresponding trace sources
 like this::
 
-   Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverStart",
-                   MakeCallback(&NotifyHandoverStartEnb));
-   Config::Connect("/NodeList/*/DeviceList/*/LteUeRrc/HandoverStart",
-                   MakeCallback(&NotifyHandoverStartUe));
-   Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverEndOk",
-                   MakeCallback(&NotifyHandoverEndOkEnb));
-   Config::Connect("/NodeList/*/DeviceList/*/LteUeRrc/HandoverEndOk",
-                   MakeCallback(&NotifyHandoverEndOkUe));
-
-Handover failure events can also be traced by trace sink functions with
-a similar signature as above(including IMSI, cell ID, and RNTI). Four
-different failure events are traced:
-
-1. HandoverFailureNoPreamble: Handover failure due to non allocation of
-   non-contention-based preamble at eNB
-2. HandoverFailureMaxRach: Handover failure due to maximum RACH attempts
-3. HandoverFailureLeaving: Handover leaving timeout at source eNB
-4. HandoverFailureJoining: Handover joining timeout at target eNB
-
-Similarly, one can hook up methods to the corresponding trace sources
-like this::
-
-   Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverFailureNoPreamble",
-                   MakeCallback(&NotifyHandoverFailureNoPreamble));
-   Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverFailureMaxRach",
-                   MakeCallback(&NotifyHandoverFailureMaxRach));
-   Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverFailureLeaving",
-                   MakeCallback(&NotifyHandoverFailureLeaving));
-   Config::Connect("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverFailureJoining",
-                   MakeCallback(&NotifyHandoverFailureJoining));
+   Config::Connect ("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverStart",
+                    MakeCallback (&NotifyHandoverStartEnb));
+   Config::Connect ("/NodeList/*/DeviceList/*/LteUeRrc/HandoverStart",
+                    MakeCallback (&NotifyHandoverStartUe));
+   Config::Connect ("/NodeList/*/DeviceList/*/LteEnbRrc/HandoverEndOk",
+                    MakeCallback (&NotifyHandoverEndOkEnb));
+   Config::Connect ("/NodeList/*/DeviceList/*/LteUeRrc/HandoverEndOk",
+                    MakeCallback (&NotifyHandoverEndOkUe));
 
 The example program ``src/lte/examples/lena-x2-handover.cc``
-illustrates how the above instructions can be integrated in a
+illustrates how the all above instructions can be integrated in a
 simulation program. You can run the program like this::
 
-   ./ns3 run lena-x2-handover
+   ./waf --run lena-x2-handover
 
 and it will output the messages printed by the custom handover trace
-hooks. In order to additionally print out some meaningful logging
+hooks. In order additionally visualize some meaningful logging
 information, you can run the program like this::
 
-    NS_LOG=LteEnbRrc:LteUeRrc:EpcX2 ./ns3 run lena-x2-handover
+    NS_LOG=LteEnbRrc:LteUeRrc:EpcX2 ./waf --run lena-x2-handover
 
 
 Frequency Reuse Algorithms
@@ -1694,8 +1547,8 @@ seven FR algorithms are implemented:
 Selecting a FR algorithm is done via the ``LteHelper`` object and
 its ``SetFfrAlgorithmType`` method as shown below::
 
-   Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-   lteHelper->SetFfrAlgorithmType("ns3::LteFrHardAlgorithm");
+   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+   lteHelper->SetFfrAlgorithmType ("ns3::LteFrHardAlgorithm");
 
 Each implemented FR algorithm provide several configurable attributes. Users do
 not have to care about UL and DL bandwidth configuration, because it is done
@@ -1703,8 +1556,8 @@ automatically during cell configuration. To change bandwidth for FR algorithm,
 configure required values for ``LteEnbNetDevice``::
 
    uint8_t bandwidth = 100;
-   lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(bandwidth));
-   lteHelper->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(bandwidth));
+   lteHelper->SetEnbDeviceAttribute ("DlBandwidth", UintegerValue (bandwidth));
+   lteHelper->SetEnbDeviceAttribute ("UlBandwidth", UintegerValue (bandwidth));
 
 
 Now, each FR algorithms configuration will be described.
@@ -1725,12 +1578,12 @@ Hard Frequency Reuse Algorithm provides following attributes:
 
 Example configuration of LteFrHardAlgorithm can be done in following way::
 
-   lteHelper->SetFfrAlgorithmType("ns3::LteFrHardAlgorithm");
-   lteHelper->SetFfrAlgorithmAttribute("DlSubBandOffset", UintegerValue(8));
-   lteHelper->SetFfrAlgorithmAttribute("DlSubBandwidth", UintegerValue(8));
-   lteHelper->SetFfrAlgorithmAttribute("UlSubBandOffset", UintegerValue(8));
-   lteHelper->SetFfrAlgorithmAttribute("UlSubBandwidth", UintegerValue(8));
-   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes.Get(0));
+   lteHelper->SetFfrAlgorithmType ("ns3::LteFrHardAlgorithm");
+   lteHelper->SetFfrAlgorithmAttribute ("DlSubBandOffset", UintegerValue (8));
+   lteHelper->SetFfrAlgorithmAttribute ("DlSubBandwidth", UintegerValue (8));
+   lteHelper->SetFfrAlgorithmAttribute ("UlSubBandOffset", UintegerValue (8));
+   lteHelper->SetFfrAlgorithmAttribute ("UlSubBandwidth", UintegerValue (8));
+   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice (enbNodes.Get(0));
 
 Above example allow eNB to use only RBs from 8 to 16 in DL and UL, while entire cell
 bandwidth is 25.
@@ -1764,21 +1617,21 @@ Example below allow eNB to use RBs from 0 to 6 as common sub-band and from 12 to
 private sub-band in DL and UL, RSRQ threshold is 20 dB, power in center area equals
 ``LteEnbPhy::TxPower - 3dB``, power in edge area equals ``LteEnbPhy::TxPower + 3dB``::
 
-   lteHelper->SetFfrAlgorithmType("ns3::LteFrStrictAlgorithm");
-   lteHelper->SetFfrAlgorithmAttribute("DlCommonSubBandwidth", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("UlCommonSubBandwidth", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("DlEdgeSubBandOffset", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("DlEdgeSubBandwidth", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("UlEdgeSubBandOffset", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("UlEdgeSubBandwidth", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("RsrqThreshold", UintegerValue(20));
-   lteHelper->SetFfrAlgorithmAttribute("CenterPowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB_3));
-   lteHelper->SetFfrAlgorithmAttribute("EdgePowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB3));
-   lteHelper->SetFfrAlgorithmAttribute("CenterAreaTpc", UintegerValue(1));
-   lteHelper->SetFfrAlgorithmAttribute("EdgeAreaTpc", UintegerValue(2));
-   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes.Get(0));
+   lteHelper->SetFfrAlgorithmType ("ns3::LteFrStrictAlgorithm");
+   lteHelper->SetFfrAlgorithmAttribute ("DlCommonSubBandwidth", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("UlCommonSubBandwidth", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("DlEdgeSubBandOffset", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("DlEdgeSubBandwidth", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("UlEdgeSubBandOffset", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("UlEdgeSubBandwidth", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("RsrqThreshold", UintegerValue (20));
+   lteHelper->SetFfrAlgorithmAttribute ("CenterPowerOffset",
+             UintegerValue (LteRrcSap::PdschConfigDedicated::dB_3));
+   lteHelper->SetFfrAlgorithmAttribute ("EdgePowerOffset",
+             UintegerValue (LteRrcSap::PdschConfigDedicated::dB3));
+   lteHelper->SetFfrAlgorithmAttribute ("CenterAreaTpc", UintegerValue (1));
+   lteHelper->SetFfrAlgorithmAttribute ("EdgeAreaTpc", UintegerValue (2));
+   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice (enbNodes.Get(0));
 
 
 Soft Frequency Reuse Algorithm
@@ -1807,18 +1660,18 @@ Example below configures RBs from 8 to 16 to be used by cell edge UEs and this s
 is not available for cell center users. RSRQ threshold is 20 dB, power in center area
 equals ``LteEnbPhy::TxPower``, power in edge area equals ``LteEnbPhy::TxPower + 3dB``::
 
-   lteHelper->SetFfrAlgorithmType("ns3::LteFrSoftAlgorithm");
-   lteHelper->SetFfrAlgorithmAttribute("DlEdgeSubBandOffset", UintegerValue(8));
-   lteHelper->SetFfrAlgorithmAttribute("DlEdgeSubBandwidth", UintegerValue(8));
-   lteHelper->SetFfrAlgorithmAttribute("UlEdgeSubBandOffset", UintegerValue(8));
-   lteHelper->SetFfrAlgorithmAttribute("UlEdgeSubBandwidth", UintegerValue(8));
-   lteHelper->SetFfrAlgorithmAttribute("AllowCenterUeUseEdgeSubBand", BooleanValue(false));
-   lteHelper->SetFfrAlgorithmAttribute("RsrqThreshold", UintegerValue(20));
-   lteHelper->SetFfrAlgorithmAttribute("CenterPowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB0));
-   lteHelper->SetFfrAlgorithmAttribute("EdgePowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB3));
-   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes.Get(0));
+   lteHelper->SetFfrAlgorithmType ("ns3::LteFrSoftAlgorithm");
+   lteHelper->SetFfrAlgorithmAttribute ("DlEdgeSubBandOffset", UintegerValue (8));
+   lteHelper->SetFfrAlgorithmAttribute ("DlEdgeSubBandwidth", UintegerValue (8));
+   lteHelper->SetFfrAlgorithmAttribute ("UlEdgeSubBandOffset", UintegerValue (8));
+   lteHelper->SetFfrAlgorithmAttribute ("UlEdgeSubBandwidth", UintegerValue (8));
+   lteHelper->SetFfrAlgorithmAttribute ("AllowCenterUeUseEdgeSubBand", BooleanValue (false));
+   lteHelper->SetFfrAlgorithmAttribute ("RsrqThreshold", UintegerValue (20));
+   lteHelper->SetFfrAlgorithmAttribute ("CenterPowerOffset",
+             UintegerValue (LteRrcSap::PdschConfigDedicated::dB0));
+   lteHelper->SetFfrAlgorithmAttribute ("EdgePowerOffset",
+                 UintegerValue (LteRrcSap::PdschConfigDedicated::dB3));
+   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice (enbNodes.Get(0));
 
 
 Soft Fractional Frequency Reuse Algorithm
@@ -1859,22 +1712,22 @@ and medium area is 28 dB, RSRQ threshold between medium and edge area is 18 dB.
 Power in center area equals ``LteEnbPhy::TxPower - 3dB``, power in medium area equals
 ``LteEnbPhy::TxPower + 3dB``, power in edge area equals ``LteEnbPhy::TxPower + 3dB``::
 
-   lteHelper->SetFfrAlgorithmType("ns3::LteFfrSoftAlgorithm");
-   lteHelper->SetFfrAlgorithmAttribute("UlCommonSubBandwidth", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("DlCommonSubBandwidth", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("DlEdgeSubBandOffset", UintegerValue(0));
-   lteHelper->SetFfrAlgorithmAttribute("DlEdgeSubBandwidth", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("UlEdgeSubBandOffset", UintegerValue(0));
-   lteHelper->SetFfrAlgorithmAttribute("UlEdgeSubBandwidth", UintegerValue(6));
-   lteHelper->SetFfrAlgorithmAttribute("CenterRsrqThreshold", UintegerValue(28));
-   lteHelper->SetFfrAlgorithmAttribute("EdgeRsrqThreshold", UintegerValue(18));
-   lteHelper->SetFfrAlgorithmAttribute("CenterAreaPowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB_3));
-   lteHelper->SetFfrAlgorithmAttribute("MediumAreaPowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB0));
-   lteHelper->SetFfrAlgorithmAttribute("EdgeAreaPowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB3));
-   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes.Get(0));
+   lteHelper->SetFfrAlgorithmType ("ns3::LteFfrSoftAlgorithm");
+   lteHelper->SetFfrAlgorithmAttribute ("UlCommonSubBandwidth", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("DlCommonSubBandwidth", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("DlEdgeSubBandOffset", UintegerValue (0));
+   lteHelper->SetFfrAlgorithmAttribute ("DlEdgeSubBandwidth", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("UlEdgeSubBandOffset", UintegerValue (0));
+   lteHelper->SetFfrAlgorithmAttribute ("UlEdgeSubBandwidth", UintegerValue (6));
+   lteHelper->SetFfrAlgorithmAttribute ("CenterRsrqThreshold", UintegerValue (28));
+   lteHelper->SetFfrAlgorithmAttribute ("EdgeRsrqThreshold", UintegerValue (18));
+   lteHelper->SetFfrAlgorithmAttribute ("CenterAreaPowerOffset",
+             UintegerValue (LteRrcSap::PdschConfigDedicated::dB_3));
+   lteHelper->SetFfrAlgorithmAttribute ("MediumAreaPowerOffset",
+             UintegerValue (LteRrcSap::PdschConfigDedicated::dB0));
+   lteHelper->SetFfrAlgorithmAttribute ("EdgeAreaPowerOffset",
+             UintegerValue (LteRrcSap::PdschConfigDedicated::dB3));
+   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice (enbNodes.Get(0));
 
 
 Enhanced Fractional Frequency Reuse Algorithm
@@ -1920,19 +1773,19 @@ thresholds are set to value of 10. Power in center area equals ``LteEnbPhy::TxPo
 power in edge area equals ``LteEnbPhy::TxPower + 0dB``::
 
    lteHelper->SetFfrAlgorithmType("ns3::LteFfrEnhancedAlgorithm");
-   lteHelper->SetFfrAlgorithmAttribute("RsrqThreshold", UintegerValue(25));
-   lteHelper->SetFfrAlgorithmAttribute("DlCqiThreshold", UintegerValue(10));
-   lteHelper->SetFfrAlgorithmAttribute("UlCqiThreshold", UintegerValue(10));
+   lteHelper->SetFfrAlgorithmAttribute("RsrqThreshold", UintegerValue (25));
+   lteHelper->SetFfrAlgorithmAttribute("DlCqiThreshold", UintegerValue (10));
+   lteHelper->SetFfrAlgorithmAttribute("UlCqiThreshold", UintegerValue (10));
    lteHelper->SetFfrAlgorithmAttribute("CenterAreaPowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB_6));
+          UintegerValue (LteRrcSap::PdschConfigDedicated::dB_6));
    lteHelper->SetFfrAlgorithmAttribute("EdgeAreaPowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB0));
-   lteHelper->SetFfrAlgorithmAttribute("UlSubBandOffset", UintegerValue(0));
-   lteHelper->SetFfrAlgorithmAttribute("UlReuse3SubBandwidth", UintegerValue(4));
-   lteHelper->SetFfrAlgorithmAttribute("UlReuse1SubBandwidth", UintegerValue(4));
-   lteHelper->SetFfrAlgorithmAttribute("DlSubBandOffset", UintegerValue(0));
-   lteHelper->SetFfrAlgorithmAttribute("DlReuse3SubBandwidth", UintegerValue(4));
-   lteHelper->SetFfrAlgorithmAttribute("DlReuse1SubBandwidth", UintegerValue(4));
+          UintegerValue (LteRrcSap::PdschConfigDedicated::dB0));
+   lteHelper->SetFfrAlgorithmAttribute("UlSubBandOffset", UintegerValue (0));
+   lteHelper->SetFfrAlgorithmAttribute("UlReuse3SubBandwidth", UintegerValue (4));
+   lteHelper->SetFfrAlgorithmAttribute("UlReuse1SubBandwidth", UintegerValue (4));
+   lteHelper->SetFfrAlgorithmAttribute("DlSubBandOffset", UintegerValue (0));
+   lteHelper->SetFfrAlgorithmAttribute("DlReuse3SubBandwidth", UintegerValue (4));
+   lteHelper->SetFfrAlgorithmAttribute("DlReuse1SubBandwidth", UintegerValue (4));
 
 
 Distributed Fractional Frequency Reuse Algorithm
@@ -1945,7 +1798,7 @@ EPC scenarios.
 With Distributed Fractional Frequency Reuse  Algorithm, eNb uses entire cell bandwidth and there can
 be two sub-bands: center sub-band and edge sub-band . Within these sub-bands UEs can be served with
 different power level. Algorithm adaptively selects RBs for cell-edge sub-band on basis of
-coordination information (i.e. RNTP) from adjacent cells and notifies the base stations of the adjacent cells,
+coordination information (i.e. RNTP) from adjecent cells and notifies the base stations of the adjacent cells,
 which RBs it selected to use in edge sub-band. If there are no UE classified as edge UE in cell,
 eNB will not use any RBs as edge sub-band.
 
@@ -1970,13 +1823,13 @@ Power in center area equals ``LteEnbPhy::TxPower - 0dB``, power in edge area equ
 
   lteHelper->SetFfrAlgorithmType("ns3::LteFfrDistributedAlgorithm");
   lteHelper->SetFfrAlgorithmAttribute("CalculationInterval", TimeValue(MilliSeconds(500)));
-  lteHelper->SetFfrAlgorithmAttribute("RsrqThreshold", UintegerValue(25));
-  lteHelper->SetFfrAlgorithmAttribute("RsrpDifferenceThreshold", UintegerValue(5));
-  lteHelper->SetFfrAlgorithmAttribute("EdgeRbNum", UintegerValue(6));
-  lteHelper->SetFfrAlgorithmAttribute("CenterPowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB0));
-  lteHelper->SetFfrAlgorithmAttribute("EdgePowerOffset",
-                                       UintegerValue(LteRrcSap::PdschConfigDedicated::dB3));
+  lteHelper->SetFfrAlgorithmAttribute ("RsrqThreshold", UintegerValue (25));
+  lteHelper->SetFfrAlgorithmAttribute ("RsrpDifferenceThreshold", UintegerValue (5));
+  lteHelper->SetFfrAlgorithmAttribute ("EdgeRbNum", UintegerValue (6));
+  lteHelper->SetFfrAlgorithmAttribute ("CenterPowerOffset",
+          UintegerValue (LteRrcSap::PdschConfigDedicated::dB0));
+  lteHelper->SetFfrAlgorithmAttribute ("EdgePowerOffset",
+          UintegerValue (LteRrcSap::PdschConfigDedicated::dB3));
 
 
 Automatic configuration
@@ -1998,8 +1851,8 @@ configuration.
 Example below show automatic FR algorithm configuration::
 
    lteHelper->SetFfrAlgorithmType("ns3::LteFfrSoftAlgorithm");
-   lteHelper->SetFfrAlgorithmAttribute("FrCellTypeId", UintegerValue(1));
-   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes.Get(0));
+   lteHelper->SetFfrAlgorithmAttribute("FrCellTypeId", UintegerValue (1));
+   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice (enbNodes.Get(0));
 
 
 Uplink Power Control
@@ -2043,10 +1896,10 @@ Traced values in Uplink Power Control:
 
 Example configuration is presented below::
 
-  Config::SetDefault("ns3::LteUePhy::EnableUplinkPowerControl", BooleanValue(true));
-  Config::SetDefault("ns3::LteEnbPhy::TxPower", DoubleValue(30));
-  Config::SetDefault("ns3::LteUePowerControl::ClosedLoop", BooleanValue(true));
-  Config::SetDefault("ns3::LteUePowerControl::AccumulationEnabled", BooleanValue(true));
+  Config::SetDefault ("ns3::LteUePhy::EnableUplinkPowerControl", BooleanValue (true));
+  Config::SetDefault ("ns3::LteEnbPhy::TxPower", DoubleValue (30));
+  Config::SetDefault ("ns3::LteUePowerControl::ClosedLoop", BooleanValue (true));
+  Config::SetDefault ("ns3::LteUePowerControl::AccumulationEnabled", BooleanValue (true));
 
 As an example, user can take a look and run the lena-uplink-power-control program.
 
@@ -2072,7 +1925,7 @@ be found in the literature. Here we list some of them:
    changing the corresponding global variables. To get a list of all these
    global variables, you can run this command::
 
-     ./ns3 run lena-dual-stripe --command-template="%s --PrintGlobals"
+     ./waf --run lena-dual-stripe --command-template="%s --PrintGlobals"
 
    The following subsection presents an example of running a simulation
    campaign using this example program.
@@ -2097,28 +1950,28 @@ Finally, SINR can be obtained by enabling the PHY simulation output. The
 following sample code snippet shows one possible way to obtain the above::
 
    void
-   NotifyHandoverEndOkUe(std::string context, uint64_t imsi,
-                         uint16_t cellId, uint16_t rnti)
+   NotifyHandoverEndOkUe (std::string context, uint64_t imsi,
+                          uint16_t cellId, uint16_t rnti)
    {
      std::cout << "Handover IMSI " << imsi << std::endl;
    }
 
    int
-   main(int argc, char *argv[])
+   main (int argc, char *argv[])
    {
      /*** SNIP ***/
 
-     Config::Connect("/NodeList/*/DeviceList/*/LteUeRrc/HandoverEndOk",
-                     MakeCallback(&NotifyHandoverEndOkUe));
+     Config::Connect ("/NodeList/*/DeviceList/*/LteUeRrc/HandoverEndOk",
+                      MakeCallback (&NotifyHandoverEndOkUe));
 
-     lteHelper->EnablePhyTraces();
-     lteHelper->EnableRlcTraces();
-     Ptr<RadioBearerStatsCalculator> rlcStats = lteHelper->GetRlcStats();
-     rlcStats->SetAttribute("StartTime", TimeValue(Seconds(0)));
-     rlcStats->SetAttribute("EpochDuration", TimeValue(Seconds(simTime)));
+     lteHelper->EnablePhyTraces ();
+     lteHelper->EnableRlcTraces ();
+     Ptr<RadioBearerStatsCalculator> rlcStats = lteHelper->GetRlcStats ();
+     rlcStats->SetAttribute ("StartTime", TimeValue (Seconds (0)));
+     rlcStats->SetAttribute ("EpochDuration", TimeValue (Seconds (simTime)));
 
-     Simulator::Run();
-     Simulator::Destroy();
+     Simulator::Run ();
+     Simulator::Destroy ();
      return 0;
    }
 
@@ -2205,11 +2058,11 @@ shown in Table :ref:`tab-handover-campaign-default-values` below.
 
 |ns3| provides many ways for passing configuration values into a simulation. In
 this example, we will use the command line arguments. It is basically done by
-appending the parameters and their values to the ``ns3`` call when starting each
-individual simulation. So the ``ns3`` calls for invoking our 3 simulations would
+appending the parameters and their values to the ``waf`` call when starting each
+individual simulation. So the ``waf`` calls for invoking our 3 simulations would
 look as below::
 
-   $ ./ns3 run "lena-dual-stripe
+   $ ./waf --run="lena-dual-stripe
      --simTime=50 --nBlocks=0 --nMacroEnbSites=7 --nMacroEnbSitesX=2
      --epc=1 --useUdp=0 --outdoorUeMinSpeed=16.6667 --outdoorUeMaxSpeed=16.6667
      --ns3::LteHelper::HandoverAlgorithm=ns3::NoOpHandoverAlgorithm
@@ -2219,7 +2072,7 @@ look as below::
      --ns3::PhyStatsCalculator::UlSinrFilename=no-op-UlSinrStats.txt
      --RngRun=1" > no-op.txt
 
-   $ ./ns3 run "lena-dual-stripe
+   $ ./waf --run="lena-dual-stripe
      --simTime=50 --nBlocks=0 --nMacroEnbSites=7 --nMacroEnbSitesX=2
      --epc=1 --useUdp=0 --outdoorUeMinSpeed=16.6667 --outdoorUeMaxSpeed=16.6667
      --ns3::LteHelper::HandoverAlgorithm=ns3::A3RsrpHandoverAlgorithm
@@ -2229,7 +2082,7 @@ look as below::
      --ns3::PhyStatsCalculator::UlSinrFilename=a3-rsrp-UlSinrStats.txt
      --RngRun=1" > a3-rsrp.txt
 
-   $ ./ns3 run "lena-dual-stripe
+   $ ./waf --run="lena-dual-stripe
      --simTime=50 --nBlocks=0 --nMacroEnbSites=7 --nMacroEnbSitesX=2
      --epc=1 --useUdp=0 --outdoorUeMinSpeed=16.6667 --outdoorUeMaxSpeed=16.6667
      --ns3::LteHelper::HandoverAlgorithm=ns3::A2A4RsrqHandoverAlgorithm
@@ -2386,7 +2239,7 @@ To run ``lena-frequency-reuse`` with different Frequency Reuse algorithms, user 
 FR algorithm by overriding the default attribute ``ns3::LteHelper::FfrAlgorithm``.
 Example command to run ``lena-frequency-reuse`` with Soft FR algorithm is presented below::
 
-   $ ./ns3 run "lena-frequency-reuse --ns3::LteHelper::FfrAlgorithm=ns3::LteFrSoftAlgorithm"
+   $ ./waf --run "lena-frequency-reuse --ns3::LteHelper::FfrAlgorithm=ns3::LteFrSoftAlgorithm"
 
 In these examples functionality to generate REM and spectrum analyzer trace was added.
 User can enable generation of it by setting ``generateRem`` and ``generateSpectrumTrace``
@@ -2395,7 +2248,7 @@ attributes.
 Command to generate REM for RB 1 in data channel from ``lena-frequency-reuse`` scenario
 with Soft FR algorithm is presented below::
 
-   $ ./ns3 run "lena-frequency-reuse --ns3::LteHelper::FfrAlgorithm=ns3::LteFrSoftAlgorithm
+   $ ./waf --run "lena-frequency-reuse --ns3::LteHelper::FfrAlgorithm=ns3::LteFrSoftAlgorithm
      --generateRem=true --remRbId=1"
 
 Radio Environment Map for Soft FR is presented in Figure :ref:`fig-lte-soft-fr-1-rem`.
@@ -2413,7 +2266,7 @@ Command to generate spectrum trace from ``lena-frequency-reuse`` scenario
 with Soft FFR algorithm is presented below (Spectrum Analyzer position needs to be configured
 inside script)::
 
-   $ ./ns3 run "lena-frequency-reuse --ns3::LteHelper::FfrAlgorithm=ns3::LteFfrSoftAlgorithm
+   $ ./waf --run "lena-frequency-reuse --ns3::LteHelper::FfrAlgorithm=ns3::LteFfrSoftAlgorithm
      --generateSpectrumTrace=true"
 
 Example spectrum analyzer trace is presented in figure :ref:`fig-lte-soft-ffr-2-spectrum-trace`.
@@ -2436,7 +2289,7 @@ along entire system bandwidth.
 User needs to specify FR algorithm by overriding the default attribute ``ns3::LteHelper::FfrAlgorithm``.
 Example command to run ``lena-dual-stripe`` with Hard FR algorithm is presented below::
 
-   $ ./ns3 run "lena-dual-stripe
+   $ ./waf --run="lena-dual-stripe
      --simTime=50 --nBlocks=0 --nMacroEnbSites=7 --nMacroEnbSitesX=2
      --epc=1 --useUdp=0 --outdoorUeMinSpeed=16.6667 --outdoorUeMaxSpeed=16.6667
      --ns3::LteHelper::HandoverAlgorithm=ns3::NoOpHandoverAlgorithm
@@ -2450,7 +2303,7 @@ Example command to run ``lena-dual-stripe`` with Hard FR algorithm is presented 
 Example command to generate REM for RB 1 in data channel from ``lena-dual-stripe`` scenario
 with Hard FR algorithm is presented below::
 
-   $ ./ns3 run "lena-dual-stripe
+   $ ./waf --run="lena-dual-stripe
      --simTime=50 --nBlocks=0 --nMacroEnbSites=7 --nMacroEnbSitesX=2
      --epc=0 --useUdp=0 --outdoorUeMinSpeed=16.6667 --outdoorUeMaxSpeed=16.6667
      --ns3::LteHelper::HandoverAlgorithm=ns3::NoOpHandoverAlgorithm
@@ -2499,9 +2352,9 @@ The CCM can be configured by using the attribute ``LteHelper::EnbComponentCarrie
 
 An example configuration is presented below::
 
-  Config::SetDefault("ns3::LteHelper::UseCa", BooleanValue(useCa));
-  Config::SetDefault("ns3::LteHelper::NumberOfComponentCarriers", UintegerValue(2));
-  Config::SetDefault("ns3::LteHelper::EnbComponentCarrierManager", StringValue("ns3::RrComponentCarrierManager"));
+  Config::SetDefault ("ns3::LteHelper::UseCa", BooleanValue (useCa));
+  Config::SetDefault ("ns3::LteHelper::NumberOfComponentCarriers", UintegerValue (2));
+  Config::SetDefault ("ns3::LteHelper::EnbComponentCarrierManager", StringValue ("ns3::RrComponentCarrierManager"));
 
 As an example, the user can take a look and run the ``lena-simple`` and ``lena-simple-epc`` programs and enable LTE traces
 to check the performance. A new column is added to PHY and MAC traces to indicate the component carrier.
@@ -2509,7 +2362,7 @@ to check the performance. A new column is added to PHY and MAC traces to indicat
 The test suite ``lte-carrier-aggregation`` is also a test program that can be used as an example as it can be run in a mode to write results
 to output files by setting the ``s_writeResults`` boolean static variable to true. The test can be run by using a `test-runner`:
 
-   ./ns3 run 'test-runner --suite=lte-carrier-aggregation'
+   ./waf --run 'test-runner --suite=lte-carrier-aggregation'
 
 To plot the test results, a file has to be created in the root folder of the ns-3 repository, and added to it with the following content :
 
@@ -2557,136 +2410,6 @@ figures are generated. An example to run this test suite is shown in figures:
    Example of CA test performance in the downlink
 
 
-Radio link failure example
---------------------------
-
-The example *lena-radio-link-failure.cc* is an example to simulate the RLF
-functionality. In particular, it simulates only one moving UE using *Ideal* or *Real*
-RRC protocol with EPC performing downlink and uplink communication in two
-scenarios shown in :ref:`lena-radio-link-failure-one-enb` and
-:ref:`lena-radio-link-failure-two-enb`
-
-.. _lena-radio-link-failure-one-enb:
-
-.. figure:: figures/lena-radio-link-failure-one-enb.*
-   :align: center
-
-   Scenario A: Radio link failure example with one eNB
-
-We note that, the RLF detection is enabled by default, which can be disabled by
-configuring the ``LteUePhy::EnableRlfDetection`` to false, e.g.,::
-
- Config::SetDefault("ns3::LteUePhy::EnableRlfDetection", BooleanValue(false));
-
-In this example, to study the impact of a RLF on the user's quality of experience,
-we compute an instantaneous (i.e., every 200 ms) DL throughput of the UE, and
-writes it into a file for plotting purposes. For example, to simulate the "Scenario
-A" with *Ideal* and *Real* RRC protocol a user can use the following commands::
-
-  Ideal RRC:
-  ./ns3 run "lena-radio-link-failure
-  --numberOfEnbs=1 --useIdealRrc=1
-  --interSiteDistance=1200 --n310=1 --n311=1
-  --t310=1 --enableCtrlErrorModel=1
-  --enableDataErrorModel=1 --simTime=25"
-
-  Real RRC:
-  ./ns3 run "lena-radio-link-failure
-  --numberOfEnbs=1 --useIdealRrc=0
-  --interSiteDistance=1200 --n310=1 --n311=1
-  --t310=1 --enableCtrlErrorModel=1
-  --enableDataErrorModel=1 --simTime=25"
-
-After running the above two commands, we can use a simple gnuplot script to plot
-the throughput as shown in the Figure :ref:`fig-lena-radio-link-failure-one-enb-thrput`
-, e.g., ::
-
- set terminal png
- set output  "lena-radio-link-failure-one-enb-thrput.png"
- set multiplot
- set xlabel "Time [s]"
- set ylabel "Instantaneous throughput UE [Mbps]"
- set grid
- set title "LTE RLF example 1 eNB DL instantaneous throughput"
- plot "rlf_dl_thrput_1_eNB_ideal_rrc" using ($1):($2) with linespoints
- title 'Ideal RRC' linestyle 1 lw 2 lc rgb 'blue', "rlf_dl_thrput_1_eNB_real_rrc"
- using ($1):($2) with linespoints title 'Real RRC' linestyle 2 lw 2 lc rgb 'red'
-
- unset multiplot
-
-.. _fig-lena-radio-link-failure-one-enb-thrput:
-
-.. figure:: figures/lena-radio-link-failure-one-enb-thrput.png
-   :align: center
-
-   Downlink instantaneous throughput of UE in scenario A
-
-In the simulator, a UE can synchronize (i.e., start reading system information)
-with an eNB at a low RSRP level, which defaults to -140 dBm (see QRxLevMin attribute of eNB RRC).
-It enables the UE to start the random access procedure with the eNB. In this scenario,
-when using the *Ideal* RRC the UE after the RLF will connect and disconnect from
-the eNB several times. This is because in the *Ideal* RRC mode, once the UE is
-able to receive Random Access Response (RAR) from the eNB, it can complete the
-RRC connection establishment procedure
-(:ref:`sec-rrc-connection-establishment`) without any
-errors, since all the RRC messages are exchanged ideally between the eNB and the UE.
-However, soon after the connection establishment, it ends up in RLF due to the
-poor channel quality. On the other hand, with the *Real* RRC the UE after the RLF
-will not be able to complete the RRC connection establishment procedure due to
-the loss of RRC messages. Thus, it will not be able to establish the connection
-with the eNB. Therefore, in both the cases the UE throughput drops to zero as shown in the
-Figure :ref:`fig-lena-radio-link-failure-one-enb-thrput`. It is also worthwhile
-to mention that towards the end of the simulation (using *Ideal* or *Real* RRC)
-there are occasions where RAR timer at the UE MAC would timeout due to the
-increased distance between the eNB and the UE, which causes errors while decoding
-this message at the UE (Note: the downlink control error model is enabled by default).
-
-
-.. _lena-radio-link-failure-two-enb:
-
-.. figure:: figures/lena-radio-link-failure-two-enb.*
-   :align: center
-
-   Scenario B: Radio link failure example with two eNBs
-
-Similarly, to simulate the "Scenario B" with *Ideal* and *Real* RRC protocol
-following commands can be used::
-
-  Ideal RRC:
-  ./ns3 run "lena-radio-link-failure
-  --numberOfEnbs=2 --useIdealRrc=1
-  --interSiteDistance=1200 --n310=1 --n311=1
-  --t310=1 --enableCtrlErrorModel=1
-  --enableDataErrorModel=1 --simTime=25"
-
-  Real RRC:
-  ./ns3 run "lena-radio-link-failure
-  --numberOfEnbs=2 --useIdealRrc=0
-  --interSiteDistance=1200 --n310=1 --n311=1
-  --t310=1 --enableCtrlErrorModel=1
-  --enableDataErrorModel=1 --simTime=25"
-
-Figure :ref:`fig-lena-radio-link-failure-two-enb-thrput`, shows the throughput
-in "Scenario B". We note that in this scenario the handover algorithm is not used.
-As expected, with *Ideal* RRC protocol the UE after the RLF can complete
-the random access procedure with the second eNB. Interestingly, the DL SINR after
-the connection establishment is not low enough to trigger the RLF, but it is
-low enough to impact the DL control reception for some TBs, which in turn causes
-loss of data. It can be observed from the slightly unstable throughput of the UE
-after connecting to the second eNB. On the other hand, with *Real* RRC the UE faces
-problems in connection establishment phase due to the loss of RRC messages, in
-particular, the RRC connection request from the UE. This is the reason why the
-UE throughput after the RLF remains zero for a more extended period as compared
-to the *ideal* RRC protocol.
-
-.. _fig-lena-radio-link-failure-two-enb-thrput:
-
-.. figure:: figures/lena-radio-link-failure-two-enb-thrput.png
-   :align: center
-
-   Downlink instantaneous throughput of UE in scenario B
-
-
 
 Troubleshooting and debugging tips
 ---------------------------------------------------
@@ -2706,6 +2429,8 @@ output is as expected. In detail:
 
  * then check packet transmissions on the data plane, starting by
    enabling the log components LteUeNetDevice and the
-   EpcSgwApplication, EpcPgwApplication and EpcEnbApplication, then moving down the
+   EpcSgwPgwApplication, then EpcEnbApplication, then moving down the
    LTE radio stack (PDCP, RLC, MAC, and finally PHY). All this until
    you find where packets stop being processed / forwarded.
+
+

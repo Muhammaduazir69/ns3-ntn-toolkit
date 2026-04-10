@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 CTTC
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  */
@@ -254,7 +266,7 @@ EpcTft::Matches(Direction direction,
 {
     NS_LOG_FUNCTION(this << direction << remoteAddress << localAddress << std::dec << remotePort
                          << localPort << (uint16_t)typeOfService);
-    for (auto it = m_filters.begin(); it != m_filters.end(); ++it)
+    for (std::list<PacketFilter>::iterator it = m_filters.begin(); it != m_filters.end(); ++it)
     {
         if (it->Matches(direction,
                         remoteAddress,
@@ -279,7 +291,7 @@ EpcTft::Matches(Direction direction,
 {
     NS_LOG_FUNCTION(this << direction << remoteAddress << localAddress << std::dec << remotePort
                          << localPort << (uint16_t)typeOfService);
-    for (auto it = m_filters.begin(); it != m_filters.end(); ++it)
+    for (std::list<PacketFilter>::iterator it = m_filters.begin(); it != m_filters.end(); ++it)
     {
         if (it->Matches(direction,
                         remoteAddress,
@@ -292,13 +304,6 @@ EpcTft::Matches(Direction direction,
         }
     }
     return false;
-}
-
-std::list<EpcTft::PacketFilter>
-EpcTft::GetPacketFilters() const
-{
-    NS_LOG_FUNCTION(this);
-    return m_filters;
 }
 
 } // namespace ns3

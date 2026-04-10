@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2013 Budiarto Herman
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Budiarto Herman <budiarto.herman@magister.fi>
  *
@@ -38,6 +50,7 @@ NS_LOG_COMPONENT_DEFINE("LteHandoverTargetTest");
 
 /**
  * \ingroup lte-test
+ * \ingroup tests
  *
  * \brief Testing a handover algorithm, verifying that it selects the right
  *        target cell when more than one options available.
@@ -78,7 +91,7 @@ class LteHandoverTargetTestCase : public TestCase
                               uint16_t targetCellId,
                               std::string handoverAlgorithmType);
 
-    ~LteHandoverTargetTestCase() override;
+    virtual ~LteHandoverTargetTestCase();
 
     /**
      * \brief Triggers when an eNodeB starts a handover and then verifies that
@@ -110,13 +123,13 @@ class LteHandoverTargetTestCase : public TestCase
      * \brief Run a simulation of a micro-cell network using the parameters
      *        provided to the constructor function.
      */
-    void DoRun() override;
+    virtual void DoRun();
 
     /**
      * \brief Called at the end of simulation and verifies that a handover has
      *        occurred in the simulation.
      */
-    void DoTeardown() override;
+    virtual void DoTeardown();
 
     // simulation parameters
     Vector m_uePosition;                 ///< UE positions
@@ -145,7 +158,7 @@ LteHandoverTargetTestCase::LteHandoverTargetTestCase(std::string name,
       m_sourceCellId(sourceCellId),
       m_targetCellId(targetCellId),
       m_handoverAlgorithmType(handoverAlgorithmType),
-      m_sourceEnbDev(nullptr),
+      m_sourceEnbDev(0),
       m_hasHandoverOccurred(false)
 {
     NS_LOG_INFO(this << " name=" << name);
@@ -402,7 +415,7 @@ LteHandoverTargetTestSuite::LteHandoverTargetTestSuite()
                                               1,
                                               3,
                                               "ns3::A2A4RsrqHandoverAlgorithm"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteHandoverTargetTestCase("4 cells and strongest cell algorithm",
                                               Vector(20, 40, 0),
                                               2,
@@ -410,7 +423,7 @@ LteHandoverTargetTestSuite::LteHandoverTargetTestSuite()
                                               1,
                                               3,
                                               "ns3::A3RsrpHandoverAlgorithm"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     /*
      *    4 --- 5 --- 6
@@ -425,7 +438,7 @@ LteHandoverTargetTestSuite::LteHandoverTargetTestSuite()
                                               5,
                                               2,
                                               "ns3::A2A4RsrqHandoverAlgorithm"),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
     AddTestCase(new LteHandoverTargetTestCase("6 cells and strongest cell algorithm",
                                               Vector(150, 90, 0),
                                               3,
@@ -433,12 +446,8 @@ LteHandoverTargetTestSuite::LteHandoverTargetTestSuite()
                                               5,
                                               2,
                                               "ns3::A3RsrpHandoverAlgorithm"),
-                TestCase::Duration::EXTENSIVE);
+                Duration::EXTENSIVE);
 
 } // end of LteHandoverTargetTestSuite ()
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteHandoverTargetTestSuite g_lteHandoverTargetTestSuiteInstance;

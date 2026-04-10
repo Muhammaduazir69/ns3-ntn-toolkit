@@ -1,24 +1,42 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2016, University of Padova, Dep. of Information Engineering, SIGNET lab
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Marco Miozzo <marco.miozzo@cttc.es>
  *         Nicola Baldo  <nbaldo@cttc.es>
  * Modified by:
  *          Danilo Abrignani <danilo.abrignani@unibo.it> (Carrier Aggregation - GSoC 2015)
  *          Biljana Bojovic <biljana.bojovic@cttc.es> (Carrier Aggregation)
+ * Modified by: Michele Polese <michele.polese@gmail.com>
+ *          Dual Connectivity functionalities
  */
 
-#include "lte-enb-mac.h"
-
-#include "lte-common.h"
+#include "lte-amc.h"
 #include "lte-control-messages.h"
-#include "lte-enb-cmac-sap.h"
-#include "lte-mac-sap.h"
-#include "lte-radio-bearer-tag.h"
+#include "lte-enb-net-device.h"
+#include "lte-ue-net-device.h"
 
+#include "ns3/lte-enb-cmac-sap.h"
+#include "ns3/lte-mac-sap.h"
 #include <ns3/log.h>
+#include <ns3/lte-common.h>
+#include <ns3/lte-enb-mac.h>
+#include <ns3/lte-radio-bearer-tag.h>
+#include <ns3/lte-ue-phy.h>
 #include <ns3/packet.h>
 #include <ns3/pointer.h>
 #include <ns3/simulator.h>
@@ -46,15 +64,15 @@ class EnbMacMemberLteEnbCmacSapProvider : public LteEnbCmacSapProvider
     EnbMacMemberLteEnbCmacSapProvider(LteEnbMac* mac);
 
     // inherited from LteEnbCmacSapProvider
-    void ConfigureMac(uint16_t ulBandwidth, uint16_t dlBandwidth) override;
-    void AddUe(uint16_t rnti) override;
-    void RemoveUe(uint16_t rnti) override;
-    void AddLc(LcInfo lcinfo, LteMacSapUser* msu) override;
-    void ReconfigureLc(LcInfo lcinfo) override;
-    void ReleaseLc(uint16_t rnti, uint8_t lcid) override;
-    void UeUpdateConfigurationReq(UeConfig params) override;
-    RachConfig GetRachConfig() override;
-    AllocateNcRaPreambleReturnValue AllocateNcRaPreamble(uint16_t rnti) override;
+    virtual void ConfigureMac(uint8_t ulBandwidth, uint8_t dlBandwidth);
+    virtual void AddUe(uint16_t rnti);
+    virtual void RemoveUe(uint16_t rnti);
+    virtual void AddLc(LcInfo lcinfo, LteMacSapUser* msu);
+    virtual void ReconfigureLc(LcInfo lcinfo);
+    virtual void ReleaseLc(uint16_t rnti, uint8_t lcid);
+    virtual void UeUpdateConfigurationReq(UeConfig params);
+    virtual RachConfig GetRachConfig();
+    virtual AllocateNcRaPreambleReturnValue AllocateNcRaPreamble(uint16_t rnti);
 
   private:
     LteEnbMac* m_mac; ///< the MAC
@@ -66,7 +84,7 @@ EnbMacMemberLteEnbCmacSapProvider::EnbMacMemberLteEnbCmacSapProvider(LteEnbMac* 
 }
 
 void
-EnbMacMemberLteEnbCmacSapProvider::ConfigureMac(uint16_t ulBandwidth, uint16_t dlBandwidth)
+EnbMacMemberLteEnbCmacSapProvider::ConfigureMac(uint8_t ulBandwidth, uint8_t dlBandwidth)
 {
     m_mac->DoConfigureMac(ulBandwidth, dlBandwidth);
 }
@@ -130,8 +148,8 @@ class EnbMacMemberFfMacSchedSapUser : public FfMacSchedSapUser
      */
     EnbMacMemberFfMacSchedSapUser(LteEnbMac* mac);
 
-    void SchedDlConfigInd(const SchedDlConfigIndParameters& params) override;
-    void SchedUlConfigInd(const SchedUlConfigIndParameters& params) override;
+    virtual void SchedDlConfigInd(const struct SchedDlConfigIndParameters& params);
+    virtual void SchedUlConfigInd(const struct SchedUlConfigIndParameters& params);
 
   private:
     LteEnbMac* m_mac; ///< the MAC
@@ -143,13 +161,13 @@ EnbMacMemberFfMacSchedSapUser::EnbMacMemberFfMacSchedSapUser(LteEnbMac* mac)
 }
 
 void
-EnbMacMemberFfMacSchedSapUser::SchedDlConfigInd(const SchedDlConfigIndParameters& params)
+EnbMacMemberFfMacSchedSapUser::SchedDlConfigInd(const struct SchedDlConfigIndParameters& params)
 {
     m_mac->DoSchedDlConfigInd(params);
 }
 
 void
-EnbMacMemberFfMacSchedSapUser::SchedUlConfigInd(const SchedUlConfigIndParameters& params)
+EnbMacMemberFfMacSchedSapUser::SchedUlConfigInd(const struct SchedUlConfigIndParameters& params)
 {
     m_mac->DoSchedUlConfigInd(params);
 }
@@ -165,13 +183,14 @@ class EnbMacMemberFfMacCschedSapUser : public FfMacCschedSapUser
      */
     EnbMacMemberFfMacCschedSapUser(LteEnbMac* mac);
 
-    void CschedCellConfigCnf(const CschedCellConfigCnfParameters& params) override;
-    void CschedUeConfigCnf(const CschedUeConfigCnfParameters& params) override;
-    void CschedLcConfigCnf(const CschedLcConfigCnfParameters& params) override;
-    void CschedLcReleaseCnf(const CschedLcReleaseCnfParameters& params) override;
-    void CschedUeReleaseCnf(const CschedUeReleaseCnfParameters& params) override;
-    void CschedUeConfigUpdateInd(const CschedUeConfigUpdateIndParameters& params) override;
-    void CschedCellConfigUpdateInd(const CschedCellConfigUpdateIndParameters& params) override;
+    virtual void CschedCellConfigCnf(const struct CschedCellConfigCnfParameters& params);
+    virtual void CschedUeConfigCnf(const struct CschedUeConfigCnfParameters& params);
+    virtual void CschedLcConfigCnf(const struct CschedLcConfigCnfParameters& params);
+    virtual void CschedLcReleaseCnf(const struct CschedLcReleaseCnfParameters& params);
+    virtual void CschedUeReleaseCnf(const struct CschedUeReleaseCnfParameters& params);
+    virtual void CschedUeConfigUpdateInd(const struct CschedUeConfigUpdateIndParameters& params);
+    virtual void CschedCellConfigUpdateInd(
+        const struct CschedCellConfigUpdateIndParameters& params);
 
   private:
     LteEnbMac* m_mac; ///< the MAC
@@ -183,45 +202,48 @@ EnbMacMemberFfMacCschedSapUser::EnbMacMemberFfMacCschedSapUser(LteEnbMac* mac)
 }
 
 void
-EnbMacMemberFfMacCschedSapUser::CschedCellConfigCnf(const CschedCellConfigCnfParameters& params)
+EnbMacMemberFfMacCschedSapUser::CschedCellConfigCnf(
+    const struct CschedCellConfigCnfParameters& params)
 {
     m_mac->DoCschedCellConfigCnf(params);
 }
 
 void
-EnbMacMemberFfMacCschedSapUser::CschedUeConfigCnf(const CschedUeConfigCnfParameters& params)
+EnbMacMemberFfMacCschedSapUser::CschedUeConfigCnf(const struct CschedUeConfigCnfParameters& params)
 {
     m_mac->DoCschedUeConfigCnf(params);
 }
 
 void
-EnbMacMemberFfMacCschedSapUser::CschedLcConfigCnf(const CschedLcConfigCnfParameters& params)
+EnbMacMemberFfMacCschedSapUser::CschedLcConfigCnf(const struct CschedLcConfigCnfParameters& params)
 {
     m_mac->DoCschedLcConfigCnf(params);
 }
 
 void
-EnbMacMemberFfMacCschedSapUser::CschedLcReleaseCnf(const CschedLcReleaseCnfParameters& params)
+EnbMacMemberFfMacCschedSapUser::CschedLcReleaseCnf(
+    const struct CschedLcReleaseCnfParameters& params)
 {
     m_mac->DoCschedLcReleaseCnf(params);
 }
 
 void
-EnbMacMemberFfMacCschedSapUser::CschedUeReleaseCnf(const CschedUeReleaseCnfParameters& params)
+EnbMacMemberFfMacCschedSapUser::CschedUeReleaseCnf(
+    const struct CschedUeReleaseCnfParameters& params)
 {
     m_mac->DoCschedUeReleaseCnf(params);
 }
 
 void
 EnbMacMemberFfMacCschedSapUser::CschedUeConfigUpdateInd(
-    const CschedUeConfigUpdateIndParameters& params)
+    const struct CschedUeConfigUpdateIndParameters& params)
 {
     m_mac->DoCschedUeConfigUpdateInd(params);
 }
 
 void
 EnbMacMemberFfMacCschedSapUser::CschedCellConfigUpdateInd(
-    const CschedCellConfigUpdateIndParameters& params)
+    const struct CschedCellConfigUpdateIndParameters& params)
 {
     m_mac->DoCschedCellConfigUpdateInd(params);
 }
@@ -238,13 +260,13 @@ class EnbMacMemberLteEnbPhySapUser : public LteEnbPhySapUser
     EnbMacMemberLteEnbPhySapUser(LteEnbMac* mac);
 
     // inherited from LteEnbPhySapUser
-    void ReceivePhyPdu(Ptr<Packet> p) override;
-    void SubframeIndication(uint32_t frameNo, uint32_t subframeNo) override;
-    void ReceiveLteControlMessage(Ptr<LteControlMessage> msg) override;
-    void ReceiveRachPreamble(uint32_t prachId) override;
-    void UlCqiReport(FfMacSchedSapProvider::SchedUlCqiInfoReqParameters ulcqi) override;
-    void UlInfoListElementHarqFeedback(UlInfoListElement_s params) override;
-    void DlInfoListElementHarqFeedback(DlInfoListElement_s params) override;
+    virtual void ReceivePhyPdu(Ptr<Packet> p);
+    virtual void SubframeIndication(uint32_t frameNo, uint32_t subframeNo);
+    virtual void ReceiveLteControlMessage(Ptr<LteControlMessage> msg);
+    virtual void ReceiveRachPreamble(uint32_t prachId);
+    virtual void UlCqiReport(FfMacSchedSapProvider::SchedUlCqiInfoReqParameters ulcqi);
+    virtual void UlInfoListElementHarqFeeback(UlInfoListElement_s params);
+    virtual void DlInfoListElementHarqFeeback(DlInfoListElement_s params);
 
   private:
     LteEnbMac* m_mac; ///< the MAC
@@ -286,15 +308,15 @@ EnbMacMemberLteEnbPhySapUser::UlCqiReport(FfMacSchedSapProvider::SchedUlCqiInfoR
 }
 
 void
-EnbMacMemberLteEnbPhySapUser::UlInfoListElementHarqFeedback(UlInfoListElement_s params)
+EnbMacMemberLteEnbPhySapUser::UlInfoListElementHarqFeeback(UlInfoListElement_s params)
 {
-    m_mac->DoUlInfoListElementHarqFeedback(params);
+    m_mac->DoUlInfoListElementHarqFeeback(params);
 }
 
 void
-EnbMacMemberLteEnbPhySapUser::DlInfoListElementHarqFeedback(DlInfoListElement_s params)
+EnbMacMemberLteEnbPhySapUser::DlInfoListElementHarqFeeback(DlInfoListElement_s params)
 {
-    m_mac->DoDlInfoListElementHarqFeedback(params);
+    m_mac->DoDlInfoListElementHarqFeeback(params);
 }
 
 // //////////////////////////////////////
@@ -302,7 +324,7 @@ EnbMacMemberLteEnbPhySapUser::DlInfoListElementHarqFeedback(DlInfoListElement_s 
 // //////////////////////////////////////
 
 TypeId
-LteEnbMac::GetTypeId()
+LteEnbMac::GetTypeId(void)
 {
     static TypeId tid =
         TypeId("ns3::LteEnbMac")
@@ -326,11 +348,6 @@ LteEnbMac::GetTypeId()
                           UintegerValue(3),
                           MakeUintegerAccessor(&LteEnbMac::m_raResponseWindowSize),
                           MakeUintegerChecker<uint8_t>(2, 10))
-            .AddAttribute("ConnEstFailCount",
-                          "how many time T300 timer can expire on the same cell",
-                          UintegerValue(1),
-                          MakeUintegerAccessor(&LteEnbMac::m_connEstFailCount),
-                          MakeUintegerChecker<uint8_t>(1, 4))
             .AddTraceSource("DlScheduling",
                             "Information regarding DL scheduling.",
                             MakeTraceSourceAccessor(&LteEnbMac::m_dlScheduling),
@@ -349,7 +366,7 @@ LteEnbMac::GetTypeId()
 }
 
 LteEnbMac::LteEnbMac()
-    : m_ccmMacSapUser(nullptr)
+    : m_ccmMacSapUser(0)
 {
     NS_LOG_FUNCTION(this);
     m_macSapProvider = new EnbMacMemberLteMacSapProvider<LteEnbMac>(this);
@@ -396,7 +413,7 @@ LteEnbMac::SetFfMacSchedSapProvider(FfMacSchedSapProvider* s)
 }
 
 FfMacSchedSapUser*
-LteEnbMac::GetFfMacSchedSapUser()
+LteEnbMac::GetFfMacSchedSapUser(void)
 {
     return m_schedSapUser;
 }
@@ -408,7 +425,7 @@ LteEnbMac::SetFfMacCschedSapProvider(FfMacCschedSapProvider* s)
 }
 
 FfMacCschedSapUser*
-LteEnbMac::GetFfMacCschedSapUser()
+LteEnbMac::GetFfMacCschedSapUser(void)
 {
     return m_cschedSapUser;
 }
@@ -420,7 +437,7 @@ LteEnbMac::SetLteMacSapUser(LteMacSapUser* s)
 }
 
 LteMacSapProvider*
-LteEnbMac::GetLteMacSapProvider()
+LteEnbMac::GetLteMacSapProvider(void)
 {
     return m_macSapProvider;
 }
@@ -432,7 +449,7 @@ LteEnbMac::SetLteEnbCmacSapUser(LteEnbCmacSapUser* s)
 }
 
 LteEnbCmacSapProvider*
-LteEnbMac::GetLteEnbCmacSapProvider()
+LteEnbMac::GetLteEnbCmacSapProvider(void)
 {
     return m_cmacSapProvider;
 }
@@ -472,10 +489,16 @@ LteEnbMac::DoSubframeIndication(uint32_t frameNo, uint32_t subframeNo)
 
     // --- DOWNLINK ---
     // Send Dl-CQI info to the scheduler
-    if (!m_dlCqiReceived.empty())
+    if (m_dlCqiReceived.size() > 0)
     {
         FfMacSchedSapProvider::SchedDlCqiInfoReqParameters dlcqiInfoReq;
         dlcqiInfoReq.m_sfnSf = ((0x3FF & frameNo) << 4) | (0xF & subframeNo);
+
+        int cqiNum = m_dlCqiReceived.size();
+        if (cqiNum > MAX_CQI_LIST)
+        {
+            cqiNum = MAX_CQI_LIST;
+        }
         dlcqiInfoReq.m_cqiList.insert(dlcqiInfoReq.m_cqiList.begin(),
                                       m_dlCqiReceived.begin(),
                                       m_dlCqiReceived.end());
@@ -488,7 +511,8 @@ LteEnbMac::DoSubframeIndication(uint32_t frameNo, uint32_t subframeNo)
         // process received RACH preambles and notify the scheduler
         FfMacSchedSapProvider::SchedDlRachInfoReqParameters rachInfoReqParams;
         NS_ASSERT(subframeNo > 0 && subframeNo <= 10); // subframe in 1..10
-        for (auto it = m_receivedRachPreambleCount.begin(); it != m_receivedRachPreambleCount.end();
+        for (std::map<uint8_t, uint32_t>::const_iterator it = m_receivedRachPreambleCount.begin();
+             it != m_receivedRachPreambleCount.end();
              ++it)
         {
             NS_LOG_INFO(this << " preambleId " << (uint32_t)it->first << ": " << it->second
@@ -503,7 +527,8 @@ LteEnbMac::DoSubframeIndication(uint32_t frameNo, uint32_t subframeNo)
             else
             {
                 uint16_t rnti;
-                auto jt = m_allocatedNcRaPreambleMap.find(it->first);
+                std::map<uint8_t, NcRaPreambleInfo>::iterator jt =
+                    m_allocatedNcRaPreambleMap.find(it->first);
                 if (jt != m_allocatedNcRaPreambleMap.end())
                 {
                     rnti = jt->second.rnti;
@@ -513,14 +538,6 @@ LteEnbMac::DoSubframeIndication(uint32_t frameNo, uint32_t subframeNo)
                 else
                 {
                     rnti = m_cmacSapUser->AllocateTemporaryCellRnti();
-
-                    if (rnti == 0)
-                    {
-                        // If rnti = 0, UE context was not created (not enough SRS)
-                        // Therefore don't send RAR for this preamble
-                        NS_LOG_INFO("UE context not created, no RAR to send");
-                        continue;
-                    }
                     NS_LOG_INFO("preambleId " << (uint32_t)it->first << ": allocated T-C-RNTI "
                                               << (uint32_t)rnti << ", sending RAR");
                 }
@@ -551,8 +568,8 @@ LteEnbMac::DoSubframeIndication(uint32_t frameNo, uint32_t subframeNo)
     FfMacSchedSapProvider::SchedDlTriggerReqParameters dlparams;
     dlparams.m_sfnSf = ((0x3FF & dlSchedFrameNo) << 4) | (0xF & dlSchedSubframeNo);
 
-    // Forward DL HARQ Feedbacks collected during last TTI
-    if (!m_dlInfoListReceived.empty())
+    // Forward DL HARQ feebacks collected during last TTI
+    if (m_dlInfoListReceived.size() > 0)
     {
         dlparams.m_dlInfoList = m_dlInfoListReceived;
         // empty local buffer
@@ -563,7 +580,7 @@ LteEnbMac::DoSubframeIndication(uint32_t frameNo, uint32_t subframeNo)
 
     // --- UPLINK ---
     // Send UL-CQI info to the scheduler
-    for (std::size_t i = 0; i < m_ulCqiReceived.size(); i++)
+    for (uint16_t i = 0; i < m_ulCqiReceived.size(); i++)
     {
         if (subframeNo > 1)
         {
@@ -578,7 +595,7 @@ LteEnbMac::DoSubframeIndication(uint32_t frameNo, uint32_t subframeNo)
     m_ulCqiReceived.clear();
 
     // Send BSR reports to the scheduler
-    if (!m_ulCeReceived.empty())
+    if (m_ulCeReceived.size() > 0)
     {
         FfMacSchedSapProvider::SchedUlMacCtrlInfoReqParameters ulMacReq;
         ulMacReq.m_sfnSf = ((0x3FF & frameNo) << 4) | (0xF & subframeNo);
@@ -605,8 +622,8 @@ LteEnbMac::DoSubframeIndication(uint32_t frameNo, uint32_t subframeNo)
     FfMacSchedSapProvider::SchedUlTriggerReqParameters ulparams;
     ulparams.m_sfnSf = ((0x3FF & ulSchedFrameNo) << 4) | (0xF & ulSchedSubframeNo);
 
-    // Forward DL HARQ Feedbacks collected during last TTI
-    if (!m_ulInfoListReceived.empty())
+    // Forward DL HARQ feebacks collected during last TTI
+    if (m_ulInfoListReceived.size() > 0)
     {
         ulparams.m_ulInfoList = m_ulInfoListReceived;
         // empty local buffer
@@ -634,7 +651,7 @@ LteEnbMac::DoReceiveLteControlMessage(Ptr<LteControlMessage> msg)
     {
         Ptr<DlHarqFeedbackLteControlMessage> dlharq =
             DynamicCast<DlHarqFeedbackLteControlMessage>(msg);
-        DoDlInfoListElementHarqFeedback(dlharq->GetDlHarqFeedback());
+        DoDlInfoListElementHarqFeeback(dlharq->GetDlHarqFeedback());
     }
     else
     {
@@ -703,9 +720,10 @@ LteEnbMac::DoReceivePhyPdu(Ptr<Packet> p)
 
     // store info of the packet received
 
+    //   std::map <uint16_t,UlInfoListElement_s>::iterator it;
     //   u_int rnti = tag.GetRnti ();
-    //   u_int lcid = tag.GetLcid ();
-    //   auto it = m_ulInfoListElements.find (tag.GetRnti ());
+    //  u_int lcid = tag.GetLcid ();
+    //   it = m_ulInfoListElements.find (tag.GetRnti ());
     //   if (it == m_ulInfoListElements.end ())
     //     {
     //       // new RNTI
@@ -735,9 +753,10 @@ LteEnbMac::DoReceivePhyPdu(Ptr<Packet> p)
     // forward the packet to the correspondent RLC
     uint16_t rnti = tag.GetRnti();
     uint8_t lcid = tag.GetLcid();
-    auto rntiIt = m_rlcAttached.find(rnti);
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator rntiIt =
+        m_rlcAttached.find(rnti);
     NS_ASSERT_MSG(rntiIt != m_rlcAttached.end(), "could not find RNTI" << rnti);
-    auto lcidIt = rntiIt->second.find(lcid);
+    std::map<uint8_t, LteMacSapUser*>::iterator lcidIt = rntiIt->second.find(lcid);
     // NS_ASSERT_MSG (lcidIt != rntiIt->second.end (), "could not find LCID" << lcid);
 
     LteMacSapUser::ReceivePduParameters rxPduParams;
@@ -757,10 +776,11 @@ LteEnbMac::DoReceivePhyPdu(Ptr<Packet> p)
 // ////////////////////////////////////////////
 
 void
-LteEnbMac::DoConfigureMac(uint16_t ulBandwidth, uint16_t dlBandwidth)
+LteEnbMac::DoConfigureMac(uint8_t ulBandwidth, uint8_t dlBandwidth)
 {
-    NS_LOG_FUNCTION(this << " ulBandwidth=" << ulBandwidth << " dlBandwidth=" << dlBandwidth);
-    FfMacCschedSapProvider::CschedCellConfigReqParameters params{};
+    NS_LOG_FUNCTION(this << " ulBandwidth=" << (uint16_t)ulBandwidth
+                         << " dlBandwidth=" << (uint16_t)dlBandwidth);
+    FfMacCschedSapProvider::CschedCellConfigReqParameters params;
     // Configure the subset of parameters used by FfMacScheduler
     params.m_ulBandwidth = ulBandwidth;
     params.m_dlBandwidth = dlBandwidth;
@@ -774,7 +794,7 @@ LteEnbMac::DoAddUe(uint16_t rnti)
 {
     NS_LOG_FUNCTION(this << " rnti=" << rnti);
     std::map<uint8_t, LteMacSapUser*> empty;
-    auto ret =
+    std::pair<std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator, bool> ret =
         m_rlcAttached.insert(std::pair<uint16_t, std::map<uint8_t, LteMacSapUser*>>(rnti, empty));
     NS_ASSERT_MSG(ret.second, "element already present, RNTI already existed");
 
@@ -815,39 +835,6 @@ LteEnbMac::DoRemoveUe(uint16_t rnti)
     m_cschedSapProvider->CschedUeReleaseReq(params);
     m_rlcAttached.erase(rnti);
     m_miDlHarqProcessesPackets.erase(rnti);
-
-    NS_LOG_DEBUG("start checking for unprocessed preamble for rnti: " << rnti);
-    // remove unprocessed preamble received for RACH during handover
-    auto jt = m_allocatedNcRaPreambleMap.begin();
-    while (jt != m_allocatedNcRaPreambleMap.end())
-    {
-        if (jt->second.rnti == rnti)
-        {
-            auto it = m_receivedRachPreambleCount.find(jt->first);
-            if (it != m_receivedRachPreambleCount.end())
-            {
-                m_receivedRachPreambleCount.erase(it->first);
-            }
-            jt = m_allocatedNcRaPreambleMap.erase(jt);
-        }
-        else
-        {
-            ++jt;
-        }
-    }
-
-    auto itCeRxd = m_ulCeReceived.begin();
-    while (itCeRxd != m_ulCeReceived.end())
-    {
-        if (itCeRxd->m_rnti == rnti)
-        {
-            itCeRxd = m_ulCeReceived.erase(itCeRxd);
-        }
-        else
-        {
-            itCeRxd++;
-        }
-    }
 }
 
 void
@@ -855,11 +842,14 @@ LteEnbMac::DoAddLc(LteEnbCmacSapProvider::LcInfo lcinfo, LteMacSapUser* msu)
 {
     NS_LOG_FUNCTION(this << lcinfo.rnti << (uint16_t)lcinfo.lcId);
 
+    std::map<LteFlowId_t, LteMacSapUser*>::iterator it;
+
     LteFlowId_t flow(lcinfo.rnti, lcinfo.lcId);
 
-    auto rntiIt = m_rlcAttached.find(lcinfo.rnti);
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator rntiIt =
+        m_rlcAttached.find(lcinfo.rnti);
     NS_ASSERT_MSG(rntiIt != m_rlcAttached.end(), "RNTI not found");
-    auto lcidIt = rntiIt->second.find(lcinfo.lcId);
+    std::map<uint8_t, LteMacSapUser*>::iterator lcidIt = rntiIt->second.find(lcinfo.lcId);
     if (lcidIt == rntiIt->second.end())
     {
         rntiIt->second.insert(std::pair<uint8_t, LteMacSapUser*>(lcinfo.lcId, msu));
@@ -875,22 +865,21 @@ LteEnbMac::DoAddLc(LteEnbCmacSapProvider::LcInfo lcinfo, LteMacSapUser* msu)
     // 4.3.4 logicalChannelConfigListElement
     if (lcinfo.lcId != 0)
     {
-        FfMacCschedSapProvider::CschedLcConfigReqParameters params;
+        struct FfMacCschedSapProvider::CschedLcConfigReqParameters params;
         params.m_rnti = lcinfo.rnti;
         params.m_reconfigureFlag = false;
 
-        LogicalChannelConfigListElement_s lccle;
+        struct LogicalChannelConfigListElement_s lccle;
         lccle.m_logicalChannelIdentity = lcinfo.lcId;
         lccle.m_logicalChannelGroup = lcinfo.lcGroup;
         lccle.m_direction = LogicalChannelConfigListElement_s::DIR_BOTH;
+        lccle.m_qosBearerType = lcinfo.isGbr ? LogicalChannelConfigListElement_s::QBT_GBR
+                                             : LogicalChannelConfigListElement_s::QBT_NON_GBR;
         lccle.m_qci = lcinfo.qci;
         lccle.m_eRabMaximulBitrateUl = lcinfo.mbrUl;
         lccle.m_eRabMaximulBitrateDl = lcinfo.mbrDl;
         lccle.m_eRabGuaranteedBitrateUl = lcinfo.gbrUl;
         lccle.m_eRabGuaranteedBitrateDl = lcinfo.gbrDl;
-        lccle.m_qosBearerType =
-            static_cast<LogicalChannelConfigListElement_s::QosBearerType_e>(lcinfo.resourceType);
-
         params.m_logicalChannelConfigList.push_back(lccle);
 
         m_cschedSapProvider->CschedLcConfigReq(params);
@@ -909,10 +898,11 @@ LteEnbMac::DoReleaseLc(uint16_t rnti, uint8_t lcid)
     NS_LOG_FUNCTION(this);
 
     // Find user based on rnti and then erase lcid stored against the same
-    auto rntiIt = m_rlcAttached.find(rnti);
+    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator rntiIt =
+        m_rlcAttached.find(rnti);
     rntiIt->second.erase(lcid);
 
-    FfMacCschedSapProvider::CschedLcReleaseReqParameters params;
+    struct FfMacCschedSapProvider::CschedLcReleaseReqParameters params;
     params.m_rnti = rnti;
     params.m_logicalChannelIdentity.push_back(lcid);
     m_cschedSapProvider->CschedLcReleaseReq(params);
@@ -932,13 +922,12 @@ LteEnbMac::DoUeUpdateConfigurationReq(LteEnbCmacSapProvider::UeConfig params)
 }
 
 LteEnbCmacSapProvider::RachConfig
-LteEnbMac::DoGetRachConfig() const
+LteEnbMac::DoGetRachConfig()
 {
-    LteEnbCmacSapProvider::RachConfig rc;
+    struct LteEnbCmacSapProvider::RachConfig rc;
     rc.numberOfRaPreambles = m_numberOfRaPreambles;
     rc.preambleTransMax = m_preambleTransMax;
     rc.raResponseWindowSize = m_raResponseWindowSize;
-    rc.connEstFailCount = m_connEstFailCount;
     return rc;
 }
 
@@ -949,27 +938,8 @@ LteEnbMac::DoAllocateNcRaPreamble(uint16_t rnti)
     uint8_t preambleId;
     for (preambleId = m_numberOfRaPreambles; preambleId < 64; ++preambleId)
     {
-        auto it = m_allocatedNcRaPreambleMap.find(preambleId);
-        /**
-         * Allocate preamble only if its free. The non-contention preamble
-         * assigned to UE during handover or PDCCH order is valid only until the
-         * time duration of the “expiryTime” of the preamble is reached. This
-         * timer value is only maintained at the eNodeB and the UE has no way of
-         * knowing if this timer has expired. If the UE tries to send the preamble
-         * again after the expiryTime and the preamble is re-assigned to another
-         * UE, it results in errors. This has been solved by re-assigning the
-         * preamble to another UE only if it is not being used (An UE can be using
-         * the preamble even after the expiryTime duration).
-         */
-        if ((it != m_allocatedNcRaPreambleMap.end()) && (it->second.expiryTime < Simulator::Now()))
-        {
-            if (!m_cmacSapUser->IsRandomAccessCompleted(it->second.rnti))
-            {
-                // random access of the UE is not completed,
-                // check other preambles
-                continue;
-            }
-        }
+        std::map<uint8_t, NcRaPreambleInfo>::iterator it =
+            m_allocatedNcRaPreambleMap.find(preambleId);
         if ((it == m_allocatedNcRaPreambleMap.end()) || (it->second.expiryTime < Simulator::Now()))
         {
             found = true;
@@ -1015,7 +985,8 @@ LteEnbMac::DoTransmitPdu(LteMacSapProvider::TransmitPduParameters params)
     params.pdu->AddPacketTag(tag);
     params.componentCarrierId = m_componentCarrierId;
     // Store pkt in HARQ buffer
-    auto it = m_miDlHarqProcessesPackets.find(params.rnti);
+    std::map<uint16_t, DlHarqProcessesBuffer_t>::iterator it =
+        m_miDlHarqProcessesPackets.find(params.rnti);
     NS_ASSERT(it != m_miDlHarqProcessesPackets.end());
     NS_LOG_DEBUG(this << " LAYER " << (uint16_t)tag.GetLayer() << " HARQ ID "
                       << (uint16_t)params.harqProcessId);
@@ -1050,27 +1021,29 @@ LteEnbMac::DoSchedDlConfigInd(FfMacSchedSapUser::SchedDlConfigIndParameters ind)
     NS_LOG_FUNCTION(this);
     // Create DL PHY PDU
     Ptr<PacketBurst> pb = CreateObject<PacketBurst>();
+    std::map<LteFlowId_t, LteMacSapUser*>::iterator it;
     LteMacSapUser::TxOpportunityParameters txOpParams;
 
-    for (std::size_t i = 0; i < ind.m_buildDataList.size(); i++)
+    for (unsigned int i = 0; i < ind.m_buildDataList.size(); i++)
     {
-        for (std::size_t layer = 0; layer < ind.m_buildDataList.at(i).m_dci.m_ndi.size(); layer++)
+        for (uint16_t layer = 0; layer < ind.m_buildDataList.at(i).m_dci.m_ndi.size(); layer++)
         {
             if (ind.m_buildDataList.at(i).m_dci.m_ndi.at(layer) == 1)
             {
                 // new data -> force emptying correspondent harq pkt buffer
-                auto it = m_miDlHarqProcessesPackets.find(ind.m_buildDataList.at(i).m_rnti);
+                std::map<uint16_t, DlHarqProcessesBuffer_t>::iterator it =
+                    m_miDlHarqProcessesPackets.find(ind.m_buildDataList.at(i).m_rnti);
                 NS_ASSERT(it != m_miDlHarqProcessesPackets.end());
-                for (std::size_t lcId = 0; lcId < (*it).second.size(); lcId++)
+                for (uint16_t lcId = 0; lcId < (*it).second.size(); lcId++)
                 {
                     Ptr<PacketBurst> pb = CreateObject<PacketBurst>();
                     (*it).second.at(lcId).at(ind.m_buildDataList.at(i).m_dci.m_harqProcess) = pb;
                 }
             }
         }
-        for (std::size_t j = 0; j < ind.m_buildDataList.at(i).m_rlcPduList.size(); j++)
+        for (unsigned int j = 0; j < ind.m_buildDataList.at(i).m_rlcPduList.size(); j++)
         {
-            for (std::size_t k = 0; k < ind.m_buildDataList.at(i).m_rlcPduList.at(j).size(); k++)
+            for (uint16_t k = 0; k < ind.m_buildDataList.at(i).m_rlcPduList.at(j).size(); k++)
             {
                 if (ind.m_buildDataList.at(i).m_dci.m_ndi.at(k) == 1)
                 {
@@ -1078,9 +1051,10 @@ LteEnbMac::DoSchedDlConfigInd(FfMacSchedSapUser::SchedDlConfigIndParameters ind)
                     uint16_t rnti = ind.m_buildDataList.at(i).m_rnti;
                     uint8_t lcid =
                         ind.m_buildDataList.at(i).m_rlcPduList.at(j).at(k).m_logicalChannelIdentity;
-                    auto rntiIt = m_rlcAttached.find(rnti);
+                    std::map<uint16_t, std::map<uint8_t, LteMacSapUser*>>::iterator rntiIt =
+                        m_rlcAttached.find(rnti);
                     NS_ASSERT_MSG(rntiIt != m_rlcAttached.end(), "could not find RNTI" << rnti);
-                    auto lcidIt = rntiIt->second.find(lcid);
+                    std::map<uint8_t, LteMacSapUser*>::iterator lcidIt = rntiIt->second.find(lcid);
                     NS_ASSERT_MSG(lcidIt != rntiIt->second.end(),
                                   "could not find LCID" << (uint32_t)lcid << " carrier id:"
                                                         << (uint16_t)m_componentCarrierId);
@@ -1099,11 +1073,13 @@ LteEnbMac::DoSchedDlConfigInd(FfMacSchedSapUser::SchedDlConfigIndParameters ind)
                     if (ind.m_buildDataList.at(i).m_dci.m_tbsSize.at(k) > 0)
                     {
                         // HARQ retransmission -> retrieve TB from HARQ buffer
-                        auto it = m_miDlHarqProcessesPackets.find(ind.m_buildDataList.at(i).m_rnti);
+                        std::map<uint16_t, DlHarqProcessesBuffer_t>::iterator it =
+                            m_miDlHarqProcessesPackets.find(ind.m_buildDataList.at(i).m_rnti);
                         NS_ASSERT(it != m_miDlHarqProcessesPackets.end());
                         Ptr<PacketBurst> pb =
                             (*it).second.at(k).at(ind.m_buildDataList.at(i).m_dci.m_harqProcess);
-                        for (auto j = pb->Begin(); j != pb->End(); ++j)
+                        for (std::list<Ptr<Packet>>::const_iterator j = pb->Begin(); j != pb->End();
+                             ++j)
                         {
                             Ptr<Packet> pkt = (*j)->Copy();
                             m_enbPhySapProvider->SendMacPdu(pkt);
@@ -1171,7 +1147,8 @@ LteEnbMac::DoSchedDlConfigInd(FfMacSchedSapUser::SchedDlConfigIndParameters ind)
     rarMsg->SetRaRnti(raRnti);
     for (unsigned int i = 0; i < ind.m_buildRarList.size(); i++)
     {
-        auto itRapId = m_rapIdRntiMap.find(ind.m_buildRarList.at(i).m_rnti);
+        std::map<uint8_t, uint32_t>::iterator itRapId =
+            m_rapIdRntiMap.find(ind.m_buildRarList.at(i).m_rnti);
         if (itRapId == m_rapIdRntiMap.end())
         {
             NS_FATAL_ERROR("Unable to find rapId of RNTI " << ind.m_buildRarList.at(i).m_rnti);
@@ -1183,7 +1160,7 @@ LteEnbMac::DoSchedDlConfigInd(FfMacSchedSapUser::SchedDlConfigIndParameters ind)
         NS_LOG_INFO(this << " Send RAR message to RNTI " << ind.m_buildRarList.at(i).m_rnti
                          << " rapId " << itRapId->second);
     }
-    if (!ind.m_buildRarList.empty())
+    if (ind.m_buildRarList.size() > 0)
     {
         m_enbPhySapProvider->SendLteControlMessage(rarMsg);
     }
@@ -1270,20 +1247,21 @@ LteEnbMac::DoCschedCellConfigUpdateInd(
 }
 
 void
-LteEnbMac::DoUlInfoListElementHarqFeedback(UlInfoListElement_s params)
+LteEnbMac::DoUlInfoListElementHarqFeeback(UlInfoListElement_s params)
 {
     NS_LOG_FUNCTION(this);
     m_ulInfoListReceived.push_back(params);
 }
 
 void
-LteEnbMac::DoDlInfoListElementHarqFeedback(DlInfoListElement_s params)
+LteEnbMac::DoDlInfoListElementHarqFeeback(DlInfoListElement_s params)
 {
     NS_LOG_FUNCTION(this);
     // Update HARQ buffer
-    auto it = m_miDlHarqProcessesPackets.find(params.m_rnti);
+    std::map<uint16_t, DlHarqProcessesBuffer_t>::iterator it =
+        m_miDlHarqProcessesPackets.find(params.m_rnti);
     NS_ASSERT(it != m_miDlHarqProcessesPackets.end());
-    for (std::size_t layer = 0; layer < params.m_harqStatus.size(); layer++)
+    for (uint8_t layer = 0; layer < params.m_harqStatus.size(); layer++)
     {
         if (params.m_harqStatus.at(layer) == DlInfoListElement_s::ACK)
         {

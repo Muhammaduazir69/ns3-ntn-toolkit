@@ -1,22 +1,42 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
- * Copyright (c) 2012-2018 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2018, University of Padova, Dep. of Information Engineering, SIGNET lab.
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
  *
- * Authors:
- *   Nicola Baldo <nbaldo@cttc.es>
- *   Manuel Requena <manuel.requena@cttc.es>
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
+ * Author: Nicola Baldo <nbaldo@cttc.es>
+ *
+ * Modified by: Tommaso Zugno <tommasozugno@gmail.com>
+ *              Integration of Carrier Aggregation for the mmWave module
  */
 
 #ifndef RADIO_BEARER_STATS_CONNECTOR_H
 #define RADIO_BEARER_STATS_CONNECTOR_H
 
-#include "ns3/config.h"
-#include "ns3/ptr.h"
-#include "ns3/simple-ref-count.h"
-#include "ns3/traced-callback.h"
+#include "mac-tx-stats-calculator.h"
+#include "retx-stats-calculator.h"
 
+#include <ns3/config.h>
+#include <ns3/object.h>
+#include <ns3/ptr.h>
+#include <ns3/simple-ref-count.h>
+#include <ns3/traced-callback.h>
+
+#include <fstream>
 #include <map>
+#include <set>
 
 namespace ns3
 {
@@ -62,24 +82,8 @@ class RadioBearerStatsConnector
     // trace sinks, to be used with MakeBoundCallback
 
     /**
-     * Function hooked to NewUeContext trace source at eNB RRC,
-     * which is fired upon creation of a new UE context.
-     * It stores the UE manager path and connects the callback that will be called
-     * when the DRB is created in the eNB.
-     * \param c
-     * \param context
-     * \param cellid
-     * \param rnti
-     */
-    static void NotifyNewUeContextEnb(RadioBearerStatsConnector* c,
-                                      std::string context,
-                                      uint16_t cellid,
-                                      uint16_t rnti);
-
-    /**
      * Function hooked to RandomAccessSuccessful trace source at UE RRC,
-     * which is fired upon successful completion of the random access procedure.
-     * It connects the callbacks for the SRB0 at the eNB and the UE.
+     * which is fired upon successful completion of the random access procedure
      * \param c
      * \param context
      * \param imsi
@@ -93,76 +97,125 @@ class RadioBearerStatsConnector
                                                uint16_t rnti);
 
     /**
-     * Function hooked to Srb1Created trace source at UE RRC,
-     * which is fired when SRB1 is created, i.e. RLC and PDCP are created for one LC = 1.
-     * It connects the callbacks for the DRB at the eNB.
+     * Sink connected source of UE Connection Setup trace. Not used.
      * \param c
      * \param context
      * \param imsi
      * \param cellid
      * \param rnti
      */
-    static void CreatedSrb1Ue(RadioBearerStatsConnector* c,
-                              std::string context,
-                              uint64_t imsi,
-                              uint16_t cellid,
-                              uint16_t rnti);
+    static void NotifyConnectionSetupUe(RadioBearerStatsConnector* c,
+                                        std::string context,
+                                        uint64_t imsi,
+                                        uint16_t cellid,
+                                        uint16_t rnti);
 
     /**
-     * Function hooked to DrbCreated trace source at UE manager in eNB RRC,
-     * which is fired when DRB is created, i.e. RLC and PDCP are created for LC = lcid.
-     * It connects the callbacks for the DRB at the eNB.
+     * Function hooked to ConnectionReconfiguration trace source at UE RRC,
+     * which is fired upon RRC connection reconfiguration
      * \param c
      * \param context
      * \param imsi
      * \param cellid
      * \param rnti
-     * \param lcid
      */
-    static void CreatedDrbEnb(RadioBearerStatsConnector* c,
-                              std::string context,
-                              uint64_t imsi,
-                              uint16_t cellid,
-                              uint16_t rnti,
-                              uint8_t lcid);
+    static void NotifyConnectionReconfigurationUe(RadioBearerStatsConnector* c,
+                                                  std::string context,
+                                                  uint64_t imsi,
+                                                  uint16_t cellid,
+                                                  uint16_t rnti);
 
     /**
-     * Function hooked to DrbCreated trace source at UE RRC,
-     * which is fired when DRB is created, i.e. RLC and PDCP are created for LC = lcid.
-     * It connects the callbacks for the DRB at the UE.
+     * Function hooked to HandoverStart trace source at UE RRC,
+     * which is fired upon start of a handover procedure
      * \param c
      * \param context
      * \param imsi
      * \param cellid
      * \param rnti
-     * \param lcid
+     * \param targetCellId
      */
-    static void CreatedDrbUe(RadioBearerStatsConnector* c,
-                             std::string context,
-                             uint64_t imsi,
-                             uint16_t cellid,
-                             uint16_t rnti,
-                             uint8_t lcid);
+    static void NotifyHandoverStartUe(RadioBearerStatsConnector* c,
+                                      std::string context,
+                                      uint64_t imsi,
+                                      uint16_t cellid,
+                                      uint16_t rnti,
+                                      uint16_t targetCellId);
 
     /**
-     * Disconnects all trace sources at eNB to RLC and PDCP calculators.
-     * Function is not implemented.
+     * Function hooked to HandoverStart trace source at UE RRC,
+     * which is fired upon successful termination of a handover procedure
+     * \param c
      * \param context
      * \param imsi
      * \param cellid
      * \param rnti
      */
-    void DisconnectTracesEnb(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti);
+    static void NotifyHandoverEndOkUe(RadioBearerStatsConnector* c,
+                                      std::string context,
+                                      uint64_t imsi,
+                                      uint16_t cellid,
+                                      uint16_t rnti);
 
     /**
-     * Disconnects all trace sources at UE to RLC and PDCP calculators.
-     * Function is not implemented.
+     * Function hooked to NewUeContext trace source at eNB RRC,
+     * which is fired upon creation of a new UE context
+     * \param c
+     * \param context
+     * \param cellid
+     * \param rnti
+     */
+    static void NotifyNewUeContextEnb(RadioBearerStatsConnector* c,
+                                      std::string context,
+                                      uint16_t cellid,
+                                      uint16_t rnti);
+
+    /**
+     * Function hooked to ConnectionReconfiguration trace source at eNB RRC,
+     * which is fired upon RRC connection reconfiguration
+     * \param c
      * \param context
      * \param imsi
      * \param cellid
      * \param rnti
      */
-    void DisconnectTracesUe(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti);
+    static void NotifyConnectionReconfigurationEnb(RadioBearerStatsConnector* c,
+                                                   std::string context,
+                                                   uint64_t imsi,
+                                                   uint16_t cellid,
+                                                   uint16_t rnti);
+
+    /**
+     * Function hooked to HandoverStart trace source at eNB RRC,
+     * which is fired upon start of a handover procedure
+     * \param c
+     * \param context
+     * \param imsi
+     * \param cellid
+     * \param rnti
+     * \param targetCellId
+     */
+    static void NotifyHandoverStartEnb(RadioBearerStatsConnector* c,
+                                       std::string context,
+                                       uint64_t imsi,
+                                       uint16_t cellid,
+                                       uint16_t rnti,
+                                       uint16_t targetCellId);
+
+    /**
+     * Function hooked to HandoverEndOk trace source at eNB RRC,
+     * which is fired upon successful termination of a handover procedure
+     * \param c
+     * \param context
+     * \param imsi
+     * \param cellid
+     * \param rnti
+     */
+    static void NotifyHandoverEndOkEnb(RadioBearerStatsConnector* c,
+                                       std::string context,
+                                       uint64_t imsi,
+                                       uint16_t cellid,
+                                       uint16_t rnti);
 
   private:
     /**
@@ -174,55 +227,111 @@ class RadioBearerStatsConnector
     void StoreUeManagerPath(std::string ueManagerPath, uint16_t cellId, uint16_t rnti);
 
     /**
-     * Connects SRB0 trace sources at UE and eNB to RLC and PDCP calculators
-     * \param context
+     * Connects Srb0 trace sources at UE and eNB to RLC and PDCP calculators,
+     * and Srb1 trace sources at eNB to RLC and PDCP calculators,
+     * \param ueRrcPath
      * \param imsi
      * \param cellId
      * \param rnti
      */
-    void ConnectTracesSrb0(std::string context, uint64_t imsi, uint16_t cellId, uint16_t rnti);
+    void ConnectSrb0Traces(std::string ueRrcPath, uint64_t imsi, uint16_t cellId, uint16_t rnti);
 
     /**
-     * Connects SRB1 trace sources at UE and eNB to RLC and PDCP calculators
+     * Connects all trace sources at UE to RLC and PDCP calculators.
+     * This function can connect traces only once for UE.
      * \param context
      * \param imsi
-     * \param cellId
+     * \param cellid
      * \param rnti
      */
-    void ConnectTracesSrb1(std::string context, uint64_t imsi, uint16_t cellId, uint16_t rnti);
+    void ConnectTracesUeIfFirstTime(std::string context,
+                                    uint64_t imsi,
+                                    uint16_t cellid,
+                                    uint16_t rnti);
 
     /**
-     * Connects DRB trace sources at eNB to RLC and PDCP calculators
+     * Connects all trace sources at eNB to RLC and PDCP calculators.
+     * This function can connect traces only once for eNB.
      * \param context
      * \param imsi
-     * \param cellId
+     * \param cellid
      * \param rnti
-     * \param lcid
      */
-    void ConnectTracesDrbEnb(std::string context,
-                             uint64_t imsi,
-                             uint16_t cellId,
-                             uint16_t rnti,
-                             uint8_t lcid);
+    void ConnectTracesEnbIfFirstTime(std::string context,
+                                     uint64_t imsi,
+                                     uint16_t cellid,
+                                     uint16_t rnti);
 
     /**
-     * Connects DRB trace sources at UE to RLC and PDCP calculators
-     * \param context
+     * Connects SRB1 trace sources at UE to RLC and PDCP calculators
+     * \param ueRrcPath
      * \param imsi
      * \param cellId
      * \param rnti
-     * \param lcid
      */
-    void ConnectTracesDrbUe(std::string context,
-                            uint64_t imsi,
-                            uint16_t cellId,
-                            uint16_t rnti,
-                            uint8_t lcid);
+    void ConnectSrb1TracesUe(std::string ueRrcPath, uint64_t imsi, uint16_t cellId, uint16_t rnti);
+
+    /**
+     * Connects DRBs trace sources at UE to RLC and PDCP calculators.
+     * \param context
+     * \param imsi
+     * \param cellid
+     * \param rnti
+     */
+    void ConnectDrbTracesUe(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti);
+
+    /**
+     * Disconnects all trace sources at UE to RLC and PDCP calculators.
+     * Function is not implemented.
+     * \param context
+     * \param imsi
+     * \param cellid
+     * \param rnti
+     */
+    void DisconnectTracesUe(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti);
+
+    /**
+     * Connects SRB1 trace sources at eNB to RLC and PDCP calculators
+     * \param context
+     * \param imsi
+     * \param cellid
+     * \param rnti
+     */
+    void ConnectSrb1TracesEnb(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti);
+
+    /**
+     * Connects DRBs trace sources at eNB to RLC and PDCP calculators
+     * \param context
+     * \param imsi
+     * \param cellid
+     * \param rnti
+     */
+    void ConnectDrbTracesEnb(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti);
+
+    /**
+     * Disconnects all trace sources at eNB to RLC and PDCP calculators.
+     * Function is not implemented.
+     * \param context
+     * \param imsi
+     * \param cellid
+     * \param rnti
+     */
+    void DisconnectTracesEnb(std::string context, uint64_t imsi, uint16_t cellid, uint16_t rnti);
 
     Ptr<RadioBearerStatsCalculator> m_rlcStats;  //!< Calculator for RLC Statistics
     Ptr<RadioBearerStatsCalculator> m_pdcpStats; //!< Calculator for PDCP Statistics
+    Ptr<RetxStatsCalculator> m_retxStats;
+    Ptr<MacTxStatsCalculator> m_macTxStats;
 
     bool m_connected; //!< true if traces are connected to sinks, initially set to false
+    std::set<uint64_t>
+        m_imsiSeenUeSrb; //!< stores all UEs for which RLC and PDCP for SRB1 traces were connected
+    std::set<uint64_t>
+        m_imsiSeenEnbSrb; //!< stores all eNBs for which RLC and PDCP traces and SRB1 were connected
+    std::map<uint64_t, uint16_t>
+        m_imsiSeenUeDrb; //!< stores all UEs for which RLC and PDCP traces for DRBs were connected
+    std::set<uint64_t>
+        m_imsiSeenEnbDrb; //!< stores all eNBs for which RLC and PDCP traces for drbs were connected
 
     /**
      * Struct used as key in m_ueManagerPathByCellIdRnti map
@@ -235,10 +344,6 @@ class RadioBearerStatsConnector
 
     /**
      * Less than operator for CellIdRnti, because it is used as key in map
-     *
-     * \param a the lhs operand
-     * \param b the rhs operand
-     * \returns true if less than
      */
     friend bool operator<(const CellIdRnti& a, const CellIdRnti& b);
 

@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Marco Miozzo <marco.miozzo@cttc.es>
  */
@@ -53,19 +65,15 @@ LenaTestHarqSuite::LenaTestHarqSuite()
     // MCS 0 TB size of 66 bytes SINR -9.91 dB expected throughput 31822 bytes/s
     // TBLER 1st tx 1.0
     // TBLER 2nd tx 0.074
-    AddTestCase(new LenaHarqTestCase(2, 2400, 66, 0.12, 31822), TestCase::Duration::QUICK);
+    AddTestCase(new LenaHarqTestCase(2, 2400, 66, 0.12, 31822), Duration::QUICK);
 
     // Tests on DL/UL Data channels (PDSCH, PUSCH)
     // MCS 10 TB size of 472 bytes SINR 0.3 dB expected throughput 209964 bytes/s
     // TBLER 1st tx 1.0
     // TBLER 2nd tx 0.248
-    AddTestCase(new LenaHarqTestCase(1, 770, 472, 0.06, 209964), TestCase::Duration::QUICK);
+    AddTestCase(new LenaHarqTestCase(1, 770, 472, 0.06, 209964), Duration::QUICK);
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LenaTestHarqSuite lenaTestHarqSuite;
 
 std::string
@@ -94,22 +102,13 @@ LenaHarqTestCase::~LenaHarqTestCase()
 }
 
 void
-LenaHarqTestCase::DoRun()
+LenaHarqTestCase::DoRun(void)
 {
     Config::SetDefault("ns3::LteAmc::Ber", DoubleValue(m_amcBer));
     Config::SetDefault("ns3::LteAmc::AmcModel", EnumValue(LteAmc::PiroEW2010));
     Config::SetDefault("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue(false));
     Config::SetDefault("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue(true));
     Config::SetDefault("ns3::LteHelper::UseIdealRrc", BooleanValue(true));
-    Config::SetDefault("ns3::MacStatsCalculator::DlOutputFilename",
-                       StringValue(CreateTempDirFilename("DlMacStats.txt")));
-    Config::SetDefault("ns3::MacStatsCalculator::UlOutputFilename",
-                       StringValue(CreateTempDirFilename("UlMacStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::DlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("DlRlcStats.txt")));
-    Config::SetDefault("ns3::RadioBearerStatsCalculator::UlRlcOutputFilename",
-                       StringValue(CreateTempDirFilename("UlRlcStats.txt")));
-
     // Disable Uplink Power Control
     Config::SetDefault("ns3::LteUePhy::EnableUplinkPowerControl", BooleanValue(false));
 
@@ -191,6 +190,9 @@ LenaHarqTestCase::DoRun()
     lena->SetSchedulerType("ns3::RrFfMacScheduler");
     lena->SetSchedulerAttribute("UlCqiFilter", EnumValue(FfMacScheduler::PUSCH_UL_CQI));
 
+    // set DL bandwidth.
+    lena->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(25));
+
     enbDevs = lena->InstallEnbDevice(enbNodes);
     ueDevs = lena->InstallUeDevice(ueNodes);
 
@@ -198,7 +200,7 @@ LenaHarqTestCase::DoRun()
     lena->Attach(ueDevs, enbDevs.Get(0));
 
     // Activate an EPS bearer
-    EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
     EpsBearer bearer(q);
     lena->ActivateDataRadioBearer(ueDevs, bearer);
 
@@ -236,7 +238,7 @@ LenaHarqTestCase::DoRun()
     Simulator::Run();
 
     /**
-     * Check that the assignment is done in a RR fashion
+     * Check that the assignation is done in a RR fashion
      */
     NS_LOG_INFO("\tTest on downlink data shared channels (PDSCH)");
     NS_LOG_INFO("Test with " << m_nUser << " user(s) at distance " << m_dist << " expected Thr "

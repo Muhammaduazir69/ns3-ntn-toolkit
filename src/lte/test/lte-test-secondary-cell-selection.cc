@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2017 Alexander Krotov
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Alexander Krotov <krotov@iitp.ru>
  *
@@ -40,26 +52,22 @@ NS_LOG_COMPONENT_DEFINE("LteSecondaryCellSelectionTest");
 LteSecondaryCellSelectionTestSuite::LteSecondaryCellSelectionTestSuite()
     : TestSuite("lte-secondary-cell-selection", Type::SYSTEM)
 {
-    // REAL RRC PROTOCOL, either 2 or 4 UEs connecting to 2 or 4 component carriers
+    // REAL RRC PROTOCOL
 
     AddTestCase(new LteSecondaryCellSelectionTestCase("EPC, real RRC, RngRun=1", false, 1U, 2),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteSecondaryCellSelectionTestCase("EPC, real RRC, RngRun=1", false, 1U, 4),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
-    // IDEAL RRC PROTOCOL, either 2 or 4 UEs connecting to 2 or 4 component carriers
+    // IDEAL RRC PROTOCOL
 
     AddTestCase(new LteSecondaryCellSelectionTestCase("EPC, ideal RRC, RngRun=1", true, 1U, 2),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteSecondaryCellSelectionTestCase("EPC, ideal RRC, RngRun=1", true, 1U, 4),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
 } // end of LteSecondaryCellSelectionTestSuite::LteSecondaryCellSelectionTestSuite ()
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteSecondaryCellSelectionTestSuite g_lteSecondaryCellSelectionTestSuite;
 
 /*
@@ -90,6 +98,8 @@ LteSecondaryCellSelectionTestCase::DoRun()
     NS_LOG_FUNCTION(this << GetName());
 
     Config::SetGlobal("RngRun", UintegerValue(m_rngRun));
+    Config::SetDefault("ns3::LteEnbNetDevice::UlBandwidth", UintegerValue(25));
+    Config::SetDefault("ns3::LteEnbNetDevice::DlBandwidth", UintegerValue(25));
 
     // Create helpers.
     auto lteHelper = CreateObject<LteHelper>();
@@ -125,8 +135,7 @@ LteSecondaryCellSelectionTestCase::DoRun()
     std::map<uint8_t, Ptr<ComponentCarrierUe>> ueCcMap = ueDev->GetCcMap();
     for (auto it : ueCcMap)
     {
-        NS_LOG_DEBUG("Assign DL EARFCN " << it.second->GetDlEarfcn() << " to UE "
-                                         << ueDevs.Get(it.first)->GetNode()->GetId());
+        std::cerr << "Assign " << it.second->GetDlEarfcn() << std::endl;
         DynamicCast<LteUeNetDevice>(ueDevs.Get(it.first))->SetDlEarfcn(it.second->GetDlEarfcn());
     }
 
@@ -134,10 +143,14 @@ LteSecondaryCellSelectionTestCase::DoRun()
     lteHelper->Attach(ueDevs);
 
     // Connect to trace sources in UEs
-    Config::Connect(
+    Config::ConnectFailSafe(
         "/NodeList/*/DeviceList/*/LteUeRrc/StateTransition",
         MakeCallback(&LteSecondaryCellSelectionTestCase::StateTransitionCallback, this));
-    Config::Connect(
+    Config::ConnectFailSafe(
+        "/NodeList/*/DeviceList/*/LteUeRrc/InitialSecondaryCellSelectionEndOk",
+        MakeCallback(&LteSecondaryCellSelectionTestCase::InitialSecondaryCellSelectionEndOkCallback,
+                     this));
+    Config::ConnectFailSafe(
         "/NodeList/*/DeviceList/*/LteUeRrc/ConnectionEstablished",
         MakeCallback(&LteSecondaryCellSelectionTestCase::ConnectionEstablishedCallback, this));
 
@@ -150,8 +163,6 @@ LteSecondaryCellSelectionTestCase::DoRun()
         ueDev = DynamicCast<LteUeNetDevice>(ueDevs.Get(it.first));
         uint16_t expectedCellId = it.second->GetCellId();
         uint16_t actualCellId = ueDev->GetRrc()->GetCellId();
-        NS_LOG_DEBUG("RNTI " << ueDev->GetRrc()->GetRnti()
-                             << " attached to cell ID: " << actualCellId);
         NS_TEST_ASSERT_MSG_EQ(expectedCellId,
                               actualCellId,
                               "IMSI " << ueDev->GetImsi() << " has attached to an unexpected cell");
@@ -173,9 +184,16 @@ LteSecondaryCellSelectionTestCase::StateTransitionCallback(std::string context,
                                                            LteUeRrc::State oldState,
                                                            LteUeRrc::State newState)
 {
-    NS_LOG_FUNCTION(this << imsi << cellId << rnti << LteUeRrc::ToString(oldState)
-                         << LteUeRrc::ToString(newState));
+    NS_LOG_FUNCTION(this << imsi << cellId << rnti << oldState << newState);
     m_lastState[imsi] = newState;
+}
+
+void
+LteSecondaryCellSelectionTestCase::InitialSecondaryCellSelectionEndOkCallback(std::string context,
+                                                                              uint64_t imsi,
+                                                                              uint16_t cellId)
+{
+    NS_LOG_FUNCTION(this << imsi << cellId);
 }
 
 void

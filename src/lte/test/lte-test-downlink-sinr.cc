@@ -1,7 +1,19 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Manuel Requena <manuel.requena@cttc.es>
  * Modified by Marco Miozzo <mmiozzo@ctt.es>
@@ -70,9 +82,9 @@ LteDownlinkSinrTestSuite::LteDownlinkSinrTestSuite()
     (*theoreticalSinr1)[1] = 3.72255684126076;
 
     AddTestCase(new LteDownlinkDataSinrTestCase(rxPsd1, theoreticalSinr1, "sdBm = [-46 -48]"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkCtrlSinrTestCase(rxPsd1, theoreticalSinr1, "sdBm = [-46 -48]"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 
     /**
      * TX signal #2: Power Spectral Density (W/Hz) of the signal of interest = [-63 -61] dBm and BW
@@ -87,15 +99,11 @@ LteDownlinkSinrTestSuite::LteDownlinkSinrTestSuite()
     (*theoreticalSinr2)[1] = 0.1865697965291756;
 
     AddTestCase(new LteDownlinkDataSinrTestCase(rxPsd2, theoreticalSinr2, "sdBm = [-63 -61]"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
     AddTestCase(new LteDownlinkCtrlSinrTestCase(rxPsd2, theoreticalSinr2, "sdBm = [-63 -61]"),
-                TestCase::Duration::QUICK);
+                Duration::QUICK);
 }
 
-/**
- * \ingroup lte-test
- * Static variable for test initialization
- */
 static LteDownlinkSinrTestSuite lteDownlinkSinrTestSuite;
 
 /**
@@ -118,7 +126,7 @@ LteDownlinkDataSinrTestCase::~LteDownlinkDataSinrTestCase()
 }
 
 void
-LteDownlinkDataSinrTestCase::DoRun()
+LteDownlinkDataSinrTestCase::DoRun(void)
 {
     Config::SetDefault("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue(false));
     /**
@@ -146,10 +154,10 @@ LteDownlinkDataSinrTestCase::DoRun()
      */
 
     // Number of packet bursts (1 data + 4 interferences)
-    constexpr int numOfPbs = 5;
+    const int numOfPbs = 5;
 
     // Number of packets in the packet bursts
-    constexpr int numOfPkts = 10;
+    const int numOfPkts = 10;
 
     // Packet bursts
     Ptr<PacketBurst> packetBursts[numOfPbs];
@@ -216,7 +224,7 @@ LteDownlinkDataSinrTestCase::DoRun()
     // eNB sends data to 2 UEs through 2 subcarriers
     Ptr<LteSpectrumSignalParametersDataFrame> sp1 = Create<LteSpectrumSignalParametersDataFrame>();
     sp1->psd = m_sv;
-    sp1->txPhy = nullptr;
+    sp1->txPhy = 0;
     sp1->duration = ds;
     sp1->packetBurst = packetBursts[0];
     sp1->cellId = pbCellId[0];
@@ -224,7 +232,7 @@ LteDownlinkDataSinrTestCase::DoRun()
 
     Ptr<LteSpectrumSignalParametersDataFrame> ip1 = Create<LteSpectrumSignalParametersDataFrame>();
     ip1->psd = i1;
-    ip1->txPhy = nullptr;
+    ip1->txPhy = 0;
     ip1->duration = di1;
     ip1->packetBurst = packetBursts[1];
     ip1->cellId = pbCellId[1];
@@ -232,7 +240,7 @@ LteDownlinkDataSinrTestCase::DoRun()
 
     Ptr<LteSpectrumSignalParametersDataFrame> ip2 = Create<LteSpectrumSignalParametersDataFrame>();
     ip2->psd = i2;
-    ip2->txPhy = nullptr;
+    ip2->txPhy = 0;
     ip2->duration = di2;
     ip2->packetBurst = packetBursts[2];
     ip2->cellId = pbCellId[2];
@@ -240,7 +248,7 @@ LteDownlinkDataSinrTestCase::DoRun()
 
     Ptr<LteSpectrumSignalParametersDataFrame> ip3 = Create<LteSpectrumSignalParametersDataFrame>();
     ip3->psd = i3;
-    ip3->txPhy = nullptr;
+    ip3->txPhy = 0;
     ip3->duration = di3;
     ip3->packetBurst = packetBursts[3];
     ip3->cellId = pbCellId[3];
@@ -248,7 +256,7 @@ LteDownlinkDataSinrTestCase::DoRun()
 
     Ptr<LteSpectrumSignalParametersDataFrame> ip4 = Create<LteSpectrumSignalParametersDataFrame>();
     ip4->psd = i4;
-    ip4->txPhy = nullptr;
+    ip4->txPhy = 0;
     ip4->duration = di4;
     ip4->packetBurst = packetBursts[4];
     ip4->cellId = pbCellId[4];
@@ -288,7 +296,7 @@ LteDownlinkCtrlSinrTestCase::~LteDownlinkCtrlSinrTestCase()
 }
 
 void
-LteDownlinkCtrlSinrTestCase::DoRun()
+LteDownlinkCtrlSinrTestCase::DoRun(void)
 {
     /**
      * Instantiate a single receiving LteSpectrumPhy
@@ -339,7 +347,7 @@ LteDownlinkCtrlSinrTestCase::DoRun()
             Ptr<DlDciLteControlMessage> msg = Create<DlDciLteControlMessage>();
             DlDciListElement_s dci;
             msg->SetDci(dci);
-            ctrlMsgList[pb].emplace_back(msg);
+            ctrlMsgList[pb].push_back(msg);
         }
     }
 
@@ -382,7 +390,7 @@ LteDownlinkCtrlSinrTestCase::DoRun()
     Ptr<LteSpectrumSignalParametersDlCtrlFrame> sp1 =
         Create<LteSpectrumSignalParametersDlCtrlFrame>();
     sp1->psd = m_sv;
-    sp1->txPhy = nullptr;
+    sp1->txPhy = 0;
     sp1->duration = ds;
     sp1->ctrlMsgList = ctrlMsgList[0];
     sp1->cellId = pbCellId[0];
@@ -392,7 +400,7 @@ LteDownlinkCtrlSinrTestCase::DoRun()
     Ptr<LteSpectrumSignalParametersDlCtrlFrame> ip1 =
         Create<LteSpectrumSignalParametersDlCtrlFrame>();
     ip1->psd = i1;
-    ip1->txPhy = nullptr;
+    ip1->txPhy = 0;
     ip1->duration = di1;
     ip1->ctrlMsgList = ctrlMsgList[1];
     ip1->cellId = pbCellId[1];
@@ -402,7 +410,7 @@ LteDownlinkCtrlSinrTestCase::DoRun()
     Ptr<LteSpectrumSignalParametersDlCtrlFrame> ip2 =
         Create<LteSpectrumSignalParametersDlCtrlFrame>();
     ip2->psd = i2;
-    ip2->txPhy = nullptr;
+    ip2->txPhy = 0;
     ip2->duration = di2;
     ip2->ctrlMsgList = ctrlMsgList[2];
     ip2->cellId = pbCellId[2];
@@ -412,7 +420,7 @@ LteDownlinkCtrlSinrTestCase::DoRun()
     Ptr<LteSpectrumSignalParametersDlCtrlFrame> ip3 =
         Create<LteSpectrumSignalParametersDlCtrlFrame>();
     ip3->psd = i3;
-    ip3->txPhy = nullptr;
+    ip3->txPhy = 0;
     ip3->duration = di3;
     ip3->ctrlMsgList = ctrlMsgList[3];
     ip3->cellId = pbCellId[3];
@@ -422,7 +430,7 @@ LteDownlinkCtrlSinrTestCase::DoRun()
     Ptr<LteSpectrumSignalParametersDlCtrlFrame> ip4 =
         Create<LteSpectrumSignalParametersDlCtrlFrame>();
     ip4->psd = i4;
-    ip4->txPhy = nullptr;
+    ip4->txPhy = 0;
     ip4->duration = di4;
     ip4->ctrlMsgList = ctrlMsgList[4];
     ip4->cellId = pbCellId[4];

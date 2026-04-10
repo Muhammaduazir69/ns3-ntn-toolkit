@@ -18,7 +18,7 @@ the figure :ref:`fig-epc-topology`. There are two main components:
    stack (RRC, PDCP, RLC, MAC, PHY). These entities reside entirely within the
    UE and the eNB nodes.
 
- * the EPC Model. This model includes core network
+ * the EPC Model. This models includes core network
    interfaces, protocols and entities. These entities and protocols
    reside within the SGW, PGW and MME nodes, and partially within the
    eNB nodes.
@@ -26,7 +26,7 @@ the figure :ref:`fig-epc-topology`. There are two main components:
 
 .. _fig-epc-topology:
 
-.. figure:: figures/epc-topology-with-split.*
+.. figure:: figures/epc-topology.*
    :align: center
 
    Overview of the LTE-EPC simulation model
@@ -115,22 +115,16 @@ The main objective of the EPC model is to provides means for the
 simulation of end-to-end IP connectivity over the LTE model.
 To this aim, it supports for the
 interconnection of multiple UEs to the Internet, via a radio access
-network of multiple eNBs connected to the core network, as shown
+network of multiple eNBs connected to a single SGW/PGW node, as shown
 in Figure :ref:`fig-epc-topology`.
 
 The following design choices have been made for the EPC model:
 
  #. The Packet Data Network (PDN) type supported is both IPv4 and IPv6.
-    In other words, the end-to-end connections between the UEs and the remote
-    hosts can be IPv4 and IPv6. However, the networks between the core network
-    elements (MME, SGWs and PGWs) are IPv4-only.
- #. The SGW and PGW functional entities are implemented in different
-    nodes, which are hence referred to as the SGW node and PGW node,
-    respectively.
- #. The MME functional entities is implemented as a network node,
-    which is hence referred to as the MME node.
- #. The scenarios with inter-SGW mobility are not of interest. But
-    several SGW nodes may be present in simulations scenarios.
+ #. The SGW and PGW functional entities are implemented within a single
+    node, which is hence referred to as the SGW/PGW node.
+ #. The scenarios with inter-SGW mobility are not of interests. Hence, a
+    single SGW/PGW node will be present in all simulations scenarios
  #. A requirement for the EPC model is that it can be used to simulate the
     end-to-end performance of realistic applications. Hence, it should
     be possible to use with the EPC model any regular ns-3 application
@@ -139,20 +133,19 @@ The following design choices have been made for the EPC model:
     with the presence of multiple eNBs, some of which might be
     equipped with a backhaul connection with limited capabilities. In
     order to simulate such scenarios, the user data plane
-    protocols being used between the eNBs and the SGW should be
+    protocols being used between the eNBs and the SGW/PGW should be
     modeled accurately.
  #. It should be possible for a single UE to use different applications
     with different QoS profiles. Hence, multiple EPS bearers should be
     supported for each UE. This includes the necessary classification
     of TCP/UDP traffic over IP done at the UE in the uplink and at the
     PGW in the downlink.
- #. The initial focus of the EPC model is mainly on the EPC data plane.
-    The accurate modeling of the EPC control plane is,
-    for the time being, not a requirement; however, the necessary control
-    plane interactions among the different network nodes of the core network
-    are realized by implementing control protocols/messages among them.
-    Direct interaction among the different simulation objects via the
-    provided helper objects should be avoided as much as possible.
+ #. The focus of the EPC model is mainly on the EPC data plane. The
+    accurate modeling of the EPC control plane is,
+    for the time being, not a requirement; hence, the necessary control plane
+    interactions can be modeled in a simplified way by leveraging on direct
+    interaction among the different simulation objects via the
+    provided helper objects.
  #. The focus of the EPC model is on simulations of active users in ECM
     connected mode. Hence, all the functionality that is only relevant
     for ECM idle mode (in particular, tracking area update and paging)
@@ -262,20 +255,24 @@ EPC Model
 EPC data plane
 --------------
 
-In Figure :ref:`fig-lte-epc-e2e-data-protocol-stack-with-split`, we represent the
+In Figure :ref:`fig-lte-epc-e2e-data-protocol-stack`, we represent the
 end-to-end LTE-EPC data plane protocol stack as it is modeled in the
-simulator. The figure shows all nodes in the data path, i.e. UE, eNB,
-SGW, PGW and a remote host in the Internet. All protocol stacks
-(S5 protocol stack, S1-U protocol stack and the LTE radio protocol stack)
-specified by 3GPP are present.
+simulator. From the figure, it is evident that the
+biggest simplification introduced in the data plane model
+is the inclusion of the SGW and PGW functionality within a single
+SGW/PGW node, which removes the need for the S5 or S8 interfaces
+specified by 3GPP. On the other hand, for both the S1-U protocol stack and
+the LTE radio protocol stack all the protocol layers specified by 3GPP
+are present.
 
 
-.. _fig-lte-epc-e2e-data-protocol-stack-with-split:
+.. _fig-lte-epc-e2e-data-protocol-stack:
 
-.. figure:: figures/lte-epc-e2e-data-protocol-stack-with-split.*
+.. figure:: figures/lte-epc-e2e-data-protocol-stack.*
    :align: center
 
    LTE-EPC data plane protocol stack
+
 
 
 
@@ -283,23 +280,29 @@ EPC control plane
 -----------------
 
 The architecture of the implementation of the control plane model is
-shown in figure :ref:`fig-lte-epc-e2e-control-protocol-stack-with-split`.
-The control interfaces that are modeled explicitly are the S1-MME, the S11, and the S5
-interfaces. The X2 interface is also modeled explicitly and it is described in more
-detail in section :ref:`sec-x2`
+shown in figure :ref:`fig-epc-ctrl-arch`. The control interfaces that are
+modeled explicitly are the S1-AP, the X2-AP and the S11 interfaces.
 
-The S1-MME, the S11 and the S5 interfaces are modeled using protocol data units sent
-over its respective links. These interfaces use the SCTP protocol as transport protocol
-but currently, the SCTP protocol is not modeled in the ns-3 simulator, so the
-UDP protocol is used instead of the SCTP protocol.
+We note that the S1-AP and the S11 interfaces are modeled in a simplified
+fashion, by using just one pair of interface classes to model the
+interaction between entities that reside on different nodes (the eNB
+and the MME for the S1-AP interface, and the MME and the SGW for the
+S11 interface). In practice, this means that the primitives of these
+interfaces are mapped to a direct function call between the two
+objects. On the other hand, the X2-AP interface is being modeled using
+protocol data units sent over an X2 link (modeled as a point-to-point
+link); for this reason, the X2-AP interface model is more realistic.
 
 
-.. _fig-lte-epc-e2e-control-protocol-stack-with-split:
 
-.. figure:: figures/lte-epc-e2e-control-protocol-stack-with-split.*
+
+.. _fig-epc-ctrl-arch:
+
+.. figure:: figures/epc-ctrl-arch.*
    :align: center
 
-   LTE-EPC control plane protocol stack
+   EPC control model
+
 
 
 
@@ -492,7 +495,6 @@ MAC to Channel delay
 
 To model the latency of real MAC and PHY implementations, the PHY model simulates a MAC-to-channel delay in multiples of TTIs (1ms). The transmission of both data and control packets are delayed by this amount.
 
-.. _sec-cqi-feedback:
 
 CQI feedback
 ++++++++++++
@@ -511,7 +513,7 @@ In downlink, the SINR used to generate CQI feedback can be calculated in two dif
 
 To switch between this two CQI generation approaches, ``LteHelper::UsePdschForCqiGeneration`` needs to be configured: false for first approach and true for second approach (true is default value)::
 
-   Config::SetDefault("ns3::LteHelper::UsePdschForCqiGeneration", BooleanValue(true));
+   Config::SetDefault ("ns3::LteHelper::UsePdschForCqiGeneration", BooleanValue (true));
 
 In uplink, two types of CQIs are implemented:
 
@@ -614,7 +616,10 @@ The BLER performance of all MCS obtained with the link level simulator are plott
 .. _fig-mcs-1-4-ber:
 
 .. figure:: figures/MCS_1_4.*
+   :width: 900px
    :align: center
+   :height: 700px
+
 
    BLER for MCS 1, 2, 3 and 4.
 
@@ -622,23 +627,30 @@ The BLER performance of all MCS obtained with the link level simulator are plott
 .. _fig-mcs-5-8-ber:
 
 .. figure:: figures/MCS_5_8.*
+   :width: 900px
    :align: center
+   :height: 700px
+
 
    BLER for MCS 5, 6, 7 and 8.
-
 
 .. _fig-mcs-9-12-ber:
 
 .. figure:: figures/MCS_9_12.*
+   :width: 900px
    :align: center
+   :height: 700px
+
 
    BLER for MCS 9, 10, 11 and 12.
-
 
 .. _fig-mcs-13-16-ber:
 
 .. figure:: figures/MCS_13_16.*
+   :width: 900px
    :align: center
+   :height: 700px
+
 
    BLER for MCS 13, 14, 15 and 16.
 
@@ -646,15 +658,20 @@ The BLER performance of all MCS obtained with the link level simulator are plott
 .. _fig-mcs-17-20-ber:
 
 .. figure:: figures/MCS_17_20.*
+   :width: 900px
    :align: center
+   :height: 700px
+
 
    BLER for MCS 17, 17, 19 and 20.
-
 
 .. _fig-mcs-21-24-ber:
 
 .. figure:: figures/MCS_21_24.*
+   :width: 900px
    :align: center
+   :height: 700px
+
 
    BLER for MCS 21, 22, 23 and 24.
 
@@ -662,30 +679,36 @@ The BLER performance of all MCS obtained with the link level simulator are plott
 .. _fig-mcs-25-28-ber:
 
 .. figure:: figures/MCS_25_28.*
+   :width: 900px
    :align: center
+   :height: 700px
+
 
    BLER for MCS 25, 26, 27 and 28.
-
 
 .. _fig-mcs-29-29-ber:
 
 .. figure:: figures/MCS_29_29.*
+   :width: 900px
    :align: center
+   :height: 700px
+
 
    BLER for MCS 29.
+
+
+
 
 
 
 Integration of the BLER curves in the ns-3 LTE module
 -----------------------------------------------------
 
-The model implemented uses the curves for the LSM of the recently LTE PHY Error Model released in the ns3 community by the Signet Group [PaduaPEM]_ and the new ones generated for different CB sizes. The ``LteSpectrumPhy`` class is in charge of evaluating the TB BLER thanks to the methods provided by the ``LteMiErrorModel`` class, which is in charge of evaluating the TB BLER according to the vector of the perceived SINR per RB, the MCS and the size in order to proper model the segmentation of the TB in CBs. In order to obtain the vector of the perceived SINRs for data and control signals, two instances of ``LteChunkProcessor`` (dedicated to evaluate the SINR for obtaining physical error performance) have been attached to UE downlink and eNB uplink ``LteSpectrumPhy`` modules for evaluating the error model distribution of PDSCH (UE side) and ULSCH (eNB side).
+The model implemented uses the curves for the LSM of the recently LTE PHY Error Model released in the ns3 community by the Signet Group [PaduaPEM]_ and the new ones generated for different CB sizes. The ``LteSpectrumPhy`` class is in charge of evaluating the TB BLER thanks to the methods provided by the ``LteMiErrorModel`` class, which is in charge of evaluating the TB BLER according to the vector of the perceived SINR per RB, the MCS and the size in order to proper model the segmentation of the TB in CBs. In order to obtain the vector of the perceived SINR two instances of ``LtePemSinrChunkProcessor`` (child of ``LteChunkProcessor`` dedicated to evaluate the SINR for obtaining physical error performance) have been attached to UE downlink and eNB uplink ``LteSpectrumPhy`` modules for evaluating the error model distribution respectively of PDSCH (UE side) and ULSCH (eNB side).
 
-The model can be disabled for working with a zero-losses channel by setting the ``DataErrorModelEnabled`` attribute of the ``LteSpectrumPhy`` class (by default is active). This can be done according to the standard ns3 attribute system procedure, that is::
+The model can be disabled for working with a zero-losses channel by setting the ``PemEnabled`` attribute of the ``LteSpectrumPhy`` class (by default is active). This can be done according to the standard ns3 attribute system procedure, that is::
 
-  Config::SetDefault("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue(false));
-
-.. _sec-control-channels-phy-error-model:
+  Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
 
 Control Channels PHY Error Model
 ++++++++++++++++++++++++++++++++
@@ -707,7 +730,7 @@ MIMO Model
 
 The use of multiple antennas both at transmitter and receiver side, known as multiple-input and multiple-output (MIMO), is a problem well studied in literature during the past years. Most of the work concentrate on evaluating analytically the gain that the different MIMO schemes might have in term of capacity; however someones provide also information of the gain in terms of received power [CatreuxMIMO]_.
 
-According to the considerations above, a model more flexible can be obtained considering the gain that MIMO schemes bring in the system from a statistical point of view. As highlighted before, [CatreuxMIMO]_ presents the statistical gain of several MIMO solutions respect to the SISO one in case of no correlation between the antennas. In the work the gain is presented as the cumulative distribution function (CDF) of the output SINR for what concern SISO, MIMO-Alamouti, MIMO-MMSE, MIMO-OSIC-MMSE and MIMO-ZF schemes. Elaborating the results, the output SINR distribution can be approximated with a log-normal one with different mean and variance as function of the scheme considered. However, the variances are not so different and they are approximately equal to the one of the SISO mode already included in the shadowing component of the ``BuildingsPropagationLossModel``, in detail:
+According to the considerations above, a model more flexible can be obtained considering the gain that MIMO schemes bring in the system from a statistical point of view. As highlighted before, [CatreuxMIMO]_ presents the statistical gain of several MIMO solutions respect to the SISO one in case of no correlation between the antennas. In the work the gain is presented as the cumulative distribution function (CDF) of the output SINR for what concern SISO, MIMO-Alamouti, MIMO-MMSE, MIMO-OSIC-MMSE and MIMO-ZF schemes. Elaborating the results, the output SINR distribution can be approximated with a log-normal one with different mean and variance as function of the scheme considered. However, the variances are not so different and they are approximatively equal to the one of the SISO mode already included in the shadowing component of the ``BuildingsPropagationLossModel``, in detail:
 
  * SISO: :math:`\mu = 13.5` and :math:`\sigma = 20` [dB].
  * MIMO-Alamouti: :math:`\mu = 17.7` and :math:`\sigma = 11.1` [dB].
@@ -1000,7 +1023,7 @@ available resources among the active flows, i.e., those logical channels which h
 
 For what concern the HARQ, RR implements the non adaptive version, which implies that in allocating the retransmission attempts RR uses the same allocation configuration of the original block, which means maintaining the same RBGs and MCS. UEs that are allocated for HARQ retransmissions are not considered for the transmission of new data in case they have a transmission opportunity available in the same TTI. Finally, HARQ can be disabled with ns3 attribute system for maintaining backward compatibility with old test cases and code, in detail::
 
-   Config::SetDefault("ns3::RrFfMacScheduler::HarqEnabled", BooleanValue(false));
+   Config::SetDefault ("ns3::RrFfMacScheduler::HarqEnabled", BooleanValue (false));
 
 The scheduler implements the filtering of the uplink CQIs according to their nature with ``UlCqiFilter`` attribute, in detail:
 
@@ -1037,7 +1060,7 @@ In detail, the index :math:`\widehat{i}_{k}(t)` to which RBG :math:`k` is assign
    \widehat{i}_{k}(t) = \underset{j=1,...,N}{\operatorname{argmax}}
     \left( \frac{ R_{j}(k,t) }{ T_\mathrm{j}(t) } \right)
 
-where :math:`T_{j}(t)` is the past throughput performance perceived by the
+where :math:`T_{j}(t)` is the past througput performance perceived by the
 user :math:`j`.
 According to the above scheduling algorithm, a user can be allocated to
 different RBGs, which can be either adjacent or not, depending on the current
@@ -1079,7 +1102,7 @@ where :math:`|\cdot|` indicates the cardinality of the set; finally,
 
 For what concern the HARQ, PF implements the non adaptive version, which implies that in allocating the retransmission attempts the scheduler uses the same allocation configuration of the original block, which means maintaining the same RBGs and MCS. UEs that are allocated for HARQ retransmissions are not considered for the transmission of new data in case they have a transmission opportunity available in the same TTI. Finally, HARQ can be disabled with ns3 attribute system for maintaining backward compatibility with old test cases and code, in detail::
 
-   Config::SetDefault("ns3::PfFfMacScheduler::HarqEnabled", BooleanValue(false));
+   Config::SetDefault ("ns3::PfFfMacScheduler::HarqEnabled", BooleanValue (false));
 
 
 
@@ -1256,7 +1279,7 @@ quality UE tend towards the TBR.
 
 ::
 
-  Config::SetDefault("ns3::PfFfMacScheduler::HarqEnabled", BooleanValue(false));
+  Config::SetDefault ("ns3::PfFfMacScheduler::HarqEnabled", BooleanValue (false));
 
 The scheduler implements the filtering of the uplink CQIs according to their nature with ``UlCqiFilter`` attribute, in detail:
 
@@ -1303,7 +1326,7 @@ where :math:`m_{GBR}^j(t)` is calculated as follows:
 
 .. math::
 
-   m_{GBR}^j(t)=\frac{GBR^j}{\overline{R^j}(t)}=\frac{GBR^j}{(1-\alpha)\cdot\overline{R^j}(t-1)+\alpha \cdot r^j(t)} \;,
+    m_{GBR}^j(t)=\frac{GBR^j}{\overline{R^j}(t)}=\frac{GBR^j}{(1-\alpha)\cdot\overline{R^j}(t-1)+\alpha \cdot r^j(t)} \;,
 
 where :math:`GBR^j` is the bit rate specified in EPS bearer of the
 flow :math:`j`, :math:`\overline{R^j}(t)` is the past averaged throughput that is calculated with a
@@ -1456,6 +1479,7 @@ with all the other entities and services in the protocol stack.
 .. _fig-lte-rlc-implementation-model:
 
 .. figure:: figures/lte-rlc-implementation-model.*
+   :width: 800px
 
    Implementation Model of PDCP, RLC and MAC entities and SAPs
 
@@ -1542,8 +1566,8 @@ transmit operations:
     * **Transmission Buffer**: it is the RLC SDU queue.
       When the AM RLC entity receives a SDU in the TransmitPdcpPdu service primitive from the
       upper PDCP entity, it enqueues it in the Transmission Buffer. We
-      put a limit on the RLC buffer size and the LteRlc TxDrop trace source
-      is called when a drop due to a full buffer occurs.
+      put a limit on the RLC buffer size and just silently drop SDUs
+      when the buffer is full.
 
     * **Transmitted PDUs Buffer**: it is the queue of transmitted RLC PDUs for which an ACK/NACK has not
       been received yet. When the AM RLC entity sends a PDU to the MAC
@@ -1570,7 +1594,7 @@ entities/services of the LTE protocol stack.
 .. _fig-lte-rlc-data-txon-dl:
 
 .. figure:: figures/lte-rlc-data-txon-dl.*
-   :width: 550px
+   :width: 800px
 
    Sequence diagram of data PDU transmission in downlink
 
@@ -1641,7 +1665,7 @@ are sent by the upper layers.
 .. _fig-lte-rlc-data-txon-ul:
 
 .. figure:: figures/lte-rlc-data-txon-ul.*
-   :width: 550px
+   :width: 800px
 
    Sequence diagram of data PDU transmission in uplink
 
@@ -1832,7 +1856,6 @@ all packets in the transmission buffer, thus notifying to the MAC the
 exact buffer size.
 
 
-.. _sec-sm-rlc:
 
 SM RLC
 ++++++
@@ -1985,16 +2008,32 @@ as implemented in the RRC UE entity.
 .. _fig-lte-ue-rrc-states:
 
 .. figure:: figures/lte-ue-rrc-states.*
-   :scale: 60 %
+   :scale: 70 %
    :align: center
 
    UE RRC State Machine
 
-All the states are transient, however, the UE in "CONNECTED_NORMALLY" state will
-only switch to the IDLE state if the downlink SINR is below a defined threshold,
-which would lead to radio link failure :ref:`sec-radio-link-failure`.
-One the other hand, the UE would not be able switch to IDLE mode due to a handover
-failure, as mentioned in :ref:`sec-x2`.
+It is to be noted that most of the states are transient, i.e., once
+the UE goes into one of the CONNECTED states it will never switch back
+to any of the IDLE states. This choice is done for the following reasons:
+
+ - as discussed in the section :ref:`sec-design-criteria`, the focus
+   of the LTE-EPC simulation model is on CONNECTED mode
+ - radio link failure is not currently modeled, as discussed in the
+   section :ref:`sec-radio-link-failure`, so an UE cannot go IDLE
+   because of radio link failure
+ - RRC connection release is currently never triggered neither by the EPC
+   nor by the NAS
+
+Still, we chose to model explicitly the IDLE states, because:
+
+ - a realistic UE RRC configuration is needed for handover, which is a
+   required feature, and in order to have a cleaner implementation it makes sense to
+   use the same UE RRC configuration also for the initial connection
+   establishment
+ - it makes easier to implement idle mode cell selection in the
+   future, which is a highly desirable feature
+
 
 ENB RRC State Machine
 +++++++++++++++++++++
@@ -2056,7 +2095,7 @@ assumptions:
 
  - marking a cell as barred or reserved is not supported;
 
- - Idle cell reselection is not supported, hence it is not possible for UE to camp to
+ - cell reselection is not supported, hence it is not possible for UE to camp to
    a different cell after the initial camp has been placed; and
 
  - UE's Closed Subscriber Group (CSG) white list contains only one CSG identity.
@@ -2127,8 +2166,6 @@ lifecycle. MIB enables the UE to increase the initial DL bandwidth of 6 RBs to
 the actual operating bandwidth of the network. SIB1 provides information
 necessary for cell selection evaluation (explained in the next section). And
 finally SIB2 is required before the UE is allowed to switch to CONNECTED state.
-
-.. _sec-cell-selection-evaluation:
 
 Cell Selection Evaluation
 -------------------------
@@ -2207,152 +2244,20 @@ Some implementation choices have been made in the RRC regarding the setup of rad
 
 Radio Link Failure
 ++++++++++++++++++
-In real LTE networks, Radio link failure (RLF) can happen due to several reasons.
-It can be triggered if a UE is unable to decode PDCCH due to poor signal quality,
-upon maximum RLC retransmissions, RACH problems and other reasons. 3GPP only
-specifies guidelines to detect RLF at the UE side, in [TS36331]_ and [TS36133]_.
-On the other hand, the eNB implementation is expected to be vendor specific.
-To implement the RLF functionality in ns-3, we have assumed the following
-simplifications:
 
- * The RLF detection procedure at eNodeB is not implemented. **Instead, a direct
-   function call by using the SAP between UE and eNB RRC (for both ideal and real
-   RRC) is used to notify the eNB about the RLF**.
- * No RRC connection re-establishment procedure is implemented, thus, the UE
-   directly goes to the IDLE state upon RLF. This is in fact as per the standard
-   [TS36331]_ sec 5.3.11.3, since, at this stage the LTE module does not support
-   the Access Stratum (AS) security.
+Since at this stage the RRC supports the CONNECTED mode only, Radio Link
+Failure (RLF) is not handled. The reason is that one of the possible
+outcomes of RLF (when RRC re-establishment is unsuccessful) is to
+leave RRC CONNECTED notifying the NAS of the RRC connection
+failure. In order to model RLF properly, RRC IDLE mode should be
+supported, including in particular idle mode cell (re-)selection.
 
-The above mentioned RLF specifications can be divided into the following two
-categories:
+With the current model, an UE that experiences bad link quality and
+that does not perform handover (because of, e.g., no neighbor cells,
+handover disabled, handover thresholds misconfigured) will
+just stay associated with the same eNB, and the scheduler will stop
+allocating resources to it for communications.
 
- #. RLF detection
- #. Actions upon RLF detection
-
-In the following, we will explain the RLF implementation in context of these
-two categories.
-
-RLF detection implementation
-----------------------------
-
-The RLF detection at the UE is implemented as per [TS36133]_, i.e., by monitoring
-the radio link quality based on the reference signals (which in the simulation
-is equivalent to the PDCCH) in the downlink. Thus, it is independent of the method
-used for the downlink CQI computation, i.e., *Ctrl* method and *Mixed method*.
-Moreover, when using FFR, especially for hard-FFR, and CQIs based on *Mixed method*,
-UEs might experience relatively good performance and RLF simultaneously. This is
-due to the fact that the interference in PDSCH is affected by the actual data
-transmissions on the specific RBs and the power control. Therefore, UEs might
-experience good SINR in PDSCH, while bad SINR in PDCCH channel. For more details
-about these methods please refer to :ref:`sec-cqi-feedback`. Also, it does not
-matter if the DL control error model is disabled, a UE can still detect the RLF
-since the SINR based on the control channel is reported to the LteUePhy class,
-using a callback hooked in LteHelper while installing a UE device.
-
-The RLF detection starts once the RRC connection is established between UE and
-eNodeB, i.e., UE is in "CONNECTED_NORMALLY" state; upon which the RLF parameters
-are configured (see ``LteUePhy::DoConfigureRadioLinkFailureDetection``). In real
-networks, these parameters are transmitted by the eNB using IE UE-TimersAndConstants or
-RLF-TimersAndConstants. However, for the sake of simplification, in the simulator
-they are presented as the attributes of the LteUePhy and LteUeRrc classes.
-Moreover, what concerns the carrier aggregation, i.e., when a UE is configured
-with multiple component carriers, the RLF detection is only performed by the
-primary component carrier, i.e. component carrier id 0
-(see ``LteUePhy::DoNotifyConnectionSuccessful``). In LteUePhy class, CQI
-calculation is triggered for every downlink subframe received,
-and the average SINR value is measured across all resource blocks. For the RLF
-detection, these SINR values are averaged over a downlink frame and if the result
-is less than a defined threshold Qout (default: -5dB), the frame cannot be decoded
-(see``LteUePhy::RadioLinkFailureDetection``). The Qout threshold corresponds to 10%
-block error rate (BLER) of a hypothetical PDCCH transmission taking into account
-the PCFICH errors [R4-081920]_ (also refer to
-:ref:`sec-control-channels-phy-error-model`). Once, the UE is unable to decode
-20 consecutive frames, i.e., the Qout evaluation period (200ms) is reached, an
-out-of-sync indication is sent to the UE RRC layer (see ``LteUeRrc::DoNotifyOutOfSync``).
-Else, the counter for the unsuccessfuly decoded frames is reset to zero. At the
-LteUeRrc, when the number of consecutive out-of-sync indications matches with the
-value of N310 parameter, the T310 timer is started and LteUePhy is notified to start
-measuring for in-sync indications (see ``LteUePhy::DoStartInSyncDetection``). We note
-that, the UE RRC state is not changed till the expiration of T310 timer. If the
-resultant SINR values averaged over a downlink frame is greater than a defined
-threshold Qin (default: -3.8dB), the frame is considered to be successfully
-decoded. Qin corresponds to 2% BLER [R4-081920]_ of a hypothetical PDCCH transmission
-taking into account the PCFICH errors. Once the UE is able to decode 10
-consecutive frames, an in-sync indication is sent to the UE RRC layer
-(see ``LteUeRrc::DoNotifyInSync``). Else, the counter for the successfully decoded
-frames is reset to zero. If prior to the T310 timer expiry, the number of
-consecutive in-sync indications matches with N311 parameter of LteUeRRC, the UE
-is considered back in-sync. At this stage, the related parameters are reset to
-initiate the radio link failure detection from the beginning
-(see ``LteUePhy::DoConfigureRadioLinkFailureDetection``). On the other hand, If the
-T310 timer expires, the UE considers that a RLF has occurred
-(see ``LteUeRrc::RadioLinkFailureDetected``).
-
-Actions upon RLF
-----------------
-
-Once the T310 timer is expired, a UE is considered to be in RLF; upon which the
-UE RRC:
-
- * Sends a request to the eNB RRC to remove the UE context
- * Moves to "CONNECTED_PHY_PROBLEM" state
- * Notifies the UE NAS layer about the release of RRC connection.
-
-Then, after getting the notification from the UE RRC the NAS does the following:
-
- * Delete all the TFTs
- * Reset the bearer counter
- * Restore the bearer list, which is used to activate the bearers for the next
-   RRC connection. This restoration of the bearers is achieved by maintaining an
-   additional list, i.e., m_bearersToBeActivatedListForReconnection in EpcUeNas
-   class
- * Switch the NAS state to OFF by calling EpcUeNas::Disconnect
- * Tells the UE RRC to disconnect
-
-The UE RRC, upon receiving the call to disconnect from the EpcUeNas class,
-performs the action as specified by [TS36331]_ 5.3.11.3, and finally leaves the
-connected state, i.e., its RRC state is changed from "CONNECTED_PHY_PROBLEM" to
-"IDLE_START" to perform cell selection as shown in figures :ref:`fig-lte-ue-rrc-states`
-and :ref:`fig-lte-ue-procedures-after-rlf`.
-
-At this stage, the LTE module does not support the paging functionality, therefore,
-to allow a UE to read SIB2 message after camping on a suitable cell after RLF, a
-work around is used in ``LteUeRrc::EvaluateCellForSelection`` method. As per this
-workaround, the UE RRC invokes the call to ``LteUeRrc::DoConnect`` method, which
-enables the UE to switch its state from "IDLE_CAMPED_NORMALLY" to "IDLE_WAIT_SIB2",
-thus, allowing it to perform the random access.
-
-.. _fig-lte-ue-procedures-after-rlf:
-
-.. figure:: figures/lte-ue-procedures-after-rlf.*
-   :scale: 95 %
-   :align: center
-
-   UE procedures after radio link failure
-
-The eNB RRC, after receiving the notification from the UE RRC starts the procedure
-of UE context deletion, which also involves the deletion of the UE context removal
-from the EPC :ref:`fig-lte-ue-context-removal-from-epc` and the eNB stack
-:ref:`fig-lte-ue-context-removal-from-enb-stack`. We note that, the UE context
-at the MME is not removed since, bearers are only added at the start of a
-simulation in MME, and cannot be added again unless scheduled for addition
-during a simulation.
-
-.. _fig-lte-ue-context-removal-from-epc:
-
-.. figure:: figures/lte-ue-context-removal-from-epc.*
-   :scale: 80 %
-   :align: center
-
-   UE context removal from EPC
-
-.. _fig-lte-ue-context-removal-from-enb-stack:
-
-.. figure:: figures/lte-ue-context-removal-from-enb-stack.*
-   :scale: 80 %
-   :align: center
-
-   UE context removal from eNB stack
 
 .. _sec-ue-measurements:
 
@@ -2468,7 +2373,7 @@ where:
  - :math:`F_{n-1}` is the old filtered measurement result, where
    :math:`F_0 = M_1` (i.e. the first measurement is not filtered); and
  - :math:`a = (\frac{1}{2})^{\frac{k}{4}}`, where :math:`k` is the configurable
-   `filterCoefficient` provided by the ``QuantityConfig``;
+   `filterCoefficent` provided by the ``QuantityConfig``;
 
 :math:`k = 4` is the default value, but can be configured by setting the
 `RsrpFilterCoefficient` and `RsrqFilterCoefficient` attributes in
@@ -2865,10 +2770,8 @@ interaction with the other layers.
 There are several timeouts related to this procedure, which are listed in the
 following Table :ref:`tab-rrc-connection_establishment_timer`. If any of these
 timers expired, the RRC connection establishment procedure is terminated in
-failure. At the UE side, if T300 timer has expired a consecutive
-*connEstFailCount* times on the same cell it performs the cell selection again
-[TS36331]_. Else, the upper layer (UE NAS) will immediately attempt to retry
-the procedure.
+failure. In this case, the upper layer (UE NAS) will immediately attempt to
+retry the procedure until it completes successfully.
 
 .. _tab-rrc-connection_establishment_timer:
 
@@ -2879,7 +2782,7 @@ the procedure.
    |            |          | starts     | stops       | duration | expired    |
    +============+==========+============+=============+==========+============+
    | Connection | eNodeB   | New UE     | Receive RRC | 15 ms    | Remove UE  |
-   | request    | RRC      | context    | CONNECTION  | (Max)    | context    |
+   | request    | RRC      | context    | CONNECTION  |          | context    |
    | timeout    |          | added      | REQUEST     |          |            |
    +------------+----------+------------+-------------+----------+------------+
    | Connection | UE RRC   | Send RRC   | Receive RRC | 100 ms   | Reset UE   |
@@ -2897,28 +2800,6 @@ the procedure.
    | timeout    |          | REJECT     |             |          |            |
    +------------+----------+------------+-------------+----------+------------+
 
-
-**Note:** The value of connection request timeout timer at the eNB RRC should
-not be higher than the T300 timer at UE RRC. It is to make sure that the UE
-context is already removed at the eNB, once the UE will perform cell selection
-upon reaching the *connEstFailCount* count. Moreover, at the time of writing
-this document the :ref:`sec-cell-selection-evaluation` does not include
-the :math:`Qoffset_{temp}` parameter, thus, it is not applied while selecting
-the same cell again.
-
-.. _tab-rrc-connection_establishment_counter:
-
-.. table:: Counters in RRC connection establishment procedure
-
-   +------------------+----------+------------------+-----------+---------+------------------------------+---------------------+
-   | Name             | Location | Msg              | Monitored | Default | Limit not reached            | Limit reached       |
-   |                  |          |                  | by        | value   |                              |                     |
-   +==================+==========+==================+===========+=========+==============================+=====================+
-   | ConnEstFailCount | eNB MAC  | RachConfigCommon | UE RRC    | 1       | Increment the local counter. | Reset the local     |
-   |                  |          | in SIB2, HO REQ  |           |         | Invalided the prev SIB2 msg, | counter and perform |
-   |                  |          | and HO Ack       |           |         | and try random access        | cell selection.     |
-   |                  |          |                  |           |         | with the same cell.          |                     |
-   +------------------+----------+------------------+-----------+---------+------------------------------+---------------------+
 
 
 .. _sec-rrc-connection-reconfiguration:
@@ -3155,7 +3036,6 @@ The following RRC SAP have been implemented:
         \clearpage
 
 
-.. _sec-nas:
 
 ---
 NAS
@@ -3164,9 +3044,9 @@ NAS
 
 The focus of the LTE-EPC model is on the NAS Active state, which corresponds to EMM Registered, ECM connected, and RRC connected. Because of this, the following simplifications are made:
 
-- EMM and ECM are not modeled explicitly; instead, the NAS entity at the UE will interact directly with the MME to perform actions that are equivalent (with gross simplifications) to taking the UE to the states EMM Connected and ECM Connected;
+ - EMM and ECM are not modeled explicitly; instead, the NAS entity at the UE will interact directly with the MME to perform actions that are equivalent (with gross simplifications) to taking the UE to the states EMM Connected and ECM Connected;
 
-- the NAS also takes care of multiplexing uplink data packets coming from the upper layers into the appropriate EPS bearer by using the Traffic Flow Template classifier (TftClassifier).
+ - the NAS also takes care of multiplexing uplink data packets coming from the upper layers into the appropriate EPS bearer by using the Traffic Flow Template classifier (TftClassifier).
 
 - the NAS does not support PLMN and CSG selection
 
@@ -3200,38 +3080,37 @@ procedure.
 
 
 
-----------------
-S1, S5 and S11
-----------------
+-----------------
+S1
+-----------------
 
-S1-U and S5 (user plane)
-+++++++++++++++++++++++++
+S1-U
++++++++++
 
-The S1-U and S5 interfaces are modeled in a realistic way by encapsulating
+The S1-U interface is modeled in a realistic way by encapsulating
 data packets over GTP/UDP/IP, as done in real LTE-EPC systems. The
 corresponding protocol stack is shown in Figure
-:ref:`fig-lte-epc-e2e-data-protocol-stack-with-split`. As shown in the figure,
+:ref:`fig-lte-epc-e2e-data-protocol-stack`. As shown in the figure,
 there are two different layers of
 IP networking. The first one is the end-to-end layer, which provides end-to-end
-connectivity to the users; this layer involves the UEs, the PGW and
+connectivity to the users; this layers involves the UEs, the PGW and
 the remote host (including eventual internet routers and hosts in
-between), but does not involve the eNB and the SGW. In this version of LTE, the EPC
+between), but does not involve the eNB. In this version of LTE, the EPC
 supports both IPv4 and IPv6 type users. The 3GPP unique 64 bit IPv6 prefix
 allocation process for each UE and PGW is followed here. Each EPC is assigned
-a unique 16 bit IPv4 and a 48 bit IPv6 network address from the pool of
+an unique 16 bit IPv4 and a 48 bit IPv6 network address from the pool of
 7.0.0.0/8 and 7777:f00d::/32 respectively. In the end-to-end IP connection
 between UE and PGW, all addresses are configured using these prefixes.
 The PGW's address is used by all UEs as the gateway to reach the internet.
 
 The second layer of IP networking is the EPC local area network. This
-involves all eNB nodes, SGW nodes and PGW nodes. This network is
+involves all eNB nodes and the SGW/PGW node. This network is
 implemented as a set of point-to-point links which connect each eNB
-with its corresponding SGW node and a point-to-point link which connect
-each SGW node with its corresponding PGW node;
-thus, each SGW has a set of point-to-point devices, each providing
-connectivity to a different eNB. By default, a 10.x.y.z/30 subnet
-is assigned to each point-to-point link (a /30 subnet is the smallest
-subnet that allows for two distinct host addresses).
+with the SGW/PGW node; thus, the SGW/PGW has a set of point-to-point
+devices, each providing connectivity to a different eNB. By default, a
+10.x.y.z/30 subnet is assigned to each point-to-point link (a /30
+subnet is the smallest subnet that allows for two distinct host
+addresses).
 
 As specified by 3GPP, the end-to-end IP
 communications is tunneled over the local EPC IP network using
@@ -3239,69 +3118,50 @@ GTP/UDP/IP. In the following, we explain how this tunneling is
 implemented in the EPC model. The explanation is done by discussing the
 end-to-end flow of data packets.
 
-.. _fig-epc-data-flow-dl-with-split:
+.. _fig-epc-data-flow-dl:
 
-.. figure:: figures/epc-data-flow-dl-with-split.*
+.. figure:: figures/epc-data-flow-dl.*
    :align: center
 
    Data flow in the downlink between the internet and the UE
 
 To begin with, we consider the case of the downlink, which is depicted
-in Figure :ref:`fig-epc-data-flow-dl-with-split`.
+in Figure :ref:`fig-epc-data-flow-dl`.
 Downlink IPv4/IPv6 packets are generated from a generic remote host, and
 addressed to one of the UE device. Internet routing will take care of
-forwarding the packet to the generic NetDevice of the PGW node
+forwarding the packet to the generic NetDevice of the SGW/PGW node
 which is connected to the internet (this is the Gi interface according
-to 3GPP terminology). The PGW has a VirtualNetDevice which is
+to 3GPP terminology). The SGW/PGW has a VirtualNetDevice which is
 assigned the base IPv4 address of the EPC network; hence, static
 routing rules will cause the incoming packet from the internet to be
 routed through this VirtualNetDevice. In case of IPv6 address as destination,
 a manual route towards the VirtualNetDevice is inserted in the routing table,
 containing the 48 bit IPv6 prefix from which all the IPv6 addresses of the UEs
 and PGW are configured. Such device starts the GTP/UDP/IP tunneling procedure,
-by forwarding the packet to a dedicated application in the PGW node which
-is called EpcPgwApplication. This application does the following operations:
+by forwarding the packet to a dedicated application in the SGW/PGW  node which
+is called EpcSgwPgwApplication. This application does the following operations:
 
- #. it determines the SGW node to which it must route the traffic
-    for this UE, by looking at the IP destination address
-    (which is the address of the UE);
+ #. it determines the eNB node to which the UE is attached, by looking
+    at the IP destination address (which is the address of the UE);
  #. it classifies the packet using Traffic Flow Templates (TFTs) to
     identify to which EPS Bearer it belongs. EPS bearers have a
-    one-to-one mapping to S5 Bearers, so this operation returns the
+    one-to-one mapping to S1-U Bearers, so this operation returns the
     GTP-U Tunnel Endpoint Identifier  (TEID) to which the packet
     belongs;
  #. it adds the corresponding GTP-U protocol header to the packet;
- #. finally, it sends the packet over a UDP socket to the S5
-    point-to-point NetDevice, addressed to the appropriate SGW.
-
-As a consequence, the end-to-end IP packet with newly added IP, UDP
-and GTP headers is sent through one of the S5 links to the SGW, where
-it is received and delivered locally (as the destination address of
-the outermost IP header matches the SGW IP address). The local delivery
-process will forward the packet, via an UDP socket, to a dedicated
-application called EpcSgwApplication. This application then performs
-the following operations:
-
- #. it determines the eNB node to which the UE is attached, by looking
-    at the S5 TEID;
- #. it maps the S5 TEID to get the S1 TEID. EPS bearers have a
-    one-to-one mapping to S1-U Bearers, so this operation returns the
-    S1 GTP-U Tunnel Endpoint Identifier (TEID) to which the packet
-    belongs;
- #. it adds a new GTP-U protocol header to the packet;
- #. finally, it sends the packet over a UDP socket to the S1-U
+ #. finally, it sends the packet over an UDP socket to the S1-U
     point-to-point NetDevice, addressed to the eNB to which the UE is
     attached.
 
-Finally, the end-to-end IP packet with newly added IP, UDP
+As a consequence, the end-to-end IP packet with newly added IP, UDP
 and GTP headers is sent through one of the S1 links to the eNB, where
 it is received and delivered locally (as the destination address of
-the outermost IP header matches the eNB IP address). The local delivery
+the outmost IP header matches the eNB IP address). The local delivery
 process will forward the packet, via an UDP socket, to a dedicated
 application called EpcEnbApplication. This application then performs
 the following operations:
 
- #. it removes the GTP header and retrieves the S1 TEID which is
+ #. it removes the GTP header and retrieves the TEID which is
     contained in it;
  #. leveraging on the one-to-one mapping between S1-U bearers and
     Radio Bearers (which is a 3GPP requirement), it determines the
@@ -3325,15 +3185,15 @@ the UE, which is the end point of the downlink communication.
 
 
 
-.. _fig-epc-data-flow-ul-with-split:
+.. _fig-epc-data-flow-ul:
 
-.. figure:: figures/epc-data-flow-ul-with-split.*
+.. figure:: figures/epc-data-flow-ul.*
    :align: center
 
    Data flow in the uplink between the UE and the internet
 
 
-The case of the uplink is depicted in Figure :ref:`fig-epc-data-flow-ul-with-split`.
+The case of the uplink is depicted in Figure :ref:`fig-epc-data-flow-ul`.
 Uplink IP packets are generated by a generic application inside the UE,
 and forwarded by the local TCP/IP stack to the LteUeNetDevice of the
 UE. The LteUeNetDevice then performs the following operations:
@@ -3361,45 +3221,27 @@ following operations:
     Bearers;
  #. it adds a GTP-U header on the packet, including the TEID
     determined previously;
- #. it sends the packet to the SGW node via the UDP socket
+ #. it sends the packet to the SGW/PGW node via the UDP socket
     connected to the S1-U point-to-point net device.
 
 At this point, the packet contains the S1-U IP, UDP and GTP headers in
 addition to the original end-to-end IP header. When the packet is
 received by the corresponding S1-U point-to-point NetDevice of the
-SGW node, it is delivered locally (as the destination address of
+SGW/PGW node, it is delivered locally (as the destination address of
 the outmost IP header matches the address of the point-to-point net
 device). The local delivery process will forward the packet to the
-EpcSgwApplication via the corresponding UDP socket. The
-EpcSgwApplication then performs the following operations:
-
- #. it removes the GTP header and retrieves the S1-U TEID;
- #. it maps the S1-U TEID to get the S5 TEID to which the packet
-    belongs;
- #. it determines the PGW to which it must send the packet from
-    the TEID mapping;
- #. it add a new GTP-U protocol header to the packet;
- #. finally, it sends the packet over a UDP socket to the S5
-    point-to-point NetDevice, addressed to the corresponding PGW.
-
-At this point, the packet contains the S5 IP, UDP and GTP headers in
-addition to the original end-to-end IP header. When the packet is
-received by the corresponding S5 point-to-point NetDevice of the
-PGW node, it is delivered locally (as the destination address of
-the outmost IP header matches the address of the point-to-point net
-device). The local delivery process will forward the packet to the
-EpcPgwApplication via the corresponding UDP socket. The
-EpcPgwApplication then removes the GTP header and forwards the
+EpcSgwPgwApplication via the corresponding UDP socket. The
+EpcSgwPgwApplication then removes the GTP header and forwards the
 packet to the VirtualNetDevice. At this point, the outmost header
 of the packet is the end-to-end IP header. Hence, if the destination
 address within this header is a remote host on the internet, the
 packet is sent to the internet via the corresponding NetDevice of the
-PGW. In the event that the packet is addressed to another UE, the
-IP stack of the PGW will redirect the packet again to the
-VirtualNetDevice, and the packet will go through the downlink delivery
+SGW/PGW. In the event that the packet is addressed to another UE, the
+IP stack of the SGW/PGW will redirect the packet again to the
+VirtualNetDevice, and the packet will go through the dowlink delivery
 process in order to reach its destination UE.
 
-Note that the EPS Bearer QoS is not enforced on the S1-U and S5
+Note that the EPS Bearer QoS is not enforced on the S1-U
 links, it is assumed that the overprovisioning of the link bandwidth
 is sufficient to meet the QoS requirements of all bearers.
 
@@ -3408,9 +3250,11 @@ S1AP
 +++++
 
 The S1-AP interface provides control plane interaction between the eNB
-and the MME. In the simulator, this interface is modeled in a realistic
-fashion transmitting the encoded S1AP messages and information elements
-specified in [TS36413]_ on the S1-MME link.
+and the MME. In the simulator, this interface is modeled in an ideal
+fashion, with direct interaction between the eNB and the MME objects,
+without actually implementing the encoding of S1AP messages and
+information elements specified in [TS36413]_ and without actually
+transmitting any PDU on any link.
 
 The S1-AP primitives that are modeled are:
 
@@ -3419,37 +3263,6 @@ The S1-AP primitives that are modeled are:
  * INITIAL CONTEXT SETUP RESPONSE
  * PATH SWITCH REQUEST
  * PATH SWITCH REQUEST ACKNOWLEDGE
-
-
-S5 and S11
-+++++++++++
-
-The S5 interface provides control plane interaction between the SGW
-and the PGW. The S11 interface provides control plane interaction between
-the SGw and the MME. Both interfaces use the GPRS Tunneling Protocol (GTPv2-C)
-to tunnel signalling messages [TS29274]_ and use UDP as transport protocol.
-In the simulator, these interfaces and protocol are modeled in a realistic
-fashion transmitting the encoded GTP-C messages.
-
-The GTPv2-C primitives that are modeled are:
-
- * CREATE SESSION REQUEST
- * CREATE SESSION RESPONSE
- * MODIFY BEARER REQUEST
- * MODIFY BEARER RESPONSE
- * DELETE SESSION REQUEST
- * DELETE SESSION RESPONSE
- * DELETE BEARER COMMAND
- * DELETE BEARER REQUEST
- * DELETE BEARER RESPONSE
-
-Of these primitives, the first two are used upon initial UE attachment for the establishment
-of the S1-U and S5 bearers. Section :ref:`sec-nas` shows the implementation of the attach
-procedure. The other primitives are used during the handover to switch the S1-U bearers from
-the source eNB to the target eNB as a consequence of the reception by the MME of a
-PATH SWITCH REQUEST S1-AP message.
-
-
 
 .. only:: latex
 
@@ -3545,7 +3358,7 @@ Figure :ref:`fig-x2-entity-saps` shows the implementation model of the X2 entity
 .. _fig-x2-entity-saps:
 
 .. figure:: figures/lte-epc-x2-entity-saps.*
-    :width: 550px
+    :width: 700px
     :align: center
 
     Implementation Model of X2 entity and SAPs
@@ -3604,7 +3417,7 @@ The X2 service interface is used by the RRC entity to send and receive messages 
 
   * the ``EpcX2SapProvider`` part is provided by the X2 entity and used by the RRC entity and
 
-  * the ``EpcX2SapUser`` part is provided by the RRC entity and used by the RRC entity.
+  * the ``EpcX2SapUser`` part is provided by the RRC entity and used by the RRC enity.
 
 The primitives that are supported in our X2-C model are described in the following subsections.
 
@@ -3646,7 +3459,7 @@ the following new member variables::
 
   std::vector<EpcX2Sap::UlInterferenceOverloadIndicationItem>
     m_currentUlInterferenceOverloadIndicationList;
-  std::vector<EpcX2Sap::UlHighInterferenceInformationItem>
+  std::vector <EpcX2Sap::UlHighInterferenceInformationItem>
     m_currentUlHighInterferenceInformationList;
   EpcX2Sap::RelativeNarrowbandTxBand m_currentRelativeNarrowbandTxBand;
 
@@ -3667,8 +3480,8 @@ implementation in order to send a load information primitive::
 
   EpcX2Sap::LoadInformationParams params;
   params.targetCellId = cellId;
-  params.cellInformationList.push_back(cii);
-  m_x2SapProvider->SendLoadInformation(params);
+  params.cellInformationList.push_back (cii);
+  m_x2SapProvider->SendLoadInformation (params);
 
 
 The above code allows the source eNB to send the message. The method
@@ -3691,8 +3504,8 @@ send a resource status update::
 
   EpcX2Sap::ResourceStatusUpdateParams params;
   params.targetCellId = cellId;
-  params.cellMeasurementResultList.push_back(m_cmri);
-  m_x2SapProvider->SendResourceStatusUpdate(params);
+  params.cellMeasurementResultList.push_back (m_cmri);
+  m_x2SapProvider->SendResourceStatusUpdate (params);
 
 
 The method ``eEnbRrc::DoRecvResourceStatusUpdate`` will be called when
@@ -3805,7 +3618,7 @@ channels. This functionality is described in 3GPP TS 36.213 section 5.
 
 Uplink Power Control is enabled by default, and can be disabled by attribute system::
 
-   Config::SetDefault("ns3::LteUePhy::EnableUplinkPowerControl", BooleanValue(false));
+   Config::SetDefault ("ns3::LteUePhy::EnableUplinkPowerControl", BooleanValue (false));
 
 
 Two Uplink Power Control mechanisms are implemented:
@@ -3818,7 +3631,7 @@ Two Uplink Power Control mechanisms are implemented:
 
 To switch between these two mechanism types, one should change parameter::
 
-  Config::SetDefault("ns3::LteUePowerControl::ClosedLoop", BooleanValue(true));
+  Config::SetDefault ("ns3::LteUePowerControl::ClosedLoop", BooleanValue (true));
 
 By default, Closed Loop Power Control is enabled.
 
@@ -3829,7 +3642,7 @@ Two modes of Closed Loop Uplink Power Control are available:
 
 To switch between these two modes, one should change parameter::
 
-  Config::SetDefault("ns3::LteUePowerControl::AccumulationEnabled", BooleanValue(true));
+  Config::SetDefault ("ns3::LteUePowerControl::AccumulationEnabled", BooleanValue (true));
 
 By default, Accumulation Mode is enabled and TPC commands in DL-DCI are set by all schedulers to 1,
 what is mapped to value of 0 in Accumulation Mode.
@@ -3894,15 +3707,15 @@ where:
    layers for :math:`j={0,1}` for serving cell :math:`c`. SIB2 message needs to be extended to carry these two
    components, but currently they can be set via attribute system::
 
-      Config::SetDefault("ns3::LteUePowerControl::PoNominalPusch", IntegerValue(-90));
-      Config::SetDefault("ns3::LteUePowerControl::PoUePusch", IntegerValue(7));
+      Config::SetDefault ("ns3::LteUePowerControl::PoNominalPusch", IntegerValue (-90));
+      Config::SetDefault ("ns3::LteUePowerControl::PoUePusch", IntegerValue (7));
 
  * :math:`\alpha_{c} (j)` is a 3-bit parameter provided by higher layers for serving cell :math:`c`.
    For :math:`j=0,1`,   :math:`\alpha_c \in \left \{ 0, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1 \right \}`
    For :math:`j=2`,   :math:`\alpha_{c} (j) = 1`.
    This parameter is configurable by attribute system::
 
-      Config::SetDefault("ns3::LteUePowerControl::Alpha", DoubleValue(0.8));
+      Config::SetDefault ("ns3::LteUePowerControl::Alpha", DoubleValue (0.8));
 
  * :math:`PL_{c}` is the downlink pathloss estimate calculated in the UE for serving cell :math:`c` in dB
    and :math:`PL_{c} = referenceSignalPower – higher layer filtered RSRP`, where :math:`referenceSignalPower`
@@ -3979,7 +3792,7 @@ where:
 
    This parameter is configurable by attribute system::
 
-      Config::SetDefault("ns3::LteUePowerControl::PsrsOffset", IntegerValue(7));
+      Config::SetDefault ("ns3::LteUePowerControl::PsrsOffset", IntegerValue (7));
 
  * :math:`M_{SRS,c}` is the bandwidth of the SRS transmission in subframe :math:`i` for serving
    cell :math:`c` expressed in number of resource blocks. In current implementation SRS is sent
@@ -4252,7 +4065,7 @@ Distributed Fractional Frequency Reuse
 This Distributed Fractional Frequency Reuse Algorithm was presented in [DKimura2012]_. It
 automatically optimizes cell-edge sub-bands by focusing on user distribution (in particular,
 receive-power distribution). This algorithm adaptively selects RBs for cell-edge sub-band on
-basis of coordination information from adjacent cells and notifies the base stations of the
+basis of coordination information from adjecent cells and notifies the base stations of the
 adjacent cells, which RBs it selected to use in edge sub-band. The base station of each cell
 uses the received information and the following equation to compute cell-edge-band metric
 :math:`A_{k}` for each RB.
@@ -4299,9 +4112,6 @@ sequence diagram of Distributed Fractional Frequency Reuse Scheme.
     .. raw:: latex
 
         \clearpage
-
-
-.. _sec-carrier-aggregation:
 
 --------------------
 Carrier Aggregation
@@ -4362,7 +4172,7 @@ layers of the LTE protocol stack in ns-3.
    CA impact on different layers of LTE protocol stack (from 3gpp.org)
 
 Impact on RRC layer
--------------------
+-------------------------------
 
 The main impacts on the RRC layer are related to secondary carrier configuration and
 measurements reporting. To enable these features we have enhanced the already existing
@@ -4414,17 +4224,12 @@ event A6 (neighbour becomes offset better than SCell) is not implemented yet.
 
    A schematic overview of the secondary carrier enabling procedure
 
-Handover is possible between different component carriers on the same
-eNB (i.e., intra-eNB handover from one frequency to another) and between
-carriers on different eNB (i.e., inter-eNB).  One constraint for inter-eNB
-handovers is that both eNB must have the same number of component carriers.
-
-Impact on PDCP layer
---------------------
+Impact on PCDCP layer
+-------------------------------
 There is no impact on PDCP layer.
 
 Impact on RLC layer
--------------------
+-------------------------------
 The impact on the RLC layer is relatively small. There is some impact on configuration of
 the buffer and the usage of SAP interfaces between RLC and MAC. Since the capacity of the
 lower layers increases with the carrier aggregation it is necessary to accordingly adjust
@@ -4439,7 +4244,7 @@ carriers. Additionally, it uses the information of the UEs and the logical chann
 its own functionalities.
 
 Impact on MAC layer
--------------------
+-------------------------------
 
 The impact on the MAC layer depends on the CA scheduling scheme in use. Two different
 scheduling schemes are proposed in R10 and are shown in
@@ -4468,7 +4273,7 @@ The MAC layer of the eNodeB has suffered minor changes and they are mainly relat
 addition of component carrier information in message exchange between layers.
 
 Impact on PHY layer
--------------------
+-------------------------------
 
 The impact on PHY layer is minor. There is an instance of PHY layer per each component
 carrier and the SAP interface functions remain unchanged. As shown
@@ -4485,7 +4290,7 @@ and the uplink traffic is transmitted only over the primary carrier.
 
 
 Code Structure Design
-+++++++++++++++++++++
++++++++++++++++++++++++++++++++
 
 This section briefly introduces the software design and implementation of the
 carrier aggregation functionality.
@@ -4605,7 +4410,7 @@ Figure :ref:`fig-ca-setup-radio-bearer` shows how the Radio Bearer are configure
    Sequence Diagram of Data Radio Bearer Setup
 
 CA impact on data plane of UE
------------------------------
+------------------------------
 Figure :ref:`fig-ca-ue-data-plane` shows the relation between the different classes
 related to the UE data plane. The UE data plane architecture is similar to the eNB data
 plane implementation. The ``LteUeComponentCarrierManager`` is responsible to (re)map
@@ -4641,7 +4446,7 @@ the ``LteUlCcmRrcSapProvider``.
 
 
 CA impact on control plane of UE
---------------------------------
+---------------------------------
 Figure :ref:`fig-ca-ue-ctrl-plane` shows the relation between the different classes
 associated to the UE control plane. The control plane implementation at the UE is basically
 the same as the eNB control plane implementation. Each component carrier control SAP
@@ -4662,7 +4467,7 @@ in the same way as in the eNB.
 layer parameters, such as uplink and downlink,bandwidth and EARFCN of each carrier.
 
 CCM RRC MAC interfaces
-----------------------
+-----------------------
 
 The Component carrier manager (CCM) is also developed by using the SAP interface design.
 The following SAP interfaces are implemented for CCM and MAC:
@@ -4679,7 +4484,7 @@ The following SAP interfaces are implemented for CCM and MAC:
  to split the traffic and whether to use the secondary carriers.
 
 CCM RRC SAP interfaces
-----------------------
+----------------------------------
 
 The following SAP interfaces are implemented for CCM and RRC:
 
@@ -4695,7 +4500,7 @@ be used to add and remove of UEs, setup or release of radio bearer, configuratio
 signalling bearer, etc.
 
 Component carrier managers
---------------------------
+-----------------------------------------
 Currently, there are two component carrier manager implementations available. The first one
 is the ``NoOpComponentCarrierManager``, which  is the default CCM choice. When this CCM is
 used the carrier aggregation feature is disabled. This CCM forwards all traffic, the uplink
@@ -4712,6 +4517,7 @@ Helpers
 Two helper objects are used to setup simulations and configure the
 various components. These objects are:
 
+
  * ``LteHelper``, which takes care of the configuration of the LTE radio access network,
    as well as of coordinating the setup and release of EPS bearers. The ``LteHelper`` class
    provides both the API definition and its implementation.
@@ -4719,9 +4525,6 @@ various components. These objects are:
    ``EpcHelper`` class is an abstract base class, which only provides the API definition;
    the implementation is delegated to the child classes in order to allow for different
    EPC network models.
-
-A third helper object is used to configure the :ref:`sec-carrier-aggregation` functionality:
-
  * ``CcHelper``, which takes care of the configuration of the ``LteEnbComponentCarrierMap``,
    basically, it creates a user specified number of ``LteEnbComponentCarrier``.
    ``LteUeComponentCarrierMap`` is currently created starting from the
@@ -4742,3 +4545,4 @@ called by the ``LteHelper``. The exact interactions are displayed in the Figure 
    :align: center
 
    Sequence diagram of the interaction between ``LteHelper`` and ``EpcHelper``.
+

@@ -1,13 +1,26 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2014 Piotr Gawlowicz
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Piotr Gawlowicz <gawlowicz.p@gmail.com>
  *
  */
 
 #include "ns3/applications-module.h"
+#include "ns3/config-store.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/log.h"
@@ -27,13 +40,13 @@ void
 PrintGnuplottableUeListToFile(std::string filename)
 {
     std::ofstream outFile;
-    outFile.open(filename, std::ios_base::out | std::ios_base::trunc);
+    outFile.open(filename.c_str(), std::ios_base::out | std::ios_base::trunc);
     if (!outFile.is_open())
     {
         NS_LOG_ERROR("Can't open file " << filename);
         return;
     }
-    for (auto it = NodeList::Begin(); it != NodeList::End(); ++it)
+    for (NodeList::Iterator it = NodeList::Begin(); it != NodeList::End(); ++it)
     {
         Ptr<Node> node = *it;
         int nDevs = node->GetNDevices();
@@ -56,13 +69,13 @@ void
 PrintGnuplottableEnbListToFile(std::string filename)
 {
     std::ofstream outFile;
-    outFile.open(filename, std::ios_base::out | std::ios_base::trunc);
+    outFile.open(filename.c_str(), std::ios_base::out | std::ios_base::trunc);
     if (!outFile.is_open())
     {
         NS_LOG_ERROR("Can't open file " << filename);
         return;
     }
-    for (auto it = NodeList::Begin(); it != NodeList::End(); ++it)
+    for (NodeList::Iterator it = NodeList::Begin(); it != NodeList::End(); ++it)
     {
         Ptr<Node> node = *it;
         int nDevs = node->GetNDevices();
@@ -101,13 +114,13 @@ main(int argc, char* argv[])
     bool generateSpectrumTrace = false;
     bool generateRem = false;
     int32_t remRbId = -1;
-    uint16_t bandwidth = 25;
+    uint8_t bandwidth = 25;
     double distance = 1000;
     Box macroUeBox =
         Box(-distance * 0.5, distance * 1.5, -distance * 0.5, distance * 1.5, 1.5, 1.5);
 
     // Command line arguments
-    CommandLine cmd(__FILE__);
+    CommandLine cmd;
     cmd.AddValue("numberOfUes", "Number of UEs", numberOfRandomUes);
     cmd.AddValue("simTime", "Total duration of the simulation (in seconds)", simTime);
     cmd.AddValue("generateSpectrumTrace",
@@ -362,8 +375,8 @@ main(int argc, char* argv[])
         Ptr<SpectrumChannel> dlChannel = enbDlSpectrumPhy->GetChannel();
         uint32_t dlChannelId = dlChannel->GetId();
         NS_LOG_INFO("DL ChannelId: " << dlChannelId);
-        remHelper->SetAttribute("Channel", PointerValue(dlChannel));
-        remHelper->SetAttribute("OutputFile", StringValue("lena-distributed-ffr.rem"));
+        remHelper->SetAttribute("ChannelPath", StringValue("/ChannelList/1"));
+        remHelper->SetAttribute("OutputFile", StringValue("lena-frequency-reuse.rem"));
         remHelper->SetAttribute("XMin", DoubleValue(macroUeBox.xMin));
         remHelper->SetAttribute("XMax", DoubleValue(macroUeBox.xMax));
         remHelper->SetAttribute("YMin", DoubleValue(macroUeBox.yMin));

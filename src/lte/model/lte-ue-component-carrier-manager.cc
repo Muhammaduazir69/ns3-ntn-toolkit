@@ -1,15 +1,25 @@
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2015 Danilo Abrignani
  *
- * SPDX-License-Identifier: GPL-2.0-only
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Danilo Abrignani <danilo.abrignani@unibo.it>
  *
  */
 
 #include "lte-ue-component-carrier-manager.h"
-
-#include "lte-common.h"
 
 #include <ns3/log.h>
 
@@ -20,8 +30,8 @@ NS_LOG_COMPONENT_DEFINE("LteUeComponentCarrierManager");
 NS_OBJECT_ENSURE_REGISTERED(LteUeComponentCarrierManager);
 
 LteUeComponentCarrierManager::LteUeComponentCarrierManager()
-    : m_ccmRrcSapUser(nullptr),
-      m_ccmRrcSapProvider(nullptr),
+    : m_ccmRrcSapUser(0),
+      m_ccmRrcSapProvider(0),
       m_noOfComponentCarriers(0)
 {
     NS_LOG_FUNCTION(this);
@@ -44,6 +54,8 @@ void
 LteUeComponentCarrierManager::DoDispose()
 {
     NS_LOG_FUNCTION(this);
+    delete m_ccmRrcSapProvider;
+    delete m_ccmRrcSapUser;
 }
 
 void
@@ -66,7 +78,8 @@ LteUeComponentCarrierManager::SetComponentCarrierMacSapProviders(uint8_t compone
 {
     NS_LOG_FUNCTION(this);
     bool result = false;
-    auto it = m_macSapProvidersMap.find(componentCarrierId);
+    std::map<uint8_t, LteMacSapProvider*>::iterator it;
+    it = m_macSapProvidersMap.find(componentCarrierId);
     if (componentCarrierId > m_noOfComponentCarriers)
     {
         NS_FATAL_ERROR("Inconsistent componentCarrierId or you didn't call "
