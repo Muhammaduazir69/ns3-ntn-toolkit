@@ -36,43 +36,44 @@ The LTE module (`src/lte/`) is patched with dual-connectivity extensions enablin
 ## Quick Start
 
 ```bash
-# Clone
+# Step 1: Clone the toolkit
 git clone https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 cd ns3-ntn-toolkit
 
-# Configure and build
+# Step 2: Clone the SNS3 Satellite module (REQUIRED - not bundled due to 3.7 GB size)
+cd contrib/
+git clone https://github.com/sns3/sns3-satellite.git satellite
+cd ..
+
+# Step 3: Configure and build
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 
-# Verify modules are available
+# Step 4: Verify all modules are available
 ./ns3 show profile   # Should list: mmwave, satellite, lte, ...
 
 # Run mmWave example
 ./ns3 run mmwave-simple-epc
 
-# Run satellite constellation example
-./ns3 run sat-constellation-example
-
 # Run dual-connectivity example (LTE + mmWave)
 ./ns3 run mc-twoenbs
 ```
 
-## Adding Satellite & Research Modules
+> **Note**: The SNS3 satellite module is **required** for NTN simulation. It is not bundled in this repository due to its size (3.7 GB with constellation TLE data). You must clone it into `contrib/satellite/` as shown above before building.
 
-The SNS3 satellite module (3.7 GB with constellation TLE data) is not bundled in this repo due to size. Clone it separately:
+## Adding the NTN-CHO Research Module
+
+The [NTN-CHO Framework](https://github.com/Muhammaduazir69/ntn-cho-framework) is our research contribution for TTE-aware Conditional Handover. It requires the satellite module to be installed first:
 
 ```bash
 cd contrib/
-
-# Add SNS3 Satellite module (required for NTN constellation simulations)
-git clone https://github.com/sns3/sns3-satellite.git satellite
-
-# Add NTN-CHO handover research framework
 git clone https://github.com/Muhammaduazir69/ntn-cho-framework.git ntn-cho
-
 cd ..
 ./ns3 configure --enable-examples
-./ns3 build
+./ns3 build ntn-cho
+
+# Run the full constellation handover simulation
+./ns3 run "ntn-cho-full-constellation --algorithm=tte-aware --simTime=600 --numUes=50"
 ```
 
 ## Module Structure
