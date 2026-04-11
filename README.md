@@ -76,6 +76,78 @@ cd ..
 ./ns3 run "ntn-cho-full-constellation --algorithm=tte-aware --simTime=600 --numUes=50"
 ```
 
+## Included Example: NTN-TN Integrated Analysis
+
+The toolkit includes a comprehensive example at `scratch/ntn-tn-integrated-analysis.cc` that demonstrates genuine multi-module integration. This is a ready-to-use simulation for 6G NTN-TN handover research.
+
+```bash
+# Run the integrated analysis
+./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
+```
+
+### What the Example Does
+
+**Terrestrial Network (mmWave module - real packet-level simulation):**
+- Creates real NR gNBs using `MmWaveHelper::InstallEnbDevice()` with actual PHY/MAC/RRC/HARQ stack
+- Creates real EPC core network using `MmWavePointToPointEpcHelper` (SGW/PGW/MME with S1-U/S1-AP interfaces)
+- Installs real UDP traffic flow: RemoteHost -> PGW -> S1-U tunnel -> gNB PHY -> wireless channel -> UE
+- Uses `ThreeGppUmaPropagationLossModel` + `ThreeGppSpectrumPropagationLossModel` for terrestrial channel
+- Real `MmWaveSvdBeamforming` with 8x8 UPA at gNB, 2x2 UPA at UE
+- Real `MmWaveFlexTtiMacScheduler` for OFDMA resource scheduling
+- Real HARQ retransmissions with configurable enable/disable
+- Collects real PHY-layer SINR, MCS, transport block size, BLER per packet via `EnableTraces()`
+
+**NTN Constellation (satellite module + 3GPP NTN models):**
+- 66-satellite Walker Star constellation (6 planes x 11 sats, 780 km, 86.4 deg inclination)
+- Uses `GeoCoordinate` from satellite module for proper geodetic/ECEF coordinate math
+- Uses `ThreeGppNTN{DenseUrban,Urban,Suburban,Rural}PropagationLossModel` from ns-3 core for NTN channel
+- Uses `ThreeGppNTN*ChannelConditionModel` for elevation-dependent LoS probability
+- Keplerian orbital mechanics with proper RAAN, mean anomaly, Earth rotation
+- Per-satellite Doppler shift computation from orbital velocity (~6.6 km/s)
+
+**Handover Engine (ntn-cho module):**
+- Uses real `NtnChoAlgorithm` class with 3GPP TS 38.331 CHO state machine
+- Uses real `NtnChoHelper` for per-UE algorithm instantiation
+- Uses real `NtnMeasurementModel` configured with NTN scenario parameters
+- Per-UE NTN serving satellite tracking with handover decision logic
+- TTE (Time-to-Exit) computation for each candidate satellite beam
+- Compares 4 algorithms: TTE-aware CHO, Location-only CHO, Baseline A3, Time-based
+
+### Output Files
+
+The example generates the following datasets:
+
+| File | Source | Description |
+|------|--------|-------------|
+| `mmwave_dl_sinr_trace.csv` | mmWave spectrum PHY | Real PHY-layer SINR, MCS, TB size, HARQ RV per received packet |
+| `ntn_measurements.csv` | NTN-CHO measurement model | Per-UE per-satellite elevation, range, delay, Doppler, SINR, RSRP, path loss |
+| `ntn_handover_events.csv` | NTN-CHO algorithm | NTN-NTN handover events with source/target, SINR, TTE, success/failure |
+| `tte_computations.csv` | NTN-CHO TTE estimator | TTE prediction per candidate with gain, admitted status, elevation |
+| `satellite_tracks.csv` | Walker Star model + GeoCoordinate | 66-satellite orbital positions (lat/lon/alt/velocity/period) |
+| `cho_state_log.csv` | NtnChoAlgorithm | CHO state machine: candidates, admitted, best TTE, serving cell tracking |
+| `kpi_summary.txt` | Combined | Aggregated KPIs for both TN and NTN |
+| `DlPhyTransmissionTrace.txt` | mmWave EnableTraces() | Raw DL PHY transmission events (frame/subframe/slot/RNTI) |
+| `RxPacketTrace.txt` | mmWave EnableTraces() | Raw received packet trace with SINR/MCS/corrupt/BLER |
+| `UlPhyTransmissionTrace.txt` | mmWave EnableTraces() | Raw UL PHY transmission events |
+| `EnbSchedAllocTraces.txt` | mmWave EnableTraces() | Real OFDMA scheduler resource allocation |
+
+### Configurable Parameters
+
+```bash
+./ns3 run "ntn-tn-integrated-analysis \
+  --simTime=60 \              # Simulation duration (seconds)
+  --numTnUes=4 \              # Number of terrestrial UEs with real packet flow
+  --numTnGnbs=2 \             # Number of mmWave gNBs
+  --algorithm=tte-aware \     # CHO algorithm: tte-aware, location, a3, time
+  --scenario=suburban \       # NTN scenario: dense-urban, urban, suburban, rural
+  --harqEnabled=true \        # Enable/disable HARQ
+  --interPacketInterval=500 \ # UDP packet interval (microseconds)
+  --rngRun=1 \                # Random seed for reproducibility
+  --outputDir=output/"        # Output directory
+```
+
+---
+
 ## Module Structure
 
 ```
@@ -88,11 +160,30 @@ ns3-ntn-toolkit/
 │   └── ...               # All standard ns-3.43 modules
 ├── contrib/
 │   ├── mmwave/           # 5G-NR mmWave module (16 examples, all build)
-│   ├── satellite/        # SNS3 satellite module (LEO/MEO/GEO constellations)
+│   ├── satellite/        # SNS3 satellite module (clone separately)
 │   ├── magister-stats/   # Satellite statistics helpers
 │   └── traffic/          # Traffic generation helpers
-└── scratch/              # Your simulation scripts
+├── scratch/
+│   └── ntn-tn-integrated-analysis.cc  # Multi-module NTN-TN example
+└── ...
 ```
+
+## Key Features & Contributions
+
+### 1. Seamless Module Integration
+The primary contribution of this toolkit is making mmWave, satellite, and NTN-CHO modules work together on ns-3.43 without conflicts. The patched LTE module provides the glue layer enabling LTE-NR dual connectivity and inter-RAT handover.
+
+### 2. Real Packet-Level NR Simulation
+Unlike analytical or link-level tools, the mmWave module provides real ns-3 packet flow through the full NR protocol stack (PDCP -> RLC -> MAC -> PHY -> spectrum channel -> beamforming). Every packet is individually scheduled, transmitted, received, and optionally retransmitted via HARQ.
+
+### 3. 3GPP-Compliant NTN Channel Models
+The toolkit includes the full set of 3GPP TR 38.811 NTN propagation and channel condition models directly from ns-3.43, covering all four deployment scenarios (Dense Urban, Urban, Suburban, Rural) with elevation-dependent LoS probability.
+
+### 4. LEO Constellation Support
+Via the SNS3 satellite module, the toolkit supports real TLE-based orbit propagation (SGP4), mega-constellation scenarios (Starlink, Kuiper, Iridium, Telesat), ISL routing, 72 spot beams per satellite, and antenna gain pattern modeling.
+
+### 5. Extensible Architecture
+Researchers can add their own contrib modules (like [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework)) into `contrib/` and immediately access all integrated modules.
 
 ## Supported Constellation Data
 
