@@ -161,6 +161,7 @@ ns3-ntn-toolkit/
 ├── contrib/
 │   ├── mmwave/           # 5G-NR mmWave module (16 examples, all build)
 │   ├── satellite/        # SNS3 satellite module (clone separately)
+│   ├── ai/               # ns3-ai module for AI/ML integration (clone separately)
 │   ├── magister-stats/   # Satellite statistics helpers
 │   └── traffic/          # Traffic generation helpers
 ├── scratch/
@@ -182,7 +183,25 @@ The toolkit includes the full set of 3GPP TR 38.811 NTN propagation and channel 
 ### 4. LEO Constellation Support
 Via the SNS3 satellite module, the toolkit supports real TLE-based orbit propagation (SGP4), mega-constellation scenarios (Starlink, Kuiper, Iridium, Telesat), ISL routing, 72 spot beams per satellite, and antenna gain pattern modeling.
 
-### 5. Extensible Architecture
+### 5. AI/ML Integration via ns3-ai
+The toolkit includes a [modernized ns3-ai module](https://github.com/Muhammaduazir69/ns3-ai) (forked and fixed for ns-3.43+) that enables real-time AI-driven network control via shared memory:
+
+```bash
+# Add ns3-ai (our fixed fork, works with default build profile)
+cd contrib/
+git clone https://github.com/Muhammaduazir69/ns3-ai.git ai
+cd ..
+./ns3 configure --enable-examples
+./ns3 build ai
+pip install -e contrib/ai/python_utils
+pip install -e contrib/ai/model/gym-interface/py
+```
+
+Key fixes in our fork: LTO/pybind11 compatibility (all build profiles), shared memory RAII, NumPy 2.0+, Python 3.13+, modern atomic semaphores. See the [ns3-ai PR #137](https://github.com/hust-diangroup/ns3-ai/pull/137) for details.
+
+The [NTN-CHO Framework](https://github.com/Muhammaduazir69/ntn-cho-framework) includes an `NtnAiInterface` class that bridges ns3-ai shared memory with the handover engine, enabling DQN/PPO/Federated Learning agents for AI-driven satellite handover.
+
+### 6. Extensible Architecture
 Researchers can add their own contrib modules (like [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework)) into `contrib/` and immediately access all integrated modules.
 
 ## Supported Constellation Data
