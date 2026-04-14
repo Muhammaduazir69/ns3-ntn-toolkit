@@ -19,6 +19,7 @@ This toolkit integrates three major modules into a single pre-configured package
 | **mmWave (5G-NR)** | `contrib/mmwave/` | NR PHY/MAC (numerology 2/3), EESM error models, SVD/DFT/Codebook beamforming, HARQ, carrier aggregation, LTE-NR dual connectivity via McUeNetDevice |
 | **SNS3 Satellite** | `contrib/satellite/` | SGP4 orbit propagation, 72 spot beams/sat, ISL routing, DVB-RCS2, mega-constellation support (Starlink 1584-sat, Kuiper 1156-sat, Iridium 66-sat with real TLE data) |
 | **3GPP NTN Channel** | `src/propagation/` | TR 38.811 path loss and channel condition models for Dense Urban, Urban, Suburban, and Rural NTN scenarios |
+| **O-RAN NTN** | `contrib/oran-ntn/` | Complete Space-O-RAN architecture: Near-RT/Non-RT/Space RIC, 9 xApps, OpenGymEnv RL training, federated learning, NTN beamforming, dual connectivity, ISL coordination (27,000+ LOC) |
 
 ### Key Integration: Patched LTE Module
 
@@ -201,8 +202,29 @@ Key fixes in our fork: LTO/pybind11 compatibility (all build profiles), shared m
 
 The [NTN-CHO Framework](https://github.com/Muhammaduazir69/ntn-cho-framework) includes an `NtnAiInterface` class that bridges ns3-ai shared memory with the handover engine, enabling DQN/PPO/Federated Learning agents for AI-driven satellite handover.
 
-### 6. Extensible Architecture
-Researchers can add their own contrib modules (like [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework)) into `contrib/` and immediately access all integrated modules.
+### 6. O-RAN NTN Module (Space-O-RAN)
+
+The toolkit includes the [O-RAN NTN module](https://github.com/Muhammaduazir69/oran-ntn) -- a complete Space-O-RAN architecture for intelligent LEO satellite network management:
+
+```bash
+# Add O-RAN NTN module
+cd contrib/
+git clone https://github.com/Muhammaduazir69/oran-ntn.git oran-ntn
+cd .. && ./ns3 build
+```
+
+**27,000+ LOC** implementing:
+- **Near-RT RIC, Non-RT RIC, Space RIC** with full E2/A1 interfaces
+- **9 xApps**: HO prediction (DQN/LSTM), beam hopping (PPO), slice management (MAPPO), Doppler compensation, TN-NTN steering, interference management (graph coloring), energy harvesting (solar/battery), predictive allocation (LSTM), multi-connectivity (DC orchestration)
+- **5 OpenGymEnv** subclasses for RL-based xApp training via ns3-ai
+- **Federated learning** coordinator (FedAvg/FedProx/FedNova) across orbital planes
+- **Deep satellite integration**: Markov fading, DVB-S2X ModCod selection, inter-beam interference, ISL topology
+- **mmWave NTN PHY**: elevation-aware beamforming, composite channel model (ITU-R P.676/P.618/P.531), RTT-aware scheduler
+- **Dual connectivity** manager for simultaneous TN + NTN bearers
+- **Space RIC inference engine**: LibTorch / msg-interface IPC / rule-based fallback
+
+### 7. Extensible Architecture
+Researchers can add their own contrib modules (like [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) or [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn)) into `contrib/` and immediately access all integrated modules.
 
 ## Supported Constellation Data
 
