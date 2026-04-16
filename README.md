@@ -25,6 +25,23 @@ This toolkit integrates three major modules into a single pre-configured package
 | **3GPP NTN Channel** | `src/propagation/` | TR 38.811 path loss and channel condition models for Dense Urban, Urban, Suburban, and Rural NTN scenarios |
 | **O-RAN NTN** | `contrib/oran-ntn/` | Complete Space-O-RAN architecture: Near-RT/Non-RT/Space RIC, 9 xApps, OpenGymEnv RL training, federated learning, NTN beamforming, dual connectivity, ISL coordination (27,000+ LOC) |
 
+### Module Outputs & Capabilities
+
+**O-RAN NTN Module** — 9 xApps making real-time decisions:
+<p align="center">
+  <img src="docs/oran_ntn_showcase.png" alt="O-RAN NTN Showcase" width="850"/>
+</p>
+
+**NTN-CHO Framework** — TTE-Aware Conditional Handover achieves 0% ping-pong:
+<p align="center">
+  <img src="docs/ntn_cho_showcase.png" alt="NTN-CHO Showcase" width="850"/>
+</p>
+
+**Realistic NTN KPM Metrics** — Ka-band link budget, Doppler, TTE distributions:
+<p align="center">
+  <img src="docs/kpm_metrics_showcase.png" alt="KPM Metrics" width="850"/>
+</p>
+
 ### Key Integration: Patched LTE Module
 
 The LTE module (`src/lte/`) is patched with dual-connectivity extensions enabling seamless LTE-NR-Satellite interworking:
