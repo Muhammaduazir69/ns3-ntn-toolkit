@@ -25,19 +25,41 @@ This toolkit integrates three major modules into a single pre-configured package
 | **3GPP NTN Channel** | `src/propagation/` | TR 38.811 path loss and channel condition models for Dense Urban, Urban, Suburban, and Rural NTN scenarios |
 | **O-RAN NTN** | `contrib/oran-ntn/` | Complete Space-O-RAN architecture: Near-RT/Non-RT/Space RIC, 9 xApps, OpenGymEnv RL training, federated learning, NTN beamforming, dual connectivity, ISL coordination (27,000+ LOC) |
 
-### Module Outputs & Capabilities
+### Live Simulation Demos
 
-**O-RAN NTN Module** — 9 xApps making real-time decisions:
+**O-RAN NTN — 66-Satellite Constellation** with Space RICs, ISL links, feeder links, and UE connections:
+<p align="center">
+  <img src="docs/oran_ntn_constellation_ric.gif" alt="LEO Constellation with Space RICs" width="700"/>
+</p>
+
+**O-RAN NTN — 9 xApps Dashboard** running concurrently (HO prediction, beam hopping, slicing, interference, energy, FL):
+<p align="center">
+  <img src="docs/oran_ntn_xapp_decisions.gif" alt="xApp Decision Dashboard" width="850"/>
+</p>
+
+**NTN-CHO — TTE-Aware Handover** with satellite ground tracks, TTE countdown, and handover events:
+<p align="center">
+  <img src="docs/ntn_cho_handover_animation.gif" alt="TTE-Aware Handover" width="800"/>
+</p>
+
+**NTN-CHO — 4-Algorithm Comparison** (TTE-Aware vs Location vs A3 vs Time-Based):
+<p align="center">
+  <img src="docs/ntn_cho_algorithm_comparison.gif" alt="Algorithm Comparison" width="850"/>
+</p>
+
+### Module Outputs & Results
+
+**O-RAN NTN** — xApp outputs (SINR traces, beam heatmap, slice allocation, energy, FL convergence, interference):
 <p align="center">
   <img src="docs/oran_ntn_showcase.png" alt="O-RAN NTN Showcase" width="850"/>
 </p>
 
-**NTN-CHO Framework** — TTE-Aware Conditional Handover achieves 0% ping-pong:
+**NTN-CHO** — Algorithm comparison results (245 HOs, 0% ping-pong for TTE-Aware):
 <p align="center">
   <img src="docs/ntn_cho_showcase.png" alt="NTN-CHO Showcase" width="850"/>
 </p>
 
-**Realistic NTN KPM Metrics** — Ka-band link budget, Doppler, TTE distributions:
+**NTN KPM Metrics** — SINR CDFs, elevation vs Doppler, TTE distributions:
 <p align="center">
   <img src="docs/kpm_metrics_showcase.png" alt="KPM Metrics" width="850"/>
 </p>
