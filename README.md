@@ -6,6 +6,10 @@
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![Platform](https://img.shields.io/badge/Platform-Linux-green.svg)]()
 
+<p align="center">
+  <img src="docs/ns3_ntn_toolkit_architecture.png" alt="NS3-NTN-Toolkit Architecture" width="900"/>
+</p>
+
 ---
 
 ## What is NS3-NTN-Toolkit?
