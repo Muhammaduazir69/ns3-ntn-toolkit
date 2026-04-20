@@ -16,7 +16,7 @@
 
 A **ready-to-use** ns-3.43 simulation platform for 6G Non-Terrestrial Network (NTN) research. Clone, build, run -- no manual module patching required.
 
-This toolkit integrates three major modules into a single pre-configured package:
+This toolkit integrates five major modules into a single pre-configured package:
 
 | Module | Location | Capabilities |
 |--------|----------|-------------|
@@ -24,6 +24,7 @@ This toolkit integrates three major modules into a single pre-configured package
 | **SNS3 Satellite** | `contrib/satellite/` | SGP4 orbit propagation, 72 spot beams/sat, ISL routing, DVB-RCS2, mega-constellation support (Starlink 1584-sat, Kuiper 1156-sat, Iridium 66-sat with real TLE data) |
 | **3GPP NTN Channel** | `src/propagation/` | TR 38.811 path loss and channel condition models for Dense Urban, Urban, Suburban, and Rural NTN scenarios |
 | **O-RAN NTN** | `contrib/oran-ntn/` | Complete Space-O-RAN architecture: Near-RT/Non-RT/Space RIC, 9 xApps, OpenGymEnv RL training, federated learning, NTN beamforming, dual connectivity, ISL coordination (27,000+ LOC) |
+| **THz-NTN (6G sub-THz)** | `contrib/thz-ntn/` | Terahertz communications (100 GHz - 10 THz): HITRAN molecular absorption, ITU-R weather/scintillation, UM-MIMO (up to 128x128), EKF beam tracking, THz inter-satellite links, Reconfigurable Intelligent Surfaces, ISAC for space debris, 5 waveforms (OFDM/OTFS/AFDM/DFT-s-OFDM/SC-FDE), 4 O-RAN THz xApps. Extends `SatFreeSpaceLoss`, uses `MmWaveAmc` and `SpectrumValue` for real SINR. 24 classes, 59 source files, 12 passing tests |
 
 ### Live Simulation Demos
 
@@ -222,19 +223,33 @@ ns3-ntn-toolkit/
 ├── src/
 │   ├── lte/              # Patched LTE with dual-connectivity extensions
 │   ├── propagation/      # 3GPP NTN propagation models (TR 38.811)
-│   ├── spectrum/          # NTN channel example
+│   ├── spectrum/         # NTN channel example
 │   ├── mobility/         # GeocentricConstantPositionMobilityModel
 │   └── ...               # All standard ns-3.43 modules
 ├── contrib/
 │   ├── mmwave/           # 5G-NR mmWave module (16 examples, all build)
 │   ├── satellite/        # SNS3 satellite module (clone separately)
 │   ├── ai/               # ns3-ai module for AI/ML integration (clone separately)
+│   ├── oran-ntn/         # Space-O-RAN module: RICs, 9 xApps, FL, ISL coordination (clone separately)
+│   ├── ntn-cho/          # TTE-aware Conditional Handover framework (clone separately)
+│   ├── thz-ntn/          # THz (100 GHz - 10 THz) extension: HITRAN absorption,
+│   │                     #   UM-MIMO, beam tracking, ISL, RIS, ISAC, 5 waveforms,
+│   │                     #   O-RAN THz xApps (clone separately)
 │   ├── magister-stats/   # Satellite statistics helpers
 │   └── traffic/          # Traffic generation helpers
 ├── scratch/
 │   └── ntn-tn-integrated-analysis.cc  # Multi-module NTN-TN example
 └── ...
 ```
+
+### Research modules (external, add via `git clone`)
+
+| Module | Repository | Role |
+|---|---|---|
+| [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) | `contrib/ntn-cho/` | TTE-aware CHO algorithm (3GPP Rel-17), zero ping-pong, binary-search beam exit prediction |
+| [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) | `contrib/oran-ntn/` | Space-O-RAN architecture: Near-RT/Non-RT/Space RIC, 9 xApps, Gymnasium RL, FL, ISL |
+| [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) | `contrib/thz-ntn/` | 6G sub-THz extension: 24 model classes, HITRAN molecular absorption, UM-MIMO, RIS, ISAC, 5 waveforms, deep satellite/mmWave integration |
+| [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) | `contrib/ai/` | Modernized ns3-ai fork for ns-3.43+ with LTO/pybind11 fixes, NumPy 2.0+, Gymnasium 1.0+ |
 
 ## Key Features & Contributions
 
