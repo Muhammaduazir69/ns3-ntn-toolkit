@@ -120,6 +120,29 @@ cd ..
 ./ns3 run "ntn-cho-full-constellation --algorithm=tte-aware --simTime=600 --numUes=50"
 ```
 
+## Adding the THz-NTN Extension Module
+
+The [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) module extends the toolkit with Terahertz (100 GHz - 10 THz) capabilities for 6G sub-THz satellite communications. It integrates deeply with the satellite and mmWave modules (extends `SatFreeSpaceLoss`, uses `MmWaveAmc` for MCS selection, `SpectrumValue` for real SINR computation):
+
+```bash
+cd contrib/
+git clone https://github.com/Muhammaduazir69/ns3-thz-ntn.git thz-ntn
+cd ..
+./ns3 configure --enable-modules=thz-ntn
+./ns3 build thz-ntn
+
+# Run the test suite (12 tests, all passing)
+./ns3 run "test-runner --suite=thz-ntn --verbose"
+
+# Run the comprehensive demo with 8 scenarios and CSV dataset generation
+cp contrib/thz-ntn/examples/thz-ntn-demo.cc scratch/
+./ns3 build scratch/thz-ntn-demo
+./build/scratch/ns3.43-thz-ntn-demo-debug            # All 8 scenarios
+./build/scratch/ns3.43-thz-ntn-demo-debug --example=1 # Just scenario 1
+```
+
+**Capabilities**: HITRAN molecular absorption, ITU-R weather/scintillation, UM-MIMO arrays (up to 128x128), hierarchical beam tracking with EKF, THz inter-satellite links, Reconfigurable Intelligent Surfaces, ISAC for space debris detection, 5 waveforms (OFDM/DFT-s-OFDM/OTFS/AFDM/SC-FDE), 4 O-RAN THz xApps, NTN-CHO THz trigger extension. 24 model classes, 59 source files, 12 passing tests.
+
 ## Included Example: NTN-TN Integrated Analysis
 
 The toolkit includes a comprehensive example at `scratch/ntn-tn-integrated-analysis.cc` that demonstrates genuine multi-module integration. This is a ready-to-use simulation for 6G NTN-TN handover research.
