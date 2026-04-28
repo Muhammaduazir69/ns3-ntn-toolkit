@@ -48,6 +48,16 @@ This toolkit integrates five major modules into a single pre-configured package:
   <img src="docs/ntn_cho_algorithm_comparison.gif" alt="Algorithm Comparison" width="850"/>
 </p>
 
+**Realistic NTN UE Mobility** — 14 UEs across all 7 3GPP TR 38.811 §6.1.1.1 classes (static handheld, pedestrian, vehicular, HST, maritime vessel, aviation FL350, IoT) over a 66-sat Walker-Star pass:
+<p align="center">
+  <img src="docs/ntn_realistic_mobility.gif" alt="Realistic NTN UE Mobility" width="850"/>
+</p>
+
+**Per-class Handover Behaviour** — TTE-aware CHO handover counts split by UE class on the same realistic mobility scenario:
+<p align="center">
+  <img src="docs/ntn_handover_realistic.gif" alt="Per-class HO Behaviour" width="900"/>
+</p>
+
 ### Module Outputs & Results
 
 **O-RAN NTN** — xApp outputs (SINR traces, beam heatmap, slice allocation, energy, FL convergence, interference):
