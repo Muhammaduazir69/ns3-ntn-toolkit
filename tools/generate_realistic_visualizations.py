@@ -178,102 +178,116 @@ ICONS = {
 def generate_toolkit_architecture():
     print("[1/3] toolkit architecture diagram...")
 
-    fig, ax = plt.subplots(1, 1, figsize=(20, 13.5), facecolor='white')
+    fig, ax = plt.subplots(1, 1, figsize=(22, 15.5), facecolor='white')
     ax.set_xlim(0, 20); ax.set_ylim(0, 13.5)
     ax.axis('off')
 
-    def box(x, y, w, h, title, color, sub='', tc='white', body_fontsize=8.5):
+    def box(x, y, w, h, title, color, sub='', tc='white', body_fontsize=11.0,
+            title_fontsize=14.5):
         r = FancyBboxPatch((x, y), w, h, boxstyle='round,pad=0.05,rounding_size=0.20',
-                           fc=color, ec='#37474f', lw=1.4, alpha=0.92)
+                           fc=color, ec='#37474f', lw=1.6, alpha=0.92)
         ax.add_patch(r)
-        ax.text(x+w/2, y+h-0.32, title, ha='center', va='top',
-                fontsize=11.5, fontweight='bold', color=tc)
+        ax.text(x+w/2, y+h-0.36, title, ha='center', va='top',
+                fontsize=title_fontsize, fontweight='bold', color=tc)
         if sub:
-            ax.text(x+w/2, y+h-0.78, sub, ha='center', va='top',
-                    fontsize=body_fontsize, color=tc, alpha=0.95)
+            ax.text(x+w/2, y+h-0.92, sub, ha='center', va='top',
+                    fontsize=body_fontsize, color=tc, alpha=0.95,
+                    linespacing=1.35)
 
-    def arrow(x1, y1, x2, y2, label='', color='#37474f', lw=1.4, label_dy=0.18):
+    def arrow(x1, y1, x2, y2, label='', color='#37474f', lw=1.8, label_dy=0.22):
         a = FancyArrowPatch((x1, y1), (x2, y2),
-                             arrowstyle='-|>', mutation_scale=14,
+                             arrowstyle='-|>', mutation_scale=18,
                              color=color, lw=lw, zorder=4)
         ax.add_patch(a)
         if label:
             mx, my = (x1+x2)/2, (y1+y2)/2 + label_dy
-            ax.text(mx, my, label, fontsize=7.5, color='#263238',
+            ax.text(mx, my, label, fontsize=10, color='#263238',
                     ha='center', fontstyle='italic',
-                    bbox=dict(boxstyle='round,pad=0.18', fc='white',
-                              ec='#cfd8dc', lw=0.6, alpha=0.95))
+                    bbox=dict(boxstyle='round,pad=0.22', fc='white',
+                              ec='#cfd8dc', lw=0.7, alpha=0.95))
 
     # ── Title block ──
     ax.text(10, 12.85,
             'ns3-ntn-toolkit — Integrated 6G Non-Terrestrial Network Simulation Platform',
-            fontsize=17, fontweight='bold', ha='center', color='#0d47a1')
-    ax.text(10, 12.40,
+            fontsize=22, fontweight='bold', ha='center', color='#0d47a1')
+    ax.text(10, 12.35,
             'ns-3.43  •  3GPP Rel-17 NTN  •  O-RAN  •  HITRAN/ITU-R THz  •  Realistic UE Mobility (TR 38.811)',
-            fontsize=10, ha='center', color='#37474f', fontstyle='italic')
+            fontsize=13, ha='center', color='#37474f', fontstyle='italic')
 
     # ── Tier 4: ns-3 core (full width at bottom) ──
     box(0.5, 0.6, 19.0, 1.2, 'ns-3.43 core',
         '#37474f', tc='white',
         sub='Simulator engine  •  events  •  channels  •  helpers  •  attribute system  •  tracing',
-        body_fontsize=9.0)
+        body_fontsize=12.0, title_fontsize=15)
 
     # ── Tier 3: upstream contrib ──
     box(0.5, 2.3, 4.5, 1.4, 'satellite (SNS3)', '#01579b',
-        sub='SGP4 orbit propagator\n3GPP TR 38.811 NTN channel\nLoo / Markov fading')
+        sub='SGP4 orbit propagator\n3GPP TR 38.811 NTN channel\nLoo / Markov fading',
+        body_fontsize=9.5, title_fontsize=13)
     box(5.3, 2.3, 4.5, 1.4, 'mmwave', '#1565c0',
-        sub='5G NR PHY/MAC\nDual connectivity\nBeamforming')
+        sub='5G NR PHY/MAC\nDual connectivity\nBeamforming',
+        body_fontsize=9.5, title_fontsize=13)
     box(10.1, 2.3, 4.5, 1.4, 'lte (patched)', '#283593',
-        sub='X2 PDCP/RLC\nInter-RAT HO\nMcEnbPdcp / McUePdcp')
+        sub='X2 PDCP/RLC\nInter-RAT HO\nMcEnbPdcp / McUePdcp',
+        body_fontsize=9.5, title_fontsize=13)
     box(14.9, 2.3, 4.6, 1.4, 'traffic + magister-stats', '#3949ab',
-        sub='NTN traffic generators\nStatistics collectors')
+        sub='NTN traffic generators\nStatistics collectors',
+        body_fontsize=9.5, title_fontsize=13)
 
     # ── Tier 2: custom contrib (this work) ──
     box(0.5, 4.4, 4.0, 2.2, 'contrib/ntn-cho', '#bf360c',
-        sub='3GPP Rel-17 CHO state machine\nTTE estimator (binary search)\nN(0,σ²) shadow fading\nITU-R P.676 atmosphere\nntn-realistic-mobility helper\n7 UE classes / 5 scenarios')
+        sub='3GPP Rel-17 CHO state machine\nTTE estimator (binary search)\nN(0,σ²) shadow fading\nITU-R P.676 atmosphere\nntn-realistic-mobility helper\n7 UE classes / 5 scenarios',
+        body_fontsize=10.0, title_fontsize=14)
     box(4.8, 4.4, 4.0, 2.2, 'contrib/oran-ntn', '#1b5e20',
-        sub='Space O-RAN architecture\nE2 / A1 / O1 interfaces\n13 xApps + Near-RT RIC\n28 E2SM-RC actions\n11 A1 policies\n5 conflict strategies')
+        sub='Space O-RAN architecture\nE2 / A1 / O1 interfaces\n13 xApps + Near-RT RIC\n28 E2SM-RC actions\n11 A1 policies\n5 conflict strategies',
+        body_fontsize=10.0, title_fontsize=14)
     box(9.1, 4.4, 4.0, 2.2, 'contrib/thz-ntn', '#4a148c',
-        sub='HITRAN-2020 line-by-line\nITU-R P.835 6-layer atm.\nUM-MIMO array factor\nRIS / ISAC / EKF tracker\n9 example sweeps\nVan Vleck-Weisskopf line shape')
+        sub='HITRAN-2020 line-by-line\nITU-R P.835 6-layer atm.\nUM-MIMO array factor\nRIS / ISAC / EKF tracker\n9 example sweeps\nVan Vleck-Weisskopf line shape',
+        body_fontsize=10.0, title_fontsize=14)
     box(13.4, 4.4, 4.0, 2.2, 'contrib/ai (ns3-ai fork)', '#311b92',
-        sub='Gymnasium API\nShared-memory IPC\nLibTorch / pybind11\nns-3.43 + Py 3.13 + NumPy 2 fixes\n4 RL agents (DQN / Dueling /\nLSTM / FedDQN)')
+        sub='Gymnasium API\nShared-memory IPC\nLibTorch / pybind11\nns-3.43 + Py 3.13 + NumPy 2 fixes\n4 RL agents (DQN / Dueling /\nLSTM / FedDQN)',
+        body_fontsize=10.0, title_fontsize=14)
     box(17.7, 4.4, 1.8, 2.2, 'contrib/\ntraffic-ntn', '#01579b',
-        sub='NTN-aware\nflows', body_fontsize=8)
+        sub='NTN-aware\nflows', body_fontsize=10, title_fontsize=12.5)
 
     # ── Tier 1: applications / outputs ──
     box(0.5, 7.3, 4.5, 1.6, 'Reference Scenarios', '#0277bd',
-        sub='Walker-Star 6×11=66 sat  •  10-seed × 600-s MC  •  Multi-xApp coexistence  •  THz LEO pass')
+        sub='Walker-Star 6×11=66 sat\n10-seed × 600-s Monte-Carlo\nMulti-xApp coexistence  •  THz LEO pass',
+        body_fontsize=10.0, title_fontsize=13.5)
     box(5.3, 7.3, 4.5, 1.6, 'Analysis & Figures', '#00695c',
-        sub='Python build_figures.py  •  300-DPI PDF exports  •  Reproducible mc_table.tex  •  Anti-overlap fixes')
+        sub='Python build_figures.py\n300-DPI PDF exports  •  mc_table.tex\nReproducible anti-overlap layout',
+        body_fontsize=10.0, title_fontsize=13.5)
     box(10.1, 7.3, 4.5, 1.6, 'Reinforcement-Learning Agents', '#5e35b1',
-        sub='Gymnasium environments  •  Reward shaping  •  Federated learning  •  68-feature observation space')
+        sub='Gymnasium environments\nReward shaping  •  Federated learning\n68-feature observation space',
+        body_fontsize=10.0, title_fontsize=13.5)
     box(14.9, 7.3, 4.6, 1.6, '3-D Visualisation Dashboard', '#c62828',
-        sub='CesiumJS web viewer  •  Constellation animation  •  Per-UE handover trace  •  KPM heat map')
+        sub='CesiumJS web viewer\nConstellation animation\nPer-UE HO trace  •  KPM heat map',
+        body_fontsize=10.0, title_fontsize=13.5)
 
     # ── Side legend: standards alignment ──
-    box(0.5, 9.3, 19.0, 2.4, '', '#eceff1', tc='#263238',
-        sub='', body_fontsize=8)
+    box(0.5, 9.3, 19.0, 2.7, '', '#eceff1', tc='#263238',
+        sub='')
     standards = [
         ('3GPP TR 38.811 v15.4',  'NTN UE classes & channel'),
         ('3GPP TS 38.331 Rel-17', 'CHO state machine + T304'),
         ('3GPP TR 38.821 v16.2',  'NR-NTN solutions'),
         ('3GPP TR 38.901 v17',    'Channel 0.5–100 GHz / HST'),
-        ('ITU-R P.676-13',        'Gas absorption ref.'),
+        ('ITU-R P.676-13',        'Gas absorption reference'),
         ('ITU-R P.618-14',        'Earth-space scintillation'),
         ('O-RAN.WG3.E2AP / A1AP', 'O-RAN interface profiles'),
         ('IMO Res. A.857(20)',    'Maritime TSS lanes'),
     ]
-    ax.text(10, 11.40, 'Standards alignment',
-            ha='center', fontsize=11, fontweight='bold', color='#0d47a1')
+    ax.text(10, 11.65, 'Standards alignment',
+            ha='center', fontsize=14.5, fontweight='bold', color='#0d47a1')
     for i, (ref, desc) in enumerate(standards):
         col = i % 4
         row = i // 4
-        x = 0.85 + col * 4.55
-        y = 10.85 - row * 0.55
-        ax.text(x, y, '•', fontsize=12, color='#01579b', va='center')
-        ax.text(x+0.18, y+0.08, ref, fontsize=8.5, fontweight='bold',
+        x = 0.95 + col * 4.55
+        y = 11.00 - row * 0.65
+        ax.text(x, y, '•', fontsize=15, color='#01579b', va='center')
+        ax.text(x+0.22, y+0.10, ref, fontsize=10.5, fontweight='bold',
                 color='#263238', va='center')
-        ax.text(x+0.18, y-0.16, desc, fontsize=7.0,
+        ax.text(x+0.22, y-0.20, desc, fontsize=9.0,
                 color='#546e7a', fontstyle='italic', va='center')
 
     # ── Connection arrows (vertical, between tiers) ──
@@ -294,9 +308,9 @@ def generate_toolkit_architecture():
     arrow(17.2, 7.3, 17.2, 6.6, '', '#c62828')
 
     # ── Bottom info ──
-    ax.text(10, 0.30,
+    ax.text(10, 0.25,
             'Build:  ./ns3 configure --enable-tests --enable-examples  →  ./ns3 build  →  ./ns3 run "<example>"',
-            fontsize=9, ha='center', color='#37474f', fontstyle='italic')
+            fontsize=11.5, ha='center', color='#37474f', fontstyle='italic')
 
     path = os.path.join(OUT_DIR, 'ns3_ntn_toolkit_architecture.png')
     fig.savefig(path, dpi=180, bbox_inches='tight', facecolor='white',
@@ -435,9 +449,19 @@ def best_serving(ue_lat, ue_lon, sats):
 
 def generate_realistic_mobility_gif(n_frames=80, sim_step_s=8.0):
     print("[2/3] realistic mobility GIF (this may take ~60 s)...")
-    fig, ax = plt.subplots(1, 1, figsize=(13, 8.5),
-                           facecolor='#050a18')
+
+    # Two-panel layout: large map on the left, dedicated legend axis on the
+    # right.  This keeps the legend completely outside the data area, so it
+    # never overlaps UEs or satellite scatter no matter how the map evolves.
+    fig = plt.figure(figsize=(18, 10), facecolor='#050a18')
+    gs = fig.add_gridspec(1, 2, width_ratios=[3.4, 1.0],
+                          left=0.05, right=0.985, top=0.93, bottom=0.07,
+                          wspace=0.04)
+    ax     = fig.add_subplot(gs[0, 0])
+    ax_leg = fig.add_subplot(gs[0, 1])
     ax.set_facecolor('#050a18')
+    ax_leg.set_facecolor('#0a1628')
+
     rng = np.random.default_rng(42)
     ues = make_population(rng)
 
@@ -450,29 +474,23 @@ def generate_realistic_mobility_gif(n_frames=80, sim_step_s=8.0):
         ax.set_ylim(lat_min, lat_max)
         ax.set_aspect((lon_max-lon_min) / (lat_max-lat_min) /
                        (np.cos(np.radians(50.0))))
-        # gridlines
         for ll in range(lon_min, lon_max+1, 10):
-            ax.axvline(ll, color='#1a2744', lw=0.5, alpha=0.6, zorder=1)
+            ax.axvline(ll, color='#1a2744', lw=0.6, alpha=0.6, zorder=1)
         for ll in range(lat_min, lat_max+1, 10):
-            ax.axhline(ll, color='#1a2744', lw=0.5, alpha=0.6, zorder=1)
-        # rough continental outline (purely cosmetic; lat-lon polygon)
+            ax.axhline(ll, color='#1a2744', lw=0.6, alpha=0.6, zorder=1)
         europe = [
             (-10, 36), (-9, 43), (-2, 43), (1, 49), (-5, 51),
             (-1, 60), (10, 65), (30, 65), (35, 50), (28, 41),
             (20, 38), (12, 38), (5, 36), (-6, 36)
         ]
         ax.add_patch(Polygon(europe, fc='#0a1f3a', ec='#1a3556',
-                             lw=1.0, alpha=0.85, zorder=2))
-        ax.set_xlabel('Longitude (°)', color='#90a4ae', fontsize=10)
-        ax.set_ylabel('Latitude (°)',  color='#90a4ae', fontsize=10)
-        ax.tick_params(colors='#607d8b', labelsize=8)
+                             lw=1.2, alpha=0.85, zorder=2))
+        ax.set_xlabel('Longitude (°)', color='#90a4ae', fontsize=13)
+        ax.set_ylabel('Latitude (°)',  color='#90a4ae', fontsize=13)
+        ax.tick_params(colors='#cfd8dc', labelsize=11)
         for s in ax.spines.values():
             s.set_color('#1a2744')
 
-    title = ax.set_title('', color='#e8eaf6', fontsize=14, fontweight='bold',
-                          pad=16)
-
-    # Legend (drawn once, not animated)
     legend_classes = [
         ('Static handheld', 'static',     _phone),
         ('Pedestrian',      'pedestrian', _pedestrian),
@@ -483,64 +501,79 @@ def generate_realistic_mobility_gif(n_frames=80, sim_step_s=8.0):
         ('IoT sensor',      'iot',        _iot),
     ]
 
+    def draw_legend_panel():
+        """Static legend in its own axis — drawn once per frame after clear."""
+        ax_leg.clear()
+        ax_leg.set_facecolor('#0a1628')
+        ax_leg.set_xlim(0, 10); ax_leg.set_ylim(0, 24)
+        ax_leg.set_xticks([]); ax_leg.set_yticks([])
+        for s in ax_leg.spines.values():
+            s.set_color('#37474f'); s.set_linewidth(1.2)
+
+        # ── header ──
+        ax_leg.text(5.0, 22.6, 'UE Classes',
+                    color='#e8eaf6', fontsize=15, fontweight='bold',
+                    ha='center', va='center')
+        ax_leg.text(5.0, 21.6, '(3GPP TR 38.811 §6.1.1.1)',
+                    color='#90a4ae', fontsize=10, fontstyle='italic',
+                    ha='center', va='center')
+        ax_leg.plot([0.6, 9.4], [20.7, 20.7], color='#37474f', lw=0.8)
+
+        # ── 7 class rows, generously spaced ──
+        y0, dy = 19.2, 2.20
+        for i, (lab, key, drawer) in enumerate(legend_classes):
+            yy = y0 - i*dy
+            drawer(ax_leg, 1.6, yy, 1.55, PALETTE[key])
+            ax_leg.text(3.4, yy, lab, color='#e8eaf6', fontsize=12.5,
+                        va='center', fontweight='bold')
+
+        # ── footer: satellite + link key ──
+        ax_leg.plot([0.6, 9.4], [3.5, 3.5], color='#37474f', lw=0.8)
+        ax_leg.scatter(1.6, 2.6, marker='^', s=240,
+                       c=PALETTE['sat'], edgecolors='white', linewidths=1.0)
+        ax_leg.text(3.4, 2.6, 'LEO sat (780 km)',
+                    color='#e8eaf6', fontsize=11.5, va='center',
+                    fontweight='bold')
+        ax_leg.plot([1.0, 2.2], [1.3, 1.3],
+                    color=PALETTE['gnd_link'], lw=1.4, alpha=0.85)
+        ax_leg.text(3.4, 1.3, 'serving link',
+                    color='#cfd8dc', fontsize=11, va='center')
+        ax_leg.text(5.0, 0.4,
+                    f'14 UEs · 6 × 11 = 66 sats',
+                    color='#78909c', fontsize=9.5, fontstyle='italic',
+                    ha='center')
+
     def step(frame):
         ax.clear()
         draw_static_map()
+        draw_legend_panel()
+
         t_sec = frame * sim_step_s
-        # advance UEs
         for ue in ues:
             step_ue(ue, sim_step_s, rng)
 
-        # ─ satellites ─
         sats = constellation_positions(t_sec)
         sat_lats = np.array([s[0] for s in sats])
         sat_lons = np.array([s[1] for s in sats])
-        # only plot sats inside (or near) viewport
         m = ((sat_lats > lat_min-5) & (sat_lats < lat_max+5) &
              (sat_lons > lon_min-5) & (sat_lons < lon_max+5))
-        ax.scatter(sat_lons[m], sat_lats[m], marker='^', s=110,
-                    c=PALETTE['sat'], edgecolors='white', linewidths=0.8,
-                    zorder=8, label='LEO Sat (780 km)')
-        # ─ UEs and serving links ─
-        served_count = {c: 0 for c in PALETTE}
+        ax.scatter(sat_lons[m], sat_lats[m], marker='^', s=180,
+                    c=PALETTE['sat'], edgecolors='white', linewidths=1.0,
+                    zorder=8)
+
         for ue in ues:
-            served_count.setdefault(ue.cls, 0)
-            served_count[ue.cls] += 1
             si, elev = best_serving(ue.lat, ue.lon, sats)
             if si >= 0 and m[si]:
-                # draw connection link
                 ax.plot([ue.lon, sats[si][1]], [ue.lat, sats[si][0]],
-                         color=PALETTE['gnd_link'], lw=0.6, alpha=0.55,
+                         color=PALETTE['gnd_link'], lw=0.9, alpha=0.55,
                          zorder=5)
-            # icon
-            scale = 1.2 if ue.cls in ('hst', 'maritime', 'aviation') else 1.0
+            # bigger, scenario-aware icon scaling — fills the map cleanly now
+            scale = 2.4 if ue.cls in ('hst', 'maritime', 'aviation') else 2.0
             ICONS[ue.cls](ax, ue.lon, ue.lat, scale, ue.color)
 
-        # title with elapsed simulation time
         ax.set_title(
-            f'ns3-ntn-toolkit — realistic NTN UE mobility · t = {t_sec:6.1f} s',
-            color='#e8eaf6', fontsize=14, fontweight='bold', pad=14)
-
-        # legend — outside the map area, bottom-left, bigger icons
-        legx, legy = lon_min + 0.5, lat_min + 14.5
-        ax.add_patch(Rectangle((legx-0.5, legy-13.0), 16.5, 14.5,
-                                fc='#0a1628', ec='#37474f', lw=0.8,
-                                alpha=0.95, zorder=15))
-        ax.text(legx + 7.5, legy, 'UE classes (3GPP TR 38.811)',
-                color='#cfd8dc', fontsize=10, fontweight='bold',
-                ha='center', va='center', zorder=16)
-        legy -= 1.8
-        for lab, key, drawer in legend_classes:
-            drawer(ax, legx + 1.2, legy, 1.4, PALETTE[key])
-            ax.text(legx + 3.2, legy, lab, color='#e8eaf6', fontsize=10,
-                     va='center', zorder=16)
-            legy -= 1.65
-        # info line
-        ax.text(lon_max - 0.5, lat_min + 0.6,
-                 f'14 UEs across 7 classes  ·  6 × 11 = 66-sat Walker-Star\n'
-                 f'3GPP TR 38.811 §6.1.1.1 mobility classes',
-                 color='#90a4ae', fontsize=8, ha='right', va='bottom',
-                 fontstyle='italic')
+            f'ns3-ntn-toolkit — Realistic NTN UE Mobility   ·   t = {t_sec:6.1f} s',
+            color='#e8eaf6', fontsize=17, fontweight='bold', pad=14)
 
     writer = PillowWriter(fps=8)
     anim = FuncAnimation(fig, step, frames=n_frames, interval=125)
@@ -622,12 +655,12 @@ def generate_handover_realistic_gif(n_frames=80, sim_step_s=8.0):
             if si >= 0 and m[si]:
                 ax.plot([ue.lon, sats[si][1]], [ue.lat, sats[si][0]],
                          color=PALETTE['gnd_link'], lw=0.5, alpha=0.5, zorder=5)
-            scale = 1.2 if ue.cls in ('hst', 'maritime', 'aviation') else 1.0
+            scale = 2.0 if ue.cls in ('hst', 'maritime', 'aviation') else 1.6
             ICONS[ue.cls](ax, ue.lon, ue.lat, scale, ue.color)
 
         ax.set_title(
             f'TTE-aware CHO  ·  t = {t_sec:6.1f} s  ·  total HO = {sum(ho_count)}',
-            color='#e8eaf6', fontsize=12, fontweight='bold', pad=10)
+            color='#e8eaf6', fontsize=14, fontweight='bold', pad=10)
 
         # ── KPI panel ──
         ax_kpi.clear()
