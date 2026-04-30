@@ -1,5 +1,6 @@
 set(base_examples
-    stats-helper-example
+    nrtv-p2p-example
+    nrtv-variables-plot
 )
 
 foreach(
@@ -10,12 +11,10 @@ foreach(
     NAME ${example}
     SOURCE_FILES ${example}.cc
     LIBRARIES_TO_LINK
+    ${libntn-traffic}
     ${libapplications}
+    ${libpoint-to-point}
     ${libinternet}
     ${libnetwork}
-    ${libpoint-to-point}
-    ${libstats}
-    ${libmagister-stats}
-    ${libntn-traffic}
   )
 endforeach()

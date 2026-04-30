@@ -1,0 +1,51 @@
+
+.vscode
+build
+__pycache__
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Custom
+*.egg-info/
+.DS_Store
+result/
+dist/
+*.egg
+log_*
+libtensorflow/
+libtorch/
+
+# Protobuf files
+*.pb.cc
+*.pb.h
+*_pb2.py

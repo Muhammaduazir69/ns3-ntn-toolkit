@@ -1,0 +1,15 @@
+{
+  "name": "ntn-cho-3d-visualizer",
+  "version": "1.0.0",
+  "description": "Real-time 3D Globe Visualization for NTN-CHO Framework - LEO Satellite Handover Analysis",
+  "author": "Muhammad Uzair",
+  "license": "GPL-2.0",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js --dev"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "keywords": ["6G", "NTN", "LEO", "satellite", "handover", "3D", "visualization", "CesiumJS"]
+}

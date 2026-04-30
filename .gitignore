@@ -81,3 +81,15 @@ vcpkg/
 
 # Ignore local cache used by e.g. clangd
 .cache/
+
+# Bulk upstream module — clone separately, see README
+contrib/satellite/
+
+# Simulation outputs
+DlPhyTransmissionTrace.txt
+EnbSchedAllocTraces.txt
+RxPacketTrace.txt
+UlPhyTransmissionTrace.txt
+ntn-ai-output/
+ntn-analysis-output/
+oran-ntn-output/

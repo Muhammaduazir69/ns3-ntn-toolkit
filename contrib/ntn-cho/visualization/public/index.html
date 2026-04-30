@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NTN-CHO 3D Visualizer | 6G LEO Satellite Handover</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0a0a1a; color: #e0e0e0; overflow: hidden; }
+        #cesiumContainer { width: 100%; height: 100vh; }
+
+        /* Control Panel */
+        #panel {
+            position: absolute; top: 10px; left: 10px; width: 340px;
+            background: rgba(10,10,30,0.92); border: 1px solid #2a2a5a; border-radius: 12px;
+            padding: 16px; z-index: 100; backdrop-filter: blur(12px);
+            max-height: 95vh; overflow-y: auto;
+        }
+        #panel h1 { font-size: 16px; color: #00d4ff; margin-bottom: 4px; letter-spacing: 1px; }
+        #panel h2 { font-size: 11px; color: #888; margin-bottom: 12px; font-weight: 400; }
+        .section { margin-bottom: 14px; border-bottom: 1px solid #1a1a3a; padding-bottom: 10px; }
+        .section-title { font-size: 12px; color: #00d4ff; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+        label { font-size: 11px; color: #aaa; display: block; margin: 4px 0 2px; }
+        select, input[type=range] { width: 100%; background: #1a1a3a; color: #fff; border: 1px solid #333; border-radius: 6px; padding: 6px; font-size: 12px; }
+        input[type=range] { padding: 0; margin: 4px 0; }
+        .btn { display: inline-block; padding: 8px 16px; background: linear-gradient(135deg, #0066cc, #0099ff); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; margin: 4px 2px; transition: all 0.2s; }
+        .btn:hover { background: linear-gradient(135deg, #0077dd, #00aaff); transform: translateY(-1px); }
+        .btn.active { background: linear-gradient(135deg, #00cc66, #00ff88); }
+        .btn.danger { background: linear-gradient(135deg, #cc3300, #ff4444); }
+
+        /* KPI Dashboard */
+        #kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+        .kpi-card { background: rgba(0,100,200,0.15); border: 1px solid rgba(0,150,255,0.3); border-radius: 8px; padding: 8px; text-align: center; }
+        .kpi-value { font-size: 22px; font-weight: 700; color: #00d4ff; }
+        .kpi-label { font-size: 10px; color: #888; text-transform: uppercase; }
+        .kpi-card.good .kpi-value { color: #00ff88; }
+        .kpi-card.bad .kpi-value { color: #ff4444; }
+        .kpi-card.warn .kpi-value { color: #ffaa00; }
+
+        /* Legend */
+        .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+        /* Timeline */
+        #timeline-bar { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); width: 60%; background: rgba(10,10,30,0.9); border: 1px solid #2a2a5a; border-radius: 8px; padding: 10px 16px; z-index: 100; }
+        #timeline-bar input { width: 100%; }
+        #time-display { text-align: center; font-size: 13px; color: #00d4ff; margin-bottom: 4px; }
+
+        /* Status bar */
+        #status { position: absolute; bottom: 10px; right: 10px; background: rgba(10,10,30,0.9); border: 1px solid #2a2a5a; border-radius: 8px; padding: 8px 14px; font-size: 11px; color: #888; z-index: 100; }
+    </style>
+</head>
+<body>
+
+<div id="cesiumContainer"></div>
+
+<!-- Control Panel -->
+<div id="panel">
+    <h1>NTN-CHO 3D VISUALIZER</h1>
+    <h2>6G LEO Satellite Conditional Handover Framework</h2>
+
+    <div class="section">
+        <div class="section-title">Dataset</div>
+        <select id="dataset-select"></select>
+    </div>
+
+    <div class="section">
+        <div class="section-title">KPI Dashboard</div>
+        <div id="kpi-grid">
+            <div class="kpi-card good"><div class="kpi-value" id="kpi-success">-</div><div class="kpi-label">Success Rate</div></div>
+            <div class="kpi-card bad"><div class="kpi-value" id="kpi-failure">-</div><div class="kpi-label">Failure Rate</div></div>
+            <div class="kpi-card warn"><div class="kpi-value" id="kpi-pingpong">-</div><div class="kpi-label">Ping-Pong</div></div>
+            <div class="kpi-card"><div class="kpi-value" id="kpi-total">-</div><div class="kpi-label">Total HOs</div></div>
+            <div class="kpi-card"><div class="kpi-value" id="kpi-tos">-</div><div class="kpi-label">Avg ToS (s)</div></div>
+            <div class="kpi-card"><div class="kpi-value" id="kpi-algo">-</div><div class="kpi-label">Algorithm</div></div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Visualization Layers</div>
+        <button class="btn active" id="btn-sats" onclick="toggleLayer('satellites')">Satellites</button>
+        <button class="btn active" id="btn-beams" onclick="toggleLayer('beams')">Beams</button>
+        <button class="btn active" id="btn-ues" onclick="toggleLayer('ues')">UEs</button>
+        <button class="btn active" id="btn-hos" onclick="toggleLayer('handovers')">Handovers</button>
+        <button class="btn" id="btn-orbits" onclick="toggleLayer('orbits')">Orbit Tracks</button>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Playback</div>
+        <label>Speed: <span id="speed-val">1x</span></label>
+        <input type="range" id="speed-slider" min="0.1" max="20" step="0.1" value="1">
+        <button class="btn" id="btn-play" onclick="togglePlayback()">Play</button>
+        <button class="btn" onclick="resetView()">Reset View</button>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Legend</div>
+        <div class="legend">
+            <div class="legend-item"><div class="legend-dot" style="background:#00d4ff"></div>Satellite</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#00ff88"></div>UE (Connected)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#ffaa00"></div>UE (Handover)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#ff4444"></div>HO Failed</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#ff00ff"></div>Ping-Pong</div>
+            <div class="legend-item"><div class="legend-dot" style="background:rgba(0,150,255,0.3)"></div>Beam Coverage</div>
+        </div>
+    </div>
+</div>
+
+<!-- Timeline -->
+<div id="timeline-bar">
+    <div id="time-display">t = 0.0 s</div>
+    <input type="range" id="time-slider" min="0" max="600" step="1" value="0">
+</div>
+
+<!-- Status -->
+<div id="status">NTN-CHO Visualizer | Muhammad Uzair | 6G NTN Research Framework</div>
+
+<script>
+// ========================================================
+// NTN-CHO 3D Visualization Engine
+// ========================================================
+
+// CesiumJS setup (using default ion token for basic imagery)
+Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJiMGRjYmUzNy0yNjk5LTQwMmMtYmUzNS0xMWFkMTAxMGM0YTQiLCJpZCI6MjU5LCJpYXQiOjE3MzgyNTM5NTR9.k0Wkm4eTBPIjPrMQMbGWCy4eTGbWFnU7u4c77J3GFHQ';
+
+const viewer = new Cesium.Viewer('cesiumContainer', {
+    terrain: Cesium.Terrain.fromWorldTerrain(),
+    baseLayerPicker: true,
+    geocoder: false,
+    homeButton: false,
+    sceneModePicker: true,
+    navigationHelpButton: false,
+    animation: false,
+    timeline: false,
+    fullscreenButton: false,
+    infoBox: true,
+    selectionIndicator: true,
+    shadows: false,
+    skyAtmosphere: new Cesium.SkyAtmosphere()
+});
+
+// Darker globe for space aesthetic
+viewer.scene.globe.enableLighting = true;
+viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#050510');
+
+// Data storage
+let satData = [], ueData = [], hoData = [], measData = [], tteData = [];
+let satEntities = [], ueEntities = [], hoEntities = [], beamEntities = [], orbitEntities = [];
+let layers = { satellites: true, beams: true, ues: true, handovers: true, orbits: false };
+let playing = false;
+let currentTime = 0;
+let playSpeed = 1;
+
+// ========== Data Loading ==========
+
+async function loadData(dataset) {
+    try {
+        document.getElementById('status').textContent = 'Loading data...';
+
+        if (dataset) await fetch(`/api/switch/${dataset}`);
+
+        const [sats, ues, hos, kpi, datasets] = await Promise.all([
+            fetch('/api/data/satellite_tracks.csv').then(r => r.json()),
+            fetch('/api/data/ue_tracks.csv').then(r => r.json()),
+            fetch('/api/data/handover_events.csv').then(r => r.json()),
+            fetch('/api/kpi').then(r => r.json()),
+            fetch('/api/datasets').then(r => r.json())
+        ]);
+
+        satData = sats;
+        ueData = ues;
+        hoData = hos;
+
+        updateKpiDashboard(kpi);
+        populateDatasetSelector(datasets);
+        createVisualization();
+
+        const maxTime = Math.max(...satData.map(d => d.time_s || 0), 1);
+        document.getElementById('time-slider').max = maxTime;
+
+        document.getElementById('status').textContent =
+            `Loaded: ${satData.length} sat points, ${ueData.length} UE points, ${hoData.length} HO events`;
+    } catch (err) {
+        document.getElementById('status').textContent = 'Error loading data: ' + err.message;
+        console.error(err);
+    }
+}
+
+function populateDatasetSelector(datasets) {
+    const sel = document.getElementById('dataset-select');
+    sel.innerHTML = '';
+    datasets.datasets.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d; opt.textContent = d;
+        if (d === datasets.current) opt.selected = true;
+        sel.appendChild(opt);
+    });
+    sel.onchange = () => loadData(sel.value);
+}
+
+function updateKpiDashboard(kpi) {
+    document.getElementById('kpi-success').textContent = kpi['HO Success Rate'] || '-';
+    document.getElementById('kpi-failure').textContent = kpi['HO Failure Rate'] || '-';
+    document.getElementById('kpi-pingpong').textContent = kpi['Ping-Pong Rate'] || '-';
+    document.getElementById('kpi-total').textContent = kpi['Total Handovers'] || '-';
+    document.getElementById('kpi-tos').textContent = kpi['Avg Time-of-Stay'] || '-';
+    document.getElementById('kpi-algo').textContent = kpi['Trigger Type'] || '-';
+}
+
+// ========== Visualization Creation ==========
+
+function createVisualization() {
+    // Clear previous
+    satEntities.forEach(e => viewer.entities.remove(e));
+    ueEntities.forEach(e => viewer.entities.remove(e));
+    hoEntities.forEach(e => viewer.entities.remove(e));
+    beamEntities.forEach(e => viewer.entities.remove(e));
+    orbitEntities.forEach(e => viewer.entities.remove(e));
+    satEntities = []; ueEntities = []; hoEntities = []; beamEntities = []; orbitEntities = [];
+
+    createSatellites();
+    createUes();
+    createHandoverEvents();
+    createOrbitTracks();
+
+    // Fly to Europe (where UEs are)
+    viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(10, 40, 5000000),
+        duration: 2
+    });
+}
+
+function createSatellites() {
+    // Get unique satellites and their latest positions
+    const satMap = new Map();
+    satData.forEach(d => {
+        const key = d.sat_id;
+        if (!satMap.has(key) || d.time_s > satMap.get(key).time_s) {
+            satMap.set(key, d);
+        }
+    });
+
+    satMap.forEach((d, satId) => {
+        const entity = viewer.entities.add({
+            name: `Satellite ${satId}`,
+            position: Cesium.Cartesian3.fromDegrees(d.lon, d.lat, (d.altitude_km || 780) * 1000),
+            point: { pixelSize: 12, color: Cesium.Color.CYAN, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
+            label: {
+                text: `SAT-${satId}`,
+                font: '11px monospace',
+                fillColor: Cesium.Color.CYAN,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                outlineWidth: 2,
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -16)
+            },
+            description: `<h3>Satellite ${satId}</h3><p>Alt: ${d.altitude_km} km</p><p>Lat: ${d.lat.toFixed(4)}</p><p>Lon: ${d.lon.toFixed(4)}</p>`
+        });
+        satEntities.push(entity);
+
+        // Beam footprint (simplified circle)
+        const beamRadius = 250000; // 250km
+        const beam = viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(d.lon, d.lat, 0),
+            ellipse: {
+                semiMajorAxis: beamRadius,
+                semiMinorAxis: beamRadius,
+                material: Cesium.Color.CYAN.withAlpha(0.08),
+                outline: true,
+                outlineColor: Cesium.Color.CYAN.withAlpha(0.3),
+                outlineWidth: 1,
+                height: 0
+            }
+        });
+        beamEntities.push(beam);
+    });
+}
+
+function createUes() {
+    // Group UE data by ue_id, take latest position
+    const ueMap = new Map();
+    ueData.forEach(d => {
+        const key = d.ue_id;
+        if (!ueMap.has(key) || d.time_s > ueMap.get(key).time_s) {
+            ueMap.set(key, d);
+        }
+    });
+
+    ueMap.forEach((d, ueId) => {
+        const isHo = d.ho_state === 'handover';
+        const color = isHo ? Cesium.Color.YELLOW : Cesium.Color.LIME;
+
+        const entity = viewer.entities.add({
+            name: `UE ${ueId}`,
+            position: Cesium.Cartesian3.fromDegrees(d.lon, d.lat, 0),
+            point: { pixelSize: 8, color: color, outlineColor: Cesium.Color.WHITE, outlineWidth: 1 },
+            label: {
+                text: `UE${ueId}`,
+                font: '9px monospace',
+                fillColor: color,
+                style: Cesium.LabelStyle.FILL,
+                verticalOrigin: Cesium.VerticalOrigin.TOP,
+                pixelOffset: new Cesium.Cartesian2(0, 10),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 5e6, 0)
+            },
+            description: `<h3>UE ${ueId}</h3><p>Serving: Cell ${d.serving_cell}</p><p>SINR: ${d.sinr_dB?.toFixed(1)} dB</p><p>Mobility: ${d.mobility_type}</p>`
+        });
+        ueEntities.push(entity);
+    });
+}
+
+function createHandoverEvents() {
+    hoData.forEach((d, idx) => {
+        const success = d.success === 1 || d.success === true;
+        const pingPong = d.ping_pong === 1 || d.ping_pong === true;
+        let color = success ? Cesium.Color.LIME : Cesium.Color.RED;
+        if (pingPong) color = Cesium.Color.MAGENTA;
+
+        const entity = viewer.entities.add({
+            name: `HO #${idx} (t=${d.time_s}s)`,
+            position: Cesium.Cartesian3.fromDegrees(d.ue_lon || 10, d.ue_lat || 40, 5000),
+            billboard: {
+                image: createHoIcon(color),
+                width: 20, height: 20,
+                verticalOrigin: Cesium.VerticalOrigin.CENTER
+            },
+            description: `<h3>Handover Event #${idx}</h3>
+                <p>Time: ${d.time_s}s</p>
+                <p>UE: ${d.ue_id}</p>
+                <p>Source: Cell ${d.source_cell} (Sat ${d.source_sat})</p>
+                <p>Target: Cell ${d.target_cell} (Sat ${d.target_sat})</p>
+                <p>SINR before: ${d.sinr_before_dB?.toFixed(1)} dB</p>
+                <p>SINR after: ${d.sinr_after_dB?.toFixed(1)} dB</p>
+                <p>TTE: ${d.tte_predicted_s?.toFixed(1)} s</p>
+                <p>ToS: ${d.time_of_stay_s?.toFixed(1)} s</p>
+                <p>Success: ${success ? 'Yes' : 'No'}</p>
+                <p>Ping-Pong: ${pingPong ? 'Yes' : 'No'}</p>
+                <p>Algorithm: ${d.algorithm}</p>`
+        });
+        hoEntities.push(entity);
+    });
+}
+
+function createOrbitTracks() {
+    // Group sat positions by sat_id and create polylines
+    const satTracks = new Map();
+    satData.forEach(d => {
+        if (!satTracks.has(d.sat_id)) satTracks.set(d.sat_id, []);
+        satTracks.get(d.sat_id).push(d);
+    });
+
+    const colors = [Cesium.Color.CYAN, Cesium.Color.YELLOW, Cesium.Color.MAGENTA,
+                    Cesium.Color.LIME, Cesium.Color.ORANGE, Cesium.Color.RED];
+
+    satTracks.forEach((positions, satId) => {
+        if (positions.length < 2) return;
+        const cartesians = positions.map(p =>
+            Cesium.Cartesian3.fromDegrees(p.lon, p.lat, (p.altitude_km || 780) * 1000)
+        );
+
+        const entity = viewer.entities.add({
+            name: `Orbit Track Sat-${satId}`,
+            polyline: {
+                positions: cartesians,
+                width: 1.5,
+                material: (colors[satId % colors.length] || Cesium.Color.WHITE).withAlpha(0.4),
+                clampToGround: false
+            },
+            show: layers.orbits
+        });
+        orbitEntities.push(entity);
+    });
+}
+
+function createHoIcon(color) {
+    const c = document.createElement('canvas');
+    c.width = 20; c.height = 20;
+    const ctx = c.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(10, 10, 8, 0, 2 * Math.PI);
+    ctx.fillStyle = `rgba(${color.red*255},${color.green*255},${color.blue*255},0.8)`;
+    ctx.fill();
+    ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+    // Arrow symbol
+    ctx.fillStyle = 'white'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('H', 10, 10);
+    return c.toDataURL();
+}
+
+// ========== Layer Toggle ==========
+
+function toggleLayer(name) {
+    layers[name] = !layers[name];
+    const btn = document.getElementById('btn-' + name.substring(0, Math.min(name.length, 6)));
+    if (btn) btn.classList.toggle('active', layers[name]);
+
+    let entities = [];
+    switch(name) {
+        case 'satellites': entities = satEntities; break;
+        case 'beams': entities = beamEntities; break;
+        case 'ues': entities = ueEntities; break;
+        case 'handovers': entities = hoEntities; break;
+        case 'orbits': entities = orbitEntities; break;
+    }
+    entities.forEach(e => e.show = layers[name]);
+}
+
+// ========== Timeline Controls ==========
+
+document.getElementById('time-slider').oninput = function() {
+    currentTime = parseFloat(this.value);
+    document.getElementById('time-display').textContent = `t = ${currentTime.toFixed(1)} s`;
+    updateToTime(currentTime);
+};
+
+document.getElementById('speed-slider').oninput = function() {
+    playSpeed = parseFloat(this.value);
+    document.getElementById('speed-val').textContent = playSpeed.toFixed(1) + 'x';
+};
+
+function togglePlayback() {
+    playing = !playing;
+    document.getElementById('btn-play').textContent = playing ? 'Pause' : 'Play';
+    document.getElementById('btn-play').classList.toggle('active', playing);
+    if (playing) animate();
+}
+
+let lastFrame = 0;
+function animate(timestamp) {
+    if (!playing) return;
+    if (lastFrame === 0) lastFrame = timestamp;
+    const delta = (timestamp - lastFrame) / 1000 * playSpeed;
+    lastFrame = timestamp;
+
+    currentTime += delta;
+    const maxTime = parseFloat(document.getElementById('time-slider').max);
+    if (currentTime > maxTime) { currentTime = 0; }
+
+    document.getElementById('time-slider').value = currentTime;
+    document.getElementById('time-display').textContent = `t = ${currentTime.toFixed(1)} s`;
+    updateToTime(currentTime);
+
+    requestAnimationFrame(animate);
+}
+
+function updateToTime(t) {
+    // Update satellite positions to nearest time
+    const satMap = new Map();
+    satData.forEach(d => {
+        if (Math.abs(d.time_s - t) < 2) {
+            if (!satMap.has(d.sat_id) || Math.abs(d.time_s - t) < Math.abs(satMap.get(d.sat_id).time_s - t)) {
+                satMap.set(d.sat_id, d);
+            }
+        }
+    });
+
+    let idx = 0;
+    satMap.forEach((d, satId) => {
+        if (idx < satEntities.length) {
+            const pos = Cesium.Cartesian3.fromDegrees(d.lon, d.lat, (d.altitude_km || 780) * 1000);
+            satEntities[idx].position = pos;
+            if (idx < beamEntities.length) {
+                beamEntities[idx].position = Cesium.Cartesian3.fromDegrees(d.lon, d.lat, 0);
+            }
+        }
+        idx++;
+    });
+
+    // Show/hide HO events based on time
+    hoEntities.forEach((e, i) => {
+        if (i < hoData.length) {
+            const hoTime = hoData[i].time_s;
+            e.show = layers.handovers && Math.abs(hoTime - t) < 10;
+        }
+    });
+}
+
+function resetView() {
+    viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(10, 40, 5000000),
+        duration: 2
+    });
+}
+
+// ========== Initialize ==========
+loadData();
+</script>
+</body>
+</html>

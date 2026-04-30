@@ -1,0 +1,12 @@
+*.o
+*.o.d
+build/
+cmake-cache/
+thz-ntn-results/
+*.log
+*.pyc
+__pycache__/
+.vscode/
+.idea/
+*.swp
+*~
