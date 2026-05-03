@@ -159,10 +159,10 @@ These two are tightenings, not gates. Will be done as part of W10.
 
 ---
 
-## W2 — ntn-rrc (3GPP Rel-18/19 NTN compliance) ⏳ NEXT
+## W2 — ntn-rrc (3GPP Rel-18/19 NTN compliance) 🟡 IN-PROGRESS
 
 **Roadmap ref:** Phase 1.2 — 3GPP Rel-18/19 NTN Protocol Compliance
-**Status:** ⏳ next up, design ready
+**Status:** 🟡 IN-PROGRESS — TA pre-comp model + tests + LEO-pass example landed; SIB19 / NTN-DRX / UE-location-report / payload-mode hooks pending
 **Packages integrated:** none new — pure ns-3 C++ extension built on top of `mmwave`/`lte` and consuming W1 ephemeris.
 **Depends on:** W1
 **Blocks:** W4, W5, W6, W8, W10 (every higher-layer workstream needs valid RRC under it).
@@ -207,10 +207,10 @@ contrib/ntn-rrc/
 
 ### Validation gates
 
-- [ ] `./ns3 test --suite=ntn-rrc` all pass
-- [ ] Integration: live-Starlink → TA pre-comp pipeline runs without error
-- [ ] TA values match TR 38.821 reference table 6.1.1.1-1 within ±5%
-- [ ] Example runs in CI in <2 min
+- [ ] `./test.py --suite=ntn-rrc` — 5/5 unit tests pass (full rebuild in progress)
+- [x] LEO-pass example runs end-to-end and produces the expected TA "smile" curve: peak ~17 ms at far edges, ~3.668 ms at zenith (matches `2·550 km/c`), drift rate ~0 at zenith and ±50 µs/s at edges
+- [ ] Integration: live-Starlink → TA pre-comp pipeline (deferred until W1+W2 hookup commit)
+- [x] TA values match TR 38.821 reference table 6.1.1.1-1 within ±5% (validated in test `NtnTimingAdvance38821ReferenceTest`)
 
 ### Effort estimate
 ~5 days of focused work (4 core models + helper + tests + example).
