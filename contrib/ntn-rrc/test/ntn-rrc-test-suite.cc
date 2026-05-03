@@ -5,9 +5,11 @@
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/log.h"
+#include "ns3/ntn-drx.h"
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
+#include "ns3/ntn-ue-location-report.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 
@@ -325,6 +327,306 @@ class Sib19BroadcasterTickTest : public TestCase
     }
 };
 
+// ----------------------------------------------------------------------------
+// UE location report tests
+// ----------------------------------------------------------------------------
+
+/// ECEF→geodetic→ECEF round-trip is sub-millimetre accurate.
+class GeodeticConversionRoundTripTest : public TestCase
+{
+  public:
+    GeodeticConversionRoundTripTest()
+        : TestCase("ECEF then geodetic then ECEF round-trips to sub-mm")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        struct Sample
+        {
+            double lat, lon, alt;
+        };
+        const Sample samples[] = {
+            {0.0, 0.0, 0.0},                  // gulf of guinea, sea level
+            {33.6844, 73.0479, 540.0},        // Islamabad
+            {89.5, 0.0, 50.0},                // near north pole
+            {-89.5, 180.0, 2800.0},           // antarctic plateau
+            {45.0, -90.0, 10000.0},           // mid-latitude, 10 km alt
+        };
+        for (const auto& s : samples)
+        {
+            const Vector ecef = GeodeticWgs84ToEcef(s.lat, s.lon, s.alt);
+            double lat2, lon2, alt2;
+            EcefToGeodeticWgs84(ecef, lat2, lon2, alt2);
+            NS_TEST_EXPECT_MSG_EQ_TOL(lat2, s.lat, 1e-7, "lat round-trip");
+            NS_TEST_EXPECT_MSG_EQ_TOL(lon2, s.lon, 1e-7, "lon round-trip");
+            NS_TEST_EXPECT_MSG_EQ_TOL(alt2, s.alt, 1e-3, "alt round-trip mm");
+        }
+    }
+};
+
+/// Periodic reporter emits a report on every period tick.
+class PeriodicLocationReporterTest : public TestCase
+{
+  public:
+    PeriodicLocationReporterTest()
+        : TestCase("Periodic location reporter emits one report per period")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const Vector ecef = GeodeticWgs84ToEcef(33.6844, 73.0479, 540.0);
+        Ptr<MobilityModel> ue = MakeStaticMob(ecef);
+
+        NtnRrcHelper helper;
+        Ptr<NtnUeLocationReporter> rep =
+            helper.InstallUeLocationReporter(ue,
+                                             LocationReportMode::Periodic,
+                                             MilliSeconds(100),
+                                             0.0);
+        rep->Start();
+        Simulator::Stop(MilliSeconds(550));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(rep->HasReport(), true, "No report emitted");
+        const auto& latest = rep->GetLatestReport();
+        NS_TEST_EXPECT_MSG_GT(latest.reportSequence, 4u,
+                              "Expected at least 5 reports in 550 ms");
+        NS_TEST_EXPECT_MSG_EQ_TOL(latest.latDeg, 33.6844, 1e-6, "lat");
+        NS_TEST_EXPECT_MSG_EQ_TOL(latest.lonDeg, 73.0479, 1e-6, "lon");
+        NS_TEST_EXPECT_MSG_EQ_TOL(latest.altMetres, 540.0, 1e-3, "alt");
+        rep->Stop();
+        Simulator::Destroy();
+    }
+};
+
+/// Event-triggered reporter only emits when UE moves more than threshold.
+class EventTriggeredReporterTest : public TestCase
+{
+  public:
+    EventTriggeredReporterTest()
+        : TestCase("Event-triggered reporter respects move-distance threshold")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // UE moves 50 m/s east, threshold = 100 m → report every ~2 s.
+        // Polling cadence 50 ms; 15 s sim gives ~7 reports.
+        Ptr<ConstantVelocityMobilityModel> ue = CreateObject<ConstantVelocityMobilityModel>();
+        ue->SetPosition(GeodeticWgs84ToEcef(0.0, 0.0, 0.0));
+        ue->SetVelocity(Vector{50.0, 0.0, 0.0});
+
+        NtnRrcHelper helper;
+        Ptr<NtnUeLocationReporter> rep =
+            helper.InstallUeLocationReporter(ue,
+                                             LocationReportMode::EventTriggered,
+                                             MilliSeconds(50),
+                                             0.0);
+        rep->SetEventTriggerDistanceMetres(100.0);
+        rep->Start();
+        Simulator::Stop(Seconds(15.0));
+        Simulator::Run();
+
+        const auto& latest = rep->GetLatestReport();
+        // ~7-8 reports expected: t=0 (first sample), then every ~2 s.
+        NS_TEST_EXPECT_MSG_GT(latest.reportSequence, 4u,
+                              "Expected several event-triggered reports");
+        NS_TEST_EXPECT_MSG_LT(latest.reportSequence, 12u,
+                              "Too many reports — threshold not enforced");
+        rep->Stop();
+        Simulator::Destroy();
+    }
+};
+
+/// On-demand reporter does not auto-tick; ReportNow() drives every emission.
+class OnDemandReporterTest : public TestCase
+{
+  public:
+    OnDemandReporterTest()
+        : TestCase("On-demand reporter emits only when ReportNow is called")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<MobilityModel> ue = MakeStaticMob(GeodeticWgs84ToEcef(45.0, 90.0, 100.0));
+        NtnRrcHelper helper;
+        Ptr<NtnUeLocationReporter> rep =
+            helper.InstallUeLocationReporter(ue,
+                                             LocationReportMode::OnDemand,
+                                             MilliSeconds(50),
+                                             0.0);
+        rep->Start();
+        Simulator::Schedule(MilliSeconds(10), [rep]() { rep->ReportNow(); });
+        Simulator::Stop(MilliSeconds(500));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(rep->HasReport(), true, "No on-demand report");
+        NS_TEST_EXPECT_MSG_EQ(rep->GetLatestReport().reportSequence, 1u,
+                              "On-demand should fire exactly once");
+        rep->Stop();
+        Simulator::Destroy();
+    }
+};
+
+// ----------------------------------------------------------------------------
+// NTN-DRX tests
+// ----------------------------------------------------------------------------
+
+/// SM ticks through Active → ShortSleep → OnDuration cycle.
+class DrxStandardCycleTest : public TestCase
+{
+  public:
+    DrxStandardCycleTest()
+        : TestCase("DRX standard cycle visits Active, ShortSleep, and OnDuration")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        NtnDrxConfig cfg;
+        cfg.longCycle = MilliSeconds(320);
+        cfg.shortCycle = MilliSeconds(20);
+        cfg.onDuration = MilliSeconds(5);
+        cfg.inactivityTimer = MilliSeconds(10);
+        cfg.shortCycleCount = 2;
+
+        NtnRrcHelper helper;
+        Ptr<NtnDrxStateMachine> drx = helper.InstallDrx(cfg);
+        std::set<int> seenStates;
+        drx->TraceConnectWithoutContext(
+            "StateChange",
+            MakeCallback(+[](std::set<int>* st, DrxState prev, DrxState next, Time) {
+                st->insert(static_cast<int>(next));
+            }).Bind(&seenStates));
+        drx->Start();
+        Simulator::Stop(Seconds(1.0));
+        Simulator::Run();
+
+        NS_TEST_EXPECT_MSG_EQ(seenStates.count(static_cast<int>(DrxState::ShortSleep)), 1u,
+                              "Never entered ShortSleep");
+        NS_TEST_EXPECT_MSG_EQ(seenStates.count(static_cast<int>(DrxState::OnDuration)), 1u,
+                              "Never entered OnDuration");
+        // Sanity: time spent in sleep states should dominate over onDuration.
+        const Time tOff = drx->GetTimeInState(DrxState::ShortSleep) +
+                          drx->GetTimeInState(DrxState::LongSleep);
+        const Time tAwake = drx->GetTimeInState(DrxState::Active) +
+                            drx->GetTimeInState(DrxState::OnDuration);
+        NS_TEST_EXPECT_MSG_GT(tOff.GetSeconds(), tAwake.GetSeconds(),
+                              "Sleep should dominate active in 1 s window");
+
+        drx->Stop();
+        Simulator::Destroy();
+    }
+};
+
+/// NotifyDataActivity forces the SM back into Active.
+class DrxDataActivityTest : public TestCase
+{
+  public:
+    DrxDataActivityTest()
+        : TestCase("DRX data activity forces transition to Active")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        NtnDrxConfig cfg;
+        cfg.longCycle = MilliSeconds(200);
+        cfg.shortCycle = MilliSeconds(20);
+        cfg.onDuration = MilliSeconds(5);
+        cfg.inactivityTimer = MilliSeconds(10);
+
+        NtnRrcHelper helper;
+        Ptr<NtnDrxStateMachine> drx = helper.InstallDrx(cfg);
+        drx->Start();
+
+        // After 100 ms we expect SM to be sleeping; then poke activity at 105 ms.
+        Simulator::Schedule(MilliSeconds(100), [drx]() {
+            // Should be in some sleep state.
+        });
+        Simulator::Schedule(MilliSeconds(105),
+                            [drx]() { drx->NotifyDataActivity(); });
+        Simulator::Schedule(MilliSeconds(106),
+                            [drx]() { /* state checked via final */ });
+
+        Simulator::Stop(MilliSeconds(108));
+        Simulator::Run();
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(drx->GetState()),
+                              static_cast<int>(DrxState::Active),
+                              "Activity did not force Active");
+        drx->Stop();
+        Simulator::Destroy();
+    }
+};
+
+/// Pass-aware mode enters AwaitingPass when the next pass is far away.
+class DrxPassAwareTest : public TestCase
+{
+  public:
+    DrxPassAwareTest()
+        : TestCase("DRX pass-aware mode sleeps deep until predicted pass")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        NtnDrxConfig cfg;
+        cfg.longCycle = MilliSeconds(500);
+        cfg.shortCycle = MilliSeconds(20);
+        cfg.onDuration = MilliSeconds(5);
+        cfg.inactivityTimer = MilliSeconds(10);
+        cfg.passAware = true;
+        cfg.passDuration = Seconds(600);
+
+        NtnRrcHelper helper;
+        Ptr<NtnDrxStateMachine> drx = helper.InstallDrx(cfg);
+        drx->NotifyNextPass(Seconds(60), Seconds(600)); // pass starts in 60s
+        drx->Start();
+
+        Simulator::Stop(Seconds(20.0)); // well before the pass
+        Simulator::Run();
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(drx->GetState()),
+                              static_cast<int>(DrxState::AwaitingPass),
+                              "Did not enter AwaitingPass");
+        drx->Stop();
+        Simulator::Destroy();
+    }
+};
+
+/// Invalid configs are rejected.
+class DrxInvalidConfigTest : public TestCase
+{
+  public:
+    DrxInvalidConfigTest()
+        : TestCase("DRX rejects malformed configs")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        NtnDrxConfig cfg;
+        cfg.onDuration = Seconds(0); // invalid
+        NS_TEST_EXPECT_MSG_EQ(cfg.IsValid(), false, "zero onDuration must be invalid");
+
+        cfg.onDuration = MilliSeconds(5);
+        cfg.shortCycle = MilliSeconds(2); // shortCycle < onDuration
+        NS_TEST_EXPECT_MSG_EQ(cfg.IsValid(),
+                              false,
+                              "shortCycle smaller than onDuration must be invalid");
+    }
+};
+
 class NtnRrcTestSuite : public TestSuite
 {
   public:
@@ -339,6 +641,14 @@ class NtnRrcTestSuite : public TestSuite
         AddTestCase(new Sib19CodecRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19CodecRejectsTruncatedTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19BroadcasterTickTest, TestCase::Duration::QUICK);
+        AddTestCase(new GeodeticConversionRoundTripTest, TestCase::Duration::QUICK);
+        AddTestCase(new PeriodicLocationReporterTest, TestCase::Duration::QUICK);
+        AddTestCase(new EventTriggeredReporterTest, TestCase::Duration::QUICK);
+        AddTestCase(new OnDemandReporterTest, TestCase::Duration::QUICK);
+        AddTestCase(new DrxStandardCycleTest, TestCase::Duration::QUICK);
+        AddTestCase(new DrxDataActivityTest, TestCase::Duration::QUICK);
+        AddTestCase(new DrxPassAwareTest, TestCase::Duration::QUICK);
+        AddTestCase(new DrxInvalidConfigTest, TestCase::Duration::QUICK);
     }
 };
 

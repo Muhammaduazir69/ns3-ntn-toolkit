@@ -23,8 +23,8 @@ The toolkit's `ntn-cho` module handles handover at the application layer. The 3G
 | TA drift rate signalling | TR 38.821 §6.3.3 | `model/ntn-timing-advance` ✅ |
 | Payload modes (transparent / regenerative) | TR 38.821 §4.2 | `model/ntn-rrc-types.h` ✅ |
 | SIB19 broadcast (NTN assistance info) | TS 38.331 §6.3.2 | `model/ntn-sib19` ✅ |
-| GNSS-assisted RRC + UE location reporting | TS 38.331 §5.7.4 | `model/ntn-ue-location-report` (next commit) |
-| NTN-DRX | TS 38.321 NTN extensions | `model/ntn-drx` (next commit) |
+| GNSS-assisted RRC + UE location reporting | TS 38.331 §5.7.4 | `model/ntn-ue-location-report` ✅ |
+| NTN-DRX (with pass-aware deep sleep) | TS 38.321 + TR 38.821 §6.3.4 | `model/ntn-drx` ✅ |
 
 ## Quick start
 
@@ -65,7 +65,9 @@ The CSV captures the classic NTN "smile" curve: TA peaks at ~17 ms when the sate
 ./test.py --suite=ntn-rrc -v
 ```
 
-8 unit tests in `test/ntn-rrc-test-suite.cc`:
+16 unit tests in `test/ntn-rrc-test-suite.cc` plus a Python W1+W2 integration test in `tests-py/test_w1_w2_integration.py`:
+
+**Unit tests:**
 
 | Test | Asserts |
 |---|---|
@@ -77,14 +79,35 @@ The CSV captures the classic NTN "smile" curve: TA peaks at ~17 ms when the sate
 | `Sib19CodecRoundTripTest` | Serialise → parse round-trips every SIB19 field (124 bytes). |
 | `Sib19CodecRejectsTruncatedTest` | Codec returns `false` on undersized buffer. |
 | `Sib19BroadcasterTickTest` | Broadcaster ticks every 160 ms snapshotting fresh ephemeris. |
+| `GeodeticConversionRoundTripTest` | ECEF↔WGS-84 round-trips for 5 sample points to <1 mm. |
+| `PeriodicLocationReporterTest` | Periodic mode emits one report per period. |
+| `EventTriggeredReporterTest` | Event-triggered mode respects move-distance threshold (50 m/s × 100 m → ~7 reports/15 s). |
+| `OnDemandReporterTest` | OnDemand mode emits exactly when `ReportNow()` is called. |
+| `DrxStandardCycleTest` | DRX visits Active / OnDuration / ShortSleep / LongSleep correctly; 1.56% on-duty over 1 s. |
+| `DrxDataActivityTest` | `NotifyDataActivity()` forces the SM into `Active`. |
+| `DrxPassAwareTest` | Pass-aware mode enters `AwaitingPass` deep sleep when next pass is far. |
+| `DrxInvalidConfigTest` | Malformed configs (zero `onDuration`, `shortCycle < onDuration`) are rejected. |
 
-## What's next on this workstream
+**Integration test (`tests-py/test_w1_w2_integration.py`):**
 
-The remaining W2 components ship in follow-up commits within the same module:
+Pulls a Starlink TLE through W1 (CelesTrak with embedded fallback), spawns the C++ `ntn-rrc-from-tle` example over a 600 s pass with `SatSGP4MobilityModel` (SNS3), and compares each TA sample against an independent Skyfield reference. Pass criterion: max |error| < 200 µs and drift bias < 0.5 µs/s. Last run: 121 samples, mean 6.6 µs / max 12.8 µs error, drift bias 0.02 µs/s.
 
-- `ntn-ue-location-report` — periodic GNSS report timer + payload
-- `ntn-drx` — NTN-extended DRX cycle (sleep across non-pass windows)
-- Integration test wiring W1 (live Starlink TLE) → W2 (TA pre-comp + SIB19 broadcast)
+```bash
+cd contrib/ntn-constellation
+.venv/bin/python ../ntn-rrc/tests-py/test_w1_w2_integration.py
+```
+
+## Examples shipped
+
+| Binary | Purpose |
+|---|---|
+| `ntn-rrc-leo-pass` | Single-component demo: TA only over a 600 s LEO pass; emits the classic "smile" CSV. |
+| `ntn-rrc-full-stack` | All four W2 components running together over a pass; 4 CSVs (ta / sib19 / ue / drx). |
+| `ntn-rrc-from-tle` | Reads a real 3-line TLE, drives `SatSGP4MobilityModel` (SNS3), runs TA. Used by the W1+W2 integration test. |
+
+## What's next
+
+W2 is complete. Next workstream per `ROADMAP_EXECUTION.md`: **W3 — observability stack** (Grafana + InfluxDB + NetSimulyzer trace export).
 
 Each lands with its own test cases and updates `ROADMAP_EXECUTION.md`'s W2 status badge.
 

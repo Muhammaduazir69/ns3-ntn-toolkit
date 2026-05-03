@@ -6,3 +6,22 @@ build_lib_example(
     ${libcore}
     ${libmobility}
 )
+
+build_lib_example(
+  NAME ntn-rrc-full-stack
+  SOURCE_FILES ntn-rrc-full-stack.cc
+  LIBRARIES_TO_LINK
+    ${libntn-rrc}
+    ${libcore}
+    ${libmobility}
+)
+
+build_lib_example(
+  NAME ntn-rrc-from-tle
+  SOURCE_FILES ntn-rrc-from-tle.cc
+  LIBRARIES_TO_LINK
+    ${libntn-rrc}
+    ${libsatellite}
+    ${libcore}
+    ${libmobility}
+)

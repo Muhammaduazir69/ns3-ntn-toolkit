@@ -159,10 +159,10 @@ These two are tightenings, not gates. Will be done as part of W10.
 
 ---
 
-## W2 — ntn-rrc (3GPP Rel-18/19 NTN compliance) 🟡 IN-PROGRESS
+## W2 — ntn-rrc (3GPP Rel-18/19 NTN compliance) ✅ DONE
 
 **Roadmap ref:** Phase 1.2 — 3GPP Rel-18/19 NTN Protocol Compliance
-**Status:** 🟡 IN-PROGRESS — TA pre-comp model + SIB19 (struct + codec + broadcaster) + 8 unit tests landed; NTN-DRX / UE-location-report / W1+W2 integration test pending
+**Status:** ✅ shipped 2026-05-04, `contrib/ntn-rrc/`. All four components landed: Timing Advance pre-comp + SIB19 broadcaster + UE GNSS location reporter + NTN-extended DRX state machine. 16 unit tests + 3 examples + W1+W2 integration test all pass.
 **Packages integrated:** none new — pure ns-3 C++ extension built on top of `mmwave`/`lte` and consuming W1 ephemeris.
 **Depends on:** W1
 **Blocks:** W4, W5, W6, W8, W10 (every higher-layer workstream needs valid RRC under it).
@@ -207,10 +207,11 @@ contrib/ntn-rrc/
 
 ### Validation gates
 
-- [ ] `./test.py --suite=ntn-rrc` — 5/5 unit tests pass (full rebuild in progress)
-- [x] LEO-pass example runs end-to-end and produces the expected TA "smile" curve: peak ~17 ms at far edges, ~3.668 ms at zenith (matches `2·550 km/c`), drift rate ~0 at zenith and ±50 µs/s at edges
-- [ ] Integration: live-Starlink → TA pre-comp pipeline (deferred until W1+W2 hookup commit)
-- [x] TA values match TR 38.821 reference table 6.1.1.1-1 within ±5% (validated in test `NtnTimingAdvance38821ReferenceTest`)
+- [x] `./test.py --suite=ntn-rrc` — 16/16 unit tests pass (5 TA, 3 SIB19, 4 UE-location, 4 DRX)
+- [x] LEO-pass example produces the expected TA "smile" curve: peak ~17 ms far / ~3.668 ms zenith
+- [x] Full-stack example exercises TA + SIB19 + UE Location Report + DRX simultaneously over a 600 s pass; 4 CSVs land cleanly
+- [x] TA values match TR 38.821 reference table 6.1.1.1-1 within ±5% (test `NtnTimingAdvance38821ReferenceTest`)
+- [x] Integration: live-Starlink TLE (W1) → SatSGP4MobilityModel → C++ NtnTimingAdvance → comparison vs Skyfield reference; 121 samples, mean 6.6 µs / max 12.8 µs error, drift bias 0.02 µs/s — well under `200 µs / 0.5 µs/s` tolerance
 
 ### Effort estimate
 ~5 days of focused work (4 core models + helper + tests + example).

@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 CELESTRAK_GP_URL = "https://celestrak.org/NORAD/elements/gp.php"
 SPACETRACK_BASE = "https://www.space-track.org"
 
+# CelesTrak's terms of use require an identifying User-Agent on automated
+# requests. They will return HTTP 403 to default urllib/requests UAs.
+DEFAULT_UA = (
+    "ns3-ntn-toolkit/0.1 (+https://github.com/Muhammaduazir69/ns3-ntn-toolkit) "
+    "python-requests"
+)
+
 CELESTRAK_GROUPS = {
     "starlink": "starlink",
     "oneweb": "oneweb",
@@ -138,8 +145,12 @@ class CelesTrakFeed:
 
         self._throttle()
         params = {"GROUP": celestrak_name, "FORMAT": "tle"}
+        headers = {"User-Agent": DEFAULT_UA}
         logger.info("celestrak: fetching group=%s", celestrak_name)
-        resp = requests.get(CELESTRAK_GP_URL, params=params, timeout=self.timeout)
+        resp = requests.get(CELESTRAK_GP_URL,
+                            params=params,
+                            headers=headers,
+                            timeout=self.timeout)
         resp.raise_for_status()
         text = resp.text
         if "No GP data found" in text or len(text.strip()) < 50:
@@ -156,10 +167,14 @@ class CelesTrakFeed:
             if text is not None:
                 return parse_tle_text(text)
         records: list[TleRecord] = []
+        headers = {"User-Agent": DEFAULT_UA}
         for nid in ids:
             self._throttle()
             params = {"CATNR": str(nid), "FORMAT": "tle"}
-            resp = requests.get(CELESTRAK_GP_URL, params=params, timeout=self.timeout)
+            resp = requests.get(CELESTRAK_GP_URL,
+                                params=params,
+                                headers=headers,
+                                timeout=self.timeout)
             resp.raise_for_status()
             records.extend(parse_tle_text(resp.text))
         if self.cache is not None:
