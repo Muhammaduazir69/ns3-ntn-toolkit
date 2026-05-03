@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ntn-constellation"
+version = "0.1.0"
+description = "Live TLE feeds, SGP4/SDP4 propagation, and constellation presets for the ns3-ntn-toolkit. Bridges CelesTrak/Space-Track to ns-3 SNS3 (SatelliteSGP4MobilityModel) and CesiumJS visualization."
+readme = "README.md"
+authors = [
+  { name = "Muhammad Uzair", email = "muhammaduzairr69@gmail.com" }
+]
+license = { text = "GPL-2.0-only" }
+requires-python = ">=3.10"
+keywords = ["ns-3", "ntn", "leo", "satellite", "tle", "sgp4", "celestrak", "space-track", "starlink", "kuiper", "oneweb", "constellation"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+  "sgp4>=2.23",
+  "skyfield>=1.49",
+  "pyorbital>=1.8",
+  "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov"]
+
+[project.scripts]
+ntn-fetch = "ntn_constellation.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Muhammaduazir69/ns3-ntn-toolkit"
+Repository = "https://github.com/Muhammaduazir69/ns3-ntn-toolkit"
+Mirror = "https://gitlab.com/ha5050/ns3-ntn-toolkit"
+
+[tool.setuptools.packages.find]
+include = ["ntn_constellation*"]
+exclude = ["tests*", "examples*"]
