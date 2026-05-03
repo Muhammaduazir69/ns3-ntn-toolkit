@@ -1,11 +1,13 @@
 set(source_files
     model/ntn-timing-advance.cc
+    model/ntn-sib19.cc
     helper/ntn-rrc-helper.cc
 )
 
 set(header_files
     model/ntn-rrc-types.h
     model/ntn-timing-advance.h
+    model/ntn-sib19.h
     helper/ntn-rrc-helper.h
 )
 

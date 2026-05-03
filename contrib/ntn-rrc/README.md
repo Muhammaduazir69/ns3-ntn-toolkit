@@ -21,8 +21,8 @@ The toolkit's `ntn-cho` module handles handover at the application layer. The 3G
 | Timing Advance pre-compensation | TS 38.213 §4.2.2 + TR 38.821 §6.3.3 | `model/ntn-timing-advance` ✅ |
 | Common TA / UE-specific TA decomposition | TS 38.331 NTN-Config IE | `model/ntn-timing-advance` ✅ |
 | TA drift rate signalling | TR 38.821 §6.3.3 | `model/ntn-timing-advance` ✅ |
-| Payload modes (transparent / regenerative) | TR 38.821 §4.2 | `model/ntn-rrc-types.h` ✅ (enum + behaviour switch in TA model) |
-| SIB19 broadcast (NTN assistance info) | TS 38.331 NTN-SIB19 | `model/ntn-sib19` (next commit) |
+| Payload modes (transparent / regenerative) | TR 38.821 §4.2 | `model/ntn-rrc-types.h` ✅ |
+| SIB19 broadcast (NTN assistance info) | TS 38.331 §6.3.2 | `model/ntn-sib19` ✅ |
 | GNSS-assisted RRC + UE location reporting | TS 38.331 §5.7.4 | `model/ntn-ue-location-report` (next commit) |
 | NTN-DRX | TS 38.321 NTN extensions | `model/ntn-drx` (next commit) |
 
@@ -65,7 +65,7 @@ The CSV captures the classic NTN "smile" curve: TA peaks at ~17 ms when the sate
 ./test.py --suite=ntn-rrc -v
 ```
 
-5 unit tests in `test/ntn-rrc-test-suite.cc`:
+8 unit tests in `test/ntn-rrc-test-suite.cc`:
 
 | Test | Asserts |
 |---|---|
@@ -74,15 +74,17 @@ The CSV captures the classic NTN "smile" curve: TA peaks at ~17 ms when the sate
 | `NtnTimingAdvance38821ReferenceTest` | TA at 600 km nadir matches TR 38.821 reference within 5%. |
 | `NtnTimingAdvanceCommonAndUeSpecificTest` | `total = common + ue-specific` decomposition holds; off-centre UE has non-zero residual. |
 | `NtnTimingAdvanceDriftRateTest` | LEO drift rate < 50 µs/s (TR 38.821 bound). |
+| `Sib19CodecRoundTripTest` | Serialise → parse round-trips every SIB19 field (124 bytes). |
+| `Sib19CodecRejectsTruncatedTest` | Codec returns `false` on undersized buffer. |
+| `Sib19BroadcasterTickTest` | Broadcaster ticks every 160 ms snapshotting fresh ephemeris. |
 
 ## What's next on this workstream
 
-The remaining four W2 components ship in follow-up commits within the same module:
+The remaining W2 components ship in follow-up commits within the same module:
 
-- `ntn-sib19` — broadcast structure + serialiser
 - `ntn-ue-location-report` — periodic GNSS report timer + payload
 - `ntn-drx` — NTN-extended DRX cycle (sleep across non-pass windows)
-- `ntn-payload-mode` — explicit regenerative-vs-transparent behaviour switch hookups in upper layers
+- Integration test wiring W1 (live Starlink TLE) → W2 (TA pre-comp + SIB19 broadcast)
 
 Each lands with its own test cases and updates `ROADMAP_EXECUTION.md`'s W2 status badge.
 

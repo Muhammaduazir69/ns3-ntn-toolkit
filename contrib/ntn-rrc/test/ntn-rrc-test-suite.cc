@@ -6,7 +6,9 @@
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/log.h"
 #include "ns3/ntn-rrc-helper.h"
+#include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
+#include "ns3/simulator.h"
 #include "ns3/test.h"
 
 #include <cmath>
@@ -178,6 +180,151 @@ class NtnTimingAdvanceDriftRateTest : public TestCase
     }
 };
 
+/// SIB19 codec round-trip: serialise → parse → all fields equal.
+class Sib19CodecRoundTripTest : public TestCase
+{
+  public:
+    Sib19CodecRoundTripTest()
+        : TestCase("SIB19 serialise then parse round-trips all fields")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Sib19Content sib;
+        sib.cellId = 0xBEEF;
+        sib.payloadMode = PayloadMode::RegenerativeFull;
+        sib.taFrame = TaReferenceFrame::SatelliteSubpoint;
+        sib.cellSpecificKoffset = 17;
+        sib.kMac = 32;
+        sib.taCommon = MicroSeconds(13837);
+        sib.taCommonDriftRate = -4.88e-5;
+        sib.taCommonDriftVariation = 1.2e-9;
+        sib.ulSyncValidity = MilliSeconds(900);
+        sib.ephemeris.epoch = MilliSeconds(1715000000123);
+        sib.ephemeris.positionEcefM = Vector{1.234e6, -2.345e6, 6.789e6};
+        sib.ephemeris.velocityEcefMps = Vector{7590.0, -125.5, 50.25};
+        sib.referencePosEcefM = Vector{1234.0, 5678.0, 0.0};
+
+        std::vector<uint8_t> buf(Sib19Codec::kSerialisedBytes);
+        const auto written = Sib19Codec::Serialise(sib, buf.data(), buf.size());
+        NS_TEST_ASSERT_MSG_EQ(written,
+                              Sib19Codec::kSerialisedBytes,
+                              "Wrote unexpected number of bytes");
+
+        Sib19Content out;
+        NS_TEST_ASSERT_MSG_EQ(Sib19Codec::Parse(buf.data(), buf.size(), out),
+                              true,
+                              "Parse rejected a valid buffer");
+
+        NS_TEST_EXPECT_MSG_EQ(out.cellId, sib.cellId, "cellId");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(out.payloadMode),
+                              static_cast<int>(sib.payloadMode),
+                              "payloadMode");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(out.taFrame),
+                              static_cast<int>(sib.taFrame),
+                              "taFrame");
+        NS_TEST_EXPECT_MSG_EQ(out.cellSpecificKoffset, sib.cellSpecificKoffset, "Koffset");
+        NS_TEST_EXPECT_MSG_EQ(out.kMac, sib.kMac, "kMac");
+        NS_TEST_EXPECT_MSG_EQ(out.taCommon.GetNanoSeconds(),
+                              sib.taCommon.GetNanoSeconds(),
+                              "taCommon");
+        NS_TEST_EXPECT_MSG_EQ_TOL(out.taCommonDriftRate,
+                                  sib.taCommonDriftRate,
+                                  1e-15,
+                                  "drift rate");
+        NS_TEST_EXPECT_MSG_EQ_TOL(out.taCommonDriftVariation,
+                                  sib.taCommonDriftVariation,
+                                  1e-18,
+                                  "drift variation");
+        NS_TEST_EXPECT_MSG_EQ(out.ulSyncValidity.GetNanoSeconds(),
+                              sib.ulSyncValidity.GetNanoSeconds(),
+                              "ulSyncValidity");
+        NS_TEST_EXPECT_MSG_EQ(out.ephemeris.epoch.GetNanoSeconds(),
+                              sib.ephemeris.epoch.GetNanoSeconds(),
+                              "ephem.epoch");
+        NS_TEST_EXPECT_MSG_EQ_TOL(out.ephemeris.positionEcefM.x,
+                                  sib.ephemeris.positionEcefM.x,
+                                  1e-9,
+                                  "ephem.pos.x");
+        NS_TEST_EXPECT_MSG_EQ_TOL(out.ephemeris.velocityEcefMps.z,
+                                  sib.ephemeris.velocityEcefMps.z,
+                                  1e-9,
+                                  "ephem.vel.z");
+        NS_TEST_EXPECT_MSG_EQ_TOL(out.referencePosEcefM.y,
+                                  sib.referencePosEcefM.y,
+                                  1e-9,
+                                  "ref.y");
+    }
+};
+
+class Sib19CodecRejectsTruncatedTest : public TestCase
+{
+  public:
+    Sib19CodecRejectsTruncatedTest()
+        : TestCase("SIB19 codec rejects undersized buffers")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Sib19Content sib;
+        std::vector<uint8_t> shortBuf(Sib19Codec::kSerialisedBytes - 1);
+        std::fill(shortBuf.begin(), shortBuf.end(), 0xff);
+        NS_TEST_ASSERT_MSG_EQ(Sib19Codec::Parse(shortBuf.data(), shortBuf.size(), sib),
+                              false,
+                              "Parse must reject a truncated buffer");
+    }
+};
+
+/// Broadcaster ticks every period, snapshotting the satellite ephemeris each
+/// time. After 5 ticks the latest content reflects the satellite's most
+/// recent position.
+class Sib19BroadcasterTickTest : public TestCase
+{
+  public:
+    Sib19BroadcasterTickTest()
+        : TestCase("SIB19 broadcaster snapshots ephemeris on every tick")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ConstantVelocityMobilityModel> sat = CreateObject<ConstantVelocityMobilityModel>();
+        sat->SetPosition(Vector{0.0, 0.0, 550e3});
+        sat->SetVelocity(Vector{7590.0, 0.0, 0.0});
+
+        NtnRrcHelper helper;
+        helper.SetPayloadMode(PayloadMode::Transparent);
+        helper.SetReferencePosition(Vector{0, 0, 0});
+        Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(MakeStaticMob(Vector{0, 0, 0}), sat);
+
+        Ptr<NtnSib19Broadcaster> bc = CreateObject<NtnSib19Broadcaster>();
+        bc->SetSatelliteMobility(sat);
+        bc->SetTimingAdvance(ta);
+        bc->SetReferencePosition(Vector{0, 0, 0});
+        bc->SetCellId(0x1234);
+        bc->SetPayloadMode(PayloadMode::Transparent);
+        bc->SetPeriod(MilliSeconds(160));
+
+        bc->Start();
+        Simulator::Stop(MilliSeconds(160 * 5 + 10));
+        Simulator::Run();
+
+        const auto& latest = bc->GetLatest();
+        NS_TEST_EXPECT_MSG_EQ(latest.cellId, 0x1234, "cellId not propagated");
+        // After ~800 ms at 7590 m/s, satellite has moved > 6 km along x.
+        NS_TEST_EXPECT_MSG_GT(latest.ephemeris.positionEcefM.x, 6000.0, "ephem not refreshed");
+        NS_TEST_EXPECT_MSG_EQ(bc->GetLatestSerialised().size(),
+                              Sib19Codec::kSerialisedBytes,
+                              "Serialised size mismatch");
+        Simulator::Destroy();
+    }
+};
+
 class NtnRrcTestSuite : public TestSuite
 {
   public:
@@ -189,6 +336,9 @@ class NtnRrcTestSuite : public TestSuite
         AddTestCase(new NtnTimingAdvance38821ReferenceTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvanceCommonAndUeSpecificTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvanceDriftRateTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19CodecRoundTripTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19CodecRejectsTruncatedTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19BroadcasterTickTest, TestCase::Duration::QUICK);
     }
 };
 

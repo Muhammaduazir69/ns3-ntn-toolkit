@@ -162,7 +162,7 @@ These two are tightenings, not gates. Will be done as part of W10.
 ## W2 — ntn-rrc (3GPP Rel-18/19 NTN compliance) 🟡 IN-PROGRESS
 
 **Roadmap ref:** Phase 1.2 — 3GPP Rel-18/19 NTN Protocol Compliance
-**Status:** 🟡 IN-PROGRESS — TA pre-comp model + tests + LEO-pass example landed; SIB19 / NTN-DRX / UE-location-report / payload-mode hooks pending
+**Status:** 🟡 IN-PROGRESS — TA pre-comp model + SIB19 (struct + codec + broadcaster) + 8 unit tests landed; NTN-DRX / UE-location-report / W1+W2 integration test pending
 **Packages integrated:** none new — pure ns-3 C++ extension built on top of `mmwave`/`lte` and consuming W1 ephemeris.
 **Depends on:** W1
 **Blocks:** W4, W5, W6, W8, W10 (every higher-layer workstream needs valid RRC under it).
@@ -645,7 +645,7 @@ These rules govern *how* this plan is executed:
 4. **Update the status badge** at the top of the workstream section the moment status changes (⏳ → 🟡 → ✅).
 5. **External-blocker workstreams** (W8, W9, W11, W12) stay 🚧/⏸ until the blocker resolves; do not invent stubs that won't work without the real package.
 6. **Do not auto-rebrand** the toolkit (`SkyNet-Sim` / `SAGIN-Sim`) or migrate to a GitHub Organization without explicit user approval — those are one-way doors recorded in `project_roadmap_v2.md` memory.
-7. **Both remotes always.** Every feature branch pushes to GitHub `origin` and GitLab `gitlab` once tests pass.
+7. **Local commits only by default.** Never push to GitHub `origin` or GitLab `gitlab` without an explicit user request. When the user approves a push, sync both remotes plus any per-module standalone repo (mirrors `ntn-cho-framework` / `oran-ntn` / `ns3-thz-ntn` / `ns3-ai` pattern).
 
 ---
 
