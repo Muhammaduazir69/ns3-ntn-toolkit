@@ -3,6 +3,13 @@
 <p align="center"><strong>A pre-integrated ns-3.43 simulation platform for 6G Non-Terrestrial Network research — clone, build, run.</strong></p>
 
 <p align="center">
+  <em>Mirrors:&nbsp;</em>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">GitHub</a>
+  &nbsp;·&nbsp;
+  <a href="https://gitlab.com/ha5050/ns3-ntn-toolkit">GitLab</a>
+</p>
+
+<p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
   <img src="https://img.shields.io/badge/3GPP-Rel--17%20NTN-orange.svg"/>
