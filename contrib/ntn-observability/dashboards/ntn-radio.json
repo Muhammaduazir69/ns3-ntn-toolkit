@@ -1,0 +1,67 @@
+{
+  "title": "NTN Radio",
+  "uid": "ntn-radio",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["ntn", "radio", "phy"],
+  "timezone": "browser",
+  "time": {"from": "now-6h", "to": "now"},
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "RSRP (dBm)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_radio\") |> filter(fn: (r) => r._field == \"rsrp_dbm\") |> group(columns: [\"ue_imsi\", \"cell_id\"])"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "dBm"}}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "SINR (dB)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_radio\") |> filter(fn: (r) => r._field == \"sinr_db\") |> group(columns: [\"ue_imsi\", \"cell_id\"])"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "dB"}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "BLER",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_radio\") |> filter(fn: (r) => r._field == \"bler\")"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit"}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "MCS",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_radio\") |> filter(fn: (r) => r._field == \"mcs\")"
+        }
+      ]
+    }
+  ]
+}

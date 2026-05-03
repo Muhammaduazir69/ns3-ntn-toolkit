@@ -1,0 +1,65 @@
+{
+  "title": "NTN Handover",
+  "uid": "ntn-handover",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["ntn", "handover", "cho"],
+  "timezone": "browser",
+  "time": {"from": "now-6h", "to": "now"},
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "CHO triggered",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_handover\") |> filter(fn: (r) => r._field == \"ho_trigger_count\") |> last()"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "CHO executed",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_handover\") |> filter(fn: (r) => r._field == \"ho_exec_count\") |> last()"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "CHO failed",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_handover\") |> filter(fn: (r) => r._field == \"ho_fail_count\") |> last()"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "TA total per UE — handover boundaries are jumps",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 4},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_timing_advance\") |> filter(fn: (r) => r._field == \"ta_total_us\")"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "µs"}}
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+udp-bind-address: ":8089"
+udp-database: "ntn"
+udp-precision: "ns"
+udp-batch-size: 5000
+udp-batch-pending: 10
+udp-batch-timeout: "1s"
+udp-read-buffer: 8388608

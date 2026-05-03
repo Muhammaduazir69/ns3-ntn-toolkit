@@ -1,0 +1,53 @@
+{
+  "title": "NTN Overview",
+  "uid": "ntn-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["ntn", "overview"],
+  "timezone": "browser",
+  "time": {"from": "now-6h", "to": "now"},
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Timing Advance (us)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_timing_advance\") |> filter(fn: (r) => r._field == \"ta_total_us\" or r._field == \"ta_common_us\")"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "µs"}}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "RSRP / SINR per UE",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_radio\") |> filter(fn: (r) => r._field == \"rsrp_dbm\" or r._field == \"sinr_db\")"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Satellite ECEF position",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_sat_pos\") |> filter(fn: (r) => r._field == \"sat_x_m\" or r._field == \"sat_y_m\" or r._field == \"sat_z_m\")"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "m"}}
+    }
+  ]
+}

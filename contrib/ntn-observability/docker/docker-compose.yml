@@ -1,0 +1,41 @@
+services:
+  influxdb:
+    image: influxdb:2.7
+    container_name: ntn-influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+      - "8089:8089/udp"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: ntn-toolkit-admin
+      DOCKER_INFLUXDB_INIT_ORG: ntn
+      DOCKER_INFLUXDB_INIT_BUCKET: ntn
+      DOCKER_INFLUXDB_INIT_RETENTION: 30d
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ntn-toolkit-token
+    volumes:
+      - influx-data:/var/lib/influxdb2
+      - ./influxdb-config.yml:/etc/influxdb2/config.yml:ro
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: ntn-grafana
+    restart: unless-stopped
+    depends_on:
+      - influxdb
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning:ro
+      - ../dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  influx-data:
+  grafana-data:
