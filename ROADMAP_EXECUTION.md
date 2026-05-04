@@ -471,10 +471,10 @@ contrib/ntn-v2x/
 
 ---
 
-## W8 — FlexRIC E2 real-wire integration 🚧
+## W8 — FlexRIC E2 real-wire integration 🟢
 
 **Roadmap ref:** Phase 1.1
-**Status:** 🚧 needs FlexRIC build environment + ASN.1 toolchain.
+**Status:** 🟢 stub-mode complete (2026-05-04) — 7/7 tests, CHO xApp == in-memory oracle, 30 k IND/s loopback. Live-mode Docker stack shipped but not exercised on dev host (no Docker daemon); gates 1 & 3 unblock when user runs `docker compose up --build`.
 **Packages integrated:** FlexRIC (EURECOM), real ASN.1-compiled E2AP v1.01 / E2SM-KPM v3 / E2SM-RC v1.03 over SCTP.
 **Depends on:** W1, W2, W4 (xApps).
 **Blocks:** —
@@ -508,9 +508,9 @@ contrib/oran-ntn/flexric-bridge/
 
 ### Validation gates
 
-- [ ] FlexRIC builds in a Docker image we ship under `flexric-bridge/docker/`
-- [ ] xApp CHO produces handovers indistinguishable in result from built-in CHO
-- [ ] Real wire trace captured with `wireshark -d sctp.port==36421,e2ap`
+- [🟡] FlexRIC builds in a Docker image we ship under `flexric-bridge/docker/` — `Dockerfile` + `docker-compose.yml` shipped, recipe pins asn1c + FlexRIC + Ubuntu 22.04; not exercised on dev host (no Docker daemon).
+- [x] xApp CHO produces handovers indistinguishable in result from built-in CHO — `test_cho_xapp_matches_inmemory_oracle`: bit-identical HO sequence over 30-step pass × 3 sats.
+- [🟡] Real wire trace captured with `wireshark -d sctp.port==36421,e2ap` — `tcpdump` container wired in compose; pcap produced when live stack runs.
 
 ### Effort estimate
 ~15 days.

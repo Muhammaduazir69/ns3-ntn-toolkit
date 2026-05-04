@@ -1,0 +1,79 @@
+version: "3.9"
+
+# Live FlexRIC stack:  RIC + NTN E2 agent + 3 xApps + tcpdump for the wire trace.
+# Run: docker compose -f flexric-bridge/docker/docker-compose.yml up --build
+
+services:
+  ric:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ntn-flexric-ric
+    command: ["nearRT-RIC"]
+    networks:
+      ric:
+        ipv4_address: 172.30.0.10
+    cap_add: ["NET_ADMIN"]    # SCTP needs CAP_NET_RAW for some kernels
+    expose: ["36421/tcp", "36421/sctp", "36422/sctp"]
+
+  e2-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ntn-flexric-agent
+    command: ["ntn-e2-agent", "--gnb-id", "1", "--host", "0.0.0.0",
+              "--port", "36421"]
+    networks:
+      ric:
+        ipv4_address: 172.30.0.11
+    depends_on: [ric]
+
+  cho-xapp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ntn-flexric-cho
+    command: ["ntn-cho-xapp", "--host", "172.30.0.11", "--port", "36421",
+              "--seconds", "600"]
+    depends_on: [e2-agent]
+    networks: [ric]
+
+  beam-xapp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ntn-flexric-beam
+    command: ["ntn-beam-xapp", "--host", "172.30.0.11", "--port", "36421",
+              "--seconds", "600"]
+    depends_on: [e2-agent]
+    networks: [ric]
+
+  slice-xapp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ntn-flexric-slice
+    command: ["ntn-slice-xapp", "--host", "172.30.0.11", "--port", "36421",
+              "--seconds", "600"]
+    depends_on: [e2-agent]
+    networks: [ric]
+
+  # tcpdump captures the live SCTP wire to /captures/e2ap.pcap, which Wireshark
+  # can dissect with `wireshark -d sctp.port==36421,e2ap` per W8 gate 3.
+  tcpdump:
+    image: nicolaka/netshoot:latest
+    container_name: ntn-flexric-tcpdump
+    network_mode: "container:ntn-flexric-ric"
+    cap_add: ["NET_ADMIN", "NET_RAW"]
+    command: ["tcpdump", "-i", "any", "-w", "/captures/e2ap.pcap",
+              "sctp", "or", "tcp", "port", "36421"]
+    volumes:
+      - "./captures:/captures"
+    depends_on: [ric]
+
+networks:
+  ric:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

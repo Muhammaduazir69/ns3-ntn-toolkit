@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ntn-flexric-bridge"
+version = "0.1.0"
+description = "FlexRIC E2 real-wire bridge for the ns3-ntn-toolkit (W8)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "GPL-2.0-only"}
+authors = [
+    {name = "Muhammad Uzair", email = "muhammaduzairr69@gmail.com"},
+]
+dependencies = [
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+live = []  # FlexRIC + asn1c are external (Docker); see docs/BUILD_FLEXRIC.md
+
+[project.scripts]
+ntn-e2-agent      = "ntn_flexric_bridge.e2_agent_ns3:main"
+ntn-cho-xapp      = "ntn_flexric_bridge.xapps.cho_xapp:main"
+ntn-beam-xapp     = "ntn_flexric_bridge.xapps.beam_mgmt_xapp:main"
+ntn-slice-xapp    = "ntn_flexric_bridge.xapps.slice_orch_xapp:main"
+
+[tool.setuptools]
+packages = [
+    "ntn_flexric_bridge",
+    "ntn_flexric_bridge.xapps",
+]
+package-dir = {"ntn_flexric_bridge" = "src/ntn_flexric_bridge"}
