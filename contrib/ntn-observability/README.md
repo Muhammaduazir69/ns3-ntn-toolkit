@@ -125,6 +125,32 @@ cd contrib/ntn-constellation
 
 Spawns the demo, validates that all 6 expected measurements (`ntn_radio`, `ntn_timing_advance`, `ntn_sat_pos`, `ntn_drx`, `ntn_sib19`, `ntn_ue_report`) and 4 critical fields (`rsrp_dbm`, `ta_total_us`, `sat_x_m`, `lat_deg`) appear in the line-protocol output. If InfluxDB is up at `127.0.0.1:8086` it also runs a UDP-mode round-trip query; otherwise that step is skipped with a clear note.
 
+## Audit results (2026-05-04)
+
+Stress-tested at 1800 s (30 min) in the W1–W4 integration audit
+(`AUDIT_W1_W4.md`):
+
+| Check | Result |
+|---|---|
+| LP file size | 1.95 MB (18 810 points) |
+| `ntn_drx` count | 1 800 (= 1 Hz × 1800 s, exact) |
+| `ntn_radio` count | 1 800 (exact) |
+| `ntn_sat_pos` count | 1 800 (exact) |
+| `ntn_timing_advance` count | 1 800 (exact) |
+| `ntn_sib19` count | 11 250 (= 1800 / 0.160 s, exact) |
+| `ntn_ue_report` count | 360 (= 1800 / 5 s, exact) |
+| `run_id` tag coverage | 18 810 / 18 810 records |
+| Timestamp span | 0 – 1 799.84 s (continuous, no skips) |
+| Critical fields present | 14 / 14 |
+| NetSimulyzer JSON | 2 nodes + 2 series + 5 759 events (NodeMove 1800, SeriesSample 3600, LogMessage 359) |
+| **W2→W3 TA fidelity** (analytic vs LP) | mean &#124;err&#124; 0.49 µs, max 1.0 µs — **bit-exact within int µs truncation** |
+
+The W2→W3 fidelity check parses every `ntn_timing_advance` LP point and
+compares it to a closed-form analytic ground truth using the demo's exact
+mobility (UE position + sat position/velocity). 100 % of 1 800 samples land
+within ≤ 1 µs — meaning every byte the sink emits matches the W2 source of
+truth to the limit of `Time::GetMicroSeconds()` int truncation.
+
 ## Schema stability promise
 
 `model/ntn-metric-schema.h` names are **stable across versions**. Adding new measurements/fields is fine; renaming an existing one breaks every shipped dashboard. The `MetricSchemaStableTest` unit test pins the names so you cannot accidentally rename them without the test going red.

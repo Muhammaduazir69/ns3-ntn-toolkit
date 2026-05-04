@@ -114,6 +114,25 @@ write_czml(constellation=c, start=when, duration=timedelta(hours=2),
 | 1.3 ISL topology generation | `isl.py` (k-NN + Walker grid) |
 | 3.1 Digital Twin Mode | unblocked — feed live TLE → CZML on a cron loop |
 
+## Audit results (2026-05-04)
+
+Verified end-to-end as part of the W1–W4 integration audit (`AUDIT_W1_W4.md`):
+
+| Check | Result |
+|---|---|
+| 24 h propagation, 66 sats, 1440 samples | 0 NaN, 0.4 s wallclock |
+| Orbital period (Walker-Star Starlink-shell-1) | **96.00 min** (TLE-line-2 nominal 95.6) |
+| Altitude bounds across 24 h | 542.9 – 554.8 km (drift end-vs-start +0.0 km) |
+| ISL 4-NN graph across 24 hourly snapshots | 132 directed edges every snapshot, every node degree 4 |
+| W1→W2 live CelesTrak STARLINK-1008 vs Skyfield (600 s) | mean &#124;err&#124; **2.6 µs**, max 5.8 µs |
+| W1→W2 extended (1800 s) | max &#124;err&#124; 23.5 µs, drift &#124;err&#124;/dt **0.006 µs/s** |
+| W1→W4 real Walker-Star → PyG → GAT (60 sats) | 90 % next-hop accuracy on real geometry |
+
+The single Walker-Star shell exhibits **zero ISL edge churn** over 24 h —
+expected analytically and confirmed by the propagator. The Skyfield-vs-SNS3
+residual grows linearly at 0.006 µs/s (well under the 0.5 µs/s tolerance),
+so hour-long Starlink scenarios are safe.
+
 ## License
 
 GPL-2.0-only — same as the umbrella ns3-ntn-toolkit.

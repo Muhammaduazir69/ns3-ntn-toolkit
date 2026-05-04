@@ -105,11 +105,45 @@ cd contrib/ntn-constellation
 | `ntn-rrc-full-stack` | All four W2 components running together over a pass; 4 CSVs (ta / sib19 / ue / drx). |
 | `ntn-rrc-from-tle` | Reads a real 3-line TLE, drives `SatSGP4MobilityModel` (SNS3), runs TA. Used by the W1+W2 integration test. |
 
+## Audit results (2026-05-04)
+
+Stress-tested at production scenario length (1800 s = 30 min) as part of the
+W1–W4 integration audit (`AUDIT_W1_W4.md`):
+
+**`ntn-rrc-leo-pass --simTime=1800`:**
+
+| t (s) | TA (µs) | drift (µs/s) | meaning |
+|---:|---:|---:|---|
+| 0 | 13 837 | −48.8 | sat 2 Mm west, approaching |
+| 263 | 3 669 | −0.3 | **zenith — drift sign flips here** |
+| 598 | 17 330 | +49.5 | departing, near asymptote |
+| 1198 | 47 460 | +50.5 | approaching analytic limit |
+| 1798 | 77 785 | **+50.6** | = **2·v/c** at v=7590 m/s (4-sig-fig match) |
+
+The drift saturating at exactly +50.60 µs/s confirms `ComputeTaDriftRate()`
+uses a **closed-form velocity projection**, not a Simulator-step finite
+difference — the documented behaviour holds at long-run scale.
+
+**`ntn-rrc-full-stack --simTime=1800`:**
+
+| Cadence | Measured | Expected | Match |
+|---|---:|---:|:---:|
+| SIB19 broadcasts (160 ms) | 11 250 | 1800 / 0.160 = 11 250 | exact |
+| UE reports (5 s) | 360 | 1800 / 5 = 360 | exact |
+| TA samples (1 Hz) | 1 800 | 1800 | exact |
+
+**W1→W2 live CelesTrak integration:** 121 samples over a 600 s pass of
+STARLINK-1008, mean &#124;err&#124; vs Skyfield = **2.6 µs**, max 5.8 µs,
+drift 0.009 µs/s.
+
+**W2→W3 KPI fidelity:** 1800 / 1800 TA values landing in InfluxDB line
+protocol match the analytic ground truth within ≤ 1 µs (the unavoidable
+`Time::GetMicroSeconds()` int truncation). Bit-exact.
+
 ## What's next
 
-W2 is complete. Next workstream per `ROADMAP_EXECUTION.md`: **W3 — observability stack** (Grafana + InfluxDB + NetSimulyzer trace export).
-
-Each lands with its own test cases and updates `ROADMAP_EXECUTION.md`'s W2 status badge.
+W2 is complete and audit-verified. Next workstream per
+`ROADMAP_EXECUTION.md`: **W5 — SAGIN** (HAPS + UAV + A2G channel).
 
 ## License
 
