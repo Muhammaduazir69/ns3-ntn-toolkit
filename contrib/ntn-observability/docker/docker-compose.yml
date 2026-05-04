@@ -5,7 +5,6 @@ services:
     restart: unless-stopped
     ports:
       - "8086:8086"
-      - "8089:8089/udp"
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: admin
@@ -16,7 +15,23 @@ services:
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ntn-toolkit-token
     volumes:
       - influx-data:/var/lib/influxdb2
-      - ./influxdb-config.yml:/etc/influxdb2/config.yml:ro
+    # InfluxDB v2 doesn't accept the v1-style udp-bind-address keys we used
+    # to ship in influxdb-config.yml — UDP ingest in v2 needs a Telegraf
+    # sidecar (see telegraf service below). The bare HTTP API on 8086 is
+    # the canonical v2 entry point.
+
+  # Telegraf terminates the UDP line-protocol stream from ns-3 sinks and
+  # forwards via the v2 HTTP API to bucket "ntn".
+  telegraf:
+    image: telegraf:1.31
+    container_name: ntn-telegraf
+    restart: unless-stopped
+    depends_on:
+      - influxdb
+    ports:
+      - "8089:8089/udp"
+    volumes:
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
 
   grafana:
     image: grafana/grafana:10.4.0
