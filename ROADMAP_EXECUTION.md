@@ -394,10 +394,10 @@ None.
 
 ---
 
-## W6 — Network slicing for NTN ⏳
+## W6 — Network slicing for NTN ✅
 
 **Roadmap ref:** Phase 3.4
-**Status:** ⏳ pending
+**Status:** ✅ complete (2026-05-04) — 7/7 tests, URLLC mean p99 47 ms (< 50 ms gate), 6.3× LEO/GEO ratio
 **Packages integrated:** none new.
 **Depends on:** W2 (RRC for slice association SST/SD), W4 (RL slice orchestrator), W3 (per-slice KPIs).
 **Blocks:** —
@@ -424,9 +424,9 @@ contrib/ntn-slice/
 
 ### Validation gates
 
-- [ ] eMBB/URLLC/mMTC slices co-exist on same satellite without isolation breach
-- [ ] URLLC E2E latency < 50 ms via GEO-mode-skip routing
-- [ ] Per-slice KPI panels in Grafana populated
+- [x] eMBB/URLLC/mMTC slices co-exist on same satellite without isolation breach (`ThreeSliceCoexistenceTest`)
+- [x] URLLC E2E latency < 50 ms via GEO-mode-skip routing (mean p99 47.02 ms vs 295.52 ms when forced through GEO)
+- [x] Per-slice KPI panels in Grafana populated (`dashboards/ntn-slice.json`, 4 panels, schema extended)
 
 ### Effort estimate
 ~4 days.

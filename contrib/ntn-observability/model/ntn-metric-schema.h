@@ -72,6 +72,15 @@ inline constexpr const char* kIslRangeKm = "isl_range_km";
 inline constexpr const char* kIslLoadMbps = "isl_load_mbps";
 inline constexpr const char* kDrxState = "drx_state";
 inline constexpr const char* kDrxAwakeMs = "drx_awake_ms";
+// W6 — slice orchestration KPIs.
+inline constexpr const char* kSlicePrbAllocated = "slice_prb_allocated";
+inline constexpr const char* kSliceServedMbps = "slice_served_mbps";
+inline constexpr const char* kSliceDemandMbps = "slice_demand_mbps";
+inline constexpr const char* kSliceSatisfaction = "slice_satisfaction";
+inline constexpr const char* kSliceLatencyP99Ms = "slice_latency_p99_ms";
+inline constexpr const char* kSliceLossRate = "slice_loss_rate";
+inline constexpr const char* kSliceLatencyBreach = "slice_latency_breach";
+inline constexpr const char* kSliceReliabilityBreach = "slice_reliability_breach";
 
 } // namespace field
 

@@ -1,0 +1,67 @@
+{
+  "title": "NTN Slice",
+  "uid": "ntn-slice",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["ntn", "slice", "oran"],
+  "timezone": "browser",
+  "time": {"from": "now-6h", "to": "now"},
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Per-slice satisfaction",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_slice\") |> filter(fn: (r) => r._field == \"slice_satisfaction\") |> group(columns: [\"slice_sst\"])"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit"}}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Served vs Demand (Mbps)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_slice\") |> filter(fn: (r) => r._field == \"slice_served_mbps\" or r._field == \"slice_demand_mbps\") |> group(columns: [\"slice_sst\", \"_field\"])"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "Mbits"}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "p99 latency per slice",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_slice\") |> filter(fn: (r) => r._field == \"slice_latency_p99_ms\") |> group(columns: [\"slice_sst\"])"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms"}}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "SLA breaches (latency / reliability)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "influxdb", "uid": "InfluxDB"},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"ntn\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"ntn_slice\") |> filter(fn: (r) => r._field == \"slice_latency_breach\" or r._field == \"slice_reliability_breach\") |> sum() |> group(columns: [\"slice_sst\", \"_field\"])"
+        }
+      ]
+    }
+  ]
+}
