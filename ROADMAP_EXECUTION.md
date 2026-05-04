@@ -279,10 +279,10 @@ None. NetSimulyzer is a public NIST package; Grafana/InfluxDB are public Docker 
 
 ---
 
-## W4 — AI/ML extensions (SB3 + PyTorch Geometric + ns3-gym) ⏳
+## W4 — AI/ML extensions (SB3 + PyTorch Geometric + ns3-gym) ✅
 
 **Roadmap ref:** Phase 2.4
-**Status:** ⏳ pending
+**Status:** ✅ complete (2026-05-04) — 15/15 pytest, 88% GNN accuracy, PPO beats random by 116 (>>1σ)
 **Packages integrated:** `stable-baselines3`, `torch_geometric`, canonical `ns3-gym` (in addition to the existing `ns3-ai` shared-mem bridge), `pyorbital` for env state.
 **Depends on:** W1 (state inputs), W3 (reward signal from KPIs).
 **Blocks:** W6 (RL-driven slice orchestration), W8 (RL xApps over real E2), W10 (predictive prefetch).
@@ -327,10 +327,10 @@ contrib/ns3-ai-ntn/python_utils/
 
 ### Validation gates
 
-- [ ] All 4 envs pass `gymnasium.utils.env_checker.check_env`
-- [ ] `pytest contrib/ns3-ai-ntn/python_utils/tests/` green
-- [ ] PPO baseline beats random on `handover_env` (reward > random + 1 σ)
-- [ ] GNN converges to handover prediction accuracy ≥ 70% on Starlink subset
+- [x] All 4 envs pass `gymnasium.utils.env_checker.check_env`
+- [x] `pytest contrib/ns3-ai-ntn/python_utils/tests/` green (15/15 in 3.1 s)
+- [x] PPO baseline beats random on `handover_env` (gap 116.1 vs σ 27.5 — > 4σ)
+- [x] GNN converges to handover prediction accuracy ≥ 70% on Starlink subset (88%)
 
 ### Effort estimate
 ~5 days.
