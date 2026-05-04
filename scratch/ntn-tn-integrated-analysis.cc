@@ -525,7 +525,7 @@ main(int argc, char* argv[])
             double ueLat = 45.0 + uePos3d.y / 111320.0;
             double ueLon = 10.0 + uePos3d.x / (111320.0 * std::cos(45.0 * M_PI / 180.0));
             GeoCoordinate ueGeo(ueLat, ueLon, 0);
-            Vector ueVel = ueMobModel->GetVelocity();
+            [[maybe_unused]] Vector ueVel = ueMobModel->GetVelocity();
 
             // Scan all satellites: build measurement table
             struct SatMeas { uint32_t id; double sinr, rsrp, gain, elev, range, doppler, loss, delay, tte; };
