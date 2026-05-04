@@ -1,0 +1,26 @@
+# Python byte-code
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+
+# Build / tooling
+build/
+dist/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*~
+*.swp
+
+# ns-3 local outputs
+*.tr
+*.pcap
+*.log
+testpy-output/
