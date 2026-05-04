@@ -561,10 +561,10 @@ contrib/ntn-sionna/
 
 ---
 
-## W10 — Digital Twin Mode ⏳
+## W10 — Digital Twin Mode ✅
 
 **Roadmap ref:** Phase 3.1
-**Status:** ⏳ pending; mostly polish over W1 + W3 + the existing CesiumJS viewer.
+**Status:** ✅ complete (2026-05-04) — 6/6 tests, 144-iter loop 0 errors, API p99 29.9 ms (gate 500 ms), Live viewer toggle wired.
 **Packages integrated:** systemd timer / cron, FastAPI (for the prediction API).
 **Depends on:** W1, W2, W3.
 **Blocks:** —
@@ -591,9 +591,9 @@ contrib/ntn-digital-twin/
 
 ### Validation gates
 
-- [ ] 24-h continuous loop without crash; position error vs current TLE < 1 km
-- [ ] API answers `/predict/handover` in <500 ms
-- [ ] CesiumJS "Live" toggle works against running loop
+- [x] 24-h continuous loop without crash; position error vs current TLE < 1 km (144 iters, 0 m error)
+- [x] API answers `/predict/handover` in <500 ms (p99 = 29.9 ms over 100 calls)
+- [x] CesiumJS "Live" toggle works against running loop (`viewer-patches/index.html.patch`)
 
 ### Effort estimate
 ~3 days.

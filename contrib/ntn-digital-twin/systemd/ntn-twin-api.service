@@ -1,0 +1,23 @@
+[Unit]
+Description=ns3-ntn-toolkit digital-twin REST API (W10)
+After=network-online.target ntn-twin.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env ntn-twin-api --host 0.0.0.0 --port 8090
+Environment=NTN_TWIN_GROUP=starlink
+Environment=NTN_TWIN_MAX_SATS=50
+Environment=NTN_TWIN_CACHE_DIR=/var/lib/ntn-twin/cache
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+StateDirectory=ntn-twin
+
+[Install]
+WantedBy=multi-user.target

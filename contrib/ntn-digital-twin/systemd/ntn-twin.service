@@ -1,0 +1,28 @@
+[Unit]
+Description=ns3-ntn-toolkit digital-twin refresher (W10)
+Documentation=https://github.com/Muhammaduazir69/ns3-ntn-toolkit
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env ntn-twin-loop \
+    --group=starlink --max-sats=200 \
+    --interval=300 \
+    --czml=/var/lib/ntn-twin/twin.czml \
+    --lp=/var/lib/ntn-twin/twin.lp \
+    --run-id=twin-systemd
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+StateDirectory=ntn-twin
+
+[Install]
+WantedBy=multi-user.target

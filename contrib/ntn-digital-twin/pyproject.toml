@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ntn-digital-twin"
+version = "0.1.0"
+description = "Live digital-twin loop + REST API for the ns3-ntn-toolkit (W10)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "GPL-2.0-only"}
+authors = [
+    {name = "Muhammad Uzair", email = "muhammaduzairr69@gmail.com"},
+]
+dependencies = [
+    "ntn-constellation",   # local dep — sibling package in this repo
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "pydantic>=2.6",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "httpx>=0.26"]
+
+[project.scripts]
+ntn-twin-loop  = "ntn_digital_twin.twin_loop:main"
+ntn-twin-api   = "ntn_digital_twin.api.server:main"
+
+[tool.setuptools]
+packages = ["ntn_digital_twin", "ntn_digital_twin.api"]
