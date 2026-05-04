@@ -93,3 +93,8 @@ UlPhyTransmissionTrace.txt
 ntn-ai-output/
 ntn-analysis-output/
 oran-ntn-output/
+
+# Personal planning / audit notes — kept locally, not pushed
+ROADMAP_EXECUTION.md
+AUDIT_*.md
+docs/_archive_v1/
