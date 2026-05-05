@@ -12,6 +12,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/ntn_constellation_demo.gif" alt="module live demo" width="900"/>
+</p>
+
 ## Why this module
 
 Reproducible NTN research requires three things that, separately, are easy and, together, are surprisingly painful: **fresh ephemerides** (today's TLEs, not last year's), a **propagator that an ns-3 simulation actually trusts** (SGP4/SDP4 with frame conversions that don't drift), and **export shapes** that drop into both the simulator (SNS3 scenario layout) and the visualiser (CesiumJS CZML). `ntn-constellation` is a pure-Python, tool-side companion that produces all three in one pass — pulling from CelesTrak or Space-Track, propagating with the canonical Vallado SGP4 reference, and emitting the exact files that `SatSGP4MobilityModel` and the in-toolkit 3D viewer already know how to consume. It does not modify the C++ ns-3 build; it produces inputs the existing simulator already understands.

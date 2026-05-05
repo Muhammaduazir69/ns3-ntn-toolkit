@@ -13,6 +13,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/flexric_bridge_demo.gif" alt="module live demo" width="900"/>
+</p>
+
 ## Why this module
 
 In-process xApp stubs are a fine way to *prototype* a Near-RT RIC integration; they do not let you publish results that survive review against a real O-RAN deployment. The reviewer's question is always: "does the same xApp logic work over the actual wire?" `flexric-bridge` answers that question by replacing the in-memory E2 stubs in `oran-ntn` with a real Near-RT RIC stack based on EURECOM's [FlexRIC](https://gitlab.eurecom.fr/mosaic5g/flexric). Three NTN-aware xApps (Conditional Handover, multi-beam selection, slice orchestration) run as separate processes and exchange real E2AP messages with an ns-3 E2 agent. Two operating modes — **same code, different wire**: a stub TCP/JSON mode for CI and a live SCTP/E2AP mode driven by FlexRIC under Docker.

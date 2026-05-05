@@ -13,6 +13,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/ntn_sionna_demo.gif" alt="module live demo" width="900"/>
+</p>
+
 ## Why this module
 
 Closed-form path-loss models like 3GPP TR 38.811 are fast and reproducible but they collapse every reflective object in the world into a single scalar shadowing term. For physical-layer research that depends on ray-level effects — beamforming gains in cluttered environments, multipath fading on a moving satellite-to-ground link, sensing-and-communication trade-offs — a real ray tracer is the right tool, and NVIDIA's [Sionna RT](https://nvlabs.github.io/sionna/api/rt.html) is the open-source state of the art. `ntn-sionna` wires Sionna RT into ns-3 as an **opt-in** `PropagationLossModel`: the closed-form TR 38.811 channel remains the simulation default, and the ray-traced channel becomes available the moment a user opts in to it. A small Python server keeps the Mitsuba scene resident on the GPU between queries; a UDP client on the C++ side streams `{tx, rx, freq_hz}` into it and gets `{path_loss_db, n_paths, compute_ms}` back, with a graceful FSPL fall-back when the server is offline so CI without a GPU still runs.

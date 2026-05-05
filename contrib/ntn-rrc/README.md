@@ -12,6 +12,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/ntn_rrc_demo.gif" alt="module live demo" width="900"/>
+</p>
+
 ## Why this module
 
 LEO non-terrestrial networks introduce delays and Doppler trajectories that the terrestrial 5G RRC stack was never specified for: a single-leg propagation can exceed 17 ms at low elevation, common timing-advance values run into hundreds of microseconds-per-second of drift, and the assistance information broadcast in SIB1 is silent on satellite ephemerides. The 3GPP NTN work item (Release-17 onward) addresses these gaps with new IEs, new SIB types and new MAC behaviours — but most ns-3 distributions still carry only the terrestrial Release-15 RRC. `ntn-rrc` adds the seven NTN-specific RRC procedures as a clean, optional contrib module so that the RACH preambles arrive inside the receiver window and CHO timing decisions sit on top of a faithful RRC layer.

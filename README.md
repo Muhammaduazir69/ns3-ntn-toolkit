@@ -135,6 +135,12 @@ Plus the upstream packages this distribution patches and integrates:
   <img src="docs/oran_ntn_constellation_ric.gif" alt="O-RAN constellation + Space RIC" width="850"/>
 </p>
 
+### Per-module animated demos
+
+Every contributed module ships its own animated demo inside its repo —
+follow the [bundled-modules](#bundled-modules) links above to see each one in
+context (e.g. `ntn-sionna/docs/ntn_sionna_demo.gif`).
+
 ### Module-output snapshots
 
 | O-RAN xApps showcase | NTN-CHO algorithm comparison |

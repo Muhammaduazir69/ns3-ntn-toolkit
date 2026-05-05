@@ -12,6 +12,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/ntn_slice_demo.gif" alt="module live demo" width="900"/>
+</p>
+
 ## Why this module
 
 5G slicing is straightforward when every cell is a few kilometres away. In NTN, the latency budget of a URLLC slice (5 ms p99) is hard-bounded by orbital geometry — a single GEO hop introduces ~270 ms one-way, blowing the budget by two orders of magnitude regardless of any allocator decisions on the radio. `ntn-slice` is a 3GPP-compliant slicing layer that *understands the orbital floor*: it implements per-slice PRB allocation with min-throughput reservation (the classical isolation guarantee), an isolation monitor that flags p99-latency / loss-rate breaches per S-NSSAI, and a **GEO mode-skip policy** that keeps URLLC traffic on LEO satellites whose round-trip time is compatible with the slice's latency target. The orchestrator's `(observation, action)` shape matches the `SliceEnv` Gymnasium wrapper in [`ns3-ai`](https://github.com/Muhammaduazir69/ns3-ai), so a trained RL policy can drive the C++ allocator directly.

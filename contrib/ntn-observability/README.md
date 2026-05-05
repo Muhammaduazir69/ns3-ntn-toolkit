@@ -13,6 +13,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/ntn_observability_demo.gif" alt="module live demo" width="900"/>
+</p>
+
 ## Why this module
 
 A 6G NTN simulation produces every kind of telemetry that a real RAN does — RSRP, SINR, BLER, MCS, timing-advance, sat ECEF, ISL load, handover counters — but ns-3's default trace surface stops at flat ASCII files. That's fine for unit tests; it does not scale to a multi-hour, multi-satellite scenario where reviewers want to see what happened in a dashboard rather than reconstruct it from `.tr` files. `ntn-observability` plugs the simulator into the same observability stack production RANs already use: line-protocol into InfluxDB v2 over UDP or file, and a streaming NetSimulyzer JSON exporter for 3D playback. A canonical metric schema (`ntn-metric-schema.h`) names every KPI exactly once so downstream dashboards never break when new modules add metrics.

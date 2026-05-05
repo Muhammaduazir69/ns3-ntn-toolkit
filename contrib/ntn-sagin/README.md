@@ -12,6 +12,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/ntn_sagin_demo.gif" alt="module live demo" width="900"/>
+</p>
+
 ## Why this module
 
 Most ns-3 NTN work stops at "satellite + ground". A realistic 6G access network sits in three layers — space (LEO/MEO/GEO), air (HAPS, UAVs, commercial flights) and ground — and traffic typically traverses two or three of them per session. `ntn-sagin` fills the air-layer gap with a complete Space-Air-Ground Integrated Network model: closed-form mobility patterns for HAPS station-keeping (figure-8 racetrack with ±50 m vertical envelope), three UAV patterns (waypoint, patrol, search-lawnmower), the 3GPP TR 36.777 air-to-ground channel for UMa-AV / RMa-AV / UMi-AV scenarios, and a greedy multi-layer router that selects the best Ground → UAV → HAPS → LEO hop sequence by maximum elevation per layer.

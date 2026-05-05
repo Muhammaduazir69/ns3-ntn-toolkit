@@ -12,6 +12,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/ntn_v2x_demo.gif" alt="module live demo" width="900"/>
+</p>
+
 ## Why this module
 
 Vehicular networking research has historically lived in OMNeT++ via Veins. Veins is excellent but cannot be lifted into ns-3 without a parallel discrete-event kernel — and the rest of the 6G NTN toolkit is firmly in ns-3. `ntn-v2x` mirrors what Veins offers in spirit (a SUMO-driven mobility feed plus a couple of vehicular channel models) but builds it natively against the ns-3 mobility stack. Two operation modes ride the same API: a live TraCI socket to a running SUMO process, and an offline FCD-trace replay that reads SUMO's standard floating-car-data CSV. Together they let researchers run live co-simulations and reproduce the exact same scenario bit-for-bit in CI.
