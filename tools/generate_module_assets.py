@@ -85,6 +85,34 @@ def _save(fig, name):
     return p
 
 
+def _footer(ax, *, github_path, gitlab_path, role,
+            x_left=0.30, width=15.40, y_top=-0.10, height=1.30):
+    """Banded footer for the legacy 16x10 canvas.
+
+    Caller should expand ylim downwards (e.g. ``ax.set_ylim(-1.5, 10)``)
+    so this footer (drawn at negative y) is included in the saved figure.
+    """
+    y_bot = y_top - height
+    ax.add_patch(FancyBboxPatch(
+        (x_left, y_bot), width, height,
+        boxstyle="round,pad=0.05,rounding_size=0.10",
+        linewidth=1.2, edgecolor="#c2cad6",
+        facecolor="#eef2f8", zorder=1,
+    ))
+    cx = x_left + width / 2
+    ax.text(cx, y_top - 0.30,
+            f"Mirrors:    github.com/{github_path}    ·    gitlab.com/{gitlab_path}",
+            fontsize=14, weight="bold", color="#1f4e8c",
+            ha="center", va="center")
+    ax.text(cx, y_top - 0.66, role,
+            fontsize=12, color="#33486a",
+            ha="center", va="center", style="italic")
+    ax.text(cx, y_top - 1.02,
+            "Maintained by Muhammad Uzair  ·  Department of Computer Science, COMSATS University Islamabad",
+            fontsize=11, color="#5a6a85",
+            ha="center", va="center")
+
+
 # ===============================================================
 #  1. ntn-cho  architecture
 # ===============================================================
@@ -199,6 +227,7 @@ def diag_oran_ntn():
 def diag_thz_ntn():
     print("[arch] thz-ntn")
     fig, ax = _new_canvas()
+    ax.set_ylim(-1.5, 10)            # extra space for the banded footer
     c = ACCENT["thz-ntn"]
     _title(ax, "contrib/thz-ntn — 100 GHz–1 THz NTN Physics Module",
            "HITRAN-2020 line-by-line · ITU-R P.835/676/618/838 · UM-MIMO · RIS · ISAC")
@@ -244,9 +273,10 @@ def diag_thz_ntn():
     _arrow(ax, 9.0, 4.0, 9.6, 3.4, "loss / SNR", c)
     _arrow(ax, 13.0, 4.0, 13.5, 3.4, "loss / SNR", "#37474f")
 
-    ax.text(8, 0.40,
-            "Reference paper: Uzair, ‘A Physics-Grounded 300 GHz–1 THz LEO-NTN Model’, IEEE T-TST submission",
-            ha="center", fontsize=10, color="#37474f", fontstyle="italic")
+    _footer(ax,
+            github_path="Muhammaduazir69/ns3-thz-ntn",
+            gitlab_path="ha5050/ns3-thz-ntn",
+            role="Reference paper: Uzair, 'A Physics-Grounded 300 GHz – 1 THz LEO-NTN Model', IEEE T-TST")
     return _save(fig, "arch_thz_ntn.png")
 
 
@@ -256,6 +286,7 @@ def diag_thz_ntn():
 def diag_ns3_ai():
     print("[arch] ns3-ai")
     fig, ax = _new_canvas()
+    ax.set_ylim(-1.5, 10)            # extra space for the banded footer
     c = ACCENT["ns3-ai"]
     _title(ax, "ns3-ai (fork) — ns-3.43 + Python 3.13 + NumPy 2 Compatibility Patches",
            "Gymnasium 1.0  ·  pybind11 2.13  ·  shared-memory IPC  ·  4 RL agents shipped")
@@ -296,6 +327,11 @@ def diag_ns3_ai():
     _arrow(ax, 6.0, 4.6, 6.4, 5.4, "act", c)
     _arrow(ax, 9.6, 7.5, 10.0, 7.7, "obs", c)
     _arrow(ax, 9.6, 5.4, 10.0, 4.6, "act", c)
+
+    _footer(ax,
+            github_path="Muhammaduazir69/ns3-ai",
+            gitlab_path="ha5050/ns3-ai",
+            role="ns-3.43 + Python 3.13 + NumPy 2 compatibility patches  ·  MARL-ready RL bridge")
     return _save(fig, "arch_ns3_ai.png")
 
 
