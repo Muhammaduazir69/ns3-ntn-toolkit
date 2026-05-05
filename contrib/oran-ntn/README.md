@@ -6,6 +6,10 @@ module. It ships 13 xApps, an A1 policy engine with 11 policies, an
 E2SM-RC action runtime with 28 actions, and a conflict-resolution
 matrix for co-located xApps.
 
+<p align="center">
+  <img src="visualization/oran_ntn_architecture.png" alt="oran-ntn architecture" width="900"/>
+</p>
+
 - ns-3 version: `release ns-3.43`
 - Version: `1.0.0`
 - License: GPL-2.0-only
