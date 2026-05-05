@@ -108,7 +108,7 @@ def _footer(ax, *, github_path, gitlab_path, role,
             fontsize=12, color="#33486a",
             ha="center", va="center", style="italic")
     ax.text(cx, y_top - 1.02,
-            "Maintained by Muhammad Uzair  ·  Department of Computer Science, COMSATS University Islamabad",
+            "Muhammad Uzair, Independent Researcher",
             fontsize=11, color="#5a6a85",
             ha="center", va="center")
 
