@@ -23,6 +23,8 @@
 </p>
 
 <p align="center">
+  <a href="https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit"><img src="https://img.shields.io/docker/v/uzairdocker69/ns3-ntn-toolkit?label=Docker%20Hub&logo=docker&logoColor=white&color=2496ED"/></a>
+  <a href="https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit"><img src="https://img.shields.io/docker/image-size/uzairdocker69/ns3-ntn-toolkit/latest?label=image&logo=docker&logoColor=white"/></a>
   <a href="https://pypi.org/project/ns3-ntn-toolkit/"><img src="https://img.shields.io/pypi/v/ns3-ntn-toolkit?label=PyPI&logo=pypi&logoColor=white"/></a>
   <a href="https://pypi.org/project/ntn-constellation/"><img src="https://img.shields.io/pypi/v/ntn-constellation?label=ntn-constellation&logo=pypi&logoColor=white"/></a>
   <a href="https://pypi.org/project/ntn-digital-twin/"><img src="https://img.shields.io/pypi/v/ntn-digital-twin?label=ntn-digital-twin&logo=pypi&logoColor=white"/></a>
@@ -38,21 +40,51 @@
 
 ## Try it in 30 seconds
 
+### 🐳 Docker (recommended — full toolkit, no build, ~3.4 GB pull)
+
+The entire toolkit — ns-3.43, all 13 contrib modules, SNS3 satellite, mmWave 5G NR,
+Python utilities, FastAPI digital-twin server, NetSimulyzer + InfluxDB sinks —
+is pre-built in a single image on Docker Hub:
+
 ```bash
-# Public click-and-run demo (no install): real Starlink/OneWeb/Iridium/GPS TLEs,
-# Skyfield SGP4 + Earth-rotation-aware sub-satellite tracks, Plotly world map.
+docker pull uzairdocker69/ns3-ntn-toolkit:latest
+
+# Run any of the shipped reference scenarios:
+docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
+  ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
+
+# Interactive shell + expose the digital-twin (8000) and Grafana (3000) ports:
+docker run --rm -it -p 8000:8000 -p 3000:3000 \
+  uzairdocker69/ns3-ntn-toolkit:latest bash
+
+# Pin to a tagged release for reproducibility:
+docker pull uzairdocker69/ns3-ntn-toolkit:2.0.0
+```
+
+Image digest pinned to `sha256:8b29bc9dacbf…c102`. 3.4 GB compressed on the
+registry, 5.2 GB extracted. The Hub page at
+<https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit> has the full
+description, tag list, and pull stats.
+
+### 🤗 Live demo (browser only, zero install)
+
+```bash
+# Real Starlink/OneWeb/Iridium/GPS TLEs · Skyfield SGP4 +
+# Earth-rotation-aware sub-satellite tracks · Plotly world map.
 open https://huggingface.co/spaces/Muhammaduazir69/ns3-ntn-toolkit-demo
 ```
 
+### 🐍 Python side (utilities only, pip-installable)
+
 ```bash
-# Python side, pip-installable today
 pip install ns3-ntn-toolkit   # metapackage — pulls ntn-constellation + ntn-digital-twin
 ns3-ntn-toolkit info
 ns3-ntn-toolkit modules
 ```
 
+### 🛠️ From source (developers — full build, ~15 min)
+
 ```bash
-# Full C++ toolkit (13 ns-3 modules, ~15 min build)
 git clone https://github.com/Muhammaduazir69/ns3-ntn-toolkit
 cd ns3-ntn-toolkit
 ./ns3 configure --enable-examples --enable-tests --build-profile=optimized
@@ -316,9 +348,53 @@ A reproducibility manifest (Docker images, seeds, expected hashes) sits in
 
 ## Install & run
 
-See [**INSTALL.md**](INSTALL.md) for the full step-by-step guide (system requirements, SNS3 satellite clone, build flags, Docker stacks, GPU prerequisites, troubleshooting).
+There are two supported paths. **Docker is recommended** for first-time users
+and CI — it gets you a working toolkit in one command. Source build is for
+maintainers and anyone customising the C++ modules.
 
-Quick taste:
+### Option A — Docker (recommended)
+
+The entire toolkit is published to Docker Hub as
+[`uzairdocker69/ns3-ntn-toolkit`](https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit).
+SNS3 satellite, mmWave, all 13 contrib modules, Python utilities, FastAPI
+digital-twin server, NetSimulyzer + InfluxDB sinks are all baked in.
+
+```bash
+# 1. Pull (~3.4 GB compressed, ~5.2 GB extracted)
+docker pull uzairdocker69/ns3-ntn-toolkit:2.0.0     # pinned digest sha256:8b29bc9dacbf…c102
+# or:
+docker pull uzairdocker69/ns3-ntn-toolkit:latest    # tracks the most recent release
+
+# 2. Run a reference scenario in one shot
+docker run --rm uzairdocker69/ns3-ntn-toolkit:2.0.0 \
+  ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
+
+# 3. Or drop into an interactive shell with the standard ports exposed
+#    8000 → FastAPI digital-twin /predict/handover
+#    3000 → Grafana (when the observability stack is up)
+docker run --rm -it \
+  -p 8000:8000 -p 3000:3000 \
+  -v "$PWD/out:/work/out" \
+  uzairdocker69/ns3-ntn-toolkit:2.0.0 bash
+# inside the container:
+#   ./ns3 show profile
+#   ./ns3 run "oran-ntn-full-scenario"           # 13 xApps, 600 s, KPM CSVs land in /work/out
+#   ./ns3 run "thz-ntn-demo"                     # 9 sub-scenarios, atm-windows + UM-MIMO + ISAC
+#   python3 -c "import ntn_constellation; ntn_constellation.demo()"
+
+# 4. Bring up the observability stack alongside (optional)
+docker compose -f contrib/ntn-observability/docker/docker-compose.yml up -d
+# Grafana: http://localhost:3000 (admin/admin) · pre-loaded with 4 dashboards
+```
+
+**No git clone needed, no SNS3 satellite pull, no build wait.** First-run
+latency is the pull time (network-bound, ~5-15 min on residential broadband).
+After the first pull, container start is sub-second.
+
+### Option B — From source (developers)
+
+For anyone modifying the C++ modules, regenerating the toolkit image, or
+running on a host that can't use Docker:
 
 ```bash
 # 1. Clone the toolkit
@@ -328,9 +404,9 @@ cd ns3-ntn-toolkit
 # 2. Pull SNS3 satellite (REQUIRED — not bundled, ~3.7 GB with TLE data)
 cd contrib/ && git clone https://github.com/sns3/sns3-satellite.git satellite && cd ..
 
-# 3. Configure & build
+# 3. Configure & build (~15 min on a modern laptop)
 ./ns3 configure --enable-examples --enable-tests
-./ns3 build
+./ns3 build -j$(nproc)
 
 # 4. Run the integrated multi-module example
 ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
@@ -339,6 +415,20 @@ cd contrib/ && git clone https://github.com/sns3/sns3-satellite.git satellite &&
 cd contrib/ntn-observability/docker && docker compose up -d
 # Grafana now available at http://localhost:3000 (admin/admin)
 ```
+
+### Building your own Docker image
+
+If you've modified the source and want to ship a custom image, the canonical
+recipe sits at `distribution/docker/Dockerfile`:
+
+```bash
+docker build -t my-fork/ns3-ntn-toolkit:dev \
+  -f distribution/docker/Dockerfile .
+```
+
+The full step-by-step (system requirements, SNS3 satellite clone, build flags,
+GPU prerequisites for Sionna RT, troubleshooting) lives in
+[**INSTALL.md**](INSTALL.md).
 
 ## Reference scenarios shipped
 
