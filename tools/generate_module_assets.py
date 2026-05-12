@@ -275,7 +275,7 @@ def diag_thz_ntn():
 
     _footer(ax,
             github_path="Muhammaduazir69/ns3-thz-ntn",
-            gitlab_path="ha5050/ns3-thz-ntn",
+            gitlab_path="ns3-ntn-toolkit/ns3-thz-ntn",
             role="Reference paper: Uzair, 'A Physics-Grounded 300 GHz – 1 THz LEO-NTN Model', IEEE T-TST")
     return _save(fig, "arch_thz_ntn.png")
 
@@ -330,7 +330,7 @@ def diag_ns3_ai():
 
     _footer(ax,
             github_path="Muhammaduazir69/ns3-ai",
-            gitlab_path="ha5050/ns3-ai",
+            gitlab_path="ns3-ntn-toolkit/ns3-ai",
             role="ns-3.43 + Python 3.13 + NumPy 2 compatibility patches  ·  MARL-ready RL bridge")
     return _save(fig, "arch_ns3_ai.png")
 

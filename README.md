@@ -1,4 +1,6 @@
-<h1 align="center">ns3-ntn-toolkit</h1>
+<p align="center">
+  <img src="docs/logo_lockup.png" alt="ns3-ntn-toolkit" width="780"/>
+</p>
 
 <p align="center"><strong>A Pre-Integrated ns-3.43 Simulation Platform for 6G Non-Terrestrial Network Research — Clone, Build, Run.</strong></p>
 
@@ -6,7 +8,7 @@
   <em>Mirrors:&nbsp;</em>
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">GitHub</a>
   &nbsp;·&nbsp;
-  <a href="https://gitlab.com/ha5050/ns3-ntn-toolkit">GitLab</a>
+  <a href="https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit">GitLab</a>
 </p>
 
 <p align="center">
@@ -21,8 +23,41 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/ns3-ntn-toolkit/"><img src="https://img.shields.io/pypi/v/ns3-ntn-toolkit?label=PyPI&logo=pypi&logoColor=white"/></a>
+  <a href="https://pypi.org/project/ntn-constellation/"><img src="https://img.shields.io/pypi/v/ntn-constellation?label=ntn-constellation&logo=pypi&logoColor=white"/></a>
+  <a href="https://pypi.org/project/ntn-digital-twin/"><img src="https://img.shields.io/pypi/v/ntn-digital-twin?label=ntn-digital-twin&logo=pypi&logoColor=white"/></a>
+  <a href="https://huggingface.co/spaces/Muhammaduazir69/ns3-ntn-toolkit-demo"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20demo-yellow"/></a>
+  <a href="https://github.com/sponsors/Muhammaduazir69"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=github-sponsors&logoColor=white"/></a>
+</p>
+
+<p align="center">
   <img src="docs/ns3_ntn_toolkit_architecture.png" alt="ns3-ntn-toolkit architecture" width="950"/>
 </p>
+
+---
+
+## Try it in 30 seconds
+
+```bash
+# Public click-and-run demo (no install): real Starlink/OneWeb/Iridium/GPS TLEs,
+# Skyfield SGP4 + Earth-rotation-aware sub-satellite tracks, Plotly world map.
+open https://huggingface.co/spaces/Muhammaduazir69/ns3-ntn-toolkit-demo
+```
+
+```bash
+# Python side, pip-installable today
+pip install ns3-ntn-toolkit   # metapackage — pulls ntn-constellation + ntn-digital-twin
+ns3-ntn-toolkit info
+ns3-ntn-toolkit modules
+```
+
+```bash
+# Full C++ toolkit (13 ns-3 modules, ~15 min build)
+git clone https://github.com/Muhammaduazir69/ns3-ntn-toolkit
+cd ns3-ntn-toolkit
+./ns3 configure --enable-examples --enable-tests --build-profile=optimized
+./ns3 build -j$(nproc)
+```
 
 ---
 
@@ -76,76 +111,208 @@ Plus the upstream packages this distribution patches and integrates:
 
 ## Architecture
 
+The toolkit is layered top-down: each contrib module is independently buildable
+and testable, all of them sit on a hardened `ns-3.43` core, and an opt-in Python
+plane (Gymnasium / FastAPI / Cesium / Sionna) hangs off the same shared-memory
+bridge.
+
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                            ns3-ntn-toolkit                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│   ┌─────────────────┐   ┌──────────────────┐   ┌────────────────────┐    │
-│   │ ntn-constellation│  │   ntn-rrc        │   │ ntn-observability  │    │
-│   │  CelesTrak/SGP4  ├─►│ TA · SIB19 · DRX ├──►│  InfluxDB · Grafana │    │
-│   │  presets · ISLs  │  │ UE Loc Report    │   │  NetSimulyzer JSON  │    │
-│   └────────┬─────────┘  └─────────┬────────┘   └──────────┬─────────┘    │
-│            │                       │                       │              │
-│   ┌────────▼─────────┐   ┌─────────▼────────┐   ┌─────────▼─────────┐    │
-│   │   ntn-sagin      │   │   ntn-slice      │   │   ntn-v2x          │    │
-│   │ HAPS · UAV · A2G │   │ eMBB/URLLC/mMTC  │   │ SUMO TraCI · LEO   │    │
-│   │ multi-layer rtr  │   │ GEO mode-skip    │   │ direct + relay     │    │
-│   └────────┬─────────┘   └─────────┬────────┘   └─────────┬──────────┘    │
-│            │                       │                       │              │
-│   ┌────────▼─────────┐   ┌─────────▼────────┐   ┌─────────▼─────────┐    │
-│   │ flexric-bridge   │   │  ntn-sionna      │   │ ntn-digital-twin   │    │
-│   │ E2/SCTP · 3 xApps│   │ Sionna RT (GPU)  │   │ FastAPI predict    │    │
-│   │ Docker stack     │   │ ±3 dB matched-PL │   │ CesiumJS Live      │    │
-│   └────────┬─────────┘   └─────────┬────────┘   └─────────┬──────────┘    │
-│            │                       │                       │              │
-│   ┌────────▼─────────┐   ┌─────────▼────────┐   ┌─────────▼─────────┐    │
-│   │   ntn-cho        │   │   oran-ntn       │   │   thz-ntn          │    │
-│   │ TTE-aware Rel-17 │   │ 13 xApps · dual  │   │ 100 GHz – 1 THz    │    │
-│   │ + 7-class UE mob │   │ RIC · FL · A1    │   │ UM-MIMO · RIS · ISAC│   │
-│   └──────────────────┘   └──────────────────┘   └────────────────────┘    │
-│                                                                          │
-│                ┌────────────────────────────────────────┐                │
-│                │   ns3-ai (Gymnasium 1.0 / SB3 / PyG)   │                │
-│                └────────────────────────────────────────┘                │
-│                                   │                                      │
-│         ┌─────────────────────────▼─────────────────────────┐           │
-│         │   ns-3.43  +  SNS3 satellite  +  mmwave (5G NR)    │           │
-│         └─────────────────────────────────────────────────────┘           │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  EXTERNAL PLANE  (optional, opt-in, runs in separate processes/containers)  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐   │
+│  │ Gymnasium 1.0│  │  FastAPI     │  │ CesiumJS     │  │ Sionna RT      │   │
+│  │ SB3 PPO/SAC  │  │ predict API  │  │ Live mode    │  │ (GPU)          │   │
+│  │ PyG GAT      │  │ p99 ≤ 30 ms  │  │ globe + ISLs │  │ ray-traced PL  │   │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └───────┬────────┘   │
+│         │ shm/IPC         │ HTTPS           │ WebSocket        │ UDP        │
+├─────────┴─────────────────┴─────────────────┴──────────────────┴────────────┤
+│  ns3-ntn-toolkit (this repo)                                                │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │  CONTROL PLANE                                                          │ │
+│  │  ┌───────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │ │
+│  │  │  ntn-cho      │  │  oran-ntn    │  │ flexric-     │  │  ntn-slice │ │ │
+│  │  │  TTE Rel-17   │  │  13 xApps    │  │ bridge       │  │  TS 23.501 │ │ │
+│  │  │  7-class UE   │  │  dual RIC    │  │ E2/SCTP-AP   │  │  4 profiles│ │ │
+│  │  └───────────────┘  └──────────────┘  └──────────────┘  └────────────┘ │ │
+│  ├────────────────────────────────────────────────────────────────────────┤ │
+│  │  PROTOCOL PLANE                                                         │ │
+│  │  ┌──────────────────┐  ┌──────────────┐  ┌─────────────┐  ┌──────────┐ │ │
+│  │  │     ntn-rrc      │  │   ntn-v2x    │  │  ntn-sagin  │  │ ntn-     │ │ │
+│  │  │ TA · SIB19 · DRX │  │ TraCI · LEO  │  │ HAPS · UAV  │  │ digital- │ │ │
+│  │  │ UE Loc Report    │  │ relay/direct │  │ TR 36.777   │  │ twin     │ │ │
+│  │  └──────────────────┘  └──────────────┘  └─────────────┘  └──────────┘ │ │
+│  ├────────────────────────────────────────────────────────────────────────┤ │
+│  │  PHYSICAL PLANE                                                         │ │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────────┐   │ │
+│  │  │ ntn-constellation│  │   ntn-sionna     │  │      thz-ntn        │   │ │
+│  │  │ SGP4 · CelesTrak │  │ RT bridge (GPU)  │  │ 100 GHz – 1 THz     │   │ │
+│  │  │ ISLs · presets   │  │ ±3 dB vs 38.811  │  │ UM-MIMO · RIS · ISAC│   │ │
+│  │  └──────────────────┘  └──────────────────┘  └─────────────────────┘   │ │
+│  ├────────────────────────────────────────────────────────────────────────┤ │
+│  │  OBSERVABILITY & RL BRIDGES                                             │ │
+│  │  ┌────────────────────────────┐   ┌─────────────────────────────────┐  │ │
+│  │  │   ntn-observability        │   │   ns3-ai (fork, NumPy-2 ready)  │  │ │
+│  │  │ InfluxDB 2.7 · Grafana 10.4│   │ shm IPC · 4 RL agents shipped   │  │ │
+│  │  │ NetSimulyzer JSON · 4 dash │   │ Py 3.13 · SB3 / PyTorch 2 ready │  │ │
+│  │  └────────────────────────────┘   └─────────────────────────────────┘  │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │  ns-3.43 core + SNS3 satellite + mmwave (5G NR, dual-connectivity LTE) │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Live demos
+A higher-resolution rendered version is at `docs/ns3_ntn_toolkit_architecture.png`.
 
-### Realistic NTN UE mobility — 14 UEs across all 7 TR 38.811 classes
+## Visual tour
 
-<p align="center">
-  <img src="docs/ntn_realistic_mobility.gif" alt="Realistic NTN UE mobility" width="900"/>
-</p>
+The headline scenarios run end-to-end on a stock ns-3 build; every GIF below is
+recorded from a shipped reference scenario you can re-run on your own machine.
 
-### Per-class TTE-aware handover behaviour over the same scenario
-
-<p align="center">
-  <img src="docs/ntn_handover_realistic.gif" alt="Per-class HO behaviour" width="900"/>
-</p>
-
-### O-RAN NTN — 66-satellite Walker-Star with Space RICs
+### 1 — Realistic NTN UE mobility (TR 38.811, all 7 classes)
 
 <p align="center">
-  <img src="docs/oran_ntn_constellation_ric.gif" alt="O-RAN constellation + Space RIC" width="850"/>
+  <img src="docs/ntn_realistic_mobility.gif" alt="14 UEs, 7 mobility classes" width="900"/>
 </p>
 
-### Per-module animated demos
+`./ns3 run ntn-realistic-mobility-demo` — pedestrian, vehicular, train, aerial,
+maritime, IoT, dense-urban classes co-simulated over the same NTN cell.
 
-Every contributed module ships its own animated demo inside its repo —
-follow the [bundled-modules](#bundled-modules) links above to see each one in
-context (e.g. `ntn-sionna/docs/ntn_sionna_demo.gif`).
+### 2 — Per-class TTE-aware Rel-17 conditional handover over a real LEO pass
 
-### Module-output snapshots
+<p align="center">
+  <img src="docs/ntn_handover_realistic.gif" alt="Per-class CHO behaviour" width="900"/>
+</p>
 
-| O-RAN xApps showcase | NTN-CHO algorithm comparison |
-|---|---|
-| <img src="docs/oran_ntn_showcase.png" width="430"/> | <img src="docs/ntn_cho_showcase.png" width="430"/> |
+The bottom panel shows handover decisions per class; the top panel shows
+elevation/azimuth from the sub-satellite point. TTE-aware execution suppresses
+**100 % of ping-pong events** measured across 10 seeds × 66 satellites
+(Walker-Star, 1200 km, 53°).
+
+### 3 — Space O-RAN: 66-sat Walker-Star with dual Near-RT / Space RIC
+
+<p align="center">
+  <img src="docs/oran_ntn_constellation_ric.gif" alt="Constellation + RICs" width="900"/>
+</p>
+
+5 live xApps (HO prediction · CHO orchestrator · KPM aggregator · congestion ·
+conflict mgr) emit **85 074 actions in a 600 s run, 0 reported conflicts**.
+
+### 4 — Module gallery (per-module animated demos)
+
+| Module | Demo | What you're seeing |
+|---|---|---|
+| `ntn-constellation` | <img src="contrib/ntn-constellation/docs/ntn_constellation_demo.gif" width="380"/> | Live CelesTrak + Space-Track TLE pull, SGP4/SDP4 propagation, ISL topology |
+| `ntn-rrc`           | <img src="contrib/ntn-rrc/docs/ntn_rrc_demo.gif" width="380"/>                       | Classic NTN-"smile" TA pre-comp + SIB19 broadcast + UE-Location-Report + NTN-DRX |
+| `ntn-observability` | <img src="contrib/ntn-observability/docs/ntn_observability_demo.gif" width="380"/>   | InfluxDB sink + NetSimulyzer JSON + 4 ready-made Grafana panels |
+| `ns3-ai` (fork)     | <img src="contrib/ns3-ai-ntn/docs/rl_training.gif" width="380"/>                     | SB3 PPO training loop on a shipped NTN env — 50 k steps × 3 seeds |
+| `ntn-sagin`         | <img src="contrib/ntn-sagin/docs/ntn_sagin_demo.gif" width="380"/>                   | Ground → UAV → HAPS → LEO 4-layer routing, TR 36.777 A2G PL |
+| `ntn-slice`         | <img src="contrib/ntn-slice/docs/ntn_slice_demo.gif" width="380"/>                   | TS 23.501 eMBB/URLLC/mMTC/V2X slices + URLLC GEO mode-skip |
+| `ntn-v2x`           | <img src="contrib/ntn-v2x/docs/ntn_v2x_demo.gif" width="380"/>                       | SUMO TraCI bridge + V2X-LEO direct/relay link, rural-highway scenario |
+| `flexric-bridge`    | <img src="contrib/oran-ntn/flexric-bridge/docs/flexric_bridge_demo.gif" width="380"/> | Live FlexRIC E2/SCTP-AP wire — same xApp logic as TCP/JSON stub |
+| `ntn-sionna`        | <img src="contrib/ntn-sionna/docs/ntn_sionna_demo.gif" width="380"/>                 | NVIDIA Sionna RT GPU ray-trace over a 30-step LEO pass, ±3 dB vs TR 38.811 |
+| `ntn-digital-twin`  | <img src="contrib/ntn-digital-twin/docs/ntn_digital_twin_demo.gif" width="380"/>     | Live TLE refresher + FastAPI `/predict/handover` + CesiumJS Live globe |
+| `thz-ntn`           | <img src="contrib/thz-ntn/docs/thz_beam_tracking.gif" width="380"/>                  | EKF beam-tracking over a LEO pass at 300 GHz with UM-MIMO codebook |
+| `oran-ntn` xApps    | <img src="contrib/oran-ntn/visualization/oran_ntn_xapp_decisions.gif" width="380"/>  | 13 xApps streaming actions, RIC-conflict-manager arbitration trace |
+
+### 5 — Module-output snapshots
+
+| O-RAN xApps showcase | NTN-CHO algorithm comparison | THz post-mortem |
+|---|---|---|
+| <img src="docs/oran_ntn_showcase.png" width="280"/> | <img src="docs/ntn_cho_showcase.png" width="280"/> | <img src="contrib/thz-ntn/docs/thz_ntn_post_v2.png" width="280"/> |
+| 13 xApps × 600 s · 85 074 actions, 0 conflicts | TTE-aware vs A3 vs threshold vs hysteresis, 10 seeds | Atm windows · UM-MIMO 128×128 · RIS · ISAC CRB |
+
+## How this compares
+
+`ns3-ntn-toolkit` overlaps with a handful of existing satellite/NTN simulators,
+but the integration point — *protocol-fidelity ns-3 + 3GPP NTN procedures +
+ray-traced channel + RL bridge + O-RAN wire, all building together* — is what no
+other open distribution currently delivers.
+
+| Feature                          | Hypatia | StarPerf | SNS3 (vanilla) | 5G-LENA | **ns3-ntn-toolkit** |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Live TLE feeds (CelesTrak / Space-Track) | ●  | ●  | – | – | ● |
+| SGP4 propagator + ISL topology   | ● | ● | ● | – | ● |
+| 3GPP TS 38.213 TA pre-compensation | – | – | – | – | ● |
+| 3GPP TS 38.331 SIB19 + UE Loc Report | – | – | – | – | ● |
+| 3GPP TS 38.321 NTN-DRX           | – | – | – | – | ● |
+| Rel-17 Conditional Handover (CHO) | – | – | – | partial | **TTE-aware** |
+| 5G NR PHY/MAC (TR 38.901 + 38.811) | – | – | partial | ● | ● |
+| O-RAN E2 wire (FlexRIC live)     | – | – | – | – | ● |
+| Network slicing (TS 23.501)      | – | – | – | partial | ● |
+| GPU ray-traced channel (Sionna RT) | – | – | – | – | ● |
+| RL bridge (Gymnasium 1.0 / SB3 / PyG) | – | – | – | – | ● |
+| THz physics (100 GHz – 1 THz)    | – | – | – | – | ● |
+| HAPS + UAV (TR 36.777 A2G)       | – | – | – | – | ● |
+| SUMO TraCI live V2X              | – | – | – | – | ● |
+| Live digital twin (predict API)  | – | – | – | – | ● |
+| Observability stack (InfluxDB + Grafana) | – | – | – | – | ● |
+| Single `./ns3 build` end-to-end  | – | – | – | – | ● |
+
+"`●`" = first-class · "partial" = doable with patches · "–" = not present.
+Last reviewed 2026-05.
+
+## Performance highlights
+
+Headline numbers from the per-module verification harness — every number below
+is re-producible from a shipped reference scenario.
+
+### Conditional handover quality (10 seeds × 600 s × 66-sat Walker-Star)
+
+```
+Handover count           A3 baseline ████████████████████ 463 ± 48
+                         TTE-aware   ██████ 135 ± 12               (-71 %)
+
+Ping-pong rate (%)       A3 baseline ███████████████████  57 %
+                         TTE-aware                          0 %    (Wilcoxon p < 0.005)
+```
+
+### URLLC tail latency (`ntn-slice`, 1 h, 3-slice, GEO + LEO)
+
+```
+URLLC p99 (ms)           forced GEO  █████████████████████████████  295.52
+                         mode-skip ON ████                            47.02  (6.3× improvement)
+```
+
+### Sionna RT vs TR 38.811 closed-form (`ntn-sionna`, 30-step LEO pass)
+
+```
+Max |Δ path-loss|        ▌ 0.002 dB   (well inside ±3 dB matched-PL gate)
+Steady-state RTT          ~9 ms       (per-step bridge round-trip)
+```
+
+### FlexRIC E2 loopback throughput (`flexric-bridge`)
+
+```
+Indications / s          █████████████████████████████  30 000      (0 % loss over 60 s)
+CHO xApp decisions       bit-identical to in-memory oracle           (1 : 1 trace)
+```
+
+### Digital-twin /predict/handover (`ntn-digital-twin`, 144 / 144 iters)
+
+```
+p50 latency               ▌  9.4 ms
+p99 latency               █ 29.9 ms     (16× under the 500 ms SLO gate)
+Error rate                  0 %
+```
+
+### Reinforcement-learning bridge (`ns3-ai` fork)
+
+```
+PPO 50 k × 3 seeds        beats random by 4 – 7 σ on shipped NTN env
+GAT 80-sat × 5 seeds × 1000 epochs   95.2 %  mean handover-prediction acc.
+```
+
+### Constellation propagation fidelity (`ntn-constellation`, 24 h)
+
+```
+NaN samples / 24 h         0
+Period drift               0.006 µs / s
+Max |Δ vs Skyfield|        23.5 µs  over 1800 s
+```
+
+A reproducibility manifest (Docker images, seeds, expected hashes) sits in
+`contrib/<module>/tests/` for every entry above.
 
 ## Install & run
 

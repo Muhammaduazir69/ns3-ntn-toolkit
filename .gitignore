@@ -102,3 +102,8 @@ docs/_archive_v1/
 # Owned by the nested ns3-ai-ntn repo (git@gitlab.com:ha5050/ns3-ai.git);
 # don't double-track from the umbrella.
 contrib/ns3-ai-ntn/python_utils/
+
+# Python build artefacts — wheels and sdists are reproducible from source
+# and PyPI ships them; don't track them inside the repo.
+**/dist/
+**/*.egg-info/

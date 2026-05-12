@@ -39,7 +39,7 @@ ntn-fetch = "ntn_constellation.cli:main"
 [project.urls]
 Homepage = "https://github.com/Muhammaduazir69/ns3-ntn-toolkit"
 Repository = "https://github.com/Muhammaduazir69/ns3-ntn-toolkit"
-Mirror = "https://gitlab.com/ha5050/ns3-ntn-toolkit"
+Mirror = "https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit"
 
 [tool.setuptools.packages.find]
 include = ["ntn_constellation*"]
