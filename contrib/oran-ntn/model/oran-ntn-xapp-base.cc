@@ -420,6 +420,14 @@ OranNtnXappBase::RecordDecision(bool success, double confidence, double latency_
     m_metrics.avgDecisionLatency_ms =
         m_metrics.avgDecisionLatency_ms * ((n - 1) / n) + latency_ms / n;
 
+    // Store the raw sample so the helper can derive P50/P95/P99 at write time.
+    // Negative or zero samples (e.g. callers that did not instrument chrono)
+    // are skipped to avoid polluting the percentile distribution.
+    if (latency_ms > 0.0)
+    {
+        m_metrics.decisionLatencies_ms.push_back(latency_ms);
+    }
+
     m_decisionConfidence(m_xappId, confidence);
 }
 

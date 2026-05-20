@@ -4,6 +4,11 @@ build_lib_example(
   LIBRARIES_TO_LINK
     ${libntn-observability}
     ${libntn-rrc}
+    ${libntn-traffic}
     ${libcore}
     ${libmobility}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )

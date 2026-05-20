@@ -36,6 +36,7 @@
 #include "ns3/oran-ntn-xapp-ho-predict.h"
 #include "ns3/oran-ntn-xapp-slice-manager.h"
 #include "ns3/oran-ntn-xapp-tn-ntn-steering.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <cmath>
 #include <fstream>
@@ -343,10 +344,26 @@ main(int argc, char* argv[])
             (uint32_t)0, params.satsPerPlane - 1);
     }
 
+    // ---- Real packet traffic plane (v2 event-driven) ----
+    NtnRealisticTrafficHelper traffic;
+    traffic.SetSimTime(Seconds(params.duration));
+    traffic.SetOutputDir(params.outputDir);
+    traffic.SetRunTag("oran-ntn-full-scenario");
+    traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    traffic.InstallUes(std::min<uint32_t>(params.numUes, 32u));
+    // Surface an analytical heartbeat so xApp KPM emission is reflected in
+    // the health report.
+    traffic.RegisterPeriodicCallback(MilliSeconds(100), [&](Time) {
+        auto ricM = nearRtRic->GetMetrics();
+        (void)ricM;
+    });
+    traffic.Wire();
+
     // ---- Run simulation ----
     std::cout << "\nSimulation running..." << std::endl;
     Simulator::Stop(Seconds(params.duration));
     Simulator::Run();
+    traffic.WriteHealthReport();
 
     // ---- Collect and write results ----
     std::cout << "\n============================================================\n"

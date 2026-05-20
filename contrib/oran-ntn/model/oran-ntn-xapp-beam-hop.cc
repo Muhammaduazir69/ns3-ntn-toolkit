@@ -18,6 +18,7 @@
 #include <ns3/uinteger.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <numeric>
 
@@ -201,6 +202,14 @@ OranNtnXappBeamHop::DecisionCycle()
         return;
     }
 
+    // Use wall-clock chrono for per-decision latency rather than ns-3 sim time
+    // (sim time does not advance inside a synchronous DecisionCycle).
+    auto _cycle_t0 = std::chrono::high_resolution_clock::now();
+    auto _elapsed_ms = [&_cycle_t0]() {
+        return std::chrono::duration<double, std::milli>(
+                   std::chrono::high_resolution_clock::now() - _cycle_t0)
+            .count();
+    };
     double startTime = Simulator::Now().GetSeconds();
 
     // Run the selected scheduling algorithm
@@ -319,7 +328,8 @@ OranNtnXappBeamHop::DecisionCycle()
 
     bool accepted = SubmitAction(action);
 
-    double latencyMs = (Simulator::Now().GetSeconds() - startTime) * 1000.0;
+    double latencyMs = _elapsed_ms();
+    (void)startTime; // sim-time delta is always zero in synchronous decision cycles
     RecordDecision(accepted, 1.0, latencyMs);
 
     // Fire trace

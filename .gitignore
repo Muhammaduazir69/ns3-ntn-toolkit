@@ -93,11 +93,21 @@ UlPhyTransmissionTrace.txt
 ntn-ai-output/
 ntn-analysis-output/
 oran-ntn-output/
+thz-ntn-results/
+sim_health_report.md
+
+# Example-run CSV outputs at repo root
+/ntn-rrc-*.csv
+/ntn-three-slice*.csv
+/ntn-v2x-*.csv
+/sagin-*.csv
+/sim_health.csv
 
 # Personal planning / audit notes — kept locally, not pushed
 ROADMAP_EXECUTION.md
 AUDIT_*.md
 docs/_archive_v1/
+drafts/
 
 # Owned by the nested ns3-ai-ntn repo (git@gitlab.com:ha5050/ns3-ai.git);
 # don't double-track from the umbrella.

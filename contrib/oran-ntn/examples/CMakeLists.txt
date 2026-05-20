@@ -3,6 +3,7 @@ build_lib_example(
   SOURCE_FILES oran-ntn-full-scenario.cc
   LIBRARIES_TO_LINK
     ${liboran-ntn}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
@@ -10,6 +11,7 @@ build_lib_example(
     ${libpropagation}
     ${libinternet}
     ${libapplications}
+    ${libpoint-to-point}
     ${libsatellite}
     ${libmmwave}
     ${liblte}

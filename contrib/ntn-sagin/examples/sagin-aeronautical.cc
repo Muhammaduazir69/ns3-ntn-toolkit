@@ -12,6 +12,7 @@
 #include "ns3/multi-layer-router.h"
 #include "ns3/sagin-helper.h"
 #include "ns3/simulator.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <fstream>
 #include <iomanip>
@@ -22,6 +23,7 @@ int
 main(int argc, char* argv[])
 {
     double simTimeSec = 3600.0;
+    std::string outputDir = ".";
     double cruiseAltM = 11000.0;
     double speedMps = 250.0;
     std::string csvPath = "sagin-aeronautical.csv";
@@ -31,6 +33,7 @@ main(int argc, char* argv[])
     cmd.AddValue("cruise", "Cruise altitude (m)", cruiseAltM);
     cmd.AddValue("speed", "Cruise speed (m/s)", speedMps);
     cmd.AddValue("csv", "Output CSV path", csvPath);
+    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
     SaginHelper helper;
@@ -70,9 +73,20 @@ main(int argc, char* argv[])
                 << el << "," << rng << "\n";
         });
     }
+    // ==== v2 realistic traffic plane (auto-injected) =====================
+    NtnRealisticTrafficHelper _ntn_traffic;
+    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
+    _ntn_traffic.SetOutputDir(outputDir);
+    _ntn_traffic.SetRunTag("sagin-aeronautical");
+    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    _ntn_traffic.InstallUes(8);
+    _ntn_traffic.Wire();
+
+    
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
+    _ntn_traffic.WriteHealthReport();
     Simulator::Destroy();
     std::cout << "Wrote " << csvPath << " (" << simTimeSec << " s commercial flight)\n";
     return 0;

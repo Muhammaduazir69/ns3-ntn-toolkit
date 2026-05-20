@@ -5,4 +5,9 @@ build_lib_example(
     ${libntn-v2x}
     ${libcore}
     ${libmobility}
+    ${libntn-traffic}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )

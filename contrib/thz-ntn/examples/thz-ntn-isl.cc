@@ -17,8 +17,12 @@
 #include <ns3/node-container.h>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 // Forward declarations of THz-NTN classes
 namespace ns3
@@ -42,20 +46,23 @@ int
 main(int argc, char* argv[])
 {
     // ---- Default parameters ----
-    double freq = 300e9;      // 300 GHz
-    double txPower = 30.0;    // dBm (1 W)
-    double bandwidth = 20e9;  // 20 GHz
-    double txGain = 40.0;     // dBi
-    double rxGain = 40.0;     // dBi
-    double altitude = 550.0;  // km
+    double freq = 300e9;
+    double txPower = 30.0;
+    double bandwidth = 20e9;
+    double txGain = 40.0;
+    double rxGain = 40.0;
+    double altitude = 550.0;
+    double simTime = 60.0;
+    std::string outputDir = "thz-isl-out";
 
-    // ---- Parse command-line arguments ----
     CommandLine cmd(__FILE__);
     cmd.AddValue("freq", "Carrier frequency in Hz [default: 300e9]", freq);
     cmd.AddValue("txPower", "Transmit power in dBm [default: 30]", txPower);
     cmd.AddValue("bandwidth", "Channel bandwidth in Hz [default: 20e9]", bandwidth);
     cmd.AddValue("txGain", "Tx antenna gain in dBi [default: 40]", txGain);
     cmd.AddValue("rxGain", "Rx antenna gain in dBi [default: 40]", rxGain);
+    cmd.AddValue("simTime", "Simulation time (s)", simTime);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
     std::cout << "=============================================================\n";
@@ -114,21 +121,19 @@ main(int argc, char* argv[])
     {
         double dist_m = dist_km * 1000.0;
 
-        // Compute ISL metrics
-        double fspl = islChannel->ComputeFspl_dB(freq, dist_m);
-        double snr = islChannel->ComputeIslSnr_dB(freq, dist_m, txPower, txGain, rxGain);
-        double shannonCap = islChannel->ComputeIslCapacity_Gbps(snr, bandwidth);
-
-        // Hardware-limited capacity from link budget
+        double fspl = 20.0 * std::log10(dist_m)
+                    + 20.0 * std::log10(freq)
+                    + 20.0 * std::log10(4.0 * M_PI / 299792458.0);
         ThzNtnLinkBudget::LinkBudgetResult result = linkBudget->ComputeIslBudget(freq, dist_km);
+        double snr = result.snr_dB;
+        double shannonCap = islChannel->ComputeIslCapacity_Gbps(snr);
         double hwCap = result.hardwareLimitedCapacity_Gbps;
 
-        // Relative velocity for intra-plane ISL ~ 0 m/s (same orbit)
-        // For inter-plane: approximate worst case
-        double relVel = (dist_km > 2000.0) ? 1000.0 : 100.0; // m/s
-        double doppler = islChannel->ComputeRelativeDoppler_Hz(freq, relVel);
+        // Inline Doppler from relative radial velocity.
+        double relVel = (dist_km > 2000.0) ? 1000.0 : 100.0;
+        double doppler = relVel / 299792458.0 * freq;
 
-        bool feasible = islChannel->IsLinkFeasible(freq, dist_m, 3.0); // 3 dB min SNR
+        bool feasible = (snr >= 3.0);
 
         std::cout << std::fixed << std::setprecision(1)
                   << std::setw(10) << dist_km
@@ -160,10 +165,10 @@ main(int argc, char* argv[])
 
     for (double snr_dB = 0.0; snr_dB <= 40.0; snr_dB += 5.0)
     {
-        double shannonCap = islChannel->ComputeIslCapacity_Gbps(snr_dB, bandwidth);
+        double shannonCap = islChannel->ComputeIslCapacity_Gbps(snr_dB);
 
         // Hardware-limited: capacity saturates due to EVM floor
-        double snrLinear = std::pow(10.0, snr_dB / 10.0);
+        [[maybe_unused]] double snrLinear = std::pow(10.0, snr_dB / 10.0);
         double hwSnrCeiling = 25.0; // dB, typical EVM-limited ceiling
         double effectiveSnr = std::min(snr_dB, hwSnrCeiling);
         double effectiveSnrLin = std::pow(10.0, effectiveSnr / 10.0);
@@ -194,13 +199,40 @@ main(int argc, char* argv[])
     std::cout << "  (CMB 2.7 K + receiver contribution)\n";
 
     // Maximum feasible distance
-    double maxDist = islChannel->ComputeMaxLinkDistance_km(freq, txPower, txGain, rxGain, 3.0);
+    double maxDist = islChannel->ComputeMaxLinkDistance_km(3.0);
     std::cout << "\n  Maximum ISL distance (SNR > 3 dB): " << std::fixed << std::setprecision(1)
               << maxDist << " km\n";
 
-    // ---- Run simulation ----
-    Simulator::Stop(Seconds(1.0));
+    // ---- Real packet plane + dynamic ISL-distance sampler (v2) ----
+    NtnRealisticTrafficHelper traffic;
+    traffic.SetSimTime(Seconds(simTime));
+    traffic.SetOutputDir(outputDir);
+    traffic.SetRunTag("thz-ntn-isl");
+    traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::EmbbStreaming);
+    traffic.InstallUes(6);
+
+    std::filesystem::create_directories(outputDir);
+    std::ofstream isltimes(outputDir + "/isl_timeseries.csv");
+    isltimes << "time_s,distance_km,fspl_dB,snr_dB,shannon_Gbps,doppler_MHz\n";
+
+    traffic.RegisterPeriodicCallback(Seconds(1.0), [&](Time nowT) {
+        double t = nowT.GetSeconds();
+        // Sinusoidal in-plane separation between 100 km and 5000 km
+        double d_km = 100.0 + (4900.0) * 0.5 * (1 - std::cos(2 * M_PI * t / simTime));
+        auto r = linkBudget->ComputeLinkBudget(ThzNtnLinkBudget::INTER_SATELLITE,
+            freq, d_km * 1000.0, 90.0, txPower, txGain, rxGain, bandwidth, 10.0);
+        double relV = 100.0 * std::sin(2 * M_PI * t / simTime);
+        double doppler_MHz = relV / 299792458.0 * freq / 1e6;
+        isltimes << std::fixed << std::setprecision(2)
+                 << t << "," << d_km << "," << r.fspl_dB << "," << r.snr_dB
+                 << "," << r.shannonCapacity_Gbps << "," << doppler_MHz << "\n";
+    });
+    traffic.Wire();
+
+    Simulator::Stop(Seconds(simTime + 0.5));
     Simulator::Run();
+    traffic.WriteHealthReport();
+    isltimes.close();
     Simulator::Destroy();
 
     std::cout << "\n  Simulation complete.\n";

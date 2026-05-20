@@ -22,8 +22,11 @@
 #include "ns3/oran-ntn-xapp-slice-manager.h"
 #include "ns3/oran-ntn-xapp-tn-ntn-steering.h"
 
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <sys/stat.h>
+#include <vector>
 
 namespace ns3
 {
@@ -483,22 +486,48 @@ OranNtnHelper::WriteAllMetrics(Ptr<OranNtnNearRtRic> ric) const
     // Write KPM dataset
     WriteKpmDataset(m_outputDir + "/kpm_dataset.csv");
 
-    // Write per-xApp metrics
+    // Write per-xApp metrics including wall-clock decision latency percentiles.
+    // Latency samples are collected by each xApp's DecisionCycle via
+    // std::chrono::high_resolution_clock and pushed into XappMetrics
+    // (oran-ntn-xapp-base.cc::RecordDecision).  We sort the per-xApp vector
+    // and read off P50/P95/P99 here; -1 indicates no samples were recorded.
     std::ofstream xappOfs(m_outputDir + "/xapp_metrics.csv");
     xappOfs << "xapp_id,xapp_name,priority,decisions,successful_actions,"
                "failed_actions,conflicts,conflicts_won,avg_confidence,"
-               "avg_latency_ms\n";
+               "avg_latency_ms,p50_latency_ms,p95_latency_ms,p99_latency_ms,"
+               "min_latency_ms,max_latency_ms\n";
+
+    auto pctl = [](const std::vector<double>& v, double q) {
+        if (v.empty())
+        {
+            return -1.0;
+        }
+        double idx = q * static_cast<double>(v.size() - 1);
+        size_t lo = static_cast<size_t>(std::floor(idx));
+        size_t hi = static_cast<size_t>(std::ceil(idx));
+        double frac = idx - static_cast<double>(lo);
+        return v[lo] + (v[hi] - v[lo]) * frac;
+    };
 
     auto xappIds = ric->GetRegisteredXappIds();
     for (uint32_t id : xappIds)
     {
         auto xapp = ric->GetXapp(id);
         auto m = xapp->GetMetrics();
+        auto lat = m.decisionLatencies_ms;
+        std::sort(lat.begin(), lat.end());
+        double p50 = pctl(lat, 0.50);
+        double p95 = pctl(lat, 0.95);
+        double p99 = pctl(lat, 0.99);
+        double lmin = lat.empty() ? -1.0 : lat.front();
+        double lmax = lat.empty() ? -1.0 : lat.back();
         xappOfs << id << "," << xapp->GetXappName() << ","
                 << (int)xapp->GetPriority() << "," << m.totalDecisions << ","
                 << m.successfulActions << "," << m.failedActions << ","
                 << m.conflictsEncountered << "," << m.conflictsWon << ","
-                << m.avgConfidence << "," << m.avgDecisionLatency_ms << "\n";
+                << m.avgConfidence << "," << m.avgDecisionLatency_ms << ","
+                << p50 << "," << p95 << "," << p99 << ","
+                << lmin << "," << lmax << "\n";
     }
 
     // Write Space RIC metrics

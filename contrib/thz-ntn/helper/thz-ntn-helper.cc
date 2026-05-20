@@ -278,9 +278,9 @@ ThzNtnHelper::CreateSatellitePhy(const std::string& preset,
     Ptr<ThzNtnPhySat> phy = CreateObject<ThzNtnPhySat>();
 
     // Set preset parameters
-    phy->SetAttribute("TxPowerDbm", DoubleValue(cfg.txPowerDbm));
-    phy->SetAttribute("FrequencyHz", DoubleValue(cfg.frequencyHz));
-    phy->SetAttribute("BandwidthHz", DoubleValue(cfg.bandwidthHz));
+    phy->SetAttributeFailSafe("TxPowerDbm", DoubleValue(cfg.txPowerDbm));
+    phy->SetAttributeFailSafe("FrequencyHz", DoubleValue(cfg.frequencyHz));
+    phy->SetAttributeFailSafe("BandwidthHz", DoubleValue(cfg.bandwidthHz));
 
     // Configure satellite class based on power
     if (cfg.txPowerDbm <= 35.0)
@@ -322,8 +322,8 @@ ThzNtnHelper::CreateGroundPhy(const std::string& preset,
     Ptr<ThzNtnPhyGround> phy = CreateObject<ThzNtnPhyGround>();
 
     // Set preset parameters
-    phy->SetAttribute("FrequencyHz", DoubleValue(cfg.frequencyHz));
-    phy->SetAttribute("BandwidthHz", DoubleValue(cfg.bandwidthHz));
+    phy->SetAttributeFailSafe("FrequencyHz", DoubleValue(cfg.frequencyHz));
+    phy->SetAttributeFailSafe("BandwidthHz", DoubleValue(cfg.bandwidthHz));
 
     // Default receiver configuration
     phy->SetReceiverType(RX_HETERODYNE);
@@ -446,8 +446,8 @@ ThzNtnHelper::CreateIslChannel(const std::string& preset) const
     PresetConfig cfg = GetPresetConfig(preset);
 
     Ptr<ThzNtnIslChannel> isl = CreateObject<ThzNtnIslChannel>();
-    isl->SetAttribute("FrequencyHz", DoubleValue(cfg.frequencyHz));
-    isl->SetAttribute("BandwidthHz", DoubleValue(cfg.bandwidthHz));
+    isl->SetAttributeFailSafe("FrequencyHz", DoubleValue(cfg.frequencyHz));
+    isl->SetAttributeFailSafe("BandwidthHz", DoubleValue(cfg.bandwidthHz));
 
     NS_LOG_INFO("Created ThzNtnIslChannel at " << cfg.frequencyHz / 1e9
                 << " GHz, BW=" << cfg.bandwidthHz / 1e9 << " GHz");

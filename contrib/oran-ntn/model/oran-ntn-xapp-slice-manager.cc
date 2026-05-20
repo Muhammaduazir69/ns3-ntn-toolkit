@@ -16,6 +16,7 @@
 #include <ns3/uinteger.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <numeric>
 
@@ -356,6 +357,13 @@ OranNtnXappSliceManager::ReallocateSlices(uint32_t gnbId)
 {
     NS_LOG_FUNCTION(this << gnbId);
 
+    auto _real_t0 = std::chrono::high_resolution_clock::now();
+    auto _real_elapsed_ms = [&_real_t0]() {
+        return std::chrono::duration<double, std::milli>(
+                   std::chrono::high_resolution_clock::now() - _real_t0)
+            .count();
+    };
+
     auto stateIt = m_gnbSliceStates.find(gnbId);
     if (stateIt == m_gnbSliceStates.end())
     {
@@ -560,7 +568,7 @@ OranNtnXappSliceManager::ReallocateSlices(uint32_t gnbId)
         rate = rate * ((n - 1.0) / n) + violation / n;
     }
 
-    RecordDecision(true, 0.9, 0.0);
+    RecordDecision(true, 0.9, _real_elapsed_ms());
 }
 
 // ============================================================================

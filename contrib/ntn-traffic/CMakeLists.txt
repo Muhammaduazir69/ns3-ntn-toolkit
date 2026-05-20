@@ -2,6 +2,7 @@ set(source_files
     helper/cbr-helper.cc
     helper/client-rx-trace-plot.cc
     helper/nrtv-helper.cc
+    helper/ntn-realistic-traffic-helper.cc
     helper/three-gpp-http-satellite-helper.cc
     model/cbr-application.cc
     model/nrtv-header.cc
@@ -23,6 +24,7 @@ set(header_files
     helper/client-rx-trace-plot.h
     helper/histogram-plot-helper.h
     helper/nrtv-helper.h
+    helper/ntn-realistic-traffic-helper.h
     helper/three-gpp-http-satellite-helper.h
     model/traffic.h
     model/cbr-application.h
@@ -51,8 +53,10 @@ build_lib(
   HEADER_FILES ${header_files}
   LIBRARIES_TO_LINK
     ${libcore}
+    ${libnetwork}
     ${libapplications}
     ${libflow-monitor}
+    ${libinternet}
     ${libmagister-stats}
     ${libpoint-to-point}
   TEST_SOURCES ${test_sources}

@@ -25,6 +25,7 @@
 #include "ns3/ntn-cho-helper.h"
 #include "ns3/ntn-measurement-model.h"
 #include "ns3/ntn-realistic-mobility.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <cmath>
 #include <fstream>
@@ -358,11 +359,26 @@ int main(int argc, char* argv[])
     beamGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n"; bool fBeam = true;
     hoGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n"; bool fHo = true;
 
-    // ============= MAIN SIMULATION LOOP =============
+    // ============= MAIN SIMULATION LOOP (event-driven, v2) ===========
+    // Each per-second analytical step is now a Simulator::Schedule()
+    // callback registered through NtnRealisticTrafficHelper.  A parallel
+    // UDP traffic plane runs through the ns-3 protocol stack so the event
+    // queue carries real packet events, not just the analytical ticks.
     double dt = 1.0;
     uint32_t totalHos = 0, successHos = 0, failedHos = 0, ppCount = 0;
 
-    for (double t = 0; t < simTime; t += dt) {
+    NtnRealisticTrafficHelper traffic;
+    traffic.SetSimTime(Seconds(simTime));
+    traffic.SetOutputDir(outputDir);
+    traffic.SetRunTag("ntn-cho-full-constellation_" + algorithm);
+    traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    // Cap the real-traffic UE plane to avoid runaway wall-clock for very
+    // large analytical sweeps; the analytical loop still uses `numUes`.
+    uint32_t trafficUes = std::min<uint32_t>(numUes, 32u);
+    traffic.InstallUes(trafficUes);
+
+    traffic.RegisterPeriodicCallback(Seconds(dt), [&](Time nowT) {
+        double t = nowT.GetSeconds();
         // --- Write satellite tracks (every 2s) ---
         if (fmod(t, 2.0) < dt) {
             for (uint32_t s = 0; s < numSats; s++) {
@@ -664,7 +680,12 @@ int main(int argc, char* argv[])
                       << successHos << " ok, " << failedHos << " fail, " << ppCount << " pp)"
                       << " avgSINR=" << std::fixed << std::setprecision(1) << sumSinr/numUes << " dB\n";
         }
-    }
+    });  // end of periodic-callback lambda
+
+    traffic.Wire();
+    Simulator::Stop(Seconds(simTime + 0.5));
+    Simulator::Run();
+    traffic.WriteHealthReport();
 
     // Close GeoJSON
     satGeo << "\n]}"; ueGeo << "\n]}"; beamGeo << "\n]}"; hoGeo << "\n]}";

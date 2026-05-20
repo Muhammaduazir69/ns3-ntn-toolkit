@@ -17,8 +17,12 @@
 #include <ns3/node-container.h>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 // Forward declarations
 namespace ns3
@@ -36,7 +40,7 @@ class ThzNtnBeamforming;
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("ThzNtnBeamTracking");
+NS_LOG_COMPONENT_DEFINE("ThzNtnBeamTrackingExample");
 
 /**
  * \brief Simulate satellite angular position during a pass.
@@ -74,20 +78,19 @@ main(int argc, char* argv[])
 {
     // ---- Default parameters ----
     std::string trackingMode = "EKF";
-    double updateRate = 100.0;     // Hz
-    double passDuration = 60.0;    // seconds
-    double maxElevation = 75.0;    // degrees
-    double freq = 300e9;           // 300 GHz
-    uint32_t arraySize = 32;       // 32x32
+    double updateRate = 100.0;
+    double passDuration = 60.0;
+    double maxElevation = 75.0;
+    double freq = 300e9;
+    uint32_t arraySize = 32;
+    std::string outputDir = "thz-beam-track-out";
 
-    // ---- Parse command-line arguments ----
     CommandLine cmd(__FILE__);
-    cmd.AddValue("trackingMode", "Tracking mode: EKF or POSITION_BASED [default: EKF]",
-                 trackingMode);
-    cmd.AddValue("updateRate", "Tracking update rate in Hz [default: 100]", updateRate);
-    cmd.AddValue("passDuration", "Satellite pass duration in seconds [default: 60]",
-                 passDuration);
-    cmd.AddValue("maxElevation", "Maximum elevation angle [default: 75]", maxElevation);
+    cmd.AddValue("trackingMode", "Tracking mode: EKF or POSITION_BASED", trackingMode);
+    cmd.AddValue("updateRate", "Tracking update rate in Hz", updateRate);
+    cmd.AddValue("passDuration", "Satellite pass duration (s)", passDuration);
+    cmd.AddValue("maxElevation", "Maximum elevation angle", maxElevation);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
     std::cout << "=============================================================\n";
@@ -297,9 +300,18 @@ main(int argc, char* argv[])
     std::cout << "    3-dB beamwidth:          " << std::setprecision(3)
               << beamwidth << " deg\n";
 
-    // ---- Run simulation ----
-    Simulator::Stop(Seconds(1.0));
+    // ---- Real packet plane (v2 event-driven) ----
+    NtnRealisticTrafficHelper traffic;
+    traffic.SetSimTime(Seconds(passDuration));
+    traffic.SetOutputDir(outputDir);
+    traffic.SetRunTag("thz-ntn-beam-tracking");
+    traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::EmbbStreaming);
+    traffic.InstallUes(6);
+    traffic.Wire();
+
+    Simulator::Stop(Seconds(passDuration + 0.5));
     Simulator::Run();
+    traffic.WriteHealthReport();
     Simulator::Destroy();
 
     std::cout << "\n  Simulation complete.\n";

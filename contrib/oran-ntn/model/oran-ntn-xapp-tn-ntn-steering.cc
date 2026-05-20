@@ -16,6 +16,7 @@
 #include <ns3/uinteger.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace ns3
@@ -222,6 +223,13 @@ OranNtnXappTnNtnSteering::DecisionCycle()
 {
     NS_LOG_FUNCTION(this);
 
+    auto _cycle_t0 = std::chrono::high_resolution_clock::now();
+    auto _elapsed_ms = [&_cycle_t0]() {
+        return std::chrono::duration<double, std::milli>(
+                   std::chrono::high_resolution_clock::now() - _cycle_t0)
+            .count();
+    };
+
     Time now = Simulator::Now();
 
     for (auto& [ueId, state] : m_ueSteeringStates)
@@ -309,7 +317,7 @@ OranNtnXappTnNtnSteering::DecisionCycle()
                           : std::max(tnScore, ntnScore);
 
         bool accepted = SubmitAction(action);
-        RecordDecision(accepted, confidence, 0.0);
+        RecordDecision(accepted, confidence, _elapsed_ms());
 
         if (accepted)
         {

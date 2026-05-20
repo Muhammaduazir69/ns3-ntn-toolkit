@@ -17,6 +17,7 @@
 #include <ns3/uinteger.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <numeric>
 
@@ -190,6 +191,14 @@ void
 OranNtnXappHoPredict::DecisionCycle()
 {
     NS_LOG_FUNCTION(this);
+
+    // Wall-clock timer for per-decision latency instrumentation.
+    auto _cycle_t0 = std::chrono::high_resolution_clock::now();
+    auto _elapsed_ms = [&_cycle_t0]() {
+        return std::chrono::duration<double, std::milli>(
+                   std::chrono::high_resolution_clock::now() - _cycle_t0)
+            .count();
+    };
 
     double now = Simulator::Now().GetSeconds();
 
@@ -385,7 +394,7 @@ OranNtnXappHoPredict::DecisionCycle()
             m_hoPredMetrics.avgLeadTime_s =
                 m_hoPredMetrics.avgLeadTime_s * ((n - 1.0) / n) + leadTime / n;
 
-            RecordDecision(true, confidence, 0.0);
+            RecordDecision(true, confidence, _elapsed_ms());
 
             m_hoTriggered(ueId, bestCandidate, bestCandSinr, bestCandTte);
 
@@ -395,7 +404,7 @@ OranNtnXappHoPredict::DecisionCycle()
         }
         else
         {
-            RecordDecision(false, confidence, 0.0);
+            RecordDecision(false, confidence, _elapsed_ms());
             NS_LOG_WARN("UE " << ueId << ": HO action rejected by RIC");
         }
     }

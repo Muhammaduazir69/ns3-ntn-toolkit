@@ -5,8 +5,12 @@ build_lib_example(
     ${libntn-sagin}
     ${libcore}
     ${libmobility}
+    ${libntn-traffic}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )
-
 build_lib_example(
   NAME sagin-uav-swarm
   SOURCE_FILES sagin-uav-swarm.cc
@@ -14,8 +18,12 @@ build_lib_example(
     ${libntn-sagin}
     ${libcore}
     ${libmobility}
+    ${libntn-traffic}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )
-
 build_lib_example(
   NAME sagin-aeronautical
   SOURCE_FILES sagin-aeronautical.cc
@@ -23,4 +31,9 @@ build_lib_example(
     ${libntn-sagin}
     ${libcore}
     ${libmobility}
+    ${libntn-traffic}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )

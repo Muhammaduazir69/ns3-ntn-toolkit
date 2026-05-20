@@ -3,9 +3,13 @@ build_lib_example(
   SOURCE_FILES ntn-cho-leo-basic.cc
   LIBRARIES_TO_LINK
     ${libntn-cho}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )
 
 build_lib_example(
@@ -13,9 +17,13 @@ build_lib_example(
   SOURCE_FILES ntn-cho-full-constellation.cc
   LIBRARIES_TO_LINK
     ${libntn-cho}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )
 
 build_lib_example(

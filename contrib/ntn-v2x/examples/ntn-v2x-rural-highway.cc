@@ -20,6 +20,7 @@
 #include "ns3/sumo-traci-bridge.h"
 #include "ns3/v2x-leo-direct.h"
 #include "ns3/v2x-leo-relay.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <fstream>
 #include <iomanip>
@@ -31,7 +32,8 @@ int
 main(int argc, char* argv[])
 {
     std::size_t nVehicles = 100;
-    double simTimeSec = 300.0;  // 5-min validation gate
+    double simTimeSec = 300.0;
+    std::string outputDir = ".";  // 5-min validation gate
     double dtSec = 1.0;
     std::string tracePath = "/tmp/ntn-v2x-fcd.csv";
     std::string csvPath = "ntn-v2x-rural-highway.csv";
@@ -46,6 +48,7 @@ main(int argc, char* argv[])
     cmd.AddValue("minDirectSnr", "Minimum dB for direct uplink", minDirectSnrDb);
     cmd.AddValue("maxV2vRange", "Maximum V2V range (m) for relay", maxV2vRangeM);
     cmd.AddValue("csv", "Output CSV", csvPath);
+    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
     NtnV2xHelper::WriteSyntheticFcdCsv(tracePath, nVehicles,
@@ -114,8 +117,17 @@ main(int argc, char* argv[])
         });
     }
 
+    NtnRealisticTrafficHelper _ntn_traffic;
+    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
+    _ntn_traffic.SetOutputDir(outputDir);
+    _ntn_traffic.SetRunTag("ntn-v2x-rural-highway");
+    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    _ntn_traffic.InstallUes(8);
+    _ntn_traffic.Wire();
+
     Simulator::Stop(Seconds(simTimeSec + 1));
     Simulator::Run();
+    _ntn_traffic.WriteHealthReport();
     Simulator::Destroy();
 
     std::cout << "ntn-v2x-rural-highway done.\n"

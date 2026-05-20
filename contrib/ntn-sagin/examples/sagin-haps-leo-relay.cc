@@ -18,6 +18,7 @@
 #include "ns3/sagin-helper.h"
 #include "ns3/simulator.h"
 #include "ns3/uav-mobility-models.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <fstream>
 #include <iomanip>
@@ -28,11 +29,13 @@ int
 main(int argc, char* argv[])
 {
     double simTimeSec = 3600.0;
+    std::string outputDir = ".";
     std::string csvPath = "sagin-haps-leo-relay.csv";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
     cmd.AddValue("csv", "Output CSV path", csvPath);
+    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
     SaginHelper helper;
@@ -72,9 +75,20 @@ main(int argc, char* argv[])
                 << hapsEl << "," << hapsRng << "," << leoEl << "," << leoRng << "\n";
         });
     }
+    // ==== v2 realistic traffic plane (auto-injected) =====================
+    NtnRealisticTrafficHelper _ntn_traffic;
+    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
+    _ntn_traffic.SetOutputDir(outputDir);
+    _ntn_traffic.SetRunTag("sagin-haps-leo-relay");
+    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    _ntn_traffic.InstallUes(8);
+    _ntn_traffic.Wire();
+
+    
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
+    _ntn_traffic.WriteHealthReport();
     Simulator::Destroy();
 
     std::cout << "Wrote " << csvPath << " (" << simTimeSec << " s SAGIN scenario)\n";

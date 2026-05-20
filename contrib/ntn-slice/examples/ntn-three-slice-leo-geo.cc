@@ -21,6 +21,7 @@
 #include "ns3/simulator.h"
 #include "ns3/slice-isolation-monitor.h"
 #include "ns3/slice-orchestrator-xapp.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <fstream>
 #include <iomanip>
@@ -62,6 +63,7 @@ int
 main(int argc, char* argv[])
 {
     double simTimeSec = 3600.0;
+    std::string outputDir = ".";
     bool routeUrllcViaGeo = false;
     std::string csvPath = "ntn-three-slice.csv";
     uint32_t totalPrb = 273;
@@ -71,6 +73,7 @@ main(int argc, char* argv[])
     cmd.AddValue("urllcViaGeo", "Force URLLC over GEO (gates the GEO-skip test)", routeUrllcViaGeo);
     cmd.AddValue("totalPrb", "Total PRB budget", totalPrb);
     cmd.AddValue("csv", "Per-slice KPI CSV path", csvPath);
+    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
     auto stack = NtnSliceHelper::ThreeSliceDefault();
@@ -159,9 +162,20 @@ main(int argc, char* argv[])
             }
         });
     }
+    // ==== v2 realistic traffic plane (auto-injected) =====================
+    NtnRealisticTrafficHelper _ntn_traffic;
+    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
+    _ntn_traffic.SetOutputDir(outputDir);
+    _ntn_traffic.SetRunTag("ntn-slice");
+    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    _ntn_traffic.InstallUes(8);
+    _ntn_traffic.Wire();
+
+    
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
+    _ntn_traffic.WriteHealthReport();
     Simulator::Destroy();
 
     std::cout << "ntn-three-slice-leo-geo done.\n"

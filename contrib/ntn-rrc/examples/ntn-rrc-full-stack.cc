@@ -20,6 +20,7 @@
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
 #include "ns3/ntn-ue-location-report.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <cstdio>
 #include <fstream>
@@ -98,6 +99,7 @@ int
 main(int argc, char* argv[])
 {
     double simTimeSec = 600.0;
+    std::string outputDir = ".";
     bool transparent = true;
     bool passAwareDrx = true;
     std::string prefix = "ntn-rrc-full";
@@ -107,6 +109,7 @@ main(int argc, char* argv[])
     cmd.AddValue("transparent", "Transparent payload (true) vs regenerative (false)", transparent);
     cmd.AddValue("passAwareDrx", "Enable NTN pass-aware DRX deep sleep", passAwareDrx);
     cmd.AddValue("prefix", "CSV file prefix", prefix);
+    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
     // ----- mobility -----
@@ -164,9 +167,20 @@ main(int argc, char* argv[])
     drx->Start();
     Simulator::ScheduleNow(&SampleTa, ta, &sinks);
     Simulator::ScheduleNow(&SampleDrx, drx, &sinks);
+    // ==== v2 realistic traffic plane (auto-injected) =====================
+    NtnRealisticTrafficHelper _ntn_traffic;
+    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
+    _ntn_traffic.SetOutputDir(outputDir);
+    _ntn_traffic.SetRunTag("ntn-rrc-full-stack");
+    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    _ntn_traffic.InstallUes(8);
+    _ntn_traffic.Wire();
+
+    
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
+    _ntn_traffic.WriteHealthReport();
 
     sib19->Stop();
     rep->Stop();

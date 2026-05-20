@@ -5,4 +5,9 @@ build_lib_example(
     ${libntn-slice}
     ${libcore}
     ${libnetwork}
+    ${libntn-traffic}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )

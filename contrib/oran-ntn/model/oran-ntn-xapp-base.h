@@ -34,6 +34,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <vector>
 
 namespace ns3
 {
@@ -58,6 +59,14 @@ enum class XappState : uint8_t
 
 /**
  * \brief xApp performance metrics
+ *
+ * `decisionLatencies_ms` stores the wall-clock decision-cycle latency
+ * (std::chrono::high_resolution_clock) for every decision the xApp makes.
+ * The helper sorts this vector at write time to derive P50/P95/P99
+ * percentiles for the per-xApp metrics CSV.  The vector is sampled in
+ * the xApp's DecisionCycle() body and is independent of ns-3 simulation
+ * time, so its values reflect implementation complexity rather than
+ * scheduled simulation events.
  */
 struct XappMetrics
 {
@@ -69,6 +78,7 @@ struct XappMetrics
     double avgDecisionLatency_ms;
     double avgConfidence;
     Time uptime;
+    std::vector<double> decisionLatencies_ms;
 };
 
 // ============================================================================

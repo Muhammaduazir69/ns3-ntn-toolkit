@@ -14,6 +14,7 @@
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-timing-advance.h"
 #include "ns3/satellite-sgp4-mobility-model.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <cmath>
 #include <fstream>
@@ -95,6 +96,7 @@ main(int argc, char* argv[])
     double ueLonDeg = 73.0479;
     double ueAltM = 540.0;
     double simTimeSec = 600.0;
+    std::string outputDir = ".";
     double stepSec = 1.0;
     bool transparent = true;
     std::string csvPath = "ntn-rrc-from-tle.csv";
@@ -109,6 +111,7 @@ main(int argc, char* argv[])
     cmd.AddValue("step", "Sample period (s)", stepSec);
     cmd.AddValue("transparent", "Transparent (true) vs regenerative (false)", transparent);
     cmd.AddValue("csv", "Output CSV path", csvPath);
+    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
     TleFile tle;
@@ -165,8 +168,17 @@ main(int argc, char* argv[])
     Simulator::ScheduleNow(&SampleStep, ta, satMob, &csv, Seconds(stepSec),
                            Seconds(simTimeSec));
 
+    NtnRealisticTrafficHelper _ntn_traffic;
+    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
+    _ntn_traffic.SetOutputDir(outputDir);
+    _ntn_traffic.SetRunTag("ntn-rrc-from-tle");
+    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    _ntn_traffic.InstallUes(8);
+    _ntn_traffic.Wire();
+
     Simulator::Stop(Seconds(simTimeSec) + MilliSeconds(1));
     Simulator::Run();
+    _ntn_traffic.WriteHealthReport();
     Simulator::Destroy();
 
     std::cout << "wrote " << csvPath << " (" << simTimeSec << " s pass of " << tle.name

@@ -5,8 +5,12 @@ build_lib_example(
     ${libntn-rrc}
     ${libcore}
     ${libmobility}
+    ${libntn-traffic}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )
-
 build_lib_example(
   NAME ntn-rrc-full-stack
   SOURCE_FILES ntn-rrc-full-stack.cc
@@ -14,8 +18,12 @@ build_lib_example(
     ${libntn-rrc}
     ${libcore}
     ${libmobility}
+    ${libntn-traffic}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )
-
 build_lib_example(
   NAME ntn-rrc-from-tle
   SOURCE_FILES ntn-rrc-from-tle.cc
@@ -24,4 +32,9 @@ build_lib_example(
     ${libsatellite}
     ${libcore}
     ${libmobility}
+    ${libntn-traffic}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
 )

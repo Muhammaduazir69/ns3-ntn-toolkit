@@ -21,6 +21,7 @@
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
 #include "ns3/ntn-ue-location-report.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <cstdio>
 #include <iostream>
@@ -153,6 +154,7 @@ int
 main(int argc, char* argv[])
 {
     double simTimeSec = 600.0;
+    std::string outputDir = ".";
     std::string runId = "demo-1";
     std::string influxFile = "/tmp/ntn-observability-demo.lp";
     std::string udpHost;
@@ -168,6 +170,7 @@ main(int argc, char* argv[])
                  udpHost);
     cmd.AddValue("udpPort", "InfluxDB UDP listener port", udpPort);
     cmd.AddValue("netSim", "NetSimulyzer JSON output", netSimPath);
+    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
     Wiring w;
@@ -236,8 +239,19 @@ main(int argc, char* argv[])
     w.netSim->Start();
 
     Simulator::ScheduleNow(&SampleEverySecond, &w);
+    // ==== v2 realistic traffic plane (auto-injected) =====================
+    NtnRealisticTrafficHelper _ntn_traffic;
+    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
+    _ntn_traffic.SetOutputDir(outputDir);
+    _ntn_traffic.SetRunTag("ntn-observability-demo");
+    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    _ntn_traffic.InstallUes(8);
+    _ntn_traffic.Wire();
+
+    
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
+    _ntn_traffic.WriteHealthReport();
 
     w.sib19->Stop();
     w.ueRep->Stop();

@@ -17,8 +17,12 @@
 #include <ns3/node-container.h>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 // Forward declarations of THz-NTN classes
 namespace ns3
@@ -74,6 +78,8 @@ main(int argc, char* argv[])
     double txGain = 40.0;      // dBi (satellite UM-MIMO)
     double rxGain = 45.0;      // dBi (ground Cassegrain)
     double noiseFigure = 10.0; // dB
+    double simTime = 60.0;     // seconds (v2 — event-driven pass)
+    std::string outputDir = "thz-leo-ground-out";
 
     // ---- Parse command-line arguments ----
     CommandLine cmd(__FILE__);
@@ -83,6 +89,8 @@ main(int argc, char* argv[])
     cmd.AddValue("bandwidth", "Channel bandwidth in Hz [default: 10e9]", bandwidth);
     cmd.AddValue("txGain", "Tx antenna gain in dBi [default: 40]", txGain);
     cmd.AddValue("rxGain", "Rx antenna gain in dBi [default: 45]", rxGain);
+    cmd.AddValue("simTime", "Simulation time in seconds [default: 60]", simTime);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
     std::cout << "=============================================================\n";
@@ -231,19 +239,51 @@ main(int argc, char* argv[])
               << " Gbps\n";
     std::cout << "    Link Margin:             " << detailResult.linkMargin_dB << " dB\n";
 
-    // ---- Doppler analysis ----
-    double satVelocity = 7.6; // km/s for 550 km LEO
+    // ---- Doppler analysis (geometric, freq-scaled radial velocity) ----
+    double satVelocity = 7600.0; // m/s for 550 km LEO
     std::cout << "\n  Doppler Pre-Compensation Analysis:\n";
     for (double elev : elevations)
     {
-        double dopplerHz = satPhy->ComputeDopplerPreCompensation_Hz(satVelocity, elev, 0.0);
+        double vRadial = satVelocity * std::cos(elev * M_PI / 180.0);
+        double dopplerHz = vRadial / 299792458.0 * freq;
         std::cout << "    Elev " << std::setw(4) << elev << " deg: Doppler offset = "
                   << std::setprecision(0) << dopplerHz / 1e3 << " kHz\n";
     }
 
-    // ---- Run simulation (minimal, just validates setup) ----
-    Simulator::Stop(Seconds(1.0));
+    // ---- Real packet plane + per-second pass-geometry sampler (v2) ----
+    NtnRealisticTrafficHelper traffic;
+    traffic.SetSimTime(Seconds(simTime));
+    traffic.SetOutputDir(outputDir);
+    traffic.SetRunTag("thz-ntn-leo-ground");
+    traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::EmbbStreaming);
+    traffic.InstallUes(8);
+
+    std::filesystem::create_directories(outputDir);
+    std::ofstream passCsv(outputDir + "/pass_timeseries.csv");
+    passCsv << "time_s,elev_deg,range_km,fspl_dB,molabs_dB,weather_dB,scint_dB,"
+               "pointing_dB,total_loss_dB,snr_dB,shannon_Gbps\n";
+
+    traffic.RegisterPeriodicCallback(Seconds(1.0), [&](Time nowT) {
+        double t = nowT.GetSeconds();
+        // Simulate a single LEO pass: triangular elevation profile peaking
+        // at simTime/2.  Floor at 5 deg to keep the link budget defined.
+        double phase = std::min(t, simTime - t) / (simTime / 2.0);
+        double elev = std::max(5.0, 5.0 + 85.0 * phase);
+        double range_m = ComputeSlantRange(elev, altitude);
+        auto r = linkBudget->ComputeLinkBudget(ThzNtnLinkBudget::SAT_TO_GROUND,
+            freq, range_m, elev, txPower, txGain, rxGain, bandwidth, noiseFigure);
+        passCsv << std::fixed << std::setprecision(2)
+                << t << "," << elev << "," << range_m/1000.0 << ","
+                << r.fspl_dB << "," << r.molecularAbsorption_dB << ","
+                << r.weatherLoss_dB << "," << r.scintillationLoss_dB << ","
+                << r.pointingLoss_dB << "," << r.totalPathLoss_dB << ","
+                << r.snr_dB << "," << r.shannonCapacity_Gbps << "\n";
+    });
+    traffic.Wire();
+    Simulator::Stop(Seconds(simTime + 0.5));
     Simulator::Run();
+    traffic.WriteHealthReport();
+    passCsv.close();
     Simulator::Destroy();
 
     std::cout << "\n  Simulation complete.\n";

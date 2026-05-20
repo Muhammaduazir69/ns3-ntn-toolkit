@@ -11,6 +11,7 @@
 #include "ns3/core-module.h"
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-timing-advance.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <cmath>
 #include <fstream>
@@ -46,6 +47,7 @@ int
 main(int argc, char* argv[])
 {
     double simTimeSec = 600.0;
+    std::string outputDir = ".";
     bool transparent = true;
     std::string csvPath = "ntn-rrc-leo-pass.csv";
 
@@ -53,6 +55,7 @@ main(int argc, char* argv[])
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
     cmd.AddValue("transparent", "Transparent (true) vs regenerative (false)", transparent);
     cmd.AddValue("csv", "Output CSV path", csvPath);
+    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
     // 550-km LEO circular orbit moving along +x at 7.59 km/s, fly-over geometry.
@@ -72,9 +75,20 @@ main(int argc, char* argv[])
     std::ofstream out(csvPath);
     out << "time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate\n";
     Simulator::ScheduleNow(&SampleTa, ta, &out);
+    // ==== v2 realistic traffic plane (auto-injected) =====================
+    NtnRealisticTrafficHelper _ntn_traffic;
+    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
+    _ntn_traffic.SetOutputDir(outputDir);
+    _ntn_traffic.SetRunTag("ntn-rrc-leo-pass");
+    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    _ntn_traffic.InstallUes(8);
+    _ntn_traffic.Wire();
+
+    
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
+    _ntn_traffic.WriteHealthReport();
     Simulator::Destroy();
 
     std::cout << "Wrote " << csvPath << " (" << simTimeSec << " s pass, "

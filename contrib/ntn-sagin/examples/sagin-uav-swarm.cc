@@ -13,6 +13,7 @@
 #include "ns3/sagin-helper.h"
 #include "ns3/simulator.h"
 #include "ns3/uav-mobility-models.h"
+#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <fstream>
 #include <iomanip>
@@ -24,6 +25,7 @@ int
 main(int argc, char* argv[])
 {
     double simTimeSec = 600.0;
+    std::string outputDir = ".";
     double fcGHz = 2.0;
     std::string csvPath = "sagin-uav-swarm.csv";
 
@@ -31,6 +33,7 @@ main(int argc, char* argv[])
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
     cmd.AddValue("fcGHz", "Carrier frequency (GHz)", fcGHz);
     cmd.AddValue("csv", "Output CSV path", csvPath);
+    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
     SaginHelper helper;
@@ -82,9 +85,20 @@ main(int argc, char* argv[])
             }
         });
     }
+    // ==== v2 realistic traffic plane (auto-injected) =====================
+    NtnRealisticTrafficHelper _ntn_traffic;
+    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
+    _ntn_traffic.SetOutputDir(outputDir);
+    _ntn_traffic.SetRunTag("sagin-uav-swarm");
+    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    _ntn_traffic.InstallUes(8);
+    _ntn_traffic.Wire();
+
+    
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
+    _ntn_traffic.WriteHealthReport();
     Simulator::Destroy();
     std::cout << "Wrote " << csvPath << " (" << uavs.size() << " UAVs over " << simTimeSec << " s)\n";
     return 0;
