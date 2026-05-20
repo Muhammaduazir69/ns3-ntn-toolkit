@@ -96,10 +96,19 @@ git clone https://github.com/Muhammaduazir69/ns3-thz-ntn.git contrib/thz-ntn
 | Module | Repo |
 |---|---|
 | Toolkit (umbrella) | [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) |
+| ntn-constellation | [ntn-constellation](https://github.com/Muhammaduazir69/ntn-constellation) |
+| ntn-rrc | [ntn-rrc](https://github.com/Muhammaduazir69/ntn-rrc) |
+| ntn-observability | [ntn-observability](https://github.com/Muhammaduazir69/ntn-observability) |
+| ns3-ai (fork) | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) |
+| ntn-sagin | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) |
+| ntn-slice | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) |
+| ntn-v2x | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) |
+| ntn-traffic | [ntn-traffic](https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/main/ns-3-dev/contrib/ntn-traffic) |
+| ntn-sionna | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) |
+| ntn-digital-twin | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) |
 | ntn-cho | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) |
 | oran-ntn | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) |
 | **thz-ntn** | this repo |
-| ns3-ai (fork) | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) |
 
 ## License
 
