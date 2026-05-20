@@ -1,0 +1,54 @@
+name: sim-health
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sim-health:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build python3 \
+            libxml2-dev libsqlite3-dev libgsl-dev libboost-program-options-dev \
+            libeigen3-dev pybind11-dev libprotobuf-dev protobuf-compiler \
+            libabsl-dev
+
+      - name: Configure ns-3
+        working-directory: ns-3-dev
+        run: ./ns3 configure --enable-examples --enable-tests --disable-werror
+
+      - name: Build core targets
+        working-directory: ns-3-dev
+        run: ./ns3 build
+            ntn-cho-leo-basic
+            ntn-cho-full-constellation
+            oran-ntn-full-scenario
+            thz-ntn-leo-ground
+            thz-ntn-isl
+            thz-ntn-beam-tracking
+            ntn-rrc-leo-pass
+            ntn-rrc-full-stack
+            ntn-rrc-from-tle
+            sagin-haps-leo-relay
+            sagin-uav-swarm
+            sagin-aeronautical
+            ntn-three-slice-leo-geo
+            ntn-v2x-rural-highway
+            ntn-observability-demo
+
+      - name: Run realism gates
+        working-directory: ns-3-dev
+        run: python3 tools/check_simulation_health.py --simTime=20 --out=sim_health_report.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sim-health-report
+          path: ns-3-dev/sim_health_report.md
