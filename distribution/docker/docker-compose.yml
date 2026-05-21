@@ -1,0 +1,59 @@
+# Full ns3-ntn-toolkit stack: built image + observability backend.
+#
+#   docker compose -f distribution/docker/docker-compose.yml up -d
+#
+# Maintainer: Muhammad Uzair, Independent Researcher
+
+services:
+
+  toolkit:
+    image: uzairdocker69/ns3-ntn-toolkit:latest
+    container_name: ns3-ntn-toolkit
+    build:
+      context: ../..
+      dockerfile: distribution/docker/Dockerfile
+    ports:
+      - "8000:8000"     # ntn-twin-api (FastAPI)
+    environment:
+      - NTN_INFLUX_URL=http://influxdb:8086
+      - NTN_INFLUX_BUCKET=ntn
+    depends_on:
+      - influxdb
+    command: ["/bin/bash", "-lc", "ntn-twin-api --host 0.0.0.0 --port 8000"]
+    restart: unless-stopped
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: ns3-ntn-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminadmin
+      - DOCKER_INFLUXDB_INIT_ORG=ns3-ntn
+      - DOCKER_INFLUXDB_INIT_BUCKET=ntn
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=ns3-ntn-admin-token
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: ns3-ntn-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - influxdb
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # Mount the pre-built dashboards from the toolkit's W3 module.
+      - ../../ns-3-dev/contrib/ntn-observability/dashboards:/var/lib/grafana/dashboards:ro
+    restart: unless-stopped
+
+volumes:
+  influxdb-data:
+  grafana-data:
