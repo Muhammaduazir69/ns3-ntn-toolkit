@@ -7,6 +7,8 @@ set(source_files
     model/oran-ntn-near-rt-ric.cc
     model/oran-ntn-space-ric.cc
     model/oran-ntn-sat-bridge.cc
+    # T8 — canonical WG3 KPM metric-ID alignment (Roadmap §3 T8)
+    model/oran-ntn-kpm-canonical-ids.cc
     # Original xApps
     model/oran-ntn-xapp-ho-predict.cc
     model/oran-ntn-xapp-beam-hop.cc
@@ -53,6 +55,7 @@ set(header_files
     model/oran-ntn-near-rt-ric.h
     model/oran-ntn-space-ric.h
     model/oran-ntn-sat-bridge.h
+    model/oran-ntn-kpm-canonical-ids.h
     # Original xApps
     model/oran-ntn-xapp-ho-predict.h
     model/oran-ntn-xapp-beam-hop.h

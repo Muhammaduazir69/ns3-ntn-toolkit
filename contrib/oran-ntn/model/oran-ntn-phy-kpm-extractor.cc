@@ -674,4 +674,13 @@ OranNtnPhyKpmExtractor::GetTrackedUeIds() const
     return ids;
 }
 
+std::vector<oranntn::KpmMeasurement>
+OranNtnPhyKpmExtractor::EmitCanonicalKpm(
+    uint32_t ueId,
+    const std::map<std::string, std::string>& labels) const
+{
+    const E2KpmReport report = GetRealKpmReport(ueId);
+    return oranntn::BuildCanonicalKpmMeasurements(report, labels);
+}
+
 } // namespace ns3

@@ -15,6 +15,7 @@
 #include "ns3/oran-ntn-e2-interface.h"
 #include "ns3/oran-ntn-federated-learning.h"
 #include "ns3/oran-ntn-isl-header.h"
+#include "ns3/oran-ntn-kpm-canonical-ids.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-ntn-scheduler.h"
 #include "ns3/oran-ntn-phy-kpm-extractor.h"
@@ -1122,6 +1123,158 @@ class OranNtnEnergyHarvestTestCase : public TestCase
 };
 
 // ============================================================================
+//  T8 (Roadmap §3 T8): Canonical KPM metric-ID alignment with WG3 / srsRAN / OAI
+// ============================================================================
+
+class OranNtnKpmCanonicalIdsListTestCase : public TestCase
+{
+  public:
+    OranNtnKpmCanonicalIdsListTestCase()
+        : TestCase("KPM canonical IDs match WG3 and srsRAN naming exactly")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const auto& ids = oranntn::kpm::CanonicalMetricIds();
+        NS_TEST_ASSERT_MSG_EQ(ids.size(),
+                              10u,
+                              "canonical KPM set must have 10 entries");
+        NS_TEST_EXPECT_MSG_EQ(ids[0], "DRB.UEThpDl", "ids[0]");
+        NS_TEST_EXPECT_MSG_EQ(ids[1], "DRB.UEThpUl", "ids[1]");
+        NS_TEST_EXPECT_MSG_EQ(ids[2], "DRB.PdcpSduVolumeDL", "ids[2]");
+        NS_TEST_EXPECT_MSG_EQ(ids[3], "DRB.PdcpSduVolumeUL", "ids[3]");
+        NS_TEST_EXPECT_MSG_EQ(ids[4], "RRU.PrbAvailDl", "ids[4]");
+        NS_TEST_EXPECT_MSG_EQ(ids[5], "RRU.PrbAvailUl", "ids[5]");
+        NS_TEST_EXPECT_MSG_EQ(ids[6], "RRU.PrbUsedDl", "ids[6]");
+        NS_TEST_EXPECT_MSG_EQ(ids[7], "RRU.PrbUsedUl", "ids[7]");
+        NS_TEST_EXPECT_MSG_EQ(ids[8], "CARR.AverageSINR", "ids[8]");
+        NS_TEST_EXPECT_MSG_EQ(ids[9], "L1M.RS-SINR.Mean", "ids[9]");
+
+        NS_TEST_EXPECT_MSG_EQ(std::string(oranntn::label::kFiveQi),
+                              "FIVE_QI",
+                              "FIVE_QI label dim");
+        NS_TEST_EXPECT_MSG_EQ(std::string(oranntn::label::kSnssai),
+                              "S-NSSAI",
+                              "S-NSSAI label dim");
+        NS_TEST_EXPECT_MSG_EQ(std::string(oranntn::label::kPlmn),
+                              "PLMN",
+                              "PLMN label dim");
+    }
+};
+
+class OranNtnKpmCanonicalBuildTestCase : public TestCase
+{
+  public:
+    OranNtnKpmCanonicalBuildTestCase()
+        : TestCase("BuildCanonicalKpmMeasurements emits all 10 IDs with correct values")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        E2KpmReport r{};
+        r.ueId = 42;
+        r.sinr_dB = 12.5;
+        r.throughput_Mbps = 50.0; // 50 000 kbps
+        r.prbUtilization = 0.5;   // 50% of 273 PRBs => 136.5
+
+        const std::map<std::string, std::string> base = {
+            {oranntn::label::kFiveQi, "9"},
+            {oranntn::label::kSnssai, "1-000001"},
+            {oranntn::label::kPlmn, "00101"},
+        };
+        const auto v = oranntn::BuildCanonicalKpmMeasurements(r, base);
+        NS_TEST_ASSERT_MSG_EQ(v.size(), 10u, "vector size");
+
+        // Build a name->index map so the test is robust to ordering.
+        std::map<std::string, size_t> idx;
+        for (size_t i = 0; i < v.size(); ++i)
+        {
+            idx[v[i].metricId] = i;
+        }
+        NS_TEST_ASSERT_MSG_EQ(idx.count(oranntn::kpm::kDrbUeThpDl),
+                              1u,
+                              "DL throughput present");
+        NS_TEST_EXPECT_MSG_EQ(v[idx[oranntn::kpm::kDrbUeThpDl]].value,
+                              50000.0,
+                              "DL throughput kbps");
+        NS_TEST_EXPECT_MSG_EQ(v[idx[oranntn::kpm::kCarrAvgSinr]].value,
+                              12.5,
+                              "avg SINR");
+        NS_TEST_EXPECT_MSG_EQ(v[idx[oranntn::kpm::kL1mRsSinrMean]].value,
+                              12.5,
+                              "L1M RS-SINR mean");
+        NS_TEST_EXPECT_MSG_EQ(v[idx[oranntn::kpm::kRruPrbAvailDl]].value,
+                              273.0,
+                              "RRU.PrbAvailDl");
+        NS_TEST_EXPECT_MSG_EQ(v[idx[oranntn::kpm::kRruPrbUsedDl]].value,
+                              136.5,
+                              "RRU.PrbUsedDl = util * PRBs");
+
+        // UL fields are not plumbed yet — must carry present=false sentinel.
+        NS_TEST_EXPECT_MSG_EQ(
+            v[idx[oranntn::kpm::kDrbUeThpUl]].labels.at(oranntn::label::kPresent),
+            "false",
+            "UL throughput marked not-present");
+        NS_TEST_EXPECT_MSG_EQ(
+            v[idx[oranntn::kpm::kDrbPdcpVolumeUl]].labels.at(oranntn::label::kPresent),
+            "false",
+            "UL PDCP volume marked not-present");
+        NS_TEST_EXPECT_MSG_EQ(
+            v[idx[oranntn::kpm::kRruPrbUsedUl]].labels.at(oranntn::label::kPresent),
+            "false",
+            "UL PRBs marked not-present");
+
+        // Present metrics carry no `present` label override.
+        NS_TEST_EXPECT_MSG_EQ(
+            v[idx[oranntn::kpm::kDrbUeThpDl]].labels.count(oranntn::label::kPresent),
+            0u,
+            "DL throughput has no override label");
+    }
+};
+
+class OranNtnKpmCanonicalLabelsTestCase : public TestCase
+{
+  public:
+    OranNtnKpmCanonicalLabelsTestCase()
+        : TestCase("FIVE_QI S-NSSAI PLMN labels propagate to every measurement")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        E2KpmReport r{};
+        r.throughput_Mbps = 1.0;
+        r.sinr_dB = 0.0;
+        r.prbUtilization = 0.0;
+
+        const std::map<std::string, std::string> base = {
+            {oranntn::label::kFiveQi, "1"},
+            {oranntn::label::kSnssai, "1-000002"},
+            {oranntn::label::kPlmn, "00102"},
+        };
+        const auto v = oranntn::BuildCanonicalKpmMeasurements(r, base);
+        NS_TEST_ASSERT_MSG_EQ(v.size(), 10u, "vector size");
+        for (const auto& m : v)
+        {
+            NS_TEST_EXPECT_MSG_EQ(m.labels.at(oranntn::label::kFiveQi),
+                                  "1",
+                                  std::string("FIVE_QI label on ") + m.metricId);
+            NS_TEST_EXPECT_MSG_EQ(m.labels.at(oranntn::label::kSnssai),
+                                  "1-000002",
+                                  std::string("S-NSSAI label on ") + m.metricId);
+            NS_TEST_EXPECT_MSG_EQ(m.labels.at(oranntn::label::kPlmn),
+                                  "00102",
+                                  std::string("PLMN label on ") + m.metricId);
+        }
+    }
+};
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
 
@@ -1155,6 +1308,13 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnIslHeaderTestCase, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnInferenceTestCase, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnSpaceRicIslTestCase, TestCase::Duration::QUICK);
+        // Realism roadmap T8 — KPM ID alignment.
+        AddTestCase(new OranNtnKpmCanonicalIdsListTestCase,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnKpmCanonicalBuildTestCase,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnKpmCanonicalLabelsTestCase,
+                    TestCase::Duration::QUICK);
     }
 };
 
