@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include "ns3/contact-graph-router.h"
 #include "ns3/contact-graph-scheduler.h"
 #include "ns3/orbital-elements.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -366,6 +367,197 @@ class ContactSchedulerIslPairTest : public TestCase
     }
 };
 
+// ---------------------------------------------------------------------------
+//  Roadmap §4.4.4: ContactGraphRouter
+// ---------------------------------------------------------------------------
+
+class ContactGraphRouterDirectEdgesTest : public TestCase
+{
+  public:
+    ContactGraphRouterDirectEdgesTest()
+        : TestCase("ContactGraphRouter handles direct contact up and down events")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ContactGraphRouter> r = CreateObject<ContactGraphRouter>();
+        Ptr<ContactGraphScheduler> sched =
+            CreateObject<ContactGraphScheduler>();
+        r->Attach(sched);
+
+        ContactEvent ev_up{1.0, 1, 2, true, true, 1500e3, 0.0};
+        sched->m_contactUp(ev_up);
+        ContactEvent ev_up2{1.0, 2, 3, true, true, 1500e3, 0.0};
+        sched->m_contactUp(ev_up2);
+        NS_TEST_EXPECT_MSG_EQ(r->NumEdges(), 2u, "2 ISL edges live");
+        NS_TEST_EXPECT_MSG_EQ(r->HasEdge(1, 2), true, "edge 1<->2");
+        NS_TEST_EXPECT_MSG_EQ(r->HasEdge(2, 1), true, "edge 2<->1 undirected");
+        NS_TEST_EXPECT_MSG_EQ(r->HasEdge(1, 3), false, "no edge 1<->3");
+        NS_TEST_EXPECT_MSG_EQ(r->Neighbours(2).size(), 2u, "node 2 has 2 nbrs");
+
+        ContactEvent ev_down{2.0, 1, 2, true, false, 9999e3, 0.0};
+        sched->m_contactDown(ev_down);
+        NS_TEST_EXPECT_MSG_EQ(r->NumEdges(), 1u, "edge 1<->2 removed");
+        NS_TEST_EXPECT_MSG_EQ(r->HasEdge(1, 2), false, "edge gone");
+        NS_TEST_EXPECT_MSG_EQ(r->EdgesAddedTotal(), 2u, "2 adds counted");
+        NS_TEST_EXPECT_MSG_EQ(r->EdgesRemovedTotal(), 1u, "1 remove counted");
+
+        // Duplicate up is idempotent.
+        sched->m_contactUp(ev_up2);
+        NS_TEST_EXPECT_MSG_EQ(r->NumEdges(), 1u, "duplicate up is no-op");
+        NS_TEST_EXPECT_MSG_EQ(r->EdgesAddedTotal(),
+                              2u,
+                              "duplicate up does not double-count");
+    }
+};
+
+class ContactGraphRouterShortestPathTest : public TestCase
+{
+  public:
+    ContactGraphRouterShortestPathTest()
+        : TestCase("ContactGraphRouter BFS shortest-path on a 4-node ring")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ContactGraphRouter> r = CreateObject<ContactGraphRouter>();
+        Ptr<ContactGraphScheduler> sched =
+            CreateObject<ContactGraphScheduler>();
+        r->Attach(sched);
+
+        // Ring 1-2-3-4-1.
+        sched->m_contactUp({0, 1, 2, true, true, 1e6, 0.0});
+        sched->m_contactUp({0, 2, 3, true, true, 1e6, 0.0});
+        sched->m_contactUp({0, 3, 4, true, true, 1e6, 0.0});
+        sched->m_contactUp({0, 4, 1, true, true, 1e6, 0.0});
+        NS_TEST_EXPECT_MSG_EQ(r->NumEdges(), 4u, "ring has 4 edges");
+
+        auto p12 = r->ShortestPath(1, 2);
+        NS_TEST_ASSERT_MSG_EQ(p12.size(), 2u, "direct path size 2");
+        NS_TEST_EXPECT_MSG_EQ(p12[0], 1u, "path[0]=1");
+        NS_TEST_EXPECT_MSG_EQ(p12[1], 2u, "path[1]=2");
+
+        auto p13 = r->ShortestPath(1, 3);
+        NS_TEST_ASSERT_MSG_EQ(p13.size(), 3u, "opposite node is 2 hops");
+        NS_TEST_EXPECT_MSG_EQ(p13[0], 1u, "starts at src");
+        NS_TEST_EXPECT_MSG_EQ(p13[2], 3u, "ends at dst");
+
+        auto p_self = r->ShortestPath(2, 2);
+        NS_TEST_ASSERT_MSG_EQ(p_self.size(), 1u, "self-path length 1");
+        NS_TEST_EXPECT_MSG_EQ(p_self[0], 2u, "self path is {src}");
+
+        auto p_none = r->ShortestPath(1, 99);
+        NS_TEST_EXPECT_MSG_EQ(p_none.size(), 0u, "no path to unknown node");
+
+        // Break edge 1-2: path 1->2 lengthens to 1-4-3-2 (4 nodes, 3 hops).
+        sched->m_contactDown({1.0, 1, 2, true, false, 9e9, 0.0});
+        auto p12_again = r->ShortestPath(1, 2);
+        NS_TEST_ASSERT_MSG_EQ(p12_again.size(), 4u,
+                              "after edge 1-2 down, path is 1-4-3-2");
+        NS_TEST_EXPECT_MSG_EQ(p12_again.front(), 1u, "front still 1");
+        NS_TEST_EXPECT_MSG_EQ(p12_again.back(), 2u, "back still 2");
+        NS_TEST_EXPECT_MSG_GT(r->RouteQueries(), 0u, "queries counted");
+    }
+};
+
+namespace
+{
+
+struct RouteSample
+{
+    double t_s;
+    size_t num_edges;
+    size_t path_len;
+};
+
+void
+SampleRoute(Ptr<ContactGraphRouter> router,
+            uint32_t src,
+            uint32_t dst,
+            std::vector<RouteSample>* out)
+{
+    auto path = router->ShortestPath(src, dst);
+    out->push_back({Simulator::Now().GetSeconds(),
+                     router->NumEdges(),
+                     path.size()});
+}
+
+} // namespace
+
+class ContactGraphRouterSimulatorTimeTest : public TestCase
+{
+  public:
+    ContactGraphRouterSimulatorTimeTest()
+        : TestCase("Simulator: 600 s 4-sat Walker plane drives router edges "
+                   "and shortest-path samples through ISL evolution")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // 11-sat single-plane Walker @ 53° / 550 km — mean-anomaly delta
+        // = 360/11 ≈ 32.7°, along-track separation ≈ 3950 km, so each
+        // adjacent pair sits inside the 5000 km LEO-LEO ISL cap. We
+        // still query src=1, dst=3 (two hops along the ring).
+        WalkerConfig cfg;
+        cfg.inclination_deg = 53.0;
+        cfg.total_sats = 11;
+        cfg.num_planes = 1;
+        cfg.phasing_f = 0;
+        cfg.altitude_km = 550.0;
+        cfg.epoch_unix_s = 1577836800.0;
+        auto elts = WalkerConstellation::BuildDelta(cfg);
+        NS_TEST_ASSERT_MSG_EQ(elts.size(), 11u, "11 sats");
+
+        Ptr<ContactGraphScheduler> cg = CreateObject<ContactGraphScheduler>();
+        cg->SetSamplingInterval(Seconds(30.0));
+        cg->SetMaxIslRangeM(5'000'000.0); // realistic LEO-LEO cap
+        for (size_t i = 0; i < elts.size(); ++i)
+        {
+            Ptr<Sgp4MobilityModel> s = CreateObject<Sgp4MobilityModel>();
+            s->SetElements(elts[i]);
+            cg->RegisterSatellite(static_cast<uint32_t>(i + 1), s);
+        }
+        Ptr<ContactGraphRouter> router = CreateObject<ContactGraphRouter>();
+        router->Attach(cg);
+        cg->Start();
+
+        std::vector<RouteSample> samples;
+        for (int t = 60; t <= 600; t += 60)
+        {
+            Simulator::Schedule(Seconds(t),
+                                &SampleRoute,
+                                router,
+                                /*src=*/1u,
+                                /*dst=*/3u,
+                                &samples);
+        }
+        Simulator::Stop(Seconds(601));
+        Simulator::Run();
+        cg->Stop();
+
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), 10u, "10 route samples");
+
+        size_t max_edges = 0;
+        for (const auto& s : samples)
+        {
+            if (s.num_edges > max_edges)
+                max_edges = s.num_edges;
+        }
+        NS_TEST_ASSERT_MSG_GT(max_edges, 0u,
+                              "router sees at least one edge over 600 s");
+        NS_TEST_ASSERT_MSG_GT(router->EdgesAddedTotal(), 0u,
+                              "router observed edge-up events");
+
+        Simulator::Destroy();
+    }
+};
+
 class NtnConstellationTestSuite : public TestSuite
 {
   public:
@@ -379,6 +571,10 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new WalkerDeltaShapeTest, Duration::QUICK);
         AddTestCase(new ContactSchedulerLeoPassTest, Duration::QUICK);
         AddTestCase(new ContactSchedulerIslPairTest, Duration::QUICK);
+        // Roadmap §4.4.4 — ContactGraphRouter.
+        AddTestCase(new ContactGraphRouterDirectEdgesTest, Duration::QUICK);
+        AddTestCase(new ContactGraphRouterShortestPathTest, Duration::QUICK);
+        AddTestCase(new ContactGraphRouterSimulatorTimeTest, Duration::QUICK);
     }
 };
 

@@ -3,6 +3,8 @@ set(source_files
     model/sgp4-mobility-model.cc
     model/walker-constellation.cc
     model/contact-graph-scheduler.cc
+    # 4.4.4 — Contact-graph router integration (Roadmap §4.4 deep work)
+    model/contact-graph-router.cc
 )
 
 set(header_files
@@ -10,6 +12,8 @@ set(header_files
     model/sgp4-mobility-model.h
     model/walker-constellation.h
     model/contact-graph-scheduler.h
+    # 4.4.4 — Contact-graph router integration (Roadmap §4.4 deep work)
+    model/contact-graph-router.h
 )
 
 set(test_sources
