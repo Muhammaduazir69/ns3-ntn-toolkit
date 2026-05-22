@@ -138,6 +138,14 @@ class OranNtnConflictManager : public Object
     // ---- Metrics ----
     void WriteConflictLog(const std::string& filename) const;
 
+    /**
+     * \brief Classify a pair of RC actions into the WG3 conflict taxonomy
+     *        (Roadmap §4.1.10). Returns UNKNOWN if the pair isn't a conflict
+     *        per any of the three categories.
+     */
+    static ConflictType ClassifyConflict(const E2RcAction& a,
+                                          const E2RcAction& b);
+
     TracedCallback<XappConflict> m_conflictDetected;
     TracedCallback<XappConflict> m_conflictResolved;
 

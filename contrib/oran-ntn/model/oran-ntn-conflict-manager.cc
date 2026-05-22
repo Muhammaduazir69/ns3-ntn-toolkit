@@ -218,6 +218,8 @@ OranNtnConflictManager::ResolveConflict(const PendingAction& a1,
     conflict.xapp1Name = a1.action.xappName;
     conflict.xapp2Id = a2.xappId;
     conflict.xapp2Name = a2.action.xappName;
+    // Roadmap §4.1.10 — WG3 conflict taxonomy.
+    conflict.conflictType = ClassifyConflict(a1.action, a2.action);
 
     std::string resKey = GetResourceKey(a1.action);
     // Parse resource type from key
@@ -431,14 +433,110 @@ OranNtnConflictManager::WriteConflictLog(const std::string& filename) const
 {
     std::ofstream ofs(filename);
     ofs << "timestamp,xapp1_id,xapp1_name,xapp2_id,xapp2_name,"
-           "resource_type,resource_id,resolution,winner_id\n";
+           "resource_type,resource_id,resolution,winner_id,conflict_type\n";
 
     for (const auto& c : m_conflictLog)
     {
         ofs << c.timestamp << "," << c.xapp1Id << "," << c.xapp1Name << ","
             << c.xapp2Id << "," << c.xapp2Name << "," << c.resourceType << ","
-            << c.resourceId << "," << c.resolution << "," << c.winnerId << "\n";
+            << c.resourceId << "," << c.resolution << "," << c.winnerId << ","
+            << ConflictTypeName(c.conflictType) << "\n";
     }
+}
+
+namespace
+{
+
+// WG3 §4.1.10 resource families used for INDIRECT classification.
+// Two action types belong to the same family when they affect a shared pool
+// of physical / logical resources on the same gNB.
+enum class ResourceFamily : uint8_t
+{
+    PRB,
+    BEAM,
+    POWER,
+    HANDOVER,
+    TIMING,
+    MCS,
+    THZ,
+    SLICE,
+    AI_ML,
+    OTHER,
+};
+
+ResourceFamily
+FamilyOf(E2RcActionType t)
+{
+    switch (t)
+    {
+    case E2RcActionType::SLICE_PRB_ALLOCATION:
+    case E2RcActionType::PRB_RESERVATION:
+        return ResourceFamily::PRB;
+    case E2RcActionType::BEAM_SWITCH:
+    case E2RcActionType::BEAM_HOP_SCHEDULE:
+    case E2RcActionType::BEAM_SHUTDOWN:
+    case E2RcActionType::INTERFERENCE_NULLING:
+        return ResourceFamily::BEAM;
+    case E2RcActionType::TX_POWER_CONTROL:
+    case E2RcActionType::ENERGY_PROFILE_UPDATE:
+    case E2RcActionType::COMPUTE_THROTTLE:
+    case E2RcActionType::ACTION_THZ_POWER_BACKOFF:
+        return ResourceFamily::POWER;
+    case E2RcActionType::HANDOVER_TRIGGER:
+    case E2RcActionType::HANDOVER_CANCEL:
+    case E2RcActionType::DC_SETUP:
+    case E2RcActionType::DC_TEARDOWN:
+    case E2RcActionType::BEARER_SPLIT:
+        return ResourceFamily::HANDOVER;
+    case E2RcActionType::TIMING_ADVANCE_UPDATE:
+    case E2RcActionType::DOPPLER_COMP_UPDATE:
+        return ResourceFamily::TIMING;
+    case E2RcActionType::MCS_OVERRIDE:
+    case E2RcActionType::MODCOD_OVERRIDE:
+    case E2RcActionType::CCA_THRESHOLD_ADJUST:
+        return ResourceFamily::MCS;
+    case E2RcActionType::ACTION_THZ_FREQ_SELECT:
+    case E2RcActionType::ACTION_THZ_BEAM_CODEBOOK:
+    case E2RcActionType::ACTION_THZ_RIS_CONFIG:
+    case E2RcActionType::ACTION_THZ_WAVEFORM_SELECT:
+    case E2RcActionType::ACTION_THZ_ISAC_MODE:
+    case E2RcActionType::ACTION_THZ_WINDOW_HOP:
+        return ResourceFamily::THZ;
+    case E2RcActionType::ISL_ROUTE_UPDATE:
+    case E2RcActionType::REGEN_MODE_SWITCH:
+    case E2RcActionType::FL_MODEL_PUSH:
+        return ResourceFamily::AI_ML;
+    default:
+        return ResourceFamily::OTHER;
+    }
+}
+
+} // namespace
+
+ConflictType
+OranNtnConflictManager::ClassifyConflict(const E2RcAction& a,
+                                           const E2RcAction& b)
+{
+    // DIRECT: same parameter on the same UE+gNB+beam.
+    if (a.actionType == b.actionType && a.targetGnbId == b.targetGnbId &&
+        a.targetUeId == b.targetUeId && a.targetBeamId == b.targetBeamId)
+    {
+        return ConflictType::DIRECT;
+    }
+    // INDIRECT: same resource family on the same gNB (different parameter).
+    if (FamilyOf(a.actionType) == FamilyOf(b.actionType) &&
+        FamilyOf(a.actionType) != ResourceFamily::OTHER &&
+        a.targetGnbId == b.targetGnbId)
+    {
+        return ConflictType::INDIRECT;
+    }
+    // IMPLICIT: different parameter + different family, but both target the
+    // same UE (KPI coupling via that UE). UE 0 is wildcard, exclude it.
+    if (a.targetUeId != 0 && a.targetUeId == b.targetUeId)
+    {
+        return ConflictType::IMPLICIT;
+    }
+    return ConflictType::UNKNOWN;
 }
 
 } // namespace ns3

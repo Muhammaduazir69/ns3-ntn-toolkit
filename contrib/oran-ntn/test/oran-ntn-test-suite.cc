@@ -1742,6 +1742,93 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
 };
 
 // ============================================================================
+//  4.1.10 (Roadmap §4.1.10): WG3 conflict taxonomy
+// ============================================================================
+
+class OranNtnConflictTaxonomyTestCase : public TestCase
+{
+  public:
+    OranNtnConflictTaxonomyTestCase()
+        : TestCase("ClassifyConflict tags DIRECT, INDIRECT, IMPLICIT, UNKNOWN")
+    {
+    }
+
+  private:
+    static E2RcAction Make(E2RcActionType t, uint32_t gnb, uint32_t ue,
+                            uint32_t beam = 0)
+    {
+        E2RcAction a{};
+        a.actionType = t;
+        a.targetGnbId = gnb;
+        a.targetUeId = ue;
+        a.targetBeamId = beam;
+        return a;
+    }
+
+    void DoRun() override
+    {
+        // DIRECT: same action type, same target UE+gNB+beam.
+        E2RcAction a = Make(E2RcActionType::MCS_OVERRIDE, 1, 100, 0);
+        E2RcAction b = Make(E2RcActionType::MCS_OVERRIDE, 1, 100, 0);
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(
+                                  OranNtnConflictManager::ClassifyConflict(a, b)),
+                              static_cast<int>(ConflictType::DIRECT),
+                              "DIRECT same parameter");
+
+        // INDIRECT: different action types in the same family (PRB) on the
+        // same gNB.
+        E2RcAction prb1 = Make(E2RcActionType::SLICE_PRB_ALLOCATION, 1, 0);
+        E2RcAction prb2 = Make(E2RcActionType::PRB_RESERVATION, 1, 0);
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(
+                                  OranNtnConflictManager::ClassifyConflict(prb1,
+                                                                            prb2)),
+                              static_cast<int>(ConflictType::INDIRECT),
+                              "INDIRECT same family same gNB");
+
+        // INDIRECT for the HO family (HANDOVER_TRIGGER vs DC_SETUP).
+        E2RcAction ho1 = Make(E2RcActionType::HANDOVER_TRIGGER, 5, 100);
+        E2RcAction ho2 = Make(E2RcActionType::DC_SETUP, 5, 100);
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(
+                                  OranNtnConflictManager::ClassifyConflict(ho1,
+                                                                            ho2)),
+                              static_cast<int>(ConflictType::INDIRECT),
+                              "INDIRECT HO family");
+
+        // IMPLICIT: different family, same UE.
+        E2RcAction imp1 = Make(E2RcActionType::MCS_OVERRIDE, 1, 100);
+        E2RcAction imp2 = Make(E2RcActionType::TX_POWER_CONTROL, 2, 100);
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(
+                                  OranNtnConflictManager::ClassifyConflict(imp1,
+                                                                            imp2)),
+                              static_cast<int>(ConflictType::IMPLICIT),
+                              "IMPLICIT different family same UE");
+
+        // UNKNOWN: different family, different UE, different gNB.
+        E2RcAction un1 = Make(E2RcActionType::MCS_OVERRIDE, 1, 100);
+        E2RcAction un2 = Make(E2RcActionType::TX_POWER_CONTROL, 2, 200);
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(
+                                  OranNtnConflictManager::ClassifyConflict(un1,
+                                                                            un2)),
+                              static_cast<int>(ConflictType::UNKNOWN),
+                              "UNKNOWN unrelated targets");
+
+        // ConflictTypeName strings.
+        NS_TEST_EXPECT_MSG_EQ(std::string(
+                                  ConflictTypeName(ConflictType::DIRECT)),
+                              "direct",
+                              "DIRECT label");
+        NS_TEST_EXPECT_MSG_EQ(std::string(
+                                  ConflictTypeName(ConflictType::INDIRECT)),
+                              "indirect",
+                              "INDIRECT label");
+        NS_TEST_EXPECT_MSG_EQ(std::string(
+                                  ConflictTypeName(ConflictType::IMPLICIT)),
+                              "implicit",
+                              "IMPLICIT label");
+    }
+};
+
+// ============================================================================
 //  4.1.4 (Roadmap §4.1.4): OranNtnDataRepository
 // ============================================================================
 
@@ -1868,7 +1955,7 @@ class OranNtnDataRepoSqliteTestCase : public TestCase
 {
   public:
     OranNtnDataRepoSqliteTestCase()
-        : TestCase("SQLite data repository round-trips KPM/RC/xApp records")
+        : TestCase("SQLite data repository round-trips KPM, RC, and xApp records")
     {
     }
 
@@ -1996,6 +2083,9 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnDataRepoSqliteTestCase,
                     TestCase::Duration::QUICK);
 #endif
+        // Realism roadmap 4.1.10 — WG3 conflict taxonomy.
+        AddTestCase(new OranNtnConflictTaxonomyTestCase,
+                    TestCase::Duration::QUICK);
     }
 };
 
