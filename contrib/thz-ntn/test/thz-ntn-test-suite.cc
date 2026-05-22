@@ -18,11 +18,14 @@
 #include <ns3/uinteger.h>
 
 #include <ns3/constant-position-mobility-model.h>
+#include <ns3/constant-velocity-mobility-model.h>
 #include <ns3/node.h>
+#include <ns3/simulator.h>
 #include <ns3/thz-ntn-antenna-array.h>
 #include <ns3/thz-ntn-beamforming.h>
 #include <ns3/thz-ntn-channel-model.h>
 #include <ns3/thz-ntn-hardware-impairments.h>
+#include <ns3/thz-ntn-hitran-lut.h>
 #include <ns3/thz-ntn-isac.h>
 #include <ns3/thz-ntn-isl-channel.h>
 #include <ns3/thz-ntn-link-budget.h>
@@ -33,6 +36,11 @@
 #include <ns3/thz-ntn-weather-attenuation.h>
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <vector>
 
 using namespace ns3;
 
@@ -660,6 +668,342 @@ ThzNtnIsacTest::DoRun()
 // Test Suite Registration
 // ============================================================================
 
+// ============================================================================
+// Roadmap §4.3.1: HITRAN-2024 LUT loader + Simulator-time scenarios
+// ============================================================================
+
+namespace
+{
+
+std::string
+GenerateLutCsvFromModel(double f_start_ghz,
+                         double f_stop_ghz,
+                         double f_step_ghz,
+                         double h_start_km,
+                         double h_stop_km,
+                         double h_step_km)
+{
+    Ptr<ThzNtnMolecularAbsorption> abs =
+        CreateObject<ThzNtnMolecularAbsorption>();
+    std::ostringstream os;
+    os << "# release: HITRAN-2024\n"
+       << "# columns: freq_ghz, alt_km, attenuation_db_per_km\n"
+       << "freq_ghz,alt_km,attenuation_db_per_km\n";
+    for (double f = f_start_ghz; f <= f_stop_ghz + 1e-9; f += f_step_ghz)
+    {
+        for (double h = h_start_km; h <= h_stop_km + 1e-9; h += h_step_km)
+        {
+            const double trans = abs->GetTransmittance(f * 1e9, 1000.0, h);
+            const double db_per_km =
+                -10.0 * std::log10(std::max(trans, 1e-30));
+            os.precision(6);
+            os << std::fixed << f << "," << h << "," << db_per_km << "\n";
+        }
+    }
+    return os.str();
+}
+
+bool
+WriteFile(const std::string& path, const std::string& body)
+{
+    std::ofstream f(path);
+    if (!f)
+        return false;
+    f << body;
+    return f.good();
+}
+
+} // namespace
+
+class ThzNtnHitranLutLoadTest : public TestCase
+{
+  public:
+    ThzNtnHitranLutLoadTest()
+        : TestCase("HITRAN-2024 LUT loads from CSV and round-trips known values")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string path = "/tmp/thz-ntn-test-lut.csv";
+        const std::string body =
+            "# release: HITRAN-2024\n"
+            "# columns: freq_ghz, alt_km, attenuation_db_per_km\n"
+            "freq_ghz,alt_km,attenuation_db_per_km\n"
+            "100.000,0.00,0.012345\n"
+            "100.000,10.00,0.001234\n"
+            "200.000,0.00,0.123456\n"
+            "200.000,10.00,0.012345\n";
+        NS_TEST_ASSERT_MSG_EQ(WriteFile(path, body), true, "wrote CSV");
+
+        thzntn::HitranLut lut;
+        NS_TEST_ASSERT_MSG_EQ(lut.LoadCsv(path), true, "LoadCsv succeeded");
+        NS_TEST_ASSERT_MSG_EQ(lut.IsLoaded(), true, "loaded flag");
+        NS_TEST_EXPECT_MSG_EQ(lut.ReleaseTag(),
+                              "HITRAN-2024",
+                              "release tag");
+        NS_TEST_EXPECT_MSG_EQ(lut.FrequencyGridGhz().size(),
+                              2u,
+                              "2 frequencies");
+        NS_TEST_EXPECT_MSG_EQ(lut.AltitudeGridKm().size(), 2u, "2 alts");
+        NS_TEST_EXPECT_MSG_EQ(lut.Size(), 4u, "4 cells");
+
+        NS_TEST_ASSERT_MSG_EQ_TOL(lut.Get(100e9, 0.0),
+                                  0.012345,
+                                  1e-9,
+                                  "100 GHz at sea level");
+        NS_TEST_ASSERT_MSG_EQ_TOL(lut.Get(200e9, 10.0),
+                                  0.012345,
+                                  1e-9,
+                                  "200 GHz at 10 km");
+        const double mid =
+            0.25 * (0.012345 + 0.001234 + 0.123456 + 0.012345);
+        NS_TEST_ASSERT_MSG_EQ_TOL(lut.Get(150e9, 5.0),
+                                  mid,
+                                  1e-9,
+                                  "bilinear midpoint");
+        NS_TEST_ASSERT_MSG_EQ_TOL(lut.Get(50e9, 0.0),
+                                  0.012345,
+                                  1e-9,
+                                  "freq below clamps to low edge");
+        NS_TEST_ASSERT_MSG_EQ_TOL(lut.Get(300e9, 0.0),
+                                  0.123456,
+                                  1e-9,
+                                  "freq above clamps to high edge");
+
+        std::remove(path.c_str());
+    }
+};
+
+class ThzNtnHitranLutModelRoundTripTest : public TestCase
+{
+  public:
+    ThzNtnHitranLutModelRoundTripTest()
+        : TestCase("HITRAN-2024 LUT loaded into ThzNtnMolecularAbsorption matches model")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string path = "/tmp/thz-ntn-test-roundtrip.csv";
+        const std::string body =
+            GenerateLutCsvFromModel(100.0, 500.0, 10.0, 0.0, 30.0, 1.0);
+        NS_TEST_ASSERT_MSG_EQ(WriteFile(path, body),
+                              true,
+                              "wrote derived CSV");
+
+        Ptr<ThzNtnMolecularAbsorption> ref =
+            CreateObject<ThzNtnMolecularAbsorption>();
+        Ptr<ThzNtnMolecularAbsorption> withLut =
+            CreateObject<ThzNtnMolecularAbsorption>();
+        NS_TEST_ASSERT_MSG_EQ(withLut->LoadHitran2024Lut(path),
+                              true,
+                              "load LUT into model");
+        NS_TEST_EXPECT_MSG_EQ(withLut->IsHitranLutLoaded(),
+                              true,
+                              "model reports LUT loaded");
+        NS_TEST_EXPECT_MSG_EQ(withLut->GetHitranReleaseTag(),
+                              "HITRAN-2024",
+                              "release tag exposed");
+
+        const double freqs_ghz[] = {220.0, 280.0, 340.0, 410.0};
+        const double alts_km[] = {0.0, 5.0, 10.0, 20.0};
+        for (double f : freqs_ghz)
+        {
+            for (double h : alts_km)
+            {
+                const double tRef = ref->GetTransmittance(f * 1e9, 1000.0, h);
+                const double tLut =
+                    withLut->GetTransmittance(f * 1e9, 1000.0, h);
+                const double db_ref =
+                    -10.0 * std::log10(std::max(tRef, 1e-30));
+                const double db_lut =
+                    -10.0 * std::log10(std::max(tLut, 1e-30));
+                NS_TEST_ASSERT_MSG_EQ_TOL(
+                    db_lut,
+                    db_ref,
+                    0.05,
+                    "LUT vs Van Vleck mismatch at f=" << f << " GHz, h=" << h
+                                                       << " km");
+            }
+        }
+
+        NS_TEST_EXPECT_MSG_EQ(ref->GetHitranReleaseTag(),
+                              "in-process",
+                              "ref reports in-process");
+
+        std::remove(path.c_str());
+    }
+};
+
+class ThzNtnHitranSlantPathTest : public TestCase
+{
+  public:
+    ThzNtnHitranSlantPathTest()
+        : TestCase("LUT-driven slant path absorption agrees with in-process model")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string path = "/tmp/thz-ntn-test-slant.csv";
+        const std::string body =
+            GenerateLutCsvFromModel(100.0, 500.0, 5.0, 0.0, 30.0, 0.5);
+        NS_TEST_ASSERT_MSG_EQ(WriteFile(path, body), true, "wrote CSV");
+
+        Ptr<ThzNtnMolecularAbsorption> ref =
+            CreateObject<ThzNtnMolecularAbsorption>();
+        Ptr<ThzNtnMolecularAbsorption> withLut =
+            CreateObject<ThzNtnMolecularAbsorption>();
+        NS_TEST_ASSERT_MSG_EQ(withLut->LoadHitran2024Lut(path), true, "load");
+
+        const double dB_ref = ref->ComputeAbsorptionLoss_dB(
+            220e9, 1300e3, 0.0, 550.0, 25.0);
+        const double dB_lut = withLut->ComputeAbsorptionLoss_dB(
+            220e9, 1300e3, 0.0, 550.0, 25.0);
+        NS_TEST_ASSERT_MSG_GT(dB_ref, 0.0, "slant absorption positive");
+        NS_TEST_ASSERT_MSG_EQ_TOL(
+            dB_lut, dB_ref, std::max(0.5, 0.05 * dB_ref),
+            "LUT slant vs model mismatch dB_ref=" << dB_ref
+                                                  << " dB_lut=" << dB_lut);
+
+        const double dB_isl = withLut->ComputeAbsorptionLoss_dB(
+            220e9, 5000e3, 550.0, 600.0, 0.0);
+        NS_TEST_ASSERT_MSG_EQ(dB_isl, 0.0, "ISL absorption is 0");
+
+        std::remove(path.c_str());
+    }
+};
+
+class ThzNtnHitranBundledLutTest : public TestCase
+{
+  public:
+    ThzNtnHitranBundledLutTest()
+        : TestCase("Bundled HITRAN-2024 sub-THz LUT loads and covers 100-500 GHz, 0-30 km")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string candidates[] = {
+            "contrib/thz-ntn/data/hitran2024-lut-subthz.csv",
+            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/thz-ntn/data/"
+            "hitran2024-lut-subthz.csv",
+        };
+        thzntn::HitranLut lut;
+        bool loaded = false;
+        for (const auto& c : candidates)
+        {
+            if (lut.LoadCsv(c))
+            {
+                loaded = true;
+                break;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(loaded, true, "bundled LUT not found");
+        NS_TEST_EXPECT_MSG_EQ(lut.ReleaseTag(),
+                              "HITRAN-2024",
+                              "bundled tag");
+        NS_TEST_EXPECT_MSG_EQ(lut.FrequencyGridGhz().size(),
+                              41u,
+                              "41 freqs");
+        NS_TEST_EXPECT_MSG_EQ(lut.AltitudeGridKm().size(), 31u, "31 alts");
+        NS_TEST_EXPECT_MSG_EQ(lut.Size(), 41u * 31u, "1271 cells");
+        const double v = lut.Get(220e9, 0.0);
+        NS_TEST_ASSERT_MSG_GT(v, 0.1, "220 GHz sea level too low");
+        NS_TEST_ASSERT_MSG_LT(v, 5.0, "220 GHz sea level too high");
+    }
+};
+
+namespace
+{
+
+struct HitranSample
+{
+    double t_s;
+    double alt_km;
+    double db_per_km;
+};
+
+void
+SampleHitranLut(thzntn::HitranLut* lut,
+                Ptr<ConstantVelocityMobilityModel> haps,
+                std::vector<HitranSample>* out)
+{
+    Vector p = haps->GetPosition();
+    const double alt_km = p.z / 1e3;
+    const double db = lut->Get(280e9, alt_km);
+    out->push_back({Simulator::Now().GetSeconds(), alt_km, db});
+}
+
+} // namespace
+
+class ThzNtnHitranSimulatorTimeTest : public TestCase
+{
+  public:
+    ThzNtnHitranSimulatorTimeTest()
+        : TestCase("Simulator: 30 s HAPS ascent yields monotonically non-increasing absorption")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string candidates[] = {
+            "contrib/thz-ntn/data/hitran2024-lut-subthz.csv",
+            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/thz-ntn/data/"
+            "hitran2024-lut-subthz.csv",
+        };
+        thzntn::HitranLut lut;
+        for (const auto& c : candidates)
+        {
+            if (lut.LoadCsv(c))
+                break;
+        }
+        NS_TEST_ASSERT_MSG_EQ(lut.IsLoaded(), true, "bundled LUT loaded");
+
+        Ptr<ConstantVelocityMobilityModel> haps =
+            CreateObject<ConstantVelocityMobilityModel>();
+        haps->SetPosition(Vector(0, 0, 1000.0));
+        haps->SetVelocity(Vector(0, 0, 633.0));
+
+        std::vector<HitranSample> samples;
+        for (int t = 1; t <= 30; ++t)
+        {
+            Simulator::Schedule(Seconds(t), &SampleHitranLut, &lut, haps,
+                                &samples);
+        }
+        Simulator::Stop(Seconds(31));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), 30u, "30 samples");
+        for (size_t i = 1; i < samples.size(); ++i)
+        {
+            const bool altRose =
+                samples[i].alt_km > samples[i - 1].alt_km;
+            NS_TEST_ASSERT_MSG_EQ(altRose,
+                                  true,
+                                  "altitude rises every tick");
+            const bool dbDropped =
+                samples[i].db_per_km <= samples[i - 1].db_per_km + 1e-9;
+            NS_TEST_ASSERT_MSG_EQ(dbDropped,
+                                  true,
+                                  "absorption non-increasing as HAPS climbs");
+        }
+        const bool dropped10x =
+            samples.back().db_per_km * 10.0 < samples.front().db_per_km;
+        NS_TEST_ASSERT_MSG_EQ(dropped10x,
+                              true,
+                              "absorption drops ≥10× over 1->20 km climb");
+
+        Simulator::Destroy();
+    }
+};
+
 /**
  * \ingroup thz-ntn-test
  * \brief THz-NTN module test suite.
@@ -685,6 +1029,12 @@ ThzNtnTestSuite::ThzNtnTestSuite()
     AddTestCase(new ThzNtnIslTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnRisTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnIsacTest, TestCase::Duration::QUICK);
+    // Roadmap §4.3.1 — HITRAN-2024 LUT.
+    AddTestCase(new ThzNtnHitranLutLoadTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnHitranLutModelRoundTripTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnHitranSlantPathTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnHitranBundledLutTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnHitranSimulatorTimeTest, TestCase::Duration::QUICK);
 }
 
 /// Static instance to register the test suite

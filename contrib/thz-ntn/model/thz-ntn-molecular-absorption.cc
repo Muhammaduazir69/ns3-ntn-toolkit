@@ -122,6 +122,24 @@ ThzNtnMolecularAbsorption::~ThzNtnMolecularAbsorption()
     NS_LOG_FUNCTION(this);
 }
 
+bool
+ThzNtnMolecularAbsorption::LoadHitran2024Lut(const std::string& path)
+{
+    NS_LOG_FUNCTION(this << path);
+    return m_lut.LoadCsv(path);
+}
+
+std::string
+ThzNtnMolecularAbsorption::GetHitranReleaseTag() const
+{
+    if (m_lut.IsLoaded())
+    {
+        const auto& tag = m_lut.ReleaseTag();
+        return tag.empty() ? std::string(thzntn::kHitranRelease) : tag;
+    }
+    return "in-process";
+}
+
 void
 ThzNtnMolecularAbsorption::DoDispose()
 {
@@ -609,13 +627,32 @@ ThzNtnMolecularAbsorption::ComputeSlantPathAbsorption(double freqHz,
             // Slant distance through this sub-layer [km]
             double slantDist_km = dh / sinThetaEff;
 
-            // Atmospheric conditions at the mid-point
-            double tempK, pressureHPa, humidity;
-            GetAtmosphericConditions(h_mid, tempK, pressureHPa, humidity);
-
             // Absorption coefficient at this point [Np/km]
-            double k_NpKm = ComputeAbsorptionCoefficient(freqHz, tempK,
-                                                          pressureHPa, humidity);
+            double k_NpKm;
+            if (m_lut.IsLoaded())
+            {
+                // HITRAN-2024 LUT path (Roadmap §4.3.1) — returns dB/km;
+                // convert to Np/km via 1/NP_TO_DB.
+                double db_per_km = m_lut.Get(freqHz, h_mid);
+                if (std::isfinite(db_per_km))
+                {
+                    k_NpKm = db_per_km / NP_TO_DB;
+                }
+                else
+                {
+                    double tempK, pressureHPa, humidity;
+                    GetAtmosphericConditions(h_mid, tempK, pressureHPa, humidity);
+                    k_NpKm = ComputeAbsorptionCoefficient(freqHz, tempK,
+                                                           pressureHPa, humidity);
+                }
+            }
+            else
+            {
+                double tempK, pressureHPa, humidity;
+                GetAtmosphericConditions(h_mid, tempK, pressureHPa, humidity);
+                k_NpKm = ComputeAbsorptionCoefficient(freqHz, tempK,
+                                                       pressureHPa, humidity);
+            }
 
             // Accumulate absorption [Np]
             totalAbsorption_Np += k_NpKm * slantDist_km;
@@ -680,6 +717,17 @@ ThzNtnMolecularAbsorption::GetTransmittance(double freqHz,
                                              double altitudeAvg_km) const
 {
     NS_LOG_FUNCTION(this << freqHz << distanceM << altitudeAvg_km);
+
+    // Roadmap §4.3.1: HITRAN-2024 LUT path when loaded.
+    if (m_lut.IsLoaded())
+    {
+        double db_per_km = m_lut.Get(freqHz, altitudeAvg_km);
+        if (std::isfinite(db_per_km))
+        {
+            double db = db_per_km * (distanceM / 1e3);
+            return std::pow(10.0, -db / 10.0);
+        }
+    }
 
     // Get atmospheric conditions at the representative altitude
     double tempK, pressureHPa, humidity;

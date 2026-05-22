@@ -33,6 +33,8 @@
 #ifndef THZ_NTN_MOLECULAR_ABSORPTION_H
 #define THZ_NTN_MOLECULAR_ABSORPTION_H
 
+#include "thz-ntn-hitran-lut.h"
+
 #include <ns3/object.h>
 
 #include <string>
@@ -159,6 +161,28 @@ class ThzNtnMolecularAbsorption : public Object
                             double distanceM,
                             double altitudeAvg_km) const;
 
+    /**
+     * \brief Load a HITRAN-2024 specific-attenuation LUT (Roadmap §4.3.1).
+     *
+     * On success subsequent ComputeAbsorptionCoefficient() calls bilinear-
+     * interpolate the LUT instead of summing Van Vleck–Weisskopf terms.
+     * On failure (I/O / parse error) the model continues to use the
+     * in-process line database so the simulation always makes progress.
+     *
+     * \param path  path to the CSV LUT produced by
+     *              `contrib/thz-ntn/tools/hitran2024-lut-gen.py`
+     * \return true iff the LUT was loaded successfully
+     */
+    bool LoadHitran2024Lut(const std::string& path);
+
+    /// True iff a HITRAN-2024 LUT is loaded and being consulted by the
+    /// absorption coefficient path.
+    bool IsHitranLutLoaded() const { return m_lut.IsLoaded(); }
+
+    /// Release tag this build advertises in the reproducibility manifest.
+    /// Returns "HITRAN-2024" when a LUT is loaded with that tag, else "in-process".
+    std::string GetHitranReleaseTag() const;
+
   protected:
     void DoDispose() override;
 
@@ -241,6 +265,10 @@ class ThzNtnMolecularAbsorption : public Object
     // Pre-built tables
     std::vector<AtmosphericLayer> m_layers;  //!< atmospheric layer definitions
     std::vector<AbsorptionLine> m_lines;     //!< absorption line database
+
+    // 4.3.1 — HITRAN-2024 LUT path. When loaded, ComputeAbsorptionCoefficient
+    // routes through `m_lut` and skips the in-process Van Vleck sum.
+    thzntn::HitranLut m_lut;
 };
 
 } // namespace ns3

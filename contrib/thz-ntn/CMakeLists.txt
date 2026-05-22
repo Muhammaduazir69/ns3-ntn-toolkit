@@ -1,6 +1,8 @@
 set(source_files
     # Phase 1: Foundation - Channel models and spectrum
     model/thz-ntn-molecular-absorption.cc
+    # 4.3.1 — HITRAN-2024 LUT loader (Roadmap §4.3.1)
+    model/thz-ntn-hitran-lut.cc
     model/thz-ntn-weather-attenuation.cc
     model/thz-ntn-scintillation.cc
     model/thz-ntn-pointing-error.cc
@@ -34,6 +36,8 @@ set(source_files
 set(header_files
     # Phase 1: Foundation - Channel models and spectrum
     model/thz-ntn-molecular-absorption.h
+    # 4.3.1 — HITRAN-2024 LUT loader (Roadmap §4.3.1)
+    model/thz-ntn-hitran-lut.h
     model/thz-ntn-weather-attenuation.h
     model/thz-ntn-scintillation.h
     model/thz-ntn-pointing-error.h
