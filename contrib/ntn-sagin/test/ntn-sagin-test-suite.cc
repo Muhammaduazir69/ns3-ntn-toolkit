@@ -11,6 +11,8 @@
 #include "ns3/multi-layer-router.h"
 #include "ns3/ais-maritime-trace.h"
 #include "ns3/ais-mobility-model.h"
+#include "ns3/hst-mobility-model.h"
+#include "ns3/hst-trace.h"
 #include "ns3/opensky-adsb-trace.h"
 #include "ns3/opensky-mobility-model.h"
 #include "ns3/simulator.h"
@@ -704,6 +706,206 @@ class AisSimulatorTimeReplayTest : public TestCase
     }
 };
 
+// ============================================================================
+// Roadmap §4.4.3: HST mobility (TR 38.901 §7.5)
+// ============================================================================
+
+class HstPresetGeometryTest : public TestCase
+{
+  public:
+    HstPresetGeometryTest()
+        : TestCase("TR 38.901 HST presets carry the right speed and Dmin")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto A = sagin::HstTraceGenerator::PresetTR38901_A(60.0, 61);
+        NS_TEST_ASSERT_MSG_EQ_TOL(A.speed_kmh, 500.0, 1e-9, "HST-A speed");
+        NS_TEST_ASSERT_MSG_EQ_TOL(A.dmin_m, 150.0, 1e-9, "HST-A Dmin");
+        NS_TEST_ASSERT_MSG_EQ_TOL(A.cellSpacing_m, 300.0, 1e-9, "HST-A Ds");
+        NS_TEST_ASSERT_MSG_EQ_TOL(A.SpeedMps(), 500.0 / 3.6, 1e-9,
+                                  "HST-A speed in m/s");
+
+        auto B = sagin::HstTraceGenerator::PresetTR38901_B(60.0, 61);
+        NS_TEST_ASSERT_MSG_EQ_TOL(B.speed_kmh, 300.0, 1e-9, "HST-B speed");
+        NS_TEST_ASSERT_MSG_EQ_TOL(B.dmin_m, 10.0, 1e-9, "HST-B Dmin");
+
+        auto C = sagin::HstTraceGenerator::PresetTR38901_C(60.0, 61);
+        NS_TEST_ASSERT_MSG_EQ_TOL(C.speed_kmh, 350.0, 1e-9, "HST-C speed");
+
+        // 61 samples evenly spaced 0..60 s -> dt = 1 s.
+        NS_TEST_ASSERT_MSG_EQ(A.samples.size(), 61u, "61 samples");
+        NS_TEST_ASSERT_MSG_EQ_TOL(A.samples[1].time_s - A.samples[0].time_s,
+                                  1.0, 1e-9, "1 s sample interval");
+        // After 1 s at 500 km/h, x = 138.89 m.
+        NS_TEST_ASSERT_MSG_EQ_TOL(A.samples[1].x_m, 138.889, 0.01,
+                                  "x at t=1 s");
+    }
+};
+
+class HstDopplerShiftTest : public TestCase
+{
+  public:
+    HstDopplerShiftTest()
+        : TestCase("TR 38.901 HST: Doppler shift matches v_radial / c * f_c")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto tr = sagin::HstTraceGenerator::PresetTR38901_A(60.0, 61);
+        // gNB sits ahead of the train at along-track x = 1000 m, Dmin = 150 m
+        // perpendicular. At t=0 the train is far back (x=0), v=138.89 m/s
+        // along +x.
+        //   dx = 1000  dy = 150  r = sqrt(1000^2+150^2) = 1011.19 m
+        //   v_radial = v * dx/r = 138.89 * 1000 / 1011.19 = 137.36 m/s
+        //   f_d = 137.36 / 3e8 * 30e9 = 13.736 kHz (approaching)
+        const double f_d_30G = tr.DopplerHzAt(0.0, 1000.0, 30e9);
+        NS_TEST_ASSERT_MSG_GT(f_d_30G, 0.0,
+                              "approaching => positive Doppler");
+        NS_TEST_ASSERT_MSG_EQ_TOL(f_d_30G, 13736.0, 100.0,
+                                  "Doppler @ 30 GHz, t=0, gNB 1km ahead");
+
+        // After the train passes the gNB (t large -> train past gNB),
+        // Doppler must flip sign (receding).
+        const double t_pass = 1000.0 / tr.SpeedMps(); // ~7.2 s
+        const double f_d_after = tr.DopplerHzAt(t_pass + 2.0, 1000.0, 30e9);
+        NS_TEST_ASSERT_MSG_LT(f_d_after, 0.0,
+                              "receding => negative Doppler");
+
+        // Right at closest approach the radial component is 0 ->
+        // Doppler ≈ 0.
+        const double f_d_closest = tr.DopplerHzAt(t_pass, 1000.0, 30e9);
+        NS_TEST_ASSERT_MSG_LT(std::abs(f_d_closest), 100.0,
+                              "Doppler ≈ 0 at closest approach");
+
+        // f_d scales linearly in carrier frequency. At 4 GHz the Doppler
+        // is 4/30 of the 30 GHz number.
+        const double f_d_4G = tr.DopplerHzAt(0.0, 1000.0, 4e9);
+        NS_TEST_ASSERT_MSG_EQ_TOL(f_d_4G * 30.0 / 4.0,
+                                  f_d_30G,
+                                  10.0,
+                                  "Doppler scales linearly with carrier");
+    }
+};
+
+namespace
+{
+
+struct HstSimSample
+{
+    double t_s;
+    double x_m;
+    double v_mps;
+    double doppler_hz;
+};
+
+void
+SampleHstModel(Ptr<sagin::HstMobilityModel> mob,
+                double gnb_x_m,
+                std::vector<HstSimSample>* out)
+{
+    Vector p = mob->GetPosition();
+    Vector v = mob->GetVelocity();
+    const double d = mob->GetDopplerHz(gnb_x_m);
+    out->push_back({Simulator::Now().GetSeconds(), p.x, v.x, d});
+}
+
+} // namespace
+
+class HstSimulatorTimePassByTest : public TestCase
+{
+  public:
+    HstSimulatorTimePassByTest()
+        : TestCase("Simulator: 60 s HST-A pass-by at 500 kmh yields Doppler "
+                   "sign flip at closest approach")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<sagin::HstMobilityModel> mob =
+            CreateObject<sagin::HstMobilityModel>();
+        mob->SetTrace(sagin::HstTraceGenerator::PresetTR38901_A(60.0, 61));
+        mob->SetCarrierFrequencyHz(30e9);
+
+        const double gnb_x_m = 3000.0; // gNB 3 km along-track from start
+
+        std::vector<HstSimSample> samples;
+        for (int t = 0; t <= 60; ++t)
+        {
+            Simulator::Schedule(Seconds(t),
+                                &SampleHstModel,
+                                mob,
+                                gnb_x_m,
+                                &samples);
+        }
+        Simulator::Stop(Seconds(61));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), 61u, "61 samples");
+
+        // Constant velocity check.
+        const double expectV = 500.0 / 3.6;
+        for (const auto& s : samples)
+        {
+            NS_TEST_ASSERT_MSG_EQ_TOL(s.v_mps, expectV, 1e-6,
+                                      "velocity constant at 500 km/h");
+        }
+        // x monotonic.
+        for (size_t i = 1; i < samples.size(); ++i)
+        {
+            NS_TEST_ASSERT_MSG_GT(samples[i].x_m, samples[i - 1].x_m,
+                                  "position monotonic");
+        }
+        // x at t=60 ≈ 138.89 * 60 = 8333.3 m.
+        NS_TEST_ASSERT_MSG_EQ_TOL(samples.back().x_m, 8333.33, 1.0,
+                                  "60 s travel = 8333 m");
+
+        // Doppler must start positive (train approaching gNB at x=3000)
+        // and end negative (train past gNB).
+        NS_TEST_ASSERT_MSG_GT(samples.front().doppler_hz, 0.0,
+                              "approach: Doppler > 0");
+        NS_TEST_ASSERT_MSG_LT(samples.back().doppler_hz, 0.0,
+                              "recede: Doppler < 0");
+
+        // The pass-by happens at t = 3000 / 138.89 = 21.6 s. There must
+        // be a sample with |Doppler| smaller than the start, sandwiched
+        // between two strictly larger samples (zero-crossing region).
+        size_t minIdx = 0;
+        double minAbs = std::abs(samples.front().doppler_hz);
+        for (size_t i = 0; i < samples.size(); ++i)
+        {
+            if (std::abs(samples[i].doppler_hz) < minAbs)
+            {
+                minAbs = std::abs(samples[i].doppler_hz);
+                minIdx = i;
+            }
+        }
+        NS_TEST_ASSERT_MSG_GT(minIdx, 0u,
+                              "pass-by sample is not the first sample");
+        NS_TEST_ASSERT_MSG_LT(minIdx, samples.size() - 1,
+                              "pass-by sample is not the last sample");
+        // The true pass-by Doppler is 0, but at 1 Hz sampling and 500
+        // km/h, the train moves 139 m between ticks, so the nearest
+        // sample lands several hundred metres off the perpendicular and
+        // the min |Doppler| is in the few-kHz range. Assert it is
+        // substantially smaller than the starting Doppler.
+        NS_TEST_ASSERT_MSG_LT(minAbs,
+                              0.5 * std::abs(samples.front().doppler_hz),
+                              "min |Doppler| < 50% of start |Doppler|");
+        // Sample at minIdx should be near t=21..22 s.
+        NS_TEST_ASSERT_MSG_GT(samples[minIdx].t_s, 19.0, "pass-by t > 19 s");
+        NS_TEST_ASSERT_MSG_LT(samples[minIdx].t_s, 24.0, "pass-by t < 24 s");
+
+        Simulator::Destroy();
+    }
+};
+
 class NtnSaginTestSuite : public TestSuite
 {
   public:
@@ -726,6 +928,10 @@ class NtnSaginTestSuite : public TestSuite
         AddTestCase(new AisImporterMalformedTest, TestCase::Duration::QUICK);
         AddTestCase(new AisTraceInterpolationTest, TestCase::Duration::QUICK);
         AddTestCase(new AisSimulatorTimeReplayTest, TestCase::Duration::QUICK);
+        // Roadmap §4.4.3 — HST high-speed train (TR 38.901 §7.5).
+        AddTestCase(new HstPresetGeometryTest, TestCase::Duration::QUICK);
+        AddTestCase(new HstDopplerShiftTest, TestCase::Duration::QUICK);
+        AddTestCase(new HstSimulatorTimePassByTest, TestCase::Duration::QUICK);
     }
 };
 

@@ -10,6 +10,9 @@ set(source_files
     # 4.4.2 — AIS maritime trace importer + mobility model (Roadmap §4.4.2)
     model/ais-maritime-trace.cc
     model/ais-mobility-model.cc
+    # 4.4.3 — HST high-speed train (TR 38.901 §7.5) mobility (Roadmap §4.4.3)
+    model/hst-trace.cc
+    model/hst-mobility-model.cc
     helper/sagin-helper.cc
 )
 
@@ -25,6 +28,9 @@ set(header_files
     # 4.4.2 — AIS maritime trace importer + mobility model (Roadmap §4.4.2)
     model/ais-maritime-trace.h
     model/ais-mobility-model.h
+    # 4.4.3 — HST high-speed train (TR 38.901 §7.5) mobility (Roadmap §4.4.3)
+    model/hst-trace.h
+    model/hst-mobility-model.h
     helper/sagin-helper.h
 )
 
