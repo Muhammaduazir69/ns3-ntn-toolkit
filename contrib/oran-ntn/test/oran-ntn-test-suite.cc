@@ -14,6 +14,7 @@
 #include "ns3/oran-ntn-dual-connectivity.h"
 #include "ns3/oran-ntn-e2-interface.h"
 #include "ns3/oran-ntn-federated-learning.h"
+#include "ns3/oran-ntn-flexric-types.h"
 #include "ns3/oran-ntn-isl-header.h"
 #include "ns3/oran-ntn-kpm-canonical-ids.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
@@ -1275,6 +1276,196 @@ class OranNtnKpmCanonicalLabelsTestCase : public TestCase
 };
 
 // ============================================================================
+//  4.1.1 (Roadmap §4.1.1): FlexRIC field-name parity
+// ============================================================================
+
+class OranNtnFlexricE2apShapesTestCase : public TestCase
+{
+  public:
+    OranNtnFlexricE2apShapesTestCase()
+        : TestCase("FlexRIC e2ap_msg_t shapes carry verbatim field names")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::flexric;
+
+        // ric_request_id_t fields (FlexRIC names): ric_id + ric_instance_id.
+        ric_request_id_t reqId{};
+        reqId.ric_id = 0x1234;
+        reqId.ric_instance_id = 0x0007;
+        NS_TEST_EXPECT_MSG_EQ(reqId.ric_id, 0x1234u, "ric_id");
+        NS_TEST_EXPECT_MSG_EQ(reqId.ric_instance_id, 0x0007u, "ric_instance_id");
+
+        // ric_action_to_be_setup_t (FlexRIC names): ric_action_id,
+        // ric_action_type, action_definition, subsequent_action.
+        ric_action_to_be_setup_t act{};
+        act.ric_action_id = 42;
+        act.ric_action_type = ric_action_type_t::report;
+        act.action_definition = {0xDE, 0xAD, 0xBE, 0xEF};
+        act.subsequent_action = ric_subsequent_action_type_t::continue_action;
+        NS_TEST_EXPECT_MSG_EQ(act.ric_action_id, 42u, "ric_action_id");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(act.ric_action_type),
+                              0,
+                              "ric_action_type wire code = 0 for report");
+        NS_TEST_ASSERT_MSG_EQ(act.action_definition.size(),
+                              4u,
+                              "action_definition length");
+        NS_TEST_EXPECT_MSG_EQ(act.action_definition[2],
+                              0xBEu,
+                              "action_definition[2]");
+        NS_TEST_ASSERT_MSG_EQ(act.subsequent_action.has_value(),
+                              true,
+                              "subsequent_action present");
+
+        // ric_subscription_request_t fields.
+        ric_subscription_request_t sub{};
+        sub.ric_id = reqId;
+        sub.ran_function_id = 147;        // KPM SM
+        sub.event_trigger = {0x01, 0x02};
+        sub.action_to_be_setup.push_back(act);
+        NS_TEST_EXPECT_MSG_EQ(sub.ran_function_id, 147u, "ran_function_id");
+        NS_TEST_ASSERT_MSG_EQ(sub.action_to_be_setup.size(),
+                              1u,
+                              "action_to_be_setup length");
+
+        // ric_indication_t fields.
+        ric_indication_t ind{};
+        ind.ric_id = reqId;
+        ind.ran_function_id = 147;
+        ind.ric_action_id = 42;
+        ind.ric_indication_sn = 1;
+        ind.ric_indication_type = 0;
+        ind.ric_indication_header = {0x10};
+        ind.ric_indication_message = {0x20, 0x21};
+        NS_TEST_EXPECT_MSG_EQ(ind.ric_indication_sn, 1u, "ric_indication_sn");
+        NS_TEST_EXPECT_MSG_EQ(ind.ric_indication_message.size(),
+                              2u,
+                              "indication_message body");
+
+        // ric_control_request_t fields.
+        ric_control_request_t ctrl{};
+        ctrl.ric_id = reqId;
+        ctrl.ran_function_id = 3;          // RC SM
+        ctrl.ric_control_header = {0xAA};
+        ctrl.ric_control_message = {0xBB, 0xCC};
+        ctrl.ric_control_ack_request = 1;
+        NS_TEST_EXPECT_MSG_EQ(ctrl.ran_function_id, 3u, "RC ran_function_id");
+        NS_TEST_ASSERT_MSG_EQ(ctrl.ric_control_ack_request.has_value(),
+                              true,
+                              "ack request set");
+
+        // e2ap_msg_t tagged union round-trip.
+        e2ap_msg_t msg{};
+        msg.type = e2ap_pdu_type_t::initiating_message;
+        msg.u = ind;
+        NS_TEST_ASSERT_MSG_EQ(std::holds_alternative<ric_indication_t>(msg.u),
+                              true,
+                              "msg holds ric_indication_t");
+        NS_TEST_EXPECT_MSG_EQ(
+            std::get<ric_indication_t>(msg.u).ric_action_id,
+            42u,
+            "round-trip ric_action_id");
+    }
+};
+
+class OranNtnFlexricKpmFormat1TestCase : public TestCase
+{
+  public:
+    OranNtnFlexricKpmFormat1TestCase()
+        : TestCase("FlexRIC kpm_ind_msg_format_1_t carries meas_info, "
+                   "meas_record, label_info lists")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::flexric::kpm_v3;
+        using oranntn::flexric::ric_indication_t;
+
+        kpm_ind_msg_format_1_t body{};
+        body.gran_period_ms = 1000;
+
+        meas_info_format_1_lst_t row{};
+        row.meas_type.form = meas_type_form_t::name;
+        // FlexRIC takes the canonical metric name verbatim; reuses the
+        // string declared in oran-ntn-kpm-canonical-ids.h.
+        row.meas_type.meas_name = oranntn::kpm::kDrbUeThpDl;
+
+        meas_record_item_t r1{};
+        r1.form = meas_value_form_t::real;
+        r1.real_val = 12345.0;
+        row.meas_record_lst.push_back(r1);
+
+        meas_record_item_t r2{};
+        r2.form = meas_value_form_t::integer;
+        r2.int_val = 9876;
+        row.meas_record_lst.push_back(r2);
+
+        label_info_t lbl{};
+        lbl.five_qi = 9;
+        lbl.s_nssai = "1-000001";
+        lbl.plmn_id = "00101";
+        row.label_info_lst.push_back(lbl);
+
+        body.meas_info_lst.push_back(row);
+
+        // Shape assertions — verbatim FlexRIC names.
+        NS_TEST_ASSERT_MSG_EQ(body.meas_info_lst.size(),
+                              1u,
+                              "meas_info_lst length");
+        NS_TEST_EXPECT_MSG_EQ(body.gran_period_ms,
+                              1000u,
+                              "gran_period_ms");
+        const auto& got = body.meas_info_lst[0];
+        NS_TEST_EXPECT_MSG_EQ(got.meas_type.meas_name,
+                              "DRB.UEThpDl",
+                              "verbatim canonical meas_name");
+        NS_TEST_ASSERT_MSG_EQ(got.meas_record_lst.size(),
+                              2u,
+                              "two records");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.meas_record_lst[0].form),
+                              static_cast<int>(meas_value_form_t::real),
+                              "record[0] form = real");
+        NS_TEST_EXPECT_MSG_EQ(got.meas_record_lst[0].real_val,
+                              12345.0,
+                              "record[0] value");
+        NS_TEST_EXPECT_MSG_EQ(got.meas_record_lst[1].int_val,
+                              9876,
+                              "record[1] integer value");
+        NS_TEST_ASSERT_MSG_EQ(got.label_info_lst.size(),
+                              1u,
+                              "one label group");
+        NS_TEST_ASSERT_MSG_EQ(got.label_info_lst[0].five_qi.has_value(),
+                              true,
+                              "five_qi present");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(*got.label_info_lst[0].five_qi),
+                              9,
+                              "five_qi value");
+        NS_TEST_EXPECT_MSG_EQ(*got.label_info_lst[0].s_nssai,
+                              "1-000001",
+                              "s_nssai value");
+        NS_TEST_EXPECT_MSG_EQ(*got.label_info_lst[0].plmn_id,
+                              "00101",
+                              "plmn_id value");
+
+        // The KPM body is the bytes of ric_indication_message; T2 will
+        // serialise this struct into ASN.1-PER. For now sanity-check that
+        // the struct lives cleanly inside a ric_indication_t carrier.
+        ric_indication_t carrier{};
+        carrier.ric_indication_header = {0xAA, 0xBB};
+        carrier.ric_indication_message = {0xCC}; // placeholder for ASN.1 blob
+        carrier.ric_action_id = 1;
+        NS_TEST_EXPECT_MSG_EQ(carrier.ric_indication_message.size(),
+                              1u,
+                              "indication_message carries opaque PER blob");
+    }
+};
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
 
@@ -1314,6 +1505,11 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnKpmCanonicalBuildTestCase,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnKpmCanonicalLabelsTestCase,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.1 — FlexRIC field-name parity.
+        AddTestCase(new OranNtnFlexricE2apShapesTestCase,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnFlexricKpmFormat1TestCase,
                     TestCase::Duration::QUICK);
     }
 };

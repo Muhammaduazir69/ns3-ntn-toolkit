@@ -56,6 +56,8 @@ set(header_files
     model/oran-ntn-space-ric.h
     model/oran-ntn-sat-bridge.h
     model/oran-ntn-kpm-canonical-ids.h
+    # 4.1.1 — FlexRIC field-name parity (Roadmap §4.1.1)
+    model/oran-ntn-flexric-types.h
     # Original xApps
     model/oran-ntn-xapp-ho-predict.h
     model/oran-ntn-xapp-beam-hop.h
