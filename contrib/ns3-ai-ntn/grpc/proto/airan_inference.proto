@@ -1,0 +1,125 @@
+// Copyright (c) 2026 Muhammad Uzair
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// AI-RAN inference gRPC contract (Roadmap §3 T7).
+//
+// The toolkit ships a single canonical .proto for the AI-RAN inference
+// path. It serves three purposes simultaneously:
+//
+//   1. gRPC service definition. When users build with a real `grpc++`,
+//      both `AiranInference` RPCs become live gRPC endpoints they can
+//      point Triton (or any compatible runtime) at.
+//   2. Wire format for the C++ TcpInferenceTransport which ships in the
+//      module by default — it sends length-prefixed serialised
+//      `InferenceRequest` / `InferenceResponse` over a raw TCP socket
+//      so the contract is testable without pulling in `grpc++`.
+//   3. Source of truth for the Triton model `config.pbtxt` files under
+//      `grpc/triton/` — the input / output tensor names and shapes
+//      below match those configs byte-for-byte.
+//
+// The two AI-RAN flavours we target match WiNES Lab / AI-Aerial dApp
+// framework prior art:
+//
+//   - precoder_csi_to_weights:
+//       in : complex CSI tensor of shape [tx, rx, sc]
+//       out: complex precoder weights of shape [tx, layer]
+//   - beam_index_classifier:
+//       in : RSRP per beam (float) plus angle hints
+//       out: argmax beam index + score
+//
+// All complex numbers are flattened as (re, im) pairs of float32 — this
+// matches both Triton's CHANNEL_FIRST convention and pyAerial's tensor
+// layout.
+
+syntax = "proto3";
+
+package ns3.oranntn.airan;
+
+// One channel-state-information snapshot for one UE.
+message CsiTensor
+{
+    // Flattened (re_0, im_0, re_1, im_1, ...) — 2 * tx * rx * num_subcarriers
+    // float32 values. Big enough for any sensible NTN array.
+    repeated float values = 1 [packed = true];
+    uint32 num_tx = 2;
+    uint32 num_rx = 3;
+    uint32 num_subcarriers = 4;
+    // Optional Doppler-shift sample (Hz) — populated for LEO/HAPS
+    // scenarios so the inference engine can pick a Doppler-aware
+    // codebook entry.
+    double doppler_hz = 5;
+}
+
+// RSRP per candidate beam (used by the beam-classifier model).
+message RsrpVector
+{
+    repeated float rsrp_dbm = 1 [packed = true];
+    // Candidate beam directional centres (azimuth, elevation) — useful
+    // hints for the classifier head.
+    repeated float beam_az_deg = 2 [packed = true];
+    repeated float beam_el_deg = 3 [packed = true];
+}
+
+// Unary request to the inference service.
+message InferenceRequest
+{
+    // Logical model name (matches the Triton model directory).
+    string model_name = 1;
+    // Caller-assigned request id; the server echoes it back.
+    uint64 request_id = 2;
+    // 64-bit UE-RNTI / UE-AMBR-ID. Server uses this to keep per-UE
+    // state in stream RPCs.
+    uint64 ue_id = 3;
+    // Logical cell id (NCGI).
+    uint64 nr_cgi = 4;
+    // Simulation timestamp at which the snapshot was captured (s).
+    double sim_time_s = 5;
+    // Exactly one of the input flavours is filled depending on model.
+    oneof input
+    {
+        CsiTensor csi = 6;
+        RsrpVector rsrp = 7;
+    }
+}
+
+// Complex precoder weights produced by the SE-maximising model.
+message PrecoderWeights
+{
+    repeated float values = 1 [packed = true]; // (re, im) interleaved
+    uint32 num_tx = 2;
+    uint32 num_layers = 3;
+}
+
+// Beam-index classifier output.
+message BeamPrediction
+{
+    uint32 best_beam_id = 1;
+    float score = 2;
+    repeated float scores_top_k = 3 [packed = true]; // optional
+}
+
+// Unary response.
+message InferenceResponse
+{
+    uint64 request_id = 1;
+    // Wall-clock millis the server spent in inference; ns-3 client
+    // adds this to its scheduled completion event.
+    double inference_latency_ms = 2;
+    // Status — 0 = OK, non-zero matches Triton error codes loosely.
+    uint32 status = 3;
+    string status_message = 4;
+    oneof output
+    {
+        PrecoderWeights precoder = 5;
+        BeamPrediction beam = 6;
+    }
+}
+
+// Service definition. Both unary and bi-directional streaming forms
+// exist. The streaming form mirrors Triton's `ModelStreamInfer` and is
+// the high-throughput choice when latency matters more than fan-out.
+service AiranInference
+{
+    rpc Infer (InferenceRequest) returns (InferenceResponse);
+    rpc InferStream (stream InferenceRequest) returns (stream InferenceResponse);
+}

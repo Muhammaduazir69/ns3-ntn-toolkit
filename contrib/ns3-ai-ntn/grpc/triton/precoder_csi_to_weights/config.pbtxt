@@ -1,0 +1,62 @@
+# Triton Inference Server model config (Roadmap §3 T7)
+# Model: precoder_csi_to_weights
+# Maps a CSI snapshot to complex precoder weights that maximise SE for a
+# multi-layer DL transmission. Mirrors AI-Aerial precoder dApp.
+#
+# Field semantics match `AiranInference.InferenceRequest.csi` in
+# `grpc/proto/airan_inference.proto`. Maintain that mapping when adding
+# new models — the C++ client validates this config against the proto.
+
+name: "precoder_csi_to_weights"
+platform: "onnxruntime_onnx"
+max_batch_size: 32
+default_model_filename: "model.onnx"
+
+input [
+  {
+    name: "csi"
+    data_type: TYPE_FP32
+    dims: [ 2, 64, 32, 273 ]   # (re/im, tx, rx, num_subcarriers)
+    reshape { shape: [ -1 ] }   # flattened to match proto packed repeated
+  },
+  {
+    name: "doppler_hz"
+    data_type: TYPE_FP64
+    dims: [ 1 ]
+    optional: true
+  }
+]
+
+output [
+  {
+    name: "precoder"
+    data_type: TYPE_FP32
+    dims: [ 2, 64, 8 ]          # (re/im, tx, layer)
+  }
+]
+
+instance_group [
+  {
+    count: 2
+    kind: KIND_GPU
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [ 4, 8, 16 ]
+  max_queue_delay_microseconds: 200
+}
+
+# Inference latency budget in microseconds (server-side enforcement).
+# Triton will reject requests if the queue would exceed this.
+parameters {
+  key: "INFERENCE_BUDGET_US"
+  value: { string_value: "1000" }
+}
+
+# Toolkit-specific: which oneof of `InferenceResponse.output` to fill.
+# Read by the C++ AiranInferenceServer so it can dispatch correctly.
+parameters {
+  key: "TOOLKIT_OUTPUT_FIELD"
+  value: { string_value: "precoder" }
+}
