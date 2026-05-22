@@ -15,6 +15,10 @@ set(source_files
     model/oran-ntn-data-repository.cc
     # 4.1.11 — OSC-aligned A1 policy schema registry (Roadmap §4.1.11)
     model/oran-ntn-a1-policy-schema.cc
+    # T4 — Service-Model plugin ABI + first two concrete SMs (Roadmap §3 T4)
+    model/oran-ntn-service-model.cc
+    model/oran-ntn-service-model-kpm.cc
+    model/oran-ntn-service-model-rc.cc
     # Original xApps
     model/oran-ntn-xapp-ho-predict.cc
     model/oran-ntn-xapp-beam-hop.cc
@@ -70,6 +74,10 @@ set(header_files
     model/oran-ntn-data-repository.h
     # 4.1.11 — OSC-aligned A1 policy schema registry (Roadmap §4.1.11)
     model/oran-ntn-a1-policy-schema.h
+    # T4 — Service-Model plugin ABI + first two concrete SMs (Roadmap §3 T4)
+    model/oran-ntn-service-model.h
+    model/oran-ntn-service-model-kpm.h
+    model/oran-ntn-service-model-rc.h
     # Original xApps
     model/oran-ntn-xapp-ho-predict.h
     model/oran-ntn-xapp-beam-hop.h

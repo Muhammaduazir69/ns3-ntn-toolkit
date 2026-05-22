@@ -22,6 +22,9 @@
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-ntn-scheduler.h"
 #include "ns3/oran-ntn-rc-style3.h"
+#include "ns3/oran-ntn-service-model-kpm.h"
+#include "ns3/oran-ntn-service-model-rc.h"
+#include "ns3/oran-ntn-service-model.h"
 #include "ns3/oran-ntn-phy-kpm-extractor.h"
 #include "ns3/oran-ntn-sat-bridge.h"
 #include "ns3/oran-ntn-space-ric-inference.h"
@@ -1743,6 +1746,283 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
 };
 
 // ============================================================================
+//  T4 (Roadmap §3 T4): Service-Model plugin ABI + KPM/RC concrete SMs
+// ============================================================================
+
+class OranNtnSmRegistryTestCase : public TestCase
+{
+  public:
+    OranNtnSmRegistryTestCase()
+        : TestCase("Service-Model registry: register, lookup, duplicate refusal")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<OranNtnServiceModelRegistry> reg =
+            CreateObject<OranNtnServiceModelRegistry>();
+        NS_TEST_EXPECT_MSG_EQ(reg->Size(), 0u, "registry starts empty");
+
+        Ptr<OranNtnServiceModelKpm> kpm = CreateObject<OranNtnServiceModelKpm>();
+        Ptr<OranNtnServiceModelRc> rc = CreateObject<OranNtnServiceModelRc>();
+
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(kpm), true, "register KPM");
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(rc), true, "register RC");
+        NS_TEST_EXPECT_MSG_EQ(reg->Size(), 2u, "two plugins registered");
+
+        // Duplicate id refused.
+        Ptr<OranNtnServiceModelKpm> kpm2 =
+            CreateObject<OranNtnServiceModelKpm>();
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(kpm2),
+                              false,
+                              "duplicate function id refused");
+        NS_TEST_EXPECT_MSG_EQ(reg->Size(), 2u, "still two plugins");
+
+        // Lookup by function id.
+        Ptr<OranNtnServiceModel> found = reg->Lookup(147);
+        NS_TEST_ASSERT_MSG_NE(found, nullptr, "KPM looked up");
+        NS_TEST_EXPECT_MSG_EQ(found->Name(), "KPM", "KPM name");
+        NS_TEST_EXPECT_MSG_EQ(found->Version(), "v3.00", "KPM version");
+        found = reg->Lookup(3);
+        NS_TEST_ASSERT_MSG_NE(found, nullptr, "RC looked up");
+        NS_TEST_EXPECT_MSG_EQ(found->Name(), "RC", "RC name");
+        NS_TEST_EXPECT_MSG_EQ(found->Version(), "v1.03", "RC version");
+        NS_TEST_EXPECT_MSG_EQ(reg->Lookup(9999),
+                              Ptr<OranNtnServiceModel>(),
+                              "unknown id returns nullptr");
+
+        auto ids = reg->GetFunctionIds();
+        NS_TEST_ASSERT_MSG_EQ(ids.size(), 2u, "two ids returned");
+        // ascending
+        NS_TEST_EXPECT_MSG_EQ(ids[0], 3u, "first id is RC (3)");
+        NS_TEST_EXPECT_MSG_EQ(ids[1], 147u, "second id is KPM (147)");
+    }
+};
+
+class OranNtnSmKpmRoundTripTestCase : public TestCase
+{
+  public:
+    OranNtnSmKpmRoundTripTestCase()
+        : TestCase("KPM SM encodes and decodes kpm_ind_msg_format_1_t")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::flexric::kpm_v3;
+        kpm_ind_msg_format_1_t body{};
+        body.gran_period_ms = 1000;
+
+        meas_info_format_1_lst_t row{};
+        row.meas_type.form = meas_type_form_t::name;
+        row.meas_type.meas_name = oranntn::kpm::kDrbUeThpDl;
+        meas_record_item_t r1{};
+        r1.form = meas_value_form_t::real;
+        r1.real_val = 12345.5;
+        row.meas_record_lst.push_back(r1);
+        meas_record_item_t r2{};
+        r2.form = meas_value_form_t::integer;
+        r2.int_val = -42;
+        row.meas_record_lst.push_back(r2);
+        label_info_t lbl{};
+        lbl.five_qi = 9;
+        lbl.s_nssai = "1-000001";
+        lbl.plmn_id = "00101";
+        row.label_info_lst.push_back(lbl);
+        body.meas_info_lst.push_back(row);
+
+        OranNtnServiceModelKpm sm;
+        NS_TEST_EXPECT_MSG_EQ(sm.RicFunctionId(),
+                              147u,
+                              "canonical KPM function id");
+        const auto blob = sm.EncodeIndication(&body);
+        NS_TEST_EXPECT_MSG_GT(blob.size(),
+                              16u,
+                              "blob is non-trivial");
+
+        kpm_ind_msg_format_1_t got{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeIndication(blob, got),
+                              true,
+                              "decode succeeds");
+        NS_TEST_EXPECT_MSG_EQ(got.gran_period_ms, 1000u, "gran round-trips");
+        NS_TEST_ASSERT_MSG_EQ(got.meas_info_lst.size(),
+                              1u,
+                              "one meas info");
+        NS_TEST_EXPECT_MSG_EQ(got.meas_info_lst[0].meas_type.meas_name,
+                              "DRB.UEThpDl",
+                              "meas_name preserved");
+        NS_TEST_ASSERT_MSG_EQ(got.meas_info_lst[0].meas_record_lst.size(),
+                              2u,
+                              "two records");
+        NS_TEST_EXPECT_MSG_EQ(
+            got.meas_info_lst[0].meas_record_lst[0].real_val,
+            12345.5,
+            "real value");
+        NS_TEST_EXPECT_MSG_EQ(got.meas_info_lst[0].meas_record_lst[1].int_val,
+                              -42,
+                              "integer value");
+        NS_TEST_ASSERT_MSG_EQ(got.meas_info_lst[0].label_info_lst.size(),
+                              1u,
+                              "one label group");
+        NS_TEST_ASSERT_MSG_EQ(
+            got.meas_info_lst[0].label_info_lst[0].five_qi.has_value(),
+            true,
+            "five_qi present");
+        NS_TEST_EXPECT_MSG_EQ(
+            static_cast<int>(*got.meas_info_lst[0].label_info_lst[0].five_qi),
+            9,
+            "five_qi value");
+        NS_TEST_EXPECT_MSG_EQ(*got.meas_info_lst[0].label_info_lst[0].s_nssai,
+                              "1-000001",
+                              "s_nssai value");
+
+        // KPM SM rejects ControlRequests (reporting only).
+        std::vector<uint8_t> ctrlOut;
+        NS_TEST_EXPECT_MSG_EQ(sm.DecodeControl(blob, &ctrlOut),
+                              false,
+                              "KPM SM has no Control direction");
+
+        // Truncated blob -> decode fails cleanly.
+        std::vector<uint8_t> trunc(blob.begin(), blob.begin() + 5);
+        kpm_ind_msg_format_1_t bad{};
+        NS_TEST_EXPECT_MSG_EQ(sm.DecodeIndication(trunc, bad),
+                              false,
+                              "truncated blob rejected");
+    }
+};
+
+class OranNtnSmRcRoundTripTestCase : public TestCase
+{
+  public:
+    OranNtnSmRcRoundTripTestCase()
+        : TestCase("RC SM round-trips Style 3 HandoverControl, CHO, DAPS-HO")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::rc_v103::style3;
+        OranNtnServiceModelRc sm;
+        NS_TEST_EXPECT_MSG_EQ(sm.RicFunctionId(),
+                              3u,
+                              "canonical RC function id");
+
+        // Action 1 — HandoverControl.
+        {
+            ControlMessage m{};
+            HandoverControl h{};
+            h.target_primary_cell_id.plmn_id = "26201";
+            h.target_primary_cell_id.nr_cell_identity = 0xABCDEFULL;
+            h.handover_type = HandoverType::intra5gs;
+            NrCellGlobalId sec{};
+            sec.plmn_id = "26201";
+            sec.nr_cell_identity = 0x12;
+            h.new_secondary_cell_id = sec;
+            m.action = h;
+
+            const auto blob = sm.EncodeControl(m);
+            NS_TEST_EXPECT_MSG_GT(blob.size(), 10u, "blob non-trivial");
+            ControlMessage decoded{};
+            NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl(blob, &decoded),
+                                  true,
+                                  "decode HandoverControl");
+            NS_TEST_ASSERT_MSG_EQ(
+                std::holds_alternative<HandoverControl>(decoded.action),
+                true,
+                "variant holds HandoverControl");
+            const auto& got = std::get<HandoverControl>(decoded.action);
+            NS_TEST_EXPECT_MSG_EQ(got.target_primary_cell_id.plmn_id,
+                                  "26201",
+                                  "PLMN preserved");
+            NS_TEST_EXPECT_MSG_EQ(got.target_primary_cell_id.nr_cell_identity,
+                                  0xABCDEFULL,
+                                  "NRCGI preserved");
+            NS_TEST_ASSERT_MSG_EQ(got.new_secondary_cell_id.has_value(),
+                                  true,
+                                  "secondary cell preserved");
+            NS_TEST_EXPECT_MSG_EQ(
+                got.new_secondary_cell_id->nr_cell_identity,
+                0x12u,
+                "secondary NRCGI");
+        }
+
+        // Action 2 — CHO with two candidates.
+        {
+            ControlMessage m{};
+            ConditionalHandoverControl c{};
+            c.conditional_reconfiguration_id = 11;
+            ConditionalHandoverControl::CandidateCell c1{};
+            c1.target_primary_cell_id.plmn_id = "00101";
+            c1.target_primary_cell_id.nr_cell_identity = 0xAAAA;
+            c1.trigger_condition = {0x01, 0x02, 0x03};
+            ConditionalHandoverControl::CandidateCell c2{};
+            c2.target_primary_cell_id.plmn_id = "00101";
+            c2.target_primary_cell_id.nr_cell_identity = 0xBBBB;
+            c2.trigger_condition = {0xFF};
+            c.candidate_cell_list = {c1, c2};
+            m.action = c;
+
+            const auto blob = sm.EncodeControl(m);
+            ControlMessage decoded{};
+            NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl(blob, &decoded),
+                                  true,
+                                  "decode CHO");
+            const auto& got =
+                std::get<ConditionalHandoverControl>(decoded.action);
+            NS_TEST_EXPECT_MSG_EQ(got.conditional_reconfiguration_id,
+                                  11u,
+                                  "reconfig id");
+            NS_TEST_ASSERT_MSG_EQ(got.candidate_cell_list.size(),
+                                  2u,
+                                  "two candidates");
+            NS_TEST_EXPECT_MSG_EQ(
+                got.candidate_cell_list[1].trigger_condition.size(),
+                1u,
+                "candidate[1] trigger len");
+            NS_TEST_EXPECT_MSG_EQ(
+                got.candidate_cell_list[1].trigger_condition[0],
+                0xFFu,
+                "candidate[1] trigger byte");
+        }
+
+        // Action 3 — DAPS-HO.
+        {
+            ControlMessage m{};
+            DapsHandoverControl d{};
+            d.target_primary_cell_id.plmn_id = "00101";
+            d.target_primary_cell_id.nr_cell_identity = 0x77;
+            d.daps_termination_policy =
+                DapsTerminationCause::target_radio_link_recovery;
+            m.action = d;
+
+            const auto blob = sm.EncodeControl(m);
+            ControlMessage decoded{};
+            NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl(blob, &decoded),
+                                  true,
+                                  "decode DAPS");
+            const auto& got = std::get<DapsHandoverControl>(decoded.action);
+            NS_TEST_ASSERT_MSG_EQ(got.daps_termination_policy.has_value(),
+                                  true,
+                                  "DAPS cause preserved");
+            NS_TEST_EXPECT_MSG_EQ(
+                static_cast<int>(*got.daps_termination_policy),
+                1,
+                "target_radio_link_recovery wire code");
+        }
+
+        // Garbage blob -> decode fails.
+        std::vector<uint8_t> garbage = {0x99, 0x99, 0x99};
+        ControlMessage out{};
+        NS_TEST_EXPECT_MSG_EQ(sm.DecodeControl(garbage, &out),
+                              false,
+                              "garbage rejected");
+    }
+};
+
+// ============================================================================
 //  4.1.11 (Roadmap §4.1.11): OSC-aligned A1 policy schema registry
 // ============================================================================
 
@@ -2190,6 +2470,13 @@ class OranNtnTestSuite : public TestSuite
                     TestCase::Duration::QUICK);
         // Realism roadmap 4.1.11 — OSC-aligned A1 policy schema registry.
         AddTestCase(new OranNtnA1PolicyRegistryTestCase,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap T4 — Service-Model plugin ABI.
+        AddTestCase(new OranNtnSmRegistryTestCase,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSmKpmRoundTripTestCase,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSmRcRoundTripTestCase,
                     TestCase::Duration::QUICK);
     }
 };
