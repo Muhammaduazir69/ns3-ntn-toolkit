@@ -27,6 +27,7 @@
 #include <ns3/thz-ntn-hardware-impairments.h>
 #include <ns3/thz-ntn-hitran-lut.h>
 #include <ns3/thz-ntn-isac.h>
+#include <ns3/thz-ntn-itu-recommendations.h>
 #include <ns3/thz-ntn-isl-channel.h>
 #include <ns3/thz-ntn-link-budget.h>
 #include <ns3/thz-ntn-molecular-absorption.h>
@@ -1004,6 +1005,253 @@ class ThzNtnHitranSimulatorTimeTest : public TestCase
     }
 };
 
+// ============================================================================
+// Roadmap §4.3.2: ITU-R P.618 / P.676 / P.838 / P.681 wrappers
+// ============================================================================
+
+class ThzNtnP838CoefficientsTest : public TestCase
+{
+  public:
+    ThzNtnP838CoefficientsTest()
+        : TestCase("P.838-3 k and alpha coefficients match Annex 1 tables")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using itu::Itu838RainModel;
+        using itu::Polarization;
+
+        const auto [k_h_20, a_h_20] =
+            Itu838RainModel::GetKAlpha(20e9, Polarization::horizontal);
+        NS_TEST_ASSERT_MSG_EQ_TOL(k_h_20, 0.0751, 0.001, "k_h(20)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(a_h_20, 1.099, 0.005, "alpha_h(20)");
+
+        const auto [k_v_30, a_v_30] =
+            Itu838RainModel::GetKAlpha(30e9, Polarization::vertical);
+        NS_TEST_ASSERT_MSG_EQ_TOL(k_v_30, 0.167, 0.001, "k_v(30)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(a_v_30, 1.000, 0.005, "alpha_v(30)");
+
+        const double gamma =
+            Itu838RainModel::SpecificAttenuationDbKm(25.0, 30e9,
+                                                       Polarization::vertical);
+        NS_TEST_ASSERT_MSG_EQ_TOL(gamma, 4.175, 0.05,
+                                  "gamma_r(30 GHz V, 25 mm/h)");
+
+        const double zeroRain =
+            Itu838RainModel::SpecificAttenuationDbKm(0.0, 30e9,
+                                                       Polarization::vertical);
+        NS_TEST_ASSERT_MSG_EQ(zeroRain, 0.0, "zero rain -> zero att");
+    }
+};
+
+class ThzNtnP618SlantPathTest : public TestCase
+{
+  public:
+    ThzNtnP618SlantPathTest()
+        : TestCase("P.618-13 slant path: scales with rate and shrinks with elevation")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<itu::Itu618LossModel> p618 =
+            CreateObject<itu::Itu618LossModel>();
+        p618->SetClimateRegion(
+            itu::Itu618LossModel::ClimateRegion::midlat_summer);
+        NS_TEST_EXPECT_MSG_EQ_TOL(p618->GetRainHeightKm(), 3.5, 1e-9,
+                                  "rain height");
+
+        const double A1 = p618->SlantPathRainAttenuationDb(
+            25e9, 25.0, 5.0, 0.0, itu::Polarization::vertical);
+        const double A2 = p618->SlantPathRainAttenuationDb(
+            25e9, 25.0, 25.0, 0.0, itu::Polarization::vertical);
+        const double A3 = p618->SlantPathRainAttenuationDb(
+            25e9, 25.0, 50.0, 0.0, itu::Polarization::vertical);
+        NS_TEST_ASSERT_MSG_GT(A1, 0.0, "rain att > 0");
+        NS_TEST_ASSERT_MSG_GT(A2, A1, "more rain -> more att");
+        NS_TEST_ASSERT_MSG_GT(A3, A2, "even more rain -> even more");
+
+        const double Alow = p618->SlantPathRainAttenuationDb(
+            25e9, 10.0, 25.0, 0.0, itu::Polarization::vertical);
+        const double Ahi = p618->SlantPathRainAttenuationDb(
+            25e9, 60.0, 25.0, 0.0, itu::Polarization::vertical);
+        NS_TEST_ASSERT_MSG_GT(Alow, Ahi,
+                              "low elevation should have more rain att");
+
+        p618->SetClimateRegion(
+            itu::Itu618LossModel::ClimateRegion::subarctic);
+        const double Aabove = p618->SlantPathRainAttenuationDb(
+            25e9, 30.0, 25.0, 2.0, itu::Polarization::vertical);
+        NS_TEST_ASSERT_MSG_EQ(Aabove, 0.0,
+                              "ground above rain height -> 0 att");
+    }
+};
+
+class ThzNtnP676AbsorptionTest : public TestCase
+{
+  public:
+    ThzNtnP676AbsorptionTest()
+        : TestCase("P.676-13 gaseous attenuation is positive and bounded")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<itu::Itu676AbsorptionModel> p676 =
+            CreateObject<itu::Itu676AbsorptionModel>();
+
+        const double g30 = p676->SpecificAttenuationDbKm(30e9, 0.0);
+        NS_TEST_ASSERT_MSG_GT(g30, 0.0, "30 GHz specific att > 0");
+        NS_TEST_ASSERT_MSG_LT(g30, 1.0,
+                              "30 GHz away from lines should be < 1 dB/km");
+
+        const double g60 = p676->SpecificAttenuationDbKm(60e9, 0.0);
+        NS_TEST_ASSERT_MSG_GT(g60, g30,
+                              "60 GHz O2 line should exceed 30 GHz");
+
+        const double slant = p676->SlantPathAttenuationDb(100e9, 30.0);
+        NS_TEST_ASSERT_MSG_GT(slant, 0.0, "slant path att > 0");
+        NS_TEST_ASSERT_MSG_LT(slant, 50.0,
+                              "slant path att should be < 50 dB at 100 GHz");
+    }
+};
+
+class ThzNtnP681LmsTest : public TestCase
+{
+  public:
+    ThzNtnP681LmsTest()
+        : TestCase("P.681-11 LMS Lutz model: shadowing rate matches steady state")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<itu::Itu681LmsModel> lms = CreateObject<itu::Itu681LmsModel>();
+        lms->AssignStreams(7);
+        lms->SetEnvironment(itu::Itu681LmsModel::Environment::suburban);
+        const double pBad = lms->GetBadStateProbability();
+        NS_TEST_ASSERT_MSG_GT(pBad, 0.0, "P(bad) > 0");
+        NS_TEST_ASSERT_MSG_LT(pBad, 1.0, "P(bad) < 1");
+
+        size_t bad = 0;
+        const size_t N = 10000;
+        for (size_t i = 0; i < N; ++i)
+        {
+            lms->StepDb();
+            if (lms->IsShadowed())
+                ++bad;
+        }
+        const double empirical = static_cast<double>(bad) / N;
+        NS_TEST_ASSERT_MSG_LT(std::abs(empirical - pBad), 0.10,
+                              "Markov steady-state mismatch: empirical="
+                                  << empirical << " expected=" << pBad);
+
+        lms->SetEnvironment(itu::Itu681LmsModel::Environment::open);
+        NS_TEST_ASSERT_MSG_LT(lms->GetBadStateProbability(), 0.05,
+                              "open P(bad) < 5%");
+
+        lms->SetEnvironment(itu::Itu681LmsModel::Environment::urban);
+        NS_TEST_ASSERT_MSG_GT(lms->GetBadStateProbability(), 0.5,
+                              "urban P(bad) > 0.5");
+    }
+};
+
+namespace
+{
+
+struct RainSample
+{
+    double t_s;
+    double rain_mm_h;
+    double att_dB;
+};
+
+void
+StepRainScenario(Ptr<itu::Itu618LossModel> p618,
+                  std::vector<RainSample>* samples)
+{
+    const double t = Simulator::Now().GetSeconds();
+    double rate = 0.0;
+    if (t <= 15.0)
+        rate = t / 15.0 * 50.0;
+    else if (t <= 20.0)
+        rate = 50.0;
+    else if (t <= 30.0)
+        rate = 50.0 * (1.0 - (t - 20.0) / 10.0);
+    rate = std::max(0.0, rate);
+    const double A = p618->SlantPathRainAttenuationDb(
+        25e9, 30.0, rate, 0.0, itu::Polarization::vertical);
+    samples->push_back({t, rate, A});
+}
+
+} // namespace
+
+class ThzNtnP618RainEventSimulatorTest : public TestCase
+{
+  public:
+    ThzNtnP618RainEventSimulatorTest()
+        : TestCase("Simulator: 30 s rain event tracks rain rate via P.618")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<itu::Itu618LossModel> p618 =
+            CreateObject<itu::Itu618LossModel>();
+        p618->SetClimateRegion(
+            itu::Itu618LossModel::ClimateRegion::midlat_summer);
+
+        std::vector<RainSample> samples;
+        for (int t = 0; t <= 30; ++t)
+        {
+            Simulator::Schedule(Seconds(t), &StepRainScenario, p618, &samples);
+        }
+        Simulator::Stop(Seconds(31));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), 31u, "31 samples");
+        NS_TEST_ASSERT_MSG_EQ(samples.front().rain_mm_h, 0.0, "t=0 rate");
+        NS_TEST_ASSERT_MSG_EQ(samples.front().att_dB, 0.0, "t=0 att");
+
+        size_t peakIdx = 0;
+        for (size_t i = 1; i < samples.size(); ++i)
+        {
+            if (samples[i].rain_mm_h > samples[peakIdx].rain_mm_h)
+                peakIdx = i;
+        }
+        NS_TEST_ASSERT_MSG_GT(samples[peakIdx].rain_mm_h, 49.0,
+                              "peak rate ~ 50 mm/h");
+        NS_TEST_ASSERT_MSG_GT(samples[peakIdx].att_dB, 5.0,
+                              "peak attenuation > 5 dB");
+
+        size_t lowIdx = 0;
+        for (size_t i = 0; i < samples.size(); ++i)
+        {
+            if (samples[i].rain_mm_h >= 9.0 && samples[i].rain_mm_h <= 11.0)
+            {
+                lowIdx = i;
+                break;
+            }
+        }
+        NS_TEST_ASSERT_MSG_GT(samples[peakIdx].att_dB - samples[lowIdx].att_dB,
+                              3.0,
+                              "≥3 dB delta between 10 and 50 mm/h");
+
+        NS_TEST_ASSERT_MSG_EQ(samples.back().rain_mm_h, 0.0,
+                              "t=30 rate back to 0");
+        NS_TEST_ASSERT_MSG_EQ(samples.back().att_dB, 0.0,
+                              "t=30 attenuation back to 0");
+
+        Simulator::Destroy();
+    }
+};
+
 /**
  * \ingroup thz-ntn-test
  * \brief THz-NTN module test suite.
@@ -1035,6 +1283,12 @@ ThzNtnTestSuite::ThzNtnTestSuite()
     AddTestCase(new ThzNtnHitranSlantPathTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnHitranBundledLutTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnHitranSimulatorTimeTest, TestCase::Duration::QUICK);
+    // Roadmap §4.3.2 — ITU-R P.618 / P.676 / P.838 / P.681 wrappers.
+    AddTestCase(new ThzNtnP838CoefficientsTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnP618SlantPathTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnP676AbsorptionTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnP681LmsTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnP618RainEventSimulatorTest, TestCase::Duration::QUICK);
 }
 
 /// Static instance to register the test suite

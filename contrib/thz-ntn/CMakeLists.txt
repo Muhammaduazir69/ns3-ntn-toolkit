@@ -3,6 +3,8 @@ set(source_files
     model/thz-ntn-molecular-absorption.cc
     # 4.3.1 — HITRAN-2024 LUT loader (Roadmap §4.3.1)
     model/thz-ntn-hitran-lut.cc
+    # 4.3.2 — ITU-R P.618/676/838/681 wrappers (Roadmap §4.3.2)
+    model/thz-ntn-itu-recommendations.cc
     model/thz-ntn-weather-attenuation.cc
     model/thz-ntn-scintillation.cc
     model/thz-ntn-pointing-error.cc
@@ -38,6 +40,8 @@ set(header_files
     model/thz-ntn-molecular-absorption.h
     # 4.3.1 — HITRAN-2024 LUT loader (Roadmap §4.3.1)
     model/thz-ntn-hitran-lut.h
+    # 4.3.2 — ITU-R P.618/676/838/681 wrappers (Roadmap §4.3.2)
+    model/thz-ntn-itu-recommendations.h
     model/thz-ntn-weather-attenuation.h
     model/thz-ntn-scintillation.h
     model/thz-ntn-pointing-error.h
