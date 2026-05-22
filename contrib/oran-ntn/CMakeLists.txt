@@ -23,6 +23,11 @@ set(source_files
     model/oran-ntn-service-model-ccc.cc
     # 4.1.7 — NTN-Ephemeris (SIB19) SM plugin (Roadmap §4.1.7)
     model/oran-ntn-service-model-ntn-ephemeris.cc
+    # 4.1.9 — CU/DU/RU split with per-entity E2 termination (Roadmap §4.1.9)
+    model/oran-ntn-split-gnb.cc
+    model/oran-ntn-f1-interface.cc
+    model/oran-ntn-ofh-interface.cc
+    helper/oran-ntn-split-gnb-helper.cc
     # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
     asn1/asn1-per-codec.cc
     # T3 — SCTP / TCP E2 listener for FlexRIC bridge (Roadmap §3 T3)
@@ -91,6 +96,11 @@ set(header_files
     model/oran-ntn-service-model-ccc.h
     # 4.1.7 — NTN-Ephemeris (SIB19) SM plugin (Roadmap §4.1.7)
     model/oran-ntn-service-model-ntn-ephemeris.h
+    # 4.1.9 — CU/DU/RU split with per-entity E2 termination (Roadmap §4.1.9)
+    model/oran-ntn-split-gnb.h
+    model/oran-ntn-f1-interface.h
+    model/oran-ntn-ofh-interface.h
+    helper/oran-ntn-split-gnb-helper.h
     # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
     asn1/asn1-per-codec.h
     # T3 — SCTP / TCP E2 listener for FlexRIC bridge (Roadmap §3 T3)

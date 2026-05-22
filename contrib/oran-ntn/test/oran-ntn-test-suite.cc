@@ -22,6 +22,10 @@
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-ntn-scheduler.h"
 #include "ns3/oran-ntn-rc-style3.h"
+#include "ns3/oran-ntn-f1-interface.h"
+#include "ns3/oran-ntn-ofh-interface.h"
+#include "ns3/oran-ntn-split-gnb-helper.h"
+#include "ns3/oran-ntn-split-gnb.h"
 #include "ns3/asn1-per-codec.h"
 #include "ns3/e2-listener.h"
 #include "ns3/e2-transport.h"
@@ -3386,6 +3390,474 @@ class OranNtnDataRepoSqliteTestCase : public TestCase
 #endif // HAVE_SQLITE3
 
 // ============================================================================
+//  4.1.9 — CU/DU/RU split (Roadmap §4.1.9)
+// ============================================================================
+
+class OranNtnSplitGnbRolesTest : public TestCase
+{
+  public:
+    OranNtnSplitGnbRolesTest()
+        : TestCase("Split-gNB: per-entity role and E2 termination (4.1.9)")
+    {
+    }
+
+    void DoRun() override
+    {
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/7, nodes);
+        NS_TEST_ASSERT_MSG_EQ(nodes.GetN(),
+                               4u,
+                               "four ns-3 Nodes created");
+
+        // Each entity has its own E2 termination (different node ids).
+        NS_TEST_EXPECT_MSG_NE(g.cu_cp->GetE2Node()->GetNodeId(),
+                                g.du->GetE2Node()->GetNodeId(),
+                                "CU-CP and DU have distinct E2 ids");
+        NS_TEST_EXPECT_MSG_NE(g.du->GetE2Node()->GetNodeId(),
+                                g.ru->GetE2Node()->GetNodeId(),
+                                "DU and RU have distinct E2 ids");
+        NS_TEST_EXPECT_MSG_NE(g.cu_cp->GetE2Node()->GetNodeId(),
+                                g.cu_up->GetE2Node()->GetNodeId(),
+                                "CU-CP and CU-UP have distinct E2 ids");
+
+        // Role defaults populate the correct RIC Function IDs.
+        NS_TEST_EXPECT_MSG_EQ(g.cu_cp->HasRanFunction(3),
+                               true,
+                               "CU-CP advertises RC (3)");
+        NS_TEST_EXPECT_MSG_EQ(g.du->HasRanFunction(147),
+                               true,
+                               "DU advertises KPM (147)");
+        NS_TEST_EXPECT_MSG_EQ(g.ru->HasRanFunction(1000),
+                               true,
+                               "RU advertises CCC (1000)");
+        NS_TEST_EXPECT_MSG_EQ(g.ru->HasRanFunction(1001),
+                               true,
+                               "RU advertises NTN-Ephemeris (1001)");
+        // Roles are mutually exclusive: CU-CP does NOT advertise CCC.
+        NS_TEST_EXPECT_MSG_EQ(g.cu_cp->HasRanFunction(1000),
+                               false,
+                               "CU-CP does not advertise CCC");
+        NS_TEST_EXPECT_MSG_EQ(g.du->HasRanFunction(3),
+                               false,
+                               "DU does not advertise RC");
+        NS_TEST_EXPECT_MSG_EQ(g.ru->HasRanFunction(147),
+                               false,
+                               "RU does not advertise KPM");
+    }
+};
+
+class OranNtnSplitGnbControlRoutingTest : public TestCase
+{
+  public:
+    OranNtnSplitGnbControlRoutingTest()
+        : TestCase("Split-gNB: ControlAction role enforcement (4.1.9)")
+    {
+    }
+
+    void DoRun() override
+    {
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/9, nodes);
+
+        E2RcAction ho;
+        ho.actionType = E2RcActionType::HANDOVER_TRIGGER;
+        ho.targetGnbId = 9;
+        ho.targetUeId = 1;
+        // HO on CU-CP — accept.
+        NS_TEST_EXPECT_MSG_EQ(g.cu_cp->ReceiveControl(ho),
+                               true,
+                               "HO accepted on CU-CP");
+        // HO on DU / RU — reject.
+        NS_TEST_EXPECT_MSG_EQ(g.du->ReceiveControl(ho),
+                               false,
+                               "HO rejected on DU");
+        NS_TEST_EXPECT_MSG_EQ(g.ru->ReceiveControl(ho),
+                               false,
+                               "HO rejected on RU");
+
+        E2RcAction beam;
+        beam.actionType = E2RcActionType::BEAM_SWITCH;
+        beam.targetGnbId = 9;
+        // Beam on RU — accept; CU-CP and DU — reject.
+        NS_TEST_EXPECT_MSG_EQ(g.ru->ReceiveControl(beam),
+                               true,
+                               "beam accepted on RU");
+        NS_TEST_EXPECT_MSG_EQ(g.du->ReceiveControl(beam),
+                               false,
+                               "beam rejected on DU");
+        NS_TEST_EXPECT_MSG_EQ(g.cu_cp->ReceiveControl(beam),
+                               false,
+                               "beam rejected on CU-CP");
+
+        E2RcAction slice;
+        slice.actionType = E2RcActionType::SLICE_PRB_ALLOCATION;
+        slice.targetGnbId = 9;
+        NS_TEST_EXPECT_MSG_EQ(g.du->ReceiveControl(slice),
+                               true,
+                               "slice accepted on DU");
+        NS_TEST_EXPECT_MSG_EQ(g.cu_cp->ReceiveControl(slice),
+                               false,
+                               "slice rejected on CU-CP");
+
+        NS_TEST_EXPECT_MSG_EQ(g.cu_cp->ControlsAccepted(),
+                               1u,
+                               "CU-CP accepted 1");
+        NS_TEST_EXPECT_MSG_EQ(g.du->ControlsAccepted(),
+                               1u,
+                               "DU accepted 1");
+        NS_TEST_EXPECT_MSG_EQ(g.ru->ControlsAccepted(),
+                               1u,
+                               "RU accepted 1");
+    }
+};
+
+class OranNtnF1RoundTripTest : public TestCase
+{
+  public:
+    OranNtnF1RoundTripTest()
+        : TestCase("F1 round-trip CU-DU under Simulator (4.1.9)")
+    {
+    }
+
+    void DoRun() override
+    {
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/11, nodes);
+        g.f1->SetDeliveryDelay(MilliSeconds(2));
+
+        uint32_t du_recv = 0;
+        uint32_t cu_recv = 0;
+        F1apMessageKind last_du_kind = F1apMessageKind::f1_setup_request;
+        F1apMessageKind last_cu_kind = F1apMessageKind::f1_setup_request;
+        g.f1->SetDuReceiveCallback(
+            [&](const F1apMessage& m) {
+                ++du_recv;
+                last_du_kind = m.kind;
+                // Echo back a response.
+                F1apMessage reply;
+                reply.kind = F1apMessageKind::ue_context_setup_response;
+                reply.ue_id = m.ue_id;
+                reply.transaction_id = m.transaction_id;
+                g.f1->SendFromDu(reply);
+            });
+        g.f1->SetCuCpReceiveCallback(
+            [&](const F1apMessage& m) {
+                ++cu_recv;
+                last_cu_kind = m.kind;
+            });
+
+        F1apMessage req;
+        req.kind = F1apMessageKind::ue_context_setup_request;
+        req.ue_id = 42;
+        req.transaction_id = 1;
+        NS_TEST_ASSERT_MSG_EQ(g.f1->SendFromCuCp(req),
+                               true,
+                               "send accepted");
+
+        Simulator::Stop(MilliSeconds(50));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_EXPECT_MSG_EQ(du_recv, 1u, "DU received 1 msg");
+        NS_TEST_EXPECT_MSG_EQ(cu_recv, 1u, "CU received echo");
+        const bool du_kind_ok =
+            last_du_kind ==
+            F1apMessageKind::ue_context_setup_request;
+        const bool cu_kind_ok =
+            last_cu_kind ==
+            F1apMessageKind::ue_context_setup_response;
+        NS_TEST_EXPECT_MSG_EQ(du_kind_ok, true, "DU saw request");
+        NS_TEST_EXPECT_MSG_EQ(cu_kind_ok, true, "CU saw response");
+        NS_TEST_EXPECT_MSG_EQ(g.f1->MessagesCuToDu(),
+                               1u,
+                               "1 CU→DU");
+        NS_TEST_EXPECT_MSG_EQ(g.f1->MessagesDuToCu(),
+                               1u,
+                               "1 DU→CU");
+        NS_TEST_EXPECT_MSG_EQ(g.f1->MessagesDropped(),
+                               0u,
+                               "no drops");
+    }
+};
+
+class OranNtnF1LinkDownTest : public TestCase
+{
+  public:
+    OranNtnF1LinkDownTest()
+        : TestCase("F1: link down drops new sends + pending events (4.1.9)")
+    {
+    }
+
+    void DoRun() override
+    {
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/13, nodes);
+
+        uint32_t du_recv = 0;
+        g.f1->SetDuReceiveCallback(
+            [&](const F1apMessage&) { ++du_recv; });
+
+        // Send a message at t=0.
+        F1apMessage m1;
+        m1.kind = F1apMessageKind::rc_control_forward;
+        m1.ue_id = 1;
+        g.f1->SendFromCuCp(m1);
+        // Take link down before delivery delay elapses.
+        Simulator::Schedule(MicroSeconds(100),
+                              [&] { g.f1->SetLinkUp(false); });
+        // Try to send while link down (should drop).
+        Simulator::Schedule(MicroSeconds(200),
+                              [&] {
+                                  F1apMessage m2;
+                                  m2.kind = F1apMessageKind::rc_control_forward;
+                                  m2.ue_id = 2;
+                                  g.f1->SendFromCuCp(m2);
+                              });
+        // Bring link back up; new sends accepted.
+        Simulator::Schedule(MilliSeconds(5),
+                              [&] {
+                                  g.f1->SetLinkUp(true);
+                                  F1apMessage m3;
+                                  m3.kind = F1apMessageKind::rc_control_forward;
+                                  m3.ue_id = 3;
+                                  g.f1->SendFromCuCp(m3);
+                              });
+        Simulator::Stop(MilliSeconds(50));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        // The first message in flight at t=0 was cancelled by SetLinkUp(false).
+        // The second send was dropped synchronously.
+        // The third send (after re-up) delivers.
+        NS_TEST_EXPECT_MSG_EQ(du_recv, 1u, "only the post-restore msg arrived");
+        NS_TEST_EXPECT_MSG_EQ(g.f1->MessagesDropped(),
+                               1u,
+                               "1 explicit drop");
+    }
+};
+
+class OranNtnOfhPlaneRoutingTest : public TestCase
+{
+  public:
+    OranNtnOfhPlaneRoutingTest()
+        : TestCase("OFH: C/U/S/M plane routing + outage (4.1.9)")
+    {
+    }
+
+    void DoRun() override
+    {
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/17, nodes);
+
+        std::map<OfhPlane, uint32_t> ru_recv;
+        g.ofh->SetRuReceiveCallback(
+            [&](const OfhMessage& m) { ++ru_recv[m.plane]; });
+
+        // Send one of each plane.
+        for (auto p : {OfhPlane::c_plane,
+                          OfhPlane::u_plane,
+                          OfhPlane::s_plane,
+                          OfhPlane::m_plane})
+        {
+            OfhMessage m;
+            m.plane = p;
+            m.opcode = 1;
+            g.ofh->SendFromDu(m);
+        }
+        Simulator::Stop(MilliSeconds(20));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_EXPECT_MSG_EQ(ru_recv[OfhPlane::c_plane],
+                               1u,
+                               "C-Plane delivered");
+        NS_TEST_EXPECT_MSG_EQ(ru_recv[OfhPlane::u_plane],
+                               1u,
+                               "U-Plane delivered");
+        NS_TEST_EXPECT_MSG_EQ(ru_recv[OfhPlane::s_plane],
+                               1u,
+                               "S-Plane delivered");
+        NS_TEST_EXPECT_MSG_EQ(ru_recv[OfhPlane::m_plane],
+                               1u,
+                               "M-Plane delivered");
+
+        // Now take C-Plane down; new C-Plane sends should drop.
+        g.ofh->SetPlaneUp(OfhPlane::c_plane, false);
+        OfhMessage bad;
+        bad.plane = OfhPlane::c_plane;
+        NS_TEST_EXPECT_MSG_EQ(g.ofh->SendFromDu(bad),
+                               false,
+                               "C-Plane send drops");
+        NS_TEST_EXPECT_MSG_EQ(
+            g.ofh->MessagesDroppedPerPlane(OfhPlane::c_plane),
+            1u,
+            "1 C-Plane drop");
+        NS_TEST_EXPECT_MSG_EQ(
+            g.ofh->MessagesDroppedPerPlane(OfhPlane::u_plane),
+            0u,
+            "no U-Plane drops");
+    }
+};
+
+class OranNtnSplitGnbEndToEndTest : public TestCase
+{
+  public:
+    OranNtnSplitGnbEndToEndTest()
+        : TestCase("Split-gNB: CU→DU→RU end-to-end HO chain (4.1.9)")
+    {
+    }
+
+    void DoRun() override
+    {
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/21, nodes);
+        g.f1->SetDeliveryDelay(MilliSeconds(1));
+        g.ofh->SetPlaneDelay(OfhPlane::c_plane, MicroSeconds(80));
+
+        // Simulated end-to-end mobility flow:
+        //   1. xApp at NRTRIC issues HO ControlAction → CU-CP accepts
+        //   2. CU-CP forwards to DU via F1 (rc_control_forward)
+        //   3. DU translates to RF retune → sends via OFH C-Plane to RU
+        //   4. RU receives + applies (beam_switch via ReceiveControl)
+        uint32_t cu_observed = 0;
+        uint32_t du_observed = 0;
+        uint32_t ru_observed = 0;
+        g.cu_cp->SetControlObserver(
+            [&](const E2RcAction& a) {
+                ++cu_observed;
+                NS_TEST_EXPECT_MSG_EQ(
+                    static_cast<int>(a.actionType),
+                    static_cast<int>(E2RcActionType::HANDOVER_TRIGGER),
+                    "CU-CP sees HO");
+                // Forward to DU.
+                F1apMessage f;
+                f.kind = F1apMessageKind::rc_control_forward;
+                f.ue_id = a.targetUeId;
+                f.payload.assign(1, static_cast<uint8_t>(a.actionType));
+                g.f1->SendFromCuCp(f);
+            });
+        g.f1->SetDuReceiveCallback(
+            [&](const F1apMessage& m) {
+                ++du_observed;
+                // DU translates into an RF retune for the RU.
+                OfhMessage o;
+                o.plane = OfhPlane::c_plane;
+                o.opcode = static_cast<uint16_t>(
+                    F1apMessageKind::rc_control_forward);
+                o.payload = m.payload;
+                g.ofh->SendFromDu(o);
+            });
+        g.ofh->SetRuReceiveCallback(
+            [&](const OfhMessage& o) {
+                ++ru_observed;
+                E2RcAction a;
+                a.actionType = E2RcActionType::BEAM_SWITCH;
+                a.targetGnbId = 21;
+                a.targetUeId = 1;
+                a.targetBeamId = 3;
+                g.ru->ReceiveControl(a);
+            });
+
+        // Fire the HO at t=1ms.
+        Simulator::Schedule(MilliSeconds(1),
+                              [&] {
+                                  E2RcAction ho;
+                                  ho.actionType =
+                                      E2RcActionType::HANDOVER_TRIGGER;
+                                  ho.targetGnbId = 21;
+                                  ho.targetUeId = 1;
+                                  ho.targetBeamId = 3;
+                                  g.cu_cp->ReceiveControl(ho);
+                              });
+
+        Simulator::Stop(MilliSeconds(50));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_EXPECT_MSG_EQ(cu_observed, 1u, "CU-CP saw 1 HO");
+        NS_TEST_EXPECT_MSG_EQ(du_observed, 1u, "DU saw 1 F1 forward");
+        NS_TEST_EXPECT_MSG_EQ(ru_observed, 1u, "RU saw 1 OFH C-Plane msg");
+        NS_TEST_EXPECT_MSG_EQ(g.ru->ControlsAccepted(),
+                               1u,
+                               "RU applied 1 control");
+        NS_TEST_EXPECT_MSG_EQ(g.f1->MessagesCuToDu(),
+                               1u,
+                               "1 F1 CU→DU");
+        NS_TEST_EXPECT_MSG_EQ(g.ofh->MessagesDuToRu(),
+                               1u,
+                               "1 OFH DU→RU");
+    }
+};
+
+class OranNtnSplitGnbSimulatorWorkloadTest : public TestCase
+{
+  public:
+    OranNtnSplitGnbSimulatorWorkloadTest()
+        : TestCase("Split-gNB: 30 s workload + KPM stream (4.1.9)")
+    {
+    }
+
+    void DoRun() override
+    {
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/27, nodes);
+
+        // Periodic KPM stream from DU (every 100 ms for 30 s = 300 reports).
+        uint32_t emitted = 0;
+        const auto submit = [&]() {
+            E2KpmReport rep;
+            rep.gnbId = 2702;
+            rep.timestamp = Simulator::Now().GetSeconds();
+            rep.sinr_dB = 12.0 + 0.001 * static_cast<double>(emitted);
+            g.du->SubmitKpmIndication(rep);
+            ++emitted;
+        };
+        for (uint32_t k = 0; k < 300; ++k)
+        {
+            Simulator::Schedule(MilliSeconds(100 * (k + 1)), submit);
+        }
+
+        // Every 1 s, the xApp issues a beam-switch to the RU.
+        uint32_t beam_apps = 0;
+        for (uint32_t k = 0; k < 30; ++k)
+        {
+            Simulator::Schedule(
+                Seconds(1.0 * (k + 1)),
+                [&] {
+                    E2RcAction a;
+                    a.actionType = E2RcActionType::BEAM_SWITCH;
+                    a.targetGnbId = 27;
+                    a.targetBeamId =
+                        static_cast<uint32_t>((k * 7) % 32);
+                    g.ru->ReceiveControl(a);
+                    ++beam_apps;
+                });
+        }
+
+        Simulator::Stop(Seconds(30.5));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_EXPECT_MSG_EQ(emitted, 300u, "300 KPM reports emitted");
+        NS_TEST_EXPECT_MSG_EQ(g.du->IndicationsEmitted(),
+                               300u,
+                               "DU accounting matches");
+        NS_TEST_EXPECT_MSG_EQ(beam_apps, 30u, "30 beam-switches fired");
+        NS_TEST_EXPECT_MSG_EQ(g.ru->ControlsAccepted(),
+                               30u,
+                               "RU applied 30 controls");
+        // DU receives no controls in this scenario.
+        NS_TEST_EXPECT_MSG_EQ(g.du->ControlsAccepted(),
+                               0u,
+                               "DU saw 0 controls");
+        // CU-CP: no controls in this scenario.
+        NS_TEST_EXPECT_MSG_EQ(g.cu_cp->ControlsAccepted(),
+                               0u,
+                               "CU-CP saw 0 controls");
+    }
+};
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
 
@@ -3489,6 +3961,21 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnSmCccNtnDopplerRetuneTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnSmCccNtnSimulatorTimeTest,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.9 — CU/DU/RU split.
+        AddTestCase(new OranNtnSplitGnbRolesTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSplitGnbControlRoutingTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnF1RoundTripTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnF1LinkDownTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnOfhPlaneRoutingTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSplitGnbEndToEndTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSplitGnbSimulatorWorkloadTest,
                     TestCase::Duration::QUICK);
     }
 };
