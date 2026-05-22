@@ -19,6 +19,8 @@ set(source_files
     model/oran-ntn-service-model.cc
     model/oran-ntn-service-model-kpm.cc
     model/oran-ntn-service-model-rc.cc
+    # 4.1.6 — E2SM-CCC v1.00 SM plugin (Roadmap §4.1.6)
+    model/oran-ntn-service-model-ccc.cc
     # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
     asn1/asn1-per-codec.cc
     # T3 — SCTP / TCP E2 listener for FlexRIC bridge (Roadmap §3 T3)
@@ -83,6 +85,8 @@ set(header_files
     model/oran-ntn-service-model.h
     model/oran-ntn-service-model-kpm.h
     model/oran-ntn-service-model-rc.h
+    # 4.1.6 — E2SM-CCC v1.00 SM plugin (Roadmap §4.1.6)
+    model/oran-ntn-service-model-ccc.h
     # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
     asn1/asn1-per-codec.h
     # T3 — SCTP / TCP E2 listener for FlexRIC bridge (Roadmap §3 T3)

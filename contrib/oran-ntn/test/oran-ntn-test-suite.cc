@@ -25,6 +25,7 @@
 #include "ns3/asn1-per-codec.h"
 #include "ns3/e2-listener.h"
 #include "ns3/e2-transport.h"
+#include "ns3/oran-ntn-service-model-ccc.h"
 #include "ns3/oran-ntn-service-model-kpm.h"
 #include "ns3/oran-ntn-service-model-rc.h"
 #include "ns3/oran-ntn-service-model.h"
@@ -2214,6 +2215,240 @@ class OranNtnConflictTaxonomyTestCase : public TestCase
 };
 
 // ============================================================================
+//  4.1.6 (Roadmap §4.1.6): E2SM-CCC SM plugin
+// ============================================================================
+
+class OranNtnSmCccIndicationTest : public TestCase
+{
+  public:
+    OranNtnSmCccIndicationTest()
+        : TestCase("CCC SM Indication round-trips cell config + perf objectives")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::ccc;
+
+        CccIndMsgFormat1 body{};
+        body.snapshot_seq = 42;
+        // Two cells.
+        CellConfigRecord c1{};
+        c1.nr_cell_global_id = 0x123456789ULL;
+        c1.dtx_us_log2 = 6;
+        c1.drx_us_log2 = 8;
+        c1.output_power_dbm = 33;
+        c1.prb_pool_total = 273;
+        c1.prb_pool_reserved = 12;
+        c1.antenna_mask = 0xF0F0F0F0ULL;
+        c1.arfcn_dl = 638400;
+        c1.arfcn_ul = 638400;
+        body.cells.push_back(c1);
+
+        CellConfigRecord c2{};
+        c2.nr_cell_global_id = 0xABCDEFULL;
+        c2.dtx_us_log2 = 5;
+        c2.drx_us_log2 = 7;
+        c2.output_power_dbm = 40;
+        c2.prb_pool_total = 51;        // FR1 20 MHz at 30 kHz SCS
+        c2.prb_pool_reserved = 4;
+        c2.antenna_mask = 0xFFFFULL;
+        // No ARFCN entries (OPTIONAL absent).
+        body.cells.push_back(c2);
+
+        // Two perf objectives.
+        PerformanceObjective o1{};
+        o1.metric = PerformanceObjective::Metric::spectral_efficiency;
+        o1.target_value = 4.5;
+        o1.tolerance = 0.5;
+        o1.scope_nr_cgi = 0x123456789ULL;
+        o1.scope_slice_id = 1;
+        body.perf_objectives.push_back(o1);
+
+        PerformanceObjective o2{};
+        o2.metric = PerformanceObjective::Metric::latency_ms;
+        o2.target_value = 20.0;
+        o2.tolerance = 5.0;
+        o2.scope_nr_cgi = 0;
+        o2.scope_slice_id = 0;
+        body.perf_objectives.push_back(o2);
+
+        OranNtnServiceModelCcc sm;
+        NS_TEST_EXPECT_MSG_EQ(sm.RicFunctionId(),
+                              1000u,
+                              "CCC function ID");
+        NS_TEST_EXPECT_MSG_EQ(sm.Name(), "CCC", "CCC name");
+        NS_TEST_EXPECT_MSG_EQ(sm.Version(), "v1.00", "CCC version");
+
+        const auto blob = sm.EncodeIndication(&body);
+        NS_TEST_EXPECT_MSG_GT(blob.size(), 16u, "non-trivial PER blob");
+
+        CccIndMsgFormat1 got{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeIndication(blob, got),
+                              true,
+                              "decode indication");
+        NS_TEST_EXPECT_MSG_EQ(got.snapshot_seq, 42u, "snapshot_seq");
+        NS_TEST_ASSERT_MSG_EQ(got.cells.size(), 2u, "2 cells");
+        NS_TEST_EXPECT_MSG_EQ(got.cells[0].nr_cell_global_id,
+                              0x123456789ULL,
+                              "cell[0] NCGI");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.cells[0].dtx_us_log2),
+                              6,
+                              "cell[0] DTX");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.cells[0].output_power_dbm),
+                              33,
+                              "cell[0] power");
+        NS_TEST_ASSERT_MSG_EQ(got.cells[0].arfcn_dl.has_value(),
+                              true,
+                              "cell[0] has DL ARFCN");
+        NS_TEST_EXPECT_MSG_EQ(*got.cells[0].arfcn_dl, 638400u,
+                              "cell[0] DL ARFCN value");
+        NS_TEST_EXPECT_MSG_EQ(got.cells[1].arfcn_dl.has_value(),
+                              false,
+                              "cell[1] has no DL ARFCN (OPTIONAL absent)");
+
+        NS_TEST_ASSERT_MSG_EQ(got.perf_objectives.size(),
+                              2u,
+                              "2 perf objectives");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.perf_objectives[0].metric),
+                              static_cast<int>(
+                                  PerformanceObjective::Metric::spectral_efficiency),
+                              "obj[0] metric");
+        NS_TEST_EXPECT_MSG_EQ(got.perf_objectives[0].target_value,
+                              4.5,
+                              "obj[0] target");
+        NS_TEST_EXPECT_MSG_EQ(got.perf_objectives[1].target_value,
+                              20.0,
+                              "obj[1] target");
+
+        // Truncated blob -> decode fails cleanly.
+        std::vector<uint8_t> trunc(blob.begin(), blob.begin() + 3);
+        CccIndMsgFormat1 bad{};
+        NS_TEST_EXPECT_MSG_EQ(sm.DecodeIndication(trunc, bad),
+                              false,
+                              "truncated blob rejected");
+    }
+};
+
+class OranNtnSmCccControlTest : public TestCase
+{
+  public:
+    OranNtnSmCccControlTest()
+        : TestCase("CCC SM ControlAction round-trips set and clear ops")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::ccc;
+        OranNtnServiceModelCcc sm;
+
+        // set_perf_objective with one objective.
+        CccControlAction a1{};
+        a1.op = CccControlAction::Op::set_perf_objective;
+        PerformanceObjective po{};
+        po.metric = PerformanceObjective::Metric::ue_throughput_mbps;
+        po.target_value = 100.0;
+        po.tolerance = 10.0;
+        po.scope_nr_cgi = 0x42;
+        a1.objective_updates.push_back(po);
+        const auto blob = sm.EncodeControl(a1);
+        CccControlAction got{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl(blob, &got),
+                              true,
+                              "decode ControlAction");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.op),
+                              static_cast<int>(
+                                  CccControlAction::Op::set_perf_objective),
+                              "op preserved");
+        NS_TEST_ASSERT_MSG_EQ(got.objective_updates.size(),
+                              1u,
+                              "1 objective");
+        NS_TEST_EXPECT_MSG_EQ(got.objective_updates[0].target_value,
+                              100.0,
+                              "target value");
+        NS_TEST_EXPECT_MSG_EQ(got.cell_updates.size(),
+                              0u,
+                              "no cell updates");
+
+        // clear_config with 2 cells.
+        CccControlAction a2{};
+        a2.op = CccControlAction::Op::clear_config;
+        CellConfigRecord c{};
+        c.nr_cell_global_id = 1;
+        a2.cell_updates.push_back(c);
+        c.nr_cell_global_id = 2;
+        a2.cell_updates.push_back(c);
+        const auto blob2 = sm.EncodeControl(a2);
+        CccControlAction got2{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl(blob2, &got2),
+                              true,
+                              "decode clear_config");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got2.op),
+                              static_cast<int>(
+                                  CccControlAction::Op::clear_config),
+                              "op clear_config");
+        NS_TEST_ASSERT_MSG_EQ(got2.cell_updates.size(),
+                              2u,
+                              "2 cell updates");
+        NS_TEST_EXPECT_MSG_EQ(got2.cell_updates[0].nr_cell_global_id,
+                              1u,
+                              "cell[0] NCGI");
+        NS_TEST_EXPECT_MSG_EQ(got2.cell_updates[1].nr_cell_global_id,
+                              2u,
+                              "cell[1] NCGI");
+    }
+};
+
+class OranNtnSmRegistryThreePluginsTest : public TestCase
+{
+  public:
+    OranNtnSmRegistryThreePluginsTest()
+        : TestCase("Service-Model registry resolves KPM, RC, and CCC plugins")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<OranNtnServiceModelRegistry> reg =
+            CreateObject<OranNtnServiceModelRegistry>();
+        Ptr<OranNtnServiceModelKpm> kpm =
+            CreateObject<OranNtnServiceModelKpm>();
+        Ptr<OranNtnServiceModelRc> rc =
+            CreateObject<OranNtnServiceModelRc>();
+        Ptr<OranNtnServiceModelCcc> ccc =
+            CreateObject<OranNtnServiceModelCcc>();
+
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(kpm), true, "KPM registered");
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(rc), true, "RC registered");
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(ccc), true, "CCC registered");
+        NS_TEST_EXPECT_MSG_EQ(reg->Size(), 3u, "3 plugins");
+
+        // Lookup all three.
+        Ptr<OranNtnServiceModel> p = reg->Lookup(147);
+        NS_TEST_ASSERT_MSG_NE(p, nullptr, "KPM lookup");
+        NS_TEST_EXPECT_MSG_EQ(p->Name(), "KPM", "KPM name");
+        p = reg->Lookup(3);
+        NS_TEST_ASSERT_MSG_NE(p, nullptr, "RC lookup");
+        NS_TEST_EXPECT_MSG_EQ(p->Name(), "RC", "RC name");
+        p = reg->Lookup(1000);
+        NS_TEST_ASSERT_MSG_NE(p, nullptr, "CCC lookup");
+        NS_TEST_EXPECT_MSG_EQ(p->Name(), "CCC", "CCC name");
+        NS_TEST_EXPECT_MSG_EQ(p->Version(), "v1.00", "CCC version");
+
+        // Ascending order: RC (3), KPM (147), CCC (1000).
+        auto ids = reg->GetFunctionIds();
+        NS_TEST_ASSERT_MSG_EQ(ids.size(), 3u, "3 IDs");
+        NS_TEST_EXPECT_MSG_EQ(ids[0], 3u, "RC first");
+        NS_TEST_EXPECT_MSG_EQ(ids[1], 147u, "KPM second");
+        NS_TEST_EXPECT_MSG_EQ(ids[2], 1000u, "CCC third");
+    }
+};
+
+// ============================================================================
 //  T3 (Roadmap §3 T3): E2 SCTP / TCP listener + state machine
 // ============================================================================
 
@@ -2814,6 +3049,13 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnE2ListenerHandshakeTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2ListenerSimulatorTimeTest,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.6 — E2SM-CCC SM plugin.
+        AddTestCase(new OranNtnSmCccIndicationTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSmCccControlTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSmRegistryThreePluginsTest,
                     TestCase::Duration::QUICK);
     }
 };
