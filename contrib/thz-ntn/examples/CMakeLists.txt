@@ -58,6 +58,11 @@ build_lib_example(
     ${libmobility}
 )
 
+# TODO Roadmap §4.3.5: ISAC scheduler is being redesigned; thz-ntn-isac.cc
+# references the legacy ThzNtnIsac API (CreateIsac/PerformSensing/...). The
+# example will be rewritten alongside the Q4 2026 ISAC scheduler work. Until
+# then leave the example out of the build so test-runner can link.
+if(FALSE)
 build_lib_example(
   NAME thz-ntn-isac
   SOURCE_FILES thz-ntn-isac.cc
@@ -66,6 +71,7 @@ build_lib_example(
     ${libcore}
     ${libmobility}
 )
+endif()
 
 build_lib_example(
   NAME thz-ntn-dband-constellation
