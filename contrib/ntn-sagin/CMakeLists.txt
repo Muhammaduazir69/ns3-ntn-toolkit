@@ -4,6 +4,9 @@ set(source_files
     model/a2g-channel-tr36777.cc
     model/multi-layer-router.cc
     model/aeronautical-scenario.cc
+    # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
+    model/opensky-adsb-trace.cc
+    model/opensky-mobility-model.cc
     helper/sagin-helper.cc
 )
 
@@ -13,6 +16,9 @@ set(header_files
     model/a2g-channel-tr36777.h
     model/multi-layer-router.h
     model/aeronautical-scenario.h
+    # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
+    model/opensky-adsb-trace.h
+    model/opensky-mobility-model.h
     helper/sagin-helper.h
 )
 

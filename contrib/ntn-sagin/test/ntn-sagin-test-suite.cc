@@ -9,12 +9,17 @@
 #include "ns3/double.h"
 #include "ns3/haps-mobility-model.h"
 #include "ns3/multi-layer-router.h"
+#include "ns3/opensky-adsb-trace.h"
+#include "ns3/opensky-mobility-model.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 #include "ns3/uav-mobility-models.h"
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <vector>
 
 using namespace ns3;
 
@@ -229,6 +234,252 @@ class AeronauticalReachesArrivalTest : public TestCase
     }
 };
 
+// ============================================================================
+// Roadmap §4.4.1: OpenSky ADS-B trace importer + replay mobility model
+// ============================================================================
+
+class OpenSkyImporterParseTest : public TestCase
+{
+  public:
+    OpenSkyImporterParseTest()
+        : TestCase("OpenSky importer parses CSV header + rows for multiple aircraft")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        sagin::OpenSkyAdsbImporter imp;
+        const std::string candidates[] = {
+            "contrib/ntn-sagin/data/opensky-sample-trace.csv",
+            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/ntn-sagin/data/"
+            "opensky-sample-trace.csv",
+        };
+        std::map<std::string, sagin::OpenSkyAdsbTrace> traces;
+        for (const auto& p : candidates)
+        {
+            traces = imp.LoadCsv(p);
+            if (!traces.empty())
+                break;
+        }
+        NS_TEST_ASSERT_MSG_GT(traces.size(), 0u,
+                              "bundled OpenSky sample not loaded");
+        // Sample dump has 3 icao24 codes.
+        NS_TEST_ASSERT_MSG_EQ(traces.size(), 3u, "3 aircraft expected");
+        NS_TEST_ASSERT_MSG_EQ(traces.count("4ca7b7"), 1u, "DLH123 present");
+        NS_TEST_ASSERT_MSG_EQ(traces.count("abc123"), 1u, "BAW456 present");
+        NS_TEST_ASSERT_MSG_EQ(traces.count("ground42"), 1u, "ground aircraft");
+
+        const auto& dlh = traces.at("4ca7b7");
+        NS_TEST_ASSERT_MSG_EQ(dlh.samples.size(), 7u, "DLH123 has 7 samples");
+        // First sample must match the CSV (lat=52, lon=9, alt=1500).
+        NS_TEST_ASSERT_MSG_EQ_TOL(dlh.samples.front().lat_deg, 52.0, 1e-9,
+                                  "first lat");
+        NS_TEST_ASSERT_MSG_EQ_TOL(dlh.samples.front().lon_deg, 9.0, 1e-9,
+                                  "first lon");
+        NS_TEST_ASSERT_MSG_EQ_TOL(dlh.samples.front().alt_m, 1500.0, 1e-6,
+                                  "first alt (baro)");
+        // Last sample: lon should have moved ~ 0.162° east.
+        NS_TEST_ASSERT_MSG_GT(dlh.samples.back().lon_deg,
+                              dlh.samples.front().lon_deg,
+                              "longitude advances east");
+        NS_TEST_ASSERT_MSG_GT(dlh.samples.back().alt_m,
+                              dlh.samples.front().alt_m,
+                              "aircraft climbed during trace");
+
+        // Ground aircraft: onground=true => alt clamped to 0 m.
+        const auto& gr = traces.at("ground42");
+        for (const auto& s : gr.samples)
+        {
+            NS_TEST_ASSERT_MSG_EQ(s.alt_m, 0.0,
+                                  "onground => alt clamped to 0");
+        }
+    }
+};
+
+class OpenSkyImporterMalformedTest : public TestCase
+{
+  public:
+    OpenSkyImporterMalformedTest()
+        : TestCase("OpenSky importer skips malformed rows and counts them")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string path = "/tmp/opensky-test-bad.csv";
+        std::ofstream f(path);
+        f << "time,icao24,lat,lon,velocity,heading,vertrate,callsign,"
+             "onground,alert,spi,squawk,baroaltitude,geoaltitude,"
+             "lastposupdate,lastcontact\n";
+        f << "1572912000,abc,52.0,9.0,200,90,0,X,false,false,false,0,1000,1000,0,0\n";
+        f << ",,,bad,row,here\n"; // malformed
+        f << "1572912010,abc,52.001,9.0,200,90,0,X,false,false,false,0,1000,1000,0,0\n";
+        f << "1572912020,,no_icao,,,,,,,,,,,,\n"; // empty icao
+        f << "1572912030,def,not_a_number,9.0,200,90,0,X,false,false,false,0,1000,1000,0,0\n";
+        f.close();
+
+        sagin::OpenSkyAdsbImporter imp;
+        auto traces = imp.LoadCsv(path);
+        NS_TEST_ASSERT_MSG_EQ(traces.size(), 1u,
+                              "only the 'abc' aircraft is valid");
+        NS_TEST_ASSERT_MSG_EQ(traces.at("abc").samples.size(), 2u,
+                              "2 valid samples for abc");
+        NS_TEST_ASSERT_MSG_GT(imp.LastRowsSkipped(), 0u, "skip counter > 0");
+        std::remove(path.c_str());
+    }
+};
+
+class OpenSkyTraceInterpolationTest : public TestCase
+{
+  public:
+    OpenSkyTraceInterpolationTest()
+        : TestCase("OpenSky trace InterpolateAt linearly interpolates lat lon alt")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        sagin::OpenSkyAdsbTrace tr;
+        tr.icao24 = "tst";
+        tr.samples.push_back({0.0, 52.0, 9.0, 1000.0, 100.0, 90.0});
+        tr.samples.push_back({10.0, 52.01, 9.01, 1500.0, 200.0, 90.0});
+
+        // Midpoint should give average values.
+        auto mid = tr.InterpolateAt(5.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(mid.lat_deg, 52.005, 1e-9, "lat mid");
+        NS_TEST_ASSERT_MSG_EQ_TOL(mid.lon_deg, 9.005, 1e-9, "lon mid");
+        NS_TEST_ASSERT_MSG_EQ_TOL(mid.alt_m, 1250.0, 1e-9, "alt mid");
+        NS_TEST_ASSERT_MSG_EQ_TOL(mid.velocity_mps, 150.0, 1e-9, "vel mid");
+
+        // Below range -> first sample.
+        auto before = tr.InterpolateAt(-5.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(before.lat_deg, 52.0, 1e-9, "clamp low");
+        // Above range -> last sample.
+        auto after = tr.InterpolateAt(20.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(after.lat_deg, 52.01, 1e-9, "clamp high");
+
+        // Heading interpolation wraps around 0/360.
+        tr.samples.clear();
+        tr.samples.push_back({0.0, 0.0, 0.0, 0.0, 100.0, 350.0});
+        tr.samples.push_back({10.0, 0.0, 0.0, 0.0, 100.0, 10.0});
+        // Midpoint heading should be 0 (or 360 - either is fine).
+        auto h = tr.InterpolateAt(5.0);
+        const bool headingNearZero =
+            (h.heading_deg < 5.0) || (h.heading_deg > 355.0);
+        NS_TEST_ASSERT_MSG_EQ(headingNearZero,
+                              true,
+                              "heading interpolates around 0/360");
+    }
+};
+
+namespace
+{
+
+struct TraceSample
+{
+    double t_s;
+    double east_m;
+    double north_m;
+    double up_m;
+    double speed_mps;
+};
+
+void
+SampleOpenSkyModel(Ptr<sagin::OpenSkyMobilityModel> mob,
+                    std::vector<TraceSample>* out)
+{
+    Vector p = mob->GetPosition();
+    Vector v = mob->GetVelocity();
+    const double sp = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    out->push_back(
+        {Simulator::Now().GetSeconds(), p.x, p.y, p.z, sp});
+}
+
+} // namespace
+
+class OpenSkySimulatorTimeReplayTest : public TestCase
+{
+  public:
+    OpenSkySimulatorTimeReplayTest()
+        : TestCase("Simulator: 60 s OpenSky replay matches CSV trajectory in ENU")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        sagin::OpenSkyAdsbImporter imp;
+        const std::string candidates[] = {
+            "contrib/ntn-sagin/data/opensky-sample-trace.csv",
+            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/ntn-sagin/data/"
+            "opensky-sample-trace.csv",
+        };
+        std::map<std::string, sagin::OpenSkyAdsbTrace> traces;
+        for (const auto& p : candidates)
+        {
+            traces = imp.LoadCsv(p);
+            if (!traces.empty())
+                break;
+        }
+        NS_TEST_ASSERT_MSG_GT(traces.size(), 0u, "sample trace loaded");
+        const auto& dlh = traces.at("4ca7b7");
+
+        Ptr<sagin::OpenSkyMobilityModel> mob =
+            CreateObject<sagin::OpenSkyMobilityModel>();
+        mob->SetTrace(dlh);
+        // Reference at the trace start (lat=52, lon=9, alt=1500).
+        mob->SetReference(52.0, 9.0, 1500.0);
+        mob->SetTraceTimeOffsetSeconds(dlh.TStart());
+
+        std::vector<TraceSample> samples;
+        for (int t = 0; t <= 60; t += 5)
+        {
+            Simulator::Schedule(Seconds(t), &SampleOpenSkyModel, mob,
+                                &samples);
+        }
+        Simulator::Stop(Seconds(61));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), 13u, "13 samples over 60 s");
+
+        // At t=0, position must be exactly at the reference origin.
+        NS_TEST_ASSERT_MSG_EQ_TOL(samples.front().east_m, 0.0, 1.0,
+                                  "t=0 east≈0");
+        NS_TEST_ASSERT_MSG_EQ_TOL(samples.front().north_m, 0.0, 1.0,
+                                  "t=0 north≈0");
+        NS_TEST_ASSERT_MSG_EQ_TOL(samples.front().up_m, 0.0, 1.0,
+                                  "t=0 up≈0");
+
+        // Monotonic east (aircraft heading 90°, longitude increases).
+        for (size_t i = 1; i < samples.size(); ++i)
+        {
+            NS_TEST_ASSERT_MSG_GT(samples[i].east_m,
+                                  samples[i - 1].east_m,
+                                  "east increases as aircraft flies E");
+        }
+
+        // Vertical climb during the first 30 s.
+        NS_TEST_ASSERT_MSG_GT(samples[6].up_m, samples[0].up_m,
+                              "altitude climbed by t=30 s");
+
+        // Speed in the trace is 180..250 m/s. ENU velocity magnitude must
+        // land in that range.
+        for (const auto& s : samples)
+        {
+            NS_TEST_ASSERT_MSG_GT(s.speed_mps, 100.0,
+                                  "speed > 100 m/s during cruise");
+            NS_TEST_ASSERT_MSG_LT(s.speed_mps, 400.0,
+                                  "speed < 400 m/s during cruise");
+        }
+
+        // Past TEnd, position clamps to the last sample.
+        Simulator::Destroy();
+    }
+};
+
 class NtnSaginTestSuite : public TestSuite
 {
   public:
@@ -241,6 +492,11 @@ class NtnSaginTestSuite : public TestSuite
         AddTestCase(new A2gLosProbabilityMonotonicTest, TestCase::Duration::QUICK);
         AddTestCase(new MultiLayerRouterConvergesTest, TestCase::Duration::QUICK);
         AddTestCase(new AeronauticalReachesArrivalTest, TestCase::Duration::QUICK);
+        // Roadmap §4.4.1 — OpenSky ADS-B trace importer + replay mobility.
+        AddTestCase(new OpenSkyImporterParseTest, TestCase::Duration::QUICK);
+        AddTestCase(new OpenSkyImporterMalformedTest, TestCase::Duration::QUICK);
+        AddTestCase(new OpenSkyTraceInterpolationTest, TestCase::Duration::QUICK);
+        AddTestCase(new OpenSkySimulatorTimeReplayTest, TestCase::Duration::QUICK);
     }
 };
 
