@@ -59,11 +59,26 @@ class ContactGraphRouter : public Object
     /// All neighbours of `node` in the current graph.
     std::set<uint32_t> Neighbours(uint32_t node) const;
 
-    /// Hop-count shortest path from `src` to `dst`. Returns an empty
-    /// vector when no path exists; otherwise the path includes both
-    /// endpoints, so a length-1 path is `{src}` (when src == dst) and
-    /// a length-2 path is `{src, dst}` (direct edge).
+    /// Hop-count shortest path from `src` to `dst` (BFS). Returns an
+    /// empty vector when no path exists; otherwise the path includes
+    /// both endpoints, so a length-1 path is `{src}` (when src == dst)
+    /// and a length-2 path is `{src, dst}` (direct edge).
     std::vector<uint32_t> ShortestPath(uint32_t src, uint32_t dst) const;
+
+    /// Link-weighted shortest path (Dijkstra) — Roadmap §4.4.5.
+    /// Edge weight is the contact event's `range_m`. Consumers can
+    /// interpret `total_weight` as latency by dividing by c. Returns an
+    /// empty `path` when no route exists; total_weight is +inf in that
+    /// case.
+    struct WeightedPath
+    {
+        std::vector<uint32_t> path;
+        double total_weight;
+    };
+    WeightedPath ShortestPathWeighted(uint32_t src, uint32_t dst) const;
+
+    /// Current weight of the edge (a, b); returns NaN if no edge.
+    double EdgeWeight(uint32_t a, uint32_t b) const;
 
     /// Counters that the trace handlers tick (test asserts).
     uint64_t EdgesAddedTotal() const { return m_added.load(); }
@@ -85,6 +100,9 @@ class ContactGraphRouter : public Object
     std::map<uint32_t, std::set<uint32_t>> m_adj;
     /// Set of canonical (low, high) edge IDs currently up.
     std::set<std::pair<uint32_t, uint32_t>> m_edges;
+    /// Per-edge weight (link range in metres at the latest event for
+    /// this edge). Used by ShortestPathWeighted.
+    std::map<std::pair<uint32_t, uint32_t>, double> m_edgeWeights;
 
     mutable std::atomic<uint64_t> m_added{0};
     mutable std::atomic<uint64_t> m_removed{0};

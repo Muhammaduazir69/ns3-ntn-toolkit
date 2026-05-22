@@ -558,6 +558,208 @@ class ContactGraphRouterSimulatorTimeTest : public TestCase
     }
 };
 
+// ---------------------------------------------------------------------------
+//  Roadmap §4.4.5: ContactGraphRouter Dijkstra link-weighted shortest path
+// ---------------------------------------------------------------------------
+
+class ContactGraphRouterWeightedEdgeTest : public TestCase
+{
+  public:
+    ContactGraphRouterWeightedEdgeTest()
+        : TestCase("ContactGraphRouter records edge weights from contact "
+                   "events and EdgeWeight returns them")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ContactGraphRouter> r = CreateObject<ContactGraphRouter>();
+        Ptr<ContactGraphScheduler> sched =
+            CreateObject<ContactGraphScheduler>();
+        r->Attach(sched);
+
+        // Hand-fire edges with explicit ranges.
+        sched->m_contactUp({0, 1, 2, true, true, 1500e3, 0.0});
+        sched->m_contactUp({0, 2, 3, true, true, 3000e3, 0.0});
+        NS_TEST_ASSERT_MSG_EQ(r->NumEdges(), 2u, "2 edges");
+        NS_TEST_ASSERT_MSG_EQ_TOL(r->EdgeWeight(1, 2), 1500e3, 1e-6,
+                                  "edge 1-2 weight");
+        NS_TEST_ASSERT_MSG_EQ_TOL(r->EdgeWeight(2, 3), 3000e3, 1e-6,
+                                  "edge 2-3 weight");
+        const bool weightIsNan = std::isnan(r->EdgeWeight(1, 9));
+        NS_TEST_ASSERT_MSG_EQ(weightIsNan, true,
+                              "absent edge returns NaN");
+
+        // Re-up event refreshes the weight.
+        sched->m_contactUp({1, 1, 2, true, true, 1200e3, 0.0});
+        NS_TEST_ASSERT_MSG_EQ_TOL(r->EdgeWeight(1, 2), 1200e3, 1e-6,
+                                  "edge 1-2 weight refreshed");
+
+        // Edge-down removes weight.
+        sched->m_contactDown({2, 1, 2, true, false, 9e9, 0.0});
+        const bool postDownNan = std::isnan(r->EdgeWeight(1, 2));
+        NS_TEST_ASSERT_MSG_EQ(postDownNan, true,
+                              "edge weight removed on down");
+    }
+};
+
+class ContactGraphRouterDijkstraTest : public TestCase
+{
+  public:
+    ContactGraphRouterDijkstraTest()
+        : TestCase("Dijkstra picks a longer-hop low-weight route over a "
+                   "shorter-hop high-weight route")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ContactGraphRouter> r = CreateObject<ContactGraphRouter>();
+        Ptr<ContactGraphScheduler> sched =
+            CreateObject<ContactGraphScheduler>();
+        r->Attach(sched);
+
+        // Build the "triangle with one expensive direct edge" graph:
+        //   1 -- 2 (weight 100)
+        //   2 -- 3 (weight 100)
+        //   1 -- 3 (weight 1000)
+        // BFS from 1 to 3 -> {1, 3} (1 hop, but high weight 1000).
+        // Dijkstra from 1 to 3 -> {1, 2, 3} (2 hops, low weight 200).
+        sched->m_contactUp({0, 1, 2, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 2, 3, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 1, 3, true, true, 1000.0, 0.0});
+
+        auto bfs = r->ShortestPath(1, 3);
+        NS_TEST_ASSERT_MSG_EQ(bfs.size(), 2u, "BFS takes the 1-hop edge");
+        NS_TEST_EXPECT_MSG_EQ(bfs[0], 1u, "BFS[0]=1");
+        NS_TEST_EXPECT_MSG_EQ(bfs[1], 3u, "BFS[1]=3");
+
+        auto dij = r->ShortestPathWeighted(1, 3);
+        NS_TEST_ASSERT_MSG_EQ(dij.path.size(), 3u,
+                              "Dijkstra takes the 2-hop low-weight route");
+        NS_TEST_EXPECT_MSG_EQ(dij.path[0], 1u, "dij[0]=1");
+        NS_TEST_EXPECT_MSG_EQ(dij.path[1], 2u, "dij[1]=2 (intermediate)");
+        NS_TEST_EXPECT_MSG_EQ(dij.path[2], 3u, "dij[2]=3");
+        NS_TEST_ASSERT_MSG_EQ_TOL(dij.total_weight, 200.0, 1e-9,
+                                  "total weight = 100 + 100");
+
+        // src == dst short-circuit.
+        auto self = r->ShortestPathWeighted(2, 2);
+        NS_TEST_EXPECT_MSG_EQ(self.path.size(), 1u, "self path length 1");
+        NS_TEST_EXPECT_MSG_EQ(self.total_weight, 0.0, "self weight 0");
+
+        // Disconnected node returns empty + +inf.
+        auto none = r->ShortestPathWeighted(1, 999);
+        NS_TEST_EXPECT_MSG_EQ(none.path.size(), 0u, "no path");
+        const bool isInf = std::isinf(none.total_weight);
+        NS_TEST_EXPECT_MSG_EQ(isInf, true, "total_weight = +inf");
+
+        // Bring down the cheap leg — Dijkstra falls back to the 1000-cost
+        // direct edge.
+        sched->m_contactDown({1, 1, 2, true, false, 9e9, 0.0});
+        auto after = r->ShortestPathWeighted(1, 3);
+        NS_TEST_ASSERT_MSG_EQ(after.path.size(), 2u,
+                              "after 1-2 down, fall back to direct edge");
+        NS_TEST_ASSERT_MSG_EQ_TOL(after.total_weight, 1000.0, 1e-9,
+                                  "fallback weight 1000");
+    }
+};
+
+namespace
+{
+
+struct WeightedRouteSample
+{
+    double t_s;
+    size_t path_len;
+    double total_weight_m;
+};
+
+void
+SampleWeightedRoute(Ptr<ContactGraphRouter> router,
+                     uint32_t src,
+                     uint32_t dst,
+                     std::vector<WeightedRouteSample>* out)
+{
+    auto wp = router->ShortestPathWeighted(src, dst);
+    out->push_back({Simulator::Now().GetSeconds(),
+                     wp.path.size(),
+                     wp.total_weight});
+}
+
+} // namespace
+
+class ContactGraphRouterDijkstraSimulatorTimeTest : public TestCase
+{
+  public:
+    ContactGraphRouterDijkstraSimulatorTimeTest()
+        : TestCase("Simulator: 600 s 11-sat Walker plane drives Dijkstra "
+                   "routing; weighted path stays positive while ISLs flicker")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        WalkerConfig cfg;
+        cfg.inclination_deg = 53.0;
+        cfg.total_sats = 11;
+        cfg.num_planes = 1;
+        cfg.phasing_f = 0;
+        cfg.altitude_km = 550.0;
+        cfg.epoch_unix_s = 1577836800.0;
+        auto elts = WalkerConstellation::BuildDelta(cfg);
+        NS_TEST_ASSERT_MSG_EQ(elts.size(), 11u, "11 sats");
+
+        Ptr<ContactGraphScheduler> cg = CreateObject<ContactGraphScheduler>();
+        cg->SetSamplingInterval(Seconds(30.0));
+        cg->SetMaxIslRangeM(5'000'000.0);
+        for (size_t i = 0; i < elts.size(); ++i)
+        {
+            Ptr<Sgp4MobilityModel> s = CreateObject<Sgp4MobilityModel>();
+            s->SetElements(elts[i]);
+            cg->RegisterSatellite(static_cast<uint32_t>(i + 1), s);
+        }
+        Ptr<ContactGraphRouter> router = CreateObject<ContactGraphRouter>();
+        router->Attach(cg);
+        cg->Start();
+
+        std::vector<WeightedRouteSample> samples;
+        for (int t = 60; t <= 600; t += 60)
+        {
+            Simulator::Schedule(Seconds(t),
+                                &SampleWeightedRoute,
+                                router,
+                                /*src=*/1u,
+                                /*dst=*/3u,
+                                &samples);
+        }
+        Simulator::Stop(Seconds(601));
+        Simulator::Run();
+        cg->Stop();
+
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), 10u, "10 weighted samples");
+        // At least one sample must have found a route with positive weight.
+        size_t routed = 0;
+        for (const auto& s : samples)
+        {
+            if (s.path_len > 0 && s.total_weight_m > 0.0 &&
+                s.total_weight_m < 1e9)
+            {
+                ++routed;
+            }
+        }
+        NS_TEST_ASSERT_MSG_GT(routed, 0u,
+                              "at least one sample found a finite-weight route");
+        NS_TEST_ASSERT_MSG_GT(router->RouteQueries(), 0u,
+                              "weighted-path queries counted");
+
+        Simulator::Destroy();
+    }
+};
+
 class NtnConstellationTestSuite : public TestSuite
 {
   public:
@@ -575,6 +777,11 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new ContactGraphRouterDirectEdgesTest, Duration::QUICK);
         AddTestCase(new ContactGraphRouterShortestPathTest, Duration::QUICK);
         AddTestCase(new ContactGraphRouterSimulatorTimeTest, Duration::QUICK);
+        // Roadmap §4.4.5 — Dijkstra link-weighted shortest path.
+        AddTestCase(new ContactGraphRouterWeightedEdgeTest, Duration::QUICK);
+        AddTestCase(new ContactGraphRouterDijkstraTest, Duration::QUICK);
+        AddTestCase(new ContactGraphRouterDijkstraSimulatorTimeTest,
+                    Duration::QUICK);
     }
 };
 

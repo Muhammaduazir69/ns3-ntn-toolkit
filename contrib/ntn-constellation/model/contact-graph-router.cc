@@ -55,6 +55,10 @@ ContactGraphRouter::HandleContactEvent(const ContactEvent& ev)
             m_adj[ev.node_b].insert(ev.node_a);
             ++m_added;
         }
+        // Always refresh the weight on a contact-up event — the
+        // scheduler emits the current range every time visibility
+        // toggles, so this is the freshest snapshot we have.
+        m_edgeWeights[key] = ev.range_m;
     }
     else
     {
@@ -65,6 +69,7 @@ ContactGraphRouter::HandleContactEvent(const ContactEvent& ev)
             m_adj[ev.node_b].erase(ev.node_a);
             ++m_removed;
         }
+        m_edgeWeights.erase(key);
     }
 }
 
@@ -85,6 +90,81 @@ ContactGraphRouter::Neighbours(uint32_t node) const
 {
     auto it = m_adj.find(node);
     return (it == m_adj.end()) ? std::set<uint32_t>{} : it->second;
+}
+
+double
+ContactGraphRouter::EdgeWeight(uint32_t a, uint32_t b) const
+{
+    auto it = m_edgeWeights.find(CanonicalEdge(a, b));
+    if (it == m_edgeWeights.end())
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return it->second;
+}
+
+ContactGraphRouter::WeightedPath
+ContactGraphRouter::ShortestPathWeighted(uint32_t src, uint32_t dst) const
+{
+    ++m_queries;
+    if (src == dst)
+    {
+        return {{src}, 0.0};
+    }
+    // Dijkstra. dist[node] = shortest known weight from src.
+    std::map<uint32_t, double> dist;
+    std::map<uint32_t, uint32_t> pred;
+    using QEntry = std::pair<double, uint32_t>; // (weight, node)
+    std::priority_queue<QEntry, std::vector<QEntry>, std::greater<QEntry>>
+        pq;
+    dist[src] = 0.0;
+    pq.push({0.0, src});
+    while (!pq.empty())
+    {
+        const auto [w, u] = pq.top();
+        pq.pop();
+        if (u == dst)
+        {
+            // Reconstruct path.
+            std::vector<uint32_t> path{dst};
+            uint32_t c = dst;
+            while (c != src)
+            {
+                c = pred.at(c);
+                path.push_back(c);
+            }
+            std::reverse(path.begin(), path.end());
+            return {std::move(path), w};
+        }
+        auto dit = dist.find(u);
+        if (dit == dist.end() || w > dit->second)
+        {
+            continue; // stale
+        }
+        auto nbIt = m_adj.find(u);
+        if (nbIt == m_adj.end())
+        {
+            continue;
+        }
+        for (uint32_t v : nbIt->second)
+        {
+            const auto wEdge =
+                m_edgeWeights.find(CanonicalEdge(u, v));
+            if (wEdge == m_edgeWeights.end())
+            {
+                continue; // edge raced out
+            }
+            const double newW = w + wEdge->second;
+            auto dvIt = dist.find(v);
+            if (dvIt == dist.end() || newW < dvIt->second)
+            {
+                dist[v] = newW;
+                pred[v] = u;
+                pq.push({newW, v});
+            }
+        }
+    }
+    return {{}, std::numeric_limits<double>::infinity()};
 }
 
 std::vector<uint32_t>
