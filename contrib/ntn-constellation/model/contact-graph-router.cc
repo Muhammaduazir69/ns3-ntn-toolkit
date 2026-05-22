@@ -103,6 +103,94 @@ ContactGraphRouter::EdgeWeight(uint32_t a, uint32_t b) const
     return it->second;
 }
 
+void
+ContactGraphRouter::SetRegenMode(uint32_t node, RegenMode mode)
+{
+    m_regenMode[node] = mode;
+}
+
+RegenMode
+ContactGraphRouter::GetRegenMode(uint32_t node) const
+{
+    auto it = m_regenMode.find(node);
+    return (it == m_regenMode.end()) ? RegenMode::bent_pipe : it->second;
+}
+
+bool
+ContactGraphRouter::IsRegenerative(uint32_t node) const
+{
+    return GetRegenMode(node) != RegenMode::bent_pipe;
+}
+
+ContactGraphRouter::WeightedPath
+ContactGraphRouter::ShortestPathWeightedRegenOnly(uint32_t src,
+                                                    uint32_t dst) const
+{
+    ++m_queries;
+    if (src == dst)
+    {
+        return {{src}, 0.0};
+    }
+    // Same Dijkstra as ShortestPathWeighted but skips relaxation through
+    // bent-pipe transit nodes. Endpoints are always allowed; only
+    // intermediate hops require regen capability.
+    std::map<uint32_t, double> dist;
+    std::map<uint32_t, uint32_t> pred;
+    using QEntry = std::pair<double, uint32_t>;
+    std::priority_queue<QEntry, std::vector<QEntry>, std::greater<QEntry>>
+        pq;
+    dist[src] = 0.0;
+    pq.push({0.0, src});
+    while (!pq.empty())
+    {
+        const auto [w, u] = pq.top();
+        pq.pop();
+        if (u == dst)
+        {
+            std::vector<uint32_t> path{dst};
+            uint32_t c = dst;
+            while (c != src)
+            {
+                c = pred.at(c);
+                path.push_back(c);
+            }
+            std::reverse(path.begin(), path.end());
+            return {std::move(path), w};
+        }
+        if (u != src && u != dst && !IsRegenerative(u))
+        {
+            continue;
+        }
+        auto dit = dist.find(u);
+        if (dit == dist.end() || w > dit->second)
+        {
+            continue;
+        }
+        auto nbIt = m_adj.find(u);
+        if (nbIt == m_adj.end())
+        {
+            continue;
+        }
+        for (uint32_t v : nbIt->second)
+        {
+            const auto wEdge = m_edgeWeights.find(CanonicalEdge(u, v));
+            if (wEdge == m_edgeWeights.end())
+            {
+                continue;
+            }
+            const double newW = w + wEdge->second;
+            auto dvIt = dist.find(v);
+            if (dvIt == dist.end() || newW < dvIt->second)
+            {
+                dist[v] = newW;
+                pred[v] = u;
+                pq.push({newW, v});
+            }
+        }
+    }
+    return {{}, std::numeric_limits<double>::infinity()};
+}
+
 ContactGraphRouter::WeightedPath
 ContactGraphRouter::ShortestPathWeighted(uint32_t src, uint32_t dst) const
 {

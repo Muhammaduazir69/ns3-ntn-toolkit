@@ -38,6 +38,19 @@ namespace ns3
 namespace ntncon
 {
 
+/// Per-satellite payload mode per 3GPP TR 38.821 (Roadmap §4.4.6).
+///   bent_pipe   — transparent relay; no protocol termination on the sat.
+///   regen_du    — gNB-DU on sat: PHY + MAC terminated.
+///   regen_cu    — gNB-CU on sat: PDCP + RRC terminated.
+///   regen_full  — full gNB on sat: DU + CU.
+enum class RegenMode : uint8_t
+{
+    bent_pipe = 0,
+    regen_du = 1,
+    regen_cu = 2,
+    regen_full = 3,
+};
+
 class ContactGraphRouter : public Object
 {
   public:
@@ -80,6 +93,22 @@ class ContactGraphRouter : public Object
     /// Current weight of the edge (a, b); returns NaN if no edge.
     double EdgeWeight(uint32_t a, uint32_t b) const;
 
+    /// Roadmap §4.4.6 — per-node regenerative payload mode. Defaults to
+    /// `bent_pipe` for any node that hasn't been explicitly set.
+    void SetRegenMode(uint32_t node, RegenMode mode);
+    RegenMode GetRegenMode(uint32_t node) const;
+
+    /// True iff `node`'s mode is regen_du / regen_cu / regen_full.
+    bool IsRegenerative(uint32_t node) const;
+
+    /// Dijkstra with the constraint that all INTERMEDIATE hops must be
+    /// regen-capable. Endpoints (src and dst) may be in any mode — a
+    /// bent-pipe sat / GS is fine as a source or destination, but only
+    /// regen sats can transit traffic through ISLs in their payload.
+    /// Roadmap §4.4.6.
+    WeightedPath ShortestPathWeightedRegenOnly(uint32_t src,
+                                                  uint32_t dst) const;
+
     /// Counters that the trace handlers tick (test asserts).
     uint64_t EdgesAddedTotal() const { return m_added.load(); }
     uint64_t EdgesRemovedTotal() const { return m_removed.load(); }
@@ -103,6 +132,9 @@ class ContactGraphRouter : public Object
     /// Per-edge weight (link range in metres at the latest event for
     /// this edge). Used by ShortestPathWeighted.
     std::map<std::pair<uint32_t, uint32_t>, double> m_edgeWeights;
+    /// Per-node payload mode (Roadmap §4.4.6). Missing entry defaults
+    /// to bent_pipe.
+    std::map<uint32_t, RegenMode> m_regenMode;
 
     mutable std::atomic<uint64_t> m_added{0};
     mutable std::atomic<uint64_t> m_removed{0};

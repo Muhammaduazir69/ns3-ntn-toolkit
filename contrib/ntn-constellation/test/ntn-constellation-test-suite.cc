@@ -760,6 +760,181 @@ class ContactGraphRouterDijkstraSimulatorTimeTest : public TestCase
     }
 };
 
+// ---------------------------------------------------------------------------
+//  Roadmap §4.4.6: Regen-vs-bent-pipe split
+// ---------------------------------------------------------------------------
+
+class ContactGraphRouterRegenModeTest : public TestCase
+{
+  public:
+    ContactGraphRouterRegenModeTest()
+        : TestCase("ContactGraphRouter SetRegenMode and IsRegenerative are sticky")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ContactGraphRouter> r = CreateObject<ContactGraphRouter>();
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(r->GetRegenMode(42)),
+                              static_cast<int>(RegenMode::bent_pipe),
+                              "unknown node defaults to bent-pipe");
+        NS_TEST_EXPECT_MSG_EQ(r->IsRegenerative(42), false, "default not regen");
+
+        r->SetRegenMode(1, RegenMode::regen_du);
+        r->SetRegenMode(2, RegenMode::regen_full);
+        r->SetRegenMode(3, RegenMode::bent_pipe);
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(r->GetRegenMode(1)),
+                              static_cast<int>(RegenMode::regen_du),
+                              "node 1 is regen_du");
+        NS_TEST_EXPECT_MSG_EQ(r->IsRegenerative(1), true, "node 1 regen");
+        NS_TEST_EXPECT_MSG_EQ(r->IsRegenerative(2), true, "node 2 regen");
+        NS_TEST_EXPECT_MSG_EQ(r->IsRegenerative(3), false, "node 3 bent");
+    }
+};
+
+class ContactGraphRouterRegenOnlyDijkstraTest : public TestCase
+{
+  public:
+    ContactGraphRouterRegenOnlyDijkstraTest()
+        : TestCase("ShortestPathWeightedRegenOnly routes around bent-pipe transit nodes")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ContactGraphRouter> r = CreateObject<ContactGraphRouter>();
+        Ptr<ContactGraphScheduler> sched =
+            CreateObject<ContactGraphScheduler>();
+        r->Attach(sched);
+
+        // 4-node chain 1-2-3-4 with each edge weight 100, plus a long
+        // direct edge 1-4 weight 1000.
+        sched->m_contactUp({0, 1, 2, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 2, 3, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 3, 4, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 1, 4, true, true, 1000.0, 0.0});
+
+        // All regen -> cheap chain.
+        r->SetRegenMode(1, RegenMode::regen_full);
+        r->SetRegenMode(2, RegenMode::regen_du);
+        r->SetRegenMode(3, RegenMode::regen_cu);
+        r->SetRegenMode(4, RegenMode::regen_full);
+        auto allRegen = r->ShortestPathWeightedRegenOnly(1, 4);
+        NS_TEST_ASSERT_MSG_EQ(allRegen.path.size(), 4u,
+                              "all-regen route is 1-2-3-4");
+        NS_TEST_ASSERT_MSG_EQ_TOL(allRegen.total_weight, 300.0, 1e-9,
+                                  "all-regen weight 300");
+
+        // Node 2 bent-pipe -> must use direct edge.
+        r->SetRegenMode(2, RegenMode::bent_pipe);
+        auto withBent = r->ShortestPathWeightedRegenOnly(1, 4);
+        NS_TEST_ASSERT_MSG_EQ(withBent.path.size(), 2u,
+                              "bent-pipe transit forces direct edge");
+        NS_TEST_ASSERT_MSG_EQ_TOL(withBent.total_weight, 1000.0, 1e-9,
+                                  "direct-edge weight");
+
+        // Bent-pipe destination is still routable (endpoints aren't filtered).
+        r->SetRegenMode(2, RegenMode::regen_du);
+        r->SetRegenMode(4, RegenMode::bent_pipe);
+        auto bentDst = r->ShortestPathWeightedRegenOnly(1, 4);
+        NS_TEST_ASSERT_MSG_EQ(bentDst.path.size(), 4u,
+                              "bent-pipe endpoint still routable");
+
+        // No transit + no direct edge -> no path.
+        r->SetRegenMode(2, RegenMode::bent_pipe);
+        r->SetRegenMode(3, RegenMode::bent_pipe);
+        sched->m_contactDown({1, 1, 4, true, false, 9e9, 0.0});
+        auto none = r->ShortestPathWeightedRegenOnly(1, 4);
+        NS_TEST_EXPECT_MSG_EQ(none.path.size(), 0u,
+                              "no transit path when all transit bent");
+        const bool isInf = std::isinf(none.total_weight);
+        NS_TEST_EXPECT_MSG_EQ(isInf, true, "+inf weight");
+    }
+};
+
+namespace
+{
+
+struct RegenSample
+{
+    double t_s;
+    size_t path_len;
+    double total_weight;
+};
+
+void
+SampleRegenRoute(Ptr<ContactGraphRouter> router,
+                  uint32_t src,
+                  uint32_t dst,
+                  std::vector<RegenSample>* out)
+{
+    auto wp = router->ShortestPathWeightedRegenOnly(src, dst);
+    out->push_back({Simulator::Now().GetSeconds(),
+                     wp.path.size(),
+                     wp.total_weight});
+}
+
+void
+ToggleRegenMode(Ptr<ContactGraphRouter> router, uint32_t node, RegenMode m)
+{
+    router->SetRegenMode(node, m);
+}
+
+} // namespace
+
+class ContactGraphRouterRegenSimulatorTimeTest : public TestCase
+{
+  public:
+    ContactGraphRouterRegenSimulatorTimeTest()
+        : TestCase("Simulator: regen-only route changes when sat 2 toggles "
+                   "bent-pipe at t=150 s")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ContactGraphRouter> r = CreateObject<ContactGraphRouter>();
+        Ptr<ContactGraphScheduler> sched =
+            CreateObject<ContactGraphScheduler>();
+        r->Attach(sched);
+
+        sched->m_contactUp({0, 1, 2, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 2, 3, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 3, 4, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 1, 4, true, true, 1000.0, 0.0});
+        for (uint32_t i = 1; i <= 4; ++i)
+        {
+            r->SetRegenMode(i, RegenMode::regen_full);
+        }
+
+        std::vector<RegenSample> samples;
+        Simulator::Schedule(Seconds(60), &SampleRegenRoute,
+                            r, 1u, 4u, &samples);
+        Simulator::Schedule(Seconds(150), &ToggleRegenMode,
+                            r, 2u, RegenMode::bent_pipe);
+        Simulator::Schedule(Seconds(240), &SampleRegenRoute,
+                            r, 1u, 4u, &samples);
+        Simulator::Schedule(Seconds(400), &ToggleRegenMode,
+                            r, 2u, RegenMode::regen_du);
+        Simulator::Schedule(Seconds(500), &SampleRegenRoute,
+                            r, 1u, 4u, &samples);
+        Simulator::Stop(Seconds(601));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), 3u, "3 route samples");
+        NS_TEST_ASSERT_MSG_EQ_TOL(samples[0].total_weight, 300.0, 1e-9,
+                                  "t=60: chain route weight 300");
+        NS_TEST_ASSERT_MSG_EQ_TOL(samples[1].total_weight, 1000.0, 1e-9,
+                                  "t=240 after sat 2 -> bent-pipe: direct 1000");
+        NS_TEST_ASSERT_MSG_EQ_TOL(samples[2].total_weight, 300.0, 1e-9,
+                                  "t=500 after sat 2 restored: chain again");
+        Simulator::Destroy();
+    }
+};
+
 class NtnConstellationTestSuite : public TestSuite
 {
   public:
@@ -781,6 +956,12 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new ContactGraphRouterWeightedEdgeTest, Duration::QUICK);
         AddTestCase(new ContactGraphRouterDijkstraTest, Duration::QUICK);
         AddTestCase(new ContactGraphRouterDijkstraSimulatorTimeTest,
+                    Duration::QUICK);
+        // Roadmap §4.4.6 — Regen-vs-bent-pipe split.
+        AddTestCase(new ContactGraphRouterRegenModeTest, Duration::QUICK);
+        AddTestCase(new ContactGraphRouterRegenOnlyDijkstraTest,
+                    Duration::QUICK);
+        AddTestCase(new ContactGraphRouterRegenSimulatorTimeTest,
                     Duration::QUICK);
     }
 };
