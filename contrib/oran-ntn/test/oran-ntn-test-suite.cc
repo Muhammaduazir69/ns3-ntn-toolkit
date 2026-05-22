@@ -17,6 +17,7 @@
 #include "ns3/oran-ntn-flexric-types.h"
 #include "ns3/oran-ntn-isl-header.h"
 #include "ns3/oran-ntn-kpm-canonical-ids.h"
+#include "ns3/oran-ntn-data-repository.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-ntn-scheduler.h"
 #include "ns3/oran-ntn-rc-style3.h"
@@ -1741,6 +1742,200 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
 };
 
 // ============================================================================
+//  4.1.4 (Roadmap §4.1.4): OranNtnDataRepository
+// ============================================================================
+
+namespace
+{
+
+E2KpmReport MakeKpm(uint32_t gnb, uint32_t ue, double ts, double sinr,
+                    double thp)
+{
+    E2KpmReport r{};
+    r.timestamp = ts;
+    r.gnbId = gnb;
+    r.isNtn = true;
+    r.ueId = ue;
+    r.sinr_dB = sinr;
+    r.rsrp_dBm = -95.0;
+    r.throughput_Mbps = thp;
+    r.latency_ms = 20.0;
+    r.elevation_deg = 45.0;
+    r.doppler_Hz = 10000.0;
+    r.tte_s = 120.0;
+    r.prbUtilization = 0.5;
+    r.sliceId = 0;
+    return r;
+}
+
+E2RcAction MakeRc(double ts, const std::string& xappName,
+                  E2RcActionType type, uint32_t targetGnb, uint32_t targetUe,
+                  double confidence, bool executed)
+{
+    E2RcAction a{};
+    a.timestamp = ts;
+    a.xappId = 1;
+    a.xappName = xappName;
+    a.actionType = type;
+    a.targetGnbId = targetGnb;
+    a.targetUeId = targetUe;
+    a.targetBeamId = 0;
+    a.targetSliceId = 0;
+    a.confidence = confidence;
+    a.parameter1 = 0.0;
+    a.parameter2 = 0.0;
+    a.executed = executed;
+    a.rejectionReason = executed ? "" : "test rejection";
+    return a;
+}
+
+} // namespace
+
+class OranNtnDataRepoInMemoryTestCase : public TestCase
+{
+  public:
+    OranNtnDataRepoInMemoryTestCase()
+        : TestCase("In-memory data repository logs, counts, and time-windows queries")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<OranNtnDataRepository> repo =
+            OranNtnDataRepository::Create("memory");
+        NS_TEST_ASSERT_MSG_NE(repo, nullptr, "memory backend exists");
+        NS_TEST_EXPECT_MSG_EQ(repo->GetBackendName(), "memory", "backend name");
+        NS_TEST_EXPECT_MSG_EQ(repo->IsOpen(), true, "open after Create");
+
+        repo->LogKpmReport(MakeKpm(1, 100, 1.0, 12.0, 50.0));
+        repo->LogKpmReport(MakeKpm(2, 100, 2.0, 9.0, 30.0));
+        repo->LogKpmReport(MakeKpm(3, 101, 1.5, 15.0, 70.0));
+        repo->LogRcAction(MakeRc(1.2, "HoPredict",
+                                  E2RcActionType::HANDOVER_TRIGGER, 1, 100,
+                                  0.9, true));
+        repo->LogRcAction(MakeRc(2.3, "HoPredict",
+                                  E2RcActionType::HANDOVER_TRIGGER, 2, 100,
+                                  0.7, false));
+        repo->LogRcAction(MakeRc(1.1, "BeamHop",
+                                  E2RcActionType::BEAM_SWITCH, 1, 0, 0.95,
+                                  true));
+        repo->LogXappRecord({1.0, 11, "HoPredict", 0, 0.9, 0.42});
+        repo->LogXappRecord({2.0, 12, "BeamHop", 2, 0.95, 0.18});
+
+        NS_TEST_EXPECT_MSG_EQ(repo->CountKpmReports(), 3u, "kpm count");
+        NS_TEST_EXPECT_MSG_EQ(repo->CountRcActions(), 3u, "rc count");
+        NS_TEST_EXPECT_MSG_EQ(repo->CountXappRecords(), 2u, "xapp count");
+
+        // UE 100 had two reports across t in [0.5, 2.5].
+        auto kpm100 = repo->GetKpmReportsForUe(100, 0.5, 2.5);
+        NS_TEST_ASSERT_MSG_EQ(kpm100.size(), 2u, "UE 100 has 2 reports");
+        NS_TEST_EXPECT_MSG_EQ(kpm100[0].gnbId, 1u, "first by gNB");
+        NS_TEST_EXPECT_MSG_EQ(kpm100[1].gnbId, 2u, "second by gNB");
+
+        // Narrow window picks only the t=1.0 report.
+        auto kpm100_narrow = repo->GetKpmReportsForUe(100, 0.0, 1.4);
+        NS_TEST_EXPECT_MSG_EQ(kpm100_narrow.size(),
+                              1u,
+                              "narrow window slices time");
+
+        // HoPredict has 2 HO actions.
+        auto rcHo = repo->GetRcActionsByXapp("HoPredict", 0.0, 5.0);
+        NS_TEST_ASSERT_MSG_EQ(rcHo.size(), 2u, "HoPredict actions");
+        NS_TEST_EXPECT_MSG_EQ(rcHo[1].executed,
+                              false,
+                              "second HO marked rejected");
+        NS_TEST_EXPECT_MSG_EQ(rcHo[1].rejectionReason,
+                              "test rejection",
+                              "rejection reason preserved");
+
+        // Unknown xapp name => empty.
+        auto rcNone = repo->GetRcActionsByXapp("DoesNotExist", 0.0, 100.0);
+        NS_TEST_EXPECT_MSG_EQ(rcNone.size(), 0u, "no rows for unknown xApp");
+
+        // xapp_records across the full window.
+        auto xappAll = repo->GetXappRecords(0.0, 100.0);
+        NS_TEST_EXPECT_MSG_EQ(xappAll.size(), 2u, "all xapp records");
+        NS_TEST_EXPECT_MSG_EQ(xappAll[0].xappName, "HoPredict", "record[0]");
+
+        repo->Close();
+        NS_TEST_EXPECT_MSG_EQ(repo->IsOpen(), false, "closed");
+    }
+};
+
+#ifdef HAVE_SQLITE3
+class OranNtnDataRepoSqliteTestCase : public TestCase
+{
+  public:
+    OranNtnDataRepoSqliteTestCase()
+        : TestCase("SQLite data repository round-trips KPM/RC/xApp records")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string path = "/tmp/oran-ntn-test-repo.db";
+        std::remove(path.c_str());
+
+        Ptr<OranNtnDataRepository> repo =
+            OranNtnDataRepository::Create("sqlite", path);
+        NS_TEST_ASSERT_MSG_NE(repo, nullptr, "sqlite backend created");
+        NS_TEST_EXPECT_MSG_EQ(repo->GetBackendName(), "sqlite", "backend name");
+        NS_TEST_EXPECT_MSG_EQ(repo->IsOpen(), true, "open after Create");
+
+        repo->LogKpmReport(MakeKpm(1, 100, 1.0, 12.0, 50.0));
+        repo->LogKpmReport(MakeKpm(2, 100, 2.0, 9.0, 30.0));
+        repo->LogKpmReport(MakeKpm(3, 101, 1.5, 15.0, 70.0));
+        repo->LogRcAction(MakeRc(1.2, "HoPredict",
+                                  E2RcActionType::HANDOVER_TRIGGER, 1, 100,
+                                  0.9, true));
+        repo->LogRcAction(MakeRc(2.3, "HoPredict",
+                                  E2RcActionType::HANDOVER_TRIGGER, 2, 100,
+                                  0.7, false));
+        repo->LogXappRecord({1.0, 11, "HoPredict", 0, 0.9, 0.42});
+
+        NS_TEST_EXPECT_MSG_EQ(repo->CountKpmReports(), 3u, "kpm count");
+        NS_TEST_EXPECT_MSG_EQ(repo->CountRcActions(), 2u, "rc count");
+        NS_TEST_EXPECT_MSG_EQ(repo->CountXappRecords(), 1u, "xapp count");
+
+        auto k = repo->GetKpmReportsForUe(100, 0.0, 5.0);
+        NS_TEST_ASSERT_MSG_EQ(k.size(), 2u, "two rows for UE 100");
+        NS_TEST_EXPECT_MSG_EQ(k[0].sinr_dB, 12.0, "first row SINR");
+        NS_TEST_EXPECT_MSG_EQ(k[1].throughput_Mbps,
+                              30.0,
+                              "second row throughput");
+        NS_TEST_EXPECT_MSG_EQ(k[0].isNtn, true, "is_ntn round-trips");
+
+        auto rc = repo->GetRcActionsByXapp("HoPredict", 0.0, 5.0);
+        NS_TEST_ASSERT_MSG_EQ(rc.size(), 2u, "two RC actions");
+        NS_TEST_EXPECT_MSG_EQ(rc[1].rejectionReason,
+                              "test rejection",
+                              "TEXT roundtrip");
+        NS_TEST_EXPECT_MSG_EQ(rc[1].executed, false, "executed flag");
+
+        repo->Close();
+        NS_TEST_EXPECT_MSG_EQ(repo->IsOpen(), false, "closed");
+
+        // Reopen the existing DB and confirm counts persist.
+        Ptr<OranNtnDataRepository> repo2 =
+            OranNtnDataRepository::Create("sqlite", path);
+        NS_TEST_ASSERT_MSG_NE(repo2, nullptr, "reopen ok");
+        NS_TEST_EXPECT_MSG_EQ(repo2->CountKpmReports(),
+                              3u,
+                              "kpm rows survived close+reopen");
+        NS_TEST_EXPECT_MSG_EQ(repo2->CountRcActions(),
+                              2u,
+                              "rc rows survived close+reopen");
+        repo2->Close();
+        std::remove(path.c_str());
+        std::remove((path + "-wal").c_str());
+        std::remove((path + "-shm").c_str());
+    }
+};
+#endif // HAVE_SQLITE3
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
 
@@ -1794,6 +1989,13 @@ class OranNtnTestSuite : public TestSuite
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnRcStyle3ConverterTestCase,
                     TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.4 — OranNtnDataRepository (NIST pattern).
+        AddTestCase(new OranNtnDataRepoInMemoryTestCase,
+                    TestCase::Duration::QUICK);
+#ifdef HAVE_SQLITE3
+        AddTestCase(new OranNtnDataRepoSqliteTestCase,
+                    TestCase::Duration::QUICK);
+#endif
     }
 };
 

@@ -11,6 +11,8 @@ set(source_files
     model/oran-ntn-kpm-canonical-ids.cc
     # 4.1.3 — E2SM-RC v1.03 Style 3 Connected-Mode Mobility (Roadmap §4.1.3)
     model/oran-ntn-rc-style3.cc
+    # 4.1.4 — NIST-pattern SQLite data repository (Roadmap §4.1.4)
+    model/oran-ntn-data-repository.cc
     # Original xApps
     model/oran-ntn-xapp-ho-predict.cc
     model/oran-ntn-xapp-beam-hop.cc
@@ -62,6 +64,8 @@ set(header_files
     model/oran-ntn-flexric-types.h
     # 4.1.3 — E2SM-RC v1.03 Style 3 Connected-Mode Mobility (Roadmap §4.1.3)
     model/oran-ntn-rc-style3.h
+    # 4.1.4 — NIST-pattern SQLite data repository (Roadmap §4.1.4)
+    model/oran-ntn-data-repository.h
     # Original xApps
     model/oran-ntn-xapp-ho-predict.h
     model/oran-ntn-xapp-beam-hop.h
@@ -103,6 +107,11 @@ set(test_sources
     test/oran-ntn-test-suite.cc
 )
 
+set(oran_ntn_extra_libs "")
+if(${ENABLE_SQLITE})
+    list(APPEND oran_ntn_extra_libs ${SQLite3_LIBRARIES})
+endif()
+
 build_lib(
     LIBNAME oran-ntn
     SOURCE_FILES ${source_files}
@@ -119,5 +128,6 @@ build_lib(
         ${libmmwave}
         ${liblte}
         ${libns3-ai-ntn}
+        ${oran_ntn_extra_libs}
     TEST_SOURCES ${test_sources}
 )
