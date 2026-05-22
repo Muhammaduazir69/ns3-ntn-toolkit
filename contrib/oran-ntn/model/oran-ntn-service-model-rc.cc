@@ -4,6 +4,8 @@
 
 #include "oran-ntn-service-model-rc.h"
 
+#include "../asn1/asn1-per-codec.h"
+
 #include "ns3/log.h"
 
 #include <cstring>
@@ -23,136 +25,46 @@ OranNtnServiceModelRc::GetTypeId()
     return tid;
 }
 
+// Aligned-PER encoding for E2SM-RC v1.03 Style 3 ControlMessage (Roadmap §3 T2).
+// Layout in PER terms:
+//   ControlMessage ::= SEQUENCE {
+//     style_id    INTEGER (3),
+//     action      CHOICE { ho [0] HandoverControl,
+//                          cho [1] ConditionalHandoverControl,
+//                          daps [2] DapsHandoverControl }
+//   }
+//   NrCellGlobalId ::= SEQUENCE { plmn UTF8String, nci INTEGER }
+//   HandoverControl ::= SEQUENCE {
+//     target NrCellGlobalId, ht INTEGER,
+//     secondary [0] NrCellGlobalId OPTIONAL
+//   }
+//   ConditionalHandoverControl ::= SEQUENCE {
+//     reconfig_id INTEGER,
+//     candidates SEQUENCE OF SEQUENCE { target NrCellGlobalId,
+//                                       trigger OCTET STRING }
+//   }
+//   DapsHandoverControl ::= SEQUENCE {
+//     target NrCellGlobalId,
+//     termination [0] INTEGER OPTIONAL
+//   }
+
 namespace
 {
 
-// Debug-friendly TLV ControlMessage encoding for v2.1. ASN.1-PER under T2.
-//
-// All numerics little-endian.
-//   uint8  style_id           (always 3 for Style 3)
-//   uint8  action_id          (1=HO control, 2=CHO, 3=DAPS-HO)
-//
-//   Action 1:
-//     uint16 plmn_len, plmn
-//     uint64 nr_cell_identity
-//     uint8  handover_type (0..3)
-//     uint8  has_secondary_cell, [if 1: uint16 plmn_len, plmn, uint64 nci]
-//
-//   Action 2:
-//     uint32 conditional_reconfiguration_id
-//     uint32 num_candidates
-//     for each candidate:
-//       uint16 plmn_len, plmn
-//       uint64 nr_cell_identity
-//       uint32 trigger_len, trigger bytes
-//
-//   Action 3:
-//     uint16 plmn_len, plmn
-//     uint64 nr_cell_identity
-//     uint8  has_termination, [if 1: uint8 cause]
-
 void
-WriteU8(std::vector<uint8_t>& b, uint8_t v) { b.push_back(v); }
-
-void
-WriteU16(std::vector<uint8_t>& b, uint16_t v)
+WriteNrCgi(oranntn::asn1::PerWriter& w,
+            const oranntn::rc_v103::style3::NrCellGlobalId& cgi)
 {
-    b.push_back(v & 0xFF);
-    b.push_back((v >> 8) & 0xFF);
+    w.WriteUtf8String(cgi.plmn_id);
+    w.WriteInteger(static_cast<int64_t>(cgi.nr_cell_identity));
 }
 
 void
-WriteU32(std::vector<uint8_t>& b, uint32_t v)
+ReadNrCgi(oranntn::asn1::PerReader& r,
+           oranntn::rc_v103::style3::NrCellGlobalId& cgi)
 {
-    b.push_back(v & 0xFF);
-    b.push_back((v >> 8) & 0xFF);
-    b.push_back((v >> 16) & 0xFF);
-    b.push_back((v >> 24) & 0xFF);
-}
-
-void
-WriteU64(std::vector<uint8_t>& b, uint64_t v)
-{
-    for (int i = 0; i < 8; ++i) { b.push_back((v >> (8 * i)) & 0xFF); }
-}
-
-void
-WriteString(std::vector<uint8_t>& b, const std::string& s)
-{
-    WriteU16(b, static_cast<uint16_t>(s.size()));
-    b.insert(b.end(), s.begin(), s.end());
-}
-
-void
-WriteBlob(std::vector<uint8_t>& b, const std::vector<uint8_t>& v)
-{
-    WriteU32(b, static_cast<uint32_t>(v.size()));
-    b.insert(b.end(), v.begin(), v.end());
-}
-
-bool
-ReadU8(const std::vector<uint8_t>& b, size_t& i, uint8_t& v)
-{
-    if (i + 1 > b.size()) { return false; }
-    v = b[i++];
-    return true;
-}
-
-bool
-ReadU16(const std::vector<uint8_t>& b, size_t& i, uint16_t& v)
-{
-    if (i + 2 > b.size()) { return false; }
-    v = static_cast<uint16_t>(b[i] | (b[i + 1] << 8));
-    i += 2;
-    return true;
-}
-
-bool
-ReadU32(const std::vector<uint8_t>& b, size_t& i, uint32_t& v)
-{
-    if (i + 4 > b.size()) { return false; }
-    v = static_cast<uint32_t>(b[i]) |
-        (static_cast<uint32_t>(b[i + 1]) << 8) |
-        (static_cast<uint32_t>(b[i + 2]) << 16) |
-        (static_cast<uint32_t>(b[i + 3]) << 24);
-    i += 4;
-    return true;
-}
-
-bool
-ReadU64(const std::vector<uint8_t>& b, size_t& i, uint64_t& v)
-{
-    if (i + 8 > b.size()) { return false; }
-    v = 0;
-    for (int k = 0; k < 8; ++k)
-    {
-        v |= static_cast<uint64_t>(b[i + k]) << (8 * k);
-    }
-    i += 8;
-    return true;
-}
-
-bool
-ReadString(const std::vector<uint8_t>& b, size_t& i, std::string& s)
-{
-    uint16_t len;
-    if (!ReadU16(b, i, len)) { return false; }
-    if (i + len > b.size()) { return false; }
-    s.assign(reinterpret_cast<const char*>(&b[i]), len);
-    i += len;
-    return true;
-}
-
-bool
-ReadBlob(const std::vector<uint8_t>& b, size_t& i,
-         std::vector<uint8_t>& out)
-{
-    uint32_t len;
-    if (!ReadU32(b, i, len)) { return false; }
-    if (i + len > b.size()) { return false; }
-    out.assign(b.begin() + i, b.begin() + i + len);
-    i += len;
-    return true;
+    cgi.plmn_id = r.ReadUtf8String();
+    cgi.nr_cell_identity = static_cast<uint64_t>(r.ReadInteger());
 }
 
 } // namespace
@@ -170,56 +82,50 @@ OranNtnServiceModelRc::EncodeControl(
     const oranntn::rc_v103::style3::ControlMessage& msg) const
 {
     using namespace oranntn::rc_v103::style3;
-    std::vector<uint8_t> out;
-    WriteU8(out, msg.style_id);
+    oranntn::asn1::PerWriter w;
+    w.WriteInteger(static_cast<int64_t>(msg.style_id));
     const uint8_t actionId = ActionId(msg.action);
-    WriteU8(out, actionId);
+    w.WriteChoiceIndex(static_cast<uint8_t>(actionId - 1));
 
     if (std::holds_alternative<HandoverControl>(msg.action))
     {
         const auto& h = std::get<HandoverControl>(msg.action);
-        WriteString(out, h.target_primary_cell_id.plmn_id);
-        WriteU64(out, h.target_primary_cell_id.nr_cell_identity);
-        WriteU8(out, static_cast<uint8_t>(h.handover_type));
+        WriteNrCgi(w, h.target_primary_cell_id);
+        w.WriteInteger(static_cast<int64_t>(h.handover_type));
+        w.BeginSequencePreamble(1);
+        w.SetPreambleBit(0, h.new_secondary_cell_id.has_value());
+        w.EndSequencePreamble();
         if (h.new_secondary_cell_id.has_value())
         {
-            WriteU8(out, 1);
-            WriteString(out, h.new_secondary_cell_id->plmn_id);
-            WriteU64(out, h.new_secondary_cell_id->nr_cell_identity);
-        }
-        else
-        {
-            WriteU8(out, 0);
+            WriteNrCgi(w, *h.new_secondary_cell_id);
         }
     }
     else if (std::holds_alternative<ConditionalHandoverControl>(msg.action))
     {
         const auto& c = std::get<ConditionalHandoverControl>(msg.action);
-        WriteU32(out, c.conditional_reconfiguration_id);
-        WriteU32(out, static_cast<uint32_t>(c.candidate_cell_list.size()));
+        w.WriteInteger(static_cast<int64_t>(c.conditional_reconfiguration_id));
+        w.WriteLengthDeterminant(
+            static_cast<uint32_t>(c.candidate_cell_list.size()));
         for (const auto& cc : c.candidate_cell_list)
         {
-            WriteString(out, cc.target_primary_cell_id.plmn_id);
-            WriteU64(out, cc.target_primary_cell_id.nr_cell_identity);
-            WriteBlob(out, cc.trigger_condition);
+            WriteNrCgi(w, cc.target_primary_cell_id);
+            w.WriteOctetString(cc.trigger_condition);
         }
     }
     else
     {
         const auto& d = std::get<DapsHandoverControl>(msg.action);
-        WriteString(out, d.target_primary_cell_id.plmn_id);
-        WriteU64(out, d.target_primary_cell_id.nr_cell_identity);
+        WriteNrCgi(w, d.target_primary_cell_id);
+        w.BeginSequencePreamble(1);
+        w.SetPreambleBit(0, d.daps_termination_policy.has_value());
+        w.EndSequencePreamble();
         if (d.daps_termination_policy.has_value())
         {
-            WriteU8(out, 1);
-            WriteU8(out, static_cast<uint8_t>(*d.daps_termination_policy));
-        }
-        else
-        {
-            WriteU8(out, 0);
+            w.WriteInteger(
+                static_cast<int64_t>(*d.daps_termination_policy));
         }
     }
-    return out;
+    return w.Take();
 }
 
 bool
@@ -228,77 +134,70 @@ OranNtnServiceModelRc::DecodeControl(const std::vector<uint8_t>& msg,
 {
     using namespace oranntn::rc_v103::style3;
     auto* out = static_cast<ControlMessage*>(outPtr);
-    size_t i = 0;
-    if (!ReadU8(msg, i, out->style_id)) { return false; }
-    if (out->style_id != 3) { return false; }
-    uint8_t actionId;
-    if (!ReadU8(msg, i, actionId)) { return false; }
-
-    if (actionId == 1)
+    try
     {
-        HandoverControl h{};
-        if (!ReadString(msg, i, h.target_primary_cell_id.plmn_id))
-            return false;
-        if (!ReadU64(msg, i, h.target_primary_cell_id.nr_cell_identity))
-            return false;
-        uint8_t ht;
-        if (!ReadU8(msg, i, ht)) { return false; }
-        h.handover_type = static_cast<HandoverType>(ht);
-        uint8_t hasSecond;
-        if (!ReadU8(msg, i, hasSecond)) { return false; }
-        if (hasSecond)
+        oranntn::asn1::PerReader r(msg);
+        out->style_id = static_cast<uint8_t>(r.ReadInteger());
+        if (out->style_id != 3)
         {
-            NrCellGlobalId sec{};
-            if (!ReadString(msg, i, sec.plmn_id)) { return false; }
-            if (!ReadU64(msg, i, sec.nr_cell_identity)) { return false; }
-            h.new_secondary_cell_id = sec;
-        }
-        out->action = h;
-    }
-    else if (actionId == 2)
-    {
-        ConditionalHandoverControl c{};
-        if (!ReadU32(msg, i, c.conditional_reconfiguration_id))
             return false;
-        uint32_t numC;
-        if (!ReadU32(msg, i, numC)) { return false; }
-        c.candidate_cell_list.reserve(numC);
-        for (uint32_t k = 0; k < numC; ++k)
+        }
+        const uint8_t ch = r.ReadChoiceIndex();
+        if (ch == 0)
         {
-            ConditionalHandoverControl::CandidateCell cc{};
-            if (!ReadString(msg, i, cc.target_primary_cell_id.plmn_id))
-                return false;
-            if (!ReadU64(msg, i, cc.target_primary_cell_id.nr_cell_identity))
-                return false;
-            if (!ReadBlob(msg, i, cc.trigger_condition)) { return false; }
-            c.candidate_cell_list.push_back(cc);
+            HandoverControl h{};
+            ReadNrCgi(r, h.target_primary_cell_id);
+            h.handover_type = static_cast<HandoverType>(r.ReadInteger());
+            const uint16_t pre = r.ReadSequencePreamble(1);
+            if (pre & 1)
+            {
+                NrCellGlobalId sec{};
+                ReadNrCgi(r, sec);
+                h.new_secondary_cell_id = sec;
+            }
+            out->action = h;
         }
-        out->action = c;
-    }
-    else if (actionId == 3)
-    {
-        DapsHandoverControl d{};
-        if (!ReadString(msg, i, d.target_primary_cell_id.plmn_id))
-            return false;
-        if (!ReadU64(msg, i, d.target_primary_cell_id.nr_cell_identity))
-            return false;
-        uint8_t hasCause;
-        if (!ReadU8(msg, i, hasCause)) { return false; }
-        if (hasCause)
+        else if (ch == 1)
         {
-            uint8_t c;
-            if (!ReadU8(msg, i, c)) { return false; }
-            d.daps_termination_policy =
-                static_cast<DapsTerminationCause>(c);
+            ConditionalHandoverControl c{};
+            c.conditional_reconfiguration_id =
+                static_cast<uint32_t>(r.ReadInteger());
+            const uint32_t numC = r.ReadLengthDeterminant();
+            c.candidate_cell_list.reserve(numC);
+            for (uint32_t k = 0; k < numC; ++k)
+            {
+                ConditionalHandoverControl::CandidateCell cc{};
+                ReadNrCgi(r, cc.target_primary_cell_id);
+                cc.trigger_condition = r.ReadOctetString();
+                c.candidate_cell_list.push_back(cc);
+            }
+            out->action = c;
         }
-        out->action = d;
+        else if (ch == 2)
+        {
+            DapsHandoverControl d{};
+            ReadNrCgi(r, d.target_primary_cell_id);
+            const uint16_t pre = r.ReadSequencePreamble(1);
+            if (pre & 1)
+            {
+                d.daps_termination_policy =
+                    static_cast<DapsTerminationCause>(r.ReadInteger());
+            }
+            out->action = d;
+        }
+        else
+        {
+            NS_LOG_WARN("RC SM: unknown action CHOICE index "
+                        << static_cast<int>(ch));
+            return false;
+        }
+        return true;
     }
-    else
+    catch (const std::exception& exc)
     {
-        NS_LOG_WARN("oran-ntn RC SM: unknown action id " << static_cast<int>(actionId));
+        NS_LOG_WARN("RC SM: PER decode error: " << exc.what());
         return false;
     }
-    return true;
 }
 
 } // namespace ns3

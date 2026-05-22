@@ -22,6 +22,7 @@
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-ntn-scheduler.h"
 #include "ns3/oran-ntn-rc-style3.h"
+#include "ns3/asn1-per-codec.h"
 #include "ns3/oran-ntn-service-model-kpm.h"
 #include "ns3/oran-ntn-service-model-rc.h"
 #include "ns3/oran-ntn-service-model.h"
@@ -2211,6 +2212,111 @@ class OranNtnConflictTaxonomyTestCase : public TestCase
 };
 
 // ============================================================================
+//  T2 (Roadmap §3 T2): ASN.1-PER codec primitives
+// ============================================================================
+
+class OranNtnAsn1PerPrimitivesTest : public TestCase
+{
+  public:
+    OranNtnAsn1PerPrimitivesTest()
+        : TestCase("ASN.1 Aligned-PER primitives round-trip "
+                   "(INTEGER, UTF8String, OCTET STRING, length determinant, SEQUENCE preamble)")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using oranntn::asn1::PerReader;
+        using oranntn::asn1::PerWriter;
+
+        // Length determinant: 0, 127, 128, 16383.
+        PerWriter w;
+        w.WriteLengthDeterminant(0);
+        w.WriteLengthDeterminant(127);
+        w.WriteLengthDeterminant(128);
+        w.WriteLengthDeterminant(16383);
+        PerReader r(w.Bytes());
+        NS_TEST_EXPECT_MSG_EQ(r.ReadLengthDeterminant(), 0u, "len 0");
+        NS_TEST_EXPECT_MSG_EQ(r.ReadLengthDeterminant(), 127u, "len 127");
+        NS_TEST_EXPECT_MSG_EQ(r.ReadLengthDeterminant(), 128u, "len 128");
+        NS_TEST_EXPECT_MSG_EQ(r.ReadLengthDeterminant(),
+                              16383u,
+                              "len 16383");
+
+        // INTEGER: 0, 1, -1, 127, -128, 256, -256, INT64_MAX, INT64_MIN.
+        PerWriter w2;
+        const int64_t vals[] = {0,
+                                  1,
+                                  -1,
+                                  127,
+                                  -128,
+                                  256,
+                                  -256,
+                                  9223372036854775807LL,
+                                  -9223372036854775807LL - 1};
+        for (auto v : vals)
+        {
+            w2.WriteInteger(v);
+        }
+        PerReader r2(w2.Bytes());
+        for (auto v : vals)
+        {
+            NS_TEST_EXPECT_MSG_EQ(r2.ReadInteger(), v, "integer round-trip");
+        }
+
+        // UTF8String + OCTET STRING.
+        PerWriter w3;
+        w3.WriteUtf8String("");
+        w3.WriteUtf8String("DRB.UEThpDl");
+        w3.WriteUtf8String(std::string(200, 'x')); // long-form length
+        w3.WriteOctetString({});
+        w3.WriteOctetString({0xDE, 0xAD, 0xBE, 0xEF});
+        PerReader r3(w3.Bytes());
+        NS_TEST_EXPECT_MSG_EQ(r3.ReadUtf8String(), "", "empty string");
+        NS_TEST_EXPECT_MSG_EQ(r3.ReadUtf8String(), "DRB.UEThpDl", "ascii string");
+        NS_TEST_EXPECT_MSG_EQ(r3.ReadUtf8String().size(),
+                              200u,
+                              "long string");
+        NS_TEST_EXPECT_MSG_EQ(r3.ReadOctetString().size(),
+                              0u,
+                              "empty octet string");
+        auto os = r3.ReadOctetString();
+        NS_TEST_ASSERT_MSG_EQ(os.size(), 4u, "octet string len");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(os[0]), 0xDE, "octet [0]");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(os[3]), 0xEF, "octet [3]");
+
+        // SEQUENCE preamble: 3 OPTIONALs, pattern 101.
+        PerWriter w4;
+        w4.BeginSequencePreamble(3);
+        w4.SetPreambleBit(0, true);
+        w4.SetPreambleBit(1, false);
+        w4.SetPreambleBit(2, true);
+        w4.EndSequencePreamble();
+        w4.WriteInteger(42);
+        PerReader r4(w4.Bytes());
+        const uint16_t pre = r4.ReadSequencePreamble(3);
+        const uint16_t slot0 = static_cast<uint16_t>((pre >> 2) & 1);
+        const uint16_t slot1 = static_cast<uint16_t>((pre >> 1) & 1);
+        const uint16_t slot2 = static_cast<uint16_t>(pre & 1);
+        NS_TEST_EXPECT_MSG_EQ(slot0, 1u, "slot 0 set");
+        NS_TEST_EXPECT_MSG_EQ(slot1, 0u, "slot 1 unset");
+        NS_TEST_EXPECT_MSG_EQ(slot2, 1u, "slot 2 set");
+        NS_TEST_EXPECT_MSG_EQ(r4.ReadInteger(), 42, "post-preamble int");
+
+        // CHOICE index.
+        PerWriter w5;
+        w5.WriteChoiceIndex(0);
+        w5.WriteChoiceIndex(1);
+        w5.WriteChoiceIndex(2);
+        PerReader r5(w5.Bytes());
+        NS_TEST_EXPECT_MSG_EQ(r5.ReadChoiceIndex(), 0u, "choice 0");
+        NS_TEST_EXPECT_MSG_EQ(r5.ReadChoiceIndex(), 1u, "choice 1");
+        NS_TEST_EXPECT_MSG_EQ(r5.ReadChoiceIndex(), 2u, "choice 2");
+    }
+};
+
+// ============================================================================
 //  4.1.4 (Roadmap §4.1.4): OranNtnDataRepository
 // ============================================================================
 
@@ -2477,6 +2583,9 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnSmKpmRoundTripTestCase,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnSmRcRoundTripTestCase,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap T2 — ASN.1-PER codec.
+        AddTestCase(new OranNtnAsn1PerPrimitivesTest,
                     TestCase::Duration::QUICK);
     }
 };

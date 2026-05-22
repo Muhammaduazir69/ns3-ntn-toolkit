@@ -19,6 +19,8 @@ set(source_files
     model/oran-ntn-service-model.cc
     model/oran-ntn-service-model-kpm.cc
     model/oran-ntn-service-model-rc.cc
+    # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
+    asn1/asn1-per-codec.cc
     # Original xApps
     model/oran-ntn-xapp-ho-predict.cc
     model/oran-ntn-xapp-beam-hop.cc
@@ -78,6 +80,8 @@ set(header_files
     model/oran-ntn-service-model.h
     model/oran-ntn-service-model-kpm.h
     model/oran-ntn-service-model-rc.h
+    # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
+    asn1/asn1-per-codec.h
     # Original xApps
     model/oran-ntn-xapp-ho-predict.h
     model/oran-ntn-xapp-beam-hop.h
