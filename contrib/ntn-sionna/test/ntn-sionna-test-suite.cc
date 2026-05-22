@@ -132,9 +132,9 @@ class MockSionnaServer
 
 /// FSPL-returning UDP server: parses the request, computes the closed-form
 /// free-space path loss for the actual (tx, rx, freq) tuple, and returns it.
-/// This is what makes the C++ tests truly end-to-end — request goes out on a
-/// real socket, gets parsed, response comes back, matched against the same
-/// FSPL identity the toolkit's fall-back uses.
+/// Roadmap §4.2.2: also parses optional tx_array / rx_array rows/cols and
+/// echoes the resulting port count in the response, so the C++ side can
+/// assert wire-level MIMO round-trip without a real Sionna RT.
 class FsplUdpMockServer
 {
   public:
@@ -224,9 +224,22 @@ class FsplUdpMockServer
                             &xyz[2]) == 3;
     }
 
+    /// Pulls an integer value from "key":<digits> inside `s`. Returns
+    /// `def` when key not found.
+    static int ExtractInt(const char* s, const char* key, int def)
+    {
+        const char* k = std::strstr(s, key);
+        if (!k)
+            return def;
+        const char* c = std::strchr(k, ':');
+        if (!c)
+            return def;
+        return std::atoi(c + 1);
+    }
+
     void Loop()
     {
-        char buf[2048];
+        char buf[4096];
         while (m_running.load())
         {
             struct sockaddr_in peer {};
@@ -257,12 +270,43 @@ class FsplUdpMockServer
                                   (tx[2] - rx[2]) * (tx[2] - rx[2]));
             double pl = FsplDb(d, freq);
 
-            char rsp[256];
+            // Roadmap §4.2.2: echo tx/rx port counts derived from the
+            // optional array descriptors. Defaults: 1 port per side.
+            int tx_ports = 1;
+            int rx_ports = 1;
+            if (const char* tArr = std::strstr(buf, "\"tx_array\""))
+            {
+                const int rows = ExtractInt(tArr, "\"rows\"", 1);
+                const int cols = ExtractInt(tArr, "\"cols\"", 1);
+                tx_ports = std::max(1, rows) * std::max(1, cols);
+                // Cross-pol doubles port count (VH or X).
+                if (std::strstr(tArr, "\"polarization\":\"VH\"") ||
+                    std::strstr(tArr, "\"polarization\":\"X\""))
+                {
+                    tx_ports *= 2;
+                }
+            }
+            if (const char* rArr = std::strstr(buf, "\"rx_array\""))
+            {
+                const int rows = ExtractInt(rArr, "\"rows\"", 1);
+                const int cols = ExtractInt(rArr, "\"cols\"", 1);
+                rx_ports = std::max(1, rows) * std::max(1, cols);
+                if (std::strstr(rArr, "\"polarization\":\"VH\"") ||
+                    std::strstr(rArr, "\"polarization\":\"X\""))
+                {
+                    rx_ports *= 2;
+                }
+            }
+
+            char rsp[512];
             int rlen = std::snprintf(rsp,
                                      sizeof(rsp),
                                      "{\"id\":1,\"path_loss_db\":%.6f,"
-                                     "\"n_paths\":1,\"compute_ms\":0.05}",
-                                     pl);
+                                     "\"n_paths\":1,\"compute_ms\":0.05,"
+                                     "\"tx_ports\":%d,\"rx_ports\":%d}",
+                                     pl,
+                                     tx_ports,
+                                     rx_ports);
             ::sendto(m_sock,
                      rsp,
                      rlen,
@@ -754,6 +798,151 @@ class PybindStubAvailabilityTest : public TestCase
     }
 };
 
+// ---------------------------------------------------------------------------
+//  Roadmap §4.2.2: Sionna RT 2.0.1 MIMO PlanarArray wire round-trip
+// ---------------------------------------------------------------------------
+
+class TransportMimoWireRoundTripTest : public TestCase
+{
+  public:
+    TransportMimoWireRoundTripTest()
+        : TestCase("UDP transport carries PlanarArray MIMO config and echoes ports back")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const uint16_t port = 38770;
+        FsplUdpMockServer mock(port);
+        NS_TEST_ASSERT_MSG_EQ(mock.Start(), true, "mock bind");
+
+        Ptr<SionnaUdpTransport> udp = CreateObject<SionnaUdpTransport>();
+        udp->SetServer("127.0.0.1", port);
+        udp->SetTimeoutMs(500);
+
+        // 4x4 V-pol gNB array (16 ports) + 1x1 V-pol UE (1 port).
+        SionnaTransport::Request req{};
+        req.tx_x = 0;
+        req.tx_y = 0;
+        req.tx_z = 0;
+        req.rx_x = 1000;
+        req.rx_y = 0;
+        req.rx_z = 0;
+        req.freq_hz = 28e9;
+        req.request_id = 1;
+        MimoArrayConfig tx;
+        tx.rows = 4;
+        tx.cols = 4;
+        tx.spacing_lambda = 0.5;
+        tx.pattern = "iso";
+        tx.polarization = "V";
+        req.tx_array = tx;
+        MimoArrayConfig rx;
+        rx.rows = 1;
+        rx.cols = 1;
+        rx.pattern = "iso";
+        rx.polarization = "V";
+        req.rx_array = rx;
+
+        auto rsp = udp->Query(req);
+        NS_TEST_ASSERT_MSG_EQ(rsp.ok, true, "query ok");
+        NS_TEST_EXPECT_MSG_EQ(rsp.tx_ports, 16u, "4x4 V-pol -> 16 ports");
+        NS_TEST_EXPECT_MSG_EQ(rsp.rx_ports, 1u, "1x1 V-pol -> 1 port");
+
+        // Cross-pol doubles port count.
+        MimoArrayConfig tx_x = tx;
+        tx_x.polarization = "VH";
+        req.tx_array = tx_x;
+        req.request_id = 2;
+        auto rsp2 = udp->Query(req);
+        NS_TEST_ASSERT_MSG_EQ(rsp2.ok, true, "VH query ok");
+        NS_TEST_EXPECT_MSG_EQ(rsp2.tx_ports, 32u,
+                              "4x4 VH-pol -> 32 ports (16x2)");
+
+        // SISO fallback (no array fields) still works and reports 1 port.
+        SionnaTransport::Request siso{};
+        siso.tx_x = 0;
+        siso.rx_x = 1000;
+        siso.freq_hz = 2e9;
+        siso.request_id = 3;
+        auto rsp3 = udp->Query(siso);
+        NS_TEST_ASSERT_MSG_EQ(rsp3.ok, true, "SISO ok");
+        NS_TEST_EXPECT_MSG_EQ(rsp3.tx_ports, 1u, "no array -> 1 tx port");
+        NS_TEST_EXPECT_MSG_EQ(rsp3.rx_ports, 1u, "no array -> 1 rx port");
+
+        mock.Stop();
+    }
+};
+
+class TransportMimoSimulatorTimeTest : public TestCase
+{
+  public:
+    TransportMimoSimulatorTimeTest()
+        : TestCase("Simulator: 30 s MIMO 8x8 path-loss queries hold ports + FSPL identity")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const uint16_t port = 38771;
+        FsplUdpMockServer mock(port);
+        NS_TEST_ASSERT_MSG_EQ(mock.Start(), true, "mock bind");
+
+        Ptr<SionnaUdpTransport> udp = CreateObject<SionnaUdpTransport>();
+        udp->SetServer("127.0.0.1", port);
+        udp->SetTimeoutMs(500);
+
+        std::vector<SionnaTransport::Response> samples;
+        // Schedule queries at 1 s, 6 s, 11 s, ..., 30 s (six queries
+        // across the 30 s window).
+        Simulator::Schedule(
+            Seconds(0),
+            [&samples, udp]() {
+                for (int t = 1; t <= 30; t += 5)
+                {
+                    Simulator::Schedule(Seconds(t),
+                                        [&samples, udp, t]() {
+                                            SionnaTransport::Request r{};
+                                            r.tx_x = 0;
+                                            r.rx_x = 1000.0 + 100.0 * t;
+                                            r.freq_hz = 28e9;
+                                            r.request_id =
+                                                static_cast<uint64_t>(t);
+                                            MimoArrayConfig a;
+                                            a.rows = 8;
+                                            a.cols = 8;
+                                            a.polarization = "V";
+                                            r.tx_array = a;
+                                            r.rx_array = a;
+                                            samples.push_back(udp->Query(r));
+                                        });
+                }
+            });
+        Simulator::Stop(Seconds(31));
+        Simulator::Run();
+
+        mock.Stop();
+
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), 6u,
+                              "6 MIMO queries across 30 s");
+        for (const auto& s : samples)
+        {
+            NS_TEST_EXPECT_MSG_EQ(s.ok, true, "query ok");
+            NS_TEST_EXPECT_MSG_EQ(s.tx_ports, 64u,
+                                  "8x8 V-pol -> 64 ports");
+            NS_TEST_EXPECT_MSG_EQ(s.rx_ports, 64u,
+                                  "8x8 V-pol -> 64 ports");
+            NS_TEST_ASSERT_MSG_GT(s.path_loss_db, 0.0,
+                                  "PL positive");
+            NS_TEST_ASSERT_MSG_LT(s.path_loss_db, 200.0,
+                                  "PL plausible for 1-4 km @ 28 GHz");
+        }
+        Simulator::Destroy();
+    }
+};
+
 class NtnSionnaTestSuite : public TestSuite
 {
   public:
@@ -770,6 +959,9 @@ class NtnSionnaTestSuite : public TestSuite
         AddTestCase(new SimulatorTimeMobilityTest, Duration::QUICK);
         AddTestCase(new MidRunServerKillTest, Duration::QUICK);
         AddTestCase(new PybindStubAvailabilityTest, Duration::QUICK);
+        // Roadmap §4.2.2 — Sionna RT 2.0.1 MIMO PlanarArray wire support.
+        AddTestCase(new TransportMimoWireRoundTripTest, Duration::QUICK);
+        AddTestCase(new TransportMimoSimulatorTimeTest, Duration::QUICK);
     }
 };
 

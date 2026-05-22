@@ -15,6 +15,7 @@
 #include <cstring>
 #include <limits>
 #include <netinet/in.h>
+#include <sstream>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -136,19 +137,39 @@ SionnaUdpTransport::Query(const Request& req) const
         return rsp;
     }
 
-    char buf[512];
-    int n = std::snprintf(buf, sizeof(buf),
-                          "{\"tx\":[%.6f,%.6f,%.6f],\"rx\":[%.6f,%.6f,%.6f],"
-                          "\"freq_hz\":%.6e,\"id\":%llu}",
-                          req.tx_x, req.tx_y, req.tx_z, req.rx_x, req.rx_y,
-                          req.rx_z, req.freq_hz,
-                          static_cast<unsigned long long>(req.request_id));
-    if (n <= 0 || static_cast<size_t>(n) >= sizeof(buf))
+    std::ostringstream req_os;
+    req_os.precision(6);
+    req_os << "{\"tx\":[" << req.tx_x << "," << req.tx_y << "," << req.tx_z
+           << "],\"rx\":[" << req.rx_x << "," << req.rx_y << "," << req.rx_z
+           << "],\"freq_hz\":" << req.freq_hz
+           << ",\"id\":" << req.request_id;
+    auto emitArray = [](std::ostringstream& os,
+                        const char* key,
+                        const MimoArrayConfig& a) {
+        os << ",\"" << key << "\":{\"rows\":" << static_cast<unsigned>(a.rows)
+           << ",\"cols\":" << static_cast<unsigned>(a.cols)
+           << ",\"spacing_lambda\":" << a.spacing_lambda
+           << ",\"pattern\":\"" << a.pattern << "\""
+           << ",\"polarization\":\"" << a.polarization << "\"}";
+    };
+    if (req.tx_array.has_value())
     {
-        NS_LOG_WARN("request truncated");
+        emitArray(req_os, "tx_array", *req.tx_array);
+    }
+    if (req.rx_array.has_value())
+    {
+        emitArray(req_os, "rx_array", *req.rx_array);
+    }
+    req_os << "}";
+    const std::string reqStr = req_os.str();
+    if (reqStr.size() >= 2048)
+    {
+        NS_LOG_WARN("request too large (" << reqStr.size() << " B)");
         ++m_failures;
         return rsp;
     }
+    const char* buf = reqStr.c_str();
+    const int n = static_cast<int>(reqStr.size());
 
     auto t0 = std::chrono::steady_clock::now();
     ssize_t sent = ::sendto(m_sock, buf, n, 0,
@@ -189,7 +210,8 @@ SionnaUdpTransport::Query(const Request& req) const
     rsp.path_loss_db = std::atof(colon + 1);
     rsp.ok = std::isfinite(rsp.path_loss_db);
 
-    // Optional n_paths / compute_ms fields. Best-effort parse; missing is OK.
+    // Optional n_paths / compute_ms / tx_ports / rx_ports fields.
+    // Best-effort parse; missing fields are OK.
     if (const char* p = std::strstr(rspBuf, "\"n_paths\""))
     {
         if (const char* c = std::strchr(p, ':'))
@@ -202,6 +224,20 @@ SionnaUdpTransport::Query(const Request& req) const
         if (const char* c = std::strchr(p, ':'))
         {
             rsp.compute_ms = std::atof(c + 1);
+        }
+    }
+    if (const char* p = std::strstr(rspBuf, "\"tx_ports\""))
+    {
+        if (const char* c = std::strchr(p, ':'))
+        {
+            rsp.tx_ports = static_cast<uint16_t>(std::atoi(c + 1));
+        }
+    }
+    if (const char* p = std::strstr(rspBuf, "\"rx_ports\""))
+    {
+        if (const char* c = std::strchr(p, ':'))
+        {
+            rsp.rx_ports = static_cast<uint16_t>(std::atoi(c + 1));
         }
     }
     return rsp;

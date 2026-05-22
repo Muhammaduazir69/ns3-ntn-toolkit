@@ -749,7 +749,7 @@ class HstDopplerShiftTest : public TestCase
 {
   public:
     HstDopplerShiftTest()
-        : TestCase("TR 38.901 HST: Doppler shift matches v_radial / c * f_c")
+        : TestCase("TR 38.901 HST Doppler shift matches v_radial over c times f_c")
     {
     }
 

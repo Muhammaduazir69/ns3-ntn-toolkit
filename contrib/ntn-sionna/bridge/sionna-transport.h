@@ -28,10 +28,27 @@
 #include <atomic>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 
 namespace ns3
 {
+
+/// PlanarArray descriptor matching Sionna RT 2.0.1 `rt.PlanarArray` arguments
+/// (Roadmap §4.2.2). When supplied on a Request the server reconfigures
+/// `scene.tx_array` / `scene.rx_array` per query.
+struct MimoArrayConfig
+{
+    uint8_t rows{1};
+    uint8_t cols{1};
+    /// Antenna spacing in wavelengths. 0.5 (default) matches the Sionna
+    /// `vertical_spacing = horizontal_spacing = 0.5` convention.
+    double spacing_lambda{0.5};
+    /// Sionna RT 2.0.1 antenna pattern: "iso", "tr38901", "dipole".
+    std::string pattern{"iso"};
+    /// "V", "H", or "VH" (Sionna's cross-polarisation convention).
+    std::string polarization{"V"};
+};
 
 /**
  * \ingroup ntn-sionna
@@ -54,6 +71,11 @@ class SionnaTransport : public Object
         double rx_z;
         double freq_hz;
         uint64_t request_id;
+        /// Optional MIMO array config (Roadmap §4.2.2). When present, the
+        /// transport forwards the (rows, cols, spacing, pattern, pol) per
+        /// side; when absent the server falls back to its SISO defaults.
+        std::optional<MimoArrayConfig> tx_array;
+        std::optional<MimoArrayConfig> rx_array;
     };
 
     struct Response
@@ -62,6 +84,10 @@ class SionnaTransport : public Object
         uint32_t n_paths;
         double compute_ms;   //!< server-side compute, not RTT
         bool ok;
+        /// Number of antenna ports reported by the server (1 when SISO).
+        /// (Roadmap §4.2.2.)
+        uint16_t tx_ports{1};
+        uint16_t rx_ports{1};
     };
 
     static TypeId GetTypeId();
