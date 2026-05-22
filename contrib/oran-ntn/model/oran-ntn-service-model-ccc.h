@@ -81,7 +81,55 @@ struct CccIndMsgFormat1
     uint32_t snapshot_seq{0};       //!< monotonic sequence number
 };
 
+// ----------------------------------------------------------------------------
+//  4.1.8 NTN extensions to E2SM-CCC
+//
+//  Three NTN-specific ControlAction shapes layered on top of the base
+//  CCC ops added in 4.1.6:
+//    leo_pass_toggle — enable / disable a beam (or whole cell) on a
+//                      satellite for the duration of a GSL pass.
+//                      Driven by T5 ContactGraphScheduler GSL events.
+//    beam_reconfig   — update a beam's steering angles + complex
+//                      weights in the cell's beamforming codebook.
+//    doppler_retune  — adjust DL / UL ARFCN to compensate the
+//                      LOS-component Doppler shift.
+// ----------------------------------------------------------------------------
+
+/// `set_leo_pass_on/off` payload.
+struct LeoPassToggleIe
+{
+    uint64_t nr_cell_global_id{0};
+    uint16_t beam_id{0};         //!< 0xFFFF = whole cell
+    bool enable{false};
+    double t_event_s{0.0};       //!< event time (wall-clock seconds)
+};
+
+/// `beam_reconfig` payload.
+struct BeamReconfigIe
+{
+    uint64_t nr_cell_global_id{0};
+    uint16_t beam_id{0};
+    double steering_az_deg{0.0};
+    double steering_el_deg{0.0};
+    /// Complex codebook weights, one pair per antenna element.
+    /// Encoded as 2*N real numbers (re_0, im_0, re_1, im_1, ...).
+    std::vector<double> codebook_weights;
+};
+
+/// `doppler_retune` payload.
+struct DopplerRetuneIe
+{
+    uint64_t nr_cell_global_id{0};
+    /// New DL / UL ARFCN values per TS 38.104 (0..3279165).
+    uint32_t arfcn_dl{0};
+    uint32_t arfcn_ul{0};
+    /// Reported LOS Doppler offset (Hz). Sign convention: positive when
+    /// the satellite approaches the cell's coverage centre.
+    double doppler_offset_hz{0.0};
+};
+
 /// E2SM-CCC Control Action — set / clear config on the listed cells.
+/// 4.1.8 adds three NTN-extension ops with their own per-op vectors.
 struct CccControlAction
 {
     enum class Op : uint8_t
@@ -90,10 +138,20 @@ struct CccControlAction
         clear_config = 1,
         set_perf_objective = 2,
         clear_perf_objective = 3,
+        // 4.1.8 NTN extensions:
+        set_leo_pass_on = 4,
+        set_leo_pass_off = 5,
+        beam_reconfig = 6,
+        doppler_retune = 7,
     };
     Op op;
     std::vector<CellConfigRecord> cell_updates;
     std::vector<PerformanceObjective> objective_updates;
+    // 4.1.8 NTN-extension payloads. Each is populated only when `op`
+    // matches the corresponding kind; other ops leave the vector empty.
+    std::vector<LeoPassToggleIe> leo_pass_updates;
+    std::vector<BeamReconfigIe> beam_reconfigs;
+    std::vector<DopplerRetuneIe> doppler_retunes;
 };
 
 } // namespace ccc

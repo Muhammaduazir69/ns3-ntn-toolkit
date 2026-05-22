@@ -2407,6 +2407,231 @@ class OranNtnSmRegistryFourPluginsTest : public TestCase
 };
 
 // ============================================================================
+//  4.1.8 (Roadmap §4.1.8): E2SM-CCC NTN extensions
+// ============================================================================
+
+class OranNtnSmCccNtnLeoPassTest : public TestCase
+{
+  public:
+    OranNtnSmCccNtnLeoPassTest()
+        : TestCase("CCC NTN ext: set_leo_pass_on encodes and decodes a pass-on event")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::ccc;
+        OranNtnServiceModelCcc sm;
+        CccControlAction a{};
+        a.op = CccControlAction::Op::set_leo_pass_on;
+        LeoPassToggleIe p{};
+        p.nr_cell_global_id = 0xABC123;
+        p.beam_id = 5;
+        p.enable = true;
+        p.t_event_s = 1234567890.5;
+        a.leo_pass_updates.push_back(p);
+        LeoPassToggleIe p2{};
+        p2.nr_cell_global_id = 0xABC123;
+        p2.beam_id = 7;
+        p2.enable = false;
+        p2.t_event_s = 1234567910.0;
+        a.leo_pass_updates.push_back(p2);
+
+        const auto blob = sm.EncodeControl(a);
+        CccControlAction got{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl(blob, &got),
+                              true,
+                              "decode LEO pass action");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.op),
+                              static_cast<int>(
+                                  CccControlAction::Op::set_leo_pass_on),
+                              "op set_leo_pass_on");
+        NS_TEST_ASSERT_MSG_EQ(got.leo_pass_updates.size(), 2u,
+                              "2 LEO pass entries");
+        NS_TEST_EXPECT_MSG_EQ(got.leo_pass_updates[0].nr_cell_global_id,
+                              0xABC123u, "entry[0] NCGI");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.leo_pass_updates[0].beam_id),
+                              5, "entry[0] beam");
+        NS_TEST_EXPECT_MSG_EQ(got.leo_pass_updates[0].enable, true,
+                              "entry[0] enable");
+        NS_TEST_EXPECT_MSG_EQ(got.leo_pass_updates[0].t_event_s,
+                              1234567890.5,
+                              "entry[0] t_event preserved (IEEE-754 bits)");
+        NS_TEST_EXPECT_MSG_EQ(got.leo_pass_updates[1].enable, false,
+                              "entry[1] enable=false");
+        NS_TEST_EXPECT_MSG_EQ(got.beam_reconfigs.size(), 0u,
+                              "no beam reconfigs");
+        NS_TEST_EXPECT_MSG_EQ(got.doppler_retunes.size(), 0u,
+                              "no doppler retunes");
+    }
+};
+
+class OranNtnSmCccNtnBeamReconfigTest : public TestCase
+{
+  public:
+    OranNtnSmCccNtnBeamReconfigTest()
+        : TestCase("CCC NTN ext: beam_reconfig carries steering + complex codebook weights")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::ccc;
+        OranNtnServiceModelCcc sm;
+        CccControlAction a{};
+        a.op = CccControlAction::Op::beam_reconfig;
+        BeamReconfigIe b{};
+        b.nr_cell_global_id = 0xDEADBEEF;
+        b.beam_id = 12;
+        b.steering_az_deg = 35.5;
+        b.steering_el_deg = -7.25;
+        b.codebook_weights = {1.0, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0, -1.0};
+        a.beam_reconfigs.push_back(b);
+
+        const auto blob = sm.EncodeControl(a);
+        CccControlAction got{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl(blob, &got),
+                              true,
+                              "decode beam reconfig");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.op),
+                              static_cast<int>(
+                                  CccControlAction::Op::beam_reconfig),
+                              "op beam_reconfig");
+        NS_TEST_ASSERT_MSG_EQ(got.beam_reconfigs.size(), 1u,
+                              "1 beam reconfig");
+        const auto& gb = got.beam_reconfigs[0];
+        NS_TEST_EXPECT_MSG_EQ(gb.nr_cell_global_id, 0xDEADBEEFu, "NCGI");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(gb.beam_id), 12, "beam id");
+        NS_TEST_EXPECT_MSG_EQ(gb.steering_az_deg, 35.5, "az");
+        NS_TEST_EXPECT_MSG_EQ(gb.steering_el_deg, -7.25, "el");
+        NS_TEST_ASSERT_MSG_EQ(gb.codebook_weights.size(), 8u,
+                              "8 codebook entries");
+        NS_TEST_EXPECT_MSG_EQ(gb.codebook_weights[2], 0.0, "weights[2]");
+        NS_TEST_EXPECT_MSG_EQ(gb.codebook_weights[4], -1.0, "weights[4]");
+    }
+};
+
+class OranNtnSmCccNtnDopplerRetuneTest : public TestCase
+{
+  public:
+    OranNtnSmCccNtnDopplerRetuneTest()
+        : TestCase("CCC NTN ext: doppler_retune carries ARFCN updates and Doppler offset")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::ccc;
+        OranNtnServiceModelCcc sm;
+        CccControlAction a{};
+        a.op = CccControlAction::Op::doppler_retune;
+        DopplerRetuneIe d{};
+        d.nr_cell_global_id = 0x42;
+        d.arfcn_dl = 638400;
+        d.arfcn_ul = 638400;
+        d.doppler_offset_hz = -13736.5;
+        a.doppler_retunes.push_back(d);
+
+        const auto blob = sm.EncodeControl(a);
+        CccControlAction got{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl(blob, &got),
+                              true,
+                              "decode doppler retune");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.op),
+                              static_cast<int>(
+                                  CccControlAction::Op::doppler_retune),
+                              "op doppler_retune");
+        NS_TEST_ASSERT_MSG_EQ(got.doppler_retunes.size(), 1u,
+                              "1 doppler retune");
+        const auto& gd = got.doppler_retunes[0];
+        NS_TEST_EXPECT_MSG_EQ(gd.arfcn_dl, 638400u, "DL ARFCN");
+        NS_TEST_EXPECT_MSG_EQ(gd.arfcn_ul, 638400u, "UL ARFCN");
+        NS_TEST_EXPECT_MSG_EQ(gd.doppler_offset_hz, -13736.5,
+                              "Doppler offset preserved");
+    }
+};
+
+namespace
+{
+
+struct PassEvent
+{
+    double t_s;
+    uint16_t beam_id;
+    bool enable;
+    size_t blob_size;
+    bool decoded_ok;
+};
+
+void
+FirePassEvent(uint16_t beam, bool on, std::vector<PassEvent>* out)
+{
+    using namespace oranntn::ccc;
+    OranNtnServiceModelCcc sm;
+    CccControlAction a{};
+    a.op = on ? CccControlAction::Op::set_leo_pass_on
+              : CccControlAction::Op::set_leo_pass_off;
+    LeoPassToggleIe p{};
+    p.nr_cell_global_id = 0x100;
+    p.beam_id = beam;
+    p.enable = on;
+    p.t_event_s = Simulator::Now().GetSeconds();
+    a.leo_pass_updates.push_back(p);
+    const auto blob = sm.EncodeControl(a);
+    CccControlAction got{};
+    const bool ok = sm.DecodeControl(blob, &got);
+    out->push_back({Simulator::Now().GetSeconds(),
+                     beam, on, blob.size(), ok});
+}
+
+} // namespace
+
+class OranNtnSmCccNtnSimulatorTimeTest : public TestCase
+{
+  public:
+    OranNtnSmCccNtnSimulatorTimeTest()
+        : TestCase("Simulator: 600 s pass-on / pass-off stream encodes and "
+                   "decodes through CCC NTN ext")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        std::vector<PassEvent> events;
+        Simulator::Schedule(Seconds(60),
+                            &FirePassEvent, uint16_t{5}, true, &events);
+        Simulator::Schedule(Seconds(540),
+                            &FirePassEvent, uint16_t{5}, false, &events);
+        Simulator::Schedule(Seconds(200),
+                            &FirePassEvent, uint16_t{7}, true, &events);
+        Simulator::Schedule(Seconds(400),
+                            &FirePassEvent, uint16_t{7}, false, &events);
+        Simulator::Stop(Seconds(601));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(events.size(), 4u, "4 LEO pass events");
+        for (const auto& e : events)
+        {
+            NS_TEST_EXPECT_MSG_EQ(e.decoded_ok, true,
+                                  "every event encode/decode round-trips");
+            NS_TEST_EXPECT_MSG_GT(e.blob_size, 0u, "non-empty blob");
+        }
+        NS_TEST_EXPECT_MSG_EQ(events[0].enable, true, "beam 5 on at t=60");
+        NS_TEST_EXPECT_MSG_EQ(events[1].enable, true, "beam 7 on at t=200");
+        NS_TEST_EXPECT_MSG_EQ(events[2].enable, false, "beam 7 off at t=400");
+        NS_TEST_EXPECT_MSG_EQ(events[3].enable, false, "beam 5 off at t=540");
+        NS_TEST_EXPECT_MSG_EQ(events[0].t_s, 60.0, "event[0] timestamp");
+        NS_TEST_EXPECT_MSG_EQ(events[3].t_s, 540.0, "event[3] timestamp");
+
+        Simulator::Destroy();
+    }
+};
+
+// ============================================================================
 //  4.1.6 (Roadmap §4.1.6): E2SM-CCC SM plugin
 // ============================================================================
 
@@ -3255,6 +3480,15 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnSmEphemerisPvTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnSmRegistryFourPluginsTest,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.8 — CCC NTN extensions.
+        AddTestCase(new OranNtnSmCccNtnLeoPassTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSmCccNtnBeamReconfigTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSmCccNtnDopplerRetuneTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSmCccNtnSimulatorTimeTest,
                     TestCase::Duration::QUICK);
     }
 };

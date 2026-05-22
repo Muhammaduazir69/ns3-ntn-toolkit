@@ -110,6 +110,98 @@ ReadPerfObjective(oranntn::asn1::PerReader& r,
     o.scope_slice_id = static_cast<uint8_t>(r.ReadInteger());
 }
 
+// ---- 4.1.8 NTN-extension helpers --------------------------------------------
+
+void
+WriteDouble(oranntn::asn1::PerWriter& w, double v)
+{
+    int64_t bits;
+    std::memcpy(&bits, &v, sizeof(bits));
+    w.WriteInteger(bits);
+}
+
+double
+ReadDouble(oranntn::asn1::PerReader& r)
+{
+    int64_t bits = r.ReadInteger();
+    double v;
+    std::memcpy(&v, &bits, sizeof(v));
+    return v;
+}
+
+void
+WriteLeoPass(oranntn::asn1::PerWriter& w,
+              const oranntn::ccc::LeoPassToggleIe& p)
+{
+    w.WriteInteger(static_cast<int64_t>(p.nr_cell_global_id));
+    w.WriteInteger(static_cast<int64_t>(p.beam_id));
+    w.WriteInteger(p.enable ? 1 : 0);
+    WriteDouble(w, p.t_event_s);
+}
+
+void
+ReadLeoPass(oranntn::asn1::PerReader& r,
+             oranntn::ccc::LeoPassToggleIe& p)
+{
+    p.nr_cell_global_id = static_cast<uint64_t>(r.ReadInteger());
+    p.beam_id = static_cast<uint16_t>(r.ReadInteger());
+    p.enable = r.ReadInteger() != 0;
+    p.t_event_s = ReadDouble(r);
+}
+
+void
+WriteBeamReconfig(oranntn::asn1::PerWriter& w,
+                   const oranntn::ccc::BeamReconfigIe& b)
+{
+    w.WriteInteger(static_cast<int64_t>(b.nr_cell_global_id));
+    w.WriteInteger(static_cast<int64_t>(b.beam_id));
+    WriteDouble(w, b.steering_az_deg);
+    WriteDouble(w, b.steering_el_deg);
+    w.WriteLengthDeterminant(
+        static_cast<uint32_t>(b.codebook_weights.size()));
+    for (double v : b.codebook_weights)
+    {
+        WriteDouble(w, v);
+    }
+}
+
+void
+ReadBeamReconfig(oranntn::asn1::PerReader& r,
+                  oranntn::ccc::BeamReconfigIe& b)
+{
+    b.nr_cell_global_id = static_cast<uint64_t>(r.ReadInteger());
+    b.beam_id = static_cast<uint16_t>(r.ReadInteger());
+    b.steering_az_deg = ReadDouble(r);
+    b.steering_el_deg = ReadDouble(r);
+    const uint32_t n = r.ReadLengthDeterminant();
+    b.codebook_weights.clear();
+    b.codebook_weights.reserve(n);
+    for (uint32_t i = 0; i < n; ++i)
+    {
+        b.codebook_weights.push_back(ReadDouble(r));
+    }
+}
+
+void
+WriteDopplerRetune(oranntn::asn1::PerWriter& w,
+                    const oranntn::ccc::DopplerRetuneIe& d)
+{
+    w.WriteInteger(static_cast<int64_t>(d.nr_cell_global_id));
+    w.WriteInteger(static_cast<int64_t>(d.arfcn_dl));
+    w.WriteInteger(static_cast<int64_t>(d.arfcn_ul));
+    WriteDouble(w, d.doppler_offset_hz);
+}
+
+void
+ReadDopplerRetune(oranntn::asn1::PerReader& r,
+                   oranntn::ccc::DopplerRetuneIe& d)
+{
+    d.nr_cell_global_id = static_cast<uint64_t>(r.ReadInteger());
+    d.arfcn_dl = static_cast<uint32_t>(r.ReadInteger());
+    d.arfcn_ul = static_cast<uint32_t>(r.ReadInteger());
+    d.doppler_offset_hz = ReadDouble(r);
+}
+
 } // namespace
 
 std::vector<uint8_t>
@@ -187,6 +279,27 @@ OranNtnServiceModelCcc::EncodeControl(
     {
         WritePerfObjective(w, o);
     }
+    // 4.1.8 — NTN extensions: three optional vectors at the tail. Older
+    // toolkit consumers parsing only the 4.1.6 prefix still decode the
+    // first two lists; the new tail extends the wire format compatibly.
+    w.WriteLengthDeterminant(
+        static_cast<uint32_t>(a.leo_pass_updates.size()));
+    for (const auto& p : a.leo_pass_updates)
+    {
+        WriteLeoPass(w, p);
+    }
+    w.WriteLengthDeterminant(
+        static_cast<uint32_t>(a.beam_reconfigs.size()));
+    for (const auto& b : a.beam_reconfigs)
+    {
+        WriteBeamReconfig(w, b);
+    }
+    w.WriteLengthDeterminant(
+        static_cast<uint32_t>(a.doppler_retunes.size()));
+    for (const auto& d : a.doppler_retunes)
+    {
+        WriteDopplerRetune(w, d);
+    }
     return w.Take();
 }
 
@@ -217,6 +330,39 @@ OranNtnServiceModelCcc::DecodeControl(const std::vector<uint8_t>& msg,
             oranntn::ccc::PerformanceObjective o{};
             ReadPerfObjective(r, o);
             out->objective_updates.push_back(o);
+        }
+        // 4.1.8 — NTN extensions. Reader stays compatible with the older
+        // 4.1.6 wire form: if the buffer ends here, leave the extension
+        // vectors empty.
+        out->leo_pass_updates.clear();
+        out->beam_reconfigs.clear();
+        out->doppler_retunes.clear();
+        if (!r.Eof())
+        {
+            const uint32_t numLeo = r.ReadLengthDeterminant();
+            out->leo_pass_updates.reserve(numLeo);
+            for (uint32_t i = 0; i < numLeo; ++i)
+            {
+                oranntn::ccc::LeoPassToggleIe p{};
+                ReadLeoPass(r, p);
+                out->leo_pass_updates.push_back(p);
+            }
+            const uint32_t numBeam = r.ReadLengthDeterminant();
+            out->beam_reconfigs.reserve(numBeam);
+            for (uint32_t i = 0; i < numBeam; ++i)
+            {
+                oranntn::ccc::BeamReconfigIe b{};
+                ReadBeamReconfig(r, b);
+                out->beam_reconfigs.push_back(b);
+            }
+            const uint32_t numDop = r.ReadLengthDeterminant();
+            out->doppler_retunes.reserve(numDop);
+            for (uint32_t i = 0; i < numDop; ++i)
+            {
+                oranntn::ccc::DopplerRetuneIe d{};
+                ReadDopplerRetune(r, d);
+                out->doppler_retunes.push_back(d);
+            }
         }
         return true;
     }
