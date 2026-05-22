@@ -26,6 +26,7 @@
 #include "ns3/e2-listener.h"
 #include "ns3/e2-transport.h"
 #include "ns3/oran-ntn-service-model-ccc.h"
+#include "ns3/oran-ntn-service-model-ntn-ephemeris.h"
 #include "ns3/oran-ntn-service-model-kpm.h"
 #include "ns3/oran-ntn-service-model-rc.h"
 #include "ns3/oran-ntn-service-model.h"
@@ -2215,6 +2216,197 @@ class OranNtnConflictTaxonomyTestCase : public TestCase
 };
 
 // ============================================================================
+//  4.1.7 (Roadmap §4.1.7): NTN-Ephemeris SM plugin (SIB19)
+// ============================================================================
+
+class OranNtnSmEphemerisOrbitalTest : public TestCase
+{
+  public:
+    OranNtnSmEphemerisOrbitalTest()
+        : TestCase("NTN-Ephemeris SM round-trips orbital SIB19 with all optional IEs")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::ephemeris;
+
+        Sib19NtnConfig cfg{};
+        cfg.epoch.sfn = 512;
+        cfg.epoch.subframe = 7;
+        OrbitalElementsIe orb{};
+        orb.semi_major_axis_m = 6921000.0;
+        orb.eccentricity = 0.0007381;
+        orb.inclination_rad = 51.6447 * M_PI / 180.0;
+        orb.raan_rad = 91.8123 * M_PI / 180.0;
+        orb.arg_perigee_rad = 152.7392 * M_PI / 180.0;
+        orb.mean_anomaly_rad = 207.3922 * M_PI / 180.0;
+        cfg.ephemeris = orb;
+        cfg.ta.ta_common_us = 4567.5;
+        cfg.ta.ta_common_drift_us_per_s = -42.5;
+        cfg.ta.ta_common_drift_variation_us_per_s2 = 0.01;
+        cfg.cell_specific_koffset_slots = 122;
+        ServiceWindowIe sw{};
+        sw.t_service_start_s = 1.0e9;
+        sw.t_service_dur_s = 600.0;
+        cfg.service_window = sw;
+        cfg.ntn_ul_sync_validity_duration_ms = 900;
+
+        OranNtnServiceModelNtnEphemeris sm;
+        NS_TEST_EXPECT_MSG_EQ(sm.RicFunctionId(), 1001u,
+                              "ephemeris function ID");
+        NS_TEST_EXPECT_MSG_EQ(sm.Name(), "NTN-Ephemeris", "name");
+        NS_TEST_EXPECT_MSG_EQ(sm.Version(), "v1.00", "version");
+
+        const auto blob = sm.EncodeIndication(&cfg);
+        NS_TEST_EXPECT_MSG_GT(blob.size(), 32u, "non-trivial PER blob");
+
+        Sib19NtnConfig got{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeIndication(blob, got),
+                              true,
+                              "decode SIB19");
+        NS_TEST_EXPECT_MSG_EQ(got.epoch.sfn, 512u, "SFN");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(got.epoch.subframe), 7,
+                              "subframe");
+
+        NS_TEST_ASSERT_MSG_EQ(
+            std::holds_alternative<OrbitalElementsIe>(got.ephemeris),
+            true,
+            "decoded ephemeris is orbital");
+        const auto& og = std::get<OrbitalElementsIe>(got.ephemeris);
+        NS_TEST_EXPECT_MSG_EQ(og.semi_major_axis_m,
+                              6921000.0,
+                              "semi-major axis exact (raw IEEE-754 bits)");
+        NS_TEST_EXPECT_MSG_EQ(og.eccentricity, 0.0007381, "eccentricity");
+        NS_TEST_EXPECT_MSG_EQ(og.raan_rad, orb.raan_rad,
+                              "RAAN preserved");
+
+        NS_TEST_EXPECT_MSG_EQ(got.ta.ta_common_us, 4567.5, "TA common");
+        NS_TEST_EXPECT_MSG_EQ(got.ta.ta_common_drift_us_per_s, -42.5,
+                              "TA drift");
+        NS_TEST_EXPECT_MSG_EQ(got.cell_specific_koffset_slots, 122,
+                              "K-offset");
+        NS_TEST_ASSERT_MSG_EQ(got.service_window.has_value(), true,
+                              "service window present");
+        NS_TEST_EXPECT_MSG_EQ(got.service_window->t_service_start_s,
+                              1.0e9,
+                              "service window start");
+        NS_TEST_EXPECT_MSG_EQ(got.service_window->t_service_dur_s,
+                              600.0,
+                              "service window duration");
+        NS_TEST_ASSERT_MSG_EQ(
+            got.ntn_ul_sync_validity_duration_ms.has_value(),
+            true,
+            "UL sync duration present");
+        NS_TEST_EXPECT_MSG_EQ(*got.ntn_ul_sync_validity_duration_ms,
+                              900u,
+                              "UL sync duration value");
+
+        std::vector<uint8_t> dummy;
+        NS_TEST_EXPECT_MSG_EQ(sm.DecodeControl(blob, &dummy),
+                              false,
+                              "Ephemeris SM has no Control direction");
+    }
+};
+
+class OranNtnSmEphemerisPvTest : public TestCase
+{
+  public:
+    OranNtnSmEphemerisPvTest()
+        : TestCase("NTN-Ephemeris SM round-trips position-velocity SIB19 with absent optionals")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::ephemeris;
+
+        Sib19NtnConfig cfg{};
+        cfg.epoch.sfn = 0;
+        cfg.epoch.subframe = 0;
+        PositionVelocityIe pv{};
+        pv.pos_x_m = 6921000.0;
+        pv.pos_y_m = 0.0;
+        pv.pos_z_m = 0.0;
+        pv.vel_x_mps = 0.0;
+        pv.vel_y_mps = 7560.0;
+        pv.vel_z_mps = 0.0;
+        cfg.ephemeris = pv;
+        cfg.ta.ta_common_us = 0.0;
+        cfg.ta.ta_common_drift_us_per_s = 0.0;
+        cfg.ta.ta_common_drift_variation_us_per_s2 = 0.0;
+        cfg.cell_specific_koffset_slots = 0;
+        // No service_window, no UL-sync-validity duration.
+
+        OranNtnServiceModelNtnEphemeris sm;
+        const auto blob = sm.EncodeIndication(&cfg);
+        Sib19NtnConfig got{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeIndication(blob, got),
+                              true,
+                              "decode SIB19 PV");
+        NS_TEST_ASSERT_MSG_EQ(
+            std::holds_alternative<PositionVelocityIe>(got.ephemeris),
+            true,
+            "decoded ephemeris is PV");
+        const auto& pg = std::get<PositionVelocityIe>(got.ephemeris);
+        NS_TEST_EXPECT_MSG_EQ(pg.pos_x_m, 6921000.0, "pos_x preserved");
+        NS_TEST_EXPECT_MSG_EQ(pg.vel_y_mps, 7560.0, "vel_y preserved");
+        NS_TEST_EXPECT_MSG_EQ(got.service_window.has_value(),
+                              false,
+                              "no service window");
+        NS_TEST_EXPECT_MSG_EQ(
+            got.ntn_ul_sync_validity_duration_ms.has_value(),
+            false,
+            "no UL-sync-validity duration");
+    }
+};
+
+class OranNtnSmRegistryFourPluginsTest : public TestCase
+{
+  public:
+    OranNtnSmRegistryFourPluginsTest()
+        : TestCase("Service-Model registry resolves KPM, RC, CCC, and "
+                   "NTN-Ephemeris plugins")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<OranNtnServiceModelRegistry> reg =
+            CreateObject<OranNtnServiceModelRegistry>();
+        Ptr<OranNtnServiceModelKpm> kpm =
+            CreateObject<OranNtnServiceModelKpm>();
+        Ptr<OranNtnServiceModelRc> rc =
+            CreateObject<OranNtnServiceModelRc>();
+        Ptr<OranNtnServiceModelCcc> ccc =
+            CreateObject<OranNtnServiceModelCcc>();
+        Ptr<OranNtnServiceModelNtnEphemeris> eph =
+            CreateObject<OranNtnServiceModelNtnEphemeris>();
+
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(kpm), true, "KPM registered");
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(rc), true, "RC registered");
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(ccc), true, "CCC registered");
+        NS_TEST_EXPECT_MSG_EQ(reg->Register(eph), true, "Eph registered");
+        NS_TEST_EXPECT_MSG_EQ(reg->Size(), 4u, "4 plugins");
+
+        auto ids = reg->GetFunctionIds();
+        NS_TEST_ASSERT_MSG_EQ(ids.size(), 4u, "4 IDs");
+        NS_TEST_EXPECT_MSG_EQ(ids[0], 3u, "RC first");
+        NS_TEST_EXPECT_MSG_EQ(ids[1], 147u, "KPM second");
+        NS_TEST_EXPECT_MSG_EQ(ids[2], 1000u, "CCC third");
+        NS_TEST_EXPECT_MSG_EQ(ids[3], 1001u, "Ephemeris fourth");
+
+        Ptr<OranNtnServiceModel> p = reg->Lookup(1001);
+        NS_TEST_ASSERT_MSG_NE(p, nullptr, "Ephemeris lookup");
+        NS_TEST_EXPECT_MSG_EQ(p->Name(), "NTN-Ephemeris", "Ephemeris name");
+        NS_TEST_EXPECT_MSG_EQ(p->Version(), "v1.00", "Ephemeris version");
+    }
+};
+
+// ============================================================================
 //  4.1.6 (Roadmap §4.1.6): E2SM-CCC SM plugin
 // ============================================================================
 
@@ -3056,6 +3248,13 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnSmCccControlTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnSmRegistryThreePluginsTest,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.7 — NTN-Ephemeris (SIB19) SM plugin.
+        AddTestCase(new OranNtnSmEphemerisOrbitalTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSmEphemerisPvTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSmRegistryFourPluginsTest,
                     TestCase::Duration::QUICK);
     }
 };
