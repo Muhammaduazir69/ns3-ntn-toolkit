@@ -19,6 +19,7 @@
 #include "ns3/oran-ntn-kpm-canonical-ids.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-ntn-scheduler.h"
+#include "ns3/oran-ntn-rc-style3.h"
 #include "ns3/oran-ntn-phy-kpm-extractor.h"
 #include "ns3/oran-ntn-sat-bridge.h"
 #include "ns3/oran-ntn-space-ric-inference.h"
@@ -1472,6 +1473,160 @@ class OranNtnFlexricKpmFormat1TestCase : public TestCase
 };
 
 // ============================================================================
+//  4.1.3 (Roadmap §4.1.3): E2SM-RC Style 3 Connected-Mode Mobility
+// ============================================================================
+
+class OranNtnRcStyle3ShapesTestCase : public TestCase
+{
+  public:
+    OranNtnRcStyle3ShapesTestCase()
+        : TestCase("E2SM-RC Style 3 action shapes carry verbatim WG3 fields")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::rc_v103::style3;
+
+        // Action 1 — Handover Control.
+        HandoverControl h{};
+        h.target_primary_cell_id.plmn_id = "00101";
+        h.target_primary_cell_id.nr_cell_identity = 0x123456789ULL;
+        h.handover_type = HandoverType::intra5gs;
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(h.kStyleId), 3, "Style ID");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(h.kActionId),
+                              1,
+                              "Action 1 for plain HO");
+        NS_TEST_EXPECT_MSG_EQ(h.target_primary_cell_id.plmn_id,
+                              "00101",
+                              "NRCGI PLMN");
+
+        // Action 2 — Conditional Handover Control with two candidates.
+        ConditionalHandoverControl cho{};
+        cho.conditional_reconfiguration_id = 7;
+        ConditionalHandoverControl::CandidateCell c1{};
+        c1.target_primary_cell_id.plmn_id = "00101";
+        c1.target_primary_cell_id.nr_cell_identity = 0xAAAA;
+        c1.trigger_condition = {0xDE, 0xAD};
+        ConditionalHandoverControl::CandidateCell c2{};
+        c2.target_primary_cell_id.plmn_id = "00101";
+        c2.target_primary_cell_id.nr_cell_identity = 0xBBBB;
+        c2.trigger_condition = {0xBE, 0xEF};
+        cho.candidate_cell_list = {c1, c2};
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(cho.kActionId),
+                              2,
+                              "Action 2 for CHO");
+        NS_TEST_ASSERT_MSG_EQ(cho.candidate_cell_list.size(),
+                              2u,
+                              "2 candidates");
+        NS_TEST_EXPECT_MSG_EQ(cho.candidate_cell_list[1]
+                                  .target_primary_cell_id.nr_cell_identity,
+                              0xBBBBu,
+                              "candidate[1] NRCGI");
+
+        // Action 3 — DAPS-HO Control.
+        DapsHandoverControl daps{};
+        daps.target_primary_cell_id.plmn_id = "00101";
+        daps.target_primary_cell_id.nr_cell_identity = 0x42;
+        daps.daps_termination_policy =
+            DapsTerminationCause::condition_release;
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(daps.kActionId),
+                              3,
+                              "Action 3 for DAPS-HO");
+        NS_TEST_ASSERT_MSG_EQ(daps.daps_termination_policy.has_value(),
+                              true,
+                              "DAPS cause set");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(*daps.daps_termination_policy),
+                              2,
+                              "condition_release wire code");
+
+        // ControlAction variant -> ActionId() helper.
+        ControlAction a1{h};
+        ControlAction a2{cho};
+        ControlAction a3{daps};
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(ActionId(a1)), 1, "ActionId 1");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(ActionId(a2)), 2, "ActionId 2");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(ActionId(a3)), 3, "ActionId 3");
+
+        // ControlMessage wrapper.
+        ControlMessage msg{};
+        msg.action = a2;
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(msg.style_id), 3, "style_id 3");
+        NS_TEST_ASSERT_MSG_EQ(std::holds_alternative<ConditionalHandoverControl>(
+                                  msg.action),
+                              true,
+                              "msg holds CHO");
+    }
+};
+
+class OranNtnRcStyle3ConverterTestCase : public TestCase
+{
+  public:
+    OranNtnRcStyle3ConverterTestCase()
+        : TestCase("ConvertE2RcToStyle3 maps HO actions and rejects non-HO types")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::rc_v103::style3;
+
+        // HANDOVER_TRIGGER -> Action 1 (HandoverControl, intra5gs).
+        E2RcAction trig{};
+        trig.actionType = E2RcActionType::HANDOVER_TRIGGER;
+        trig.targetGnbId = 0x12345;
+        trig.targetUeId = 7;
+        auto r1 = ConvertE2RcToStyle3(trig);
+        NS_TEST_ASSERT_MSG_EQ(r1.has_value(), true, "HO trigger converted");
+        NS_TEST_ASSERT_MSG_EQ(ActionId(*r1), 1u, "Action 1");
+        const auto& hc = std::get<HandoverControl>(*r1);
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(hc.handover_type),
+                              0,
+                              "intra5gs wire code");
+        NS_TEST_EXPECT_MSG_EQ(hc.target_primary_cell_id.plmn_id,
+                              "00101",
+                              "default PLMN");
+        // gNB-ID packed in upper 28 bits of NR Cell Identity: 0x12345 << 8.
+        NS_TEST_EXPECT_MSG_EQ(hc.target_primary_cell_id.nr_cell_identity,
+                              static_cast<uint64_t>(0x12345) << 8,
+                              "NRCGI = gNB-ID << 8");
+
+        // HANDOVER_CANCEL -> Action 2 (empty CHO list = cancel-all).
+        E2RcAction cancel{};
+        cancel.actionType = E2RcActionType::HANDOVER_CANCEL;
+        cancel.targetGnbId = 0x12345;
+        auto r2 = ConvertE2RcToStyle3(cancel);
+        NS_TEST_ASSERT_MSG_EQ(r2.has_value(), true, "HO cancel converted");
+        NS_TEST_ASSERT_MSG_EQ(ActionId(*r2), 2u, "Action 2");
+        const auto& chc = std::get<ConditionalHandoverControl>(*r2);
+        NS_TEST_EXPECT_MSG_EQ(chc.candidate_cell_list.size(),
+                              0u,
+                              "empty list = cancel");
+        NS_TEST_EXPECT_MSG_EQ(chc.conditional_reconfiguration_id,
+                              0u,
+                              "reconfig_id 0 = clear-all");
+
+        // BEAM_SWITCH (and any non-HO action type) -> nullopt.
+        E2RcAction beam{};
+        beam.actionType = E2RcActionType::BEAM_SWITCH;
+        beam.targetGnbId = 1;
+        NS_TEST_EXPECT_MSG_EQ(ConvertE2RcToStyle3(beam).has_value(),
+                              false,
+                              "non-HO actions reject");
+
+        // Custom PLMN argument honoured.
+        auto r3 = ConvertE2RcToStyle3(trig, "26201");
+        NS_TEST_ASSERT_MSG_EQ(r3.has_value(), true, "custom PLMN HO converted");
+        NS_TEST_EXPECT_MSG_EQ(
+            std::get<HandoverControl>(*r3).target_primary_cell_id.plmn_id,
+            "26201",
+            "custom PLMN propagated");
+    }
+};
+
+// ============================================================================
 //  4.1.2 (Roadmap §4.1.2): WG3-canonical KPM CSV emitted end-to-end
 // ============================================================================
 
@@ -1633,6 +1788,11 @@ class OranNtnTestSuite : public TestSuite
                     TestCase::Duration::QUICK);
         // Realism roadmap 4.1.2 — canonical CSV end-to-end.
         AddTestCase(new OranNtnKpmCanonicalCsvTestCase,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.3 — E2SM-RC Style 3 Connected-Mode Mobility.
+        AddTestCase(new OranNtnRcStyle3ShapesTestCase,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnRcStyle3ConverterTestCase,
                     TestCase::Duration::QUICK);
     }
 };

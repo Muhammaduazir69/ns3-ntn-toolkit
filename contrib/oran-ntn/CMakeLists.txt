@@ -9,6 +9,8 @@ set(source_files
     model/oran-ntn-sat-bridge.cc
     # T8 — canonical WG3 KPM metric-ID alignment (Roadmap §3 T8)
     model/oran-ntn-kpm-canonical-ids.cc
+    # 4.1.3 — E2SM-RC v1.03 Style 3 Connected-Mode Mobility (Roadmap §4.1.3)
+    model/oran-ntn-rc-style3.cc
     # Original xApps
     model/oran-ntn-xapp-ho-predict.cc
     model/oran-ntn-xapp-beam-hop.cc
@@ -58,6 +60,8 @@ set(header_files
     model/oran-ntn-kpm-canonical-ids.h
     # 4.1.1 — FlexRIC field-name parity (Roadmap §4.1.1)
     model/oran-ntn-flexric-types.h
+    # 4.1.3 — E2SM-RC v1.03 Style 3 Connected-Mode Mobility (Roadmap §4.1.3)
+    model/oran-ntn-rc-style3.h
     # Original xApps
     model/oran-ntn-xapp-ho-predict.h
     model/oran-ntn-xapp-beam-hop.h
