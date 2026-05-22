@@ -28,6 +28,9 @@ set(source_files
     model/oran-ntn-f1-interface.cc
     model/oran-ntn-ofh-interface.cc
     helper/oran-ntn-split-gnb-helper.cc
+    # 4.1.12 — Two-stage NN precoder + codebook beamformer (Roadmap §4.1.12)
+    model/oran-ntn-mmimo-codebook.cc
+    model/oran-ntn-mmimo-precoder-xapp.cc
     # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
     asn1/asn1-per-codec.cc
     # T3 — SCTP / TCP E2 listener for FlexRIC bridge (Roadmap §3 T3)
@@ -101,6 +104,9 @@ set(header_files
     model/oran-ntn-f1-interface.h
     model/oran-ntn-ofh-interface.h
     helper/oran-ntn-split-gnb-helper.h
+    # 4.1.12 — Two-stage NN precoder + codebook beamformer (Roadmap §4.1.12)
+    model/oran-ntn-mmimo-codebook.h
+    model/oran-ntn-mmimo-precoder-xapp.h
     # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
     asn1/asn1-per-codec.h
     # T3 — SCTP / TCP E2 listener for FlexRIC bridge (Roadmap §3 T3)

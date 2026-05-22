@@ -23,9 +23,17 @@
 #include "ns3/oran-ntn-ntn-scheduler.h"
 #include "ns3/oran-ntn-rc-style3.h"
 #include "ns3/oran-ntn-f1-interface.h"
+#include "ns3/oran-ntn-mmimo-codebook.h"
+#include "ns3/oran-ntn-mmimo-precoder-xapp.h"
 #include "ns3/oran-ntn-ofh-interface.h"
 #include "ns3/oran-ntn-split-gnb-helper.h"
 #include "ns3/oran-ntn-split-gnb.h"
+#include "ns3/airan-inference-client.h"
+#include "ns3/airan-inference-server.h"
+#include "ns3/airan-messages.h"
+#include "ns3/airan-mock-runtime.h"
+#include "ns3/inference-channel-inproc.h"
+#include "ns3/triton-model-config.h"
 #include "ns3/asn1-per-codec.h"
 #include "ns3/e2-listener.h"
 #include "ns3/e2-transport.h"
@@ -3858,6 +3866,428 @@ class OranNtnSplitGnbSimulatorWorkloadTest : public TestCase
 };
 
 // ============================================================================
+//  4.1.12 — Two-stage NN precoder + codebook beamformer (Roadmap §4.1.12)
+// ============================================================================
+
+namespace
+{
+
+ns3::oranntn::airan::TritonModelConfig
+MakePrecoderConfig()
+{
+    const char* pbtxt = R"PBTXT(
+name: "precoder_csi_to_weights"
+platform: "onnxruntime_onnx"
+max_batch_size: 32
+parameters {
+  key: "INFERENCE_BUDGET_US"
+  value: { string_value: "1000" }
+}
+parameters {
+  key: "TOOLKIT_OUTPUT_FIELD"
+  value: { string_value: "precoder" }
+}
+)PBTXT";
+    auto cfg = ns3::oranntn::airan::TritonModelConfigParser::Parse(pbtxt);
+    return *cfg;
+}
+
+ns3::oranntn::airan::CsiTensor
+MakeMmimoCsi(uint32_t num_tx, uint64_t seed)
+{
+    ns3::oranntn::airan::CsiTensor t;
+    t.num_tx = num_tx;
+    t.num_rx = 2;
+    t.num_subcarriers = 4;
+    t.doppler_hz = 25.0;
+    t.values.assign(2 * num_tx * t.num_rx * t.num_subcarriers, 0.0f);
+    for (size_t k = 0; k < t.values.size(); ++k)
+    {
+        t.values[k] = static_cast<float>(0.001 * (k + seed));
+    }
+    return t;
+}
+
+} // namespace
+
+class OranNtnMmimoCodebookDftTest : public TestCase
+{
+  public:
+    OranNtnMmimoCodebookDftTest()
+        : TestCase("Codebook: DFT codebook generation and lookup (4.1.12)")
+    {
+    }
+
+    void DoRun() override
+    {
+        auto cb = CreateObject<OranNtnMmimoCodebook>();
+        cb->PopulateDftAzimuthSweep(/*num_tx=*/8, /*num_entries=*/16);
+        NS_TEST_ASSERT_MSG_EQ(cb->NumTx(), 8u, "tx count");
+        NS_TEST_ASSERT_MSG_EQ(cb->Size(), 16u, "entry count");
+
+        // Each entry has unit norm (1/√num_tx · 8 elements → norm 1).
+        for (uint32_t k = 0; k < cb->Size(); ++k)
+        {
+            const auto& e = cb->GetEntry(k);
+            NS_TEST_ASSERT_MSG_EQ(e.size(), 16u, "16 floats per entry");
+            double norm_sq = 0.0;
+            for (uint32_t n = 0; n < 8; ++n)
+            {
+                norm_sq += e[2 * n] * e[2 * n] +
+                            e[2 * n + 1] * e[2 * n + 1];
+            }
+            NS_TEST_EXPECT_MSG_EQ_TOL(norm_sq,
+                                        1.0,
+                                        1e-5,
+                                        "unit norm");
+        }
+
+        // Self-lookup: every entry should be its own best match.
+        for (uint32_t k = 0; k < cb->Size(); ++k)
+        {
+            const uint32_t best = cb->BestMatch(cb->GetEntry(k));
+            NS_TEST_EXPECT_MSG_EQ(best, k, "self best-match");
+        }
+
+        // Score ordering: scores[k] for entry k should be the max
+        // across the row.
+        const auto scores = cb->ScoreAll(cb->GetEntry(3));
+        NS_TEST_ASSERT_MSG_EQ(scores.size(), 16u, "16 scores");
+        float max_score = scores[3];
+        for (uint32_t k = 0; k < scores.size(); ++k)
+        {
+            if (k == 3)
+            {
+                continue;
+            }
+            const bool less_or_eq = scores[k] <= max_score;
+            NS_TEST_EXPECT_MSG_EQ(less_or_eq,
+                                   true,
+                                   "self has max score");
+        }
+    }
+};
+
+class OranNtnMmimoComposeTest : public TestCase
+{
+  public:
+    OranNtnMmimoComposeTest()
+        : TestCase("Two-stage compose math: W = W_RF · W_BB (4.1.12)")
+    {
+    }
+
+    void DoRun() override
+    {
+        auto cb = CreateObject<OranNtnMmimoCodebook>();
+        cb->PopulateDftAzimuthSweep(/*num_tx=*/4, /*num_entries=*/8);
+
+        // Build an NN output whose column 0 equals codebook entry 2
+        // and column 1 equals codebook entry 5. Two-stage compose
+        // should pick those indices.
+        const auto& e2 = cb->GetEntry(2);
+        const auto& e5 = cb->GetEntry(5);
+        std::vector<float> nn(2 * 4 * 2, 0.0f);
+        for (uint32_t tx = 0; tx < 4; ++tx)
+        {
+            // layer 0
+            nn[2 * (tx * 2 + 0)] = e2[2 * tx];
+            nn[2 * (tx * 2 + 0) + 1] = e2[2 * tx + 1];
+            // layer 1
+            nn[2 * (tx * 2 + 1)] = e5[2 * tx];
+            nn[2 * (tx * 2 + 1) + 1] = e5[2 * tx + 1];
+        }
+
+        const auto res = OranNtnMmimoTwoStageComposer::Compose(
+            nn, /*num_tx=*/4, /*num_layers=*/2, *cb);
+        NS_TEST_ASSERT_MSG_EQ(res.codebook_indices.size(),
+                               2u,
+                               "two codebook indices");
+        NS_TEST_EXPECT_MSG_EQ(res.codebook_indices[0], 2u, "layer 0");
+        NS_TEST_EXPECT_MSG_EQ(res.codebook_indices[1], 5u, "layer 1");
+        NS_TEST_EXPECT_MSG_EQ(res.num_tx, 4u, "num_tx");
+        NS_TEST_EXPECT_MSG_EQ(res.num_layers, 2u, "num_layers");
+        NS_TEST_EXPECT_MSG_EQ(res.final_weights.size(),
+                               16u,
+                               "final weights size");
+        NS_TEST_EXPECT_MSG_EQ(res.bb_weights.size(),
+                               8u,
+                               "bb weights size");
+
+        // Because each layer's W_NN column equals a codeword (which
+        // has unit norm), W_BB ought to be a diagonal-like matrix:
+        // off-diagonal cross terms are bounded by codeword cross-
+        // correlation < 1 in magnitude.
+        // Diagonal [0,0] = ⟨e2, e2⟩ = 1.
+        const double diag0_re = res.bb_weights[2 * (0 * 2 + 0)];
+        const double diag0_im = res.bb_weights[2 * (0 * 2 + 0) + 1];
+        const double diag0_mag2 =
+            diag0_re * diag0_re + diag0_im * diag0_im;
+        NS_TEST_EXPECT_MSG_EQ_TOL(diag0_mag2,
+                                    1.0,
+                                    1e-4,
+                                    "BB diagonal[0,0] ~ 1");
+        const double diag1_re = res.bb_weights[2 * (1 * 2 + 1)];
+        const double diag1_im = res.bb_weights[2 * (1 * 2 + 1) + 1];
+        const double diag1_mag2 =
+            diag1_re * diag1_re + diag1_im * diag1_im;
+        NS_TEST_EXPECT_MSG_EQ_TOL(diag1_mag2,
+                                    1.0,
+                                    1e-4,
+                                    "BB diagonal[1,1] ~ 1");
+    }
+};
+
+class OranNtnMmimoXappRoundTripTest : public TestCase
+{
+  public:
+    OranNtnMmimoXappRoundTripTest()
+        : TestCase("xApp: CSI → NN → codebook → ControlAction (4.1.12)")
+    {
+    }
+
+    void DoRun() override
+    {
+        // Wire the T7 inference path
+        auto server = std::make_shared<oranntn::airan::AiranInferenceServer>();
+        server->RegisterModel(
+            MakePrecoderConfig(),
+            oranntn::airan::AiranMockRuntime::MakePrecoderHandler(
+                /*num_layers=*/2,
+                /*base_latency_ms=*/0.4));
+
+        auto pair = oranntn::airan::InProcInferenceChannel::CreatePair();
+        auto client = std::make_shared<oranntn::airan::AiranInferenceClient>();
+        client->Attach(std::move(pair.first));
+        server->AddChannel(std::move(pair.second));
+
+        // Build the §4.1.9 split-gNB so we have a real RU entity.
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/41, nodes);
+
+        // Codebook + xApp
+        auto codebook = CreateObject<OranNtnMmimoCodebook>();
+        codebook->PopulateDftAzimuthSweep(/*num_tx=*/8,
+                                            /*num_entries=*/16);
+
+        auto xapp = CreateObject<OranNtnMmimoPrecoderXapp>();
+        xapp->Configure(/*xapp_id=*/9001,
+                         /*num_tx=*/8,
+                         /*num_layers=*/2);
+        xapp->AttachCodebook(codebook);
+        xapp->AttachInferenceClient(client, "precoder_csi_to_weights");
+        xapp->AttachRu(g.ru);
+
+        // Observer captures the dispatched action.
+        E2RcAction last_action;
+        TwoStagePrecoderResult last_result;
+        bool observed = false;
+        xapp->SetActionObserver(
+            [&](const E2RcAction& a,
+                 const TwoStagePrecoderResult& r) {
+                last_action = a;
+                last_result = r;
+                observed = true;
+            });
+
+        const auto csi = MakeMmimoCsi(/*num_tx=*/8, /*seed=*/77);
+        NS_TEST_ASSERT_MSG_EQ(
+            xapp->OnCsiReport(/*ue_id=*/1234,
+                                 /*nr_cgi=*/55,
+                                 csi),
+            true,
+            "submit ok");
+
+        // Drain both sides — no Simulator::Run() needed for in-proc.
+        server->Poll(5);
+        client->Poll(5);
+
+        NS_TEST_EXPECT_MSG_EQ(xapp->CsiInputsHandled(),
+                               1u,
+                               "1 csi in");
+        NS_TEST_EXPECT_MSG_EQ(xapp->ResponsesProcessed(),
+                               1u,
+                               "1 response");
+        NS_TEST_EXPECT_MSG_EQ(xapp->ControlActionsEmitted(),
+                               1u,
+                               "1 control action");
+        NS_TEST_EXPECT_MSG_EQ(xapp->InferenceErrors(), 0u, "no errors");
+        NS_TEST_EXPECT_MSG_EQ(observed, true, "observer fired");
+        NS_TEST_EXPECT_MSG_EQ(g.ru->ControlsAccepted(),
+                               1u,
+                               "RU accepted action");
+
+        const bool action_kind_ok =
+            last_action.actionType ==
+            E2RcActionType::BEAM_HOP_SCHEDULE;
+        NS_TEST_EXPECT_MSG_EQ(action_kind_ok,
+                               true,
+                               "BEAM_HOP_SCHEDULE issued");
+        NS_TEST_EXPECT_MSG_EQ(last_result.num_tx, 8u, "num_tx echoed");
+        NS_TEST_EXPECT_MSG_EQ(last_result.num_layers,
+                               2u,
+                               "num_layers echoed");
+        NS_TEST_EXPECT_MSG_EQ(last_result.codebook_indices.size(),
+                               2u,
+                               "2 codebook picks");
+        NS_TEST_EXPECT_MSG_EQ(last_result.final_weights.size(),
+                               static_cast<size_t>(2 * 8 * 2),
+                               "final weights sized");
+
+        const bool ues_match =
+            (last_action.targetUeId & 0xFFFFFFFFu) == 1234u;
+        NS_TEST_EXPECT_MSG_EQ(ues_match,
+                               true,
+                               "ue id forwarded");
+    }
+};
+
+class OranNtnMmimoXappSimulatorTimeTest : public TestCase
+{
+  public:
+    OranNtnMmimoXappSimulatorTimeTest()
+        : TestCase("xApp: 5 s scenario with 25 CSI reports (4.1.12)")
+    {
+    }
+
+    void DoRun() override
+    {
+        auto server = std::make_shared<oranntn::airan::AiranInferenceServer>();
+        server->RegisterModel(
+            MakePrecoderConfig(),
+            oranntn::airan::AiranMockRuntime::MakePrecoderHandler(
+                /*num_layers=*/4,
+                /*base_latency_ms=*/0.5));
+
+        auto pair = oranntn::airan::InProcInferenceChannel::CreatePair();
+        auto client = std::make_shared<oranntn::airan::AiranInferenceClient>();
+        client->Attach(std::move(pair.first));
+        server->AddChannel(std::move(pair.second));
+
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/43, nodes);
+
+        auto codebook = CreateObject<OranNtnMmimoCodebook>();
+        codebook->PopulateDftAzimuthSweep(/*num_tx=*/16,
+                                            /*num_entries=*/64);
+
+        auto xapp = CreateObject<OranNtnMmimoPrecoderXapp>();
+        xapp->Configure(/*xapp_id=*/9002,
+                         /*num_tx=*/16,
+                         /*num_layers=*/4);
+        xapp->AttachCodebook(codebook);
+        xapp->AttachInferenceClient(client, "precoder_csi_to_weights");
+        xapp->AttachRu(g.ru);
+
+        // 25 CSI reports between t=0.2 s and t=5.0 s.
+        const uint32_t kNum = 25;
+        for (uint32_t i = 0; i < kNum; ++i)
+        {
+            const double when_s = 0.2 + 0.19 * i;
+            Simulator::Schedule(
+                Seconds(when_s),
+                [xapp, i, when_s] {
+                    const auto csi = MakeMmimoCsi(16, 100 + i);
+                    (void)xapp->OnCsiReport(/*ue_id=*/i + 1,
+                                              /*nr_cgi=*/1,
+                                              csi);
+                    (void)when_s;
+                });
+        }
+        // Pump server + client every 50 ms.
+        for (uint32_t t_ms = 50; t_ms <= 6000; t_ms += 50)
+        {
+            Simulator::Schedule(
+                MilliSeconds(t_ms),
+                [server, client] {
+                    server->Poll(0, 32);
+                    client->Poll(0, 32);
+                });
+        }
+
+        Simulator::Stop(Seconds(6.0));
+        Simulator::Run();
+        // Final drain
+        server->Poll(5, 32);
+        client->Poll(5, 32);
+        Simulator::Destroy();
+
+        NS_TEST_EXPECT_MSG_EQ(xapp->CsiInputsHandled(),
+                               static_cast<uint64_t>(kNum),
+                               "all csi handled");
+        NS_TEST_EXPECT_MSG_EQ(xapp->ResponsesProcessed(),
+                               static_cast<uint64_t>(kNum),
+                               "all responses");
+        NS_TEST_EXPECT_MSG_EQ(xapp->ControlActionsEmitted(),
+                               static_cast<uint64_t>(kNum),
+                               "all actions");
+        NS_TEST_EXPECT_MSG_EQ(xapp->InferenceErrors(), 0u, "no errors");
+        NS_TEST_EXPECT_MSG_EQ(g.ru->ControlsAccepted(),
+                               static_cast<uint64_t>(kNum),
+                               "RU accepted all");
+    }
+};
+
+class OranNtnMmimoXappFailureModesTest : public TestCase
+{
+  public:
+    OranNtnMmimoXappFailureModesTest()
+        : TestCase("xApp: failure modes (no client, wrong tx count) (4.1.12)")
+    {
+    }
+
+    void DoRun() override
+    {
+        NodeContainer nodes;
+        const auto g = OranNtnSplitGnbHelper::Build(/*gnb_id=*/47, nodes);
+
+        auto codebook = CreateObject<OranNtnMmimoCodebook>();
+        codebook->PopulateDftAzimuthSweep(/*num_tx=*/4,
+                                            /*num_entries=*/8);
+        auto xapp = CreateObject<OranNtnMmimoPrecoderXapp>();
+        xapp->Configure(/*xapp_id=*/1,
+                         /*num_tx=*/4,
+                         /*num_layers=*/2);
+        xapp->AttachCodebook(codebook);
+        xapp->AttachRu(g.ru);
+
+        // No inference client attached → rejection.
+        const auto csi = MakeMmimoCsi(4, 1);
+        NS_TEST_EXPECT_MSG_EQ(
+            xapp->OnCsiReport(1, 1, csi),
+            false,
+            "no client → rejected");
+        NS_TEST_EXPECT_MSG_EQ(xapp->InferenceErrors(),
+                               1u,
+                               "1 error");
+
+        // Now attach a sane client but set the wrong codebook tx
+        // count → rejection.
+        auto server = std::make_shared<oranntn::airan::AiranInferenceServer>();
+        server->RegisterModel(
+            MakePrecoderConfig(),
+            oranntn::airan::AiranMockRuntime::MakePrecoderHandler());
+        auto pair = oranntn::airan::InProcInferenceChannel::CreatePair();
+        auto client = std::make_shared<oranntn::airan::AiranInferenceClient>();
+        client->Attach(std::move(pair.first));
+        server->AddChannel(std::move(pair.second));
+        xapp->AttachInferenceClient(client, "precoder_csi_to_weights");
+
+        // Detach the codebook and re-attach a wrong-sized one.
+        auto bad_cb = CreateObject<OranNtnMmimoCodebook>();
+        bad_cb->PopulateDftAzimuthSweep(/*num_tx=*/8,
+                                          /*num_entries=*/16);
+        xapp->AttachCodebook(bad_cb);
+        NS_TEST_EXPECT_MSG_EQ(
+            xapp->OnCsiReport(2, 1, csi),
+            false,
+            "tx mismatch → rejected");
+        NS_TEST_EXPECT_MSG_EQ(xapp->InferenceErrors(),
+                               2u,
+                               "2 errors");
+    }
+};
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
 
@@ -3976,6 +4406,17 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnSplitGnbEndToEndTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnSplitGnbSimulatorWorkloadTest,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.12 — Two-stage mMIMO precoder xApp.
+        AddTestCase(new OranNtnMmimoCodebookDftTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnMmimoComposeTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnMmimoXappRoundTripTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnMmimoXappSimulatorTimeTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnMmimoXappFailureModesTest,
                     TestCase::Duration::QUICK);
     }
 };
