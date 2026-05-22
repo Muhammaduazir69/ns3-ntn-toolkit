@@ -128,5 +128,30 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
     return out;
 }
 
+void
+WriteCanonicalKpmCsv(const std::vector<E2KpmReport>& reports,
+                     const std::map<std::string, std::string>& baseLabels,
+                     std::ostream& os)
+{
+    os << "timestamp,gnb_id,is_ntn,ue_id,metric_id,value,present,"
+          "FIVE_QI,S-NSSAI,PLMN\n";
+    for (const auto& r : reports)
+    {
+        const auto measurements = BuildCanonicalKpmMeasurements(r, baseLabels);
+        for (const auto& m : measurements)
+        {
+            const auto presentIt = m.labels.find(label::kPresent);
+            const bool present =
+                (presentIt == m.labels.end()) || presentIt->second != "false";
+            os << r.timestamp << "," << r.gnbId << ","
+               << (r.isNtn ? 1 : 0) << "," << r.ueId << "," << m.metricId
+               << "," << m.value << "," << (present ? 1 : 0) << ","
+               << m.labels.at(label::kFiveQi) << ","
+               << m.labels.at(label::kSnssai) << ","
+               << m.labels.at(label::kPlmn) << "\n";
+        }
+    }
+}
+
 } // namespace oranntn
 } // namespace ns3

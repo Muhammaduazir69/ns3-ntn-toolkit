@@ -8,6 +8,7 @@
 #include "oran-ntn-types.h"
 
 #include <map>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -85,6 +86,19 @@ struct KpmMeasurement
 std::vector<KpmMeasurement>
 BuildCanonicalKpmMeasurements(const E2KpmReport& report,
                               const std::map<std::string, std::string>& baseLabels);
+
+/// Emit the WG3-canonical long-format KPM CSV for a vector of reports
+/// (Roadmap §4.1.2). Header columns:
+///   timestamp, gnb_id, is_ntn, ue_id, metric_id, value, present,
+///   FIVE_QI, S-NSSAI, PLMN
+///
+/// Each report produces 10 rows (one per canonical metric ID). Rows with
+/// not-yet-plumbed source fields carry `present = 0`.
+/// `baseLabels` must contain entries for kFiveQi, kSnssai, kPlmn.
+void
+WriteCanonicalKpmCsv(const std::vector<E2KpmReport>& reports,
+                     const std::map<std::string, std::string>& baseLabels,
+                     std::ostream& os);
 
 } // namespace oranntn
 } // namespace ns3

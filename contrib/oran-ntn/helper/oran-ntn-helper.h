@@ -221,6 +221,20 @@ class OranNtnHelper : public Object
      */
     void WriteKpmDataset(const std::string& filename) const;
 
+    /**
+     * \brief Write the WG3-canonical 10-metric KPM dataset in long format
+     *        (Roadmap §4.1.2).
+     *
+     * One row per (E2KpmReport, canonical_metric_id) pair. Columns:
+     *   timestamp, gnb_id, is_ntn, ue_id, metric_id, value, present,
+     *   FIVE_QI, S-NSSAI, PLMN
+     *
+     * FlexRIC-compatible consumers can read this CSV directly; the
+     * existing `WriteKpmDataset` continues to emit the wide-format CSV
+     * for back-compat with existing notebooks.
+     */
+    void WriteKpmDatasetCanonical(const std::string& filename) const;
+
   protected:
     void DoDispose() override;
 

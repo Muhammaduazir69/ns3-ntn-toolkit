@@ -35,6 +35,12 @@
 #include "ns3/oran-ntn-xapp-tn-ntn-steering.h"
 #include "ns3/test.h"
 
+#include <map>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
+
 using namespace ns3;
 
 // ============================================================================
@@ -1466,6 +1472,120 @@ class OranNtnFlexricKpmFormat1TestCase : public TestCase
 };
 
 // ============================================================================
+//  4.1.2 (Roadmap §4.1.2): WG3-canonical KPM CSV emitted end-to-end
+// ============================================================================
+
+class OranNtnKpmCanonicalCsvTestCase : public TestCase
+{
+  public:
+    OranNtnKpmCanonicalCsvTestCase()
+        : TestCase("Canonical kpm_canonical.csv is long-format with 10 rows per E2KpmReport")
+    {
+    }
+
+  private:
+    static E2KpmReport MakeReport(uint32_t gnbId,
+                                  uint32_t ueId,
+                                  bool isNtn,
+                                  double sinr,
+                                  double thpMbps,
+                                  double prbUtil)
+    {
+        E2KpmReport r{};
+        r.timestamp = 0.5;
+        r.gnbId = gnbId;
+        r.isNtn = isNtn;
+        r.ueId = ueId;
+        r.sinr_dB = sinr;
+        r.throughput_Mbps = thpMbps;
+        r.prbUtilization = prbUtil;
+        return r;
+    }
+
+    void DoRun() override
+    {
+        std::vector<E2KpmReport> reports = {
+            MakeReport(1, 100, true, 12.5, 50.0, 0.5),
+            MakeReport(2, 100, true, 9.0, 30.0, 0.7),
+            MakeReport(3, 101, false, 15.5, 70.0, 0.3),
+        };
+        const std::map<std::string, std::string> baseLabels = {
+            {oranntn::label::kFiveQi, "9"},
+            {oranntn::label::kSnssai, "1-000001"},
+            {oranntn::label::kPlmn, "00101"},
+        };
+
+        std::ostringstream os;
+        oranntn::WriteCanonicalKpmCsv(reports, baseLabels, os);
+        std::istringstream is(os.str());
+
+        std::string header;
+        std::getline(is, header);
+        NS_TEST_EXPECT_MSG_EQ(header,
+                              "timestamp,gnb_id,is_ntn,ue_id,metric_id,"
+                              "value,present,FIVE_QI,S-NSSAI,PLMN",
+                              "long-format header");
+
+        const std::set<std::string> canonical = {
+            oranntn::kpm::kDrbUeThpDl,      oranntn::kpm::kDrbUeThpUl,
+            oranntn::kpm::kDrbPdcpVolumeDl, oranntn::kpm::kDrbPdcpVolumeUl,
+            oranntn::kpm::kRruPrbAvailDl,   oranntn::kpm::kRruPrbAvailUl,
+            oranntn::kpm::kRruPrbUsedDl,    oranntn::kpm::kRruPrbUsedUl,
+            oranntn::kpm::kCarrAvgSinr,     oranntn::kpm::kL1mRsSinrMean,
+        };
+        size_t rowCount = 0;
+        size_t notPresentCount = 0;
+        std::set<std::string> seenIds;
+        std::map<std::string, std::pair<uint32_t, uint32_t>> idToGnbUe;
+        std::string line;
+        while (std::getline(is, line))
+        {
+            ++rowCount;
+            std::vector<std::string> f;
+            std::string cur;
+            for (char c : line)
+            {
+                if (c == ',')
+                {
+                    f.push_back(cur);
+                    cur.clear();
+                }
+                else
+                {
+                    cur.push_back(c);
+                }
+            }
+            f.push_back(cur);
+            NS_TEST_ASSERT_MSG_EQ(f.size(), 10u, "10 columns per row");
+            const std::string& metricId = f[4];
+            NS_TEST_EXPECT_MSG_EQ(canonical.count(metricId),
+                                  1u,
+                                  std::string("metric_id '") + metricId +
+                                      "' is canonical");
+            seenIds.insert(metricId);
+            NS_TEST_EXPECT_MSG_EQ(f[7], "9", "FIVE_QI column");
+            NS_TEST_EXPECT_MSG_EQ(f[8], "1-000001", "S-NSSAI column");
+            NS_TEST_EXPECT_MSG_EQ(f[9], "00101", "PLMN column");
+            if (f[6] == "0")
+            {
+                ++notPresentCount;
+            }
+        }
+        // 3 reports x 10 canonical metrics = 30 rows.
+        NS_TEST_EXPECT_MSG_EQ(rowCount, 30u, "row count");
+        NS_TEST_EXPECT_MSG_EQ(seenIds.size(),
+                              10u,
+                              "all 10 canonical IDs emitted at least once");
+        // Three UL-side IDs are not-present per report -> 3 * 3 = 9 rows
+        // should carry present=0 (the v2.1 baseline; will drop to 0 once
+        // 4.1.9 CU/DU/RU split plumbs UL counters).
+        NS_TEST_EXPECT_MSG_EQ(notPresentCount,
+                              9u,
+                              "3 UL metrics x 3 reports = 9 not-present rows");
+    }
+};
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
 
@@ -1510,6 +1630,9 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnFlexricE2apShapesTestCase,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnFlexricKpmFormat1TestCase,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.2 — canonical CSV end-to-end.
+        AddTestCase(new OranNtnKpmCanonicalCsvTestCase,
                     TestCase::Duration::QUICK);
     }
 };

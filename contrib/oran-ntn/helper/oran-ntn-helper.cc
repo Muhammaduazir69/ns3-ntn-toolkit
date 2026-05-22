@@ -14,6 +14,7 @@
 
 #include "ns3/oran-ntn-a1-interface.h"
 #include "ns3/oran-ntn-e2-interface.h"
+#include "ns3/oran-ntn-kpm-canonical-ids.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-space-ric.h"
 #include "ns3/oran-ntn-xapp-beam-hop.h"
@@ -483,8 +484,9 @@ OranNtnHelper::WriteAllMetrics(Ptr<OranNtnNearRtRic> ric) const
     // Write action log
     WriteActionLog(m_outputDir + "/action_log.csv");
 
-    // Write KPM dataset
+    // Write KPM dataset (wide legacy format + WG3-canonical long format).
     WriteKpmDataset(m_outputDir + "/kpm_dataset.csv");
+    WriteKpmDatasetCanonical(m_outputDir + "/kpm_canonical.csv");
 
     // Write per-xApp metrics including wall-clock decision latency percentiles.
     // Latency samples are collected by each xApp's DecisionCycle via
@@ -603,6 +605,24 @@ OranNtnHelper::WriteKpmDataset(const std::string& filename) const
 
     NS_LOG_INFO("OranNtnHelper: Wrote " << m_kpmDataset.size()
                 << " KPM records to " << filename);
+}
+
+void
+OranNtnHelper::WriteKpmDatasetCanonical(const std::string& filename) const
+{
+    // Stable label set for the v2.1 baseline scenario: 5QI 9 (eMBB
+    // default), single-slice S-NSSAI, PLMN 00101. Per-UE label routing is
+    // a 4.1.4 / DataRepository concern (Q3 sprint follow-up).
+    const std::map<std::string, std::string> baseLabels = {
+        {oranntn::label::kFiveQi, "9"},
+        {oranntn::label::kSnssai, "1-000001"},
+        {oranntn::label::kPlmn, "00101"},
+    };
+
+    std::ofstream ofs(filename);
+    oranntn::WriteCanonicalKpmCsv(m_kpmDataset, baseLabels, ofs);
+    NS_LOG_INFO("OranNtnHelper: Wrote " << (m_kpmDataset.size() * 10)
+                << " canonical KPM rows to " << filename);
 }
 
 } // namespace ns3
