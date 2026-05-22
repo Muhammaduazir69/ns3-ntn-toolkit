@@ -7,6 +7,9 @@ set(source_files
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
     model/opensky-adsb-trace.cc
     model/opensky-mobility-model.cc
+    # 4.4.2 — AIS maritime trace importer + mobility model (Roadmap §4.4.2)
+    model/ais-maritime-trace.cc
+    model/ais-mobility-model.cc
     helper/sagin-helper.cc
 )
 
@@ -19,6 +22,9 @@ set(header_files
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
     model/opensky-adsb-trace.h
     model/opensky-mobility-model.h
+    # 4.4.2 — AIS maritime trace importer + mobility model (Roadmap §4.4.2)
+    model/ais-maritime-trace.h
+    model/ais-mobility-model.h
     helper/sagin-helper.h
 )
 

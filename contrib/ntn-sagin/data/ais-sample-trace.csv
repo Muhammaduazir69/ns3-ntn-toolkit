@@ -1,0 +1,12 @@
+# Timestamp,Type of mobile,MMSI,Latitude,Longitude,Navigational status,ROT,SOG,COG,Heading,IMO,Callsign,Name,Ship type,Cargo type,Width,Length,Type of position fixing device,Draught,Destination,ETA,Data source type,A,B,C,D
+07/10/2019 00:00:00,Class A,219015785,55.0000,12.0000,Under way using engine,0.0,12.0,90.0,90,Unknown,OXCD2,CARGO1,Cargo,,,,GPS,7.5,COPENHAGEN,,AIS,,,,
+07/10/2019 00:00:30,Class A,219015785,55.0000,12.0017,Under way using engine,0.0,12.0,90.0,90,Unknown,OXCD2,CARGO1,Cargo,,,,GPS,7.5,COPENHAGEN,,AIS,,,,
+07/10/2019 00:01:00,Class A,219015785,55.0000,12.0034,Under way using engine,0.0,12.0,90.0,90,Unknown,OXCD2,CARGO1,Cargo,,,,GPS,7.5,COPENHAGEN,,AIS,,,,
+07/10/2019 00:01:30,Class A,219015785,55.0000,12.0051,Under way using engine,0.0,12.0,90.0,90,Unknown,OXCD2,CARGO1,Cargo,,,,GPS,7.5,COPENHAGEN,,AIS,,,,
+07/10/2019 00:02:00,Class A,219015785,55.0000,12.0068,Under way using engine,0.0,12.0,90.0,90,Unknown,OXCD2,CARGO1,Cargo,,,,GPS,7.5,COPENHAGEN,,AIS,,,,
+07/10/2019 00:00:00,Class B,257891234,59.9000,10.7500,Under way sailing,0.0,5.0,180.0,180,Unknown,LBKA,PLEASURE1,Pleasure craft,,,,GPS,2.0,OSLO,,AIS,,,,
+07/10/2019 00:01:00,Class B,257891234,59.8990,10.7500,Under way sailing,0.0,5.0,180.0,180,Unknown,LBKA,PLEASURE1,Pleasure craft,,,,GPS,2.0,OSLO,,AIS,,,,
+07/10/2019 00:02:00,Class B,257891234,59.8980,10.7500,Under way sailing,0.0,5.0,180.0,180,Unknown,LBKA,PLEASURE1,Pleasure craft,,,,GPS,2.0,OSLO,,AIS,,,,
+07/10/2019 00:00:00,Base Station,2190001,55.7000,13.1900,Default,0.0,0.0,360.0,511,Unknown,,KARLSKRONA,Not available,,,,GPS,0.0,,,AIS,,,,
+07/10/2019 00:00:00,Class A,538001234,37.9400,23.6500,At anchor,0.0,0.0,180.0,180,9156789,SVAA1,TANKER1,Tanker,Liquid,32,180,GPS,12.0,PIRAEUS,,AIS,,,,
+07/10/2019 00:01:00,Class A,538001234,37.9400,23.6500,At anchor,0.0,0.0,180.0,180,9156789,SVAA1,TANKER1,Tanker,Liquid,32,180,GPS,12.0,PIRAEUS,,AIS,,,,

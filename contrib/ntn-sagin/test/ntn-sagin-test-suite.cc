@@ -9,6 +9,8 @@
 #include "ns3/double.h"
 #include "ns3/haps-mobility-model.h"
 #include "ns3/multi-layer-router.h"
+#include "ns3/ais-maritime-trace.h"
+#include "ns3/ais-mobility-model.h"
 #include "ns3/opensky-adsb-trace.h"
 #include "ns3/opensky-mobility-model.h"
 #include "ns3/simulator.h"
@@ -480,6 +482,228 @@ class OpenSkySimulatorTimeReplayTest : public TestCase
     }
 };
 
+// ============================================================================
+// Roadmap §4.4.2: AIS maritime trace importer + replay mobility model
+// ============================================================================
+
+class AisImporterParseTest : public TestCase
+{
+  public:
+    AisImporterParseTest()
+        : TestCase("AIS Danish importer parses CSV header + rows for multiple MMSIs")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        sagin::AisDanishImporter imp;
+        const std::string candidates[] = {
+            "contrib/ntn-sagin/data/ais-sample-trace.csv",
+            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/ntn-sagin/data/"
+            "ais-sample-trace.csv",
+        };
+        std::map<uint32_t, sagin::AisMaritimeTrace> traces;
+        for (const auto& p : candidates)
+        {
+            traces = imp.LoadCsv(p);
+            if (!traces.empty())
+                break;
+        }
+        NS_TEST_ASSERT_MSG_GT(traces.size(), 0u,
+                              "bundled AIS sample not loaded");
+        // 4 distinct MMSIs in the bundled sample.
+        NS_TEST_ASSERT_MSG_EQ(traces.size(), 4u, "4 vessels expected");
+        NS_TEST_ASSERT_MSG_EQ(traces.count(219015785u), 1u, "DLK cargo");
+        NS_TEST_ASSERT_MSG_EQ(traces.count(257891234u), 1u, "OSL pleasure");
+        NS_TEST_ASSERT_MSG_EQ(traces.count(538001234u), 1u, "PIRAEUS tanker");
+
+        const auto& cargo = traces.at(219015785u);
+        NS_TEST_ASSERT_MSG_EQ(cargo.samples.size(), 5u, "5 cargo samples");
+        NS_TEST_ASSERT_MSG_EQ(cargo.ship_type, "Cargo", "ship type");
+        // First sample at lat=55, lon=12, SOG=12, COG=90.
+        const auto& s0 = cargo.samples.front();
+        NS_TEST_ASSERT_MSG_EQ_TOL(s0.lat_deg, 55.0, 1e-9, "lat");
+        NS_TEST_ASSERT_MSG_EQ_TOL(s0.lon_deg, 12.0, 1e-9, "lon");
+        NS_TEST_ASSERT_MSG_EQ_TOL(s0.sog_knots, 12.0, 1e-9, "SOG");
+        NS_TEST_ASSERT_MSG_EQ_TOL(s0.cog_deg, 90.0, 1e-9, "COG");
+        // Heading 511 (not available) sentinel preserved on the base station.
+        const auto& base = traces.at(2190001u);
+        NS_TEST_ASSERT_MSG_EQ_TOL(base.samples.front().heading_deg, 511.0, 1e-9,
+                                  "heading=511 sentinel preserved");
+
+        // Last sample of the cargo vessel has moved east.
+        NS_TEST_ASSERT_MSG_GT(cargo.samples.back().lon_deg,
+                              cargo.samples.front().lon_deg,
+                              "cargo moves east during trace");
+    }
+};
+
+class AisImporterMalformedTest : public TestCase
+{
+  public:
+    AisImporterMalformedTest()
+        : TestCase("AIS importer skips malformed rows and counts them")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string path = "/tmp/ais-test-bad.csv";
+        std::ofstream f(path);
+        f << "Timestamp,Type of mobile,MMSI,Latitude,Longitude,Navigational "
+             "status,ROT,SOG,COG,Heading,IMO,Callsign,Name,Ship type,Cargo "
+             "type,Width,Length,Type of position fixing device,Draught,"
+             "Destination,ETA,Data source type,A,B,C,D\n";
+        f << "07/10/2019 00:00:00,Class A,123456789,55.0,12.0,Under way using "
+             "engine,0,10,90,90,,,SHIP,Cargo,,,,GPS,0,,,AIS,,,,\n";
+        f << ",,,bad,row,here\n";
+        f << "07/10/2019 00:00:30,Class A,123456789,55.001,12.0,Under way using "
+             "engine,0,10,90,90,,,SHIP,Cargo,,,,GPS,0,,,AIS,,,,\n";
+        f << "07/10/2019 00:00:30,Class A,0,55.001,12.0,Under way using "
+             "engine,0,10,90,90,,,SHIP,Cargo,,,,GPS,0,,,AIS,,,,\n"; // mmsi=0
+        f << "garbage,Class A,234,not_a_lat,12.0,,,,,,,,,,,,,,,,,,,,,\n";
+        f.close();
+
+        sagin::AisDanishImporter imp;
+        auto traces = imp.LoadCsv(path);
+        NS_TEST_ASSERT_MSG_EQ(traces.size(), 1u,
+                              "only MMSI 123456789 is valid");
+        NS_TEST_ASSERT_MSG_EQ(traces.at(123456789u).samples.size(), 2u,
+                              "2 valid samples");
+        NS_TEST_ASSERT_MSG_GT(imp.LastRowsSkipped(), 0u, "skip counter > 0");
+        std::remove(path.c_str());
+    }
+};
+
+class AisTraceInterpolationTest : public TestCase
+{
+  public:
+    AisTraceInterpolationTest()
+        : TestCase("AIS trace InterpolateAt linearly interpolates lat lon sog cog")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        sagin::AisMaritimeTrace tr;
+        tr.mmsi = 1234;
+        tr.samples.push_back({0.0, 55.0, 12.0, 10.0, 90.0, 90.0,
+                              "Cargo", "TST"});
+        tr.samples.push_back({10.0, 55.001, 12.001, 12.0, 100.0, 100.0,
+                              "Cargo", "TST"});
+
+        auto mid = tr.InterpolateAt(5.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(mid.lat_deg, 55.0005, 1e-9, "lat mid");
+        NS_TEST_ASSERT_MSG_EQ_TOL(mid.lon_deg, 12.0005, 1e-9, "lon mid");
+        NS_TEST_ASSERT_MSG_EQ_TOL(mid.sog_knots, 11.0, 1e-9, "SOG mid");
+        NS_TEST_ASSERT_MSG_EQ_TOL(mid.cog_deg, 95.0, 1e-9, "COG mid");
+
+        // Below range -> first sample.
+        auto before = tr.InterpolateAt(-5.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(before.lat_deg, 55.0, 1e-9, "clamp low");
+        // Above range -> last sample.
+        auto after = tr.InterpolateAt(20.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(after.lat_deg, 55.001, 1e-9, "clamp high");
+    }
+};
+
+namespace
+{
+
+struct AisSimSample
+{
+    double t_s;
+    double east_m;
+    double north_m;
+    double speed_mps;
+};
+
+void
+SampleAisModel(Ptr<sagin::AisMobilityModel> mob,
+                std::vector<AisSimSample>* out)
+{
+    Vector p = mob->GetPosition();
+    Vector v = mob->GetVelocity();
+    const double sp = std::sqrt(v.x * v.x + v.y * v.y);
+    out->push_back({Simulator::Now().GetSeconds(), p.x, p.y, sp});
+}
+
+} // namespace
+
+class AisSimulatorTimeReplayTest : public TestCase
+{
+  public:
+    AisSimulatorTimeReplayTest()
+        : TestCase("Simulator: 120 s AIS replay matches CSV trajectory at hull speed")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        sagin::AisDanishImporter imp;
+        const std::string candidates[] = {
+            "contrib/ntn-sagin/data/ais-sample-trace.csv",
+            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/ntn-sagin/data/"
+            "ais-sample-trace.csv",
+        };
+        std::map<uint32_t, sagin::AisMaritimeTrace> traces;
+        for (const auto& p : candidates)
+        {
+            traces = imp.LoadCsv(p);
+            if (!traces.empty())
+                break;
+        }
+        NS_TEST_ASSERT_MSG_GT(traces.size(), 0u, "sample loaded");
+        const auto& cargo = traces.at(219015785u);
+
+        Ptr<sagin::AisMobilityModel> mob =
+            CreateObject<sagin::AisMobilityModel>();
+        mob->SetTrace(cargo);
+        mob->SetReference(55.0, 12.0);
+        mob->SetTraceTimeOffsetSeconds(cargo.TStart());
+
+        std::vector<AisSimSample> samples;
+        for (int t = 0; t <= 120; t += 10)
+        {
+            Simulator::Schedule(Seconds(t), &SampleAisModel, mob, &samples);
+        }
+        Simulator::Stop(Seconds(121));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), 13u, "13 samples over 120 s");
+
+        // t=0 at reference origin.
+        NS_TEST_ASSERT_MSG_EQ_TOL(samples.front().east_m, 0.0, 1.0, "t=0 east");
+        NS_TEST_ASSERT_MSG_EQ_TOL(samples.front().north_m, 0.0, 1.0, "t=0 north");
+
+        // Hull speed at 12 knots = 6.17 m/s.
+        const double expectedMps = 12.0 * 0.5144;
+        for (const auto& s : samples)
+        {
+            NS_TEST_ASSERT_MSG_EQ_TOL(
+                s.speed_mps,
+                expectedMps,
+                0.5,
+                "speed should be ~12 knots = 6.17 m/s");
+        }
+
+        // Past the last sample (t > 120s of trace) position clamps to
+        // the last sample's east. With the trace ending at t=120s and the
+        // cargo at lon=12.0068 the east displacement is ~430 m.
+        const auto& last = samples.back();
+        NS_TEST_ASSERT_MSG_GT(last.east_m, 100.0,
+                              "vessel travelled > 100 m east");
+        NS_TEST_ASSERT_MSG_LT(std::abs(last.north_m), 5.0,
+                              "vessel kept ~constant latitude");
+
+        Simulator::Destroy();
+    }
+};
+
 class NtnSaginTestSuite : public TestSuite
 {
   public:
@@ -497,6 +721,11 @@ class NtnSaginTestSuite : public TestSuite
         AddTestCase(new OpenSkyImporterMalformedTest, TestCase::Duration::QUICK);
         AddTestCase(new OpenSkyTraceInterpolationTest, TestCase::Duration::QUICK);
         AddTestCase(new OpenSkySimulatorTimeReplayTest, TestCase::Duration::QUICK);
+        // Roadmap §4.4.2 — AIS maritime trace importer + replay mobility.
+        AddTestCase(new AisImporterParseTest, TestCase::Duration::QUICK);
+        AddTestCase(new AisImporterMalformedTest, TestCase::Duration::QUICK);
+        AddTestCase(new AisTraceInterpolationTest, TestCase::Duration::QUICK);
+        AddTestCase(new AisSimulatorTimeReplayTest, TestCase::Duration::QUICK);
     }
 };
 
