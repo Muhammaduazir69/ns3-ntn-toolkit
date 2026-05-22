@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Quality of Experience Target Policy",
+  "description": "O-RAN-SC A1 policy type 20001 — per-slice / per-UE QoE targets.",
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "object",
+      "properties": {
+        "ue_id":   {"type": "string"},
+        "slice_id":{"type": "string"}
+      }
+    },
+    "statement": {
+      "type": "object",
+      "properties": {
+        "qoe_target":      {"type": "number", "minimum": 0, "maximum": 5,
+                            "description": "MOS-style score 0..5"},
+        "max_latency_ms":  {"type": "number", "minimum": 0},
+        "min_throughput_mbps": {"type": "number", "minimum": 0},
+        "min_reliability": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "required": ["qoe_target"]
+    }
+  },
+  "required": ["statement"]
+}

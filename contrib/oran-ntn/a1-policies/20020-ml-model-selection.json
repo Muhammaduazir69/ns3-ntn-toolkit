@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ML Model Selection Policy",
+  "description": "O-RAN-SC A1 policy type 20020 — selection of ML model variants for xApps (e.g. choose DQN vs PPO for HO Predict).",
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "object",
+      "properties": {
+        "xapp_id":  {"type": "string"},
+        "ue_class": {"type": "string"}
+      }
+    },
+    "statement": {
+      "type": "object",
+      "properties": {
+        "model_id":     {"type": "string"},
+        "model_version":{"type": "string"},
+        "model_uri":    {"type": "string", "format": "uri"},
+        "inference_backend": {"type": "string", "enum": ["libtorch", "triton",
+                                                          "rule_based", "msg_interface"]}
+      },
+      "required": ["model_id"]
+    }
+  },
+  "required": ["statement"]
+}

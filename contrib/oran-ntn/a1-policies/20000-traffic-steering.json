@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Traffic Steering Preference Policy",
+  "description": "O-RAN-SC A1 policy type 20000 — preferences for traffic-steering xApps (cell preference list, RAT preference, slice-aware steering weights).",
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "object",
+      "description": "Scope of the policy (UE, slice, plmn, all).",
+      "properties": {
+        "ue_id":   {"type": "string"},
+        "slice_id":{"type": "string"},
+        "plmn_id": {"type": "string"}
+      }
+    },
+    "statement": {
+      "type": "object",
+      "properties": {
+        "preference":        {"type": "string", "enum": ["SHALL", "PREFER", "AVOID", "FORBID"]},
+        "primary_cell_ids":  {"type": "array", "items": {"type": "string"}},
+        "secondary_cell_ids":{"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["preference", "primary_cell_ids"]
+    }
+  },
+  "required": ["statement"]
+}

@@ -13,6 +13,8 @@ set(source_files
     model/oran-ntn-rc-style3.cc
     # 4.1.4 — NIST-pattern SQLite data repository (Roadmap §4.1.4)
     model/oran-ntn-data-repository.cc
+    # 4.1.11 — OSC-aligned A1 policy schema registry (Roadmap §4.1.11)
+    model/oran-ntn-a1-policy-schema.cc
     # Original xApps
     model/oran-ntn-xapp-ho-predict.cc
     model/oran-ntn-xapp-beam-hop.cc
@@ -66,6 +68,8 @@ set(header_files
     model/oran-ntn-rc-style3.h
     # 4.1.4 — NIST-pattern SQLite data repository (Roadmap §4.1.4)
     model/oran-ntn-data-repository.h
+    # 4.1.11 — OSC-aligned A1 policy schema registry (Roadmap §4.1.11)
+    model/oran-ntn-a1-policy-schema.h
     # Original xApps
     model/oran-ntn-xapp-ho-predict.h
     model/oran-ntn-xapp-beam-hop.h

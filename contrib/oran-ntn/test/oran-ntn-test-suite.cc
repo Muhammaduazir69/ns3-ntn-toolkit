@@ -9,6 +9,7 @@
 
 #include "ns3/core-module.h"
 #include "ns3/oran-ntn-a1-interface.h"
+#include "ns3/oran-ntn-a1-policy-schema.h"
 #include "ns3/oran-ntn-channel-model.h"
 #include "ns3/oran-ntn-conflict-manager.h"
 #include "ns3/oran-ntn-dual-connectivity.h"
@@ -1742,6 +1743,107 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
 };
 
 // ============================================================================
+//  4.1.11 (Roadmap §4.1.11): OSC-aligned A1 policy schema registry
+// ============================================================================
+
+class OranNtnA1PolicyRegistryTestCase : public TestCase
+{
+  public:
+    OranNtnA1PolicyRegistryTestCase()
+        : TestCase("A1 policy registry exposes OSC type IDs and toolkit "
+                   "extensions in ascending order")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::a1;
+
+        const auto& reg = Registry();
+        NS_TEST_ASSERT_MSG_EQ(reg.size(),
+                              5u,
+                              "registry has 5 entries (4 OSC + 1 NTN ext)");
+
+        // Verbatim OSC IDs.
+        NS_TEST_EXPECT_MSG_EQ(static_cast<uint32_t>(reg[0].type_id),
+                              20000u,
+                              "OSC traffic steering");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<uint32_t>(reg[1].type_id),
+                              20001u,
+                              "OSC QoE");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<uint32_t>(reg[2].type_id),
+                              20008u,
+                              "OSC handover control");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<uint32_t>(reg[3].type_id),
+                              20020u,
+                              "OSC ML model selection");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<uint32_t>(reg[4].type_id),
+                              20050u,
+                              "NTN beam priority (toolkit extension)");
+
+        // Ascending order.
+        for (size_t i = 1; i < reg.size(); ++i)
+        {
+            const bool ascending =
+                static_cast<uint32_t>(reg[i - 1].type_id) <
+                static_cast<uint32_t>(reg[i].type_id);
+            NS_TEST_EXPECT_MSG_EQ(ascending,
+                                  true,
+                                  std::string("ascending order at index ") +
+                                      std::to_string(i));
+        }
+
+        // OSC-vs-extension flag.
+        NS_TEST_EXPECT_MSG_EQ(reg[2].is_osc_standard,
+                              true,
+                              "20008 marked OSC standard");
+        NS_TEST_EXPECT_MSG_EQ(reg[4].is_osc_standard,
+                              false,
+                              "20050 marked toolkit extension");
+
+        // Lookup() works for present and absent IDs.
+        const auto* ho = Lookup(PolicyTypeId::OscHandoverControl);
+        NS_TEST_ASSERT_MSG_NE(ho, nullptr, "20008 looked up");
+        NS_TEST_EXPECT_MSG_EQ(ho->slug, "handover-control", "20008 slug");
+        const auto* notRegistered =
+            Lookup(static_cast<PolicyTypeId>(99999));
+        NS_TEST_EXPECT_MSG_EQ(notRegistered,
+                              static_cast<const A1PolicySchema*>(nullptr),
+                              "absent ID returns nullptr");
+
+        // Mapping from local A1PolicyType enum to OSC IDs.
+        NS_TEST_EXPECT_MSG_EQ(OscIdForLocalType(A1PolicyType::HO_THRESHOLD),
+                              20008u,
+                              "HO_THRESHOLD -> 20008");
+        NS_TEST_EXPECT_MSG_EQ(OscIdForLocalType(A1PolicyType::TN_NTN_STEERING),
+                              20000u,
+                              "TN_NTN_STEERING -> 20000");
+        NS_TEST_EXPECT_MSG_EQ(OscIdForLocalType(A1PolicyType::SLICE_SLA),
+                              20001u,
+                              "SLICE_SLA -> 20001");
+        NS_TEST_EXPECT_MSG_EQ(OscIdForLocalType(A1PolicyType::BEAM_PRIORITY),
+                              20050u,
+                              "BEAM_PRIORITY -> 20050");
+        // Unmapped local types return 0 (sentinel).
+        NS_TEST_EXPECT_MSG_EQ(OscIdForLocalType(A1PolicyType::FL_PARTICIPATION),
+                              0u,
+                              "FL_PARTICIPATION not yet mapped");
+
+        // Schema files referenced by the registry exist on disk; that
+        // contract is what gives reviewers a path they can fetch.
+        for (const auto& s : reg)
+        {
+            std::ifstream f(s.schema_file);
+            NS_TEST_EXPECT_MSG_EQ(f.good(),
+                                  true,
+                                  std::string("schema file present on disk: ")
+                                      + s.schema_file);
+        }
+    }
+};
+
+// ============================================================================
 //  4.1.10 (Roadmap §4.1.10): WG3 conflict taxonomy
 // ============================================================================
 
@@ -2085,6 +2187,9 @@ class OranNtnTestSuite : public TestSuite
 #endif
         // Realism roadmap 4.1.10 — WG3 conflict taxonomy.
         AddTestCase(new OranNtnConflictTaxonomyTestCase,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap 4.1.11 — OSC-aligned A1 policy schema registry.
+        AddTestCase(new OranNtnA1PolicyRegistryTestCase,
                     TestCase::Duration::QUICK);
     }
 };
