@@ -23,6 +23,8 @@
 #include "ns3/oran-ntn-ntn-scheduler.h"
 #include "ns3/oran-ntn-rc-style3.h"
 #include "ns3/asn1-per-codec.h"
+#include "ns3/e2-listener.h"
+#include "ns3/e2-transport.h"
 #include "ns3/oran-ntn-service-model-kpm.h"
 #include "ns3/oran-ntn-service-model-rc.h"
 #include "ns3/oran-ntn-service-model.h"
@@ -2212,6 +2214,227 @@ class OranNtnConflictTaxonomyTestCase : public TestCase
 };
 
 // ============================================================================
+//  T3 (Roadmap §3 T3): E2 SCTP / TCP listener + state machine
+// ============================================================================
+
+class OranNtnE2ListenerHandshakeTest : public TestCase
+{
+  public:
+    OranNtnE2ListenerHandshakeTest()
+        : TestCase("E2 listener accepts client, completes Setup handshake, "
+                   "and forwards Indication via TCP loopback")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::flexric;
+
+        Ptr<OranNtnE2Listener> listener =
+            CreateObject<OranNtnE2Listener>();
+        listener->SetTransportKind(E2Transport::Protocol::tcp);
+        const uint16_t port = 56421;
+        NS_TEST_ASSERT_MSG_EQ(listener->Start("127.0.0.1", port),
+                              true,
+                              "listener starts");
+
+        auto client = MakeE2Transport(E2Transport::Protocol::tcp);
+        NS_TEST_ASSERT_MSG_EQ(client->Connect("127.0.0.1", port),
+                              true,
+                              "client connect");
+
+        listener->Poll(50);
+        NS_TEST_ASSERT_MSG_EQ(listener->NumClients(),
+                              1u,
+                              "1 client accepted");
+
+        // Without E2 Setup, subscription must fail.
+        E2Message subReq{E2MessageType::ric_subscription_request,
+                          {0xAA, 0xBB}};
+        NS_TEST_ASSERT_MSG_GT(client->Send(subReq), -1, "send early sub");
+        listener->Poll(50);
+        E2Message reply{};
+        NS_TEST_ASSERT_MSG_EQ(client->Recv(reply, 200),
+                              true,
+                              "got reply to early sub");
+        NS_TEST_EXPECT_MSG_EQ(
+            static_cast<int>(reply.type),
+            static_cast<int>(E2MessageType::ric_subscription_failure),
+            "early sub fails before E2 setup");
+
+        // E2 Setup -> Response.
+        E2Message setup{E2MessageType::e2_setup_request, {0x01}};
+        client->Send(setup);
+        listener->Poll(50);
+        NS_TEST_ASSERT_MSG_EQ(client->Recv(reply, 200),
+                              true,
+                              "got setup response");
+        NS_TEST_EXPECT_MSG_EQ(
+            static_cast<int>(reply.type),
+            static_cast<int>(E2MessageType::e2_setup_response),
+            "setup response");
+        NS_TEST_EXPECT_MSG_EQ(listener->SetupRequestsHandled(),
+                              1u,
+                              "1 setup handled");
+
+        // Subscription now succeeds.
+        client->Send(subReq);
+        listener->Poll(50);
+        NS_TEST_ASSERT_MSG_EQ(client->Recv(reply, 200),
+                              true,
+                              "got sub response");
+        NS_TEST_EXPECT_MSG_EQ(
+            static_cast<int>(reply.type),
+            static_cast<int>(E2MessageType::ric_subscription_response),
+            "sub response after setup");
+
+        // RIC Indication forwarded to the trace counter.
+        E2Message ind{E2MessageType::ric_indication,
+                       {0xDE, 0xAD, 0xBE, 0xEF}};
+        client->Send(ind);
+        listener->Poll(50);
+        NS_TEST_EXPECT_MSG_EQ(listener->IndicationsForwarded(),
+                              1u,
+                              "1 indication forwarded");
+
+        // Control request -> Ack.
+        E2Message ctrl{E2MessageType::ric_control_request, {0x77}};
+        client->Send(ctrl);
+        listener->Poll(50);
+        NS_TEST_ASSERT_MSG_EQ(client->Recv(reply, 200),
+                              true,
+                              "got control ack");
+        NS_TEST_EXPECT_MSG_EQ(
+            static_cast<int>(reply.type),
+            static_cast<int>(E2MessageType::ric_control_acknowledge),
+            "control ack");
+
+        // Keepalive ping -> pong.
+        E2Message ping{E2MessageType::keepalive_ping, {}};
+        client->Send(ping);
+        listener->Poll(50);
+        NS_TEST_ASSERT_MSG_EQ(client->Recv(reply, 200),
+                              true,
+                              "got pong");
+        NS_TEST_EXPECT_MSG_EQ(
+            static_cast<int>(reply.type),
+            static_cast<int>(E2MessageType::keepalive_pong),
+            "keepalive pong");
+
+        client->Close();
+        listener->Stop();
+    }
+};
+
+namespace
+{
+
+static std::atomic<uint64_t> g_send_attempts{0};
+static std::atomic<uint64_t> g_send_success{0};
+
+void
+SendOneIndication(oranntn::flexric::E2Transport* client, uint64_t i)
+{
+    ++g_send_attempts;
+    oranntn::flexric::E2Message ind;
+    ind.type = oranntn::flexric::E2MessageType::ric_indication;
+    ind.payload = {static_cast<uint8_t>(i >> 8),
+                    static_cast<uint8_t>(i & 0xFF),
+                    0xCC, 0xCC, 0xCC};
+    if (client->Send(ind) >= 0)
+    {
+        ++g_send_success;
+    }
+}
+
+void
+PollListener(Ptr<oranntn::flexric::OranNtnE2Listener> listener)
+{
+    listener->Poll(5);
+}
+
+} // namespace
+
+class OranNtnE2ListenerSimulatorTimeTest : public TestCase
+{
+  public:
+    OranNtnE2ListenerSimulatorTimeTest()
+        : TestCase("Simulator: 30 s RIC Indication stream into the E2 listener")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::flexric;
+
+        Ptr<OranNtnE2Listener> listener =
+            CreateObject<OranNtnE2Listener>();
+        const uint16_t port = 56422;
+        NS_TEST_ASSERT_MSG_EQ(listener->Start("127.0.0.1", port),
+                              true,
+                              "listener starts");
+
+        auto raw = MakeE2Transport(E2Transport::Protocol::tcp);
+        NS_TEST_ASSERT_MSG_EQ(raw->Connect("127.0.0.1", port),
+                              true,
+                              "client connect");
+        listener->Poll(50);
+        E2Message setup{E2MessageType::e2_setup_request, {0x01}};
+        raw->Send(setup);
+        listener->Poll(50);
+        E2Message reply;
+        NS_TEST_ASSERT_MSG_EQ(raw->Recv(reply, 200),
+                              true,
+                              "setup response during sim setup phase");
+
+        // shared_ptr so we can capture in scheduled lambdas without
+        // moving the unique_ptr.
+        g_send_attempts = 0;
+        g_send_success = 0;
+        std::shared_ptr<E2Transport> shared(raw.release());
+        E2Transport* tp = shared.get();
+        // Schedule 30 indication-send events under Simulator::Run() time
+        // (one per simulator-second). Sends complete inside the simulator
+        // but their bytes don't surface on the listener-side socket
+        // until wall-clock time passes; a post-Run drain pulls them.
+        for (int t = 1; t <= 30; ++t)
+        {
+            Simulator::Schedule(Seconds(t),
+                                &SendOneIndication, tp,
+                                static_cast<uint64_t>(t));
+        }
+        Simulator::Stop(Seconds(31));
+        Simulator::Run();
+        // All 30 Sends fired and succeeded inside the simulator.
+        NS_TEST_ASSERT_MSG_EQ(g_send_attempts.load(),
+                              30u,
+                              "all 30 send events fired in Simulator::Run");
+        NS_TEST_ASSERT_MSG_EQ(g_send_success.load(),
+                              30u,
+                              "all 30 Send() calls returned >= 0");
+        // Wall-clock drain. max_msgs_per_client = 64 so one Poll drains
+        // the full buffer; loop 50 times defensively in case the kernel
+        // staggers delivery.
+        for (int i = 0; i < 50; ++i)
+        {
+            if (listener->IndicationsForwarded() >= 30u)
+                break;
+            listener->Poll(50, /*max_msgs_per_client=*/64);
+        }
+
+        NS_TEST_ASSERT_MSG_EQ(listener->IndicationsForwarded(),
+                              30u,
+                              "30 RIC Indications forwarded across 30 s");
+
+        shared->Close();
+        listener->Stop();
+        Simulator::Destroy();
+    }
+};
+
+// ============================================================================
 //  T2 (Roadmap §3 T2): ASN.1-PER codec primitives
 // ============================================================================
 
@@ -2586,6 +2809,11 @@ class OranNtnTestSuite : public TestSuite
                     TestCase::Duration::QUICK);
         // Realism roadmap T2 — ASN.1-PER codec.
         AddTestCase(new OranNtnAsn1PerPrimitivesTest,
+                    TestCase::Duration::QUICK);
+        // Realism roadmap T3 — SCTP/TCP E2 listener.
+        AddTestCase(new OranNtnE2ListenerHandshakeTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnE2ListenerSimulatorTimeTest,
                     TestCase::Duration::QUICK);
     }
 };

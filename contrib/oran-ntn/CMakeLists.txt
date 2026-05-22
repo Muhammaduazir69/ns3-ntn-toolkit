@@ -21,6 +21,9 @@ set(source_files
     model/oran-ntn-service-model-rc.cc
     # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
     asn1/asn1-per-codec.cc
+    # T3 — SCTP / TCP E2 listener for FlexRIC bridge (Roadmap §3 T3)
+    flexric-bridge/e2-transport.cc
+    flexric-bridge/e2-listener.cc
     # Original xApps
     model/oran-ntn-xapp-ho-predict.cc
     model/oran-ntn-xapp-beam-hop.cc
@@ -82,6 +85,10 @@ set(header_files
     model/oran-ntn-service-model-rc.h
     # T2 — ASN.1-PER codec for E2AP / E2SM-KPM / E2SM-RC (Roadmap §3 T2)
     asn1/asn1-per-codec.h
+    # T3 — SCTP / TCP E2 listener for FlexRIC bridge (Roadmap §3 T3)
+    flexric-bridge/e2-message-types.h
+    flexric-bridge/e2-transport.h
+    flexric-bridge/e2-listener.h
     # Original xApps
     model/oran-ntn-xapp-ho-predict.h
     model/oran-ntn-xapp-beam-hop.h
@@ -126,6 +133,12 @@ set(test_sources
 set(oran_ntn_extra_libs "")
 if(${ENABLE_SQLITE})
     list(APPEND oran_ntn_extra_libs ${SQLite3_LIBRARIES})
+endif()
+# T3 — libsctp for SCTP E2 transport (always linked; runtime fallback to TCP
+# when the kernel SCTP module is unavailable).
+find_library(SCTP_LIB sctp)
+if(SCTP_LIB)
+    list(APPEND oran_ntn_extra_libs ${SCTP_LIB})
 endif()
 
 build_lib(
