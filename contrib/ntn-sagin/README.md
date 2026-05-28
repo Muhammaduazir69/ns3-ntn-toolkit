@@ -98,6 +98,7 @@ auto path = router->Route(ueMob);   // ordered hops, ground → … → LEO
 | `sagin-haps-leo-relay` | 1 h SAGIN scenario emitting the full 4-layer path per second. |
 | `sagin-uav-swarm` | 8-UAV swarm (mix of patterns) with TR 36.777 PL spot-checks. |
 | `sagin-aeronautical` | 1 h commercial flight under a LEO satellite. |
+| `sagin-flight-leo-e2` | **§4.4.9** — commercial flight + LEO pass emitting OAI-style O-RAN E2-KPM indications (RSRP / elevation / Doppler / slice ID) to a Near-RT RIC; logs ACQUIRE/RELEASE handover events. Outputs KPM + handover CSVs. |
 
 ## Verification
 
@@ -109,6 +110,10 @@ auto path = router->Route(ueMob);   // ordered hops, ground → … → LEO
 | LOS probability monotonic in altitude | TR 36.777 §7.6.3.1 monotonicity property holds |
 | Router 4-layer path | with 50 nodes/layer, returns 4-hop path in sub-millisecond |
 | Aeronautical scenario | flight reaches arrival point within expected ETA |
+
+**§4.4.10 — RL load-balancing hooks for ISL routing** (6 tests): `MultiLayerRouter` now accepts a pluggable `SaginScoreCallback` (global or per-layer) so an external RL agent (NS3-AI shared memory / gRPC) can override the default greedy max-elevation hop scoring. Tests cover the default scorer, a custom override, RL-observation pass-through, per-layer scorer precedence, `ClearScorer` restore, and a Simulator-driven 10-epoch run where an observation scalar steers the chosen LEO.
+
+**§4.4.7 — cross-layer slice routing with QFI mapping** (5 tests): `SaginSliceRouter` maps a 5G QFI → S-NSSAI → `SliceProfile` and biases the layer choice by latency budget + GEO allowance. Verified differentiation: mMTC reaches GEO, eMBB caps at LEO (GEO too slow at 119 ms), default 5 ms URLLC mode-skips GEO and uses LEO, a tight 1 ms URLLC stops at HAPS. Includes a Simulator-driven per-QFI stability + scorer-isolation test.
 
 **Long-run smoke (1 h):**
 

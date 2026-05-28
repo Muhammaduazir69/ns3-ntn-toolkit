@@ -13,6 +13,11 @@ set(source_files
     # 4.4.3 — HST high-speed train (TR 38.901 §7.5) mobility (Roadmap §4.4.3)
     model/hst-trace.cc
     model/hst-mobility-model.cc
+    # 4.4.7 — cross-layer slice-aware routing (Roadmap §4.4.7)
+    model/sagin-slice-router.cc
+    # 4.4.8 — HAPS trajectory CSV ingest (Roadmap §4.4.8)
+    model/haps-trajectory-trace.cc
+    model/haps-trajectory-mobility-model.cc
     helper/sagin-helper.cc
 )
 
@@ -31,6 +36,11 @@ set(header_files
     # 4.4.3 — HST high-speed train (TR 38.901 §7.5) mobility (Roadmap §4.4.3)
     model/hst-trace.h
     model/hst-mobility-model.h
+    # 4.4.7 — cross-layer slice-aware routing (Roadmap §4.4.7)
+    model/sagin-slice-router.h
+    # 4.4.8 — HAPS trajectory CSV ingest (Roadmap §4.4.8)
+    model/haps-trajectory-trace.h
+    model/haps-trajectory-mobility-model.h
     helper/sagin-helper.h
 )
 
@@ -47,5 +57,6 @@ build_lib(
     ${libnetwork}
     ${libmobility}
     ${libpropagation}
+    ${libntn-slice}
   TEST_SOURCES ${test_sources}
 )

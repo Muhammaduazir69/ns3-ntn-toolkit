@@ -18,6 +18,9 @@
 #include "ns3/ptr.h"
 #include "ns3/vector.h"
 
+#include <atomic>
+#include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace ns3
@@ -38,6 +41,32 @@ struct SaginHop
     double elevationDeg;     ///< from previous hop (descending = below horizon)
     double rangeM;
 };
+
+/**
+ * \brief Candidate hop passed to a `SaginScoreCallback` (Roadmap §4.4.10).
+ *
+ * The scorer receives every (prev, candidate) pair the router evaluates;
+ * the candidate with the highest returned score becomes the next hop.
+ * `observation` is an opaque vector that callers may set per-Route via
+ * `MultiLayerRouter::SetObservation()` — typically RL state.
+ */
+struct SaginHopCandidate
+{
+    SaginLayer layer;            //!< Candidate's layer
+    Ptr<MobilityModel> node;     //!< Candidate node
+    double elevationDeg;         //!< Elevation from `prev`
+    double rangeM;               //!< 3-D distance from `prev`
+    SaginLayer prevLayer;        //!< Previous hop's layer
+    Ptr<MobilityModel> prev;     //!< Previous hop node
+    Vector prevPos;              //!< Previous hop position cache
+    std::size_t candidateIndex;  //!< Index in the per-layer list
+    std::vector<double> observation; //!< Caller-supplied RL state
+};
+
+/// Pluggable scoring function. The hop with the highest score wins.
+/// Default scorer returns `c.elevationDeg`.
+using SaginScoreCallback =
+    std::function<double(const SaginHopCandidate& c)>;
 
 /**
  * @brief Pick a Ground→UAV→HAPS→LEO route by greedy max-elevation per layer.
@@ -65,8 +94,39 @@ class MultiLayerRouter : public Object
     /// Static utility: elevation angle (deg) of @c target from @c observer.
     static double ElevationDeg(const Vector& observer, const Vector& target);
 
+    // -- Roadmap §4.4.10 — pluggable RL-friendly scorer --
+
+    /// Install a global scoring callback. Resets per-layer scorers.
+    /// Passing nullptr restores the default greedy max-elevation scorer.
+    void SetScorer(SaginScoreCallback scorer);
+
+    /// Install a scorer that only fires for one layer; other layers
+    /// continue to use whichever scorer is currently active (per-layer
+    /// scorer wins over the global one).
+    void SetLayerScorer(SaginLayer layer, SaginScoreCallback scorer);
+
+    /// Remove any installed scorers (global + per-layer).
+    void ClearScorer();
+
+    /// Set the RL observation that's surfaced to every scoring callback
+    /// during the next Route() call. The router copies the vector, so
+    /// callers can rewrite their state between calls.
+    void SetObservation(const std::vector<double>& obs) { m_observation = obs; }
+    const std::vector<double>& GetObservation() const { return m_observation; }
+
+    // Counters for tests + observability.
+    uint64_t GetRoutesEvaluated() const { return m_routes.load(); }
+    uint64_t GetCandidatesScored() const { return m_scored.load(); }
+
   private:
+    double Score(const SaginHopCandidate& c) const;
+
     std::vector<Ptr<MobilityModel>> m_layers[4];
+    SaginScoreCallback m_globalScorer;
+    SaginScoreCallback m_layerScorer[4];
+    std::vector<double> m_observation;
+    mutable std::atomic<uint64_t> m_routes{0};
+    mutable std::atomic<uint64_t> m_scored{0};
 };
 
 } // namespace ns3

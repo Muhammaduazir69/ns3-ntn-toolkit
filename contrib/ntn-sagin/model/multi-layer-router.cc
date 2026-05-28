@@ -7,6 +7,7 @@
 #include "ns3/log.h"
 
 #include <cmath>
+#include <limits>
 
 namespace ns3
 {
@@ -32,6 +33,49 @@ MultiLayerRouter::AddNode(SaginLayer layer, Ptr<MobilityModel> node)
     m_layers[static_cast<uint8_t>(layer)].push_back(node);
 }
 
+void
+MultiLayerRouter::SetScorer(SaginScoreCallback scorer)
+{
+    m_globalScorer = std::move(scorer);
+    for (auto& s : m_layerScorer)
+    {
+        s = nullptr;
+    }
+}
+
+void
+MultiLayerRouter::SetLayerScorer(SaginLayer layer, SaginScoreCallback scorer)
+{
+    m_layerScorer[static_cast<uint8_t>(layer)] = std::move(scorer);
+}
+
+void
+MultiLayerRouter::ClearScorer()
+{
+    m_globalScorer = nullptr;
+    for (auto& s : m_layerScorer)
+    {
+        s = nullptr;
+    }
+}
+
+double
+MultiLayerRouter::Score(const SaginHopCandidate& c) const
+{
+    // Per-layer scorer wins.
+    const auto& layerCb = m_layerScorer[static_cast<uint8_t>(c.layer)];
+    if (layerCb)
+    {
+        return layerCb(c);
+    }
+    if (m_globalScorer)
+    {
+        return m_globalScorer(c);
+    }
+    // Default: greedy max-elevation.
+    return c.elevationDeg;
+}
+
 std::size_t
 MultiLayerRouter::NodeCount(SaginLayer layer) const
 {
@@ -55,10 +99,12 @@ MultiLayerRouter::ElevationDeg(const Vector& observer, const Vector& target)
 std::vector<SaginHop>
 MultiLayerRouter::Route(Ptr<MobilityModel> source) const
 {
+    ++m_routes;
     std::vector<SaginHop> path;
     path.push_back({SaginLayer::Ground, source, 90.0, 0.0});
 
     Ptr<MobilityModel> prev = source;
+    SaginLayer prevLayer = SaginLayer::Ground;
     // Try each higher layer in order; stop if a layer is empty.
     for (uint8_t l = 1; l <= 3; ++l)
     {
@@ -69,27 +115,49 @@ MultiLayerRouter::Route(Ptr<MobilityModel> source) const
             continue;
         }
         Ptr<MobilityModel> best;
+        double bestScore = -std::numeric_limits<double>::infinity();
         double bestEl = -90.0;
         double bestRange = 0.0;
         Vector observerPos = prev->GetPosition();
-        for (auto& cand : candidates)
+        for (std::size_t i = 0; i < candidates.size(); ++i)
         {
-            double el = ElevationDeg(observerPos, cand->GetPosition());
-            if (el > bestEl)
+            const auto& cand = candidates[i];
+            const Vector candPos = cand->GetPosition();
+            const double el = ElevationDeg(observerPos, candPos);
+            Vector d(candPos.x - observerPos.x,
+                      candPos.y - observerPos.y,
+                      candPos.z - observerPos.z);
+            const double range =
+                std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+
+            SaginHopCandidate hc{
+                static_cast<SaginLayer>(l),
+                cand,
+                el,
+                range,
+                prevLayer,
+                prev,
+                observerPos,
+                i,
+                m_observation};
+            const double score = Score(hc);
+            ++m_scored;
+            if (score > bestScore)
             {
+                bestScore = score;
                 bestEl = el;
+                bestRange = range;
                 best = cand;
-                Vector d = cand->GetPosition();
-                d.x -= observerPos.x; d.y -= observerPos.y; d.z -= observerPos.z;
-                bestRange = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
             }
         }
         if (!best)
         {
             break;
         }
-        path.push_back({static_cast<SaginLayer>(l), best, bestEl, bestRange});
+        path.push_back(
+            {static_cast<SaginLayer>(l), best, bestEl, bestRange});
         prev = best;
+        prevLayer = static_cast<SaginLayer>(l);
     }
     return path;
 }
