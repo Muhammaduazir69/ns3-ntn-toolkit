@@ -55,6 +55,9 @@ class ThzNtnMac;
 #include "ns3/thz-ntn-beamforming.h"
 #include "ns3/thz-ntn-antenna-array.h"
 #include "ns3/thz-ntn-mac.h"
+// Needed for the complete type behind CreateMac()'s defaulted
+// Ptr<ThzNtnMolecularAbsorption> argument.
+#include "ns3/thz-ntn-molecular-absorption.h"
 
 using namespace ns3;
 
@@ -97,11 +100,14 @@ main(int argc, char* argv[])
     double islBw = 20e9;                   // 20 GHz
     double altitude = 550.0;               // km
     double islDistance = 2000.0;            // km between satellites
+    double debrisRangeKm = 0.5;            // ISAC debris target range
 
     // ---- Parse command-line arguments ----
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration in seconds [default: 30]", duration);
     cmd.AddValue("preset", "Configuration preset [default: TeraLink-225GHz]", preset);
+    cmd.AddValue("debrisRangeKm", "ISAC debris target range in km [default: 0.5]",
+                 debrisRangeKm);
     cmd.Parse(argc, argv);
 
     std::cout << "=============================================================\n";
@@ -173,11 +179,11 @@ main(int argc, char* argv[])
     Ptr<ThzNtnIslChannel> islChannel = helper->CreateIslChannel("ISL-300GHz");
 
     // RIS: 64x64 ground-deployed
-    Ptr<ThzNtnRis> ris = helper->CreateRis(64, 64, "ground");
+    Ptr<ThzNtnRis> ris = CreateObject<ThzNtnRis>();
     ris->Configure(64, 64, downlinkFreq, RisDeployment::GROUND);
 
     // ISAC on Satellite 1
-    Ptr<ThzNtnIsac> isac = helper->CreateIsac("JOINT_ISAC");
+    Ptr<ThzNtnIsac> isac = CreateObject<ThzNtnIsac>();
     isac->SetIsacMode(JOINT_ISAC);
     isac->SetResourceSplit(0.2); // 20% for sensing
 
@@ -187,6 +193,12 @@ main(int argc, char* argv[])
     // Antenna array
     Ptr<ThzNtnAntennaArray> array = helper->CreateAntennaArray(preset);
     array->Configure(32, 32, downlinkFreq, ThzArrayType::UPA);
+
+    // Wire the satellite's real PHY and UM-MIMO array into the ISAC so the
+    // radar SNR uses the actual TX power, bandwidth and array gain rather than
+    // the standalone defaults.
+    isac->SetPhy(satPhy);
+    isac->SetAntennaArray(array);
 
     // Beamforming
     Ptr<ThzNtnBeamforming> beamforming = helper->CreateBeamforming(64);
@@ -220,10 +232,20 @@ main(int argc, char* argv[])
     double initElev = ComputeElevation(0.0, duration, maxElev);
     tracker->Initialize(initElev, 90.0, 2.0, 3.0);
 
+    // ISAC target: a 10 cm debris fragment at the configured range. Detection
+    // is decided by the radar equation in PerformSensing (TX power, array gain,
+    // RCS, coherent-integration gain) -- a short envelope is expected at THz
+    // for a cm-scale target, so the range is a CLI knob (--debrisRangeKm).
+    DebrisModel debris = isac->GetDebrisModel("medium_10cm");
+    double debrisRcs_m2 = std::pow(10.0, debris.rcs_dBsm / 10.0);
+    double debrisRange_m = debrisRangeKm * 1000.0;
+    double lastSensingPd = 0.0; // last scan's detection probability (for report)
+
     // Accumulators
     double totalThroughput = 0.0;
     double totalTrackingError = 0.0;
     uint32_t validSteps = 0;
+    uint32_t isacScans = 0;
     uint32_t isacDetections = 0;
 
     std::cout << "  Time-Series Simulation Results:\n";
@@ -236,7 +258,7 @@ main(int argc, char* argv[])
               << std::setw(10) << "RIS Gain"
               << std::setw(10) << "TrkErr"
               << std::setw(10) << "ISAC"
-              << std::setw(10) << "ModCod"
+              << std::setw(10) << "SpecEff"
               << "\n";
     std::cout << std::setw(6) << "(s)"
               << std::setw(8) << "(deg)"
@@ -246,7 +268,7 @@ main(int argc, char* argv[])
               << std::setw(10) << "(dB)"
               << std::setw(10) << "(deg)"
               << std::setw(10) << ""
-              << std::setw(10) << ""
+              << std::setw(10) << "(b/Hz)"
               << "\n";
     std::cout << "  " << std::string(90, '-') << "\n";
 
@@ -288,9 +310,10 @@ main(int argc, char* argv[])
         totalThroughput += dlRate * dt; // Gbit
 
         // ---- 3. ISL: Sat1 <-> Sat2 ----
-        double islDist_m = islDistance * 1000.0;
-        double islSnr = islChannel->ComputeIslSnr_dB(islFreq, islDist_m, 30.0, 40.0, 40.0);
-        double islCap = islChannel->ComputeIslCapacity_Gbps(islSnr, islBw);
+        // SNR and capacity come from the two satellites' actual MobilityModels
+        // (distance/Doppler from positions, FSPL + configured TX/gains/noise).
+        double islSnr = islChannel->ComputeIslSnr_dB(sat1Mob, sat2Mob);
+        double islCap = islChannel->ComputeIslCapacity_Gbps(islSnr);
 
         // ---- 4. Beam tracking ----
         double measNoise = 0.03;
@@ -306,10 +329,12 @@ main(int argc, char* argv[])
         std::string isacStatus = "-";
         if (step % 5 == 0)
         {
-            DebrisModel debris = isac->GetDebrisModel("medium_10cm");
-            double rcs = std::pow(10.0, debris.rcs_dBsm / 10.0);
-            SensingResult sensing = isac->PerformSensing(
-                islFreq, 30.0, 45.0, 45.0, 10e9, 5e3, rcs, 1e-3);
+            // Radar SNR follows the radar equation (range, RCS, ISAC split,
+            // coherent-integration gain) using Sat1's MobilityModel.
+            ++isacScans;
+            SensingResult sensing =
+                isac->PerformSensing(sat1Mob, debrisRange_m, debrisRcs_m2);
+            lastSensingPd = sensing.detectionProbability;
             if (sensing.targetDetected)
             {
                 isacDetections++;
@@ -321,9 +346,12 @@ main(int argc, char* argv[])
             }
         }
 
-        // ---- 6. ModCod selection ----
-        uint8_t modcod = satPhy->SelectModCod(risSnr);
-        double spectralEff = satPhy->GetModCodSpectralEfficiency(modcod);
+        // ---- 6. Achievable spectral efficiency from the live link ----
+        // Adaptive coding tracks the channel: report the Shannon-achievable
+        // spectral efficiency for the current (RIS-assisted) SNR. (A discrete
+        // DVB ModCod table can be driven via ThzNtnPhySat::SelectWaveformId()
+        // when a SatWaveformConf is wired in.)
+        double spectralEff = std::log2(1.0 + effectiveSnrLin);
 
         // Print every other step for readability
         if (step % 2 == 0)
@@ -361,8 +389,8 @@ main(int argc, char* argv[])
               << numSteps << " s\n";
 
     // ISL
-    double islSnr = islChannel->ComputeIslSnr_dB(islFreq, islDistance * 1e3, 30.0, 40.0, 40.0);
-    double islCap = islChannel->ComputeIslCapacity_Gbps(islSnr, islBw);
+    double islSnr = islChannel->ComputeIslSnr_dB(sat1Mob, sat2Mob);
+    double islCap = islChannel->ComputeIslCapacity_Gbps(islSnr);
     std::cout << "\n  ISL (Sat1 <-> Sat2):\n";
     std::cout << "    Distance:      " << islDistance << " km\n";
     std::cout << "    SNR:           " << std::setprecision(1) << islSnr << " dB\n";
@@ -388,12 +416,18 @@ main(int argc, char* argv[])
 
     // ISAC
     std::cout << "\n  ISAC (Space Debris Sensing):\n";
-    std::cout << "    Sensing scans:  " << (numSteps / 5) << "\n";
+    std::cout << "    Target:         10 cm debris (" << std::setprecision(1)
+              << debris.rcs_dBsm << " dBsm)\n";
+    std::cout << "    Target range:   " << std::setprecision(2)
+              << debrisRange_m / 1000.0 << " km\n";
+    std::cout << "    Detection prob: " << std::setprecision(3)
+              << lastSensingPd << "\n";
+    std::cout << "    Sensing scans:  " << isacScans << "\n";
     std::cout << "    Detections:     " << isacDetections << "\n";
     std::cout << "    Resource split: 20% sensing / 80% comms\n";
 
     // Satellite processing
-    double procDelay = satPhy->ComputeOnBoardProcessingDelay_us();
+    double procDelay = satPhy->ComputeOnBoardProcessingDelay().GetMicroSeconds();
     std::cout << "\n  Satellite Processing:\n";
     std::cout << "    Payload mode:     Regenerative\n";
     std::cout << "    Processing delay: " << std::setprecision(0)

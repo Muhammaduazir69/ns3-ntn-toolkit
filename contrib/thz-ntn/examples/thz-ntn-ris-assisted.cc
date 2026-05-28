@@ -163,7 +163,7 @@ main(int argc, char* argv[])
     for (uint32_t N : risSizes)
     {
         // Create RIS with this size
-        Ptr<ThzNtnRis> ris = helper->CreateRis(N, N, "ground");
+        Ptr<ThzNtnRis> ris = CreateObject<ThzNtnRis>();
         ris->Configure(N, N, freq, RisDeployment::GROUND);
 
         // Set optimal phase profile for satellite->RIS->GT
@@ -171,12 +171,10 @@ main(int argc, char* argv[])
 
         // RIS gain with perfect CSI (N^2 scaling)
         double risGain = ris->ComputeSnrGain_dB(true);
-        double maxRisGain = ris->ComputeMaxGain_dB();
 
-        // Cascaded path loss: Sat->RIS + RIS->GT
-        double d1 = slantRange;     // Sat to RIS ~ same as slant range
-        double d2 = risDist;        // RIS to GT
-        double cascadedPL = ris->ComputeCascadedPathLoss_dB(d1, d2, freq);
+        // Cascaded path loss Sat->RIS->GT from the actual 3D node positions
+        // (the model derives both hop distances from the MobilityModels).
+        double cascadedPL = ris->ComputeCascadedPathLoss_dB(satMob, risMob, gtMob);
 
         // Total SNR with RIS = direct SNR + RIS gain
         double totalSnr = directResult.snr_dB + risGain;
@@ -217,7 +215,7 @@ main(int argc, char* argv[])
 
     for (uint32_t N : risSizes)
     {
-        Ptr<ThzNtnRis> ris = helper->CreateRis(N, N, "ground");
+        Ptr<ThzNtnRis> ris = CreateObject<ThzNtnRis>();
         ris->Configure(N, N, freq, RisDeployment::GROUND);
 
         double measuredGain = ris->ComputeSnrGain_dB(true);
@@ -237,7 +235,7 @@ main(int argc, char* argv[])
     std::cout << "  " << std::string(40, '-') << "\n";
     std::cout << "  Continuous phase:  0.0 dB loss\n";
 
-    Ptr<ThzNtnRis> ris64 = helper->CreateRis(64, 64, "ground");
+    Ptr<ThzNtnRis> ris64 = CreateObject<ThzNtnRis>();
     ris64->Configure(64, 64, freq, RisDeployment::GROUND);
     double qLoss = ris64->ComputeQuantizationLoss_dB();
     std::cout << "  Current config:    " << std::fixed << std::setprecision(2)

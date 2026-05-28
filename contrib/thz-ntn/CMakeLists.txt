@@ -31,6 +31,15 @@ set(source_files
     # Phase 4: ISAC
     model/thz-ntn-isac.cc
     model/thz-ntn-isac-processor.cc
+    # Roadmap §4.3.4 — NYUSIM-140 reference loader + calibrator
+    model/thz-ntn-nyusim-reference.cc
+    model/thz-ntn-nyusim-calibrator.cc
+    # Roadmap §4.3.5 — ISAC scheduler + α-μ fading
+    model/thz-ntn-isac-scheduler.cc
+    model/thz-ntn-alpha-mu-fading.cc
+    # Roadmap §4.3.6 — THz-RIS-SM service model + xApp
+    model/thz-ntn-ris-service-model.cc
+    model/thz-ntn-ris-xapp.cc
     # Helper
     helper/thz-ntn-helper.cc
 )
@@ -68,6 +77,15 @@ set(header_files
     # Phase 4: ISAC
     model/thz-ntn-isac.h
     model/thz-ntn-isac-processor.h
+    # Roadmap §4.3.4 — NYUSIM-140 reference loader + calibrator
+    model/thz-ntn-nyusim-reference.h
+    model/thz-ntn-nyusim-calibrator.h
+    # Roadmap §4.3.5 — ISAC scheduler + α-μ fading
+    model/thz-ntn-isac-scheduler.h
+    model/thz-ntn-alpha-mu-fading.h
+    # Roadmap §4.3.6 — THz-RIS-SM service model + xApp
+    model/thz-ntn-ris-service-model.h
+    model/thz-ntn-ris-xapp.h
     # Helper
     helper/thz-ntn-helper.h
 )
