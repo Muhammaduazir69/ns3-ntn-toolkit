@@ -114,16 +114,38 @@ main(int argc, char* argv[])
     cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
 
+    // Default to a bundled ISS TLE when --tle is not supplied so the
+    // example smoke-runs without external state. Search a few standard
+    // paths so the binary works from build root, contrib/, or install.
+    if (tlePath.empty())
+    {
+        for (const std::string& candidate : {
+                 std::string("contrib/ntn-rrc/data/iss-zarya.tle"),
+                 std::string("../contrib/ntn-rrc/data/iss-zarya.tle"),
+                 std::string("../../contrib/ntn-rrc/data/iss-zarya.tle"),
+             })
+        {
+            std::ifstream probe(candidate);
+            if (probe)
+            {
+                tlePath = candidate;
+                break;
+            }
+        }
+    }
     TleFile tle;
     if (tlePath.empty() || !ReadTle(tlePath, tle))
     {
-        std::cerr << "error: --tle is required and must be a 3-line file\n";
+        std::cerr << "error: --tle is required and must be a 3-line file "
+                     "(default ISS TLE in contrib/ntn-rrc/data/iss-zarya.tle "
+                     "not found from cwd)\n";
         return 2;
     }
+    // Default the start UTC to the ISS TLE's anchor epoch when not
+    // provided, so smoke runs work with bundled data.
     if (startUtc.empty())
     {
-        std::cerr << "error: --start is required (UTC timestamp)\n";
-        return 2;
+        startUtc = "2024-01-01 12:00:00";
     }
 
     // ---- UE in ECEF ----
