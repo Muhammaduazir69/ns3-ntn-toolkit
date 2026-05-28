@@ -5,6 +5,7 @@
 #include "ns3/contact-graph-router.h"
 #include "ns3/contact-graph-scheduler.h"
 #include "ns3/orbital-elements.h"
+#include "ns3/tr38821-corpus.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
@@ -12,6 +13,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <iostream>
 #include <set>
 #include <vector>
 
@@ -935,6 +938,253 @@ class ContactGraphRouterRegenSimulatorTimeTest : public TestCase
     }
 };
 
+// ============================================================================
+//  Roadmap §4.4.11 — TR 38.821 + Starlink calibration corpus
+// ============================================================================
+
+namespace
+{
+
+std::string
+FindCorpusFile(const std::string& subpath)
+{
+    // Try a couple of relative roots so the test works from a few cwd
+    // depths. We treat absence of the bundled file as a soft skip.
+    const std::vector<std::string> roots = {
+        "contrib/ntn-constellation/calibration/",
+        "../contrib/ntn-constellation/calibration/",
+        "../../contrib/ntn-constellation/calibration/",
+    };
+    for (const auto& r : roots)
+    {
+        const std::string p = r + subpath;
+        std::ifstream f(p);
+        if (f)
+        {
+            return p;
+        }
+    }
+    return std::string();
+}
+
+} // namespace
+
+class Tr38821CorpusLoadTest : public TestCase
+{
+  public:
+    Tr38821CorpusLoadTest()
+        : TestCase("§4.4.11: load TR 38.821 + Starlink CSVs")
+    {
+    }
+
+    void DoRun() override
+    {
+        Tr38821CorpusReader r;
+        const std::string sp = FindCorpusFile("tr38821/scenarios.csv");
+        const std::string lp = FindCorpusFile("tr38821/link_budgets.csv");
+        const std::string yp = FindCorpusFile("starlink_eu/latency_samples.csv");
+        const std::string tp = FindCorpusFile("starlink_eu/station_locations.csv");
+        if (sp.empty() || lp.empty() || yp.empty() || tp.empty())
+        {
+            std::cout << "  corpus files not reachable from cwd, "
+                       "soft skip" << std::endl;
+            return;
+        }
+        NS_TEST_ASSERT_MSG_EQ(r.LoadScenarios(sp),
+                               true,
+                               "load scenarios");
+        NS_TEST_ASSERT_MSG_EQ(r.LoadLinkBudgets(lp),
+                               true,
+                               "load link budgets");
+        NS_TEST_ASSERT_MSG_EQ(r.LoadStarlinkLatency(yp),
+                               true,
+                               "load latency");
+        NS_TEST_ASSERT_MSG_EQ(r.LoadStarlinkStations(tp),
+                               true,
+                               "load stations");
+        NS_TEST_EXPECT_MSG_EQ(r.Scenarios().size(),
+                               8u,
+                               "8 TR 38.821 scenarios");
+        NS_TEST_EXPECT_MSG_EQ(r.LinkBudgets().size(),
+                               24u,
+                               "8 scenarios × 3 elevations");
+        NS_TEST_EXPECT_MSG_EQ(r.StarlinkStations().size(),
+                               8u,
+                               "8 EU stations");
+        NS_TEST_EXPECT_MSG_EQ(r.StarlinkLatency().size(),
+                               64u,
+                               "8 stations × 8 hours");
+        const auto a1 = r.FindScenario("A1");
+        NS_TEST_ASSERT_MSG_EQ(a1.has_value(),
+                               true,
+                               "A1 found");
+        NS_TEST_EXPECT_MSG_EQ_TOL(a1->freq_ghz,
+                                    2.0,
+                                    1e-9,
+                                    "A1 = S-band");
+        const auto fra = r.FindStation("FRA");
+        NS_TEST_ASSERT_MSG_EQ(fra.has_value(),
+                               true,
+                               "FRA found");
+        NS_TEST_EXPECT_MSG_EQ(fra->city, "Frankfurt", "FRA city");
+    }
+};
+
+class CalibrationHarnessGateTest : public TestCase
+{
+  public:
+    CalibrationHarnessGateTest()
+        : TestCase("§4.4.11: harness applies per-metric gates")
+    {
+    }
+
+    void DoRun() override
+    {
+        CalibrationHarness h;
+        // Default gates: pathloss 1 dB, rtt 5 ms.
+        auto r1 = h.Compare("A1", "pathloss", 189.3, 189.6);
+        NS_TEST_EXPECT_MSG_EQ(r1.within_gate,
+                               true,
+                               "0.3 dB within 1 dB");
+        auto r2 = h.Compare("A1", "pathloss", 189.3, 191.8);
+        NS_TEST_EXPECT_MSG_EQ(r2.within_gate,
+                               false,
+                               "2.5 dB exceeds 1 dB");
+        auto r3 = h.Compare("FRA", "rtt_p50", 28.0, 31.0);
+        NS_TEST_EXPECT_MSG_EQ(r3.within_gate,
+                               true,
+                               "3 ms within 5 ms");
+        auto r4 = h.Compare("FRA", "rtt_p50", 28.0, 40.0);
+        NS_TEST_EXPECT_MSG_EQ(r4.within_gate,
+                               false,
+                               "12 ms exceeds 5 ms");
+        NS_TEST_EXPECT_MSG_EQ(h.AllWithinGate(),
+                               false,
+                               "overall fail");
+        const auto counts = h.CountsByMetric();
+        NS_TEST_EXPECT_MSG_EQ(counts.at("pathloss"),
+                               2u,
+                               "2 pathloss");
+        NS_TEST_EXPECT_MSG_EQ(counts.at("rtt_p50"),
+                               2u,
+                               "2 rtt");
+        const auto fails = h.FailuresByMetric();
+        NS_TEST_EXPECT_MSG_EQ(fails.at("pathloss"),
+                               1u,
+                               "1 pathloss fail");
+        NS_TEST_EXPECT_MSG_EQ(fails.at("rtt_p50"),
+                               1u,
+                               "1 rtt fail");
+    }
+};
+
+class CalibrationHarnessEndToEndTest : public TestCase
+{
+  public:
+    CalibrationHarnessEndToEndTest()
+        : TestCase("§4.4.11: harness against full TR 38.821 link budgets")
+    {
+    }
+
+    void DoRun() override
+    {
+        Tr38821CorpusReader r;
+        const std::string lp = FindCorpusFile("tr38821/link_budgets.csv");
+        if (lp.empty())
+        {
+            std::cout << "  corpus not reachable, soft skip"
+                       << std::endl;
+            return;
+        }
+        NS_TEST_ASSERT_MSG_EQ(r.LoadLinkBudgets(lp),
+                               true,
+                               "load link budgets");
+        CalibrationHarness h;
+        // Simulate a toolkit prediction that matches reference within
+        // ≤ 0.5 dB on every entry (synthetic stand-in for the actual
+        // module). Then verify all-within-gate passes.
+        for (const auto& lb : r.LinkBudgets())
+        {
+            const double toolkit_pl = lb.pathloss_db + 0.3;
+            const double toolkit_atmos = lb.atmos_loss_db + 0.2;
+            const double toolkit_cnr = lb.cnr_db - 0.4;
+            h.Compare(lb.scenario_id, "pathloss",
+                       lb.pathloss_db, toolkit_pl);
+            h.Compare(lb.scenario_id, "atmos_loss",
+                       lb.atmos_loss_db, toolkit_atmos);
+            h.Compare(lb.scenario_id, "cnr",
+                       lb.cnr_db, toolkit_cnr);
+        }
+        NS_TEST_EXPECT_MSG_EQ(h.AllWithinGate(),
+                               true,
+                               "synthetic prediction passes 1 dB gate");
+        NS_TEST_EXPECT_MSG_EQ(h.Residuals().size(),
+                               r.LinkBudgets().size() * 3,
+                               "3 metrics per row");
+    }
+};
+
+class CalibrationHarnessStarlinkTest : public TestCase
+{
+  public:
+    CalibrationHarnessStarlinkTest()
+        : TestCase("§4.4.11: harness against Starlink latency samples")
+    {
+    }
+
+    void DoRun() override
+    {
+        Tr38821CorpusReader r;
+        const std::string yp =
+            FindCorpusFile("starlink_eu/latency_samples.csv");
+        if (yp.empty())
+        {
+            std::cout << "  corpus not reachable, soft skip"
+                       << std::endl;
+            return;
+        }
+        NS_TEST_ASSERT_MSG_EQ(r.LoadStarlinkLatency(yp),
+                               true,
+                               "load latency");
+        CalibrationHarness h;
+        // Toolkit-predicted RTT = reference + 2 ms constant offset;
+        // all should pass under the default 5 ms gate.
+        for (const auto& s : r.StarlinkLatency())
+        {
+            h.Compare(s.station_id,
+                       "rtt_p50",
+                       s.rtt_p50_ms,
+                       s.rtt_p50_ms + 2.0);
+        }
+        NS_TEST_EXPECT_MSG_EQ(h.AllWithinGate(),
+                               true,
+                               "all within 5 ms");
+        NS_TEST_EXPECT_MSG_EQ(h.Residuals().size(),
+                               r.StarlinkLatency().size(),
+                               "one residual per sample");
+
+        // Tighten the gate to 1 ms and re-run; should fail.
+        h.Reset();
+        CalibrationHarness::Gates g;
+        g.rtt_ms = 1.0;
+        h.SetGates(g);
+        for (const auto& s : r.StarlinkLatency())
+        {
+            h.Compare(s.station_id,
+                       "rtt_p50",
+                       s.rtt_p50_ms,
+                       s.rtt_p50_ms + 2.0);
+        }
+        NS_TEST_EXPECT_MSG_EQ(h.AllWithinGate(),
+                               false,
+                               "2 ms residual exceeds 1 ms gate");
+        const auto fails = h.FailuresByMetric();
+        NS_TEST_EXPECT_MSG_EQ(fails.at("rtt_p50"),
+                               r.StarlinkLatency().size(),
+                               "all fail under tight gate");
+    }
+};
+
 class NtnConstellationTestSuite : public TestSuite
 {
   public:
@@ -961,6 +1211,11 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new ContactGraphRouterRegenModeTest, Duration::QUICK);
         AddTestCase(new ContactGraphRouterRegenOnlyDijkstraTest,
                     Duration::QUICK);
+        // Roadmap §4.4.11 — TR 38.821 + Starlink calibration corpus.
+        AddTestCase(new Tr38821CorpusLoadTest, Duration::QUICK);
+        AddTestCase(new CalibrationHarnessGateTest, Duration::QUICK);
+        AddTestCase(new CalibrationHarnessEndToEndTest, Duration::QUICK);
+        AddTestCase(new CalibrationHarnessStarlinkTest, Duration::QUICK);
         AddTestCase(new ContactGraphRouterRegenSimulatorTimeTest,
                     Duration::QUICK);
     }

@@ -5,6 +5,8 @@ set(source_files
     model/contact-graph-scheduler.cc
     # 4.4.4 — Contact-graph router integration (Roadmap §4.4 deep work)
     model/contact-graph-router.cc
+    # 4.4.11 — TR 38.821 + Starlink calibration corpus (Roadmap §4.4.11)
+    model/tr38821-corpus.cc
 )
 
 set(header_files
@@ -14,6 +16,8 @@ set(header_files
     model/contact-graph-scheduler.h
     # 4.4.4 — Contact-graph router integration (Roadmap §4.4 deep work)
     model/contact-graph-router.h
+    # 4.4.11 — TR 38.821 + Starlink calibration corpus (Roadmap §4.4.11)
+    model/tr38821-corpus.h
 )
 
 set(test_sources

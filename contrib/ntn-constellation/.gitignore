@@ -1,5 +1,10 @@
 .venv/
 data/
+# Roadmap §4.4.11 calibration corpus is bundled with the source tree.
+!data/tr38821/
+!data/tr38821/*.csv
+!data/starlink_eu/
+!data/starlink_eu/*.csv
 *.egg-info/
 __pycache__/
 *.pyc

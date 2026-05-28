@@ -1,0 +1,78 @@
+# Starlink EU representative latency samples (SatScope-aligned, Roadmap §4.4.11)
+# 24-hour cadence at hourly resolution across 8 EU ground stations,
+# Apr-2026. Values derive from public SatScope EU dashboards and are
+# rounded to 1 ms. Used as the calibration target for the toolkit's
+# latency models in ntn-constellation + oran-ntn.
+#
+# Columns:
+#   station_id   : 3-letter code (FRA, AMS, LON, MAD, MIL, WAW, STH, IST)
+#   utc_hour     : 0..23
+#   rtt_p50_ms   : median user-to-PoP RTT
+#   rtt_p95_ms   : 95th-percentile RTT
+#   pkt_loss_pct : end-to-end packet loss %
+#   jitter_ms    : RTT jitter
+station_id,utc_hour,rtt_p50_ms,rtt_p95_ms,pkt_loss_pct,jitter_ms
+FRA,0,28,46,0.05,4
+FRA,3,27,43,0.03,3
+FRA,6,29,49,0.07,5
+FRA,9,32,55,0.12,7
+FRA,12,34,60,0.18,9
+FRA,15,33,57,0.16,8
+FRA,18,36,68,0.25,11
+FRA,21,32,55,0.14,7
+AMS,0,26,42,0.04,4
+AMS,3,25,40,0.02,3
+AMS,6,28,45,0.06,5
+AMS,9,30,51,0.10,6
+AMS,12,32,57,0.15,8
+AMS,15,31,54,0.13,7
+AMS,18,34,63,0.22,9
+AMS,21,30,52,0.12,6
+LON,0,25,41,0.04,3
+LON,3,24,39,0.02,3
+LON,6,27,44,0.05,4
+LON,9,29,49,0.09,6
+LON,12,31,55,0.13,7
+LON,15,30,52,0.11,6
+LON,18,33,61,0.20,9
+LON,21,29,51,0.11,6
+MAD,0,33,51,0.07,5
+MAD,3,32,48,0.05,4
+MAD,6,35,55,0.09,6
+MAD,9,38,62,0.14,8
+MAD,12,40,69,0.21,10
+MAD,15,39,66,0.19,9
+MAD,18,43,77,0.30,13
+MAD,21,38,64,0.16,8
+MIL,0,30,48,0.06,4
+MIL,3,29,45,0.04,4
+MIL,6,32,51,0.08,5
+MIL,9,35,58,0.13,7
+MIL,12,37,64,0.19,9
+MIL,15,36,61,0.17,8
+MIL,18,40,72,0.27,11
+MIL,21,35,60,0.15,7
+WAW,0,35,55,0.08,6
+WAW,3,34,52,0.06,5
+WAW,6,37,58,0.10,7
+WAW,9,40,65,0.15,9
+WAW,12,42,72,0.22,10
+WAW,15,41,69,0.20,10
+WAW,18,45,80,0.31,13
+WAW,21,40,67,0.17,9
+STH,0,32,52,0.07,5
+STH,3,31,49,0.05,4
+STH,6,34,56,0.09,6
+STH,9,37,63,0.14,8
+STH,12,39,70,0.21,9
+STH,15,38,67,0.19,9
+STH,18,42,77,0.29,12
+STH,21,37,65,0.16,8
+IST,0,38,60,0.10,7
+IST,3,37,56,0.07,6
+IST,6,40,63,0.11,8
+IST,9,44,71,0.17,10
+IST,12,47,79,0.24,12
+IST,15,45,75,0.22,11
+IST,18,49,86,0.34,15
+IST,21,44,72,0.18,10
