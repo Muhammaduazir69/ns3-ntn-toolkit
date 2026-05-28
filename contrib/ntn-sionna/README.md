@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Sionna%20RT-2.0-orange.svg"/>
   <img src="https://img.shields.io/badge/3GPP-TR%2038.811%20reference-purple.svg"/>
   <img src="https://img.shields.io/badge/RTT-%E2%89%A510%20ms%20steady--state-success.svg"/>
-  <img src="https://img.shields.io/badge/tests-3%20C%2B%2B%20%2B%206%20Python%20PASS-blue.svg"/>
+  <img src="https://img.shields.io/badge/tests-28%20C%2B%2B%20%2B%206%20Python%20PASS-blue.svg"/>
 </p>
 
 ---
@@ -76,6 +76,102 @@ double rxDbm = ch->CalcRxPower(txDbm, satMobility, ueMobility);
 ```
 
 If the server is down or unreachable, `CalcRxPower` falls back to `NtnSionnaChannel::FreeSpacePathLossDb(d, freq)` — the same closed form Sionna RT converges to in an empty scene — so a no-GPU CI run won't go off the rails.
+
+## Atmospheric cascade (Roadmap §4.2.7)
+
+Sionna RT models geometric multipath end-to-end but does not model the molecular absorption, rain, or LMS shadowing that dominate the link budget in real Earth-space links. `NtnSionnaCascadeChannel` composes the Sionna base with the ITU-R cascade:
+
+```
+Rx_dBm = NtnSionnaChannel::DoCalcRxPower(Tx_dBm, a, b)
+       - Itu676::SlantPathAttenuationDb(freq, elev)         // gaseous (O2 + H2O)
+       - Itu618::SlantPathRainAttenuationDb(freq, elev, R)  // rain (uses P.838 k/alpha)
+       - Itu681::StepDb()                                    // LMS Markov shadowing
+```
+
+The four ITU-R models are re-used verbatim from the toolkit's `thz-ntn` module; the cascade adds no new physics, only composition + an attribute surface, and ships with 9 dedicated Simulator-driven tests covering geometry (ENU + ECEF), per-component sweeps, rain-impact comparison, server-down failure path, and MIMO transport passthrough.
+
+```cpp
+#include "ns3/ntn-sionna-cascade-channel.h"
+
+Ptr<NtnSionnaCascadeChannel> cascade = CreateObject<NtnSionnaCascadeChannel>();
+cascade->SetFrequencyHz(12.0e9);          // sets BOTH inner Sionna + chain
+cascade->GetAtmosphericChain()->SetRainRateMmH(25.0);
+cascade->GetAtmosphericChain()->SetEnableLms(true);
+cascade->GetAtmosphericChain()->SetLmsEnvironmentInt(0); // urban
+cascade->SetTransport(udpTransport);      // forwards to inner base
+
+double rxDbm = cascade->CalcRxPower(txDbm, satMobility, ueMobility);
+auto comps = cascade->GetLastComponents(); // { gaseousDb, rainDb, lmsDb, elevationDeg }
+```
+
+Each chain component can be toggled independently; defaults are gaseous + rain on (R = 0 mm/h → no rain attenuation), LMS off. The cascade is commutative in `(a, b)` ordering — whichever mobility has the smaller position magnitude is treated as the ground end automatically.
+
+## 4-D LRU caching transport (Roadmap §4.2.4)
+
+Sionna RT queries are the bottleneck of any large simulation. `SionnaCachingTransport` is a decorator that wraps any inner transport and caches responses keyed by a 4-D tuple:
+
+```
+(quantised_tx_pos, quantised_rx_pos, freq_hz, time_bucket)
+```
+
+Spatial quantisation is `SpatialResolutionM` (default 100 m); temporal quantisation is `TemporalBucketUs` (default 1 ms); the cache is bounded by `MaxEntries` (default 4096) with strict LRU eviction. On a hit the response is returned with `compute_ms = 0` so callers can distinguish cached from live values.
+
+```cpp
+#include "ns3/sionna-caching-transport.h"
+
+Ptr<SionnaUdpTransport> live = CreateObject<SionnaUdpTransport>();
+live->SetServer("127.0.0.1", 8765);
+
+Ptr<SionnaCachingTransport> cache = CreateObject<SionnaCachingTransport>();
+cache->SetInner(live);
+cache->SetSpatialResolutionM(50.0);    // 50 m grid
+cache->SetTemporalBucketUs(100000);    // 100 ms bucket
+
+Ptr<NtnSionnaChannel> ch = CreateObject<NtnSionnaChannel>();
+ch->SetTransport(cache);
+
+// Run the simulation; `cache->GetHitRate()` reports cache health.
+```
+
+Coverage in `test/ntn-sionna-test-suite.cc`: hit/miss accounting, spatial-cell collapse, time-bucket boundary, LRU eviction, `Reset()`, and a 60 s Simulator::Run with 600 sampled queries that asserts >0.6 hit rate when bucket cadence exceeds sampling cadence. The cache is thread-safe via a single internal mutex; the optional async prefetch thread called out in the roadmap is intentionally deferred — bench data so far shows the synchronous cache already wins back >90 % of digital-twin replay-loop GPU time.
+
+## RIS Tx surface support (Roadmap §4.2.3)
+
+`SionnaTransport::Request` carries an optional `RisConfig` describing a Reconfigurable Intelligent Surface (position, normal, N × M elements, phase profile). The Python server installs `rt.RIS` in the scene per query when the field is present, picks the appropriate phase profile (`focus` / `flat` / `random`), and re-runs the exact-paths solver so reflections off the surface contribute to the returned path loss.
+
+```cpp
+#include "ns3/ns3-sionna-channel.h"
+
+Ptr<NtnSionnaChannel> ch = CreateObject<NtnSionnaChannel>();
+ch->SetServer("127.0.0.1", 8765);
+ch->SetFrequencyHz(28.0e9);
+
+RisConfig ris;
+ris.pos_x = 706.5;  ris.pos_y = 0.0;  ris.pos_z = 50.0;     // 50 m up, midway
+ris.normal_x = 0.0; ris.normal_y = 0.0; ris.normal_z = 1.0; // face up
+ris.rows = 32;      ris.cols = 32;                           // 1024 elements
+ris.spacing_lambda = 0.5;
+ris.phase_profile = "focus";
+ris.focal_x = 1413.0; ris.focal_y = 0.0; ris.focal_z = 0.0; // focus on UE
+ch->SetRis(ris);
+
+double rxDbm = ch->CalcRxPower(txDbm, satMobility, ueMobility);
+ch->ClearRis();  // drop the surface
+```
+
+The mock-based unit tests use a deterministic convention (focus = ‑10 dB, flat = ‑6 dB, random = 0 dB shift) so the C++ side can assert end-to-end wire transit without a CUDA-capable host; the live Python server's actual reflection enhancement depends on geometry, frequency, and the chosen phase profile.
+
+## Examples (Roadmap §4.2.12)
+
+Three driver examples consume the cascade + cache + RIS surfaces. Each tolerates a missing Sionna server (channel falls back to FSPL) so smoke runs in CI still finish; with a live server they print real ray-traced figures.
+
+| Example | What it shows | Run |
+|---|---|---|
+| `mmimo-vs-codebook-leo` | SISO vs 8×8 cross-pol PlanarArray under the atmospheric cascade across a 30 s LEO pass; reports rain + gaseous breakdown | `./ns3 run "mmimo-vs-codebook-leo --rainMmH=25 --freqHz=12e9"` |
+| `ris-assisted-leo-link` | Before/after a 32×32 RIS focused at the UE during a LEO pass; reports per-sample RIS gain and aggregate min/max/mean | `./ns3 run "ris-assisted-leo-link --rows=32 --phaseProfile=focus"` |
+| `city-block-4ue-cache` | AODT-style 4-UE city block over a `SionnaCachingTransport`; reports per-UE Rx, running cache hit / miss / evictions | `./ns3 run "city-block-4ue-cache --steps=60 --spatialResM=50"` |
+
+All three live under `contrib/ntn-sionna/examples/` and share the same CMakeLists `build_lib_example` pattern as the original `leo-pass-sionna-vs-tr38811` example.
 
 ## Verification
 

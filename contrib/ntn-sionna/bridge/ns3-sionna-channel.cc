@@ -83,6 +83,37 @@ NtnSionnaChannel::SetTimeoutMs(uint32_t timeoutMs)
     udp->SetTimeoutMs(timeoutMs);
 }
 
+void
+NtnSionnaChannel::SetTxArray(const MimoArrayConfig& arr)
+{
+    m_defaultTxArray = arr;
+}
+
+void
+NtnSionnaChannel::SetRxArray(const MimoArrayConfig& arr)
+{
+    m_defaultRxArray = arr;
+}
+
+void
+NtnSionnaChannel::ClearArrays()
+{
+    m_defaultTxArray.reset();
+    m_defaultRxArray.reset();
+}
+
+void
+NtnSionnaChannel::SetRis(const RisConfig& ris)
+{
+    m_defaultRis = ris;
+}
+
+void
+NtnSionnaChannel::ClearRis()
+{
+    m_defaultRis.reset();
+}
+
 uint64_t
 NtnSionnaChannel::GetQueriesSent() const
 {
@@ -118,7 +149,10 @@ NtnSionnaChannel::DoCalcRxPower(double txPowerDbm,
     Vector pb = b->GetPosition();
 
     SionnaTransport::Request req{pa.x, pa.y, pa.z, pb.x, pb.y, pb.z,
-                                  m_freqHz, ++m_seq};
+                                  m_freqHz, ++m_seq,
+                                  m_defaultTxArray,
+                                  m_defaultRxArray,
+                                  m_defaultRis};
     double pl = std::numeric_limits<double>::infinity();
     if (m_transport != nullptr)
     {

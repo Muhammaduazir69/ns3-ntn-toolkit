@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace ns3
@@ -51,6 +52,18 @@ class NtnSionnaChannel : public PropagationLossModel
     void SetFrequencyHz(double freqHz);
     void SetTimeoutMs(uint32_t timeoutMs);
 
+    /// Default MIMO array descriptors (Roadmap §4.2.2). When set, every
+    /// outgoing query includes the descriptor; clear to revert to SISO.
+    void SetTxArray(const MimoArrayConfig& arr);
+    void SetRxArray(const MimoArrayConfig& arr);
+    void ClearArrays();
+
+    /// Default RIS descriptor (Roadmap §4.2.3). When set, every outgoing
+    /// query includes the RIS so the server adds an `rt.RIS` to the scene
+    /// before running the path solver. Clear to drop the surface.
+    void SetRis(const RisConfig& ris);
+    void ClearRis();
+
     /// Counters used by tests/examples. Mirror the transport's view, plus
     /// the channel-local fallback counter.
     uint64_t GetQueriesSent() const;
@@ -77,6 +90,10 @@ class NtnSionnaChannel : public PropagationLossModel
     Ptr<SionnaTransport> m_transport;
     mutable std::atomic<uint64_t> m_seq;
     mutable std::atomic<uint64_t> m_fallbacks;
+
+    std::optional<MimoArrayConfig> m_defaultTxArray;
+    std::optional<MimoArrayConfig> m_defaultRxArray;
+    std::optional<RisConfig> m_defaultRis;
 };
 
 } // namespace ns3

@@ -116,10 +116,51 @@ class SionnaPathLossEngine:
         self._tx_added = True
         self._rx_added = True
 
+    def _apply_ris(self, ris: dict | None) -> None:
+        """Install/refresh an rt.RIS (Roadmap §4.2.3) on the scene.
+
+        Sionna RT 2.0 exposed rt.RIS as the canonical reconfigurable-surface
+        API. If the installed Sionna build does not have it (e.g. ≤ 1.x),
+        skip silently — clients still see a finite path-loss response and
+        can downgrade their RIS gain assumption.
+        """
+        # Always remove previous instance for deterministic per-query state.
+        try:
+            self._scene.remove("ris")
+        except Exception:
+            pass
+        if ris is None:
+            return
+        if not hasattr(rt, "RIS"):
+            LOG.warning("Sionna RT version lacks rt.RIS — ignoring ris field")
+            return
+        try:
+            self._scene.add(rt.RIS(
+                name="ris",
+                position=[float(v) for v in ris.get("pos", [0.0, 0.0, 0.0])],
+                orientation=[0.0, 0.0, 0.0],  # caller controls via normal; default Z+
+                num_rows=int(ris.get("rows", 32)),
+                num_cols=int(ris.get("cols", 32)),
+                vertical_spacing=float(ris.get("spacing_lambda", 0.5)),
+                horizontal_spacing=float(ris.get("spacing_lambda", 0.5)),
+            ))
+            # Phase profile: focus, flat, random.
+            profile = str(ris.get("phase_profile", "focus")).lower()
+            focal = ris.get("focal", [0.0, 0.0, 0.0])
+            if profile == "focus" and hasattr(rt, "DiscretePhaseProfile"):
+                try:
+                    self._scene.get("ris").phase_profile = rt.DiscretePhaseProfile(
+                        focal_point=[float(v) for v in focal])
+                except Exception as ph_exc:  # pragma: no cover
+                    LOG.warning("RIS phase_profile=focus install failed: %s", ph_exc)
+        except Exception as exc:  # pragma: no cover
+            LOG.warning("RIS install failed: %s", exc)
+
     def query(self, tx_xyz: list[float], rx_xyz: list[float],
               freq_hz: float, los_only: bool = True,
               tx_array: dict | None = None,
-              rx_array: dict | None = None) -> dict[str, Any]:
+              rx_array: dict | None = None,
+              ris: dict | None = None) -> dict[str, Any]:
         t0 = time.perf_counter()
         self._set_freq(freq_hz)
         if tx_array is not None:
@@ -127,6 +168,12 @@ class SionnaPathLossEngine:
         if rx_array is not None:
             self._ensure_array("rx", rx_array)
         self._replace_endpoints(tx_xyz, rx_xyz)
+        # Install / refresh RIS on every call so geometry stays consistent
+        # with mobile satellites; cheap when ris dict is None.
+        self._apply_ris(ris)
+        # When RIS is present, force full multipath so the surface contributes.
+        if ris is not None:
+            los_only = False
         # `los_only=True` is the matched-scenario reference for TR 38.811's
         # closed-form FSPL — no reflections / refractions / diffractions.
         # Set False to get the full multipath superposition (Sionna's edge).
@@ -199,6 +246,7 @@ class UdpServer:
                     los_only=bool(req.get("los_only", True)),
                     tx_array=req.get("tx_array"),
                     rx_array=req.get("rx_array"),
+                    ris=req.get("ris"),
                 )
                 rsp["id"] = req.get("id", 0)
             except Exception as exc:

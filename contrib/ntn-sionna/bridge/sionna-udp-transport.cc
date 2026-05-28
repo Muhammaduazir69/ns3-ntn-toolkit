@@ -160,6 +160,19 @@ SionnaUdpTransport::Query(const Request& req) const
     {
         emitArray(req_os, "rx_array", *req.rx_array);
     }
+    if (req.ris.has_value())
+    {
+        const RisConfig& r = *req.ris;
+        req_os << ",\"ris\":{"
+               << "\"pos\":[" << r.pos_x << "," << r.pos_y << "," << r.pos_z << "],"
+               << "\"normal\":[" << r.normal_x << "," << r.normal_y << "," << r.normal_z << "],"
+               << "\"rows\":" << static_cast<unsigned>(r.rows)
+               << ",\"cols\":" << static_cast<unsigned>(r.cols)
+               << ",\"spacing_lambda\":" << r.spacing_lambda
+               << ",\"phase_profile\":\"" << r.phase_profile << "\""
+               << ",\"focal\":[" << r.focal_x << "," << r.focal_y << "," << r.focal_z << "]"
+               << "}";
+    }
     req_os << "}";
     const std::string reqStr = req_os.str();
     if (reqStr.size() >= 2048)

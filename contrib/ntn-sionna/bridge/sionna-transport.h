@@ -50,6 +50,39 @@ struct MimoArrayConfig
     std::string polarization{"V"};
 };
 
+/// RIS (Reconfigurable Intelligent Surface) descriptor matching Sionna RT 2.0
+/// `rt.RIS` arguments (Roadmap §4.2.3). When supplied on a Request the server
+/// instantiates one `rt.RIS` in the scene with the supplied geometry + phase
+/// profile, then runs the path solver with `los_only=False` so reflections off
+/// the surface contribute to the returned `path_loss_db`.
+///
+/// `phase_profile`:
+///   "focus" — focuses on `focal_xyz` (steered constructive overlay)
+///   "flat"  — zero-phase profile (mirror-like reflector)
+///   "random" — uniformly randomised phases (worst case for coherent boost)
+struct RisConfig
+{
+    /// Centre of the surface in metres (same frame as tx_x/y/z).
+    double pos_x{0.0};
+    double pos_y{0.0};
+    double pos_z{0.0};
+    /// Outward normal vector (unit length on the server side after parse).
+    double normal_x{0.0};
+    double normal_y{0.0};
+    double normal_z{1.0};
+    /// Number of reconfigurable elements along each axis of the surface.
+    uint16_t rows{32};
+    uint16_t cols{32};
+    /// Element spacing in wavelengths along each axis.
+    double spacing_lambda{0.5};
+    /// Phase profile mode: "focus", "flat", "random".
+    std::string phase_profile{"focus"};
+    /// Optional focal point used when phase_profile == "focus".
+    double focal_x{0.0};
+    double focal_y{0.0};
+    double focal_z{0.0};
+};
+
 /**
  * \ingroup ntn-sionna
  * \brief Abstract Sionna RT transport.
@@ -76,6 +109,12 @@ class SionnaTransport : public Object
         /// side; when absent the server falls back to its SISO defaults.
         std::optional<MimoArrayConfig> tx_array;
         std::optional<MimoArrayConfig> rx_array;
+        /// Optional RIS surface (Roadmap §4.2.3). When present, the server
+        /// adds an `rt.RIS` to the scene at the supplied (pos, normal) with
+        /// rows × cols reconfigurable elements and the given phase profile,
+        /// then runs the exact-paths solver so reflections off the surface
+        /// contribute to `path_loss_db`.
+        std::optional<RisConfig> ris;
     };
 
     struct Response
