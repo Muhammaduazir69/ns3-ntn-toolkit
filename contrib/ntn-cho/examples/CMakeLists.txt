@@ -33,3 +33,18 @@ build_lib_example(
     ${libntn-cho}
     ${libcore}
 )
+
+# Real UDP traffic handed over between two LEO sats by the TTE-aware CHO.
+build_lib_example(
+  NAME ntn-cho-handover-traffic
+  SOURCE_FILES ntn-cho-handover-traffic.cc
+  LIBRARIES_TO_LINK
+    ${libntn-cho}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libpoint-to-point}
+    ${libinternet}
+    ${libapplications}
+    ${libflow-monitor}
+)
