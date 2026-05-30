@@ -62,8 +62,8 @@ docker pull uzairdocker69/ns3-ntn-toolkit:latest
 docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
   ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
 
-# Interactive shell + expose the digital-twin (8000) and Grafana (3000) ports:
-docker run --rm -it -p 8000:8000 -p 3000:3000 \
+# Interactive shell + expose the digital-twin (8090) and Grafana (3000) ports:
+docker run --rm -it -p 8090:8090 -p 3000:3000 \
   uzairdocker69/ns3-ntn-toolkit:latest bash
 
 # Pin to a tagged release for reproducibility:
@@ -379,10 +379,10 @@ docker run --rm uzairdocker69/ns3-ntn-toolkit:2.0.0 \
   ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
 
 # 3. Or drop into an interactive shell with the standard ports exposed
-#    8000 → FastAPI digital-twin /predict/handover
+#    8090 → FastAPI digital-twin /predict/handover
 #    3000 → Grafana (when the observability stack is up)
 docker run --rm -it \
-  -p 8000:8000 -p 3000:3000 \
+  -p 8090:8090 -p 3000:3000 \
   -v "$PWD/out:/work/out" \
   uzairdocker69/ns3-ntn-toolkit:2.0.0 bash
 # inside the container:
