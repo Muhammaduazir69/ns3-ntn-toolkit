@@ -1,0 +1,70 @@
+# NYUSIM-140 reference path-loss values (Roadmap §4.3.4)
+#
+# Source: Rappaport et al., "Wireless Communications and Applications Above
+# 100 GHz: Opportunities and Challenges for 6G and Beyond", IEEE Access 7
+# (2019), Table II + Close-In (CI) free-space-reference path-loss model.
+#
+# Model:
+#   PL_CI(d_m) = FSPL(1m, f_GHz) + 10 * n * log10(d_m / 1m) + chi_sigma_dB
+#
+# FSPL(1m, 140 GHz) = 20*log10(1 m) + 20*log10(140 GHz) + 32.45 = 75.36 dB
+#
+# Path-loss exponents (n) and shadow standard deviation (sigma_dB) per
+# Rappaport 2019 + Sun et al., "A Novel Millimeter-Wave Channel Simulator
+# (NYUSIM) and Applications for 5G", IEEE Comm. Mag. 2017, extended to
+# sub-THz frequencies via the 140 GHz outdoor campaign measurements:
+#
+#   urban LOS    n = 2.0  sigma = 4.0 dB
+#   urban NLOS   n = 2.9  sigma = 9.0 dB
+#   suburban LOS  n = 2.0  sigma = 3.0 dB
+#   suburban NLOS n = 2.8  sigma = 8.0 dB
+#   indoor LOS   n = 1.7  sigma = 3.0 dB
+#   indoor NLOS  n = 3.0  sigma = 8.0 dB
+#
+# Reference values below use the deterministic CI predictor (chi_sigma = 0)
+# so calibration of the toolkit's path-loss model is direct: the residual
+# from this table reflects model mean error, not the stochastic shadow.
+#
+# Columns: scenario,freq_ghz,dist_m,pl_db,std_db,environment
+# scenario ∈ {los, nlos}
+# environment ∈ {urban, suburban, indoor}
+los,140,1,75.37,4.0,urban
+los,140,3,84.91,4.0,urban
+los,140,5,89.36,4.0,urban
+los,140,10,95.37,4.0,urban
+los,140,20,101.39,4.0,urban
+los,140,30,104.91,4.0,urban
+los,140,50,109.36,4.0,urban
+los,140,100,115.37,4.0,urban
+los,140,200,121.39,4.0,urban
+los,140,500,129.36,4.0,urban
+los,140,1000,135.37,4.0,urban
+nlos,140,1,75.37,9.0,urban
+nlos,140,3,89.21,9.0,urban
+nlos,140,5,95.65,9.0,urban
+nlos,140,10,104.27,9.0,urban
+nlos,140,20,113.00,9.0,urban
+nlos,140,30,118.06,9.0,urban
+nlos,140,50,124.55,9.0,urban
+nlos,140,100,133.17,9.0,urban
+nlos,140,200,141.90,9.0,urban
+nlos,140,500,153.45,9.0,urban
+nlos,140,1000,162.17,9.0,urban
+los,140,1,75.37,3.0,suburban
+los,140,10,95.37,3.0,suburban
+los,140,50,109.36,3.0,suburban
+los,140,100,115.37,3.0,suburban
+los,140,500,129.36,3.0,suburban
+nlos,140,1,75.37,8.0,suburban
+nlos,140,10,103.37,8.0,suburban
+nlos,140,50,122.95,8.0,suburban
+nlos,140,100,131.37,8.0,suburban
+nlos,140,500,150.95,8.0,suburban
+los,140,1,75.37,3.0,indoor
+los,140,5,87.25,3.0,indoor
+los,140,10,92.36,3.0,indoor
+los,140,20,97.48,3.0,indoor
+nlos,140,1,75.37,8.0,indoor
+nlos,140,5,96.34,8.0,indoor
+nlos,140,10,105.37,8.0,indoor
+nlos,140,20,114.40,8.0,indoor

@@ -38,6 +38,15 @@
 
 ---
 
+> **What's new in v2 (2026-05).** End-to-end CSV output-realism audit across
+> every example (signed LEO Doppler, 3GPP-bounded RSRQ, slant-range latency,
+> Ka link budgets, TR 36.777 NLOS floor, orbital SGP4 RRC, on-board O-RAN
+> autonomy) plus new cross-module examples that compose the contrib modules
+> over a real ns-3 data plane. See **[CHANGELOG.md](CHANGELOG.md)** and
+> **[CSV_REALISM_FIXES_2026-05.md](CSV_REALISM_FIXES_2026-05.md)**.
+
+---
+
 ## Try it in 30 seconds
 
 ### 🐳 Docker (recommended — full toolkit, no build, ~3.4 GB pull)
@@ -53,8 +62,8 @@ docker pull uzairdocker69/ns3-ntn-toolkit:latest
 docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
   ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
 
-# Interactive shell + expose the digital-twin (8000) and Grafana (3000) ports:
-docker run --rm -it -p 8000:8000 -p 3000:3000 \
+# Interactive shell + expose the digital-twin (8090) and Grafana (3000) ports:
+docker run --rm -it -p 8090:8090 -p 3000:3000 \
   uzairdocker69/ns3-ntn-toolkit:latest bash
 
 # Pin to a tagged release for reproducibility:
@@ -370,10 +379,10 @@ docker run --rm uzairdocker69/ns3-ntn-toolkit:2.0.0 \
   ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
 
 # 3. Or drop into an interactive shell with the standard ports exposed
-#    8000 → FastAPI digital-twin /predict/handover
+#    8090 → FastAPI digital-twin /predict/handover
 #    3000 → Grafana (when the observability stack is up)
 docker run --rm -it \
-  -p 8000:8000 -p 3000:3000 \
+  -p 8090:8090 -p 3000:3000 \
   -v "$PWD/out:/work/out" \
   uzairdocker69/ns3-ntn-toolkit:2.0.0 bash
 # inside the container:
@@ -473,6 +482,9 @@ Every contributed module ships with a numerical verification harness. Headline n
 ## Documentation
 
 - [INSTALL.md](INSTALL.md) — full setup, dependencies, GPU + Docker prerequisites, troubleshooting.
+- [CHANGELOG.md](CHANGELOG.md) — release notes; v2 realism audit + cross-module examples.
+- [CSV_REALISM_FIXES_2026-05.md](CSV_REALISM_FIXES_2026-05.md) — column-by-column CSV physics audit.
+- [EXAMPLE_AUDIT_2026-05.md](EXAMPLE_AUDIT_2026-05.md) — example-execution / data-plane audit.
 - [docs/ns3_ntn_toolkit_architecture.png](docs/ns3_ntn_toolkit_architecture.png) — high-level architecture diagram.
 - Per-module READMEs — see each repository in the *Bundled modules* table above.
 - [docs/UPSTREAM_NS3_README.md](docs/UPSTREAM_NS3_README.md) — original ns-3 README (build / test / run / app-store / contributing instructions for upstream ns-3).

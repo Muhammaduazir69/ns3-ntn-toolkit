@@ -91,8 +91,14 @@ class ThzNtnSpectrum : public Object
     {
         double centerFreqGHz;          ///< centre frequency in GHz
         double bandwidthGHz;           ///< usable bandwidth in GHz
-        double peakTransmittance;      ///< peak transmittance at zenith (0--1)
-        double maxZenithAttenuation_dB; ///< maximum one-way zenith attenuation in dB
+        // peakTransmittance and maxZenithAttenuation_dB are INDEPENDENT inputs,
+        // NOT inverses of each other (do not assume A = -10*log10(T)). The
+        // effective transmittance combines them multiplicatively in
+        // ComputeTransmittance(): T_eff = peakTransmittance * 10^(-atten/10) *
+        // freqFactor. peakTransmittance is the best-case in-band factor at band
+        // centre; maxZenithAttenuation_dB is the worst-case gaseous loss term.
+        double peakTransmittance;      ///< peak in-band transmittance at zenith (0--1)
+        double maxZenithAttenuation_dB; ///< worst-case one-way zenith gaseous attenuation (dB)
         bool suitableForSatGround;     ///< true if window is viable for satellite-ground links
     };
 

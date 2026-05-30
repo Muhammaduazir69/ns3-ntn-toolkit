@@ -4,6 +4,20 @@ set(source_files
     model/a2g-channel-tr36777.cc
     model/multi-layer-router.cc
     model/aeronautical-scenario.cc
+    # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
+    model/opensky-adsb-trace.cc
+    model/opensky-mobility-model.cc
+    # 4.4.2 — AIS maritime trace importer + mobility model (Roadmap §4.4.2)
+    model/ais-maritime-trace.cc
+    model/ais-mobility-model.cc
+    # 4.4.3 — HST high-speed train (TR 38.901 §7.5) mobility (Roadmap §4.4.3)
+    model/hst-trace.cc
+    model/hst-mobility-model.cc
+    # 4.4.7 — cross-layer slice-aware routing (Roadmap §4.4.7)
+    model/sagin-slice-router.cc
+    # 4.4.8 — HAPS trajectory CSV ingest (Roadmap §4.4.8)
+    model/haps-trajectory-trace.cc
+    model/haps-trajectory-mobility-model.cc
     helper/sagin-helper.cc
 )
 
@@ -13,6 +27,20 @@ set(header_files
     model/a2g-channel-tr36777.h
     model/multi-layer-router.h
     model/aeronautical-scenario.h
+    # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
+    model/opensky-adsb-trace.h
+    model/opensky-mobility-model.h
+    # 4.4.2 — AIS maritime trace importer + mobility model (Roadmap §4.4.2)
+    model/ais-maritime-trace.h
+    model/ais-mobility-model.h
+    # 4.4.3 — HST high-speed train (TR 38.901 §7.5) mobility (Roadmap §4.4.3)
+    model/hst-trace.h
+    model/hst-mobility-model.h
+    # 4.4.7 — cross-layer slice-aware routing (Roadmap §4.4.7)
+    model/sagin-slice-router.h
+    # 4.4.8 — HAPS trajectory CSV ingest (Roadmap §4.4.8)
+    model/haps-trajectory-trace.h
+    model/haps-trajectory-mobility-model.h
     helper/sagin-helper.h
 )
 
@@ -29,5 +57,6 @@ build_lib(
     ${libnetwork}
     ${libmobility}
     ${libpropagation}
+    ${libntn-slice}
   TEST_SOURCES ${test_sources}
 )

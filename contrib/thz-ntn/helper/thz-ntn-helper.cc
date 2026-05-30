@@ -421,9 +421,12 @@ ThzNtnHelper::CreateBeamforming(uint32_t numBeams) const
     NS_LOG_FUNCTION(this << numBeams);
 
     Ptr<ThzNtnBeamforming> bf = CreateObject<ThzNtnBeamforming>();
-    bf->SetAttribute("NumBeams", UintegerValue(numBeams));
+    // The configurable analog-beam count is exposed as the "NumAnalogBeams"
+    // attribute (there is no "NumBeams" attribute); setting the wrong name
+    // here used to abort at runtime for every caller.
+    bf->SetAttribute("NumAnalogBeams", UintegerValue(numBeams));
 
-    NS_LOG_INFO("Created ThzNtnBeamforming with " << numBeams << " beams");
+    NS_LOG_INFO("Created ThzNtnBeamforming with " << numBeams << " analog beams");
     return bf;
 }
 

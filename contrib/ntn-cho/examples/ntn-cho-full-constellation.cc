@@ -182,13 +182,24 @@ LinkBudget computeLinkBudget(double ueLat, double ueLon, const SatPosition& sat,
     double noisePower = -174.0 + 10.0 * std::log10(bwHz) + noiseFigure_dB;
     lb.sinr_dB = lb.rsrp_dBm - noisePower;
 
-    // Doppler shift
+    // Doppler shift. The radial velocity must carry a SIGN: positive while the
+    // satellite approaches (slant range shrinking -> positive frequency shift)
+    // and negative while it recedes, so the Doppler trace flips sign as the
+    // satellite passes overhead — a defining feature of a real LEO pass.
     double lat1 = ueLat * M_PI / 180.0;
     double dLat = (sat.lat - ueLat) * M_PI / 180.0;
     double dLon = (sat.lon - ueLon) * M_PI / 180.0;
-    double gd = 6371000.0 * std::sqrt(dLat*dLat + dLon*dLon*std::cos(lat1)*std::cos(lat1));
-    double vRadial = std::sqrt(sat.vx*sat.vx + sat.vy*sat.vy) * std::sin(gd / 6371000.0);
-    lb.doppler_Hz = vRadial / 299792458.0 * freqHz;
+    double dE = 6371000.0 * dLon * std::cos(lat1); // east displacement UE->sat
+    double dN = 6371000.0 * dLat;                  // north displacement UE->sat
+    double gd = std::sqrt(dE * dE + dN * dN);
+    double speed = std::sqrt(sat.vx * sat.vx + sat.vy * sat.vy);
+    // Project ground-track velocity (vx=east, vy=north) onto the UE->sat
+    // direction: v.d_hat > 0 means receding. Doppler sign is the opposite of
+    // the range rate.
+    double rangeRate = (gd > 1.0) ? (sat.vx * dE + sat.vy * dN) / gd : 0.0;
+    double sign = (rangeRate <= 0.0) ? 1.0 : -1.0;
+    double vRadial = speed * std::sin(gd / 6371000.0);
+    lb.doppler_Hz = sign * vRadial / 299792458.0 * freqHz;
 
     return lb;
 }
@@ -418,6 +429,7 @@ int main(int argc, char* argv[])
 
         // --- Per-UE processing ---
         double sumSinr = 0;
+        uint32_t servedUes = 0; // UEs with a valid serving satellite this step
         for (size_t ueIdx = 0; ueIdx < ues.size(); ueIdx++) {
             auto& ue = ues[ueIdx];
             auto& realisticUe = realisticUes[ueIdx];
@@ -592,8 +604,12 @@ int main(int argc, char* argv[])
                 if (uniDist(rng) < failProb) { success = false; if(failReason.empty()) failReason = "T304Timeout"; }
                 else { failReason = ""; }
 
-                double tos = t - ue.lastHoTime;
-                bool isPP = (targetSat == ue.lastSourceSat && tos < 10.0);
+                // Time-of-stay on the source cell. Before the first handover
+                // lastHoTime is a negative init sentinel; the UE has then been
+                // served since acquisition (~start of sim), so use t — never the
+                // sentinel, which would inflate ToS past the sim duration.
+                double tos = (ue.lastHoTime >= 0.0) ? (t - ue.lastHoTime) : t;
+                bool isPP = (ue.lastHoTime >= 0.0 && targetSat == ue.lastSourceSat && tos < 10.0);
 
                 if (success) { successHos++; } else { failedHos++; ue.hoFails++; }
                 if (isPP) { ppCount++; ue.pingPongs++; }
@@ -641,15 +657,31 @@ int main(int argc, char* argv[])
                 }
             }
 
-            sumSinr += ue.servingSinr;
+            // "Served" means a valid serving satellite AND a measurable link.
+            // When the serving sat drops below the horizon servingSinr falls to
+            // the -100 sentinel (set at the measurement step); such a UE is
+            // effectively searching, so exclude it from the CSV serving fields
+            // and the average — never emit the sentinel as a real value.
+            const bool ueServed =
+                (ue.servingSatId != UINT32_MAX && ue.servingSinr > -50.0);
+            if (ueServed) {
+                sumSinr += ue.servingSinr;
+                servedUes++;
+            }
 
-            // Write UE track (every 2s)
+            // Write UE track (every 2s). For an unserved UE (no satellite in
+            // view) emit empty serving fields rather than the UINT32_MAX / -100
+            // sentinels so the CSV never carries non-physical values.
             if (fmod(t, 2.0) < dt) {
                 ueTrackFile << std::fixed << std::setprecision(3) << t << "," << ue.id << ","
-                            << std::setprecision(6) << ue.lat << "," << ue.lon << ","
-                            << ue.servingCellId << "," << ue.servingSatId << ","
-                            << std::setprecision(2) << ue.servingSinr << ","
-                            << ue.mobilityType << "," << (doHo ? "handover" : "connected") << ","
+                            << std::setprecision(6) << ue.lat << "," << ue.lon << ",";
+                if (ueServed) {
+                    ueTrackFile << ue.servingCellId << "," << ue.servingSatId << ","
+                                << std::setprecision(2) << ue.servingSinr << ",";
+                } else {
+                    ueTrackFile << ",,,"; // serving_cell, serving_sat, sinr_dB empty
+                }
+                ueTrackFile << ue.mobilityType << "," << (doHo ? "handover" : (ueServed ? "connected" : "searching")) << ","
                             << std::setprecision(1) << ue.servingElevation << "\n";
 
                 if (!fUe) ueGeo << ",\n";
@@ -671,14 +703,14 @@ int main(int argc, char* argv[])
             kpiFile << std::fixed << std::setprecision(3) << t << ","
                     << totalHos << "," << successHos << "," << failedHos << "," << ppCount << ","
                     << std::setprecision(1) << rate << ","
-                    << std::setprecision(2) << sumSinr / numUes << ","
+                    << std::setprecision(2) << (servedUes > 0 ? sumSinr / servedUes : 0.0) << ","
                     << std::setprecision(4) << hoPerUeMin << "\n";
         }
 
         if (fmod(t, 60.0) < dt) {
             std::cout << "  t=" << (int)t << "s: " << totalHos << " HOs ("
                       << successHos << " ok, " << failedHos << " fail, " << ppCount << " pp)"
-                      << " avgSINR=" << std::fixed << std::setprecision(1) << sumSinr/numUes << " dB\n";
+                      << " avgSINR=" << std::fixed << std::setprecision(1) << (servedUes > 0 ? sumSinr/servedUes : 0.0) << " dB\n";
         }
     });  // end of periodic-callback lambda
 

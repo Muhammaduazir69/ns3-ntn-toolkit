@@ -22,6 +22,7 @@
 #ifndef ORAN_NTN_PHY_KPM_EXTRACTOR_H
 #define ORAN_NTN_PHY_KPM_EXTRACTOR_H
 
+#include "oran-ntn-kpm-canonical-ids.h"
 #include "oran-ntn-types.h"
 
 #include <ns3/object.h>
@@ -29,6 +30,8 @@
 
 #include <deque>
 #include <map>
+#include <string>
+#include <vector>
 
 namespace ns3
 {
@@ -74,6 +77,19 @@ class OranNtnPhyKpmExtractor : public Object
      * satellite bridge NTN metrics (elevation, Doppler, TTE).
      */
     E2KpmReport GetRealKpmReport(uint32_t ueId) const;
+
+    /**
+     * \brief Emit the canonical 10-metric KPM measurement vector for a UE
+     *        with WG3-aligned metric IDs and label set (Roadmap T8).
+     *
+     * Wraps GetRealKpmReport() in BuildCanonicalKpmMeasurements(); the
+     * resulting vector has the exact metric IDs FlexRIC's KPM SM emits,
+     * so an xApp written against FlexRIC can consume our KPM CSV with
+     * no remapping.
+     */
+    std::vector<oranntn::KpmMeasurement>
+    EmitCanonicalKpm(uint32_t ueId,
+                     const std::map<std::string, std::string>& labels) const;
 
     /**
      * \brief Get historical SINR values for a UE

@@ -1,163 +1,142 @@
 <h1 align="center">ntn-rrc</h1>
 
-<p align="center"><strong>3GPP Release-17/18/19 NTN-Specific RRC Procedures for ns-3.43</strong></p>
+<p align="center"><strong>3GPP Rel-17 NR-NTN RRC procedures for ns-3.43: SIB19 ephemeris broadcast, timing advance, pass-aware DRX, and UE location reporting.</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0--only-green.svg"/></a>
   <img src="https://img.shields.io/badge/3GPP-TS%2038.213%20%2F%20TS%2038.331%20%2F%20TS%2038.321-orange.svg"/>
-  <img src="https://img.shields.io/badge/procedures-7-purple.svg"/>
-  <img src="https://img.shields.io/badge/unit_tests-16%20PASS-success.svg"/>
+  <img src="https://img.shields.io/badge/unit_tests-suite%20ntn--rrc-success.svg"/>
 </p>
+
+> Part of **ns3-ntn-toolkit** — see the toolkit [README](../../README.md) and [INSTALL](../../INSTALL.md) for the full build, dependency, and module map.
 
 ---
 
-<p align="center">
-  <img src="docs/ntn_rrc_demo.gif" alt="module live demo" width="900"/>
-</p>
+## Overview
 
-## Why this module
+LEO non-terrestrial networks introduce one-way delays and Doppler trajectories that the terrestrial 5G RRC stack was never specified for: a single-leg propagation can exceed 17 ms at low elevation, common timing-advance values drift by tens of microseconds-per-second, and the assistance information broadcast in SIB1 says nothing about satellite ephemerides. The 3GPP NTN work item (Release-17 onward) closes these gaps with new IEs, new SIB types, and new MAC behaviours — but most ns-3 distributions still carry only the terrestrial RRC.
 
-LEO non-terrestrial networks introduce delays and Doppler trajectories that the terrestrial 5G RRC stack was never specified for: a single-leg propagation can exceed 17 ms at low elevation, common timing-advance values run into hundreds of microseconds-per-second of drift, and the assistance information broadcast in SIB1 is silent on satellite ephemerides. The 3GPP NTN work item (Release-17 onward) addresses these gaps with new IEs, new SIB types and new MAC behaviours — but most ns-3 distributions still carry only the terrestrial Release-15 RRC. `ntn-rrc` adds the seven NTN-specific RRC procedures as a clean, optional contrib module so that the RACH preambles arrive inside the receiver window and CHO timing decisions sit on top of a faithful RRC layer.
+`ntn-rrc` adds the NTN-specific RRC procedures as a clean, optional contrib module:
 
-## At a glance
+- **SIB19 ephemeris broadcast** — periodic broadcaster (default 160 ms) snapshots fresh satellite ephemeris (ECEF state vector), the common timing advance, and its drift rate into a fixed-layout 124-byte codec frame (TS 38.331 §6.3.2).
+- **Timing advance** — ephemeris-driven TA pre-compensation decomposed into a SIB19-broadcast **common** term plus a per-UE **UE-specific** residual; `2·d/c` for transparent payload, `d/c` for regenerative (TS 38.213 §4.2.2, TR 38.821 §6.3.3).
+- **Pass-aware DRX** — NR connected-mode DRX state machine (`Active / OnDuration / ShortSleep / LongSleep`) extended with an NTN `AwaitingPass` deep-sleep state between visibility windows (TS 38.321 + TR 38.821 §6.3.4).
+- **UE location report** — GNSS-assisted reporting in periodic / event-triggered / on-demand modes, with closed-form ECEF↔WGS-84 conversion (TS 38.331 §5.7.4).
 
-| Procedure | Spec reference | This module |
+## What's new in v2
+
+See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
+
+- **`ntn-rrc-full-stack` now flies an orbital `SatSGP4MobilityModel`** (driven from the bundled ISS TLE) instead of the old straight-line constant-velocity model that climbed out of the orbital shell over the pass. The UE now sits at ground level (Islamabad, lat 33.6844°, lon 73.0479°), and the beam-centre reference position is offset ~50 km north of the UE so the UE-specific TA residual (`ta_ue`) is genuinely non-zero rather than collapsing to 0.
+- **`ta_drift_rate` is now emitted in µs/s** — all CSV columns are renamed `*_us_per_s`. The underlying timing-advance model (`ComputeTaDriftRate()`) and the SIB19 codec ABI keep their native s/s convention; only the CSV presentation is scaled.
+- **`ntn-rrc-from-tle` ships a default ISS TLE** (`data/iss-zarya.tle`) and runs with zero arguments — it auto-discovers the bundled TLE from the build root, `contrib/`, or install layout and defaults the scenario start to the TLE epoch.
+
+## Models, helpers & key classes
+
+| Class / API | Header | Role |
 |---|---|---|
-| Timing-Advance pre-compensation | TS 38.213 §4.2.2 + TR 38.821 §6.3.3 | `model/ntn-timing-advance` |
-| Common-TA / UE-specific-TA decomposition | TS 38.331 NTN-Config IE | `model/ntn-timing-advance` |
-| TA drift-rate signalling | TR 38.821 §6.3.3 | `model/ntn-timing-advance` |
-| Payload modes (transparent / regenerative) | TR 38.821 §4.2 | `model/ntn-rrc-types.h` |
-| SIB19 broadcast (NTN assistance information) | TS 38.331 §6.3.2 | `model/ntn-sib19` |
-| GNSS-assisted RRC + UE Location Report | TS 38.331 §5.7.4 | `model/ntn-ue-location-report` |
-| NTN-DRX with pass-aware deep sleep | TS 38.321 + TR 38.821 §6.3.4 | `model/ntn-drx` |
+| `NtnTimingAdvance` | `model/ntn-timing-advance.h` | `ComputeTotalTa()`, `ComputeCommonTa()`, `ComputeUeSpecificTa()`, `ComputeTaDriftRate()` (s/s), `GetSlantRangeMetres()`. Consumes a UE + satellite `MobilityModel` pair and a reference (beam-centre) position. |
+| `EphemerisInfo`, `Sib19Content` | `model/ntn-sib19.h` | NTN-Config-r17 assistance data: ECEF ephemeris state vector, `taCommon`, drift rate/variation, UL-sync validity, K-offsets, payload mode, cell id. |
+| `Sib19Codec` | `model/ntn-sib19.h` | Fixed-layout little-endian serialise/parse; `kSerialisedBytes = 124`; rejects under-size buffers. |
+| `NtnSib19Broadcaster` | `model/ntn-sib19.h` | Periodic broadcaster (default 160 ms); re-derives content from mobility + TA each tick; `RefreshNow()`, `GetLatest()`, `Broadcast` trace. |
+| `NtnDrxStateMachine`, `NtnDrxConfig`, `DrxState` | `model/ntn-drx.h` | NR DRX cycles plus NTN `AwaitingPass`; `NotifyDataActivity()`, `NotifyNextPass()`, `GetTimeInState()`, `StateChange` trace; `NtnDrxConfig::IsValid()` rejects malformed cycles. |
+| `NtnUeLocationReporter`, `UeLocationReport`, `LocationReportMode` | `model/ntn-ue-location-report.h` | Periodic / event-triggered / on-demand GNSS reporting; `EcefToGeodeticWgs84()` / `GeodeticWgs84ToEcef()` (Heikkinen closed-form); `Report` trace; `ReportNow()`. |
+| `PayloadMode`, `TaReferenceFrame` | `model/ntn-rrc-types.h` | Transparent vs regenerative payload; TA reference frame. |
+| `NtnRrcHelper` | `helper/ntn-rrc-helper.h` | Façade: `SetPayloadMode()`, `SetReferencePosition()`, `InstallTimingAdvance()`, `InstallSib19Broadcaster()`, `InstallUeLocationReporter()`, `InstallDrx()`. |
 
-## What it does
+## Examples
 
-- **Timing-Advance pre-compensation** — `ComputeTotalTa()` returns `2·d/c` for transparent payload, `d/c` for regenerative; the common/UE-specific decomposition matches the SIB19-broadcast value plus per-UE residual, exactly as TS 38.331's NTN-Config IE prescribes. Drift rate is derived from a closed-form velocity projection (no Simulator-step finite differencing), saturating analytically at `2·v/c` as the satellite reaches its asymptote.
-- **SIB19 broadcaster** — periodic broadcaster (default 160 ms) snapshots fresh ephemeris and emits a 124-byte SIB19 codec frame. Round-trip serialise→parse is bit-faithful; truncated buffers are rejected.
-- **UE Location Report** — three reporting modes per TS 38.331 §5.7.4: periodic, event-triggered (move-distance threshold), and on-demand. Geodetic conversion (ECEF↔WGS-84) round-trips to <1 mm.
-- **NTN-DRX** — DRX state machine with `Active / OnDuration / ShortSleep / LongSleep` plus a pass-aware `AwaitingPass` deep-sleep state; `NotifyDataActivity()` forces a return to active.
-- **Helper façade** — `NtnRrcHelper` consumes any `MobilityModel` (typically `SatSGP4MobilityModel` from SNS3 fed by [`ntn-constellation`](https://github.com/Muhammaduazir69/ntn-constellation)).
+All four examples are built when `--enable-examples` is configured. Each block gives the `./ns3 run` form and the direct-binary form (binaries live under `build/contrib/ntn-rrc/examples/` as `ns3.43-<name>-default`).
 
-## Install & run
+### ntn-rrc-leo-pass
+
+Single-component demo: ephemeris-driven Timing Advance over a 600 s LEO pass (straight-line fly-over geometry), sampled once per second. Produces the classic NTN "smile" curve. A realistic UDP traffic plane is auto-injected so a `sim_health.csv` is also written.
 
 ```bash
-git clone https://github.com/Muhammaduazir69/ntn-rrc.git contrib/ntn-rrc
+./ns3 run "ntn-rrc-leo-pass --simTime=600 --transparent=true --csv=ntn-rrc-leo-pass.csv --outputDir=."
+```
+```bash
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-leo-pass-default \
+    --simTime=600 --transparent=true --csv=ntn-rrc-leo-pass.csv --outputDir=.
+```
+
+**Outputs:** `ntn-rrc-leo-pass.csv` (columns `time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate_us_per_s`); `sim_health.csv` in `--outputDir`.
+**Key args:** `--simTime` (s), `--transparent` (true=transparent / false=regenerative), `--csv` (output path), `--outputDir` (sim_health.csv directory).
+
+### ntn-rrc-full-stack
+
+End-to-end pass exercising all four NTN-RRC components at once — TA pre-comp, SIB19 broadcast, UE GNSS reporting, and the DRX state machine — over a real SGP4 orbit (bundled ISS TLE) with the UE on the ground in Islamabad. A realistic UDP traffic plane is auto-injected.
+
+```bash
+./ns3 run "ntn-rrc-full-stack --simTime=600 --transparent=true --passAwareDrx=true --prefix=ntn-rrc-full --outputDir=."
+```
+```bash
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-full-stack-default \
+    --simTime=600 --transparent=true --passAwareDrx=true --prefix=ntn-rrc-full --outputDir=.
+```
+
+**Outputs:** `<prefix>-ta.csv` (`time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate_us_per_s`), `<prefix>-sib19.csv` (`time_s,broadcast_seq,cell_id,sat_x,sat_y,sat_z,ta_common_us,drift_rate_us_per_s`), `<prefix>-ue.csv` (`time_s,sequence,lat_deg,lon_deg,alt_m`), `<prefix>-drx.csv` (`time_s,state,active_ms,onDuration_ms,shortSleep_ms,longSleep_ms,awaitingPass_ms`); `sim_health.csv` in `--outputDir`.
+**Key args:** `--simTime` (s), `--transparent` (payload mode), `--passAwareDrx` (enable `AwaitingPass` deep sleep), `--prefix` (CSV filename prefix), `--outputDir` (sim_health.csv directory).
+
+### ntn-rrc-from-tle
+
+Reads a real 3-line TLE, drives a SNS3 `SatSGP4MobilityModel` from it, and logs Timing Advance across a pass. Ships with a bundled ISS TLE (`data/iss-zarya.tle`) and **runs with no arguments** — `--tle` is optional. A realistic UDP traffic plane is auto-injected.
+
+```bash
+./ns3 run "ntn-rrc-from-tle"
+```
+```bash
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-from-tle-default
+```
+
+With an explicit TLE and scenario start:
+
+```bash
+./ns3 run "ntn-rrc-from-tle --tle=contrib/ntn-rrc/data/iss-zarya.tle --start=2024-01-01T12:00:00 --csv=ntn-rrc-from-tle.csv --outputDir=."
+```
+```bash
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-from-tle-default \
+    --tle=contrib/ntn-rrc/data/iss-zarya.tle --start=2024-01-01T12:00:00 --csv=ntn-rrc-from-tle.csv --outputDir=.
+```
+
+**Outputs:** `ntn-rrc-from-tle.csv` (columns `time_s,sat_x_m,sat_y_m,sat_z_m,slant_km,ta_total_us,ta_drift_rate_us_per_s`); `sim_health.csv` in `--outputDir`.
+**Key args:** `--tle` (3-line TLE file; defaults to bundled ISS TLE), `--start` (scenario start UTC, `YYYY-MM-DDTHH:MM:SS`; the `T` separator avoids whitespace truncation), `--ueLat` / `--ueLon` / `--ueAlt` (UE geodetic position), `--simTime` (s), `--step` (sample period s), `--transparent` (payload mode), `--csv` (output path), `--outputDir`.
+
+### ntn-rrc-drx-data-traffic
+
+Real UDP downlink to a UE whose receiver is gated by the NTN RRC procedures: SIB19 broadcast + live timing advance + connected-mode DRX. On every DRX `StateChange` the receive link opens (awake) or closes (asleep), so delivered goodput tracks the DRX on-fraction — the power-saving vs throughput trade-off, measured on a real data plane (P2P link, `RateErrorModel`, FlowMonitor). Compare `--drxOn=true` vs `--drxOn=false`.
+
+```bash
+./ns3 run "ntn-rrc-drx-data-traffic --simSeconds=60 --dataRateMbps=5 --drxOn=true"
+```
+```bash
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-drx-data-traffic-default \
+    --simSeconds=60 --dataRateMbps=5 --drxOn=true
+```
+
+**Outputs:** per-second console trace (elevation, slant range, TA, DRX state, goodput) and a summary line (PDR, average goodput, on-duty %). No CSV.
+**Key args:** `--simSeconds` (s), `--leoAltKm`, `--satSpeed` (m/s), `--freqGHz`, `--dataRateMbps` (offered load), `--packetBytes`, `--txPowerDbm`, `--antennaGainDb`, `--drxOn` (enable DRX gating), `--drxLongCycleMs`, `--drxOnDurationMs`, `--linkCapacityMbps`.
+
+## Build, run & test
+
+```bash
 ./ns3 configure --enable-examples --enable-tests
-./ns3 build ntn-rrc-leo-pass
-./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-leo-pass-debug \
-    --simTime=600 --csv=/tmp/ntn-rrc-pass.csv
+./ns3 build
 ```
 
-The CSV captures the classic NTN "smile" curve: TA peaks at ~17 ms when the satellite is on the horizon, drops to **`2 × 550 km / c = 3.668 ms`** at zenith, and rises again as the satellite passes.
+Run the unit-test suite:
 
-Programmatic use:
-
-```cpp
-#include "ns3/ntn-rrc-helper.h"
-#include "ns3/ntn-timing-advance.h"
-
-using namespace ns3;
-using namespace ns3::ntnrrc;
-
-NtnRrcHelper helper;
-helper.SetPayloadMode(PayloadMode::Transparent);
-helper.SetReferencePosition(Vector{0, 0, 0});
-
-Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ueMobility, satelliteMobility);
-
-Time taTotal     = ta->ComputeTotalTa();          // 2 * d / c
-Time taCommon    = ta->ComputeCommonTa();         // SIB19-broadcast value
-Time taResidual  = ta->ComputeUeSpecificTa();     // total - common
-double driftRate = ta->ComputeTaDriftRate();      // s/s, saturates at 2*v/c
+```bash
+./build/utils/ns3.43-test-runner-default --suite=ntn-rrc
 ```
 
-## Examples shipped
+The suite (`Type::UNIT`) covers the closed-form TA (transparent and regenerative), the common/UE-specific decomposition, the LEO drift-rate bound, SIB19 codec round-trip and truncation rejection, broadcaster cadence, ECEF↔WGS-84 round-trip, all three location-report modes, the standard DRX cycle and data-activity override, pass-aware deep sleep, and invalid-config rejection.
 
-| Binary | Purpose |
-|---|---|
-| `ntn-rrc-leo-pass` | Single-component demo: TA only over a 600 s LEO pass; emits the classic "smile" CSV. |
-| `ntn-rrc-full-stack` | All four NTN-RRC components running together over a pass; produces 4 CSVs (`ta` / `sib19` / `ue` / `drx`). |
-| `ntn-rrc-from-tle` | Reads a real 3-line TLE, drives `SatSGP4MobilityModel`, runs TA. Used by the integration test. |
+For full setup notes (SNS3 / satellite-module dependency, traffic helper, toolkit layout) see the toolkit [INSTALL.md](../../INSTALL.md).
 
-## Verification
-
-**ns-3 unit tests (16 cases, all passing):**
-
-| Test | Asserts |
-|---|---|
-| `NtnTimingAdvanceClosedFormTest` | `Total TA = 2·d/c` for transparent payload (10 ns tolerance). |
-| `NtnTimingAdvanceRegenerativeTest` | Regenerative payload halves TA (single-leg). |
-| `NtnTimingAdvance38821ReferenceTest` | TA at 600 km nadir matches TR 38.821 reference within 5 %. |
-| `NtnTimingAdvanceCommonAndUeSpecificTest` | `total = common + ue-specific`; off-centre UE has non-zero residual. |
-| `NtnTimingAdvanceDriftRateTest` | LEO drift rate < 50 µs/s (TR 38.821 bound). |
-| `Sib19CodecRoundTripTest` | Serialise → parse round-trips every SIB19 field (124 bytes). |
-| `Sib19CodecRejectsTruncatedTest` | Codec returns `false` on undersized buffer. |
-| `Sib19BroadcasterTickTest` | Broadcaster ticks every 160 ms snapshotting fresh ephemeris. |
-| `GeodeticConversionRoundTripTest` | ECEF↔WGS-84 round-trips for 5 sample points to <1 mm. |
-| `PeriodicLocationReporterTest` | Periodic mode emits one report per period. |
-| `EventTriggeredReporterTest` | Move-distance threshold respected (50 m/s × 100 m → ~7 reports/15 s). |
-| `OnDemandReporterTest` | OnDemand mode emits exactly when `ReportNow()` is called. |
-| `DrxStandardCycleTest` | DRX visits Active / OnDuration / ShortSleep / LongSleep; 1.56 % on-duty over 1 s. |
-| `DrxDataActivityTest` | `NotifyDataActivity()` forces the SM into `Active`. |
-| `DrxPassAwareTest` | Pass-aware mode enters `AwaitingPass` deep sleep when next pass is far. |
-| `DrxInvalidConfigTest` | Malformed configs (zero `onDuration`, `shortCycle < onDuration`) are rejected. |
-
-**Long-run integration (`--simTime=1800`):**
-
-| t (s) | TA (µs) | drift (µs/s) | Meaning |
-|---:|---:|---:|---|
-| 0 | 13 837 | −48.8 | sat 2 Mm west, approaching |
-| 263 | 3 669 | −0.3 | **zenith — drift sign flips here** |
-| 598 | 17 330 | +49.5 | departing, near asymptote |
-| 1798 | 77 785 | **+50.6** | = **2·v/c** at v = 7590 m/s (4-sig-fig match) |
-
-Drift saturating at exactly +50.60 µs/s confirms the closed-form derivation; periodic cadences were exact (SIB19 11 250 / 11 250, UE reports 360 / 360, TA samples 1 800 / 1 800 over the 30-minute window).
-
-**Python integration test** — pulls a Starlink TLE through CelesTrak, drives `SatSGP4MobilityModel` for 600 s, and compares each TA sample against an independent Skyfield reference. Last run: 121 samples, mean 6.6 µs / max 12.8 µs error, drift bias **0.02 µs/s**. Pass criterion (max error < 200 µs, drift bias < 0.5 µs/s) is met by ~16× margin.
-
-## Documentation
-
-- [INSTALL.md](INSTALL.md) — full setup notes including SNS3 dependencies.
-- 3GPP TR 38.821 v17.0.0 — *Solutions for NR to support non-terrestrial networks (NTN)*, Sections 6.3.3 / 6.3.4.
-- 3GPP TS 38.331 — *Radio Resource Control (RRC); Protocol specification*, Sections 5.7.4 / 6.3.2.
-- 3GPP TS 38.213 §4.2.2 — *Physical layer procedures for control*, Timing Advance.
-
-## Cite this work
-
-```bibtex
-@misc{uzair2026ntnrrc,
-  author = {Uzair, Muhammad},
-  title  = {ntn-rrc: 3GPP Release-17 NTN RRC Procedures for ns-3.43},
-  year   = {2026},
-  url    = {https://github.com/Muhammaduazir69/ntn-rrc}
-}
-```
-
-## Part of the ns3-ntn-toolkit
-
-| Module | Repo |
-|---|---|
-| Toolkit (umbrella) | [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) |
-| ntn-constellation | [ntn-constellation](https://github.com/Muhammaduazir69/ntn-constellation) |
-| **ntn-rrc** | this repo |
-| ntn-observability | [ntn-observability](https://github.com/Muhammaduazir69/ntn-observability) |
-| ns3-ai (fork) | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) |
-| ntn-sagin | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) |
-| ntn-slice | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) |
-| ntn-v2x | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) |
-| flexric-bridge | [flexric-bridge](https://github.com/Muhammaduazir69/flexric-bridge) |
-| ntn-sionna | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) |
-| ntn-digital-twin | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) |
-| ntn-cho | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) |
-| oran-ntn | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) |
-| thz-ntn | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) |
-
-## License
+## License & author
 
 GPL-2.0-only — see [LICENSE](LICENSE).
 
-## Acknowledgements
-
-3GPP RAN1 / RAN2 NTN work item (Release-17/18/19) · ns-3 core team · SNS3 maintainers · Brandon Rhodes (Skyfield reference for the drift validation).
+**Muhammad Uzair**, Independent Researcher.

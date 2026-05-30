@@ -174,9 +174,21 @@ main(int argc, char* argv[])
     std::cout << "\n  3. Beam Squint at Band Edges:\n";
     std::cout << "  " << std::string(58, '-') << "\n";
 
-    Ptr<ThzNtnBeamforming> beamforming = helper->CreateBeamforming(64);
-
     double bw = 20e9; // 20 GHz bandwidth
+
+    // Configure the beamforming engine from the actual array under study: the
+    // squint loss is derived internally from the configured centre frequency,
+    // signal bandwidth and element count.  Beam-squint compensation is left
+    // OFF here so the uncompensated wideband loss is visible.
+    Ptr<ThzNtnBeamforming> beamforming = helper->CreateBeamforming(64);
+    beamforming->SetAttribute("Frequency", DoubleValue(freq));
+    beamforming->SetAttribute("Bandwidth", DoubleValue(bw));
+    beamforming->SetAttribute("NumElements", UintegerValue(numElements * numElements));
+    beamforming->SetAttribute("EnableBeamSquintComp", BooleanValue(false));
+    // A 64-beam DFT codebook at the fine search level lets UpdateBeamTracking()
+    // snap each requested steer direction onto a real codebook beam.
+    beamforming->GenerateCodebook(64, ThzCodebookLevel::NARROW);
+
     std::vector<double> steerAngles = {0.0, 10.0, 20.0, 30.0, 45.0, 60.0};
 
     std::cout << std::setw(14) << "Steer Angle"
@@ -193,14 +205,19 @@ main(int argc, char* argv[])
 
     for (double steer : steerAngles)
     {
+        // Point the active beam at the requested direction; the engine snaps
+        // to the nearest codebook beam, whose actual steer angle drives squint.
+        beamforming->UpdateBeamTracking(steer, 0.0);
+        double actualSteer = beamforming->GetActiveBeamState().steerTheta_deg;
+
         double lowerEdge = beamforming->ComputeBeamSquintAngle_deg(
-            freq - bw / 2.0, freq, steer);
+            freq - bw / 2.0, freq, actualSteer);
         double upperEdge = beamforming->ComputeBeamSquintAngle_deg(
-            freq + bw / 2.0, freq, steer);
-        double squintLoss = beamforming->ComputeBeamSquintLoss_dB(bw, freq, steer);
+            freq + bw / 2.0, freq, actualSteer);
+        double squintLoss = beamforming->ComputeBeamSquintLoss_dB();
 
         std::cout << std::fixed << std::setprecision(2)
-                  << std::setw(14) << steer
+                  << std::setw(14) << actualSteer
                   << std::setprecision(3)
                   << std::setw(14) << lowerEdge
                   << std::setw(14) << upperEdge

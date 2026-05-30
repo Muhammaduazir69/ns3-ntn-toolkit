@@ -489,7 +489,12 @@ OranNtnSatBridge::ComputeFullLinkBudget(uint32_t ueId,
 
     report.rsrp_dBm = ComputeNtnRsrp(ueId, satId, beamId);
     report.sinr_dB = ComputeNtnSinr(ueId, satId, beamId);
-    report.rsrq_dB = report.sinr_dB - 3.0; // Simplified RSRQ approximation
+    // Bounded RSRQ from SINR: S/(S+I+N) per RE, clamped to 3GPP [-19.5,-3].
+    {
+        double sinrLin = std::pow(10.0, report.sinr_dB / 10.0);
+        report.rsrq_dB = std::max(-19.5, std::min(-3.0,
+                            10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
+    }
 
     // CQI mapping from SINR (simplified)
     if (report.sinr_dB < -6.0)

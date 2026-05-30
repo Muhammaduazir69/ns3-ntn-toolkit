@@ -16,6 +16,7 @@ build_lib_example(
   SOURCE_FILES ntn-rrc-full-stack.cc
   LIBRARIES_TO_LINK
     ${libntn-rrc}
+    ${libsatellite}
     ${libcore}
     ${libmobility}
     ${libntn-traffic}
@@ -37,4 +38,19 @@ build_lib_example(
     ${libinternet}
     ${libapplications}
     ${libpoint-to-point}
+)
+
+# Real downlink traffic gated by SIB19 + timing-advance + connected-mode DRX.
+build_lib_example(
+  NAME ntn-rrc-drx-data-traffic
+  SOURCE_FILES ntn-rrc-drx-data-traffic.cc
+  LIBRARIES_TO_LINK
+    ${libntn-rrc}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libpoint-to-point}
+    ${libinternet}
+    ${libapplications}
+    ${libflow-monitor}
 )

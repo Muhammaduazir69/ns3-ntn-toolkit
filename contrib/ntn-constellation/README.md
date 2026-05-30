@@ -1,6 +1,6 @@
-<h1 align="center">ntn-constellation</h1>
+# ntn-constellation
 
-<p align="center"><strong>Constellation Database, Live TLE Feeds and SGP4/SDP4 Propagation for 6G NTN Research</strong></p>
+> Walker constellation generation, SGP4 propagation, contact-graph scheduling/routing, and a TR 38.821 + Starlink calibration corpus for ns-3 6G NTN research. Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
@@ -10,40 +10,168 @@
   <img src="https://img.shields.io/badge/exporters-SNS3%20%E2%80%A2%20CesiumJS-success.svg"/>
 </p>
 
----
-
 <p align="center">
   <img src="docs/ntn_constellation_demo.gif" alt="module live demo" width="900"/>
 </p>
 
-## Why this module
+## Overview
 
-Reproducible NTN research requires three things that, separately, are easy and, together, are surprisingly painful: **fresh ephemerides** (today's TLEs, not last year's), a **propagator that an ns-3 simulation actually trusts** (SGP4/SDP4 with frame conversions that don't drift), and **export shapes** that drop into both the simulator (SNS3 scenario layout) and the visualiser (CesiumJS CZML). `ntn-constellation` is a pure-Python, tool-side companion that produces all three in one pass — pulling from CelesTrak or Space-Track, propagating with the canonical Vallado SGP4 reference, and emitting the exact files that `SatSGP4MobilityModel` and the in-toolkit 3D viewer already know how to consume. It does not modify the C++ ns-3 build; it produces inputs the existing simulator already understands.
+`ntn-constellation` provides the orbital-mechanics foundation for the toolkit: it
+generates LEO constellations, propagates them with high fidelity inside an ns-3
+simulation, and turns the resulting time-varying geometry into the link-up/link-down
+events that the rest of the data plane consumes. Everything lives in the
+`ns3::ntncon` namespace.
 
-## At a glance
+- **Walker-Delta / Walker-Star generator** — `WalkerConstellation` builds a full
+  constellation from a `WalkerConfig` (planes, satellites per plane, altitude,
+  inclination), emitting SGP4-parseable orbital state.
+- **SGP4 propagation** — `Sgp4MobilityModel` is an ns-3 `MobilityModel` that
+  propagates a satellite from a `TleRecord` (or `KeplerianElements`) using the
+  canonical Vallado SGP4/SDP4 reference, so position queries during
+  `Simulator::Run()` track real ephemerides.
+- **Contact-graph scheduling** — `ContactGraphScheduler` evaluates GSL (ground↔sat)
+  and ISL (sat↔sat) visibility over the simulation timeline and raises
+  `ContactEvent`s as links come up and go down.
+- **Contact-graph routing** — `ContactGraphRouter` turns the contact graph into
+  forwarding decisions across the time-varying topology.
+- **Calibration corpus** — `tr38821-corpus` (`Tr38821CorpusReader`,
+  `CalibrationHarness`) ships 3GPP TR 38.821 reference scenarios/link budgets plus
+  a Starlink-EU latency/station corpus to validate toolkit predictions against
+  published references.
 
-| Metric | Value |
-|---|---|
-| Built-in presets | **Starlink** (shells 1+2 + polar) · **OneWeb** · **Kuiper** · **Telesat Lightspeed** · **Iridium NEXT** |
-| Walker generators | `walker_delta` · `walker_star` (emit valid SGP4-parseable TLEs) |
-| Propagator backends | `sgp4` (Brandon Rhodes / Vallado) + `skyfield` cross-check |
-| ISL topology builders | k-NN with range cap · closed-form Walker +grid |
-| Live feeds | CelesTrak (no credentials) · Space-Track (`SPACETRACK_USER`/`PASS`) |
-| TLE cache | TTL-based, default 6 h, on-disk |
-| **24 h propagation, 66 sats, 1440 samples** | **0 NaN, 0.4 s wallclock** |
-| **W1→W2 vs Skyfield** (1800 s pass, STARLINK-1008) | **max 23.5 µs, drift 0.006 µs/s** |
-| **W1→W4 GAT next-hop accuracy** (60 sats, real Walker-Star geometry) | **90 %** |
+This module also ships a pip-installable Python companion (`ntn_constellation`) for
+the tool side — see [Python package](#python-package).
 
-## What it does
+## What's new in v2
 
-- 3GPP-compliant ephemeris pipeline: live CelesTrak / Space-Track fetch with on-disk TTL cache, robust TLE parser with checksum-aware records.
-- Six built-in named constellations and two Walker generators emitting valid SGP4-parseable TLEs (used as the input layer for every other toolkit module).
-- `Satellite` / `Constellation` API over Skyfield + raw `sgp4` for sub-millisecond per-tick propagation; geodetic subpoint, ECI state vector, ground-station elevation/azimuth/range.
-- ISL topology generation (`build_isl_topology` k-nearest with range cap; `grid_isl_topology_walker` closed-form +grid for Walker layouts) — verified zero edge churn over 24 h on a Walker-Star shell.
-- Two exporter sinks: `write_sns3_scenario` emits the exact `positions/{tles,isls,start_date,gw_positions,ut_positions}.txt` layout `SatSGP4MobilityModel` (SNS3) consumes, and `write_czml` emits sampled-position CesiumJS CZML for the in-toolkit 3D viewer.
+See [../../CHANGELOG.md](../../CHANGELOG.md) for the full toolkit changelog.
+
+- **New cross-module examples driving a REAL UDP data plane** via
+  `NtnRealisticTrafficHelper` (from the `ntn-traffic` module), so packets actually
+  traverse the time-varying topology instead of a static round-trip:
+  - **`ntn-constellation-walker-traffic`** — a Walker-Delta constellation whose ISL
+    connectivity is sampled every second from the `ContactGraphScheduler` and logged
+    alongside the live UDP flow.
+  - **`ntn-constellation-sgp4-mobility-traffic`** — a single SGP4-propagated LEO
+    pass; the ground station is auto-placed under the satellite's t=0 sub-point so a
+    real GSL up/down pass always occurs regardless of TLE epoch.
+
+## Models, helpers & key classes
+
+Derived from `model/*.h`:
+
+| Header | Key types | Role |
+|---|---|---|
+| `walker-constellation.h` | `WalkerConfig`, `WalkerConstellation` | Walker-Delta / Walker-Star constellation generation (planes, sats/plane, altitude, inclination). |
+| `sgp4-mobility-model.h` | `Sgp4MobilityModel` | ns-3 `MobilityModel` that propagates a satellite via SGP4/SDP4 during the simulation. |
+| `orbital-elements.h` | `TleRecord`, `KeplerianElements` | TLE / Keplerian element records consumed by the mobility model. |
+| `contact-graph-scheduler.h` | `ContactGraphScheduler`, `ContactEvent` | Computes GSL/ISL visibility and emits link up/down events over time. |
+| `contact-graph-router.h` | `ContactGraphRouter` | Routes over the time-varying contact graph. |
+| `tr38821-corpus.h` | `Tr38821CorpusReader`, `Tr38821Scenario`, `Tr38821LinkBudget`, `StarlinkLatencySample`, `StarlinkStation`, `CalibrationResidual` | TR 38.821 + Starlink calibration corpus and harness. |
+
+## Examples
+
+Built binaries land in `build/contrib/ntn-constellation/examples/` as
+`ns3.43-<NAME>-default`. Each can be launched through `./ns3 run` (from the repo
+root) or invoked directly.
+
+### ntn-constellation-walker-traffic
+
+A Walker-Delta constellation generated in-sim, with a real UDP data plane carried
+by `NtnRealisticTrafficHelper`. The `ContactGraphScheduler` is sampled every second
+to log live ISL connectivity changes alongside the flow.
+
+```bash
+# via ns3 (from repo root)
+./ns3 run "ntn-constellation-walker-traffic --simSeconds=120 --numPlanes=6 --satsPerPlane=11 --altKm=550 --inclinationDeg=53 --outputDir=results/walker"
+```
+
+```bash
+# direct binary
+./build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-walker-traffic-default \
+    --simSeconds=120 --numPlanes=6 --satsPerPlane=11 --altKm=550 \
+    --inclinationDeg=53 --islRangeCapKm=5000 --outputDir=results/walker
+```
+
+**Outputs:** `sim_health.csv` (packets_tx, … health counters) in `--outputDir`, plus
+a summary block printed to stdout:
+
+```
+# === ntn-constellation-walker-traffic summary ===
+#   GS-A=(lat=35,lon=-75)  GS-B=(lat=35,lon=15)  ISL cap=<N> km
+#   GSL up=<N> down=<N>  ISL up=<N> down=<N>
+```
+
+**Key args:** `--simSeconds`, `--numPlanes`, `--satsPerPlane`, `--altKm`,
+`--inclinationDeg`, `--islRangeCapKm`, `--outputDir`.
+
+### ntn-constellation-sgp4-mobility-traffic
+
+A single SGP4-propagated LEO satellite passing over a ground station, with a real
+UDP data plane and GSL up/down sampling. If `--gsLat`/`--gsLon` are not supplied, the
+ground station is auto-placed beneath the satellite's t=0 sub-point so a real GSL
+up+down pass always occurs.
+
+```bash
+# via ns3 (from repo root)
+./ns3 run "ntn-constellation-sgp4-mobility-traffic --simSeconds=600 --tle=contrib/ntn-rrc/data/iss-zarya.tle --outputDir=results/sgp4"
+```
+
+```bash
+# direct binary (pin a fixed ground site)
+./build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-sgp4-mobility-traffic-default \
+    --simSeconds=600 --tle=contrib/ntn-rrc/data/iss-zarya.tle \
+    --gsLat=33.6844 --gsLon=73.0479 --minElev=10 --outputDir=results/sgp4
+```
+
+**Outputs:** `sim_health.csv` in `--outputDir`, plus a summary block printed to
+stdout:
+
+```
+# === ntn-constellation-sgp4-mobility-traffic summary ===
+#   GSL up=<N>  down=<N>
+```
+
+**Key args:** `--simSeconds`, `--tle` (default: `contrib/ntn-rrc/data/iss-zarya.tle`),
+`--gsLat` / `--gsLon` (default: satellite t=0 sub-point), `--minElev`, `--outputDir`.
+
+### ntn-constellation-isl-routed-traffic
+
+Real ISL-routed packet forwarding `GS1 -> satA -> [ISL] -> satB -> GS2` over a
+point-to-point data plane with `FlowMonitor` instrumentation.
+
+```bash
+# via ns3 (from repo root)
+./ns3 run ntn-constellation-isl-routed-traffic
+```
+
+```bash
+# direct binary
+./build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-isl-routed-traffic-default
+```
+
+## Python package
+
+This module also ships a pip-installable Python companion, `ntn_constellation` —
+a pure-Python, tool-side pipeline for **fresh ephemerides**, **canonical SGP4/SDP4
+propagation**, and **export shapes** that drop into both the simulator (SNS3 scenario
+layout) and the CesiumJS 3D viewer. It does not modify the C++ ns-3 build; it
+produces inputs the simulator already understands.
+
+- Built-in presets: **Starlink** (shells 1+2 + polar) · **OneWeb** · **Kuiper** ·
+  **Telesat Lightspeed** · **Iridium NEXT**.
+- Walker generators (`walker_delta`, `walker_star`) emitting valid SGP4-parseable TLEs.
+- `Satellite` / `Constellation` API over Skyfield + raw `sgp4`; geodetic subpoint,
+  ECI state vector, ground-station elevation/azimuth/range.
+- ISL topology builders (`build_isl_topology` k-NN with range cap;
+  `grid_isl_topology_walker` closed-form +grid for Walker layouts).
+- Live feeds: CelesTrak (no credentials) and Space-Track
+  (`SPACETRACK_USER`/`SPACETRACK_PASS`), with a TTL-based on-disk TLE cache (default 6 h).
+- Exporters: `write_sns3_scenario` (SNS3 `positions/{tles,isls,start_date,gw_positions,ut_positions}.txt`)
+  and `write_czml` (CesiumJS CZML).
 - `ntn-fetch` CLI entry point for one-line scenario builds (preset or live).
 
-## Install & run
+Install and run:
 
 ```bash
 git clone https://github.com/Muhammaduazir69/ntn-constellation.git contrib/ntn-constellation
@@ -52,20 +180,14 @@ python3 -m venv .venv
 .venv/bin/pip install -e .[test]
 ```
 
-Live: current Starlink → SNS3 + Cesium
-
 ```bash
+# Live: current Starlink → SNS3 + Cesium
 .venv/bin/ntn-fetch starlink --out data/starlink-now \
     --max-sats 200 --czml --czml-duration-min 120 --czml-step-sec 30 -v
-```
 
-Preset (no internet): Kuiper Phase-1 Walker
-
-```bash
+# Preset (no internet): Kuiper Phase-1 Walker
 .venv/bin/ntn-fetch kuiper --out data/kuiper --isl-walker --czml
 ```
-
-Programmatic:
 
 ```python
 from datetime import datetime, timedelta, timezone
@@ -90,64 +212,50 @@ write_czml(constellation=c, start=when, duration=timedelta(hours=2),
            out_path="data/oneweb-sample/oneweb.czml")
 ```
 
-## Verification
+The Python side ships 10 unit tests (TLE parsing, preset generation, SGP4
+propagation, ISS visibility from Islamabad, ISL topology, SNS3 file layout) and is
+validated against an independent Skyfield reference (24 h / 66 sats / 1440 samples:
+0 NaN, 0.4 s wallclock; STARLINK-1008 1800 s pass: max 23.5 µs error, drift
+0.006 µs/s). See [INSTALL.md](INSTALL.md) for the full Python setup including
+CelesTrak/Space-Track environment variables.
 
-10 unit tests cover TLE parsing, preset generation, SGP4 propagation, ISS visibility from Islamabad, ISL topology, and SNS3 file layout. End-to-end pipeline numbers measured against an independent Skyfield reference:
+## Build, run & test
 
-| Check | Result |
-|---|---|
-| 24 h propagation, 66 sats, 1440 samples | 0 NaN, 0.4 s wallclock |
-| Orbital period (Walker-Star Starlink-shell-1) | **96.00 min** (TLE-line-2 nominal 95.6) |
-| Altitude bounds across 24 h | 542.9 – 554.8 km (drift end-vs-start +0.0 km) |
-| ISL 4-NN graph across 24 hourly snapshots | 132 directed edges every snapshot, every node degree 4 |
-| Live CelesTrak STARLINK-1008 vs Skyfield (600 s) | mean &#124;err&#124; **2.6 µs**, max 5.8 µs |
-| Extended pass (1800 s) | max &#124;err&#124; 23.5 µs, drift &#124;err&#124;/dt **0.006 µs/s** |
-| Real Walker-Star → PyG → GAT next-hop accuracy (60 sats) | **90 %** on real geometry |
+From the repository root:
 
-The single Walker-Star shell exhibits zero ISL edge churn over 24 h — expected analytically and confirmed by the propagator. The Skyfield-vs-SNS3 residual grows linearly at 0.006 µs/s (well under the 0.5 µs/s tolerance), so hour-long Starlink scenarios stay tightly aligned with ground-truth ephemerides.
+```bash
+# Configure & build
+./ns3 configure --enable-examples --enable-tests
+./ns3 build
 
-## Documentation
+# Run an example
+./ns3 run ntn-constellation-isl-routed-traffic
 
-- [INSTALL.md](INSTALL.md) — full setup with the CelesTrak/Space-Track environment variables.
-- Reference: B. Rhodes, *sgp4 — Python implementation of SGP4 by Vallado et al.*, https://pypi.org/project/sgp4/
-- 3GPP TR 38.821 §6.1 — Reference satellite parameters.
+# Run this module's test suite
+./test.py --suite=ntn-constellation
+```
 
-## Cite this work
+For prerequisites and the full toolkit build, see [../../INSTALL.md](../../INSTALL.md).
+
+## License & author
+
+GPL-2.0-only — see [LICENSE](LICENSE).
+
+**Muhammad Uzair**, Independent Researcher.
 
 ```bibtex
 @misc{uzair2026ntnconstellation,
   author = {Uzair, Muhammad},
-  title  = {ntn-constellation: Live TLE Feeds, SGP4/SDP4 Propagation and SNS3/CesiumJS Exporters for 6G NTN Research},
+  title  = {ntn-constellation: Walker Constellation Generation, SGP4 Propagation,
+            Contact-Graph Scheduling/Routing and a TR 38.821 Calibration Corpus
+            for 6G NTN Research},
   year   = {2026},
   url    = {https://github.com/Muhammaduazir69/ntn-constellation}
 }
 ```
 
-## Part of the ns3-ntn-toolkit
-
-This module is part of [**ns3-ntn-toolkit**](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) — a pre-integrated ns-3.43 distribution for 6G NTN research:
-
-| Module | Repo |
-|---|---|
-| Toolkit (umbrella) | [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) |
-| **ntn-constellation** | this repo |
-| ntn-rrc | [ntn-rrc](https://github.com/Muhammaduazir69/ntn-rrc) |
-| ntn-observability | [ntn-observability](https://github.com/Muhammaduazir69/ntn-observability) |
-| ns3-ai (fork) | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) |
-| ntn-sagin | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) |
-| ntn-slice | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) |
-| ntn-v2x | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) |
-| flexric-bridge | [flexric-bridge](https://github.com/Muhammaduazir69/flexric-bridge) |
-| ntn-sionna | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) |
-| ntn-digital-twin | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) |
-| ntn-cho | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) |
-| oran-ntn | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) |
-| thz-ntn | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) |
-
-## License
-
-GPL-2.0-only — see [LICENSE](LICENSE).
-
 ## Acknowledgements
 
-Brandon Rhodes (`sgp4`, Skyfield) · CelesTrak (Dr. T. S. Kelso) · Space-Track / 18th Space Defense Squadron · CesiumJS · pytroll (`pyorbital`) · ns-3 core team · SNS3 maintainers.
+Brandon Rhodes (`sgp4`, Skyfield) · CelesTrak (Dr. T. S. Kelso) · Space-Track / 18th
+Space Defense Squadron · CesiumJS · pytroll (`pyorbital`) · ns-3 core team · SNS3
+maintainers.

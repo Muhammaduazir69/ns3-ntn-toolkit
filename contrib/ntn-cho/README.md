@@ -1,91 +1,100 @@
-# ntn-cho — Conditional Handover for NTN in ns-3
+# ntn-cho
 
-`ntn-cho` is an ns-3 contributed module that implements
-**3GPP Release-17 Conditional Handover (CHO)** for **Non-Terrestrial
-Networks (NTN)**, with a focus on LEO satellite constellations. It
-ships four CHO algorithms (including a novel **Time-to-Exit
-(TTE)-aware** variant), an SGP4 orbit propagator, a Walker-Star
-constellation generator, and an mmWave+satellite channel adaptor built
-on top of the public mmWave-ns3 module.
+> Time-to-Exit (TTE)-aware 3GPP Rel-17 Conditional Handover for LEO satellite NTN, in ns-3.43. Part of the **ns3-ntn-toolkit** (ns-3.43) — see the toolkit [README](../../README.md) and [INSTALL](../../INSTALL.md).
 
 - ns-3 version: `release ns-3.43`
 - Version: `1.0.0`
 - License: GPL-2.0-only
-- Maintainer: Muhammad Uzair (ORCID 0009-0002-4104-2680)
+- Maintainer: Muhammad Uzair, Independent Researcher (ORCID 0009-0002-4104-2680)
 
-## Highlights
+## Overview
 
-- **TTE-aware CHO** reduces ping-pong handovers to **0 %** in a
-  5-seed Monte-Carlo campaign versus **47.64 %** for the event-A3
-  baseline and **56.51 %** for location-only CHO, while maintaining
-  **81.75 % ± 14.83 %** handover success (Paper 2, IEEE TAES, in
-  submission).
-- **3GPP-aligned state machine**: `CHO_CONFIGURED → CHO_EVALUATING →
-  CHO_EXECUTING → CHO_COMPLETED` with TS 38.331 §5.3.5 timers.
-- **SGP4 orbit propagation** validated against a Vallado reference
-  vector (RMSE < 150 m over 1 orbit, see `test/ntn-sgp4-test.cc`).
-- **Walker-Star constellation generator** with arbitrary
-  `(T, P, F)` configuration.
-- **Monte-Carlo harness** with Student's t 95 % CIs.
-- **12 example scripts** and **6 unit test suites**.
+`ntn-cho` implements **3GPP Release-17 Conditional Handover (CHO)** for **Non-Terrestrial Networks (NTN)**, with a focus on LEO satellite constellations where rapid beam-coverage changes drive frequent, often premature, handovers. The module adds a **Time-to-Exit (TTE)-aware** candidate selection that admits a target beam only when it will stay in coverage long enough to be worth the switch, alongside event-A3, location, and time triggers for comparison. It is built around a 3GPP-aligned CHO state machine, an orbit/beam predictor, and a 3GPP TR 38.811 NTN measurement model so that handover decisions fall out of live geometry rather than hardcoded scripts.
 
-## Quick start
+## What's new in v2
 
-```bash
-cd ns-3-dev
-git clone https://github.com/Muhammaduazir69/ntn-cho-framework contrib/ntn-cho
-./ns3 configure --enable-examples --enable-tests --enable-modules=ntn-cho
-./ns3 build
-./ns3 run "ntn-cho-scenario-a --tteThreshold=5.0 --RngRun=1"
-./ns3 test --suite=ntn-cho
-```
+See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full list.
 
-## Programmatic use
+- **Doppler is now SIGNED** — the shift flips from positive to negative across a LEO pass (previously magnitude-only), so approaching vs. receding geometry is modelled correctly.
+- **CSV sentinel hygiene** — no more `serving_sat=4294967295` or `sinr=-100` sentinel values leaking into `ue_tracks`, `handover_events`, or `kpi_timeseries`; `avg_sinr` now averages only currently-served UEs; and the first-handover `time_of_stay` is no longer inflated.
 
-```cpp
-#include "ns3/ntn-cho-module.h"
+## Models, helpers & key classes
 
-Ptr<NtnConstellationHelper> walker =
-    CreateObject<NtnConstellationHelper> ();
-walker->SetAttribute ("TotalSats", UintegerValue (66));
-walker->SetAttribute ("Planes",    UintegerValue (6));
-walker->SetAttribute ("Phasing",   UintegerValue (2));
-walker->SetAttribute ("AltitudeKm",DoubleValue (550));
-walker->Install ();
+Model (`model/`):
 
-Ptr<NtnTteCondHandoverAlgorithm> cho =
-    CreateObject<NtnTteCondHandoverAlgorithm> ();
-cho->SetAttribute ("TteThresholdS", DoubleValue (5.0));
-cho->SetAttribute ("HysteresisDb",  DoubleValue (2.0));
-```
+- `NtnChoAlgorithm` (`ntn-cho-algorithm.h`) — 3GPP Rel-17 CHO algorithm with TTE-aware candidate selection and the `CHO_CONFIGURED → CHO_EVALUATING → CHO_EXECUTING → CHO_COMPLETED` state machine; supports a3 / location / time / tte-aware triggers.
+- `NtnTteEstimator` (`ntn-tte-estimator.h`) — estimates Time-to-Exit for satellite beam coverage, per-candidate and in batch.
+- `NtnOrbitPredictor` (`ntn-orbit-predictor.h`) — predicts satellite/beam positions and coverage over time and reports visible satellites and best beams per UE position.
+- `NtnMeasurementModel` (`ntn-measurement-model.h`) — computes RSRP/SINR from satellite beams using the 3GPP TR 38.811 NTN channel scenarios.
+- `NtnAiInterface` (`ntn-ai-interface.h`) — ns3-ai shared-memory bridge exposing a candidate-cell observation/action space for AI-driven handover decisions.
 
-## What's in the module
+Helper (`helper/`):
 
-```
-model/       — TTE estimator, 4 CHO algos, SGP4, Walker-Star,
-               mmWave+sat channel, geometry helpers
-helper/      — constellation helper, CHO helper, mobility helper
-examples/    — 12 scenarios (scenario-a, scenario-b-mc, walker-star …)
-test/        — 6 suites: geometry, sgp4, cho-state, tte-monotonic …
-visualization/ — Python plotters for dwell/track/HO traces
-tools/       — Monte-Carlo runner (mc_runner.cc), CSV helpers
-```
+- `NtnChoHelper` (`ntn-cho-helper.h`) — top-level helper that wires up a CHO scenario (channel scenario, trigger type, carrier frequency) and reports aggregated KPI results.
+- `NtnRealisticMobility` (`ntn-realistic-mobility.h`) — generates UE populations with realistic per-class motion following 3GPP TR 38.811 §6.1.1.1 NTN UE classes, with built-in scenario profiles.
 
-## Reproducing the paper results
+## Examples
+
+All four examples build under `build/contrib/ntn-cho/examples/`. Each can be launched either through `./ns3 run` or directly via the built binary with `LD_LIBRARY_PATH=build/lib`.
+
+### ntn-cho-leo-basic
+
+Smoke test for the realistic event-driven path: spawns a few UEs, runs real UDP traffic through the ns-3 stack toward a remote host, and exercises the CHO algorithm on a 200 ms cadence so `Simulator::Run()` advances in proportion to `simTime`.
 
 ```bash
-cd papers/sim_runs
-./run_mc_sweep.sh          # 4 algos × 5 seeds = 20 ns-3 runs
-python3 build_figures.py   # regenerate all figures/*.pdf
+./ns3 run "ntn-cho-leo-basic --trigger=tte-aware --trafficProfile=mixed --simTime=120"
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-cho/examples/ns3.43-ntn-cho-leo-basic-default --trigger=tte-aware --trafficProfile=mixed --simTime=120
 ```
 
-Full methodology, equations, and result tables are in
-**Paper 2** (`papers/paper2_taes_tte_cho/main.tex`), targeted at
-IEEE TAES.
+Outputs: `sim_health.csv` (written via `NtnRealisticTrafficHelper::WriteHealthReport()`) in `--outputDir`.
+Key args: `simTime`, `scenario` (dense-urban|urban|suburban|rural), `trigger` (a3|location|tte-aware), `d1Threshold`, `qualityTh`, `tteMinimum`, `numUes`, `outputDir`, `trafficProfile` (nb-iot|embb|urllc|dt|mixed), `strict`.
+
+### ntn-cho-full-constellation
+
+Full Walker constellation NTN-CHO run: multi-beam satellites, proper initial serving assignment, calibrated TTE values and a realistic HO-failure model, with the four algorithms (a3 / location / time / tte-aware) selectable for comparison.
+
+```bash
+./ns3 run "ntn-cho-full-constellation --algorithm=tte-aware --numUes=50 --outputDir=/tmp/ntn-full"
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-cho/examples/ns3.43-ntn-cho-full-constellation-default --algorithm=tte-aware --numUes=50 --outputDir=/tmp/ntn-full
+```
+
+Outputs (in `--outputDir`): `handover_events.csv`, `measurements.csv`, `tte_computations.csv`, `satellite_tracks.csv`, `ue_tracks.csv`, `kpi_timeseries.csv`, `kpi_summary.txt`, the GeoJSON layers (`satellite_positions.geojson`, `ue_positions.geojson`, `beam_footprints.geojson`, `handover_events.geojson`), and `sim_health.csv` (via `NtnRealisticTrafficHelper`).
+Key args: `simTime`, `numUes`, `scenario`, `algorithm` (a3|location|time|tte-aware), `d1Threshold`, `qualityTh`, `tteMinimum`, `outputDir`, `rngRun`, `verbose`, `numPlanes`, `satsPerPlane`.
+
+### ntn-cho-handover-traffic
+
+Real UDP downlink to a ground UE that is handed over between two passing LEO satellites by the actual `NtnChoAlgorithm`. Each second the per-satellite SINR is computed from live geometry, fed to the algorithm, and the chosen satellite's PointToPoint link is opened (the other closed) — so the data plane follows the CHO decision and FlowMonitor shows the UDP flow surviving the handover.
+
+```bash
+./ns3 run "ntn-cho-handover-traffic --simSeconds=120 --tteMinSec=20 --dataRateMbps=10"
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-cho/examples/ns3.43-ntn-cho-handover-traffic-default --simSeconds=120 --tteMinSec=20 --dataRateMbps=10
+```
+
+Outputs: no CSV; prints FlowMonitor flow statistics (delivered goodput across the handover) to stdout.
+Key args: `simSeconds`, `leoAltKm`, `satSpeed`, `freqGHz`, `dataRateMbps`, `packetBytes`, `txPowerDbm`, `antennaGainDb`, `tteMinSec`, `linkCapacityMbps`.
+
+### ntn-realistic-mobility-demo
+
+Demonstrates the per-class realistic mobility generator: spawns one UE per 3GPP TR 38.811 §6.1.1.1 class and writes its trajectory to CSV for inspection/plotting.
+
+```bash
+./ns3 run "ntn-realistic-mobility-demo --outputDir=/tmp/mob_demo --simTime=600"
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-cho/examples/ns3.43-ntn-realistic-mobility-demo-default --outputDir=/tmp/mob_demo --simTime=600
+```
+
+Outputs: `mobility_trace.csv` in `--outputDir`.
+Key args: `outputDir`, `simTime`, `dt`, `rngRun`.
+
+## Build, run & test
+
+```bash
+./ns3 configure --enable-examples --enable-tests && ./ns3 build
+./build/utils/ns3.43-test-runner-default --suite=ntn-cho
+```
+
+The `ntn-cho` suite covers the CHO algorithm, the CHO state machine, and the NTN measurement model. See [INSTALL](../../INSTALL.md) for full toolkit setup.
 
 ## Citing
-
-If you use this module, please cite:
 
 ```bibtex
 @misc{uzair2026ntncho,
@@ -97,6 +106,8 @@ If you use this module, please cite:
 }
 ```
 
-## License
+## License & author
 
 GPL-2.0-only. See `LICENSE`.
+
+Author: Muhammad Uzair, Independent Researcher (ORCID 0009-0002-4104-2680).

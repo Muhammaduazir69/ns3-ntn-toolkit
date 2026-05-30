@@ -122,6 +122,30 @@ set(gym_interface_hdrs
         model/gym-interface/cpp/spaces.h
 )
 
+# Roadmap §3 T7 — gRPC/Triton inference contract.
+set(airan_inference_srcs
+        grpc/cpp/inference-channel-inproc.cc
+        grpc/cpp/inference-channel-tcp.cc
+        grpc/cpp/triton-model-config.cc
+        grpc/cpp/airan-messages.cc
+        grpc/cpp/airan-inference-server.cc
+        grpc/cpp/airan-inference-client.cc
+        grpc/cpp/airan-mock-runtime.cc
+)
+set(airan_inference_hdrs
+        grpc/cpp/inference-channel.h
+        grpc/cpp/inference-channel-inproc.h
+        grpc/cpp/inference-channel-tcp.h
+        grpc/cpp/triton-model-config.h
+        grpc/cpp/airan-messages.h
+        grpc/cpp/airan-inference-server.h
+        grpc/cpp/airan-inference-client.h
+        grpc/cpp/airan-mock-runtime.h
+)
+set(airan_test_sources
+        test/airan-inference-test-suite.cc
+)
+
 # protobuf_generate function is missing in some installations by package manager
 check_function_exists(protobuf_generate protobuf_generate_exists)
 if(${protobuf_generate_exists})
@@ -148,9 +172,16 @@ protobuf_generate(
 
 build_lib(
         LIBNAME ns3-ai-ntn
-        SOURCE_FILES ${msg_interface_srcs} ${gym_interface_srcs}
-        HEADER_FILES ${msg_interface_hdrs} ${gym_interface_hdrs}
+        SOURCE_FILES
+            ${msg_interface_srcs}
+            ${gym_interface_srcs}
+            ${airan_inference_srcs}
+        HEADER_FILES
+            ${msg_interface_hdrs}
+            ${gym_interface_hdrs}
+            ${airan_inference_hdrs}
         LIBRARIES_TO_LINK ${libcore} protobuf::libprotobuf
+        TEST_SOURCES ${airan_test_sources}
 )
 # ${libns3-ai-ntn} is set by build_lib; guard against empty
 if(TARGET ${libns3-ai-ntn})

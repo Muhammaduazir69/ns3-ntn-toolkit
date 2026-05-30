@@ -7,6 +7,7 @@
 #include "ns3/ntn-metric-schema.h"
 #include "ns3/ntn-netsimulyzer-exporter.h"
 #include "ns3/ntn-observability-helper.h"
+#include "ns3/ntn-repro-manifest.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 
@@ -220,6 +221,213 @@ class MetricSchemaStableTest : public TestCase
     }
 };
 
+class ReproManifestRoundTripTest : public TestCase
+{
+  public:
+    ReproManifestRoundTripTest()
+        : TestCase("Reproducibility manifest round-trips through JSON file")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string path = "/tmp/ntn-repro-manifest-test.json";
+        std::remove(path.c_str());
+
+        const char* argv[] = {"./ns3", "run", "oran-ntn-full-scenario",
+                              "--duration=600"};
+        ntnobs::NtnReproManifest m;
+        m.SetToolkitGitSha("deadbeef")
+            .SetNs3Version("ns-3.43")
+            .SetScenarioName("oran-ntn-full-scenario")
+            .SetScenarioDuration(600.0)
+            .SetRng(1, 7)
+            .SetTleEpoch("2026-05-22T00:00:00Z")
+            .AddNoradId(25544)
+            .AddNoradId(25545)
+            .SetConstellation("Walker-Star", 6, 11, 550.0, 53.0)
+            .SetSionna("2.0.1",
+                       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                       "aaaaaaa")
+            .SetHitranRelease("HITRAN-2024")
+            .SetItuRpyVersion("0.4.0")
+            .AddServiceModel("KPM", "v3.00")
+            .AddServiceModel("RC", "v1.03")
+            .SetCliArgv(4, const_cast<char**>(argv))
+            .AddExtra("scenario_note", "Q3 2026 sprint baseline");
+
+        NS_TEST_ASSERT_MSG_EQ(m.WriteJson(path), true, "manifest write");
+
+        ntnobs::NtnReproManifest loaded;
+        NS_TEST_ASSERT_MSG_EQ(ntnobs::NtnReproManifest::LoadJson(path, loaded),
+                              true,
+                              "manifest load");
+
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetToolkitGitSha(), "deadbeef", "git sha");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetScenarioName(),
+                              "oran-ntn-full-scenario",
+                              "scenario name");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetScenarioDuration(),
+                              600.0,
+                              "scenario duration");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetRngSeed(), 1u, "rng seed");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetRngRun(), 7u, "rng run");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetTleEpoch(),
+                              "2026-05-22T00:00:00Z",
+                              "tle epoch");
+        NS_TEST_ASSERT_MSG_EQ(loaded.GetNoradIds().size(), 2u, "norad size");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetNoradIds()[0], 25544u, "norad[0]");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetNoradIds()[1], 25545u, "norad[1]");
+        NS_TEST_EXPECT_MSG_EQ(loaded.HasConstellation(), true, "has const");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetConstellationName(),
+                              "Walker-Star",
+                              "const name");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetPlanes(), 6u, "planes");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetSatsPerPlane(), 11u, "sats per plane");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetAltitudeKm(), 550.0, "alt km");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetInclinationDeg(), 53.0, "inc deg");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetSionnaRtVersion(), "2.0.1", "sionna rt");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetHitranRelease(),
+                              "HITRAN-2024",
+                              "hitran");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetItuRpyVersion(), "0.4.0", "itu-rpy");
+        NS_TEST_ASSERT_MSG_EQ(loaded.GetServiceModels().size(),
+                              2u,
+                              "service models size");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetServiceModels()[0].first, "KPM", "sm[0]");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetServiceModels()[1].second,
+                              "v1.03",
+                              "sm[1].version");
+        NS_TEST_ASSERT_MSG_EQ(loaded.GetCliArgv().size(), 4u, "argv size");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetCliArgv()[2],
+                              "oran-ntn-full-scenario",
+                              "argv[2]");
+        NS_TEST_ASSERT_MSG_EQ(loaded.GetExtras().size(), 1u, "extras size");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetExtras()[0].first,
+                              "scenario_note",
+                              "extras key");
+    }
+};
+
+class ReproManifestSchemaHeaderTest : public TestCase
+{
+  public:
+    ReproManifestSchemaHeaderTest()
+        : TestCase("Manifest JSON declares schema name + version")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        ntnobs::NtnReproManifest m;
+        const std::string body = m.ToJson();
+        NS_TEST_EXPECT_MSG_NE(
+            body.find("\"schema\": \"ns3-ntn-toolkit/manifest\""),
+            std::string::npos,
+            "schema name present");
+        NS_TEST_EXPECT_MSG_NE(body.find("\"schema_version\": 1"),
+                              std::string::npos,
+                              "schema version present");
+        NS_TEST_EXPECT_MSG_EQ(body.front(), '{', "starts with {");
+        // body ends with closing-brace + newline
+        const auto trimmed = body.find_last_not_of(" \t\r\n");
+        NS_TEST_ASSERT_MSG_NE(trimmed, std::string::npos, "non-blank body");
+        NS_TEST_EXPECT_MSG_EQ(body[trimmed], '}', "ends with }");
+    }
+};
+
+class ReproManifestUnknownKeyTest : public TestCase
+{
+  public:
+    ReproManifestUnknownKeyTest()
+        : TestCase("Manifest parser ignores unknown top-level keys")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string body =
+            R"({
+              "schema": "ns3-ntn-toolkit/manifest",
+              "schema_version": 1,
+              "scenario": { "name": "x", "duration_s": 10, "rng_seed": 2, "rng_run": 3 },
+              "future_field": { "nested": [1, 2, "three"], "x": null, "y": true },
+              "extras": { "k": "v" }
+            })";
+        ntnobs::NtnReproManifest m;
+        NS_TEST_ASSERT_MSG_EQ(ntnobs::NtnReproManifest::ParseJson(body, m),
+                              true,
+                              "parse OK with unknown key");
+        NS_TEST_EXPECT_MSG_EQ(m.GetScenarioName(), "x", "scenario name");
+        NS_TEST_EXPECT_MSG_EQ(m.GetRngSeed(), 2u, "rng seed");
+        NS_TEST_EXPECT_MSG_EQ(m.GetRngRun(), 3u, "rng run");
+        NS_TEST_ASSERT_MSG_EQ(m.GetExtras().size(), 1u, "extras parsed");
+        NS_TEST_EXPECT_MSG_EQ(m.GetExtras()[0].second, "v", "extras value");
+    }
+};
+
+class ReproManifestMalformedRejectedTest : public TestCase
+{
+  public:
+    ReproManifestMalformedRejectedTest()
+        : TestCase("Manifest parser rejects malformed JSON")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        ntnobs::NtnReproManifest m;
+        NS_TEST_EXPECT_MSG_EQ(
+            ntnobs::NtnReproManifest::ParseJson("{ this is not json }", m),
+            false,
+            "garbage rejected");
+        NS_TEST_EXPECT_MSG_EQ(
+            ntnobs::NtnReproManifest::ParseJson("{\"schema\": ", m),
+            false,
+            "truncated rejected");
+        NS_TEST_EXPECT_MSG_EQ(
+            ntnobs::NtnReproManifest::ParseJson("not even an object", m),
+            false,
+            "non-object rejected");
+    }
+};
+
+class ReproManifestEscapeRoundTripTest : public TestCase
+{
+  public:
+    ReproManifestEscapeRoundTripTest()
+        : TestCase("Manifest round-trip preserves quotes, backslashes, "
+                   "newlines in strings")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string tricky =
+            "value with \"quotes\" and \\backslash\\ and \n newline";
+        ntnobs::NtnReproManifest m;
+        m.SetScenarioName(tricky).AddExtra("k", tricky);
+        const std::string body = m.ToJson();
+
+        ntnobs::NtnReproManifest loaded;
+        NS_TEST_ASSERT_MSG_EQ(ntnobs::NtnReproManifest::ParseJson(body, loaded),
+                              true,
+                              "parse tricky strings");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetScenarioName(),
+                              tricky,
+                              "scenario name preserved");
+        NS_TEST_ASSERT_MSG_EQ(loaded.GetExtras().size(), 1u, "extras size");
+        NS_TEST_EXPECT_MSG_EQ(loaded.GetExtras()[0].second,
+                              tricky,
+                              "extras value preserved");
+    }
+};
+
 class NtnObservabilityTestSuite : public TestSuite
 {
   public:
@@ -231,6 +439,13 @@ class NtnObservabilityTestSuite : public TestSuite
         AddTestCase(new InfluxFileSinkRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new NetSimulyzerJsonShapeTest, TestCase::Duration::QUICK);
         AddTestCase(new MetricSchemaStableTest, TestCase::Duration::QUICK);
+        AddTestCase(new ReproManifestRoundTripTest, TestCase::Duration::QUICK);
+        AddTestCase(new ReproManifestSchemaHeaderTest, TestCase::Duration::QUICK);
+        AddTestCase(new ReproManifestUnknownKeyTest, TestCase::Duration::QUICK);
+        AddTestCase(new ReproManifestMalformedRejectedTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new ReproManifestEscapeRoundTripTest,
+                    TestCase::Duration::QUICK);
     }
 };
 

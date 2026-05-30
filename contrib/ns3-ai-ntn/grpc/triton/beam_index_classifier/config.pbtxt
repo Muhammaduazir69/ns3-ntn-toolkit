@@ -1,0 +1,67 @@
+# Triton Inference Server model config (Roadmap §3 T7)
+# Model: beam_index_classifier
+# Maps RSRP-per-beam + angle hints to the best beam index. Mirrors the
+# WiNES-Lab beam-management dApp.
+
+name: "beam_index_classifier"
+platform: "tensorrt_plan"
+max_batch_size: 64
+default_model_filename: "model.plan"
+
+input [
+  {
+    name: "rsrp_dbm"
+    data_type: TYPE_FP32
+    dims: [ 64 ]
+  },
+  {
+    name: "beam_az_deg"
+    data_type: TYPE_FP32
+    dims: [ 64 ]
+  },
+  {
+    name: "beam_el_deg"
+    data_type: TYPE_FP32
+    dims: [ 64 ]
+  }
+]
+
+output [
+  {
+    name: "best_beam_id"
+    data_type: TYPE_UINT32
+    dims: [ 1 ]
+  },
+  {
+    name: "score"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+  },
+  {
+    name: "scores_top_k"
+    data_type: TYPE_FP32
+    dims: [ 4 ]
+  }
+]
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [ 16, 32 ]
+  max_queue_delay_microseconds: 100
+}
+
+parameters {
+  key: "INFERENCE_BUDGET_US"
+  value: { string_value: "500" }
+}
+
+parameters {
+  key: "TOOLKIT_OUTPUT_FIELD"
+  value: { string_value: "beam" }
+}

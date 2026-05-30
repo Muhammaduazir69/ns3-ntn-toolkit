@@ -1,0 +1,22 @@
+# EU Starlink ground stations measured in the latency corpus (Roadmap §4.4.11).
+# Lat/Lon are city-centre WGS-84 approximations to enable repeatable
+# geo-anchored simulation runs; PoP coordinates are the carrier-side
+# anchors documented in SatScope dashboards.
+#
+# Columns:
+#   station_id    : 3-letter code matching latency_samples.csv
+#   city          : human-readable city
+#   country       : ISO-2
+#   lat_deg
+#   lon_deg
+#   pop_lat_deg   : carrier-side PoP latitude
+#   pop_lon_deg
+station_id,city,country,lat_deg,lon_deg,pop_lat_deg,pop_lon_deg
+FRA,Frankfurt,DE,50.1109,8.6821,50.1109,8.6821
+AMS,Amsterdam,NL,52.3676,4.9041,52.3676,4.9041
+LON,London,GB,51.5074,-0.1278,51.5074,-0.1278
+MAD,Madrid,ES,40.4168,-3.7038,40.4168,-3.7038
+MIL,Milan,IT,45.4642,9.1900,45.4642,9.1900
+WAW,Warsaw,PL,52.2297,21.0122,52.2297,21.0122
+STH,Stockholm,SE,59.3293,18.0686,59.3293,18.0686
+IST,Istanbul,TR,41.0082,28.9784,41.0082,28.9784

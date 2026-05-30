@@ -218,6 +218,40 @@ struct A1Policy
 // ============================================================================
 
 /**
+ * \brief WG3-aligned conflict taxonomy (Roadmap §4.1.10).
+ *
+ * Per O-RAN.WG3 conflict-mitigation terminology three categories matter:
+ *   - DIRECT   two xApps target the same parameter on the same UE/cell
+ *   - INDIRECT two xApps target different parameters but in the same
+ *              resource family on the same gNB (e.g. PRB reservation vs
+ *              slice PRB share)
+ *   - IMPLICIT actions are coupled through a shared KPI; here flagged
+ *              when both target the same UE but the action types and
+ *              resource families differ
+ *   - UNKNOWN  classifier could not place the pair (kept so non-WG3
+ *              conflicts still log without losing taxonomy)
+ */
+enum class ConflictType : uint8_t
+{
+    UNKNOWN = 0,
+    DIRECT = 1,
+    INDIRECT = 2,
+    IMPLICIT = 3,
+};
+
+inline const char*
+ConflictTypeName(ConflictType c)
+{
+    switch (c)
+    {
+    case ConflictType::DIRECT:   return "direct";
+    case ConflictType::INDIRECT: return "indirect";
+    case ConflictType::IMPLICIT: return "implicit";
+    default:                     return "unknown";
+    }
+}
+
+/**
  * \brief Record of a conflict between two xApps
  */
 struct XappConflict
@@ -231,6 +265,7 @@ struct XappConflict
     uint32_t resourceId;           //!< Which specific resource
     std::string resolution;        //!< "priority", "merge", "reject_lower"
     uint32_t winnerId;             //!< Which xApp's action was executed
+    ConflictType conflictType{ConflictType::UNKNOWN}; //!< WG3 taxonomy (Roadmap §4.1.10)
 };
 
 // ============================================================================

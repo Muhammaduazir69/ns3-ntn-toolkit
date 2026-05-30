@@ -190,7 +190,12 @@ OranNtnPhyKpmExtractor::GetRealKpmReport(uint32_t ueId) const
         // Noise floor for 100 MHz BW: -174 + 10*log10(1e8) + NF ~ -174 + 80 + 7 = -87 dBm
         double noisePower_dBm = -87.0;
         report.rsrp_dBm = s.latestSinr_dB + noisePower_dBm;
-        report.rsrq_dB = s.latestSinr_dB - 3.0; // Simplified RSRQ estimate
+        // Bounded RSRQ from SINR: S/(S+I+N) per RE, clamped to 3GPP [-19.5,-3].
+        {
+            double sinrLin = std::pow(10.0, s.latestSinr_dB / 10.0);
+            report.rsrq_dB = std::max(-19.5, std::min(-3.0,
+                                10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
+        }
 
         // Spectral efficiency from MCS (approximate Shannon bound)
         // SE ~ log2(1 + 10^(SINR/10))
@@ -672,6 +677,15 @@ OranNtnPhyKpmExtractor::GetTrackedUeIds() const
         ids.push_back(kv.first);
     }
     return ids;
+}
+
+std::vector<oranntn::KpmMeasurement>
+OranNtnPhyKpmExtractor::EmitCanonicalKpm(
+    uint32_t ueId,
+    const std::map<std::string, std::string>& labels) const
+{
+    const E2KpmReport report = GetRealKpmReport(ueId);
+    return oranntn::BuildCanonicalKpmMeasurements(report, labels);
 }
 
 } // namespace ns3

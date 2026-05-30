@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Handover Control Policy",
+  "description": "O-RAN-SC A1 policy type 20008 — thresholds and offsets for HO xApps (HO Predict, TN-NTN Steering, CHO).",
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "object",
+      "properties": {
+        "ue_id":      {"type": "string"},
+        "cell_id":    {"type": "string"},
+        "plmn_id":    {"type": "string"}
+      }
+    },
+    "statement": {
+      "type": "object",
+      "properties": {
+        "trigger_event":   {"type": "string",
+                             "enum": ["A1", "A2", "A3", "A4", "A5", "B1", "B2",
+                                      "CondTrigger"]},
+        "hysteresis_dB":   {"type": "number"},
+        "time_to_trigger_ms": {"type": "integer", "minimum": 0},
+        "min_sinr_dB":     {"type": "number"},
+        "min_rsrp_dBm":    {"type": "number"},
+        "offset_dB":       {"type": "number"},
+        "min_tte_s":       {"type": "number", "minimum": 0,
+                             "description": "NTN-specific: minimum Time-to-Exit before handover"}
+      },
+      "required": ["trigger_event"]
+    }
+  },
+  "required": ["statement"]
+}

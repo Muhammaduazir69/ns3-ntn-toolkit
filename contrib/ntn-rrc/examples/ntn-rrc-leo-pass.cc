@@ -36,7 +36,7 @@ SampleTa(Ptr<NtnTimingAdvance> ta, std::ostream* out)
         *out << std::fixed << std::setprecision(6) << Simulator::Now().GetSeconds() << ","
              << total.GetMicroSeconds() << "," << common.GetMicroSeconds() << ","
              << residual.GetMicroSeconds() << "," << std::scientific << std::setprecision(3)
-             << drift << "\n";
+             << (drift * 1e6) << "\n"; // s/s -> us/s for the CSV column
     }
     Simulator::Schedule(Seconds(1.0), &SampleTa, ta, out);
 }
@@ -73,7 +73,7 @@ main(int argc, char* argv[])
     Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ueMob, satMob);
 
     std::ofstream out(csvPath);
-    out << "time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate\n";
+    out << "time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate_us_per_s\n";
     Simulator::ScheduleNow(&SampleTa, ta, &out);
     // ==== v2 realistic traffic plane (auto-injected) =====================
     NtnRealisticTrafficHelper _ntn_traffic;

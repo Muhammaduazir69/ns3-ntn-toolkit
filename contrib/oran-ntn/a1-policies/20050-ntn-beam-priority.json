@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NTN Beam Priority Policy (toolkit extension)",
+  "description": "ns3-ntn-toolkit policy type 20050 — per-beam priority hints for the Beam Hop xApp. Not a standard O-RAN-SC type; the type ID is in the toolkit-reserved 20050+ range.",
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "object",
+      "properties": {
+        "sat_id":  {"type": "string"},
+        "plane_id":{"type": "string"}
+      }
+    },
+    "statement": {
+      "type": "object",
+      "properties": {
+        "beam_priority": {"type": "array",
+                          "items": {"type": "object",
+                                    "properties": {
+                                      "beam_id": {"type": "integer", "minimum": 0},
+                                      "priority":{"type": "integer", "minimum": 0, "maximum": 255}
+                                    },
+                                    "required": ["beam_id", "priority"]}},
+        "min_dwell_ms":   {"type": "integer", "minimum": 0},
+        "max_skip_slots": {"type": "integer", "minimum": 0}
+      },
+      "required": ["beam_priority"]
+    }
+  },
+  "required": ["statement"]
+}

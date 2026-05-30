@@ -14,6 +14,7 @@
 
 #include "ns3/oran-ntn-a1-interface.h"
 #include "ns3/oran-ntn-e2-interface.h"
+#include "ns3/oran-ntn-kpm-canonical-ids.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-space-ric.h"
 #include "ns3/oran-ntn-xapp-beam-hop.h"
@@ -398,16 +399,43 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
     report.tte_s = tte;
     report.elevation_deg = elevation;
     report.doppler_Hz = doppler;
-    report.rsrq_dB = sinr - 3.0; // Simplified
+    // RSRQ = N·RSRP/RSSI. For a loaded cell this reduces to S/(S+I+N) per RE,
+    // i.e. SINR_lin/(1+SINR_lin), bounded to the 3GPP RSRQ range [-19.5,-3] dB.
+    // (The old `sinr - 3` produced physically-impossible positive RSRQ.)
+    {
+        double sinrLin = std::pow(10.0, sinr / 10.0);
+        report.rsrq_dB = std::max(-19.5, std::min(-3.0,
+                            10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
+    }
     report.cqi = static_cast<uint8_t>(std::max(0.0, std::min(15.0, sinr + 6.0)));
     report.throughput_Mbps = std::max(0.0, 10.0 * (1.0 + sinr / 30.0));
-    report.latency_ms = it->second->IsNtn() ? 20.0 : 5.0;
-    report.propagationDelay_ms = it->second->IsNtn() ? 3.7 : 0.1;
+    // Propagation delay from the actual slant range, derived from elevation for
+    // a LEO shell (h~600 km), instead of a single is_ntn constant. One-way
+    // user-plane latency = propagation + ~1 ms processing/scheduling.
+    if (it->second->IsNtn())
+    {
+        const double Re = 6371.0;
+        const double h = 600.0;
+        const double e = elevation * M_PI / 180.0;
+        const double slantKm =
+            Re * (std::sqrt(std::pow((Re + h) / Re, 2.0) - std::cos(e) * std::cos(e)) -
+                  std::sin(e));
+        report.propagationDelay_ms = slantKm / 299.792458; // km / (km/ms)
+        report.latency_ms = report.propagationDelay_ms + 1.0;
+    }
+    else
+    {
+        report.propagationDelay_ms = 0.05;
+        report.latency_ms = 4.0;
+    }
     report.beamId = 1;
     report.beamGain_dB = elevation * 0.3; // Simplified
-    report.prbUtilization = 0.5;
-    report.activeUes = 10;
-    report.cellThroughput_Mbps = 100.0;
+    // Cell-level load varies with time and cell so PRB/active-UE/throughput are
+    // not frozen constants. Deterministic (reproducible) pseudo-load.
+    const double phase = std::sin(Simulator::Now().GetSeconds() * 0.1 + gnbId * 0.7);
+    report.prbUtilization = std::max(0.05, std::min(0.98, 0.55 + 0.30 * phase));
+    report.activeUes = static_cast<uint32_t>(std::max(1.0, 12.0 + 6.0 * phase));
+    report.cellThroughput_Mbps = report.prbUtilization * 273.0 * 0.75; // util x PRB x Mbps/PRB
     // Assign slice based on UE modular grouping: eMBB=0, URLLC=1, mMTC=2
     report.sliceId = static_cast<uint8_t>(ueId % 3);
     // Slice-aware throughput and latency
@@ -453,7 +481,11 @@ OranNtnHelper::DefaultRcActionHandler(E2RcAction action)
     entry.targetGnb = action.targetGnbId;
     entry.targetUe = action.targetUeId;
     entry.confidence = action.confidence;
-    entry.success = true;
+    // Model the action outcome: a low-confidence decision is more likely to be
+    // rejected/ineffective. Tie success to the xApp's own reported confidence
+    // (>=0.5 applied) instead of hardcoding true, so failed_actions/conflicts
+    // in xapp_metrics reflect a realistic mix.
+    entry.success = (action.confidence >= 0.5);
     m_actionLog.push_back(entry);
 
     return true; // Accept all actions in simulation
@@ -483,8 +515,9 @@ OranNtnHelper::WriteAllMetrics(Ptr<OranNtnNearRtRic> ric) const
     // Write action log
     WriteActionLog(m_outputDir + "/action_log.csv");
 
-    // Write KPM dataset
+    // Write KPM dataset (wide legacy format + WG3-canonical long format).
     WriteKpmDataset(m_outputDir + "/kpm_dataset.csv");
+    WriteKpmDatasetCanonical(m_outputDir + "/kpm_canonical.csv");
 
     // Write per-xApp metrics including wall-clock decision latency percentiles.
     // Latency samples are collected by each xApp's DecisionCycle via
@@ -596,13 +629,31 @@ OranNtnHelper::WriteKpmDataset(const std::string& filename) const
             << r.latency_ms << "," << r.elevation_deg << "," << r.doppler_Hz << ","
             << r.propagationDelay_ms << "," << r.tte_s << "," << r.beamId << ","
             << r.beamGain_dB << "," << r.prbUtilization << "," << r.activeUes << ","
-            << r.cellThroughput_Mbps << "," << r.sliceId << ","
+            << r.cellThroughput_Mbps << "," << (int)r.sliceId << ","
             << r.sliceThroughput_Mbps << "," << r.sliceLatency_ms << ","
             << r.sliceReliability << "\n";
     }
 
     NS_LOG_INFO("OranNtnHelper: Wrote " << m_kpmDataset.size()
                 << " KPM records to " << filename);
+}
+
+void
+OranNtnHelper::WriteKpmDatasetCanonical(const std::string& filename) const
+{
+    // Stable label set for the v2.1 baseline scenario: 5QI 9 (eMBB
+    // default), single-slice S-NSSAI, PLMN 00101. Per-UE label routing is
+    // a 4.1.4 / DataRepository concern (Q3 sprint follow-up).
+    const std::map<std::string, std::string> baseLabels = {
+        {oranntn::label::kFiveQi, "9"},
+        {oranntn::label::kSnssai, "1-000001"},
+        {oranntn::label::kPlmn, "00101"},
+    };
+
+    std::ofstream ofs(filename);
+    oranntn::WriteCanonicalKpmCsv(m_kpmDataset, baseLabels, ofs);
+    NS_LOG_INFO("OranNtnHelper: Wrote " << (m_kpmDataset.size() * 10)
+                << " canonical KPM rows to " << filename);
 }
 
 } // namespace ns3

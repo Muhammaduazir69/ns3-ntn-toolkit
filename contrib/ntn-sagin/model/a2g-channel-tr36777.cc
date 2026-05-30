@@ -111,9 +111,19 @@ A2gChannelTr36777::PathLossDb(A2gScenario scenario, A2gLink link,
     {
         NS_LOG_WARN("fcGHz=" << fcGHz << " outside TR 36.777 validation band");
     }
-    LosCoeffs c = (link == A2gLink::LOS) ? GetLosCoeffs(scenario, hUtM)
-                                         : GetNlosCoeffs(scenario, hUtM);
-    return c.alpha + c.beta * std::log10(d3dM) + 20.0 * std::log10(fcGHz);
+    const double fcTermDb = 20.0 * std::log10(fcGHz);
+    const LosCoeffs los = GetLosCoeffs(scenario, hUtM);
+    const double losDb = los.alpha + los.beta * std::log10(d3dM) + fcTermDb;
+    if (link == A2gLink::LOS)
+    {
+        return losDb;
+    }
+    // TR 36.777 defines NLOS path loss as max(PL_LOS, PL'_NLOS): an obstructed
+    // link can never have LESS loss than the LOS reference. At short range the
+    // raw NLOS formula can dip below LOS, so apply the spec-mandated floor.
+    const LosCoeffs nl = GetNlosCoeffs(scenario, hUtM);
+    const double nlosDb = nl.alpha + nl.beta * std::log10(d3dM) + fcTermDb;
+    return std::max(losDb, nlosDb);
 }
 
 double

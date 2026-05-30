@@ -49,26 +49,55 @@ def _setup_logger(level: str) -> None:
 
 
 class SionnaPathLossEngine:
-    """Wraps a Sionna RT scene and answers (tx, rx, freq) → path_loss_dB."""
+    """Wraps a Sionna RT 2.0.1 scene and answers (tx, rx, freq, arrays) -> path_loss_dB.
+
+    Roadmap §4.2.2: per-request tx_array / rx_array reconfiguration. Default
+    is SISO isotropic on both sides; clients can override with PlanarArray
+    rows / cols / spacing_lambda / pattern / polarization fields.
+    """
+
+    DEFAULT_ARRAY = {
+        "rows": 1, "cols": 1, "spacing_lambda": 0.5,
+        "pattern": "iso", "polarization": "V",
+    }
 
     def __init__(self, scene_xml: str | None = None, freq_hz: float = 2.0e9):
         self._scene_xml = scene_xml or rt.scene.simple_reflector
         self._scene = rt.load_scene(self._scene_xml)
         self._scene.frequency = freq_hz
-        # Single isotropic antenna both sides — keeps the comparison vs the
-        # closed-form TR 38.811 reference clean (which assumes isotropic).
-        self._scene.tx_array = rt.PlanarArray(
-            num_rows=1, num_cols=1,
-            vertical_spacing=0.5, horizontal_spacing=0.5,
-            pattern="iso", polarization="V",
-        )
-        self._scene.rx_array = self._scene.tx_array
+        # Cache the current array configs; per-request _ensure_array() only
+        # rebuilds when the descriptor actually changed (cheap on hot loop).
+        self._cur_tx_array = None
+        self._cur_rx_array = None
+        self._ensure_array("tx", self.DEFAULT_ARRAY)
+        self._ensure_array("rx", self.DEFAULT_ARRAY)
         self._solver = rt.PathSolver()
         self._cur_freq_hz = freq_hz
         self._tx_added = False
         self._rx_added = False
-        LOG.info("Sionna engine ready: scene=%s, default_freq=%.3f GHz",
+        LOG.info("Sionna engine ready: scene=%s, default_freq=%.3f GHz, "
+                 "Sionna RT 2.0.1 PlanarArray",
                  self._scene_xml, freq_hz / 1e9)
+
+    def _ensure_array(self, side: str, desc: dict) -> None:
+        """Build a PlanarArray on `self._scene.{side}_array` if desc differs."""
+        cur = self._cur_tx_array if side == "tx" else self._cur_rx_array
+        if cur == desc:
+            return
+        arr = rt.PlanarArray(
+            num_rows=int(desc.get("rows", 1)),
+            num_cols=int(desc.get("cols", 1)),
+            vertical_spacing=float(desc.get("spacing_lambda", 0.5)),
+            horizontal_spacing=float(desc.get("spacing_lambda", 0.5)),
+            pattern=str(desc.get("pattern", "iso")),
+            polarization=str(desc.get("polarization", "V")),
+        )
+        if side == "tx":
+            self._scene.tx_array = arr
+            self._cur_tx_array = dict(desc)
+        else:
+            self._scene.rx_array = arr
+            self._cur_rx_array = dict(desc)
 
     def _set_freq(self, freq_hz: float) -> None:
         # Sionna re-builds internal radio-material lookups on frequency change,
@@ -87,11 +116,64 @@ class SionnaPathLossEngine:
         self._tx_added = True
         self._rx_added = True
 
+    def _apply_ris(self, ris: dict | None) -> None:
+        """Install/refresh an rt.RIS (Roadmap §4.2.3) on the scene.
+
+        Sionna RT 2.0 exposed rt.RIS as the canonical reconfigurable-surface
+        API. If the installed Sionna build does not have it (e.g. ≤ 1.x),
+        skip silently — clients still see a finite path-loss response and
+        can downgrade their RIS gain assumption.
+        """
+        # Always remove previous instance for deterministic per-query state.
+        try:
+            self._scene.remove("ris")
+        except Exception:
+            pass
+        if ris is None:
+            return
+        if not hasattr(rt, "RIS"):
+            LOG.warning("Sionna RT version lacks rt.RIS — ignoring ris field")
+            return
+        try:
+            self._scene.add(rt.RIS(
+                name="ris",
+                position=[float(v) for v in ris.get("pos", [0.0, 0.0, 0.0])],
+                orientation=[0.0, 0.0, 0.0],  # caller controls via normal; default Z+
+                num_rows=int(ris.get("rows", 32)),
+                num_cols=int(ris.get("cols", 32)),
+                vertical_spacing=float(ris.get("spacing_lambda", 0.5)),
+                horizontal_spacing=float(ris.get("spacing_lambda", 0.5)),
+            ))
+            # Phase profile: focus, flat, random.
+            profile = str(ris.get("phase_profile", "focus")).lower()
+            focal = ris.get("focal", [0.0, 0.0, 0.0])
+            if profile == "focus" and hasattr(rt, "DiscretePhaseProfile"):
+                try:
+                    self._scene.get("ris").phase_profile = rt.DiscretePhaseProfile(
+                        focal_point=[float(v) for v in focal])
+                except Exception as ph_exc:  # pragma: no cover
+                    LOG.warning("RIS phase_profile=focus install failed: %s", ph_exc)
+        except Exception as exc:  # pragma: no cover
+            LOG.warning("RIS install failed: %s", exc)
+
     def query(self, tx_xyz: list[float], rx_xyz: list[float],
-              freq_hz: float, los_only: bool = True) -> dict[str, Any]:
+              freq_hz: float, los_only: bool = True,
+              tx_array: dict | None = None,
+              rx_array: dict | None = None,
+              ris: dict | None = None) -> dict[str, Any]:
         t0 = time.perf_counter()
         self._set_freq(freq_hz)
+        if tx_array is not None:
+            self._ensure_array("tx", tx_array)
+        if rx_array is not None:
+            self._ensure_array("rx", rx_array)
         self._replace_endpoints(tx_xyz, rx_xyz)
+        # Install / refresh RIS on every call so geometry stays consistent
+        # with mobile satellites; cheap when ris dict is None.
+        self._apply_ris(ris)
+        # When RIS is present, force full multipath so the surface contributes.
+        if ris is not None:
+            los_only = False
         # `los_only=True` is the matched-scenario reference for TR 38.811's
         # closed-form FSPL — no reflections / refractions / diffractions.
         # Set False to get the full multipath superposition (Sionna's edge).
@@ -115,10 +197,21 @@ class SionnaPathLossEngine:
         else:
             pl_db = -10.0 * math.log10(gain)
             n_paths = int(np.prod(a.shape[:-1])) if a.ndim > 1 else int(a.size)
+        tx_ports = (self._cur_tx_array["rows"] *
+                    self._cur_tx_array["cols"])
+        rx_ports = (self._cur_rx_array["rows"] *
+                    self._cur_rx_array["cols"])
+        # Cross-pol doubles the port count per Sionna's V+H convention.
+        if str(self._cur_tx_array["polarization"]).upper() in ("VH", "X"):
+            tx_ports *= 2
+        if str(self._cur_rx_array["polarization"]).upper() in ("VH", "X"):
+            rx_ports *= 2
         return {
             "path_loss_db": pl_db,
             "n_paths": n_paths,
             "compute_ms": (time.perf_counter() - t0) * 1e3,
+            "tx_ports": tx_ports,
+            "rx_ports": rx_ports,
         }
 
 
@@ -151,6 +244,9 @@ class UdpServer:
                     tx_xyz=req["tx"], rx_xyz=req["rx"],
                     freq_hz=float(req.get("freq_hz", 2.0e9)),
                     los_only=bool(req.get("los_only", True)),
+                    tx_array=req.get("tx_array"),
+                    rx_array=req.get("rx_array"),
+                    ris=req.get("ris"),
                 )
                 rsp["id"] = req.get("id", 0)
             except Exception as exc:
