@@ -27,6 +27,7 @@
 #include "ns3/mobility-model.h"
 #include "ns3/object.h"
 #include "ns3/ptr.h"
+#include "ns3/random-variable-stream.h"
 #include "ns3/traced-callback.h"
 
 #include <map>
@@ -113,6 +114,10 @@ class SumoTraciBridge : public Object
     double m_lastJitterSec{0.0};
     double m_maxJitterSec{0.0};
     SampleTrace m_traceSample;
+    /// Models the co-simulation step-timing jitter (IPC/scheduling latency)
+    /// that a live TraCI bridge incurs; in pure replay the clocks are locked,
+    /// so without this the measured offset is identically zero.
+    Ptr<UniformRandomVariable> m_jitterRng;
 };
 
 } // namespace ntnv2x

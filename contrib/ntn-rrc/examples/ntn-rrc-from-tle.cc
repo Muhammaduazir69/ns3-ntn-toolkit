@@ -7,7 +7,7 @@
 // log NtnTimingAdvance values across a pass.
 //
 // Output CSV columns:
-//   time_s, sat_x_m, sat_y_m, sat_z_m, slant_km, ta_total_us, ta_drift_rate
+//   time_s, sat_x_m, sat_y_m, sat_z_m, slant_km, ta_total_us, ta_drift_rate_us_per_s
 
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/core-module.h"
@@ -81,7 +81,7 @@ SampleStep(Ptr<NtnTimingAdvance> ta,
     *csv << std::fixed << std::setprecision(3) << Simulator::Now().GetSeconds() << ","
          << std::setprecision(2) << p.x << "," << p.y << "," << p.z << "," << std::setprecision(3)
          << slant << "," << static_cast<long long>(taTotalUs) << "," << std::scientific
-         << std::setprecision(3) << drift << "\n";
+         << std::setprecision(3) << (drift * 1e6) << "\n"; // s/s -> us/s
     Simulator::Schedule(step, &SampleStep, ta, sat, csv, step, stopAt);
 }
 
@@ -186,7 +186,7 @@ main(int argc, char* argv[])
     Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ueMob, satMob);
 
     std::ofstream csv(csvPath);
-    csv << "time_s,sat_x_m,sat_y_m,sat_z_m,slant_km,ta_total_us,ta_drift_rate\n";
+    csv << "time_s,sat_x_m,sat_y_m,sat_z_m,slant_km,ta_total_us,ta_drift_rate_us_per_s\n";
     Simulator::ScheduleNow(&SampleStep, ta, satMob, &csv, Seconds(stepSec),
                            Seconds(simTimeSec));
 

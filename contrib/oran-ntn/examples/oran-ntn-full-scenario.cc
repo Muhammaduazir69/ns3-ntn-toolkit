@@ -85,6 +85,10 @@ class KpmGenerator
     {
     }
 
+    /// Route per-UE KPM to the on-board Space-RICs too, so that during a feeder
+    /// outage they have live measurements to make autonomous decisions on.
+    void SetSpaceRics(std::vector<Ptr<OranNtnSpaceRic>>* sr) { m_spaceRics = sr; }
+
     void GenerateKpmReports()
     {
         double t = Simulator::Now().GetSeconds();
@@ -126,6 +130,30 @@ class KpmGenerator
             m_helper->InjectKpmReport(neighbor1, ue, nSinr1, -120.0 + nElev1 * 0.5,
                                        nTte1, nElev1, nDoppler1);
 
+            // Feed the on-board Space-RIC of the serving sat (if autonomous):
+            // the serving report plus a candidate on a different beam let the
+            // autonomous control loop trigger handovers when the link degrades.
+            if (m_spaceRics && servingSat >= 1 && servingSat <= m_spaceRics->size())
+            {
+                Ptr<OranNtnSpaceRic> sric = (*m_spaceRics)[servingSat - 1];
+                if (sric && sric->IsAutonomous())
+                {
+                    E2KpmReport sr{};
+                    sr.timestamp = t; sr.gnbId = servingSat; sr.isNtn = true;
+                    sr.ueId = ue; sr.sinr_dB = sinr; sr.rsrp_dBm = rsrp;
+                    sr.tte_s = tte; sr.elevation_deg = elevation;
+                    sr.doppler_Hz = doppler; sr.beamId = servingSat;
+                    sric->ProcessLocalKpm(sr);
+                    // A neighbour candidate on a different beam.
+                    E2KpmReport cand{};
+                    cand.timestamp = t; cand.gnbId = neighbor1; cand.isNtn = true;
+                    cand.ueId = ue + m_numUes; cand.sinr_dB = nSinr1;
+                    cand.tte_s = nTte1; cand.elevation_deg = nElev1;
+                    cand.beamId = neighbor1;
+                    sric->ProcessLocalKpm(cand);
+                }
+            }
+
             if (ue % 3 == 0)
             {
                 uint32_t neighbor2 = ((servingSat + 1) % m_numSats) + 1;
@@ -156,6 +184,7 @@ class KpmGenerator
     uint32_t m_numSats;
     uint32_t m_numTnGnbs;
     uint32_t m_numUes;
+    std::vector<Ptr<OranNtnSpaceRic>>* m_spaceRics{nullptr};
 };
 
 // ============================================================================
@@ -325,23 +354,45 @@ main(int argc, char* argv[])
     // ---- Start KPM feed ----
     std::cout << "[7/7] Starting KPM feed simulation..." << std::endl;
     KpmGenerator kpmGen(helper, totalSats, params.numTnGnbs, params.numUes);
+    if (params.enableSpaceRic)
+    {
+        kpmGen.SetSpaceRics(&spaceRics);
+    }
     Simulator::Schedule(Seconds(1.0), &KpmGenerator::GenerateKpmReports, &kpmGen);
 
     // ---- Schedule feeder link outage event ----
     if (params.enableSpaceRic)
     {
-        // Outage for plane 0 satellites (satellites 0-10) at t=200s for 30s
+        // The feeder-link outage is the only trigger of Space-RIC autonomy, so
+        // it must fall inside the run. For short (smoke) runs where the default
+        // 200 s start would never fire, scale the outage to ~30% of duration so
+        // space_ric_metrics is always populated.
+        double outageStart = params.feederLinkOutageStart;
+        double outageDur = params.feederLinkOutageDuration;
+        if (outageStart + outageDur >= params.duration)
+        {
+            outageStart = params.duration * 0.3;
+            outageDur = std::min((double)params.feederLinkOutageDuration,
+                                 params.duration * 0.3);
+        }
+        // Regional gateway outage: the first ~3 planes lose their feeder link.
+        // Spanning several planes (rather than just plane 0) ensures some of
+        // the satellites running autonomously are also serving UEs at the end
+        // of a pass, so the on-board control loop actually issues autonomous
+        // handover/beam decisions (not just accrues autonomous time).
+        const uint32_t outageEndSat =
+            std::min(totalSats, 3u * params.satsPerPlane) - 1u;
         Simulator::Schedule(
-            Seconds(params.feederLinkOutageStart),
+            Seconds(outageStart),
             &SimulateFeederLinkOutage,
             std::ref(satE2Nodes), std::ref(spaceRics),
-            (uint32_t)0, params.satsPerPlane - 1);
+            (uint32_t)0, outageEndSat);
 
         Simulator::Schedule(
-            Seconds(params.feederLinkOutageStart + params.feederLinkOutageDuration),
+            Seconds(outageStart + outageDur),
             &RestoreFeederLink,
             std::ref(satE2Nodes), std::ref(spaceRics),
-            (uint32_t)0, params.satsPerPlane - 1);
+            (uint32_t)0, outageEndSat);
     }
 
     // ---- Real packet traffic plane (v2 event-driven) ----

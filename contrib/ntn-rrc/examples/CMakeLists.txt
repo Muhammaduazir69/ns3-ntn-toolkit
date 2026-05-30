@@ -16,6 +16,7 @@ build_lib_example(
   SOURCE_FILES ntn-rrc-full-stack.cc
   LIBRARIES_TO_LINK
     ${libntn-rrc}
+    ${libsatellite}
     ${libcore}
     ${libmobility}
     ${libntn-traffic}

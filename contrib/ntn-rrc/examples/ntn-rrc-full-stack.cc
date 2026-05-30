@@ -13,8 +13,8 @@
 //   <prefix>-drx.csv     — DRX state at each second + cumulative awake time
 
 #include "ns3/constant-position-mobility-model.h"
-#include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
+#include "ns3/satellite-sgp4-mobility-model.h"
 #include "ns3/ntn-drx.h"
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-sib19.h"
@@ -54,7 +54,7 @@ SampleTa(Ptr<NtnTimingAdvance> ta, Sinks* s)
              << ta->ComputeTotalTa().GetMicroSeconds() << ","
              << ta->ComputeCommonTa().GetMicroSeconds() << ","
              << ta->ComputeUeSpecificTa().GetMicroSeconds() << "," << std::scientific
-             << std::setprecision(3) << ta->ComputeTaDriftRate(MilliSeconds(10)) << "\n";
+             << std::setprecision(3) << (ta->ComputeTaDriftRate(MilliSeconds(10)) * 1e6) << "\n"; // s/s -> us/s
     Simulator::Schedule(Seconds(1.0), &SampleTa, ta, s);
 }
 
@@ -81,7 +81,7 @@ OnSib19(Sinks* s, const Sib19Content& sib)
     s->sibOut << Simulator::Now().GetSeconds() << "," << s->sib19Count << "," << sib.cellId << ","
               << sib.ephemeris.positionEcefM.x << "," << sib.ephemeris.positionEcefM.y << ","
               << sib.ephemeris.positionEcefM.z << "," << sib.taCommon.GetMicroSeconds() << ","
-              << sib.taCommonDriftRate << "\n";
+              << (sib.taCommonDriftRate * 1e6) << "\n"; // s/s -> us/s
 }
 
 void
@@ -114,17 +114,26 @@ main(int argc, char* argv[])
 
     // ----- mobility -----
     Ptr<ConstantPositionMobilityModel> ueMob = CreateObject<ConstantPositionMobilityModel>();
-    // UE in Islamabad expressed in ECEF.
-    ueMob->SetPosition(Vector{1146054.7, 5567530.7, 3525200.6});
+    // UE in Islamabad (lat 33.6844, lon 73.0479, ~540 m AMSL) in ECEF — a real
+    // ground terminal (the old coordinate sat 319 km up, not on the surface).
+    ueMob->SetPosition(Vector{1545854.5, 5071422.4, 3533770.1});
 
-    Ptr<ConstantVelocityMobilityModel> satMob = CreateObject<ConstantVelocityMobilityModel>();
-    satMob->SetPosition(Vector{-1.5e6, 5.5e6, 4.0e6});      // initial sat ECEF
-    satMob->SetVelocity(Vector{7590.0, 0.0, 0.0});
+    // Satellite on a real LEO orbit via SGP4 (bundled ISS TLE) rather than a
+    // straight-line constant velocity, which would climb out of the orbital
+    // shell over the pass and freeze the y/z ephemeris components.
+    Ptr<SatSGP4MobilityModel> satMob = CreateObject<SatSGP4MobilityModel>();
+    satMob->SetStartDate("2024-01-01 12:00:00");
+    satMob->SetTleInfo(
+        std::string("1 25544U 98067A   24001.50000000  .00006000  00000-0  11000-3 0  9991") +
+        "\n" + "2 25544  51.6400  60.0000 0006000  90.0000 270.0000 15.49000000123456");
 
     // ----- helper + 4 components -----
     NtnRrcHelper helper;
     helper.SetPayloadMode(transparent ? PayloadMode::Transparent : PayloadMode::RegenerativeFull);
-    helper.SetReferencePosition(Vector{1146054.7, 5567530.7, 3525200.6});
+    // Reference (beam centre) offset ~50 km north of the UE so the UE-specific
+    // TA residual (ta_ue = total - common) is non-zero, exercising the
+    // common/UE-specific TA split instead of collapsing it to 0.
+    helper.SetReferencePosition(Vector{1537714.6, 5044718.0, 3575300.8});
 
     Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ueMob, satMob);
     Ptr<NtnSib19Broadcaster> sib19 =
@@ -149,9 +158,9 @@ main(int argc, char* argv[])
     // ----- sinks -----
     Sinks sinks;
     sinks.taOut.open(prefix + "-ta.csv");
-    sinks.taOut << "time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate\n";
+    sinks.taOut << "time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate_us_per_s\n";
     sinks.sibOut.open(prefix + "-sib19.csv");
-    sinks.sibOut << "time_s,broadcast_seq,cell_id,sat_x,sat_y,sat_z,ta_common_us,drift_rate\n";
+    sinks.sibOut << "time_s,broadcast_seq,cell_id,sat_x,sat_y,sat_z,ta_common_us,drift_rate_us_per_s\n";
     sinks.ueOut.open(prefix + "-ue.csv");
     sinks.ueOut << "time_s,sequence,lat_deg,lon_deg,alt_m\n";
     sinks.drxOut.open(prefix + "-drx.csv");

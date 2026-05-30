@@ -137,7 +137,13 @@ WriteCanonicalKpmCsv(const std::vector<E2KpmReport>& reports,
           "FIVE_QI,S-NSSAI,PLMN\n";
     for (const auto& r : reports)
     {
-        const auto measurements = BuildCanonicalKpmMeasurements(r, baseLabels);
+        // Per-slice 5QI so the canonical stream differentiates the slices:
+        // eMBB(0)->9 (default non-GBR), URLLC(1)->82 (delay-critical GBR),
+        // mMTC(2)->79. Overrides the base FIVE_QI label per record.
+        std::map<std::string, std::string> labels = baseLabels;
+        labels[label::kFiveQi] =
+            (r.sliceId == 1) ? "82" : (r.sliceId == 2) ? "79" : "9";
+        const auto measurements = BuildCanonicalKpmMeasurements(r, labels);
         for (const auto& m : measurements)
         {
             const auto presentIt = m.labels.find(label::kPresent);

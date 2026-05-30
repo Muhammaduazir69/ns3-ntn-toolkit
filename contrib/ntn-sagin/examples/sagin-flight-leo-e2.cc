@@ -53,6 +53,12 @@ namespace
 
 constexpr double kC = 299792458.0;       // m/s
 constexpr double kFreqHz = 20.0e9;        // Ka-band downlink
+// Ka-band LEO->aircraft downlink budget (3GPP TR 38.821 LEO-class figures).
+constexpr double kBwHz = 30.0e6;          // 30 MHz NTN carrier
+constexpr double kNoiseFigureDb = 3.0;    // aircraft Ka receiver
+constexpr double kSatAntGainDbi = 30.0;   // LEO satellite beam gain
+constexpr double kAcAntGainDbi = 30.0;    // aeronautical VSAT gain
+constexpr double kSpectralEff = 0.75;     // practical fraction of Shannon
 
 double
 FsplDb(double dM, double fHz)
@@ -110,6 +116,7 @@ void
 EmitKpm(Context* ctx, Time reportPeriod)
 {
     const Vector ue = ctx->aircraft->GetPosition();
+    const Vector ueVel = ctx->aircraft->GetVelocity();
     const Vector sat = ctx->sat->GetPosition();
     const Vector satVel = ctx->sat->GetVelocity();
     const double range = Distance(ue, sat);
@@ -136,14 +143,25 @@ EmitKpm(Context* ctx, Time reportPeriod)
     r.gnbId = ctx->e2node->GetNodeId();
     r.isNtn = true;
     r.ueId = 1;
-    r.rsrp_dBm = ctx->txPowerDbm - pl;
-    r.rsrq_dB = -10.0;
-    r.sinr_dB = std::max(-5.0, 30.0 - (pl - 150.0)); // coarse proxy
+    // Link budget: RSRP = EIRP + Rx gain - FSPL. Noise-based SINR over the
+    // carrier bandwidth, then Shannon-bounded (CQI-mapped) throughput. This
+    // replaces the earlier affine-proxy SINR and binary 0/80 throughput so the
+    // KPM trace tracks the real pass geometry.
+    r.rsrp_dBm = ctx->txPowerDbm + kSatAntGainDbi + kAcAntGainDbi - pl;
+    const double noiseDbm = -174.0 + 10.0 * std::log10(kBwHz) + kNoiseFigureDb;
+    r.sinr_dB = r.rsrp_dBm - noiseDbm;
+    const double sinrLin = std::pow(10.0, r.sinr_dB / 10.0);
+    // RSRQ = S/(S+I+N) per RE, clamped to 3GPP [-19.5,-3] dB.
+    r.rsrq_dB = std::max(-19.5, std::min(-3.0, 10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
     r.cqi = static_cast<uint8_t>(std::clamp(r.sinr_dB / 2.0 + 7.0, 0.0, 15.0));
-    r.throughput_Mbps = nowInService ? 80.0 : 0.0;
+    // Shannon capacity (Mbps) gated by visibility and a practical efficiency.
+    r.throughput_Mbps =
+        nowInService ? kSpectralEff * (kBwHz / 1e6) * std::log2(1.0 + sinrLin) : 0.0;
     r.latency_ms = (range / kC) * 1000.0;
     r.elevation_deg = elev;
-    r.doppler_Hz = DopplerHz(ue, sat, satVel, kFreqHz);
+    // Relative radial velocity (satellite minus aircraft) drives the Doppler.
+    const Vector relVel(satVel.x - ueVel.x, satVel.y - ueVel.y, satVel.z - ueVel.z);
+    r.doppler_Hz = DopplerHz(ue, sat, relVel, kFreqHz);
     r.propagationDelay_ms = (range / kC) * 1000.0;
     r.beamId = 1;
     r.sliceId = ctx->sliceId;
