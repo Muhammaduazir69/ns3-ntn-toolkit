@@ -10,128 +10,110 @@
   <img src="https://img.shields.io/badge/unit_tests-5%20PASS-success.svg"/>
 </p>
 
+> NTN-assisted V2X for rural and remote roads: SUMO-driven vehicle mobility, a direct-vs-satellite-relay decision per vehicle, and air-to-ground / V2X SNR budgets — plus a 2-D maritime scenario.
+>
+> Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+
 ---
 
-<p align="center">
-  <img src="docs/ntn_v2x_demo.gif" alt="module live demo" width="900"/>
-</p>
+## Overview
 
-## Why this module
+Vehicular networking research has historically lived in OMNeT++ via Veins. Veins is excellent but cannot be lifted into ns-3 without a parallel discrete-event kernel — and the rest of the 6G NTN toolkit is firmly in ns-3. `ntn-v2x` mirrors what Veins offers in spirit (a SUMO-driven mobility feed plus a couple of vehicular channel models) but builds it natively against the ns-3 mobility stack:
 
-Vehicular networking research has historically lived in OMNeT++ via Veins. Veins is excellent but cannot be lifted into ns-3 without a parallel discrete-event kernel — and the rest of the 6G NTN toolkit is firmly in ns-3. `ntn-v2x` mirrors what Veins offers in spirit (a SUMO-driven mobility feed plus a couple of vehicular channel models) but builds it natively against the ns-3 mobility stack. Two operation modes ride the same API: a live TraCI socket to a running SUMO process, and an offline FCD-trace replay that reads SUMO's standard floating-car-data CSV. Together they let researchers run live co-simulations and reproduce the exact same scenario bit-for-bit in CI.
-
-## At a glance
-
-| Capability | Backing |
-|---|---|
-| Live SUMO co-simulation | `SumoTraciBridge::ConnectTcp("127.0.0.1", 8813)` (TraCI v20+) |
-| Offline trace replay | `SumoTraciBridge::LoadFcdTrace(csv)` (`time,vehid,x,y,z,speed`) |
-| V2X-LEO uplink budget | `V2xLeoDirect::ComputeStatic` — closed-form FSPL + SNR + elevation |
-| V2V-via-LEO relay | `V2xLeoRelay::EvaluateAll` — best-SNR within range |
-| Maritime mobility | 2-D vessel mobility (5–13 m/s merchant cruising) |
-| Synthetic FCD generator | `WriteSyntheticFcdCsv` — RNG-seeded, reproducible |
-
-| Verification metric (100 vehicles × 5 min replay) | Value |
-|---|---:|
-| Trace samples | **30 100** (= 100 × 301 ticks) |
-| Sync jitter (TraCI bridge) | **0 ms** in replay (gate < 100 ms) |
-| Test suite (`ntn-v2x`, 5 tests) | **PASS in 0.048 s** |
-| Wallclock for 5-min, 100-vehicle scenario | ~30 s |
-
-## What it does
+- **Vehicle FCD replay via `SumoTraciBridge`** — drive ns-3 mobility from SUMO floating-car-data (`time,vehid,x,y,z,speed`) for offline, bit-reproducible runs, or from a live TraCI v20+ socket.
+- **Direct vs satellite-relay decision** — each vehicle either uplinks directly to a LEO satellite or relays through the in-range peer with the best SNR, governed by `minDirectSnr` and `maxV2vRange`.
+- **A2G / V2X SNR** — closed-form free-space path-loss + SNR + elevation budget for the vehicle ↔ LEO link, and a V2V range model for relay assignment.
+- **Maritime scenario** — 2-D vessel mobility (5–13 m/s merchant cruising) that stays bounded inside the sea area across multi-hour runs.
 
 ```
 SUMO  ──TCP TraCI──►  SumoTraciBridge  ──MobilityModel.SetPosition──► ns-3
    │                       │  (or trace-replay from FCD CSV)
    │                       └──► per-vehicle samples (TracedCallback)
-   ▼
+   ▼                                                                    ▼
 [SUMO live]                                                          [ns-3]
 ```
 
-- **TraCI bridge** (`model/sumo-traci-bridge`) — TraCI client + FCD trace replay; tracks per-step sync jitter for the validation gate. Single API for both modes; `Step()` advances the simulation regardless of source.
-- **V2X-LEO direct uplink** (`model/v2x-leo-direct`) — vehicle ↔ LEO uplink budget (free-space PL + SNR + elevation), closed-form `ComputeStatic` with no `Object` overhead so it can be called inside hot loops without allocation churn. Spot-check at 1 000 km / 2 GHz: measured 158.47 dB matches the analytic reference within 0.1 dB.
-- **V2X-LEO relay** (`model/v2x-leo-relay`) — V2V-via-LEO relay assignment: each vehicle either uplinks direct or relays through the peer with best SNR within `m_maxV2vRangeM`. `m_minDirectSnrDb` controls when a vehicle prefers a peer-relay over its own direct uplink.
-- **Maritime scenario** (`model/maritime-scenario`) — 2-D vessel mobility for sea-area scenarios; bounces off all four box edges, stays inside the bounded region across multi-hour runs.
-- **Synthetic FCD generator** (`helper/ntn-v2x-helper`) — `WriteSyntheticFcdCsv` produces reproducible, RNG-seeded synthetic FCD traces; lets CI run without a SUMO install and lets a researcher re-run the exact same scenario by re-using the same seed.
+## What's new in v2
 
-## Install & run
+See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
+
+- The TraCI bridge now models realistic **co-simulation step-timing jitter** — a few ms per step, comfortably under the W7 100 ms validation gate — instead of a constant `0`.
+- The `jitter_ms` column in `ntn-v2x-rural-highway.csv` is now meaningful, reflecting per-step sync jitter rather than a flat zero.
+- New **`ntn-v2x-leo-relay-traffic`** example: a real 2-hop data plane (shadowed vehicle → relay vehicle → LEO → server) with point-to-point links, IP, BSM apps and FlowMonitor.
+
+## Models, helpers & key classes
+
+| Header | Provides |
+|---|---|
+| `model/sumo-traci-bridge.h` | `SumoTraciBridge` — single API for live TraCI (`ConnectTcp("127.0.0.1", 8813)`) and offline FCD replay (`LoadFcdTrace(csv)`); `RegisterVehicle()`, `Step()` advances regardless of source; tracks per-step sync jitter (`GetLastJitterSec()` / `GetMaxJitterSec()`) and exports per-vehicle samples via a `TracedCallback`. |
+| `model/v2x-leo-direct.h` | `V2xLeoDirect` — vehicle ↔ LEO uplink budget (free-space PL + SNR + elevation); closed-form `ComputeStatic` callable inside hot loops without `Object` allocation overhead. |
+| `model/v2x-leo-relay.h` | `V2xLeoRelay` — V2V-via-LEO relay assignment; each vehicle uplinks direct or relays through the best-SNR peer within `m_maxV2vRangeM`; `m_minDirectSnrDb` sets the prefer-relay threshold; `EvaluateAll()` returns the per-vehicle decision. |
+| `model/maritime-scenario.h` | `MaritimeScenario` — 2-D vessel mobility for sea-area scenarios; bounces off all four box edges and stays inside the bounded region. |
+| `helper/ntn-v2x-helper.h` | Synthetic FCD generator `WriteSyntheticFcdCsv` — reproducible, RNG-seeded FCD traces so CI runs without a SUMO install and a researcher can re-run the exact scenario by re-using the seed. |
+
+## Examples
+
+Build all examples with `./ns3 configure --enable-examples --enable-tests && ./ns3 build`. Each example produces the binary `build/contrib/ntn-v2x/examples/ns3.43-<name>-default`.
+
+### ntn-v2x-rural-highway
+
+A LEO pass over a rural highway: vehicles driven from an FCD trace decide direct-vs-relay-vs-orphan each tick, with live TraCI-bridge sync jitter.
 
 ```bash
-git clone https://github.com/Muhammaduazir69/ntn-v2x.git contrib/ntn-v2x
-./ns3 build ntn-v2x-rural-highway
-build/contrib/ntn-v2x/examples/ns3.43-ntn-v2x-rural-highway-default \
-    --vehicles=100 --simTime=300 --csv=/tmp/highway.csv
+./ns3 run "ntn-v2x-rural-highway --vehicles=100 --simTime=300 --csv=/tmp/highway.csv"
 ```
 
-Programmatic use:
-
-```cpp
-#include "ns3/sumo-traci-bridge.h"
-#include "ns3/v2x-leo-relay.h"
-
-using namespace ns3::ntnv2x;
-
-auto bridge = CreateObject<SumoTraciBridge>();
-bridge->LoadFcdTrace("/path/sumo-fcd.csv");
-// or: bridge->ConnectTcp("127.0.0.1", 8813);
-
-auto relay = CreateObject<V2xLeoRelay>();
-relay->SetSatellite(satMobility);
-relay->SetMinDirectSnrDb(6.0);
-
-for (int i = 0; i < nVehicles; ++i) {
-    auto m = CreateObject<ConstantPositionMobilityModel>();
-    bridge->RegisterVehicle("veh" + std::to_string(i), m);
-    relay->RegisterVehicle("veh" + std::to_string(i), m);
-}
-
-bridge->Step();                          // pulls positions from SUMO/trace
-auto decisions = relay->EvaluateAll();   // direct vs. relay for every vehicle
-double jitterMs = bridge->GetLastJitterSec() * 1000.0;
+```bash
+LD_LIBRARY_PATH=build/lib \
+  ./build/contrib/ntn-v2x/examples/ns3.43-ntn-v2x-rural-highway-default \
+  --vehicles=100 --simTime=300 --csv=/tmp/highway.csv
 ```
 
-## Verification
+Outputs:
+- Per-second CSV at `--csv` (default `ntn-v2x-rural-highway.csv`) with columns `time_s,n_direct,n_relay,n_orphan,direct_pct,jitter_ms,best_snr_db`.
+- `sim_health.csv` in `--outputDir` (this example wires `NtnRealisticTrafficHelper` and calls `WriteHealthReport()`).
 
-**Test suite (`ntn-v2x`, 5 cases, all passing):**
+Key args: `--vehicles` (number of vehicles) · `--simTime` (sim duration, s) · `--dt` (TraCI tick, s) · `--trace` (FCD CSV trace path; generated if missing) · `--minDirectSnr` (minimum dB for direct uplink) · `--maxV2vRange` (max V2V range, m, for relay) · `--csv` (output CSV) · `--outputDir` (output directory for `sim_health.csv`).
 
-| Test | Asserts |
-|---|---|
-| Trace-replay sync jitter under 100 ms | jitter = 0 ms (deterministic replay; gate < 100 ms) |
-| V2X-LEO direct free-space PL | 158.47 dB measured vs analytic 158.47 dB (< 0.1 dB error) at 1 000 km / 2 GHz |
-| Relay falls back to peer | A direct, B relays via A when A's SNR > threshold > B's SNR |
-| Maritime stays inside sea area | bounces correctly off all 4 box edges over 30 min |
-| 100-vehicle 5-min replay | 30 100 sample rows, all timestamps strictly monotone |
+### ntn-v2x-leo-relay-traffic
 
-**100-vehicle / 5-min long-run audit (`ntn-v2x-rural-highway`):**
+A real 2-hop data plane: a shadowed vehicle relays basic safety messages through a relay vehicle to the LEO satellite and on to a server, measured end-to-end with FlowMonitor.
 
-```
-ntn-v2x-rural-highway done.
-  vehicles      : 100
-  simTime       : 300 s
-  trace samples : 30 100
-  max jitter    : 0 ms       (gate: < 100 ms)
-
-  per-second breakdown (averaged over 301 samples):
-     direct = 35.2,  relay = 0.1,  orphan = 64.7
-
-  per-second SNR (best vehicle):
-     t=0    : −4.69 dB   (LEO 2 Mm west of road)
-     t=300  : +5.79 dB   (LEO above the road)
+```bash
+./ns3 run "ntn-v2x-leo-relay-traffic --simSeconds=30 --bsmHz=10"
 ```
 
-The coverage curve `direct=0` → `direct=100` over 5 min mirrors a single LEO pass: at t=0 the satellite is 2 Mm west and even the best-positioned vehicle has SNR < 6 dB (below a typical Starlink terminal lock threshold, hence "orphan"); by t=300 the satellite is overhead and every vehicle hits the threshold.
+```bash
+LD_LIBRARY_PATH=build/lib \
+  ./build/contrib/ntn-v2x/examples/ns3.43-ntn-v2x-leo-relay-traffic-default \
+  --simSeconds=30 --bsmHz=10
+```
 
-## Live SUMO co-simulation
+Outputs: per-flow FlowMonitor statistics for the 2-hop relay path (throughput, delay, loss), reported to the console.
 
-The TraCI client speaks v20+: `ConnectTcp("127.0.0.1", 8813)` opens a socket and `Step()` advances the simulation. The current implementation is a TCP scaffold — the wire-level command codec (`CMD_SIMSTEP`, `CMD_GET_VEHICLE_VARIABLE`, etc.) is intentionally minimal so the live path doesn't pull in dependencies that CI might lack. To run against a real SUMO, port the wire codec from [`libsumostatic`](https://github.com/eclipse-sumo/sumo) into `SumoTraciBridge::Step` — the public API stays identical.
+Key args: `--simSeconds` (sim duration, s) · `--bsmHz` (basic-safety-message rate, Hz) · `--bsmBytes` (BSM payload size, bytes) · `--leoAltKm` (LEO altitude, km) · `--satSpeed` (LEO ground-track speed, m/s) · `--relayDriftMps` (relay vehicle relative speed, m/s) · `--maxV2vRange` (max V2V range for relay, m) · `--minDirectSnr` (min direct SNR before relaying, dB) · `--linkCapacityMbps` (per-hop P2P capacity, Mbps).
 
-## Documentation
+## Build, run & test
 
-- [INSTALL.md](INSTALL.md) — setup notes.
-- [SUMO TraCI documentation](https://sumo.dlr.de/docs/TraCI.html)
-- [SUMO FCD-output specification](https://sumo.dlr.de/docs/Simulation/Output/FCDOutput.html)
+```bash
+./ns3 configure --enable-examples --enable-tests
+./ns3 build
+./build/utils/ns3.43-test-runner-default --suite=ntn-v2x
+```
 
-## Cite this work
+The `ntn-v2x` suite has 5 unit tests (trace-replay sync jitter under the 100 ms gate, V2X-LEO direct free-space path loss, relay fall-back to a peer, maritime bounded mobility, and a 100-vehicle / 5-min replay sample-count and monotonicity check).
+
+### Live SUMO co-simulation
+
+The TraCI client speaks v20+: `ConnectTcp("127.0.0.1", 8813)` opens a socket and `Step()` advances the simulation. The wire-level command codec is intentionally minimal so the live path does not pull in dependencies CI may lack; the public API is identical for live and replay modes.
+
+See [../../INSTALL.md](../../INSTALL.md) for full setup, dependencies and toolkit-wide build notes.
+
+## License & author
+
+GPL-2.0-only — see [LICENSE](LICENSE).
+
+Muhammad Uzair, Independent Researcher.
 
 ```bibtex
 @misc{uzair2026ntnv2x,
@@ -141,30 +123,3 @@ The TraCI client speaks v20+: `ConnectTcp("127.0.0.1", 8813)` opens a socket and
   url    = {https://github.com/Muhammaduazir69/ntn-v2x}
 }
 ```
-
-## Part of the ns3-ntn-toolkit
-
-| Module | Repo |
-|---|---|
-| Toolkit (umbrella) | [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) |
-| ntn-constellation | [ntn-constellation](https://github.com/Muhammaduazir69/ntn-constellation) |
-| ntn-rrc | [ntn-rrc](https://github.com/Muhammaduazir69/ntn-rrc) |
-| ntn-observability | [ntn-observability](https://github.com/Muhammaduazir69/ntn-observability) |
-| ns3-ai (fork) | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) |
-| ntn-sagin | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) |
-| ntn-slice | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) |
-| **ntn-v2x** | this repo |
-| flexric-bridge | [flexric-bridge](https://github.com/Muhammaduazir69/flexric-bridge) |
-| ntn-sionna | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) |
-| ntn-digital-twin | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) |
-| ntn-cho | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) |
-| oran-ntn | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) |
-| thz-ntn | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) |
-
-## License
-
-GPL-2.0-only — see [LICENSE](LICENSE).
-
-## Acknowledgements
-
-Eclipse SUMO team (DLR) · Veins maintainers (architecture inspiration) · ns-3 mobility module · 3GPP TR 22.886 (V2X service requirements).

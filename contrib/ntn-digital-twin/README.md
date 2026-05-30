@@ -2,6 +2,8 @@
 
 <p align="center"><strong>Live Digital-Twin Loop, REST Prediction API and CesiumJS Live Mode for 6G NTN Constellations</strong></p>
 
+<p align="center">Part of <strong>ns3-ntn-toolkit</strong> — <a href="../../README.md">README</a> / <a href="../../INSTALL.md">INSTALL</a>.</p>
+
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
@@ -16,6 +18,10 @@
 <p align="center">
   <img src="docs/ntn_digital_twin_demo.gif" alt="module live demo" width="900"/>
 </p>
+
+## What's new in v2
+
+Documentation refreshed to match the v2 toolkit release; the FastAPI service (`/health`, `/constellation/state`, `/predict/handover`) and the refresher loop are unchanged. See the toolkit-wide [CHANGELOG](../../CHANGELOG.md).
 
 ## Why this module
 

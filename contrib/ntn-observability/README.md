@@ -1,6 +1,6 @@
 <h1 align="center">ntn-observability</h1>
 
-<p align="center"><strong>InfluxDB Sinks, NetSimulyzer Exporter and Pre-Built Grafana Dashboards for 6G NTN Simulation</strong></p>
+<p align="center"><strong>InfluxDB Sinks, NetSimulyzer Exporter, Repro Manifests and Pre-Built Grafana Dashboards for 6G NTN Simulation</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
@@ -11,30 +11,19 @@
   <img src="https://img.shields.io/badge/unit_tests-5%20PASS-blue.svg"/>
 </p>
 
+> Structured run manifests plus KPI / observability sinks for reproducible NTN experiments: line-protocol into InfluxDB v2, a streaming NetSimulyzer JSON exporter, and pre-built Grafana dashboards.
+>
+> Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+
 ---
 
-<p align="center">
-  <img src="docs/ntn_observability_demo.gif" alt="module live demo" width="900"/>
-</p>
+## Overview
 
-## Why this module
+A 6G NTN simulation produces every kind of telemetry a real RAN does — RSRP, SINR, BLER, MCS, timing-advance, sat ECEF, ISL load, handover counters — but ns-3's default trace surface stops at flat ASCII files. That is fine for unit tests; it does not scale to a multi-hour, multi-satellite scenario where reviewers want a dashboard rather than a pile of `.tr` files. `ntn-observability` plugs the simulator into the same observability stack production RANs already use, and pairs every run with a reproducibility manifest:
 
-A 6G NTN simulation produces every kind of telemetry that a real RAN does — RSRP, SINR, BLER, MCS, timing-advance, sat ECEF, ISL load, handover counters — but ns-3's default trace surface stops at flat ASCII files. That's fine for unit tests; it does not scale to a multi-hour, multi-satellite scenario where reviewers want to see what happened in a dashboard rather than reconstruct it from `.tr` files. `ntn-observability` plugs the simulator into the same observability stack production RANs already use: line-protocol into InfluxDB v2 over UDP or file, and a streaming NetSimulyzer JSON exporter for 3D playback. A canonical metric schema (`ntn-metric-schema.h`) names every KPI exactly once so downstream dashboards never break when new modules add metrics.
-
-## At a glance
-
-| Metric (1800 s scenario, full toolkit) | Value |
-|---|---|
-| Line-protocol file size | **1.95 MB** (18 810 points) |
-| InfluxDB measurements | **6** (`ntn_radio` · `ntn_timing_advance` · `ntn_sat_pos` · `ntn_drx` · `ntn_sib19` · `ntn_ue_report`) |
-| Grafana dashboards shipped | **4** (Overview · Handover · Radio · ISL) |
-| Per-second cadence (`ntn_radio`, `ntn_timing_advance`, `ntn_sat_pos`, `ntn_drx`) | exactly **1800 / 1800** points |
-| 160 ms cadence (`ntn_sib19`) | exactly **11 250 / 11 250** points |
-| 5 s cadence (`ntn_ue_report`) | exactly **360 / 360** points |
-| TA fidelity vs analytic ground truth | **mean &#124;err&#124; 0.49 µs, max 1.0 µs** (`int µs` truncation only) |
-| NetSimulyzer JSON | 2 nodes + 2 series + 5 759 events |
-
-## What it does
+- **Structured run manifests** — `NtnReproManifest` captures the toolkit git SHA, ns-3 version, scenario name, TLE epoch, constellation, service models, CLI argv and arbitrary extras, then serialises to / parses from JSON so a run is reproducible byte-for-byte.
+- **KPI / observability sinks** — `NtnInfluxSink` emits InfluxDB v2 line protocol over UDP or to a file; `NtnNetSimulyzerExporter` streams NetSimulyzer 1.0 JSON for 3D playback.
+- **Canonical metric schema** — `ntn-metric-schema.h` names every measurement, tag and field exactly once so downstream dashboards never break when new modules add metrics.
 
 ```
 ns-3 traces  ─┐
@@ -45,113 +34,94 @@ ns-3 traces  ─┐
                     (JSON 1.0 schema)
 ```
 
-- **Canonical metric schema** (`model/ntn-metric-schema.h`) — header-only enum-string table that names every measurement, tag and field exactly once. A pinned `MetricSchemaStableTest` unit test catches accidental renames before they break shipped dashboards.
-- **InfluxDB sink** — line-protocol encoder (with proper escape handling for commas, spaces and equals in tag/measurement keys), buffered file or UDP transport, and run-id tagging so multi-run dashboards can demux.
-- **NetSimulyzer exporter** — streaming JSON writer compatible with the NIST NetSimulyzer 1.0 schema. Produces `configuration` / `nodes` / `series` / `events` sections in valid order, escapes inner quotes correctly.
-- **Helper façade** (`NtnObservabilityHelper`) — one-call setup of both sinks with consistent run-id tagging.
-- **Docker stack** — fully-provisioned InfluxDB 2.7 + Grafana 10.4 + Telegraf-sidecar (line-protocol UDP terminator with simulation-time → ingest-time rewrite, so points always land inside the InfluxDB retention window).
-- **4 pre-built Grafana dashboards** — auto-loaded under the `ns3-ntn-toolkit` folder when the Docker stack starts.
+## What's new in v2
 
-## Install & run
+See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
 
-File mode — no Docker:
+- New **`ntn-repro-manifest` model** (`NtnReproManifest`) — a reproducibility manifest that records git SHA, ns-3 version, scenario, TLE epoch, constellation, Sionna / HITRAN / ITU versions, service models, CLI argv and extras, with `WriteJson()` / `LoadJson()` round-tripping.
+- New **`ntn-observability-traffic`** example with a real ns-3 data plane (LEO downlink over point-to-point + IP + UDP apps + FlowMonitor) whose InfluxDB KPIs come from a real `PacketSink` byte counter, not synthetic values.
+
+## Models, helpers & key classes
+
+| Header | Provides |
+|---|---|
+| `model/ntn-metric-schema.h` | Header-only canonical schema — `measurement::`, `tag::`, `field::` string tables naming every KPI exactly once; pinned by `MetricSchemaStableTest`. |
+| `model/ntn-influx-sink.h` | `NtnInfluxSink` — InfluxDB v2 line-protocol encoder (escapes commas / spaces / equals in keys), buffered file or UDP transport, run-id tagging; `Push(Point)`, `Start()`. |
+| `model/ntn-netsimulyzer-exporter.h` | `NtnNetSimulyzerExporter` — streaming JSON writer for the NIST NetSimulyzer 1.0 schema (`configuration` / `nodes` / `series` / `events` in valid order). |
+| `model/ntn-repro-manifest.h` | `NtnReproManifest` — fluent setters (`SetToolkitGitSha`, `SetNs3Version`, `SetScenarioName`, `SetTleEpoch`, `SetConstellation`, `AddServiceModel`, `AddExtra`, …), `WriteJson()` / `ToJson()` / `LoadJson()` / `ParseJson()`. |
+| `helper/ntn-observability-helper.h` | `NtnObservabilityHelper` — one-call setup of both sinks with consistent run-id tagging (`SetRunId`, `SetInfluxUdp`, `SetNetSimulyzerOutput`, `InstallInfluxSink`). |
+
+Four pre-built Grafana dashboards (Overview, Handover, Radio, ISL) auto-load under the `ns3-ntn-toolkit` folder when the bundled Docker stack (InfluxDB 2.7 + Grafana 10.4 + Telegraf sidecar) starts.
+
+## Examples
+
+Build all examples with `./ns3 configure --enable-examples --enable-tests && ./ns3 build`. Each example produces the binary `build/contrib/ntn-observability/examples/ns3.43-<name>-default`.
+
+### ntn-observability-demo
+
+End-to-end telemetry demo emitting line protocol and NetSimulyzer JSON across every NTN measurement.
 
 ```bash
-git clone https://github.com/Muhammaduazir69/ntn-observability.git contrib/ntn-observability
-./ns3 build ntn-observability-demo
-build/contrib/ntn-observability/examples/ns3.43-ntn-observability-demo-default \
-    --simTime=300 --runId=local-1 \
-    --influxFile=/tmp/run.lp \
-    --netSim=/tmp/run.json
+./ns3 run "ntn-observability-demo --simTime=300 --runId=local-1 --influxFile=/tmp/run.lp --netSim=/tmp/run.json"
 ```
 
-Outputs: `/tmp/run.lp` (later `influx write -f /tmp/run.lp`) and `/tmp/run.json` (open in NetSimulyzer for 3D playback with timeline).
+```bash
+LD_LIBRARY_PATH=build/lib \
+  ./build/contrib/ntn-observability/examples/ns3.43-ntn-observability-demo-default \
+  --simTime=300 --runId=local-1 --influxFile=/tmp/run.lp --netSim=/tmp/run.json
+```
 
-Grafana stack — Docker:
+Outputs:
+- InfluxDB line-protocol file at `--influxFile` (default `/tmp/ntn-observability-demo.lp`) — `influx write -f` it, or send to `--udpHost:--udpPort` for live ingest.
+- NetSimulyzer JSON at `--netSim` (default `/tmp/ntn-observability-demo.json`) for 3D playback.
+- `sim_health.csv` in `--outputDir` (this example wires `NtnRealisticTrafficHelper` and calls `WriteHealthReport()`).
+
+Key args: `--simTime` (sim duration, s) · `--runId` (tag value attached to every point) · `--influxFile` (line-protocol output file) · `--udpHost` (InfluxDB UDP host) · `--udpPort` (InfluxDB UDP listener port) · `--netSim` (NetSimulyzer JSON output) · `--outputDir` (output directory for `sim_health.csv`).
+
+### ntn-observability-traffic
+
+A real LEO downlink packet sim whose InfluxDB KPIs come from a live data plane (`PacketSink` byte counter + FlowMonitor), exported through `NtnInfluxSink`.
+
+```bash
+./ns3 run "ntn-observability-traffic --simSeconds=120 --dataRateMbps=5 --out=/tmp/ntn-obs.lp"
+```
+
+```bash
+LD_LIBRARY_PATH=build/lib \
+  ./build/contrib/ntn-observability/examples/ns3.43-ntn-observability-traffic-default \
+  --simSeconds=120 --dataRateMbps=5 --out=/tmp/ntn-obs.lp
+```
+
+Outputs: InfluxDB line-protocol file at `--out` (default `ntn-observability-traffic.lp`) carrying KPIs derived from the real data plane; optionally streamed to `--influxHost:--influxPort` instead of a file.
+
+Key args: `--simSeconds` (sim duration, s) · `--leoAltKm` (satellite altitude, km) · `--satSpeed` (LEO ground-track speed, m/s) · `--freqGHz` (carrier frequency, GHz) · `--dataRateMbps` (offered downlink load, Mbps) · `--packetBytes` (UDP payload size, bytes) · `--txPowerDbm` (satellite HPA output power, dBm) · `--antennaGainDb` (combined antenna gain, dB) · `--out` (line-protocol output file) · `--influxHost` (InfluxDB/Telegraf UDP host; empty = file) · `--influxPort` (InfluxDB/Telegraf UDP port) · `--linkCapacityMbps` (P2P link capacity, Mbps).
+
+## Build, run & test
+
+```bash
+./ns3 configure --enable-examples --enable-tests
+./ns3 build
+./build/utils/ns3.43-test-runner-default --suite=ntn-observability
+```
+
+The `ntn-observability` suite has 5 unit tests (line-protocol basic encode, line-protocol escaping, Influx file-sink round-trip, NetSimulyzer JSON shape, and the pinned metric-schema-stability test).
+
+### Grafana stack (Docker)
 
 ```bash
 cd contrib/ntn-observability/docker
-docker compose up -d
-# Wait ~5 s for InfluxDB to finish first-run setup.
-
-build/contrib/ntn-observability/examples/ns3.43-ntn-observability-demo-default \
-    --simTime=600 --runId=docker-1 \
-    --udpHost=127.0.0.1 --udpPort=8089 \
-    --netSim=/tmp/docker-1.json
+docker compose up -d   # InfluxDB 2.7 + Grafana 10.4 + Telegraf sidecar
 ```
 
-Open Grafana at http://localhost:3000 (admin / admin) — the 4 NTN dashboards are pre-loaded.
+Open Grafana at http://localhost:3000 (admin / admin) — the 4 NTN dashboards (Overview, Handover, Radio, ISL) are pre-loaded.
 
-| Dashboard | Panels | Use it for |
-|---|---|---|
-| `NTN Overview` | TA, RSRP/SINR, sat ECEF | quick scenario sanity check |
-| `NTN Handover` | CHO trigger / exec / fail counters, TA-jump view | debugging CHO algorithm changes |
-| `NTN Radio` | RSRP, SINR, BLER, MCS per UE×cell | PHY / MAC tuning |
-| `NTN ISL` | ISL range, ISL load, sat ECEF | constellation + ephemeris wiring sanity |
+See [../../INSTALL.md](../../INSTALL.md) for full setup, dependencies and the Telegraf sidecar configuration that rewrites simulation-time stamps to ingest time.
 
-Programmatic use:
+## License & author
 
-```cpp
-#include "ns3/ntn-observability-helper.h"
-#include "ns3/ntn-metric-schema.h"
+GPL-2.0-only — see [LICENSE](LICENSE).
 
-NtnObservabilityHelper obs;
-obs.SetRunId("my-run");
-obs.SetInfluxUdp("influxdb-host", 8089);
-obs.SetNetSimulyzerOutput("/tmp/run.json");
-
-Ptr<NtnInfluxSink> sink = obs.InstallInfluxSink();
-sink->Start();
-
-ntnobs::Point p;
-p.measurement = ntnobs::measurement::kRadio;
-p.tags[ntnobs::tag::kUeImsi] = "100001";
-p.tags[ntnobs::tag::kCellId] = "C-1";
-p.fieldsFloat[ntnobs::field::kRsrpDbm] = -97.5;
-p.fieldsFloat[ntnobs::field::kSinrDb]  = 12.3;
-sink->Push(p);
-```
-
-## Verification
-
-**ns-3 unit tests (5 cases, all passing):**
-
-| Test | Asserts |
-|---|---|
-| `LineProtocolBasicEncodeTest` | encoder emits the expected `meas,tag=v field=v ts` shape with newline. |
-| `LineProtocolEscapeTest` | commas / spaces / equals are properly escaped in tag/measurement keys. |
-| `InfluxFileSinkRoundTripTest` | file-mode sink buffers + flushes correctly across simulation events. |
-| `NetSimulyzerJsonShapeTest` | output JSON has correct sections, escapes inner quotes, opens with `{` and closes with `}`. |
-| `MetricSchemaStableTest` | canonical KPI names are pinned (downstream dashboards depend on them). |
-
-**Pipeline integration test** — spawns the demo, validates every expected measurement and critical field appears in the line-protocol output. If InfluxDB is up at `127.0.0.1:8086` it also runs a UDP-mode round-trip query.
-
-**1800 s long-run audit:**
-
-| Check | Result |
-|---|---|
-| LP file size | 1.95 MB (18 810 points) |
-| `ntn_drx`, `ntn_radio`, `ntn_sat_pos`, `ntn_timing_advance` counts | 1 800 each (exact) |
-| `ntn_sib19` count | 11 250 (exact) |
-| `ntn_ue_report` count | 360 (exact) |
-| `run_id` tag coverage | 18 810 / 18 810 records |
-| Timestamp span | 0 – 1 799.84 s (continuous, no skips) |
-| Critical fields present | 14 / 14 |
-| TA fidelity (analytic vs LP) | mean &#124;err&#124; **0.49 µs**, max 1.0 µs — bit-exact within int µs truncation |
-
-The fidelity check parses every `ntn_timing_advance` LP point and compares it to a closed-form analytic ground truth using the demo's exact mobility (UE position + sat position/velocity). 100 % of 1 800 samples land within ≤ 1 µs — meaning every byte the sink emits matches the upstream RRC source of truth to the limit of `Time::GetMicroSeconds()` int truncation.
-
-## Schema stability promise
-
-`model/ntn-metric-schema.h` names are stable across versions. Adding new measurements/fields is fine; renaming an existing one breaks every shipped dashboard. The `MetricSchemaStableTest` unit test pins the names so accidental renames never reach a release.
-
-## Documentation
-
-- [INSTALL.md](INSTALL.md) — full setup, including the Telegraf sidecar configuration that rewrites simulation-time stamps to ingest time.
-- [InfluxDB Line Protocol reference](https://docs.influxdata.com/influxdb/v2/reference/syntax/line-protocol/)
-- [NetSimulyzer JSON 1.0 schema](https://github.com/usnistgov/NetSimulyzer)
-
-## Cite this work
+Muhammad Uzair, Independent Researcher.
 
 ```bibtex
 @misc{uzair2026ntnobservability,
@@ -161,30 +131,3 @@ The fidelity check parses every `ntn_timing_advance` LP point and compares it to
   url    = {https://github.com/Muhammaduazir69/ntn-observability}
 }
 ```
-
-## Part of the ns3-ntn-toolkit
-
-| Module | Repo |
-|---|---|
-| Toolkit (umbrella) | [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) |
-| ntn-constellation | [ntn-constellation](https://github.com/Muhammaduazir69/ntn-constellation) |
-| ntn-rrc | [ntn-rrc](https://github.com/Muhammaduazir69/ntn-rrc) |
-| **ntn-observability** | this repo |
-| ns3-ai (fork) | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) |
-| ntn-sagin | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) |
-| ntn-slice | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) |
-| ntn-v2x | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) |
-| flexric-bridge | [flexric-bridge](https://github.com/Muhammaduazir69/flexric-bridge) |
-| ntn-sionna | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) |
-| ntn-digital-twin | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) |
-| ntn-cho | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) |
-| oran-ntn | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) |
-| thz-ntn | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) |
-
-## License
-
-GPL-2.0-only — see [LICENSE](LICENSE).
-
-## Acknowledgements
-
-InfluxData (InfluxDB, Telegraf) · Grafana Labs · NIST NetSimulyzer team · ns-3 core team · 3GPP NTN work item.
