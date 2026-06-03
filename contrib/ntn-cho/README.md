@@ -1,11 +1,27 @@
 # ntn-cho
 
-> Time-to-Exit (TTE)-aware 3GPP Rel-17 Conditional Handover for LEO satellite NTN, in ns-3.43. Part of the **ns3-ntn-toolkit** (ns-3.43) — see the toolkit [README](../../README.md) and [INSTALL](../../INSTALL.md).
+> Time-to-Exit (TTE)-aware 3GPP Rel-17 Conditional Handover for LEO satellite NTN, in ns-3.43.
 
 - ns-3 version: `release ns-3.43`
 - Version: `1.0.0`
 - License: GPL-2.0-only
 - Maintainer: Muhammad Uzair, Independent Researcher (ORCID 0009-0002-4104-2680)
+
+See [INSTALL.md](INSTALL.md) for setup and the dependency list. This module
+is also distributed as part of the
+[ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
+
+## Dependencies
+
+- **Required:** the SNS3 [`satellite`](https://github.com/sns3/sns3-satellite)
+  module — `NtnOrbitPredictor`/`NtnTteEstimator` use its `SatSGP4MobilityModel`
+  and antenna-gain patterns for SGP4 propagation and beam geometry.
+- **Traffic helper:** the `ntn-cho-leo-basic` and `ntn-cho-full-constellation`
+  examples use `NtnRealisticTrafficHelper`. In the standalone App Store package
+  this helper is **vendored into the module** (self-contained); inside
+  `ns3-ntn-toolkit` it is provided by the sibling `ntn-traffic` module.
+- **Optional:** the `ns3-ai` module, only for `NtnAiInterface` (the
+  learning-based path). The C++ triggers build and run without it.
 
 ## Overview
 
@@ -13,7 +29,7 @@
 
 ## What's new in v2
 
-See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full list.
+See the [CHANGELOG](CHANGELOG.md).
 
 - **Doppler is now SIGNED** — the shift flips from positive to negative across a LEO pass (previously magnitude-only), so approaching vs. receding geometry is modelled correctly.
 - **CSV sentinel hygiene** — no more `serving_sat=4294967295` or `sinr=-100` sentinel values leaking into `ue_tracks`, `handover_events`, or `kpi_timeseries`; `avg_sinr` now averages only currently-served UEs; and the first-handover `time_of_stay` is no longer inflated.
@@ -22,7 +38,7 @@ See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full list.
 
 Model (`model/`):
 
-- `NtnChoAlgorithm` (`ntn-cho-algorithm.h`) — 3GPP Rel-17 CHO algorithm with TTE-aware candidate selection and the `CHO_CONFIGURED → CHO_EVALUATING → CHO_EXECUTING → CHO_COMPLETED` state machine; supports a3 / location / time / tte-aware triggers.
+- `NtnChoAlgorithm` (`ntn-cho-algorithm.h`) — 3GPP Rel-17 CHO algorithm with TTE-aware candidate selection and the `CHO_IDLE → CHO_PREPARED → CHO_CONDITION_MONITORING → CHO_EXECUTING → CHO_COMPLETED` state machine; supports a3 / location / time / tte-aware triggers.
 - `NtnTteEstimator` (`ntn-tte-estimator.h`) — estimates Time-to-Exit for satellite beam coverage, per-candidate and in batch.
 - `NtnOrbitPredictor` (`ntn-orbit-predictor.h`) — predicts satellite/beam positions and coverage over time and reports visible satellites and best beams per UE position.
 - `NtnMeasurementModel` (`ntn-measurement-model.h`) — computes RSRP/SINR from satellite beams using the 3GPP TR 38.811 NTN channel scenarios.
@@ -31,7 +47,7 @@ Model (`model/`):
 Helper (`helper/`):
 
 - `NtnChoHelper` (`ntn-cho-helper.h`) — top-level helper that wires up a CHO scenario (channel scenario, trigger type, carrier frequency) and reports aggregated KPI results.
-- `NtnRealisticMobility` (`ntn-realistic-mobility.h`) — generates UE populations with realistic per-class motion following 3GPP TR 38.811 §6.1.1.1 NTN UE classes, with built-in scenario profiles.
+- `NtnRealisticMobilityHelper` (`ntn-realistic-mobility.h`) — generates UE populations with realistic per-class motion following the seven 3GPP TR 38.811 §6.1.1.1 NTN UE classes, with built-in scenario profiles (`NtnMobilityScenarios`).
 
 ## Examples
 
@@ -92,7 +108,7 @@ Key args: `outputDir`, `simTime`, `dt`, `rngRun`.
 ./build/utils/ns3.43-test-runner-default --suite=ntn-cho
 ```
 
-The `ntn-cho` suite covers the CHO algorithm, the CHO state machine, and the NTN measurement model. See [INSTALL](../../INSTALL.md) for full toolkit setup.
+The `ntn-cho` suite covers the CHO algorithm, the CHO state machine, and the NTN measurement model. See [INSTALL.md](INSTALL.md) for full setup.
 
 ## Citing
 

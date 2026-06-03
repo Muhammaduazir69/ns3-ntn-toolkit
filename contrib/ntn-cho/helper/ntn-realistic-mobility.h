@@ -18,8 +18,8 @@
  *   - IMO Resolution A.857(20)(Maritime Traffic Separation Schemes)
  *   - ICAO Doc 4444 PANS-ATM  (airway / great-circle waypoint structure)
  *
- * Six UE classes are provided (matching TR 38.811 Table 6.1.1.1):
- *   HANDHELD_PEDESTRIAN, HANDHELD_STATIC, VEHICULAR, HIGH_SPEED_TRAIN,
+ * Seven UE classes are provided (matching TR 38.811 Table 6.1.1.1):
+ *   HANDHELD_STATIC, HANDHELD_PEDESTRIAN, VEHICULAR, HIGH_SPEED_TRAIN,
  *   MARITIME_VESSEL, AVIATION_COMMERCIAL, IOT_FIXED.
  *
  * Each class provides: an initial geographic distribution (regions

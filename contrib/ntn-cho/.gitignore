@@ -1,0 +1,21 @@
+build/
+*.o
+*.so
+*.pyc
+__pycache__/
+node_modules/
+package-lock.json
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Generated simulation output — regenerate with the examples, do not commit.
+results/
+*.csv
+*.geojson
+# Generated figures/animations.
+*.gif
+*.pdf
+# Keep the App Store icon.
+!icon.png

@@ -9,8 +9,17 @@
 
 #include <ns3/log.h>
 #include <ns3/simulator.h>
-#include <ns3/ns3-ai-msg-interface.h>
 
+// ns3-ai is an optional dependency. When the module is built with it present
+// the build system defines NTN_CHO_HAS_NS3AI (see CMakeLists.txt) and the
+// shared-memory bridge is compiled in; otherwise the learning-based path is
+// stubbed out with a clear fatal error and the C++ CHO baselines are
+// unaffected.
+#ifdef NTN_CHO_HAS_NS3AI
+#include <ns3/ns3-ai-msg-interface.h>
+#endif
+
+#include <algorithm> // std::clamp / std::min (do not rely on transitive includes)
 #include <cmath>
 
 namespace ns3
@@ -59,6 +68,7 @@ NtnAiInterface::Initialize(const std::string& segmentName, uint32_t memorySize)
     NS_LOG_FUNCTION(this << segmentName << memorySize);
     m_segmentName = segmentName;
 
+#ifdef NTN_CHO_HAS_NS3AI
     // Configure ns3-ai shared memory interface
     auto& msgIf = *Singleton<Ns3AiMsgInterface>::Get();
     msgIf.SetIsMemoryCreator(true);
@@ -75,6 +85,11 @@ NtnAiInterface::Initialize(const std::string& segmentName, uint32_t memorySize)
 
     NS_LOG_INFO("NTN AI Interface initialized: segment=" << segmentName
                 << " size=" << memorySize);
+#else
+    NS_FATAL_ERROR("NtnAiInterface requires the ns3-ai module, but ntn-cho was "
+                   "built without it. Add ns3-ai to contrib/ and rebuild, or "
+                   "use the C++ CHO baselines (a3 / location / time / tte-aware).");
+#endif
 }
 
 NtnAiAction
@@ -83,6 +98,7 @@ NtnAiInterface::GetAction(const NtnAiObservation& obs)
     NS_LOG_FUNCTION(this << obs.ueId << obs.simTime);
     NS_ASSERT_MSG(m_initialized, "NtnAiInterface not initialized");
 
+#ifdef NTN_CHO_HAS_NS3AI
     auto msgInterface =
         Singleton<Ns3AiMsgInterface>::Get()
             ->GetInterface<NtnAiObservation, NtnAiAction>();
@@ -101,6 +117,11 @@ NtnAiInterface::GetAction(const NtnAiObservation& obs)
     NS_LOG_DEBUG("AI action: selectedAction=" << action.selectedAction
                  << " confidence=" << action.confidence);
     return action;
+#else
+    NS_FATAL_ERROR("NtnAiInterface::GetAction requires the ns3-ai module "
+                   "(ntn-cho was built without it).");
+    return NtnAiAction{}; // unreachable
+#endif
 }
 
 void
@@ -114,6 +135,7 @@ void
 NtnAiInterface::NotifySimulationEnd()
 {
     NS_LOG_FUNCTION(this);
+#ifdef NTN_CHO_HAS_NS3AI
     if (m_active)
     {
         auto msgInterface =
@@ -122,6 +144,7 @@ NtnAiInterface::NotifySimulationEnd()
         msgInterface->CppSetFinished();
         m_active = false;
     }
+#endif
 }
 
 bool
