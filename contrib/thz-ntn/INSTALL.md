@@ -18,8 +18,8 @@ or any vanilla ns-3.43 tree.
 | Disk | ~2 GB after build |
 
 No additional Python or HITRAN-database installation is required —
-the absorption-line table ships with the module under
-`model/data/hitran_subset.csv`.
+the HITRAN-2024 absorption table ships with the module under
+`data/hitran2024-lut-subthz.csv`.
 
 ---
 
@@ -79,39 +79,24 @@ Verify:
 
 ## 5. Run examples
 
-The `thz-ntn-demo` umbrella binary exposes 9 example scenarios via `--example=N`:
-
-| N | Scenario | What it produces |
-|---|---|---|
-| 1 | LEO-ground slant link budget @ 225 GHz | per-elevation FSPL/abs/scint/pointing CSV |
-| 2 | ISL capacity @ 225 GHz | range vs Shannon-capacity sweep |
-| 3 | UM-MIMO array gain | gain vs N²×N² element count |
-| 4 | RIS sweep | 64–4 096 element gain table |
-| 5 | ISAC CRLB on space debris | 2-cm / 10-cm / 1-m detection ranges |
-| 6 | EKF beam tracking | per-step pointing-error trace |
-| 7 | Atmospheric-window detection | 140 / 220 / 340 / 410 / 460 GHz |
-| 8 | 600-s LEO beam-tracking pass | full-pass timeseries |
-| 9 | Cross-reference validation | residuals vs ITU-R P.676 / *am* |
-
-Run all 9:
+The module ships 13 built examples under `examples/`. A few to start with:
 
 ```bash
-./ns3 run "thz-ntn-demo --outputDir=thz-ntn-output/"
+./ns3 run thz-ntn-leo-ground
+./ns3 run "thz-ntn-leo-ground --freq=300e9 --altitude=600"
+./ns3 run thz-ntn-isl
+./ns3 run thz-ntn-ris-assisted
 ```
 
-Or one specific:
-
-```bash
-./ns3 run "thz-ntn-demo --example=7 --outputDir=/tmp/windows/"
-```
+See [doc/EXAMPLES.md](doc/EXAMPLES.md) for the full list and their arguments.
 
 ### Test suite
 
 ```bash
-./ns3 run "test-runner --suite=thz-ntn --verbose"
+./test.py --suite=thz-ntn
 ```
 
-Expected: **12 / 12 passing**.
+Expected: **38 / 38 passing**.
 
 ---
 
@@ -134,7 +119,7 @@ You're missing SNS3 `satellite`. Clone it under `contrib/satellite/`.
 Missing mmWave dependency. Clone it under `contrib/mmwave/`.
 
 **HITRAN line file missing**
-Make sure `model/data/hitran_subset.csv` exists in your clone — it ships with the repo at ~250 KB.
+Make sure `data/hitran2024-lut-subthz.csv` exists in your clone — it ships with the repo.
 
 **Build cache filtering modules**
 `./ns3 configure --enable-modules='' --enable-tests --enable-examples`.

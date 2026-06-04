@@ -52,7 +52,8 @@ ShouldSkipGeo(const SliceProfile& slice)
     return slice.snssai.sst == SliceSst::Urllc || !slice.allowGeo;
 }
 
-/// Convenience: classify a satellite altitude as GEO if above 35 000 km.
+/// Convenience: classify a satellite as GEO-class. Altitudes at or above the
+/// conservative 30 000 km boundary are treated as GEO; GEO proper is 35 786 km.
 inline bool
 IsGeoSatellite(double altitudeKm)
 {

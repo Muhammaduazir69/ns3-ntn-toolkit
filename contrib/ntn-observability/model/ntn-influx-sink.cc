@@ -95,6 +95,11 @@ FormatFloat(double v)
 std::string
 EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulationTime)
 {
+    // The sim-time vs wall-time choice is applied earlier, in NtnInfluxSink::Push(),
+    // which stamps Simulator::Now() onto each Point when sim time is enabled. By the
+    // time a Point reaches here its timestamp is already final, so we always emit it
+    // as-is. The parameter is kept for source/ABI compatibility of this public helper.
+    (void)useSimulationTime;
     std::string out;
     out.reserve(pts.size() * 96);
     for (const auto& p : pts)
@@ -137,8 +142,7 @@ EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulationTime)
             out += EscapeStringValue(v);
             first = false;
         }
-        long long ts_ns =
-            useSimulationTime ? p.timestamp.GetNanoSeconds() : p.timestamp.GetNanoSeconds();
+        long long ts_ns = p.timestamp.GetNanoSeconds();
         out.push_back(' ');
         out += std::to_string(ts_ns);
         out.push_back('\n');

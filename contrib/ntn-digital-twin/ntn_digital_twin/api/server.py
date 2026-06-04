@@ -26,10 +26,8 @@ import math
 import os
 import time
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from pydantic import ValidationError
 
 from ntn_constellation.feeds import CelesTrakFeed, TleCache
 from ntn_constellation.propagator import Constellation, Satellite
@@ -90,9 +88,24 @@ class TwinState:
         self.max_sats = int(os.environ.get("NTN_TWIN_MAX_SATS", "50"))
         self.cache_dir = Path(os.environ.get("NTN_TWIN_CACHE_DIR",
                                               "/tmp/.ntn-twin-cache"))
+        # The twin_loop rewrites this CZML file every iteration. Its mtime is
+        # the cache key: when it changes, the API reloads the constellation.
+        self.czml_path = Path(os.environ.get("NTN_TWIN_CZML",
+                                             "/tmp/ntn-twin.czml"))
+        self.czml_mtime: float | None = None
+
+    def _czml_mtime(self) -> float | None:
+        """Current mtime of the CZML file, or None if it does not exist."""
+        try:
+            return self.czml_path.stat().st_mtime
+        except OSError:
+            return None
 
     def ensure_loaded(self) -> Constellation:
-        if self.cons is not None:
+        mtime = self._czml_mtime()
+        # Serve the cached constellation unless the loop has written a newer
+        # CZML file. If the file is absent, we cannot tell — keep the cache.
+        if self.cons is not None and (mtime is None or mtime == self.czml_mtime):
             return self.cons
         cache = TleCache(self.cache_dir)
         feed = CelesTrakFeed(cache=cache)
@@ -102,6 +115,7 @@ class TwinState:
         if not records:
             raise HTTPException(503, f"no TLEs for group={self.group}")
         self.cons = Constellation([Satellite(r) for r in records])
+        self.czml_mtime = mtime
         self.last_refresh = dt.datetime.now(tz=dt.timezone.utc)
         return self.cons
 

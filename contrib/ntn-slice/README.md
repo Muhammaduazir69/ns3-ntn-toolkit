@@ -12,7 +12,7 @@
 
 > Per-slice PRB orchestration for LEO + GEO non-terrestrial networks: eMBB / URLLC / mMTC / V2X slices with TS 22.261 demand profiles, per-slice latency / reliability KPIs, and a GEO mode-skip policy that keeps URLLC traffic off the orbital latency floor.
 >
-> Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+> Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
 
 ---
 
@@ -27,16 +27,17 @@
 
 The orchestrator's `(observation, action)` shape matches the `SliceEnv` Gymnasium wrapper in [`ns3-ai`](https://github.com/Muhammaduazir69/ns3-ai), so a trained RL policy can drive the C++ allocator directly via `StepWithShares()`.
 
-| Slice | SST | Default min throughput | Default p99 latency budget | GEO allowed |
+| Slice | SST | Default min throughput | Default latency budget | GEO allowed |
 |---|---:|---:|---:|:---:|
-| eMBB  | 1 | 100 Mbps | 100 ms | yes |
-| URLLC | 2 |   5 Mbps |   5 ms | **no — mode-skip** |
-| mMTC  | 3 |   1 Mbps |   1 s  | yes |
-| V2X   | 4 |   2 Mbps |  10 ms | yes |
+| eMBB  | 1 | 50 Mbps | 50 ms | yes |
+| URLLC | 2 |  5 Mbps |  5 ms | **no — mode-skip** |
+| mMTC  | 3 |  1 Mbps |  1 s  | yes |
+
+The V2X SST enum value (SST 4) is defined, but no default V2X profile ships yet — only the three slices above have a default-profile factory.
 
 ## What's new in v2
 
-See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
+See the [CHANGELOG](CHANGELOG.md) for the full history.
 
 - The **three-slice LEO/GEO example** now produces genuinely *differentiated* slices: URLLC achieves low latency and high reliability, eMBB drives high throughput, and mMTC supports many low-rate devices — each within its own KPI envelope.
 - `served_mbps` is now clamped so it **never exceeds the per-slice demand** (no over-reporting of served load).
@@ -50,7 +51,7 @@ See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
 | `model/ntn-slice-selector.h` | `NtnSliceSelector` — DSCP / port-range / app-label rule chain, first-match-wins, default fallback; maps a flow to its S-NSSAI. |
 | `model/slice-orchestrator-xapp.h` | `SliceOrchestratorXapp` — PRB allocator with min-throughput reservation + priority-weighted unmet-demand sharing; `Step()` / `StepWithShares({snssai → fraction})` for RL override; `Tick` trace source exports per-slice allocated PRBs, served Mbps, satisfaction. |
 | `model/slice-isolation-monitor.h` | `SliceIsolationMonitor` — rolling per-slice latency / loss-rate windows; `RecordPacket()` / `EvaluateAll()` returns `BreachEvent` records for latency-p99 and reliability breaches. |
-| `helper/ntn-slice-helper.h` | `NtnSliceHelper::ThreeSliceDefault()` — ready-wired selector + orchestrator + monitor + the three default slices; GEO helpers `ShouldSkipGeo(slice)` and `IsGeoSatellite(altKm)` (35 786 km threshold). |
+| `helper/ntn-slice-helper.h` | `NtnSliceHelper::ThreeSliceDefault()` — ready-wired selector + orchestrator + monitor + the three default slices; GEO helpers `ShouldSkipGeo(slice)` and `IsGeoSatellite(altKm)` (altitudes at or above the conservative 30 000 km boundary are treated as GEO-class; GEO proper is 35 786 km). |
 
 ## Examples
 
@@ -104,7 +105,7 @@ Key args: `--simSeconds` (sim duration, s) · `--dataRateMbps` (per-slice offere
 
 The `ntn-slice` suite has 7 unit tests (S-NSSAI pack/unpack round-trip, selector first-match-wins, URLLC min-throughput preservation under contention, isolation-monitor breach detection, URLLC GEO mode-skip, three-slice co-existence, RL-shares honoured).
 
-See [../../INSTALL.md](../../INSTALL.md) for full setup, dependencies and toolkit-wide build notes.
+See [INSTALL.md](INSTALL.md) for setup and dependencies. For the full toolkit, see [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
 
 ## License & author
 

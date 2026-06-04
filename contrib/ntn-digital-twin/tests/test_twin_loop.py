@@ -137,7 +137,14 @@ def test_api_predict_handover_returns_events(synthetic_constellation):
     r = client.post("/predict/handover", json=payload)
     assert r.status_code == 200
     body = r.json()
+    # Response schema keys are always present.
+    for key in ("requested_at_iso", "horizon_min", "n_handovers",
+                "events", "elapsed_ms"):
+        assert key in body
+    assert body["horizon_min"] == 30.0
+    assert isinstance(body["events"], list)
     assert body["n_handovers"] >= 0
+    assert body["n_handovers"] == len(body["events"])
     if body["n_handovers"] > 0:
         ev = body["events"][0]
         assert ev["sat_in_norad"] > 0

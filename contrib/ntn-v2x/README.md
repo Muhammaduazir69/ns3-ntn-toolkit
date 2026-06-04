@@ -12,7 +12,7 @@
 
 > NTN-assisted V2X for rural and remote roads: SUMO-driven vehicle mobility, a direct-vs-satellite-relay decision per vehicle, and air-to-ground / V2X SNR budgets — plus a 2-D maritime scenario.
 >
-> Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+> Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
 
 ---
 
@@ -35,7 +35,7 @@ SUMO  ──TCP TraCI──►  SumoTraciBridge  ──MobilityModel.SetPosition
 
 ## What's new in v2
 
-See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
+See the [CHANGELOG](CHANGELOG.md) for the full history.
 
 - The TraCI bridge now models realistic **co-simulation step-timing jitter** — a few ms per step, comfortably under the W7 100 ms validation gate — instead of a constant `0`.
 - The `jitter_ms` column in `ntn-v2x-rural-highway.csv` is now meaningful, reflecting per-step sync jitter rather than a flat zero.
@@ -48,7 +48,7 @@ See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
 | `model/sumo-traci-bridge.h` | `SumoTraciBridge` — single API for live TraCI (`ConnectTcp("127.0.0.1", 8813)`) and offline FCD replay (`LoadFcdTrace(csv)`); `RegisterVehicle()`, `Step()` advances regardless of source; tracks per-step sync jitter (`GetLastJitterSec()` / `GetMaxJitterSec()`) and exports per-vehicle samples via a `TracedCallback`. |
 | `model/v2x-leo-direct.h` | `V2xLeoDirect` — vehicle ↔ LEO uplink budget (free-space PL + SNR + elevation); closed-form `ComputeStatic` callable inside hot loops without `Object` allocation overhead. |
 | `model/v2x-leo-relay.h` | `V2xLeoRelay` — V2V-via-LEO relay assignment; each vehicle uplinks direct or relays through the best-SNR peer within `m_maxV2vRangeM`; `m_minDirectSnrDb` sets the prefer-relay threshold; `EvaluateAll()` returns the per-vehicle decision. |
-| `model/maritime-scenario.h` | `MaritimeScenario` — 2-D vessel mobility for sea-area scenarios; bounces off all four box edges and stays inside the bounded region. |
+| `model/maritime-scenario.h` | `MaritimeMobilityModel` — 2-D vessel mobility for sea-area scenarios; bounces off all four box edges and stays inside the bounded region. |
 | `helper/ntn-v2x-helper.h` | Synthetic FCD generator `WriteSyntheticFcdCsv` — reproducible, RNG-seeded FCD traces so CI runs without a SUMO install and a researcher can re-run the exact scenario by re-using the seed. |
 
 ## Examples
@@ -105,9 +105,9 @@ The `ntn-v2x` suite has 5 unit tests (trace-replay sync jitter under the 100 ms 
 
 ### Live SUMO co-simulation
 
-The TraCI client speaks v20+: `ConnectTcp("127.0.0.1", 8813)` opens a socket and `Step()` advances the simulation. The wire-level command codec is intentionally minimal so the live path does not pull in dependencies CI may lack; the public API is identical for live and replay modes.
+The live SUMO TraCI wire codec is a stub: `ConnectTcp()` fails gracefully (it does not open a real TraCI session) and live `Step()` only advances the clock — so FCD replay (`LoadFcdTrace(csv)`) is the supported path. The public API is identical for both modes, so a real codec can be dropped in later without changing callers.
 
-See [../../INSTALL.md](../../INSTALL.md) for full setup, dependencies and toolkit-wide build notes.
+See [INSTALL.md](INSTALL.md) for full setup, dependencies and build notes.
 
 ## License & author
 

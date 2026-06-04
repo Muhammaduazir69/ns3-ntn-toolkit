@@ -218,4 +218,4 @@ The test suite (`test/thz-ntn-test-suite.cc`) exercises each integration point:
 | `ThzNtnRis` | Configure + max gain + N^2 scaling + quantization loss |
 | `ThzNtnIsac` | Range/velocity resolution + CRB + detection probability |
 
-All 12 tests pass.
+The suite registers 38 test cases; all pass.

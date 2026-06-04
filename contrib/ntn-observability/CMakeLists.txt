@@ -24,6 +24,5 @@ build_lib(
   LIBRARIES_TO_LINK
     ${libcore}
     ${libnetwork}
-    ${libmobility}
   TEST_SOURCES ${test_sources}
 )

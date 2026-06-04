@@ -108,6 +108,5 @@ build_lib(
         ${libapplications}
         ${libsatellite}
         ${libmmwave}
-        ${liblte}
     TEST_SOURCES ${test_sources}
 )

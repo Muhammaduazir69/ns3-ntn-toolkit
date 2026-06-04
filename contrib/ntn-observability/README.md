@@ -8,12 +8,12 @@
   <img src="https://img.shields.io/badge/InfluxDB-2.7-orange.svg"/>
   <img src="https://img.shields.io/badge/Grafana-10.4-purple.svg"/>
   <img src="https://img.shields.io/badge/dashboards-4-success.svg"/>
-  <img src="https://img.shields.io/badge/unit_tests-5%20PASS-blue.svg"/>
+  <img src="https://img.shields.io/badge/unit_tests-10%20PASS-blue.svg"/>
 </p>
 
 > Structured run manifests plus KPI / observability sinks for reproducible NTN experiments: line-protocol into InfluxDB v2, a streaming NetSimulyzer JSON exporter, and pre-built Grafana dashboards.
 >
-> Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+> Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
 
 ---
 
@@ -36,7 +36,7 @@ ns-3 traces  ─┐
 
 ## What's new in v2
 
-See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
+See the [CHANGELOG](CHANGELOG.md) for the full history.
 
 - New **`ntn-repro-manifest` model** (`NtnReproManifest`) — a reproducibility manifest that records git SHA, ns-3 version, scenario, TLE epoch, constellation, Sionna / HITRAN / ITU versions, service models, CLI argv and extras, with `WriteJson()` / `LoadJson()` round-tripping.
 - New **`ntn-observability-traffic`** example with a real ns-3 data plane (LEO downlink over point-to-point + IP + UDP apps + FlowMonitor) whose InfluxDB KPIs come from a real `PacketSink` byte counter, not synthetic values.
@@ -104,7 +104,7 @@ Key args: `--simSeconds` (sim duration, s) · `--leoAltKm` (satellite altitude, 
 ./build/utils/ns3.43-test-runner-default --suite=ntn-observability
 ```
 
-The `ntn-observability` suite has 5 unit tests (line-protocol basic encode, line-protocol escaping, Influx file-sink round-trip, NetSimulyzer JSON shape, and the pinned metric-schema-stability test).
+The `ntn-observability` suite has 10 unit tests. Five cover the sinks and schema (line-protocol basic encode, line-protocol escaping, Influx file-sink round-trip, NetSimulyzer JSON shape, and the pinned metric-schema-stability test). The other five cover the repro-manifest family: JSON round-trip, schema-header presence, tolerance of unknown keys, rejection of malformed JSON, and escape round-trip.
 
 ### Grafana stack (Docker)
 
@@ -115,7 +115,7 @@ docker compose up -d   # InfluxDB 2.7 + Grafana 10.4 + Telegraf sidecar
 
 Open Grafana at http://localhost:3000 (admin / admin) — the 4 NTN dashboards (Overview, Handover, Radio, ISL) are pre-loaded.
 
-See [../../INSTALL.md](../../INSTALL.md) for full setup, dependencies and the Telegraf sidecar configuration that rewrites simulation-time stamps to ingest time.
+See [INSTALL.md](INSTALL.md) for setup, dependencies and the Telegraf sidecar configuration that rewrites simulation-time stamps to ingest time. For the full toolkit, see [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
 
 ## License & author
 

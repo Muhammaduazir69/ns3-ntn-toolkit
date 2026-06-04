@@ -8,10 +8,10 @@
   <img src="https://img.shields.io/badge/Sionna%20RT-2.0-orange.svg"/>
   <img src="https://img.shields.io/badge/3GPP-TR%2038.811%20reference-purple.svg"/>
   <img src="https://img.shields.io/badge/RTT-%E2%89%A510%20ms%20steady--state-success.svg"/>
-  <img src="https://img.shields.io/badge/tests-28%20C%2B%2B%20%2B%206%20Python%20PASS-blue.svg"/>
+  <img src="https://img.shields.io/badge/tests-38%20C%2B%2B%20%2B%203%20Python%20PASS-blue.svg"/>
 </p>
 
-> Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+> Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit). See [INSTALL.md](INSTALL.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -29,7 +29,7 @@ The closed-form TR 38.811 channel remains the simulation default; the ray-traced
 
 ## What's new in v2
 
-See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 - **Cascade / caching / RIS channel bridges** — `NtnSionnaCascadeChannel` composes Sionna RT with the ITU-R `NtnAtmosphericLossChain`; `SionnaCachingTransport` is a 4-D LRU decorator over any transport; RIS Tx surfaces are carried in the request and installed in the scene per query.
 - **Sionna calibrator** — `SionnaCalibrator` measures the residual of the ray-traced channel against a reference propagation model and feeds the calibration harness.
@@ -109,7 +109,7 @@ These exercise the channel models, link budget, and calibration directly (no dat
 
 The bridge does **not** require a live Sionna GPU to run:
 
-- **Live GPU path** — start `bridge/sionna-server.py` (needs CUDA, TensorFlow, Sionna RT) and point `SionnaUdpTransport` at it. See [../../INSTALL.md](../../INSTALL.md) for the GPU prerequisites and version matrix.
+- **Live GPU path** — start `bridge/sionna-server.py` (needs CUDA, TensorFlow, Sionna RT) and point `SionnaUdpTransport` at it. See [INSTALL.md](INSTALL.md) for the GPU prerequisites and version matrix.
 - **No-GPU paths** — `SionnaReplayTransport` replays a previously recorded query log, and `SionnaCachingTransport` serves cached responses; both run headless. With no transport answering at all, `NtnSionnaChannel` falls back to closed-form FSPL.
 - **Stub server** — `test/sionna-stub-server.py` mimics the wire protocol using closed-form FSPL, so the C++ tests run without Sionna RT installed.
 - **Geospatial tooling** — `tools/` ships `osm_to_sionna_scene.py` (OSM → Sionna scene), `lidar_dem_ingest.py` (AW3D30 + LiDAR → elevation grid), and `probe_sionna_env.py` (env / version gate). See [tools/README.md](tools/README.md).
@@ -133,7 +133,7 @@ pytest contrib/ntn-sionna/test/         # Python integration tests
 pytest contrib/ntn-sionna/tools/tests/  # geospatial tool tests
 ```
 
-For CUDA / TensorFlow / Sionna RT installation and the supported version matrix, see [../../INSTALL.md](../../INSTALL.md).
+For CUDA / TensorFlow / Sionna RT installation and the supported version matrix, see [INSTALL.md](INSTALL.md).
 
 ## Cite this work
 

@@ -30,7 +30,6 @@ build_lib(
   HEADER_FILES ${header_files}
   LIBRARIES_TO_LINK
     ${libcore}
-    ${libnetwork}
     ${libmobility}
   TEST_SOURCES ${test_sources}
 )

@@ -2,12 +2,12 @@
 
 <p align="center"><strong>Live Digital-Twin Loop, REST Prediction API and CesiumJS Live Mode for 6G NTN Constellations</strong></p>
 
-<p align="center">Part of <strong>ns3-ntn-toolkit</strong> — <a href="../../README.md">README</a> / <a href="../../INSTALL.md">INSTALL</a>.</p>
+<p align="center">Part of <strong>ns3-ntn-toolkit</strong> — <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">toolkit</a> / <a href="INSTALL.md">INSTALL</a>.</p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/FastAPI-0.136-orange.svg"/>
+  <img src="https://img.shields.io/badge/FastAPI->=0.110-orange.svg"/>
   <img src="https://img.shields.io/badge/refresh-cron%20%2F%20systemd-purple.svg"/>
   <img src="https://img.shields.io/badge/p99_latency-29.9_ms-success.svg"/>
   <img src="https://img.shields.io/badge/tests-6%20PASS-blue.svg"/>
@@ -21,7 +21,7 @@
 
 ## What's new in v2
 
-Documentation refreshed to match the v2 toolkit release; the FastAPI service (`/health`, `/constellation/state`, `/predict/handover`) and the refresher loop are unchanged. See the toolkit-wide [CHANGELOG](../../CHANGELOG.md).
+Documentation refreshed to match the v2 toolkit release; the FastAPI service (`/health`, `/constellation/state`, `/predict/handover`) and the refresher loop are unchanged. See the [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) for the toolkit-wide changelog.
 
 ## Why this module
 
@@ -35,7 +35,7 @@ A simulator that mirrors a real LEO constellation in near-real time stops being 
 | Propagator | `ntn-constellation` SGP4-direct (raw `Satrec` for highest fidelity) |
 | Geometry on the hot API path | closed-form ECEF→ENU elevation (no Skyfield) |
 | Output sinks | CesiumJS CZML · InfluxDB line-protocol (file or UDP) |
-| API server | FastAPI 0.136 / Uvicorn (async) |
+| API server | FastAPI >=0.110 / Uvicorn (async) |
 | Service units | systemd: `ntn-twin.service` (loop) + `ntn-twin-api.service` (API) |
 
 | Verification metric | Value |
@@ -111,7 +111,7 @@ For long-running production deployments, install the systemd unit files from `sy
 | `test_api_health` | `{ok: true, constellation_size: 50, last_refresh_iso: …}` |
 | `test_api_constellation_state` | 50 satellites, altitude 540–555 km, lat/lon in valid ranges. |
 | `test_api_predict_handover_under_500ms` | server `elapsed_ms` < 500, round-trip < 1500. |
-| `test_api_predict_handover_returns_events` | events have valid NORAD + elevation in [-90, 90]. |
+| `test_api_predict_handover_returns_events` | response has all schema keys; `n_handovers` matches `len(events)`; any returned event has a valid NORAD and elevation in [-90, 90]. |
 
 **24-hour-equivalent compressed loop (144 iterations):**
 

@@ -11,55 +11,79 @@ oran-ntn Module
 Overview
 --------
 
-The ``oran-ntn`` module provides an O-RAN Near-RT RIC and Space RIC
-implementation for Non-Terrestrial Networks in ns-3, together with 13
-xApps, an A1 policy engine, and an E2SM-RC action runtime.
+The ``oran-ntn`` module brings an O-RAN control plane to ns-3 NTN
+simulations: a ground Near-RT RIC, per-satellite Space RICs with an
+autonomous mode under feeder outage, an A1 policy layer, an xApp
+framework with thirteen reference xApps, and a conflict manager.
 
 Model description
 -----------------
 
-Key classes:
+The source code lives in ``contrib/oran-ntn/model`` and
+``contrib/oran-ntn/helper``.
 
-* ``OranRic`` — Near-RT RIC core with E2AP session management,
-  subscription handling, and a conflict-resolver hook.
-* ``Xapp`` — abstract xApp base class.  Concrete xApps:
-  ``TrafficSteeringXapp``, ``HandoverControlXapp``,
-  ``QosOptimiserXapp``, ``BeamManagementXapp``, ``LoadBalancerXapp``,
-  ``AnomalyDetectorXapp``, ``EnergySaverXapp``, ``SlicingXapp``,
-  ``RlmXapp``, ``CellOnOffXapp``, ``AdmissionControlXapp``,
-  ``InterferenceCoordinatorXapp``, ``SpaceRicXapp``.
-* ``A1PolicyEngine`` — 11 policy types; see Paper 3 Table IV.
-* ``E2smRcRuntime`` — 28 actions; see Paper 3 Table V.
-* ``ConflictResolver`` — pair-wise matrix for co-located xApps.
-* ``SpaceRic`` — autonomous-mode metrics for stressed feeder-link
+Design
+~~~~~~
+
+The module exposes the following public classes:
+
+* ``OranNtnNearRtRic`` — ground Near-RT RIC: E2 node registry,
+  subscriptions, indication routing, action pipeline, KPM logging.
+* ``OranNtnXappBase`` — xApp base class (decision interval,
+  confidence, latency tracking). Thirteen concrete xApps inherit it:
+  ``OranNtnXappHoPredict``, ``OranNtnXappBeamHop``,
+  ``OranNtnXappSliceManager``, ``OranNtnXappDopplerComp``,
+  ``OranNtnXappTnNtnSteering``, ``OranNtnXappEnergyHarvest``,
+  ``OranNtnXappInterferenceMgmt``, ``OranNtnXappMultiConn``,
+  ``OranNtnXappPredictiveAlloc``, ``OranNtnXappIsac``,
+  ``OranNtnXappThzSpectrum``, ``OranNtnXappThzBeamMgmt``,
+  ``OranNtnXappThzRis``.
+* ``OranNtnA1PolicyManager`` / ``OranNtnA1Adapter`` — 11 A1 policy
+  types with versioning and acknowledgement.
+* Service models: E2SM-KPM, E2SM-RC v1.03 (29 action types),
+  E2SM-CCC, and an NTN-ephemeris extension.
+* ``OranNtnConflictManager`` — five resolution strategies
+  (PRIORITY, TEMPORAL, MERGE, A1_GUIDED, ML_BASED) over
+  resource-key contracts.
+* ``OranNtnSpaceRic`` — satellite-hosted RIC with autonomous mode
+  and ISL messaging (8 message types).
+
+Scope and limitations
+~~~~~~~~~~~~~~~~~~~~~~~
+
+* The federated-learning path ships four aggregators but an
+  end-to-end FL training campaign is not part of the released
   scenarios.
+* A dedicated ``E2SM-HO-PRED`` codec class is specified in the
+  companion paper but not yet shipped; the HO-prediction xApp
+  consumes the measurement tuple through E2SM-KPM/RC.
+
+Examples
+~~~~~~~~
+
+* ``oran-ntn-full-scenario`` — 66-satellite Walker constellation,
+  5 live xApps, real UDP traffic plane, feeder-outage windows with
+  autonomous Space-RIC decisions; writes ``action_log.csv``,
+  ``xapp_metrics.csv``, ``space_ric_metrics.csv``,
+  ``conflict_log.csv``, ``kpm_dataset.csv``, ``ric_metrics.txt``,
+  ``sim_health.csv``.
+* ``oran-ntn-ric-controlled-traffic`` — RIC control actions steering
+  a real UDP flow.
+
+Testing
+-------
+
+The ``oran-ntn`` unit-test suite registers 58 test cases covering
+RIC bookkeeping, service-model round-trips, A1 policies, conflict
+strategies, Space-RIC behaviour, and failure modes:
+
+.. sourcecode:: bash
+
+   ./test.py --suite=oran-ntn
 
 References
 ~~~~~~~~~~
 
-* O-RAN Alliance WG1, O-RAN Architecture Description v10.0, 2024.
-* O-RAN Alliance WG3, E2SM-KPM v03.00, E2SM-RC v01.03.
-* Lacava A. et al., *An Open RAN Framework for Non-Terrestrial
-  Networks*, IEEE TNSM, 2025.
-* Shen P. et al., *Federated A1 Transfer Accounting for Space RICs*,
-  IEEE TNSM, 2025.
-
-Usage
------
-
-See ``examples/oran-ntn-scenario-b-full-xapps.cc`` for a 60-second
-full-xApp Monte-Carlo-free scenario.  Per-xApp decision intervals are
-configurable attributes.
-
-Output
-~~~~~~
-
-Each run writes: ``action_log.csv``, ``conflict_log.csv``,
-``kpm_dataset.csv``, ``xapp_metrics.csv``, ``space_ric_metrics.csv``.
-
-Validation
-----------
-
-The 60-s full-xApp run reproduced in Paper 3 produced 7369 actions
-with 0 conflicts; the dataset is included under
-``papers/sim_runs/oran-ntn/run1/``.
+* O-RAN Alliance WG3, Near-RT RIC architecture & E2AP.
+* O-RAN Alliance, NTN deployment white paper (2025).
+* 3GPP TR 38.811 / TR 38.821, NTN study items.

@@ -46,12 +46,8 @@ GetLosCoeffs(A2gScenario s, double hUtM)
     switch (s)
     {
     case A2gScenario::UMa_AV:
-        // h_UT < 22.5 m → standard 3GPP UMa LOS (38.901 §7.4.1)
-        // h_UT ≥ 22.5 m: PL_LOS = 28.0 + 22*log10(d3D) + 20*log10(fc)
-        if (hUtM < 22.5)
-        {
-            return {28.0, 22.0};
-        }
+        // TR 36.777 table B-1 gives a single UMa-AV LOS coefficient set that
+        // applies to all UT heights: PL_LOS = 28.0 + 22*log10(d3D) + 20*log10(fc).
         return {28.0, 22.0};
     case A2gScenario::RMa_AV:
         // PL_LOS = max(23.9 - 1.8*log10(h_UT), 20) * log10(d3D) + 20*log10(fc)

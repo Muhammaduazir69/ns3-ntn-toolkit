@@ -179,7 +179,6 @@ build_lib(
         ${libapplications}
         ${libsatellite}
         ${libmmwave}
-        ${liblte}
         ${libns3-ai-ntn}
         ${oran_ntn_extra_libs}
     TEST_SOURCES ${test_sources}

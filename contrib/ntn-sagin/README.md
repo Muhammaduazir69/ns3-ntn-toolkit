@@ -1,6 +1,6 @@
 # ntn-sagin
 
-> Space-Air-Ground Integrated Network for ns-3.43 — LEO space layer, an air layer of aircraft / HAPS / UAV swarms, and a ground layer of maritime, high-speed-train and ADS-B terminals, stitched together by a multi-layer / slice-aware router. Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+> Space-Air-Ground Integrated Network for ns-3.43 — LEO space layer, an air layer of aircraft / HAPS / UAV swarms, and a ground layer of maritime, high-speed-train and ADS-B terminals, stitched together by a multi-layer / slice-aware router. Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
@@ -40,7 +40,7 @@ ground UE  ──►  UAV-relay  ──►  HAPS (20 km)  ──►  LEO (550 km
 
 ## What's new in v2
 
-See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
+See the [CHANGELOG](CHANGELOG.md) for the full history.
 
 - **Flight-LEO KPM now uses a full Ka-band link budget.** EIRP + satellite/aircraft antenna
   gains → realistic RSRP (≈ −73 … −80 dBm), noise-based SINR over the carrier bandwidth,
@@ -228,7 +228,7 @@ build/contrib/ntn-sagin/examples/ns3.43-sagin-sgp4-routed-traffic-default --simS
 ./test.py --suite=ntn-sagin
 ```
 
-For full toolkit setup (dependencies, enabling modules, environment), see [../../INSTALL.md](../../INSTALL.md).
+For module setup (dependencies, enabling modules, environment), see [INSTALL.md](INSTALL.md). For the full toolkit, see [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
 
 ## License & author
 

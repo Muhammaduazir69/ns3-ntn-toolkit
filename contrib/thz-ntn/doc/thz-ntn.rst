@@ -11,41 +11,91 @@ thz-ntn Module
 Overview
 --------
 
-The ``thz-ntn`` module provides sub-THz / THz propagation,
-atmospheric absorption, UM-MIMO array models, reconfigurable
-intelligent surfaces (RIS), and integrated sensing and communication
-(ISAC) primitives for ns-3 NTN scenarios.
+The ``thz-ntn`` module provides sub-THz / THz propagation, molecular
+absorption, antenna arrays and beamforming, reconfigurable intelligent
+surfaces (RIS), inter-satellite links (ISL), and integrated sensing and
+communication (ISAC) primitives for ns-3 NTN scenarios. It targets the
+100 GHz - 1 THz band (D-band and sub-THz).
 
-Model description
------------------
+Design
+------
 
-Key classes:
+The composite channel (``ThzNtnChannelModel``, a ``PropagationLossModel``)
+cascades free-space loss, molecular absorption, weather attenuation,
+scintillation, pointing error, and a hardware-impairment stage. The
+hardware-impairment stage is a registered placeholder: ``ThzNtnHardwareImpairments``
+is a registered ns-3 object and the channel exposes an ``EnableHardwareImpairments``
+attribute, but the per-link SNR degradation is not yet applied (the call site in
+``thz-ntn-channel-model.cc`` is commented out pending the model implementation).
 
-* ``ThzAtmosphericAbsorptionModel`` — HITRAN-2020 line-by-line model
-  with band-averaged shortcut tables (140–460 GHz).
-* ``ThzIslChannel`` — inter-satellite D-band / 300 GHz link channel
-  (100–1000 km validated).
-* ``ThzUmMimoArray`` — up to 16384 antenna elements, analog-hybrid
-  beamforming.
-* ``ThzRisSurface`` — quantised-phase RIS with 1–8 bit sweep.
-* ``ThzIsacSensor`` — ISAC CRB estimator for three debris classes.
-* ``ThzBeamTracker`` — 60-s LEO-pass beam-tracking helper.
+Key classes (from ``model/*.h``):
 
-Validation
-----------
+* ``ThzNtnMolecularAbsorption`` - HITRAN line-by-line gaseous absorption over
+  an ITU-R P.835 stratified atmosphere.
+* ``HitranLut`` (namespace ``ns3::thzntn``) - bundled HITRAN-2024 specific
+  attenuation lookup table; the build pins ``kHitranRelease = "HITRAN-2024"``
+  and ships ``data/hitran2024-lut-subthz.csv``.
+* ``ThzNtnFreeSpaceLoss`` - free-space path loss; extends ``SatFreeSpaceLoss``.
+* ``ThzNtnChannelModel`` - composite cascade propagation loss model.
+* ``Itu838RainModel``, ``Itu618LossModel``, ``Itu676AbsorptionModel``,
+  ``Itu681LmsModel`` (``thz-ntn-itu-recommendations.h``) - per-recommendation
+  reference implementations.
+* ``ThzNtnAntennaArray`` - UPA / UCA / Cassegrain arrays, gain and beamwidth.
+* ``ThzNtnBeamforming`` - DFT codebook generation and beam-squint analysis
+  (``ComputeBeamSquintLoss_dB``).
+* ``ThzNtnBeamTracking`` - beam tracking with a 4-state EKF
+  (state ``[theta, phi, dTheta/dt, dPhi/dt]``) driven by the satellite
+  ``MobilityModel``.
+* ``ThzNtnIslChannel`` - inter-satellite link channel (D-band / 300 GHz).
+* ``ThzNtnRis`` - reconfigurable intelligent surface with N^2 array gain and
+  phase-quantisation loss.
+* ``ThzNtnIsac`` - integrated sensing and communication for space-debris
+  ranging.
+* ``ThzNtnNyusimReference``, ``ThzNtnNyusimCalibrator`` - NYUSIM-140 GHz
+  reference loader and calibrator.
 
-Cross-checked against ITU-R P.676-13 (max deviation 0.61 dB at 10°
-elevation) and the *am* atmospheric model (max deviation 0.33 dB).
-Per-band validation plots are in
-``papers/figures/fig_thz_*``; raw CSVs are under
-``papers/sim_runs/thz-ntn/``.
+Scope
+-----
+
+The module models the PHY-layer link physics (channel, antenna/beamforming,
+ISL, RIS, ISAC) plus link-budget and waveform utilities. The
+hardware-impairment stage is registered but not active (see Design). The ISAC
+scheduler is under redesign; the legacy ``thz-ntn-isac.cc`` example is excluded
+from the build.
+
+Usage
+-----
+
+Build and run an example:
+
+.. code-block:: bash
+
+   ./ns3 configure --enable-examples --enable-tests
+   ./ns3 build thz-ntn
+   ./ns3 run thz-ntn-leo-ground
+
+See ``doc/EXAMPLES.md`` for the full list of built examples.
+
+Testing
+-------
+
+The test suite ``test/thz-ntn-test-suite.cc`` registers 38 test cases covering
+molecular absorption, FSPL, weather, pointing error, hardware-impairment
+arithmetic, atmospheric windows, link budget, antenna gain, beamforming
+codebooks, ISL vacuum propagation, RIS scaling, and ISAC resolution. Run with:
+
+.. code-block:: bash
+
+   ./test.py --suite=thz-ntn
 
 References
 ~~~~~~~~~~
 
-* Gordon, I. E., et al., *The HITRAN2020 molecular spectroscopic
-  database*, J. Quant. Spectrosc. Radiat. Transf., 277, 2022.
-* ITU-R P.676-13, Attenuation by atmospheric gases and related
-  effects, 2022.
-* Akyildiz, I. F., et al., *Terahertz Band: Next Frontier for
-  Wireless Communications*, Physical Communication, 2014.
+* Gordon, I. E., et al., *The HITRAN2020 molecular spectroscopic database*,
+  J. Quant. Spectrosc. Radiat. Transf., 277, 2022. (The module's LUT tracks the
+  HITRAN-2024 release.)
+* ITU-R P.676, Attenuation by atmospheric gases and related effects.
+* ITU-R P.618, Propagation data and prediction methods for Earth-space
+  telecommunication systems.
+* Akyildiz, I. F., et al., *Terahertz Band: Next Frontier for Wireless
+  Communications*, Physical Communication, 2014.

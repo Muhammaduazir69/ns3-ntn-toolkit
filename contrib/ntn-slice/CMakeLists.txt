@@ -23,6 +23,5 @@ build_lib(
   HEADER_FILES ${header_files}
   LIBRARIES_TO_LINK
     ${libcore}
-    ${libnetwork}
   TEST_SOURCES ${test_sources}
 )

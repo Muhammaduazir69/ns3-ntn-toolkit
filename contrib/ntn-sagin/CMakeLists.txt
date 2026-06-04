@@ -56,7 +56,6 @@ build_lib(
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpropagation}
     ${libntn-slice}
   TEST_SOURCES ${test_sources}
 )

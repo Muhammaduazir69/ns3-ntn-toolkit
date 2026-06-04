@@ -1,11 +1,12 @@
 # ntn-constellation
 
-> Walker constellation generation, SGP4 propagation, contact-graph scheduling/routing, and a TR 38.821 + Starlink calibration corpus for ns-3 6G NTN research. Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+> Walker constellation generation, orbital propagation, contact-graph scheduling/routing, and a TR 38.821 + Starlink calibration corpus for ns-3 6G NTN research. Part of **ns3-ntn-toolkit** — [README](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/SGP4%2FSDP4-Vallado%20et%20al.-orange.svg"/>
+  <img src="https://img.shields.io/badge/C%2B%2B%20propagator-Kepler%20%2B%20secular%20J2-orange.svg"/>
+  <img src="https://img.shields.io/badge/Python-sgp4%20%2B%20Skyfield-orange.svg"/>
   <img src="https://img.shields.io/badge/presets-Starlink%20%E2%80%A2%20OneWeb%20%E2%80%A2%20Kuiper%20%E2%80%A2%20Iridium-purple.svg"/>
   <img src="https://img.shields.io/badge/exporters-SNS3%20%E2%80%A2%20CesiumJS-success.svg"/>
 </p>
@@ -25,10 +26,12 @@ events that the rest of the data plane consumes. Everything lives in the
 - **Walker-Delta / Walker-Star generator** — `WalkerConstellation` builds a full
   constellation from a `WalkerConfig` (planes, satellites per plane, altitude,
   inclination), emitting SGP4-parseable orbital state.
-- **SGP4 propagation** — `Sgp4MobilityModel` is an ns-3 `MobilityModel` that
-  propagates a satellite from a `TleRecord` (or `KeplerianElements`) using the
-  canonical Vallado SGP4/SDP4 reference, so position queries during
-  `Simulator::Run()` track real ephemerides.
+- **Orbital propagation** — `Sgp4MobilityModel` is an ns-3 `MobilityModel` that
+  propagates a satellite from a `TleRecord` (or `KeplerianElements`) using an
+  analytic Kepler propagator with secular J2 corrections (RAAN and
+  argument-of-perigee) and an SGP4-compatible TLE interface, so position queries
+  during `Simulator::Run()` follow the orbit. Full Vallado SGP4 is a planned
+  follow-on; the TLE drag (B*) field is parsed but not yet used by this model.
 - **Contact-graph scheduling** — `ContactGraphScheduler` evaluates GSL (ground↔sat)
   and ISL (sat↔sat) visibility over the simulation timeline and raises
   `ContactEvent`s as links come up and go down.
@@ -42,9 +45,17 @@ events that the rest of the data plane consumes. Everything lives in the
 This module also ships a pip-installable Python companion (`ntn_constellation`) for
 the tool side — see [Python package](#python-package).
 
+**Two propagators, two fidelity levels.** The in-simulation C++ model
+(`Sgp4MobilityModel`) is an analytic Kepler + secular-J2 propagator with an
+SGP4-compatible TLE interface — it is *not* a full SGP4 implementation yet. The
+tool-side Python package (`ntn_constellation`) is different: it uses the real
+`sgp4` library and Skyfield for canonical SGP4/SDP4 propagation when it generates
+TLEs, ephemerides, and export files offline. So "SGP4" claims below apply to the
+Python side; the C++ side is Kepler+J2 for now.
+
 ## What's new in v2
 
-See [../../CHANGELOG.md](../../CHANGELOG.md) for the full toolkit changelog.
+See [CHANGELOG.md](CHANGELOG.md) for this module's changelog.
 
 - **New cross-module examples driving a REAL UDP data plane** via
   `NtnRealisticTrafficHelper` (from the `ntn-traffic` module), so packets actually
@@ -52,9 +63,10 @@ See [../../CHANGELOG.md](../../CHANGELOG.md) for the full toolkit changelog.
   - **`ntn-constellation-walker-traffic`** — a Walker-Delta constellation whose ISL
     connectivity is sampled every second from the `ContactGraphScheduler` and logged
     alongside the live UDP flow.
-  - **`ntn-constellation-sgp4-mobility-traffic`** — a single SGP4-propagated LEO
-    pass; the ground station is auto-placed under the satellite's t=0 sub-point so a
-    real GSL up/down pass always occurs regardless of TLE epoch.
+  - **`ntn-constellation-sgp4-mobility-traffic`** — a single LEO pass propagated by
+    the `Sgp4MobilityModel` (Kepler + secular J2); the ground station is auto-placed
+    under the satellite's t=0 sub-point so a real GSL up/down pass always occurs
+    regardless of TLE epoch.
 
 ## Models, helpers & key classes
 
@@ -63,7 +75,7 @@ Derived from `model/*.h`:
 | Header | Key types | Role |
 |---|---|---|
 | `walker-constellation.h` | `WalkerConfig`, `WalkerConstellation` | Walker-Delta / Walker-Star constellation generation (planes, sats/plane, altitude, inclination). |
-| `sgp4-mobility-model.h` | `Sgp4MobilityModel` | ns-3 `MobilityModel` that propagates a satellite via SGP4/SDP4 during the simulation. |
+| `sgp4-mobility-model.h` | `Sgp4MobilityModel` | ns-3 `MobilityModel` that propagates a satellite during the simulation via an analytic Kepler + secular-J2 propagator with an SGP4-compatible TLE interface (full Vallado SGP4 planned). |
 | `orbital-elements.h` | `TleRecord`, `KeplerianElements` | TLE / Keplerian element records consumed by the mobility model. |
 | `contact-graph-scheduler.h` | `ContactGraphScheduler`, `ContactEvent` | Computes GSL/ISL visibility and emits link up/down events over time. |
 | `contact-graph-router.h` | `ContactGraphRouter` | Routes over the time-varying contact graph. |
@@ -107,7 +119,8 @@ a summary block printed to stdout:
 
 ### ntn-constellation-sgp4-mobility-traffic
 
-A single SGP4-propagated LEO satellite passing over a ground station, with a real
+A single LEO satellite (propagated by the `Sgp4MobilityModel`: Kepler + secular J2)
+passing over a ground station, with a real
 UDP data plane and GSL up/down sampling. If `--gsLat`/`--gsLon` are not supplied, the
 ground station is auto-placed beneath the satellite's t=0 sub-point so a real GSL
 up+down pass always occurs.
@@ -235,7 +248,8 @@ From the repository root:
 ./test.py --suite=ntn-constellation
 ```
 
-For prerequisites and the full toolkit build, see [../../INSTALL.md](../../INSTALL.md).
+For prerequisites and per-module setup, see [INSTALL.md](INSTALL.md). For the full
+toolkit build, see the [toolkit repository](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
 
 ## License & author
 

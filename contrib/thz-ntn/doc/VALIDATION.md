@@ -4,7 +4,8 @@ This document verifies each model's outputs against analytical formulas and publ
 
 ## Test Suite
 
-12 automated tests in `test/thz-ntn-test-suite.cc`:
+The suite `test/thz-ntn-test-suite.cc` registers 38 test cases. A
+representative subset:
 
 ```
 PASS thz-ntn 0.034 s
@@ -101,4 +102,4 @@ All pairs match within 0.2 dB -- the only asymmetry is the random scintillation 
 
 ## Conclusion
 
-Every demo output and every test case verifies against analytical formulas. The module is physically consistent across all 8 scenarios and 24 model classes.
+Every demo output and every test case verifies against analytical formulas. The module is physically consistent across all 8 scenarios and 24 model classes. The full suite registers 38 test cases.

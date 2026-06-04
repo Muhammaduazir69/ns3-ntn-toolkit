@@ -14,7 +14,6 @@ build_lib_example(
     ${libpoint-to-point}
     ${libsatellite}
     ${libmmwave}
-    ${liblte}
 )
 
 # Closed RIC control loop: E2-KPM -> mMIMO precoder xApp -> beam -> real link.

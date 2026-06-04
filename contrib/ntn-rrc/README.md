@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/unit_tests-suite%20ntn--rrc-success.svg"/>
 </p>
 
-> Part of **ns3-ntn-toolkit** — see the toolkit [README](../../README.md) and [INSTALL](../../INSTALL.md) for the full build, dependency, and module map.
+> Part of **ns3-ntn-toolkit** — see the [toolkit repository](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) for the full build, dependency, and module map, and [INSTALL.md](INSTALL.md) for this module's setup.
 
 ---
 
@@ -26,7 +26,7 @@ LEO non-terrestrial networks introduce one-way delays and Doppler trajectories t
 
 ## What's new in v2
 
-See the toolkit [CHANGELOG](../../CHANGELOG.md) for the full history.
+See [CHANGELOG.md](CHANGELOG.md) for this module's history.
 
 - **`ntn-rrc-full-stack` now flies an orbital `SatSGP4MobilityModel`** (driven from the bundled ISS TLE) instead of the old straight-line constant-velocity model that climbed out of the orbital shell over the pass. The UE now sits at ground level (Islamabad, lat 33.6844°, lon 73.0479°), and the beam-centre reference position is offset ~50 km north of the UE so the UE-specific TA residual (`ta_ue`) is genuinely non-zero rather than collapsing to 0.
 - **`ta_drift_rate` is now emitted in µs/s** — all CSV columns are renamed `*_us_per_s`. The underlying timing-advance model (`ComputeTaDriftRate()`) and the SIB19 codec ABI keep their native s/s convention; only the CSV presentation is scaled.
@@ -133,7 +133,7 @@ Run the unit-test suite:
 
 The suite (`Type::UNIT`) covers the closed-form TA (transparent and regenerative), the common/UE-specific decomposition, the LEO drift-rate bound, SIB19 codec round-trip and truncation rejection, broadcaster cadence, ECEF↔WGS-84 round-trip, all three location-report modes, the standard DRX cycle and data-activity override, pass-aware deep sleep, and invalid-config rejection.
 
-For full setup notes (SNS3 / satellite-module dependency, traffic helper, toolkit layout) see the toolkit [INSTALL.md](../../INSTALL.md).
+For full setup notes (SNS3 / satellite-module dependency, traffic helper, toolkit layout) see [INSTALL.md](INSTALL.md).
 
 ## License & author
 
