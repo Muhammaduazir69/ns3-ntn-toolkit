@@ -1,0 +1,15 @@
+{
+  "title": "ns3-ntn-toolkit: A Pre-Integrated ns-3 Platform for 6G Non-Terrestrial Network Research",
+  "description": "Pre-integrated ns-3.43 distribution for 6G NTN research: SGP4 constellation propagation (SNS3), 3GPP TR 38.811 NTN channels, mmWave 5G-NR, Release-17 conditional handover with a Time-to-Exit trigger (ntn-cho), Space O-RAN with 13 xApps (oran-ntn), HITRAN-2024 sub-THz propagation (thz-ntn), NTN traffic models, and a modernised ns3-ai Gymnasium bridge. Includes the 10-seed Monte-Carlo CHO baseline and THz/O-RAN demonstrator datasets.",
+  "license": "GPL-2.0-only",
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "Uzair, Muhammad",
+      "affiliation": "Independent Researcher, Islamabad, Pakistan",
+      "orcid": "0009-0002-4104-2680"
+    }
+  ],
+  "keywords": ["ns-3", "6G", "non-terrestrial networks", "LEO", "conditional handover", "O-RAN", "terahertz", "reinforcement learning"],
+  "version": "2.0.2"
+}
