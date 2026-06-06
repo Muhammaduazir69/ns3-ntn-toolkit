@@ -14,11 +14,13 @@
 #include "ns3/packet-sink-helper.h"
 #include "ns3/packet-sink.h"
 #include "ns3/point-to-point-helper.h"
+#include "ns3/pointer.h"
 #include "ns3/random-variable-stream.h"
 #include "ns3/simulator.h"
 #include "ns3/string.h"
 #include "ns3/uinteger.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -87,6 +89,23 @@ NtnRealisticTrafficHelper::Wire()
         subnet << "10.1." << (i + 1) << ".0";
         addr.SetBase(subnet.str().c_str(), "255.255.255.0");
         addr.Assign(devs);
+
+        // Dynamic-coupling hooks: keep the channel handle and install a
+        // zero-rate receive error model on both directions. Scenarios
+        // retune delay/loss per step via UpdateUeLink(); helpers that
+        // never call it keep the legacy static behaviour exactly.
+        m_ueChannels.push_back(devs.Get(0)->GetChannel());
+        for (uint32_t d = 0; d < 2; d++)
+        {
+            Ptr<RateErrorModel> em = CreateObject<RateErrorModel>();
+            em->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
+            em->SetRate(0.0);
+            Ptr<UniformRandomVariable> rv = CreateObject<UniformRandomVariable>();
+            rv->SetStream(static_cast<int64_t>(900000) + 2 * i + d);
+            em->SetRandomVariable(rv);
+            devs.Get(d)->SetAttribute("ReceiveErrorModel", PointerValue(em));
+            m_ueErrorModels.push_back(em);
+        }
     }
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
@@ -192,6 +211,19 @@ NtnRealisticTrafficHelper::RegisterPeriodicCallback(Time period,
                                                     std::function<void(Time)> cb)
 {
     m_periodics.push_back({period, std::move(cb)});
+}
+
+void
+NtnRealisticTrafficHelper::UpdateUeLink(uint32_t ueIndex, Time oneWayDelay, double per)
+{
+    if (!m_wired || ueIndex >= m_ueChannels.size())
+    {
+        return;
+    }
+    per = std::min(1.0, std::max(0.0, per));
+    m_ueChannels[ueIndex]->SetAttribute("Delay", TimeValue(oneWayDelay));
+    m_ueErrorModels[2 * ueIndex]->SetRate(per);
+    m_ueErrorModels[2 * ueIndex + 1]->SetRate(per);
 }
 
 void

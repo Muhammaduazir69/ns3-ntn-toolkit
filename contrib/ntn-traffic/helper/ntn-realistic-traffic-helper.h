@@ -29,6 +29,8 @@
 #define NTN_REALISTIC_TRAFFIC_HELPER_H
 
 #include "ns3/application-container.h"
+#include "ns3/channel.h"
+#include "ns3/error-model.h"
 #include "ns3/ipv4-address.h"
 #include "ns3/net-device-container.h"
 #include "ns3/node-container.h"
@@ -119,6 +121,23 @@ class NtnRealisticTrafficHelper
      */
     void RegisterPeriodicCallback(Time period, std::function<void(Time)> cb);
 
+    // ---- Dynamic geometry coupling ---------------------------------------
+    /**
+     * \brief Retune one UE's access link from live scenario geometry.
+     *
+     * Sets the one-way propagation delay of the UE<->gateway channel and
+     * the packet-error rate of the receive-side error models installed on
+     * both directions of that link at Wire() time. Scenarios call this
+     * from their analytical step so the packet plane tracks the serving
+     * slant path (delay), serving SINR (loss), coverage gaps and handover
+     * interruption windows (per = 1.0 models a full outage).
+     *
+     * No-op before Wire() or for an out-of-range index. `per` is clamped
+     * to [0, 1]. Error-model RNG streams are fixed per UE, so runs remain
+     * reproducible under a given RngRun.
+     */
+    void UpdateUeLink(uint32_t ueIndex, Time oneWayDelay, double per);
+
     // ---- End-of-run reporting -------------------------------------------
     /**
      * \brief Write sim_health.csv, print a one-line summary, and (if
@@ -161,6 +180,10 @@ class NtnRealisticTrafficHelper
     NetDeviceContainer m_gwToRemoteDevices;
     ApplicationContainer m_clientApps;
     ApplicationContainer m_serverApps;
+
+    // Dynamic-coupling handles (one channel + two error models per UE)
+    std::vector<Ptr<Channel>> m_ueChannels;
+    std::vector<Ptr<RateErrorModel>> m_ueErrorModels;
 
     // Per-period callbacks the example registers
     struct PeriodicEntry

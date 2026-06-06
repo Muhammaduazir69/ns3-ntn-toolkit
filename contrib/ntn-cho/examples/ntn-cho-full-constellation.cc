@@ -261,6 +261,9 @@ int main(int argc, char* argv[])
     cmd.AddValue("verbose", "Verbose", verbose);
     cmd.AddValue("numPlanes", "Number of orbital planes", numPlanes);
     cmd.AddValue("satsPerPlane", "Satellites per plane", satsPerPlane);
+    uint32_t trafficUesOpt = 0;
+    cmd.AddValue("trafficUes",
+                 "UEs carrying the real UDP plane (0 = all UEs)", trafficUesOpt);
     cmd.Parse(argc, argv);
 
     int ntnScenario = (scenario == "dense-urban") ? 0 : (scenario == "urban") ? 1 :
@@ -383,10 +386,26 @@ int main(int argc, char* argv[])
     traffic.SetOutputDir(outputDir);
     traffic.SetRunTag("ntn-cho-full-constellation_" + algorithm);
     traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
-    // Cap the real-traffic UE plane to avoid runaway wall-clock for very
-    // large analytical sweeps; the analytical loop still uses `numUes`.
-    uint32_t trafficUes = std::min<uint32_t>(numUes, 32u);
+    // With the geometry-coupled plane, delivery is outage-dominated (UEs
+    // keep sending while searching for a cell), so the delivery floor
+    // guards against dead queues rather than enforcing QoS.
+    {
+        NtnRealisticTrafficHelper::HealthGates g;
+        g.minRxOverTxRatio = 0.55;
+        traffic.SetGates(g);
+    }
+    // Real UDP plane on all UEs by default; --trafficUes caps it for very
+    // large analytical sweeps. The analytical loop always covers numUes.
+    uint32_t trafficUes =
+        (trafficUesOpt == 0) ? numUes : std::min<uint32_t>(numUes, trafficUesOpt);
     traffic.InstallUes(trafficUes);
+
+    // Per-UE data-plane state for geometry coupling: last geometry-derived
+    // one-way delay and PER, plus the sim-time until which a handover
+    // interruption holds the link in outage.
+    std::vector<int64_t> ueOwdNs(numUes, 15000000); // 15 ms bootstrap
+    std::vector<double> uePer(numUes, 0.001);
+    std::vector<double> ueIntUntil(numUes, -1.0);
 
     traffic.RegisterPeriodicCallback(Seconds(dt), [&](Time nowT) {
         double t = nowT.GetSeconds();
@@ -655,6 +674,27 @@ int main(int argc, char* argv[])
                         ue.hysteresisUntil = t + std::min(ttePred * 0.5, 15.0); // half TTE or 15s
                     }
                 }
+
+                // Data-plane interruption during execution: the link drops
+                // for the handover window, then restores to the last
+                // geometry-derived state. CHO variants keep the target
+                // pre-prepared (short window); baseline A3 pays the full
+                // break-before-make budget.
+                if (ueIdx < trafficUes) {
+                    double intMs = (algorithm == "a3") ? 80.0 : 30.0;
+                    ueIntUntil[ueIdx] = t + intMs / 1000.0;
+                    traffic.UpdateUeLink(ueIdx, NanoSeconds(ueOwdNs[ueIdx]), 1.0);
+                    NtnRealisticTrafficHelper* tp = &traffic;
+                    auto* owdVec = &ueOwdNs;
+                    auto* perVec = &uePer;
+                    uint32_t restoreIdx = static_cast<uint32_t>(ueIdx);
+                    Simulator::Schedule(MilliSeconds(static_cast<uint64_t>(intMs)),
+                        [tp, owdVec, perVec, restoreIdx]() {
+                            tp->UpdateUeLink(restoreIdx,
+                                             NanoSeconds((*owdVec)[restoreIdx]),
+                                             (*perVec)[restoreIdx]);
+                        });
+                }
             }
 
             // "Served" means a valid serving satellite AND a measurable link.
@@ -667,6 +707,42 @@ int main(int argc, char* argv[])
             if (ueServed) {
                 sumSinr += ue.servingSinr;
                 servedUes++;
+            }
+
+            // ---- Geometry-coupled data plane ---------------------------
+            // Retune this UE's access link from the serving slant path and
+            // serving SINR so the packet plane tracks orbital geometry:
+            //   delay = (service + feeder legs)/c + 1 ms processing
+            //           (feeder leg approximated by the service slant; the
+            //            gateway sits in the same region as the UEs)
+            //   PER   = logistic in serving SINR, clamped; 1.0 in outage.
+            // TR 38.821 LEO transparent budgets bracket the resulting
+            // one-way delays (about 6-16 ms at 780 km).
+            if (ueIdx < trafficUes) {
+                double owdMs = 30.0; // searching: parked high-delay value
+                double per = 1.0;    // no serving cell -> outage
+                if (ueServed) {
+                    double srvRangeKm = -1.0;
+                    for (auto& vs : visibleSats) {
+                        if (vs.satId == ue.servingSatId) { srvRangeKm = vs.range; break; }
+                    }
+                    if (srvRangeKm > 0.0) {
+                        owdMs = 2.0 * srvRangeKm / 299.792458 + 1.0;
+                        // Residual (post-HARQ) loss versus serving SINR:
+                        // ~0.1% at -5 dB, ~0.7% at -10 dB, ~12% at -16 dB,
+                        // consistent with NR-NTN low-MCS operation down to
+                        // about -6 dB Es/N0 plus repetition gain below it.
+                        per = 1.0 / (1.0 + std::exp(0.5 * (ue.servingSinr + 20.0)));
+                        per = std::min(0.90, std::max(1e-4, per));
+                    }
+                }
+                ueOwdNs[ueIdx] = static_cast<int64_t>(owdMs * 1e6);
+                uePer[ueIdx] = per;
+                // During a handover-interruption window the link stays in
+                // outage; the scheduled restore re-applies these arrays.
+                if (t >= ueIntUntil[ueIdx]) {
+                    traffic.UpdateUeLink(ueIdx, NanoSeconds(ueOwdNs[ueIdx]), per);
+                }
             }
 
             // Write UE track (every 2s). For an unserved UE (no satellite in
