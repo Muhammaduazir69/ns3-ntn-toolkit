@@ -73,6 +73,9 @@ set(source_files
     model/oran-ntn-ric-placement.cc
     model/oran-ntn-cross-domain.cc
     model/oran-ntn-onnx-xapp.cc
+    # WS4 — payload options / FH split / platform spec / role switch
+    model/oran-ntn-fh-split.cc
+    model/ntn-platform-spec.cc
     # Helper
     helper/oran-ntn-helper.cc
 )
@@ -156,6 +159,9 @@ set(header_files
     model/oran-ntn-ric-placement.h
     model/oran-ntn-cross-domain.h
     model/oran-ntn-onnx-xapp.h
+    # WS4 — payload options / FH split / platform spec / role switch
+    model/oran-ntn-fh-split.h
+    model/ntn-platform-spec.h
     # Helper
     helper/oran-ntn-helper.h
 )
@@ -163,6 +169,7 @@ set(header_files
 set(test_sources
     test/oran-ntn-test-suite.cc
     test/oran-ntn-multi-tier-ric-test.cc
+    test/oran-ntn-ws4-test.cc
 )
 
 set(oran_ntn_extra_libs "")

@@ -115,3 +115,23 @@ build_lib_example(
     ${libapplications}
     ${libpoint-to-point}
 )
+
+# WS4 — four payload architectures measured on one real cell.
+build_lib_example(
+  NAME oran-ntn-payload-options-ab
+  SOURCE_FILES oran-ntn-payload-options-ab.cc
+  LIBRARIES_TO_LINK
+    ${liboran-ntn}
+    ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
+)

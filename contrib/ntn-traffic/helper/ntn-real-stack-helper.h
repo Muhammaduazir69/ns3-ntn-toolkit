@@ -60,6 +60,7 @@ namespace ns3
 class Node;
 class Packet;
 class Address;
+class MobilityModel;
 class PropagationLossModel;
 class NtnOranAiFlowMonitor;
 
@@ -90,6 +91,26 @@ class NtnRealStackHelper
         MixedBouquet,        ///< NB-IoT / eMBB / URLLC, 1/3 each across UEs
     };
 
+    /// Satellite payload architecture (Deng 2026 Sec. II-B2; WS4). Selects
+    /// where the gNB functions live and therefore which legs the user plane
+    /// crosses; the extra one-way delay is computed from the LIVE feeder
+    /// slant range when SetFeederGeometry() is wired:
+    ///   Transparent      bent-pipe: the user plane crosses the RF feeder leg
+    ///                    too -> 2 x slant/c
+    ///   RegenerativeRu   O-RU on sat, O-DU/O-CU ground: Open-FH (7.2x) over
+    ///                    the feeder -> slant/c + 0.25 ms lower-PHY budget
+    ///   RegenerativeRuDu O-DU on sat: F1 midhaul over the feeder ->
+    ///                    slant/c + 0.15 ms
+    ///   FullGnb          full gNB on sat: GTP backhaul to the ground core ->
+    ///                    slant/c + 0.05 ms (default option)
+    enum class PayloadOption : uint8_t
+    {
+        Transparent,
+        RegenerativeRu,
+        RegenerativeRuDu,
+        FullGnb,
+    };
+
     /// Honest realism floors asserted at end of run.
     struct HealthGates
     {
@@ -111,6 +132,17 @@ class NtnRealStackHelper
     void SetSatEirpDbm(double p) { m_satEirpDbm = p; }   ///< gNB (satellite) Tx power / EIRP
     void SetUeTxPowerDbm(double p) { m_ueTxDbm = p; }
     void SetBackhaulDelay(Time t) { m_backhaulDelay = t; } ///< feeder+core one-way delay
+    void SetPayloadOption(PayloadOption p) { m_payload = p; }
+    PayloadOption GetPayloadOption() const { return m_payload; }
+    /// One-way user-plane extra delay of the current payload option at the
+    /// given feeder slant range (see PayloadOption docs).
+    Time ComputePayloadExtraDelay(double slantRangeM) const;
+    /**
+     * \brief Drive the EPC backhaul delay LIVE from the real feeder geometry
+     *        (satellite and gateway mobility models) per the selected payload
+     *        option, re-evaluated every second. Call after Build().
+     */
+    void SetFeederGeometry(Ptr<MobilityModel> satMobility, Ptr<MobilityModel> gwMobility);
     void SetHarqEnabled(bool h) { m_harq = h; }
     void SetRlcAmEnabled(bool a) { m_rlcAm = a; }
     void SetUplink(bool u) { m_uplink = u; }
@@ -234,6 +266,9 @@ class NtnRealStackHelper
     double m_satEirpDbm{55.0};    // LEO beam EIRP (Friis budget -> ~15-20 dB SINR)
     double m_ueTxDbm{33.0};
     Time m_backhaulDelay{MilliSeconds(5)};
+    PayloadOption m_payload{PayloadOption::FullGnb};
+    Ptr<MobilityModel> m_feederSat;
+    Ptr<MobilityModel> m_feederGw;
     bool m_harq{false};
     bool m_rlcAm{false};
     bool m_uplink{false};
@@ -248,6 +283,7 @@ class NtnRealStackHelper
     NetDeviceContainer m_enbDevs;
     NetDeviceContainer m_ueDevs;
     Ptr<Node> m_remoteHost;
+    Ptr<Object> m_backhaulCh; // PointToPointChannel of the PGW<->remote link
     Ipv4Address m_remoteHostAddr;
     std::vector<Ipv4Address> m_ueAddrs; // assigned UE IP per UE device
     ApplicationContainer m_clientApps;

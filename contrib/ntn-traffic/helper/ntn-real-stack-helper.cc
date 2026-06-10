@@ -17,6 +17,7 @@
 #include "ns3/ipv4.h"
 #include "ns3/log.h"
 #include "ns3/mmwave-helper.h"
+#include "ns3/mobility-model.h"
 #include "ns3/mmwave-phy-mac-common.h"
 #include "ns3/mmwave-point-to-point-epc-helper.h"
 #include "ns3/ntn-oran-ai-flow-monitor.h"
@@ -99,6 +100,7 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
     p2ph.SetDeviceAttribute("Mtu", UintegerValue(1500));
     p2ph.SetChannelAttribute("Delay", TimeValue(m_backhaulDelay));
     NetDeviceContainer internetDevices = p2ph.Install(pgw, m_remoteHost);
+    m_backhaulCh = internetDevices.Get(0)->GetChannel();
     Ipv4AddressHelper ipv4h;
     ipv4h.SetBase("1.0.0.0", "255.0.0.0");
     Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
@@ -299,6 +301,46 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
     apps.Add(client);
     apps.Add(sink);
     return apps;
+}
+
+Time
+NtnRealStackHelper::ComputePayloadExtraDelay(double slantRangeM) const
+{
+    constexpr double kC = 299792458.0;
+    const Time prop = Seconds(slantRangeM / kC);
+    switch (m_payload)
+    {
+    case PayloadOption::Transparent:
+        // Bent-pipe: the user plane rides the RF feeder leg too.
+        return prop + prop;
+    case PayloadOption::RegenerativeRu:
+        // Open-FH (split 7.2x) over the feeder; 0.25 ms lower-PHY budget.
+        return prop + MicroSeconds(250);
+    case PayloadOption::RegenerativeRuDu:
+        // F1 midhaul over the feeder.
+        return prop + MicroSeconds(150);
+    case PayloadOption::FullGnb:
+    default:
+        // GTP backhaul to the ground core.
+        return prop + MicroSeconds(50);
+    }
+}
+
+void
+NtnRealStackHelper::SetFeederGeometry(Ptr<MobilityModel> satMobility,
+                                      Ptr<MobilityModel> gwMobility)
+{
+    NS_ABORT_MSG_IF(!m_built, "SetFeederGeometry before Build()");
+    NS_ABORT_MSG_IF(!satMobility || !gwMobility, "SetFeederGeometry: null mobility");
+    m_feederSat = satMobility;
+    m_feederGw = gwMobility;
+    // Live update: the EPC backhaul channel delay tracks the real slant.
+    RegisterPeriodicCallback(Seconds(1.0), [this](Time) {
+        const double slantM = m_feederSat->GetDistanceFrom(m_feederGw);
+        m_backhaulCh->SetAttribute("Delay", TimeValue(ComputePayloadExtraDelay(slantM)));
+    });
+    const double slantM = m_feederSat->GetDistanceFrom(m_feederGw);
+    m_backhaulCh->SetAttribute("Delay", TimeValue(ComputePayloadExtraDelay(slantM)));
 }
 
 Ptr<NtnOranAiFlowMonitor>
