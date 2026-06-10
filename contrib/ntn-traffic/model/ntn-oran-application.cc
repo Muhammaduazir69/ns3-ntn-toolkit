@@ -222,6 +222,26 @@ NtnOranApplication::StopApplication()
 void
 NtnOranApplication::ScheduleNext()
 {
+    // Rate-driven profiles recompute the period each send, so a live
+    // DataRate attribute change (e.g. an SMO quota actuation) takes effect
+    // immediately on the running flow.
+    if (m_profile == CBR_SATURATING || m_profile == POISSON_BACKGROUND ||
+        m_profile == EMBB_VIDEO)
+    {
+        const double bitRate = std::max<double>(m_dataRate.GetBitRate(), 1.0);
+        if (m_profile == EMBB_VIDEO)
+        {
+            m_resolvedPeriod = (m_period.IsZero()) ? Seconds(1.0 / m_frameRate) : m_period;
+        }
+        else if (m_period.IsZero())
+        {
+            m_resolvedPeriod = Seconds(static_cast<double>(m_packetSize) * 8.0 / bitRate);
+        }
+        if (m_profile == POISSON_BACKGROUND)
+        {
+            m_expVar->SetAttribute("Mean", DoubleValue(m_resolvedPeriod.GetSeconds()));
+        }
+    }
     Time next = m_resolvedPeriod;
     if (m_profile == POISSON_BACKGROUND)
     {
