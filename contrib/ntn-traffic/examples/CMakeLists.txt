@@ -35,3 +35,22 @@ build_lib_example(
     ${libflow-monitor}
     ${libcore}
 )
+
+build_lib_example(
+  NAME ntn-oran-qos-flows
+  SOURCE_FILES ntn-oran-qos-flows.cc
+  LIBRARIES_TO_LINK
+    ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
+    ${libmmwave}
+    ${liblte}
+)

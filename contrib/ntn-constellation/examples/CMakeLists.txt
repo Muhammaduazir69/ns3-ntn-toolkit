@@ -12,7 +12,7 @@ build_lib_example(
     ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libntn-traffic}
 )
 
 # Walker constellation as ephemeris/contact-graph context; ONE serving satellite
@@ -69,5 +69,5 @@ build_lib_example(
     ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libntn-traffic}
 )

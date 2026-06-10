@@ -11,7 +11,8 @@
  * elevation and the ISL hop within the range cap. The contact gate is driven by
  * the live orbital geometry, NOT a closed-form SINR/sigmoid: when a hop falls
  * out of contact its link drops, and delivery recovers when contact resumes.
- * Delivery / end-to-end delay are MEASURED (PacketSink + FlowMonitor).
+ * Delivery / delay / jitter / loss are MEASURED end-to-end by NtnOranSink
+ * from the in-band NtnOranPayloadHeader (WS1 application suite).
  *
  * Usage:
  *   ./ns3 run "ntn-constellation-isl-routed-traffic --duration=40"
@@ -23,8 +24,8 @@
 #include "ns3/walker-constellation.h"
 #include "ns3/core-module.h"
 #include "ns3/error-model.h"
-#include "ns3/flow-monitor-helper.h"
-#include "ns3/flow-monitor.h"
+#include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-oran-sink.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
@@ -199,40 +200,32 @@ main(int argc, char* argv[])
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
     uint16_t port = 8080;
-    PacketSinkHelper sink("ns3::UdpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sink.Install(nodes.Get(GS2));
-    Ptr<PacketSink> ps = DynamicCast<PacketSink>(sinkApp.Get(0));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(duration));
+    Ptr<NtnOranSink> ps = CreateObject<NtnOranSink>();
+    ps->SetAttribute("Local", AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+    nodes.Get(GS2)->AddApplication(ps);
+    ps->SetStartTime(Seconds(0.0));
+    ps->SetStopTime(Seconds(duration));
 
-    OnOffHelper onoff("ns3::UdpSocketFactory", InetSocketAddress(icGsl2.GetAddress(1), port));
-    onoff.SetAttribute("DataRate", DataRateValue(DataRate("5Mbps")));
-    onoff.SetAttribute("PacketSize", UintegerValue(1200));
-    onoff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
-    onoff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
-    ApplicationContainer clientApp = onoff.Install(nodes.Get(GS1));
-    clientApp.Start(Seconds(1.0));
-    clientApp.Stop(Seconds(duration - 0.5));
-
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
+    Ptr<NtnOranApplication> client = CreateObject<NtnOranApplication>();
+    client->SetRemote(InetSocketAddress(icGsl2.GetAddress(1), port));
+    client->SetProfile(NtnOranApplication::CBR_SATURATING);
+    client->SetAttribute("DataRate", DataRateValue(DataRate("5Mbps")));
+    client->SetAttribute("PacketSize", UintegerValue(1200));
+    client->SetFlowIdentity(/*5qi*/ 9, /*sst*/ 1, /*sd*/ 0x000001, /*src*/ GS1, /*dst*/ GS2);
+    nodes.Get(GS1)->AddApplication(client);
+    client->SetStartTime(Seconds(1.0));
+    client->SetStopTime(Seconds(duration - 0.5));
 
     Simulator::Schedule(Seconds(0.5), &Tick);
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
 
-    monitor->CheckForLostPackets();
-    uint64_t txP = 0, rxP = 0;
-    double delaySum = 0;
-    for (const auto& kv : monitor->GetFlowStats())
-    {
-        txP += kv.second.txPackets;
-        rxP += kv.second.rxPackets;
-        delaySum += kv.second.delaySum.GetSeconds();
-    }
-    double rxBytes = ps ? ps->GetTotalRx() : 0;
+    // All KPIs measured from in-band header primitives at the sink.
+    uint64_t txP = client->GetTxPackets();
+    uint64_t rxP = ps->GetRxPackets();
+    double rxBytes = ps->GetTotalRx();
     double thrMbps = rxBytes * 8.0 / std::max(1.0, duration) / 1e6;
-    double meanDelayMs = (rxP > 0) ? (delaySum / rxP) * 1e3 : 0.0;
+    double meanDelayMs = ps->GetMeanDelayMs();
     double delivery = (txP > 0) ? (double)rxP / txP : 0.0;
 
     std::filesystem::create_directories(outputDir);
@@ -243,8 +236,10 @@ main(int argc, char* argv[])
     out << "packets_through_sats," << rxP << ",1," << (rxP > 0 ? 1 : 0) << ",packetsink\n";
     out << "rx_throughput_mbps," << thrMbps << ",0.05," << (thrMbps >= 0.05 ? 1 : 0)
         << ",packetsink\n";
-    out << "mean_e2e_delay_ms," << meanDelayMs << ",-,1,flowmonitor\n";
-    out << "app_delivery_ratio," << delivery << ",-,1,flowmonitor\n";
+    out << "mean_e2e_delay_ms," << meanDelayMs << ",-,1,inband-timestamp\n";
+    out << "app_jitter_ms," << ps->GetMeanJitterMs() << ",-,1,inband-timestamp\n";
+    out << "app_loss_ratio," << ps->GetLossRatio() << ",-,1,inband-seq\n";
+    out << "app_delivery_ratio," << delivery << ",-,1,app-trace\n";
     out << "contact_drop_ticks," << g_contactDrops << ",-,1,router\n";
     out.close();
 

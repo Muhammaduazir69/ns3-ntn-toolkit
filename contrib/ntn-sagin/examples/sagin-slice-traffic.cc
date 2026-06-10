@@ -10,7 +10,8 @@
  * A SaginSliceRouter maps each QFI to its slice profile and chooses a serving
  * layer (HAPS / LEO / GEO). The example wires one PointToPoint link per layer
  * with that layer's realistic propagation delay, routes each slice's flow to
- * its chosen layer, and uses FlowMonitor to show the per-slice mean delay:
+ * its chosen layer; per-slice delay/jitter/loss are MEASURED by NtnOranSink
+ * from in-band NtnOranPayloadHeader bytes (WS1 application suite):
  * URLLC lands on the low-delay layer, mMTC accepts the high-delay GEO, eMBB
  * sits on LEO — the layer choice comes from SaginSliceRouter, not hardcoded.
  *
@@ -20,10 +21,10 @@
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/core-module.h"
-#include "ns3/flow-monitor-helper.h"
 #include "ns3/internet-stack-helper.h"
 #include "ns3/ipv4-address-helper.h"
-#include "ns3/ipv4-flow-classifier.h"
+#include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-oran-sink.h"
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/point-to-point-helper.h"
 
@@ -133,31 +134,32 @@ main(int argc, char* argv[])
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
     // One sink per slice on its relay; one source per slice on the gateway.
+    // 5QI per slice class: URLLC 82, eMBB 2, mMTC 9; the S-NSSAI SST encodes
+    // the slice (TS 23.501: 1 = eMBB, 2 = URLLC, 3 = mMTC).
+    Ptr<NtnOranSink> sliceSinks[3];
+    const uint8_t sliceQi[3] = {82, 2, 9};
+    const uint8_t sliceSst[3] = {2, 1, 3};
     for (int i = 0; i < 3; ++i)
     {
-        PacketSinkHelper sink(
-            "ns3::UdpSocketFactory",
-            InetSocketAddress(Ipv4Address::GetAny(), slices[i].port));
-        ApplicationContainer sa = sink.Install(relays.Get(i));
-        sa.Start(Seconds(0.0));
-        sa.Stop(Seconds(simSeconds));
+        sliceSinks[i] = CreateObject<NtnOranSink>();
+        sliceSinks[i]->SetAttribute(
+            "Local",
+            AddressValue(InetSocketAddress(Ipv4Address::GetAny(), slices[i].port)));
+        relays.Get(i)->AddApplication(sliceSinks[i]);
+        sliceSinks[i]->SetStartTime(Seconds(0.0));
+        sliceSinks[i]->SetStopTime(Seconds(simSeconds));
 
-        OnOffHelper onoff("ns3::UdpSocketFactory",
-                          InetSocketAddress(dstAddr[i], slices[i].port));
-        onoff.SetAttribute("DataRate",
-                           DataRateValue(DataRate(uint64_t(dataRateMbps * 1e6))));
-        onoff.SetAttribute("PacketSize", UintegerValue(packetBytes));
-        onoff.SetAttribute(
-            "OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-        onoff.SetAttribute(
-            "OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-        ApplicationContainer src = onoff.Install(gnd.Get(0));
-        src.Start(Seconds(1.0));
-        src.Stop(Seconds(simSeconds));
+        Ptr<NtnOranApplication> src = CreateObject<NtnOranApplication>();
+        src->SetRemote(InetSocketAddress(dstAddr[i], slices[i].port));
+        src->SetProfile(NtnOranApplication::CBR_SATURATING);
+        src->SetAttribute("DataRate",
+                          DataRateValue(DataRate(uint64_t(dataRateMbps * 1e6))));
+        src->SetAttribute("PacketSize", UintegerValue(packetBytes));
+        src->SetFlowIdentity(sliceQi[i], sliceSst[i], 0x000001, slices[i].qfi, i);
+        gnd.Get(0)->AddApplication(src);
+        src->SetStartTime(Seconds(1.0));
+        src->SetStopTime(Seconds(simSeconds));
     }
-
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
 
     std::printf("# sagin-slice-traffic (SaginSliceRouter cross-layer steering)\n");
     std::printf("#   sim=%.0fs perSliceLoad=%.1fMbps\n", simSeconds, dataRateMbps);
@@ -173,34 +175,19 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(simSeconds + 0.1));
     Simulator::Run();
 
-    monitor->CheckForLostPackets();
-    Ptr<Ipv4FlowClassifier> classifier =
-        DynamicCast<Ipv4FlowClassifier>(fmHelper.GetClassifier());
-    const auto stats = monitor->GetFlowStats();
-    std::printf("# === per-slice FlowMonitor results ===\n");
-    std::printf("# %-6s  %-8s  %10s  %10s  %8s\n",
-                "slice", "dstPort", "rxPackets", "meanDelay", "Mbps");
-    for (const auto& kv : stats)
+    std::printf("# === per-slice measured results (in-band header) ===\n");
+    std::printf("# %-6s  %4s  %10s  %10s  %9s  %8s  %8s\n",
+                "slice", "5QI", "rxPackets", "meanDelay", "jitter", "loss", "Mbps");
+    for (int i = 0; i < 3; ++i)
     {
-        const auto ft = classifier->FindFlow(kv.first);
-        const auto& s = kv.second;
-        // Identify the slice by destination port.
-        const char* name = "?";
-        for (int i = 0; i < 3; ++i)
+        for (const auto& kv : sliceSinks[i]->GetFlowStats())
         {
-            if (ft.destinationPort == slices[i].port)
-            {
-                name = slices[i].name;
-            }
+            const auto& fs = kv.second;
+            std::printf("  %-6s  %4u  %10lu  %8.2fms  %7.3fms  %8.4f  %8.3f\n",
+                        slices[i].name, fs.fiveQi, (unsigned long)fs.rxPackets,
+                        fs.MeanDelayMs(), fs.jitterMs, fs.LossRatio(),
+                        fs.ThroughputMbps());
         }
-        const double durationS =
-            (s.timeLastRxPacket - s.timeFirstTxPacket).GetSeconds();
-        const double mbps = durationS > 0 ? s.rxBytes * 8.0 / durationS / 1e6 : 0.0;
-        const double meanDelayMs =
-            s.rxPackets ? (s.delaySum.GetSeconds() / s.rxPackets) * 1000.0 : 0.0;
-        std::printf("  %-6s  %-8u  %10lu  %8.2fms  %8.3f\n",
-                    name, ft.destinationPort, (unsigned long)s.rxPackets,
-                    meanDelayMs, mbps);
     }
     Simulator::Destroy();
     return 0;

@@ -29,7 +29,7 @@
 //
 // Because the LEO satellites move under SGP4, the contact graph changes during
 // the pass: satA hands the gs1 (HAPS) link to satB, the route flips, and the
-// FlowMonitor goodput tracks the actual end-to-end connectivity. The example
+// NtnOranSink goodput/delay (in-band header) track the actual end-to-end connectivity. The example
 // also prints, each second, the ContactGraphRouter's Dijkstra path so the
 // model-level decision can be cross-checked against the measured data plane.
 //
@@ -42,7 +42,8 @@
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/core-module.h"
 #include "ns3/error-model.h"
-#include "ns3/flow-monitor-helper.h"
+#include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-oran-sink.h"
 #include "ns3/internet-stack-helper.h"
 #include "ns3/ipv4-address-helper.h"
 #include "ns3/ipv4-global-routing-helper.h"
@@ -95,7 +96,7 @@ struct SpaceLink
 
 std::map<std::pair<uint32_t, uint32_t>, SpaceLink> g_links;
 Ptr<ContactGraphRouter> g_router;
-Ptr<PacketSink> g_sink;
+Ptr<NtnOranSink> g_sink;
 uint64_t g_lastRx = 0;
 double g_eirpDbm = 95.0; // Ka-band GSL with high-gain dishes (txPwr + ant gain)
 double g_freqHz = 20e9;
@@ -375,24 +376,22 @@ main(int argc, char* argv[])
     // --- traffic: UE -> server (over whatever space path is up) ----------
     const uint16_t port = 7000;
     Ipv4Address srvAddr = srvIf.GetAddress(1); // server side of GW-SRV link
-    PacketSinkHelper sinkH("ns3::UdpSocketFactory",
-                           InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sinkH.Install(srv.Get(0));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(simSeconds));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
+    g_sink = CreateObject<NtnOranSink>();
+    g_sink->SetAttribute("Local",
+                         AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+    srv.Get(0)->AddApplication(g_sink);
+    g_sink->SetStartTime(Seconds(0.0));
+    g_sink->SetStopTime(Seconds(simSeconds));
 
-    OnOffHelper onoff("ns3::UdpSocketFactory", InetSocketAddress(srvAddr, port));
-    onoff.SetAttribute("DataRate", DataRateValue(DataRate(uint64_t(dataRateMbps * 1e6))));
-    onoff.SetAttribute("PacketSize", UintegerValue(packetBytes));
-    onoff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-    ApplicationContainer src = onoff.Install(ue.Get(0));
-    src.Start(Seconds(1.0));
-    src.Stop(Seconds(simSeconds));
-
-    FlowMonitorHelper fm;
-    Ptr<FlowMonitor> monitor = fm.InstallAll();
+    Ptr<NtnOranApplication> src = CreateObject<NtnOranApplication>();
+    src->SetRemote(InetSocketAddress(srvAddr, port));
+    src->SetProfile(NtnOranApplication::CBR_SATURATING);
+    src->SetAttribute("DataRate", DataRateValue(DataRate(uint64_t(dataRateMbps * 1e6))));
+    src->SetAttribute("PacketSize", UintegerValue(packetBytes));
+    src->SetFlowIdentity(/*5qi*/ 9, /*sst*/ 1, /*sd*/ 0x000001, /*src*/ 1, /*dst*/ 2);
+    ue.Get(0)->AddApplication(src);
+    src->SetStartTime(Seconds(1.0));
+    src->SetStopTime(Seconds(simSeconds));
 
     // Drive the data plane from the contact graph.
     sched->m_contactUp.ConnectWithoutContext(MakeCallback(&ApplyContact));
@@ -410,13 +409,15 @@ main(int argc, char* argv[])
     Simulator::Run();
     sched->Stop();
 
-    monitor->CheckForLostPackets();
     const uint64_t rx = g_sink ? g_sink->GetTotalRx() : 0;
     std::printf("# === summary ===  GSL up/down=%lu/%lu  ISL up/down=%lu/%lu  "
                 "rxBytes=%lu  avgGoodput=%.3f Mbps\n",
                 (unsigned long)sched->GslEventsUp(), (unsigned long)sched->GslEventsDown(),
                 (unsigned long)sched->IslEventsUp(), (unsigned long)sched->IslEventsDown(),
                 (unsigned long)rx, rx * 8.0 / simSeconds / 1e6);
+    std::printf("#   in-band measured: owd=%.3f ms jitter=%.3f ms loss=%.4f\n",
+                g_sink->GetMeanDelayMs(), g_sink->GetMeanJitterMs(),
+                g_sink->GetLossRatio());
     std::printf("#   router: edges added=%lu removed=%lu route-queries=%lu\n",
                 (unsigned long)g_router->EdgesAddedTotal(),
                 (unsigned long)g_router->EdgesRemovedTotal(),

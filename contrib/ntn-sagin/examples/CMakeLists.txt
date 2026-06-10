@@ -62,7 +62,7 @@ build_lib_example(
     ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libntn-traffic}
 )
 
 # Cross-layer network-slice steering (SaginSliceRouter) with real per-slice traffic.
@@ -77,7 +77,7 @@ build_lib_example(
     ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libntn-traffic}
 )
 
 # Maritime AIS vessel terminal + LEO downlink (AisMobilityModel), real mmwave cell.
@@ -114,5 +114,5 @@ build_lib_example(
     ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libntn-traffic}
 )

@@ -10,7 +10,8 @@
  * in contact — the V2V hop within range, the uplink above the minimum elevation.
  * The contact gate is driven by the live geometry, NOT a closed-form SINR /
  * sigmoid; the V2xLeoRelay engine logs when veh0 must relay vs go direct.
- * Delivered BSM rate / latency are MEASURED end-to-end (PacketSink + FlowMonitor).
+ * Delivered BSM rate / latency / jitter / loss are MEASURED end-to-end by
+ * NtnOranSink from the in-band NtnOranPayloadHeader (WS1 application suite).
  *
  * Quick test:  --simSeconds=60 --bsmHz=10
  */
@@ -23,7 +24,8 @@
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
 #include "ns3/error-model.h"
-#include "ns3/flow-monitor-helper.h"
+#include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-oran-sink.h"
 #include "ns3/internet-module.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/v2x-leo-relay.h"
@@ -42,7 +44,7 @@ Ptr<ntnv2x::V2xLeoRelay> g_relay;
 Ptr<MobilityModel> g_veh0, g_veh1, g_sat;
 Ptr<RateErrorModel> g_emV2v, g_emUplink;
 Ptr<PointToPointChannel> g_chV2v, g_chUplink;
-Ptr<PacketSink> g_sink;
+Ptr<NtnOranSink> g_sink;
 uint64_t g_lastRx = 0;
 double g_maxV2vRangeM = 1500.0;
 double g_minElev = 10.0;
@@ -205,25 +207,23 @@ main(int argc, char* argv[])
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
     const uint16_t port = 7600;
-    PacketSinkHelper sinkHelper("ns3::UdpSocketFactory",
-                                InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(3));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(simSeconds));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
+    g_sink = CreateObject<NtnOranSink>();
+    g_sink->SetAttribute("Local",
+                         AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+    nodes.Get(3)->AddApplication(g_sink);
+    g_sink->SetStartTime(Seconds(0.0));
+    g_sink->SetStopTime(Seconds(simSeconds));
 
-    const double bsmRateBps = bsmHz * bsmBytes * 8.0;
-    OnOffHelper onoff("ns3::UdpSocketFactory", InetSocketAddress(iFeeder.GetAddress(1), port));
-    onoff.SetAttribute("DataRate", DataRateValue(DataRate(uint64_t(bsmRateBps))));
-    onoff.SetAttribute("PacketSize", UintegerValue(bsmBytes));
-    onoff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-    ApplicationContainer src = onoff.Install(nodes.Get(0));
-    src.Start(Seconds(1.0));
-    src.Stop(Seconds(simSeconds));
-
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
+    // BSM cadence: deterministic periodic V2X messages (5QI 82, URLLC class).
+    Ptr<NtnOranApplication> src = CreateObject<NtnOranApplication>();
+    src->SetRemote(InetSocketAddress(iFeeder.GetAddress(1), port));
+    src->SetProfile(NtnOranApplication::URLLC_PERIODIC);
+    src->SetAttribute("PacketSize", UintegerValue(bsmBytes));
+    src->SetAttribute("Period", TimeValue(Seconds(1.0 / bsmHz)));
+    src->SetFlowIdentity(/*5qi*/ 82, /*sst*/ 2, /*sd*/ 0x000001, /*src*/ 0, /*dst*/ 3);
+    nodes.Get(0)->AddApplication(src);
+    src->SetStartTime(Seconds(1.0));
+    src->SetStopTime(Seconds(simSeconds));
 
     std::printf("# ntn-v2x-leo-relay-traffic (veh0 --V2V--> veh1 --uplink--> LEO --> server)\n"
                 "#   sim=%.0fs bsm=%.0fHz x %uB leoAlt=%.0fkm relayDrift=%.0fm/s maxV2vRange=%.0fm\n",
@@ -233,19 +233,13 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(simSeconds + 1));
     Simulator::Run();
 
-    monitor->CheckForLostPackets();
-    uint64_t txP = 0, rxP = 0;
-    double delaySum = 0;
-    for (const auto& kv : monitor->GetFlowStats())
-    {
-        txP += kv.second.txPackets;
-        rxP += kv.second.rxPackets;
-        delaySum += kv.second.delaySum.GetSeconds();
-    }
-    const double meanDelayMs = (rxP > 0) ? (delaySum / rxP) * 1e3 : 0.0;
+    // KPIs measured from in-band NtnOranPayloadHeader primitives at the sink.
+    const uint64_t txP = src->GetTxPackets();
+    const uint64_t rxP = g_sink->GetRxPackets();
     std::printf("# === summary ===  BSM txPackets=%lu rxPackets=%lu PDR=%.2f%%  "
-                "mean e2e delay=%.2f ms (real range delays through the relay)\n",
-                (unsigned long)txP, (unsigned long)rxP, txP ? 100.0 * rxP / txP : 0.0, meanDelayMs);
+                "mean e2e delay=%.2f ms jitter=%.3f ms (real range delays through the relay)\n",
+                (unsigned long)txP, (unsigned long)rxP, txP ? 100.0 * rxP / txP : 0.0,
+                g_sink->GetMeanDelayMs(), g_sink->GetMeanJitterMs());
     Simulator::Destroy();
     return 0;
 }

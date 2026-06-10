@@ -10,7 +10,8 @@
  * packets are forwarded THROUGH the satellite nodes and adaptively REROUTE as
  * the constellation moves: gs1 -> satA -> gs2 while satA is in contact, then
  * gs1 -> satB -> gs2 once satA sets and satB rises. Per-link delay is the real
- * slant range / c. Delivery/delay are MEASURED end-to-end (PacketSink).
+ * slant range / c. Delivery/delay/jitter/loss are MEASURED end-to-end by
+ * NtnOranSink from the in-band NtnOranPayloadHeader (WS1 application suite).
  *
  * Usage:
  *   ./ns3 run "ntn-constellation-real-routed --duration=40"
@@ -22,9 +23,9 @@
 #include "ns3/walker-constellation.h"
 #include "ns3/contact-graph-router.h"
 #include "ns3/core-module.h"
-#include "ns3/flow-monitor-helper.h"
-#include "ns3/flow-monitor.h"
 #include "ns3/internet-module.h"
+#include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-oran-sink.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/point-to-point-module.h"
@@ -55,7 +56,7 @@ Ipv4Address g_destAddr;
 Ipv4Address g_satA_fromGs1, g_satB_fromGs1;
 Ipv4Address g_gs2_fromA, g_gs2_fromB;
 Ptr<PointToPointChannel> g_chA1, g_chA2, g_chB1, g_chB2;
-Ptr<PacketSink> g_sink;
+Ptr<NtnOranSink> g_sink;
 double g_minElev = 10.0;
 uint32_t g_currentSat = 0;
 uint32_t g_reroutes = 0;
@@ -251,41 +252,33 @@ main(int argc, char* argv[])
     g_satBRouting = srh.GetStaticRouting(nodes.Get(SATB)->GetObject<Ipv4>());
 
     uint16_t port = 8080;
-    PacketSinkHelper sink("ns3::UdpSocketFactory",
-                          InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sink.Install(nodes.Get(GS2));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(duration));
+    g_sink = CreateObject<NtnOranSink>();
+    g_sink->SetAttribute("Local",
+                         AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+    nodes.Get(GS2)->AddApplication(g_sink);
+    g_sink->SetStartTime(Seconds(0.0));
+    g_sink->SetStopTime(Seconds(duration));
 
-    OnOffHelper onoff("ns3::UdpSocketFactory", InetSocketAddress(g_destAddr, port));
-    onoff.SetAttribute("DataRate", DataRateValue(DataRate("5Mbps")));
-    onoff.SetAttribute("PacketSize", UintegerValue(1200));
-    onoff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
-    onoff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
-    ApplicationContainer clientApp = onoff.Install(nodes.Get(GS1));
-    clientApp.Start(Seconds(1.0));
-    clientApp.Stop(Seconds(duration - 0.5));
-
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
+    Ptr<NtnOranApplication> client = CreateObject<NtnOranApplication>();
+    client->SetRemote(InetSocketAddress(g_destAddr, port));
+    client->SetProfile(NtnOranApplication::CBR_SATURATING);
+    client->SetAttribute("DataRate", DataRateValue(DataRate("5Mbps")));
+    client->SetAttribute("PacketSize", UintegerValue(1200));
+    client->SetFlowIdentity(/*5qi*/ 9, /*sst*/ 1, /*sd*/ 0x000001, /*src*/ GS1, /*dst*/ GS2);
+    nodes.Get(GS1)->AddApplication(client);
+    client->SetStartTime(Seconds(1.0));
+    client->SetStopTime(Seconds(duration - 0.5));
 
     Simulator::Schedule(Seconds(0.5), &Tick);
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
 
-    monitor->CheckForLostPackets();
-    uint64_t txP = 0, rxP = 0;
-    double delaySum = 0;
-    for (const auto& kv : monitor->GetFlowStats())
-    {
-        txP += kv.second.txPackets;
-        rxP += kv.second.rxPackets;
-        delaySum += kv.second.delaySum.GetSeconds();
-    }
-    double rxBytes = g_sink ? g_sink->GetTotalRx() : 0;
+    // All KPIs measured from in-band header primitives at the sink.
+    uint64_t txP = client->GetTxPackets();
+    uint64_t rxP = g_sink->GetRxPackets();
+    double rxBytes = g_sink->GetTotalRx();
     double thrMbps = rxBytes * 8.0 / std::max(1.0, duration) / 1e6;
-    double meanDelayMs = (rxP > 0) ? (delaySum / rxP) * 1e3 : 0.0;
+    double meanDelayMs = g_sink->GetMeanDelayMs();
     double delivery = (txP > 0) ? (double)rxP / txP : 0.0;
 
     std::filesystem::create_directories(outputDir);
@@ -296,8 +289,10 @@ main(int argc, char* argv[])
     out << "packets_through_sats," << rxP << ",1," << (rxP > 0 ? 1 : 0) << ",packetsink\n";
     out << "rx_throughput_mbps," << thrMbps << ",0.05," << (thrMbps >= 0.05 ? 1 : 0)
         << ",packetsink\n";
-    out << "mean_e2e_delay_ms," << meanDelayMs << ",-,1,flowmonitor\n";
-    out << "app_delivery_ratio," << delivery << ",-,1,flowmonitor\n";
+    out << "mean_e2e_delay_ms," << meanDelayMs << ",-,1,inband-timestamp\n";
+    out << "app_jitter_ms," << g_sink->GetMeanJitterMs() << ",-,1,inband-timestamp\n";
+    out << "app_loss_ratio," << g_sink->GetLossRatio() << ",-,1,inband-seq\n";
+    out << "app_delivery_ratio," << delivery << ",-,1,app-trace\n";
     out << "route_installs," << (g_currentSat != 0 ? 1 : 0) + g_reroutes << ",1,"
         << ((g_currentSat != 0) ? 1 : 0) << ",router\n";
     out << "reroutes," << g_reroutes << ",-,1,router\n";

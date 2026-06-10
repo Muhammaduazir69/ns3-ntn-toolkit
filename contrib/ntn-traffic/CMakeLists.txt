@@ -13,6 +13,11 @@ set(source_files
     model/nrtv-variables.cc
     model/nrtv-video-worker.cc
     model/traffic-time-tag.cc
+    model/ntn-command-and-control-app.cc
+    model/ntn-oran-ai-flow-monitor.cc
+    model/ntn-oran-application.cc
+    model/ntn-oran-payload-header.cc
+    model/ntn-oran-sink.cc
     model/ntn-static-extra-loss-model.cc
     model/three-gpp-http-satellite-client.cc
     stats/application-stats-helper.cc
@@ -38,6 +43,11 @@ set(header_files
     model/nrtv-variables.h
     model/nrtv-video-worker.h
     model/traffic-time-tag.h
+    model/ntn-command-and-control-app.h
+    model/ntn-oran-ai-flow-monitor.h
+    model/ntn-oran-application.h
+    model/ntn-oran-payload-header.h
+    model/ntn-oran-sink.h
     model/ntn-static-extra-loss-model.h
     model/three-gpp-http-satellite-client.h
     stats/application-stats-helper.h
@@ -49,6 +59,7 @@ set(header_files
 set(test_sources
     test/cbr-test.cc
     test/nrtv-test.cc
+    test/ntn-oran-application-test.cc
 )
 
 build_lib(

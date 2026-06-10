@@ -28,7 +28,8 @@
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
 #include "ns3/error-model.h"
-#include "ns3/flow-monitor-helper.h"
+#include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-oran-sink.h"
 #include "ns3/internet-stack-helper.h"
 #include "ns3/ipv4-address-helper.h"
 #include "ns3/ipv4-global-routing-helper.h"
@@ -66,7 +67,7 @@ Ptr<MobilityModel> g_ground;
 Hop g_gu; // ground-uav
 Hop g_uh; // uav-haps
 Hop g_hl; // haps-leo
-Ptr<PacketSink> g_sink;
+Ptr<NtnOranSink> g_sink;
 uint64_t g_lastRx = 0;
 double g_eirpDbm = 70.0;
 double g_noiseDbm = -95.0;
@@ -269,30 +270,24 @@ main(int argc, char* argv[])
 
     // End-to-end UDP: ground (node 0) → LEO (node 3), the leo-side address.
     const uint16_t port = 7000;
-    PacketSinkHelper sinkHelper(
-        "ns3::UdpSocketFactory",
-        InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(3));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(simSeconds));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
+    g_sink = CreateObject<NtnOranSink>();
+    g_sink->SetAttribute("Local",
+                         AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+    nodes.Get(3)->AddApplication(g_sink);
+    g_sink->SetStartTime(Seconds(0.0));
+    g_sink->SetStopTime(Seconds(simSeconds));
 
-    OnOffHelper onoff("ns3::UdpSocketFactory",
-                      InetSocketAddress(iHl.GetAddress(1), port));
-    onoff.SetAttribute("DataRate",
-                       DataRateValue(DataRate(static_cast<uint64_t>(
-                           dataRateMbps * 1e6))));
-    onoff.SetAttribute("PacketSize", UintegerValue(packetBytes));
-    onoff.SetAttribute("OnTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute("OffTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-    ApplicationContainer srcApp = onoff.Install(nodes.Get(0));
-    srcApp.Start(Seconds(1.0));
-    srcApp.Stop(Seconds(simSeconds));
-
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
+    Ptr<NtnOranApplication> client = CreateObject<NtnOranApplication>();
+    client->SetRemote(InetSocketAddress(iHl.GetAddress(1), port));
+    client->SetProfile(NtnOranApplication::CBR_SATURATING);
+    client->SetAttribute(
+        "DataRate",
+        DataRateValue(DataRate(static_cast<uint64_t>(dataRateMbps * 1e6))));
+    client->SetAttribute("PacketSize", UintegerValue(packetBytes));
+    client->SetFlowIdentity(/*5qi*/ 9, /*sst*/ 1, /*sd*/ 0x000001, /*src*/ 0, /*dst*/ 3);
+    nodes.Get(0)->AddApplication(client);
+    client->SetStartTime(Seconds(1.0));
+    client->SetStopTime(Seconds(simSeconds));
 
     std::printf("# sagin-multihop-traffic (Ground→UAV→HAPS→LEO)\n");
     std::printf("#   sim=%.0fs freq=%.1fGHz load=%.1fMbps uavAlt=%.0fm "
@@ -306,25 +301,15 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(simSeconds + 0.1));
     Simulator::Run();
 
-    monitor->CheckForLostPackets();
-    const auto stats = monitor->GetFlowStats();
-    uint64_t txP = 0, rxP = 0;
-    double sumDelay = 0.0;
-    uint64_t rxForDelay = 0;
-    for (const auto& kv : stats)
-    {
-        txP += kv.second.txPackets;
-        rxP += kv.second.rxPackets;
-        sumDelay += kv.second.delaySum.GetSeconds();
-        rxForDelay += kv.second.rxPackets;
-    }
-    const uint64_t totalRx = g_sink ? g_sink->GetTotalRx() : 0;
+    // KPIs measured from in-band NtnOranPayloadHeader primitives at the sink.
+    const uint64_t txP = client->GetTxPackets();
+    const uint64_t rxP = g_sink->GetRxPackets();
+    const uint64_t totalRx = g_sink->GetTotalRx();
     std::printf("# === summary ===  end-to-end txPackets=%lu rxPackets=%lu "
-                "PDR=%.2f%% meanDelay=%.3fms avgGoodput=%.3f Mbps\n",
+                "PDR=%.2f%% meanDelay=%.3fms jitter=%.3fms avgGoodput=%.3f Mbps\n",
                 (unsigned long)txP, (unsigned long)rxP,
-                txP ? 100.0 * rxP / txP : 0.0,
-                rxForDelay ? (sumDelay / rxForDelay) * 1000.0 : 0.0,
-                totalRx * 8.0 / simSeconds / 1e6);
+                txP ? 100.0 * rxP / txP : 0.0, g_sink->GetMeanDelayMs(),
+                g_sink->GetMeanJitterMs(), totalRx * 8.0 / simSeconds / 1e6);
     Simulator::Destroy();
     return 0;
 }

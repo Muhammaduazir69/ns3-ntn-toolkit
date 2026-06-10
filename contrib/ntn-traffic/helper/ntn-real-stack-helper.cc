@@ -19,7 +19,9 @@
 #include "ns3/mmwave-helper.h"
 #include "ns3/mmwave-phy-mac-common.h"
 #include "ns3/mmwave-point-to-point-epc-helper.h"
-#include "ns3/on-off-helper.h"
+#include "ns3/ntn-oran-ai-flow-monitor.h"
+#include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-oran-sink.h"
 #include "ns3/packet-sink-helper.h"
 #include "ns3/propagation-loss-model.h"
 #include "ns3/packet-sink.h"
@@ -156,13 +158,9 @@ NtnRealStackHelper::InstallTraffic(TrafficProfile profile, Time start, Time stop
 {
     NS_ABORT_MSG_IF(!m_built, "InstallTraffic before Build()");
 
-    uint16_t dlPort = 1234;
     for (uint32_t u = 0; u < m_ue.GetN(); ++u)
     {
-        // Choose per-UE profile params.
-        std::string rate;
-        uint32_t pkt;
-        bool saturating = false;
+        // Choose per-UE profile params (NtnOranApplication QoS flows).
         TrafficProfile p = profile;
         if (profile == TrafficProfile::MixedBouquet)
         {
@@ -171,55 +169,48 @@ NtnRealStackHelper::InstallTraffic(TrafficProfile profile, Time start, Time stop
                          : (b == 1) ? TrafficProfile::EmbbStreaming
                                     : TrafficProfile::UrllcPings;
         }
+        NtnOranApplication::Profile oranProfile;
+        uint8_t fiveQi;
         switch (p)
         {
         case TrafficProfile::NbIotPeriodic:
-            rate = "16kbps"; pkt = 128; break;
+            oranProfile = NtnOranApplication::MMTC_PERIODIC;
+            fiveQi = 9;
+            break;
         case TrafficProfile::UrllcPings:
-            rate = "204kbps"; pkt = 256; break;
+            oranProfile = NtnOranApplication::URLLC_PERIODIC;
+            fiveQi = 82;
+            break;
+        case TrafficProfile::ConversationalVoice:
+            oranProfile = NtnOranApplication::CONVERSATIONAL_VOICE;
+            fiveQi = 1;
+            break;
         case TrafficProfile::EmbbStreaming:
         default:
-            rate = "5Mbps"; pkt = 1400; saturating = true; break;
+            oranProfile = NtnOranApplication::CBR_SATURATING;
+            fiveQi = 2;
+            break;
         }
-
-        // DL: remote host -> UE.
-        PacketSinkHelper dlSink("ns3::UdpSocketFactory",
-                                InetSocketAddress(Ipv4Address::GetAny(), dlPort));
-        ApplicationContainer dlSinkApp = dlSink.Install(m_ue.Get(u));
-        m_serverApps.Add(dlSinkApp);
-        m_dlSinks.Add(dlSinkApp);
-        dlSinkApp.Get(0)->TraceConnectWithoutContext(
-            "Rx", MakeCallback(&NtnRealStackHelper::DlSinkRx, this));
-
-        OnOffHelper dlClient("ns3::UdpSocketFactory",
-                             InetSocketAddress(m_ueAddrs[u], dlPort));
-        dlClient.SetAttribute("DataRate", DataRateValue(DataRate(rate)));
-        dlClient.SetAttribute("PacketSize", UintegerValue(pkt));
-        dlClient.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
-        dlClient.SetAttribute(
-            "OffTime",
-            StringValue(saturating ? "ns3::ConstantRandomVariable[Constant=0.0]"
-                                   : "ns3::ConstantRandomVariable[Constant=0.05]"));
-        ApplicationContainer dlClientApp = dlClient.Install(m_remoteHost);
-        dlClientApp.Get(0)->TraceConnectWithoutContext(
-            "Tx", MakeCallback(&NtnRealStackHelper::DlClientTx, this));
-        m_clientApps.Add(dlClientApp);
+        ApplicationContainer flow =
+            InstallOranFlow(u, fiveQi, 1, 0x000001, oranProfile, start, stop);
 
         if (m_uplink)
         {
             uint16_t ulPort = 2000 + u;
-            PacketSinkHelper ulSink("ns3::UdpSocketFactory",
-                                    InetSocketAddress(Ipv4Address::GetAny(), ulPort));
-            m_serverApps.Add(ulSink.Install(m_remoteHost));
-            OnOffHelper ulClient("ns3::UdpSocketFactory",
-                                 InetSocketAddress(m_remoteHostAddr, ulPort));
-            ulClient.SetAttribute("DataRate", DataRateValue(DataRate("128kbps")));
-            ulClient.SetAttribute("PacketSize", UintegerValue(256));
-            ulClient.SetAttribute("OnTime",
-                                  StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
-            ulClient.SetAttribute("OffTime",
-                                  StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
-            m_clientApps.Add(ulClient.Install(m_ue.Get(u)));
+            Ptr<NtnOranSink> ulSink = CreateObject<NtnOranSink>();
+            ulSink->SetAttribute("Local",
+                                 AddressValue(InetSocketAddress(Ipv4Address::GetAny(), ulPort)));
+            m_remoteHost->AddApplication(ulSink);
+            m_serverApps.Add(ulSink);
+
+            Ptr<NtnOranApplication> ulClient = CreateObject<NtnOranApplication>();
+            ulClient->SetRemote(InetSocketAddress(m_remoteHostAddr, ulPort));
+            ulClient->SetProfile(NtnOranApplication::MMTC_PERIODIC);
+            ulClient->SetAttribute("PacketSize", UintegerValue(256));
+            ulClient->SetAttribute("Period", TimeValue(MilliSeconds(16))); // 128 kbps
+            ulClient->SetFlowIdentity(9, 1, 0x000001, 1000 + u, 0);
+            m_ue.Get(u)->AddApplication(ulClient);
+            m_clientApps.Add(ulClient);
         }
     }
 
@@ -230,8 +221,9 @@ NtnRealStackHelper::InstallTraffic(TrafficProfile profile, Time start, Time stop
 
     // NB: FlowMonitor is intentionally NOT used. Over the LTE/mmwave EPC the GTP
     // tunnel re-encapsulates DL packets and strips the flow byte-tag, so
-    // FlowMonitor under-counts DL rx. The PacketSink is the authoritative DL
-    // delivery measurement (see Collect()).
+    // FlowMonitor under-counts DL rx. The NtnOranSink is the authoritative DL
+    // measurement (delivery, in-band one-way delay, jitter, seq-gap loss) —
+    // its primitives ride INSIDE the GTP tunnel as real payload bytes.
 
     // Periodic callbacks are scheduled at registration time (see
     // RegisterPeriodicCallback), so registration order vs InstallTraffic does
@@ -240,6 +232,108 @@ NtnRealStackHelper::InstallTraffic(TrafficProfile profile, Time start, Time stop
     m_wallStartNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now().time_since_epoch())
                         .count();
+}
+
+ApplicationContainer
+NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
+                                    uint8_t fiveQi,
+                                    uint8_t sst,
+                                    uint32_t sd,
+                                    uint8_t profile,
+                                    Time start,
+                                    Time stop)
+{
+    NS_ABORT_MSG_IF(!m_built, "InstallOranFlow before Build()");
+    NS_ABORT_MSG_IF(ueIdx >= m_ue.GetN(), "InstallOranFlow: UE index out of range");
+    const auto oranProfile = static_cast<NtnOranApplication::Profile>(profile);
+    const uint16_t dlPort = m_nextDlPort++;
+
+    Ptr<NtnOranSink> sink = CreateObject<NtnOranSink>();
+    sink->SetAttribute("Local",
+                       AddressValue(InetSocketAddress(Ipv4Address::GetAny(), dlPort)));
+    m_ue.Get(ueIdx)->AddApplication(sink);
+    m_serverApps.Add(sink);
+    m_dlSinks.Add(sink);
+    m_dlSinkUe.push_back(ueIdx);
+    sink->TraceConnectWithoutContext("Rx",
+                                     MakeCallback(&NtnRealStackHelper::DlSinkRx, this));
+
+    Ptr<NtnOranApplication> client = CreateObject<NtnOranApplication>();
+    client->SetRemote(InetSocketAddress(m_ueAddrs[ueIdx], dlPort));
+    client->SetProfile(oranProfile);
+    // Cadence/size presets matching the helper's historical OnOff rates, so
+    // the 30+ examples already gated on these profiles keep their budgets.
+    switch (oranProfile)
+    {
+    case NtnOranApplication::MMTC_PERIODIC:
+        client->SetAttribute("PacketSize", UintegerValue(128));
+        client->SetAttribute("Period", TimeValue(MilliSeconds(64))); // ~16 kbps
+        break;
+    case NtnOranApplication::URLLC_PERIODIC:
+        client->SetAttribute("PacketSize", UintegerValue(256));
+        client->SetAttribute("Period", TimeValue(MilliSeconds(10))); // ~205 kbps
+        break;
+    case NtnOranApplication::CONVERSATIONAL_VOICE:
+        client->SetAttribute("PacketSize", UintegerValue(92)); // AMR-WB + RTP-ish
+        break;
+    case NtnOranApplication::EMBB_VIDEO:
+    case NtnOranApplication::POISSON_BACKGROUND:
+    case NtnOranApplication::CBR_SATURATING:
+    default:
+        client->SetAttribute("DataRate", DataRateValue(DataRate("5Mb/s")));
+        client->SetAttribute("PacketSize", UintegerValue(1400));
+        break;
+    }
+    client->SetFlowIdentity(fiveQi, sst, sd, /*srcId=*/dlPort, /*dstId=*/ueIdx);
+    m_remoteHost->AddApplication(client);
+    m_clientApps.Add(client);
+    client->TraceConnectWithoutContext("Tx",
+                                       MakeCallback(&NtnRealStackHelper::DlClientTx, this));
+
+    sink->SetStartTime(Seconds(0.0));
+    sink->SetStopTime(m_simTime);
+    client->SetStartTime(start);
+    client->SetStopTime(stop);
+
+    ApplicationContainer apps;
+    apps.Add(client);
+    apps.Add(sink);
+    return apps;
+}
+
+Ptr<NtnOranAiFlowMonitor>
+NtnRealStackHelper::EnableOranFlowMonitor()
+{
+    NS_ABORT_MSG_IF(!m_built, "EnableOranFlowMonitor before Build()");
+    NS_ABORT_MSG_IF(m_dlSinks.GetN() == 0,
+                    "EnableOranFlowMonitor before InstallTraffic/InstallOranFlow");
+    if (m_oranMonitor)
+    {
+        return m_oranMonitor;
+    }
+    m_oranMonitor = CreateObject<NtnOranAiFlowMonitor>();
+    m_oranMonitor->SetPhySource(this);
+    for (uint32_t i = 0; i < m_clientApps.GetN(); ++i)
+    {
+        Ptr<NtnOranApplication> app = DynamicCast<NtnOranApplication>(m_clientApps.Get(i));
+        if (app)
+        {
+            m_oranMonitor->AddSource(app);
+        }
+    }
+    for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
+    {
+        Ptr<NtnOranSink> sink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
+        if (sink)
+        {
+            // m_dlSinkUe maps the flow to its UE for PHY (L1M.RS-SINR) metrics.
+            const int32_t ue =
+                (i < m_dlSinkUe.size()) ? static_cast<int32_t>(m_dlSinkUe[i]) : -1;
+            m_oranMonitor->AddSink(sink, ue);
+        }
+    }
+    m_oranMonitor->Start();
+    return m_oranMonitor;
 }
 
 void
@@ -356,11 +450,36 @@ NtnRealStackHelper::Collect()
                                         : std::numeric_limits<double>::quiet_NaN();
     m_dlTblerMean = (m_dlGlobal.n > 0) ? m_dlGlobal.sumTbler / m_dlGlobal.n : 0.0;
 
-    // App-measured KPIs. Throughput/delivery from the PacketSink (authoritative
-    // for the DL data plane); end-to-end delay from FlowMonitor.
+    // App-measured KPIs from the NtnOranSinks (authoritative for the DL data
+    // plane): delivery from received bytes; one-way delay / jitter / loss
+    // from the in-band NtnOranPayloadHeader primitives.
     uint64_t dlRxBytes = 0;
+    double sumDelayMs = 0.0;
+    uint64_t delaySamples = 0;
+    double sumJitterMs = 0.0;
+    uint64_t jitterFlows = 0;
+    uint64_t lostPkts = 0;
+    uint64_t expectedPkts = 0;
     for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
     {
+        Ptr<NtnOranSink> oranSink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
+        if (oranSink)
+        {
+            dlRxBytes += oranSink->GetTotalRx();
+            for (const auto& [key, fs] : oranSink->GetFlowStats())
+            {
+                sumDelayMs += fs.sumDelayMs;
+                delaySamples += fs.rxPackets;
+                if (fs.rxPackets > 1)
+                {
+                    sumJitterMs += fs.jitterMs;
+                    ++jitterFlows;
+                }
+                lostPkts += fs.LostPackets();
+                expectedPkts += static_cast<uint64_t>(fs.highestSeq) + 1;
+            }
+            continue;
+        }
         Ptr<PacketSink> sink = DynamicCast<PacketSink>(m_dlSinks.Get(i));
         if (sink)
         {
@@ -370,7 +489,10 @@ NtnRealStackHelper::Collect()
     double activeS = std::max(1e-6, m_simTime.GetSeconds());
     m_rxThroughputMbps = (dlRxBytes * 8.0) / activeS / 1e6;
     // m_appTxPackets / m_appRxPackets are accumulated live by the app traces.
-    m_meanDelayMs = 0.0; // measured end-to-end delay: deferred (app-stats-delay-helper)
+    m_meanDelayMs = delaySamples ? sumDelayMs / delaySamples : 0.0;
+    m_meanJitterMs = jitterFlows ? sumJitterMs / jitterFlows : 0.0;
+    m_appLossRatio =
+        expectedPkts ? static_cast<double>(lostPkts) / expectedPkts : 0.0;
 }
 
 void
@@ -409,6 +531,11 @@ NtnRealStackHelper::GetUeRxBytes(uint32_t ueIndex) const
     if (ueIndex >= m_dlSinks.GetN())
     {
         return 0;
+    }
+    Ptr<NtnOranSink> oranSink = DynamicCast<NtnOranSink>(m_dlSinks.Get(ueIndex));
+    if (oranSink)
+    {
+        return oranSink->GetTotalRx();
     }
     Ptr<PacketSink> sink = DynamicCast<PacketSink>(m_dlSinks.Get(ueIndex));
     return sink ? sink->GetTotalRx() : 0;
@@ -467,6 +594,9 @@ NtnRealStackHelper::WriteHealthReport()
                           ? static_cast<double>(m_appRxPackets) / m_appTxPackets
                           : 0.0;
     out << "app_delivery_ratio," << delivery << ",-,1,app-trace\n";
+    out << "app_owd_ms," << m_meanDelayMs << ",-,1,inband-timestamp\n";
+    out << "app_jitter_ms," << m_meanJitterMs << ",-,1,inband-timestamp\n";
+    out << "app_loss_ratio," << m_appLossRatio << ",-,1,inband-seq\n";
     out << "app_tx_pkts," << m_appTxPackets << ",-,1,app-trace\n";
     out << "app_rx_pkts," << m_appRxPackets << ",-,1,app-trace\n";
     out << "ues," << m_ue.GetN() << ",-,1,config\n";

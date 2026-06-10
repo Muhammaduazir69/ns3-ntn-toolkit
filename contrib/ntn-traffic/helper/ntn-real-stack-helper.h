@@ -15,7 +15,10 @@
 // Crucially, every headline KPI is MEASURED, not computed:
 //   * DL SINR / TBLER / corrupt-fraction come from the mmwave SpectrumPhy
 //     RxPacketTraceUe trace (struct ns3::mmwave::RxPacketTraceParams).
-//   * Throughput / delay / loss come from FlowMonitor on the running data plane.
+//   * Throughput / one-way delay / jitter / loss come from NtnOranSink: every
+//     NtnOranApplication packet carries an in-band NtnOranPayloadHeader
+//     (seq + TX timestamp + 5QI/S-NSSAI as real bytes inside the GTP tunnel),
+//     so the app-layer KPIs are computed from received bytes (WS1 suite).
 // WriteHealthReport() emits an HONEST sim_health.csv whose gates assert that the
 // packets actually traversed the radio stack and that the KPIs have trace
 // provenance — replacing the cosmetic "clock advanced over a P2P link" gates.
@@ -58,6 +61,7 @@ class Node;
 class Packet;
 class Address;
 class PropagationLossModel;
+class NtnOranAiFlowMonitor;
 
 namespace mmwave
 {
@@ -74,12 +78,16 @@ class NtnRealStackHelper
 {
   public:
     /// Pre-canned downlink traffic mixes (remote-host -> UE over the radio).
+    /// Backed by NtnOranApplication QoS flows (AI_NATIVE_ORAN_NTN plan WS1):
+    /// every packet carries an in-band NtnOranPayloadHeader (5QI/S-NSSAI/seq/
+    /// timestamp), so delay/jitter/loss are measured from received bytes.
     enum class TrafficProfile : uint8_t
     {
-        NbIotPeriodic,  ///< 128 B / 1 s
-        EmbbStreaming,  ///< saturating UDP, 1400 B
-        UrllcPings,     ///< 256 B / 10 ms
-        MixedBouquet,   ///< 1/3 each across UEs
+        NbIotPeriodic,       ///< mMTC 128 B / 64 ms (5QI 9)
+        EmbbStreaming,       ///< saturating UDP, 1400 B (5QI 2)
+        UrllcPings,          ///< 256 B / 10 ms (5QI 82)
+        ConversationalVoice, ///< vocoder 20 ms cadence (5QI 1)
+        MixedBouquet,        ///< NB-IoT / eMBB / URLLC, 1/3 each across UEs
     };
 
     /// Honest realism floors asserted at end of run.
@@ -122,6 +130,19 @@ class NtnRealStackHelper
     void InstallTraffic(TrafficProfile profile, Time start, Time stop);
 
     /**
+     * \brief Install one explicit NtnOranApplication QoS flow (DL: remote host
+     *        -> UE \p ueIdx) with full slice/QoS identity. \p profile is an
+     *        NtnOranApplication::Profile value. Returns {client, sink}.
+     */
+    ApplicationContainer InstallOranFlow(uint32_t ueIdx,
+                                         uint8_t fiveQi,
+                                         uint8_t sst,
+                                         uint32_t sd,
+                                         uint8_t profile,
+                                         Time start,
+                                         Time stop);
+
+    /**
      * \brief Chain an extra propagation loss model onto the real radio channel
      *        (after the built-in Friis loss). This is the channel-plugin hook:
      *        a module re-homes its physics (THz molecular absorption, Sionna RT,
@@ -133,6 +154,15 @@ class NtnRealStackHelper
 
     /// Schedule a user callback on the real event queue (e.g. CHO/KPM tick).
     void RegisterPeriodicCallback(Time period, std::function<void(Time)> cb);
+
+    /**
+     * \brief Stand up the WS2 AI-native measurement layer over every ORAN
+     *        flow installed so far (call AFTER InstallTraffic/InstallOranFlow):
+     *        per-flow KPM time series under TS 28.552 names, AI feature
+     *        windows, EWMA anomaly events, XML/CSV/Influx/E2 export. The
+     *        monitor also reads this helper's PHY trace for L1M.RS-SINR.
+     */
+    Ptr<NtnOranAiFlowMonitor> EnableOranFlowMonitor();
 
     // ---- Post-run measurement (call after Simulator::Run) ----------------
     /// Aggregate FlowMonitor + PHY-sink samples into the measured KPI set.
@@ -146,7 +176,13 @@ class NtnRealStackHelper
     double GetDlCorruptFraction() const;
     uint64_t GetPhyRxTb() const { return m_phyRxTb; }
     double GetRxThroughputMbps() const { return m_rxThroughputMbps; }
+    /// Measured mean one-way delay (ms) from in-band NtnOranPayloadHeader
+    /// timestamps across all DL sinks (radio + GTP + backhaul, real path).
     double GetMeanDelayMs() const { return m_meanDelayMs; }
+    /// Measured RFC 3550 jitter (ms) across all DL flows.
+    double GetMeanJitterMs() const { return m_meanJitterMs; }
+    /// Measured app-layer loss ratio (seq gaps) across all DL flows.
+    double GetAppLossRatio() const { return m_appLossRatio; }
     /// Measured mean DL SINR (dB) for a given cellId, or NaN if no samples.
     double GetCellMeanSinrDb(uint16_t cellId) const;
 
@@ -216,7 +252,8 @@ class NtnRealStackHelper
     std::vector<Ipv4Address> m_ueAddrs; // assigned UE IP per UE device
     ApplicationContainer m_clientApps;
     ApplicationContainer m_serverApps;
-    ApplicationContainer m_dlSinks; // DL PacketSinks on the UEs (authoritative rx)
+    ApplicationContainer m_dlSinks; // DL sinks on the UEs (authoritative rx)
+    std::vector<uint32_t> m_dlSinkUe; // UE index of each DL sink, in order
 
     // Measured-KPI sink state
     SinrAccum m_dlGlobal;
@@ -232,6 +269,9 @@ class NtnRealStackHelper
     uint64_t m_phyCorruptTb{0};
     double m_rxThroughputMbps{0.0};
     double m_meanDelayMs{0.0};
+    double m_meanJitterMs{0.0};
+    double m_appLossRatio{0.0};
+    uint16_t m_nextDlPort{1234};
     uint64_t m_appTxPackets{0};
     uint64_t m_appRxPackets{0};
 
@@ -241,6 +281,7 @@ class NtnRealStackHelper
         std::function<void(Time)> cb;
     };
     std::vector<PeriodicEntry> m_periodics;
+    Ptr<NtnOranAiFlowMonitor> m_oranMonitor;
 
     bool m_built{false};
     int64_t m_wallStartNs{0};

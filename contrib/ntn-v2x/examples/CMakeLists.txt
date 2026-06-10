@@ -52,5 +52,5 @@ build_lib_example(
     ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libntn-traffic}
 )
