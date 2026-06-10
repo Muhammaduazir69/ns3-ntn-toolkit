@@ -24,6 +24,7 @@ set(header_files
 
 set(test_sources
     test/ntn-cho-test-suite.cc
+    test/ntn-standards-validation-test.cc
 )
 
 # ns3-ai is an OPTIONAL dependency: only NtnAiInterface (the learning-based

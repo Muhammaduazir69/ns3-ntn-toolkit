@@ -90,7 +90,29 @@ class NtnChoAlgorithm : public Object
          * BEFORE the predicted serving outage, toward the candidate that
          * maximizes the predicted time-of-stay.
          */
-        TRIGGER_TRAJECTORY_PREDICTIVE
+        TRIGGER_TRAJECTORY_PREDICTIVE,
+        /**
+         * 3GPP Rel-17 NTN CondEventT1 (time-based CHO): the ephemeris
+         * schedules a handover window — when the SERVING cell's remaining
+         * time-of-service (TTE from the orbit predictor) drops inside
+         * t1WindowDuration, quality-passing candidates are admitted. The
+         * paper's "time-based" trigger class (Deng 2026 Sec. VI).
+         */
+        TRIGGER_TIME_T1,
+        /**
+         * Elevation-based NTN trigger: serving elevation (derived from the
+         * ephemeris/GNSS slant range at the configured orbit altitude) falls
+         * below elevationMinDeg while a candidate is above it plus
+         * hysteresis. The paper's "elevation" trigger class.
+         */
+        TRIGGER_ELEVATION,
+        /**
+         * Timing-advance-based NTN trigger (Rel-18 discussion): the UE-side
+         * TA (2 x slant/c from ephemeris+GNSS) exceeds taServingMax, or a
+         * candidate offers at least taAdvantage less TA. The paper's
+         * "timing-advance" trigger class.
+         */
+        TRIGGER_TIMING_ADVANCE
     };
 
     /**
@@ -121,6 +143,14 @@ class NtnChoAlgorithm : public Object
         uint8_t predictionMinSamples = 4;       //!< min history for a forecast
         Time minPredictedTos = Seconds(5.0);    //!< min predicted time-of-stay
         double pchoHysteresis_dB = 1.0;         //!< predicted best-server margin
+
+        // ---- Standardized NTN triggers (TIME_T1 / ELEVATION / TA) ----
+        Time t1WindowDuration = Seconds(10.0); //!< CondEventT1 window before serving TTE
+        double elevationMinDeg = 10.0;         //!< serving-elevation handover floor
+        double elevationHystDeg = 2.0;         //!< candidate must clear floor + hyst
+        double orbitAltitudeKm = 550.0;        //!< shell altitude for elevation from slant
+        Time taServingMax = MilliSeconds(8);   //!< max acceptable serving TA (2*slant/c)
+        Time taAdvantage = MilliSeconds(1);    //!< min TA gain to admit a candidate
 
         // ---- RACH-less execution (RCHO; orthogonal to the trigger) ----
         bool rachLess = false;                  //!< skip RACH using ephemeris TA
@@ -397,6 +427,11 @@ class NtnChoAlgorithm : public Object
 
     /// Evaluate the Rel-19 conditional-LTM admission for one candidate.
     void EvaluateLtmConditional(CandidateInfo& cand);
+    /// Standardized NTN trigger classes (TIME_T1 / ELEVATION / TIMING_ADVANCE).
+    void EvaluateStandardNtnTrigger(CandidateInfo& cand);
+    /// Elevation (deg) from an ephemeris/GNSS slant range at the configured
+    /// shell altitude (spherical-Earth relation); NaN if range is invalid.
+    double ElevationFromSlantDeg(double slantRangeM) const;
 
     /// Evaluate the trajectory-predictive (PCHO) admission for one candidate.
     void EvaluateTrajectoryPredictive(CandidateInfo& cand);

@@ -135,3 +135,17 @@ build_lib_example(
     ${libmmwave}
     ${liblte}
 )
+
+# WS5 — Table-3 per-platform user-plane latency validation (real packets).
+build_lib_example(
+  NAME ntn-platform-latency-validation
+  SOURCE_FILES ntn-platform-latency-validation.cc
+  LIBRARIES_TO_LINK
+    ${liboran-ntn}
+    ${libntn-traffic}
+    ${libcore}
+    ${libnetwork}
+    ${libinternet}
+    ${libapplications}
+    ${libpoint-to-point}
+)

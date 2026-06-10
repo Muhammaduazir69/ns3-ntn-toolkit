@@ -132,7 +132,10 @@ main(int argc, char* argv[])
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("tteMinSec", "Minimum TTE for CHO admission (s)", tteMinSec);
-    cmd.AddValue("trigger", "Handover mechanism: tte-aware|ltm|pcho", trigger);
+    cmd.AddValue("trigger",
+                 "Handover trigger: tte-aware|ltm|pcho|a3|d1|t1|elevation|ta "
+                 "(a3/d1/t1/elevation/ta = the five 3GPP NTN trigger classes)",
+                 trigger);
     cmd.AddValue("rachLess", "RACH-less execution (ephemeris TA pre-comp)", rachLess);
     cmd.AddValue("satsPerPlane", "Walker in-plane satellites (spacing)", satsPerPlane);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -217,10 +220,31 @@ main(int argc, char* argv[])
     {
         cfg.triggerType = NtnChoAlgorithm::TRIGGER_TRAJECTORY_PREDICTIVE;
     }
+    else if (trigger == "a3") // 3GPP class 1: measurement-based
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_EVENT_A3;
+    }
+    else if (trigger == "d1") // class 2: location-based (CondEventD1)
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_LOCATION_D1;
+    }
+    else if (trigger == "t1") // class 3: time-based (CondEventT1, ephemeris)
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_TIME_T1;
+    }
+    else if (trigger == "elevation") // class 4: elevation-based
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_ELEVATION;
+    }
+    else if (trigger == "ta") // class 5: timing-advance-based
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_TIMING_ADVANCE;
+    }
     else
     {
         cfg.triggerType = NtnChoAlgorithm::TRIGGER_TTE_AWARE;
     }
+    cfg.orbitAltitudeKm = leoAltKm;
     cfg.rachLess = rachLess;
     cfg.tteMinimum = Seconds(tteMinSec);
     cfg.qualityThreshold_dB = 8.0;

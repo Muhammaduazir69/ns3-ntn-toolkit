@@ -54,3 +54,21 @@ build_lib_example(
     ${libmmwave}
     ${liblte}
 )
+
+build_lib_example(
+  NAME ntn-tr38821-calibration
+  SOURCE_FILES ntn-tr38821-calibration.cc
+  LIBRARIES_TO_LINK
+    ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
+)

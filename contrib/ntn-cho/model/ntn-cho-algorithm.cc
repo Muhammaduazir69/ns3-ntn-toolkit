@@ -272,6 +272,91 @@ NtnChoAlgorithm::ForecastSinr(const std::vector<std::pair<double, double>>& hist
     return intercept + slope * tF;
 }
 
+double
+NtnChoAlgorithm::ElevationFromSlantDeg(double slantRangeM) const
+{
+    if (slantRangeM <= 0.0)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    // Spherical-Earth relation for a circular shell at the configured
+    // altitude: sin(elev) = ((R+h)^2 - R^2 - d^2) / (2 R d).
+    constexpr double kRe = 6371e3;
+    const double rs = kRe + m_config.orbitAltitudeKm * 1e3;
+    const double d = slantRangeM;
+    const double s = (rs * rs - kRe * kRe - d * d) / (2.0 * kRe * d);
+    if (s < -1.0 || s > 1.0)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return std::asin(s) * 180.0 / M_PI;
+}
+
+void
+NtnChoAlgorithm::EvaluateStandardNtnTrigger(CandidateInfo& cand)
+{
+    cand.admitted = false;
+    cand.tte = Seconds(0);
+    if (cand.sinr_dB < m_config.qualityThreshold_dB)
+    {
+        return; // every class keeps the radio-quality precondition
+    }
+    constexpr double kC = 299792458.0;
+
+    switch (m_config.triggerType)
+    {
+    case TRIGGER_TIME_T1: {
+        // CondEventT1: the ephemeris-scheduled window opens when the SERVING
+        // cell's remaining time-of-service drops inside t1WindowDuration.
+        if (!m_tteEstimator)
+        {
+            return;
+        }
+        auto servingIt = m_candidates.find(m_servingCellId);
+        if (servingIt == m_candidates.end())
+        {
+            return;
+        }
+        const auto servingTte = m_tteEstimator->ComputeTte(m_uePosition,
+                                                           m_ueVelocity,
+                                                           servingIt->second.satId,
+                                                           servingIt->second.beamId,
+                                                           m_config.gainThreshold_dB);
+        cand.admitted = (servingTte.tte > Seconds(0) &&
+                         servingTte.tte <= m_config.t1WindowDuration);
+        break;
+    }
+    case TRIGGER_ELEVATION: {
+        auto servingIt = m_candidates.find(m_servingCellId);
+        if (servingIt == m_candidates.end())
+        {
+            return;
+        }
+        const double servingElev = ElevationFromSlantDeg(servingIt->second.slantRangeM);
+        const double candElev = ElevationFromSlantDeg(cand.slantRangeM);
+        cand.admitted = (!std::isnan(servingElev) && !std::isnan(candElev) &&
+                         servingElev < m_config.elevationMinDeg &&
+                         candElev >= m_config.elevationMinDeg + m_config.elevationHystDeg);
+        break;
+    }
+    case TRIGGER_TIMING_ADVANCE: {
+        auto servingIt = m_candidates.find(m_servingCellId);
+        if (servingIt == m_candidates.end() || cand.slantRangeM <= 0.0 ||
+            servingIt->second.slantRangeM <= 0.0)
+        {
+            return;
+        }
+        const Time taServing = Seconds(2.0 * servingIt->second.slantRangeM / kC);
+        const Time taCand = Seconds(2.0 * cand.slantRangeM / kC);
+        cand.admitted = (taServing > m_config.taServingMax) ||
+                        (taServing - taCand >= m_config.taAdvantage);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 void
 NtnChoAlgorithm::EvaluateLtmConditional(CandidateInfo& cand)
 {
@@ -432,6 +517,18 @@ NtnChoAlgorithm::EvaluateConditions()
             }
             continue;
         }
+        if (m_config.triggerType == TRIGGER_TIME_T1 ||
+            m_config.triggerType == TRIGGER_ELEVATION ||
+            m_config.triggerType == TRIGGER_TIMING_ADVANCE)
+        {
+            EvaluateStandardNtnTrigger(cand);
+            m_candidateEvalTrace(cellId, cand.sinr_dB, cand.tte, cand.admitted);
+            if (cand.admitted && !m_admitCallback.IsNull())
+            {
+                m_admitCallback(cellId, cand.sinr_dB, cand.tte);
+            }
+            continue;
+        }
 
         // Step 1: Check D1 condition
         bool d1Now = CheckD1Condition(cand);
@@ -556,6 +653,23 @@ NtnChoAlgorithm::SelectBestCandidate() const
             }
         }
         return bestP ? bestP->cellId : INVALID_CELL_ID;
+    }
+
+    if (m_config.triggerType == TRIGGER_TIME_T1 ||
+        m_config.triggerType == TRIGGER_ELEVATION ||
+        m_config.triggerType == TRIGGER_TIMING_ADVANCE)
+    {
+        // The admit set already encodes the standardized condition; take the
+        // strongest measured candidate.
+        const CandidateInfo* bestStd = nullptr;
+        for (const auto& [cellId, info] : m_candidates)
+        {
+            if (info.admitted && (!bestStd || info.sinr_dB > bestStd->sinr_dB))
+            {
+                bestStd = &info;
+            }
+        }
+        return bestStd ? bestStd->cellId : INVALID_CELL_ID;
     }
 
     std::vector<const CandidateInfo*> admissible;
