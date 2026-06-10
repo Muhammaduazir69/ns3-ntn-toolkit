@@ -23,6 +23,7 @@
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-command-and-control-app.h"
+#include "ns3/ntn-oran-ai-flow-monitor.h"
 #include "ns3/ntn-oran-application.h"
 #include "ns3/ntn-oran-sink.h"
 #include "ns3/ntn-real-stack-helper.h"
@@ -145,6 +146,15 @@ main(int argc, char* argv[])
     cnc->SetStartTime(Seconds(0.5));
     cnc->SetStopTime(Seconds(simSeconds - 0.5));
 
+    // WS2: AI-native KPM measurement layer over all four flows — TS 28.552
+    // metric names, AI feature windows, EWMA anomaly events.
+    Ptr<NtnOranAiFlowMonitor> kpm = rs.EnableOranFlowMonitor();
+    kpm->RegisterAnomalyCallback([](const NtnOranAiFlowMonitor::AnomalyEvent& ev) {
+        std::printf("  [anomaly] t=%.1f flow=%u 5qi=%u %s=%.4f z=%.1f\n",
+                    ev.time.GetSeconds(), ev.flowId, ev.key.fiveQi,
+                    ev.metric.c_str(), ev.value, ev.zScore);
+    });
+
     std::printf("# %5s  %10s  %10s  %10s  %10s  %8s\n",
                 "t_s", "voice_ms", "video_ms", "urllc_ms", "mmtc_ms", "battery");
     Ptr<NtnOranSink> sinks[4] = {DynamicCast<NtnOranSink>(voice.Get(1)),
@@ -165,6 +175,12 @@ main(int argc, char* argv[])
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
+    kpm->WriteCsv(outputDir + "/kpm_series.csv");
+    kpm->WriteInfluxLp(outputDir + "/kpm_series.lp");
+    kpm->SerializeToXmlFile(outputDir + "/oran_flow_monitor.xml");
+    std::printf("# KPM: %zu flows, anomalies=%zu, series -> %s/kpm_series.csv\n",
+                kpm->GetKpmSeries().size(), kpm->GetAnomalies().size(),
+                outputDir.c_str());
 
     std::printf("# === per-flow measured KPIs (in-band, through GTP + radio) ===\n");
     std::printf("# %-8s %5s %9s %10s %10s %9s %9s %10s\n",

@@ -59,6 +59,7 @@ set(header_files
 set(test_sources
     test/cbr-test.cc
     test/nrtv-test.cc
+    test/ntn-oran-ai-flow-monitor-test.cc
     test/ntn-oran-application-test.cc
 )
 
