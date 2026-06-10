@@ -2,6 +2,7 @@ set(source_files
     model/haps-mobility-model.cc
     model/uav-mobility-models.cc
     model/a2g-channel-tr36777.cc
+    model/sagin-a2g-propagation-loss-model.cc
     model/multi-layer-router.cc
     model/aeronautical-scenario.cc
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
@@ -25,6 +26,7 @@ set(header_files
     model/haps-mobility-model.h
     model/uav-mobility-models.h
     model/a2g-channel-tr36777.h
+    model/sagin-a2g-propagation-loss-model.h
     model/multi-layer-router.h
     model/aeronautical-scenario.h
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
@@ -56,6 +58,7 @@ build_lib(
     ${libcore}
     ${libnetwork}
     ${libmobility}
+    ${libpropagation}
     ${libntn-slice}
   TEST_SOURCES ${test_sources}
 )

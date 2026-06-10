@@ -3,39 +3,37 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // thz-ntn-leo-ground-downlink-traffic — END-TO-END packet transmission over a
-// sub-THz LEO downlink whose link quality is gated by the thz-ntn physics
-// (FSPL + ThzNtnMolecularAbsorption slant-path attenuation). REAL UDP traffic
-// flows over a PointToPoint link; every second a probe reads the live
-// geometry, asks ThzNtnMolecularAbsorption for the slant-path molecular
-// absorption at the current elevation, forms an SNR, maps it to a packet
-// error rate on the receiver's RateErrorModel, and updates the propagation
-// delay. Throughput therefore rises toward zenith (shorter path, less
-// absorption) and falls near the horizon — driven by the THz channel
-// physics, not hardcoded.
+// sub-THz LEO downlink on a REAL mmwave NR NTN cell (NtnRealStackHelper:
+// SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC).
 //
-// At sub-THz the molecular (O2/H2O) absorption is the dominant elevation- and
-// frequency-dependent term, so try --freqGHz=120 vs --freqGHz=183 (the strong
-// water-vapour line) to see the link budget collapse.
+// Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06, channel-plugin recipe):
+// the old version computed FSPL + molecular absorption in a probe loop and
+// drove a P2P RateErrorModel through a sigmoid SnrToPer() — packets never saw
+// the THz channel. Here ThzNtnMolecularAbsorption, re-homed as
+// ThzNtnPropagationLossModel (pure atmospheric EXCESS), is chained onto the
+// real spectrum channel via AddExtraPropagationLoss(); FSPL comes from the
+// stack's own Friis model over the live SGP4 geometry. As the satellite
+// recedes the slant path lengthens, FSPL and the O2/H2O absorption grow, and
+// the decline shows up in the MEASURED SINR / TBLER / goodput — driven by the
+// channel, nothing closed-form in the packet path.
 //
-// Quick test:  --simSeconds=120 --dataRateMbps=5
-// Full run:    (defaults) ~600 s pass at 140 GHz.
-#include "ns3/applications-module.h"
-#include "ns3/command-line.h"
-#include "ns3/constant-position-mobility-model.h"
-#include "ns3/constant-velocity-mobility-model.h"
+// The carrier is capped at 100 GHz by the 3GPP spectrum model (sub-THz /
+// W-band); the 183 GHz water-vapour-line study stays in the analytic
+// thz-ntn-leo-ground link-budget tool.
+//
+// Quick test:  --simSeconds=40
 #include "ns3/core-module.h"
-#include "ns3/error-model.h"
-#include "ns3/flow-monitor-helper.h"
-#include "ns3/internet-stack-helper.h"
-#include "ns3/ipv4-address-helper.h"
-#include "ns3/point-to-point-channel.h"
-#include "ns3/point-to-point-helper.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/thz-ntn-propagation-loss-model.h"
+#include "ns3/walker-constellation.h"
 
-#include "ns3/thz-ntn-molecular-absorption.h"
-
-#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 using namespace ns3;
 
@@ -43,199 +41,136 @@ NS_LOG_COMPONENT_DEFINE("ThzNtnLeoGroundDownlinkTraffic");
 
 namespace
 {
-constexpr double kC = 299792458.0;
-Ptr<ThzNtnMolecularAbsorption> g_abs;
-Ptr<MobilityModel> g_gnd;
-Ptr<MobilityModel> g_sat;
-Ptr<RateErrorModel> g_em;
-Ptr<PointToPointChannel> g_channel;
-Ptr<PacketSink> g_sink;
-uint64_t g_lastRx = 0;
-double g_eirpDbm = 100.0;
-double g_freqHz = 140e9;
-double g_noiseDbm = -90.0;
-double g_minElev = 10.0;
-double g_groundAltKm = 0.05;
-double g_satAltKm = 550.0;
 
 double
-ElevDeg(const Vector& u, const Vector& s)
+ElevDegEnu(const Vector& gnd, const Vector& sat)
 {
-    const Vector d(s.x - u.x, s.y - u.y, s.z - u.z);
-    return std::atan2(d.z, std::max(std::sqrt(d.x * d.x + d.y * d.y), 1e-3)) *
-           180.0 / M_PI;
+    const double dx = sat.x - gnd.x;
+    const double dy = sat.y - gnd.y;
+    const double dz = sat.z - gnd.z;
+    const double horiz = std::max(std::sqrt(dx * dx + dy * dy), 1e-3);
+    return std::atan2(dz, horiz) * 180.0 / M_PI;
 }
 
 double
-Dist(const Vector& a, const Vector& b)
+DistM(const Vector& a, const Vector& b)
 {
     const double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-double
-FsplDb(double dM, double fHz)
-{
-    return 20.0 * std::log10(std::max(dM, 1.0)) +
-           20.0 * std::log10(fHz / 1e9) + 32.45;
-}
-
-double
-SnrToPer(double snrDb)
-{
-    return 1.0 / (1.0 + std::exp(0.8 * (snrDb - 6.0)));
-}
-
-void
-LinkProbe()
-{
-    const Vector u = g_gnd->GetPosition();
-    const Vector s = g_sat->GetPosition();
-    const double elev = ElevDeg(u, s);
-    const double range = Dist(u, s);
-    const double fspl = FsplDb(range, g_freqHz);
-    // THz molecular (O2 + H2O) slant-path absorption from the thz-ntn model.
-    const double molAbs = (elev > 0.0)
-        ? g_abs->ComputeSlantPathAbsorption(g_freqHz, elev, g_groundAltKm,
-                                            g_satAltKm)
-        : 200.0;
-    const double rxDbm = g_eirpDbm - fspl - molAbs;
-    const double snr = rxDbm - g_noiseDbm;
-    const double per = (elev < g_minElev) ? 1.0 : SnrToPer(snr);
-    g_em->SetRate(per);
-    g_channel->SetAttribute("Delay", TimeValue(Seconds(range / kC)));
-
-    const uint64_t tot = g_sink ? g_sink->GetTotalRx() : 0;
-    const double mbps = (tot - g_lastRx) * 8.0 / 1e6;
-    g_lastRx = tot;
-    std::printf("  %6.1f  %7.2f  %8.2f  %8.2f  %8.2f  %9.3f\n",
-                Simulator::Now().GetSeconds(), elev, fspl, molAbs, snr, mbps);
-    Simulator::Schedule(Seconds(1.0), &LinkProbe);
-}
 } // namespace
 
 int
 main(int argc, char* argv[])
 {
-    double simSeconds = 600.0;
-    double altKm = 550.0;
-    double satSpeed = 7500.0;
-    double freqGHz = 140.0;
-    double dataRateMbps = 50.0;
-    uint32_t packetBytes = 1200;
-    double txPowerDbm = 30.0;
-    double antennaGainDb = 88.0; // high-gain THz dishes both ends (≈44 dBi each)
-    double noiseDbm = -90.0;
-    double minElevDeg = 10.0;
-    double linkCapacityMbps = 200.0;
+    double simSeconds = 60.0;
+    double freqGHz = 100.0;    // sub-THz / W-band (3GPP spectrum model upper bound)
+    double satEirpDbm = 115.0; // high-gain THz dishes both ends
+    std::string outputDir = "thz-ntn-leo-ground-downlink-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
-    cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
-    cmd.AddValue("satSpeed", "Satellite ground-track speed (m/s)", satSpeed);
-    cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("dataRateMbps", "Offered downlink load (Mbps)", dataRateMbps);
-    cmd.AddValue("packetBytes", "UDP payload size (bytes)", packetBytes);
-    cmd.AddValue("txPowerDbm", "HPA output power (dBm)", txPowerDbm);
-    cmd.AddValue("antennaGainDb", "Combined antenna gain (dB)", antennaGainDb);
-    cmd.AddValue("noiseDbm", "Receiver noise floor (dBm)", noiseDbm);
-    cmd.AddValue("minElevDeg", "Min elevation for a usable link (deg)", minElevDeg);
-    cmd.AddValue("linkCapacityMbps", "P2P link capacity (Mbps)", linkCapacityMbps);
+    cmd.AddValue("freqGHz", "Carrier frequency (GHz), capped at 100", freqGHz);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    g_eirpDbm = txPowerDbm + antennaGainDb;
-    g_freqHz = freqGHz * 1e9;
-    g_noiseDbm = noiseDbm;
-    g_minElev = minElevDeg;
-    g_satAltKm = altKm;
-
-    g_abs = CreateObject<ThzNtnMolecularAbsorption>();
-
-    NodeContainer nodes;
-    nodes.Create(2);
-    Ptr<ConstantPositionMobilityModel> gnd =
-        CreateObject<ConstantPositionMobilityModel>();
-    gnd->SetPosition(Vector(0, 0, 0));
-    nodes.Get(0)->AggregateObject(gnd);
-    Ptr<ConstantVelocityMobilityModel> sat =
-        CreateObject<ConstantVelocityMobilityModel>();
-    sat->SetPosition(Vector(-0.5 * satSpeed * simSeconds, 0, altKm * 1000.0));
-    sat->SetVelocity(Vector(satSpeed, 0, 0));
-    nodes.Get(1)->AggregateObject(sat);
-    g_gnd = gnd;
-    g_sat = sat;
-
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute(
-        "DataRate",
-        DataRateValue(DataRate(static_cast<uint64_t>(linkCapacityMbps * 1e6))));
-    p2p.SetChannelAttribute("Delay", TimeValue(Seconds(altKm * 1000.0 / kC)));
-    NetDeviceContainer devices = p2p.Install(nodes);
-    Ptr<RateErrorModel> em = CreateObject<RateErrorModel>();
-    em->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
-    em->SetRate(1.0);
-    devices.Get(0)->SetAttribute("ReceiveErrorModel", PointerValue(em));
-    g_em = em;
-    g_channel = DynamicCast<PointToPointChannel>(devices.Get(0)->GetChannel());
-
-    InternetStackHelper internet;
-    internet.Install(nodes);
-    Ipv4AddressHelper ipv4;
-    ipv4.SetBase("10.10.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifaces = ipv4.Assign(devices);
-
-    const uint16_t port = 9500;
-    PacketSinkHelper sinkHelper(
-        "ns3::UdpSocketFactory",
-        InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(0));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(simSeconds));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
-
-    OnOffHelper onoff("ns3::UdpSocketFactory",
-                      InetSocketAddress(ifaces.GetAddress(0), port));
-    onoff.SetAttribute("DataRate",
-                       DataRateValue(DataRate(static_cast<uint64_t>(
-                           dataRateMbps * 1e6))));
-    onoff.SetAttribute("PacketSize", UintegerValue(packetBytes));
-    onoff.SetAttribute("OnTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute("OffTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-    ApplicationContainer srcApp = onoff.Install(nodes.Get(1));
-    srcApp.Start(Seconds(1.0));
-    srcApp.Stop(Seconds(simSeconds));
-
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
-
-    std::printf("# thz-ntn-leo-ground-downlink-traffic\n");
-    std::printf("#   sim=%.0fs alt=%.0fkm freq=%.0fGHz load=%.1fMbps "
-                "EIRP=%.1fdBm noise=%.1fdBm minElev=%.1f\n",
-                simSeconds, altKm, freqGHz, dataRateMbps, g_eirpDbm, noiseDbm,
-                minElevDeg);
-    std::printf("# %5s  %7s  %8s  %8s  %8s  %9s\n",
-                "t_s", "elev", "fspl_dB", "molAbs", "snr_dB", "goodput");
-
-    Simulator::Schedule(Seconds(2.0), &LinkProbe);
-    Simulator::Stop(Seconds(simSeconds + 0.1));
-    Simulator::Run();
-
-    monitor->CheckForLostPackets();
-    const auto stats = monitor->GetFlowStats();
-    uint64_t txP = 0, rxP = 0;
-    for (const auto& kv : stats)
+    if (freqGHz > 100.0)
     {
-        txP += kv.second.txPackets;
-        rxP += kv.second.rxPackets;
+        std::printf("# NOTE: 3GPP spectrum model caps the carrier at 100 GHz; "
+                    "clamping %.0f -> 100 GHz\n",
+                    freqGHz);
+        freqGHz = 100.0;
     }
-    const uint64_t totalRx = g_sink ? g_sink->GetTotalRx() : 0;
-    std::printf("# === summary ===  txPackets=%lu rxPackets=%lu PDR=%.2f%% "
-                "avgGoodput=%.3f Mbps\n",
-                (unsigned long)txP, (unsigned long)rxP,
-                txP ? 100.0 * rxP / txP : 0.0,
-                totalRx * 8.0 / simSeconds / 1e6);
+
+    std::printf("# thz-ntn-leo-ground-downlink-traffic (REAL radio, THz absorption in "
+                "the packet path)\n");
+    std::printf("#   sim=%.0fs freq=%.0fGHz EIRP=%.1fdBm\n", simSeconds, freqGHz,
+                satEirpDbm);
+
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    NodeContainer gndNodes;
+    gndNodes.Create(1);
+
+    // Real SGP4 orbit projected into the local ENU frame: the serving Walker
+    // element is at zenith at t=0 and recedes with genuine orbital dynamics.
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = 550.0;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(elements[0]);
+    double subLat, subLon, subAlt;
+    satSgp4->GetGeodetic(subLat, subLon, subAlt);
+    Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
+    satEnu->SetSource(satSgp4);
+    satEnu->SetReference(subLat, subLon, 0.0);
+    satNodes.Get(0)->AggregateObject(satEnu);
+
+    // The ground station is a fixed high-gain THz dish site at the sub-point.
+    MobilityHelper mob;
+    mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    Ptr<ListPositionAllocator> gndPos = CreateObject<ListPositionAllocator>();
+    gndPos->Add(Vector(0.0, 0.0, 50.0));
+    mob.SetPositionAllocator(gndPos);
+    mob.Install(gndNodes);
+
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("thz-ntn-leo-ground-downlink-traffic");
+    rs.SetCarrierFrequencyHz(freqGHz * 1e9);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, gndNodes);
+
+    // Channel plug-in: O2/H2O molecular slant-path absorption as pure EXCESS
+    // chained AFTER the built-in Friis loss (no FSPL double-count).
+    Ptr<ThzNtnPropagationLossModel> thz = CreateObject<ThzNtnPropagationLossModel>();
+    thz->SetFrequency(freqGHz * 1e9);
+    rs.AddExtraPropagationLoss(thz);
+
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
+
+    std::printf("# %5s  %7s  %9s  %8s  %8s  %8s  %9s\n",
+                "t_s", "elev", "slant_km", "molAbs", "sinr_dB", "tbler", "goodput");
+
+    // 1 Hz probe: MEASURED SINR/TBLER off the PHY trace, goodput off the UE
+    // PacketSink, molecular absorption off the live plug-in.
+    Ptr<MobilityModel> gndMob = gndNodes.Get(0)->GetObject<MobilityModel>();
+    uint64_t lastRx = 0;
+    rs.RegisterPeriodicCallback(
+        Seconds(1.0),
+        [&rs, thz, gndMob, satEnu, &lastRx](Time now) {
+            const Vector g = gndMob->GetPosition();
+            const Vector s = satEnu->GetPosition();
+            const double elev = ElevDegEnu(g, s);
+            const double slantKm = DistM(g, s) / 1000.0;
+            const double sinr = rs.GetUeRecentSinrDb(0);
+            const double tbler = rs.GetUeRecentTbler(0);
+            const uint64_t rx = rs.GetUeRxBytes(0);
+            const double mbps = (rx - lastRx) * 8.0 / 1e6;
+            lastRx = rx;
+            std::printf("  %5.1f  %7.2f  %9.1f  %8.2f  %8.2f  %8.3f  %9.3f\n",
+                        now.GetSeconds(), elev, slantKm, thz->GetLastLossDb(), sinr,
+                        tbler, mbps);
+        });
+
+    Simulator::Stop(Seconds(simSeconds));
+    Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
+
+    std::printf("# === summary ===  measured cell SINR=%.2f dB TBLER=%.4f "
+                "throughput=%.3f Mbps (THz absorption applied to real packets)\n",
+                rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());
+
     Simulator::Destroy();
     return 0;
 }

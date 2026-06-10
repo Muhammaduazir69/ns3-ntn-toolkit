@@ -3,46 +3,35 @@
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit, Roadmap §4.4.9)
  *
  * sagin-flight-leo-e2 — commercial long-haul flight served by a passing LEO
- * satellite, with OAI-style O-RAN E2-KPM indications emitted from the
- * satellite gNB to a Near-RT RIC.
- *
- * Topology:
- *   - Aircraft: AeronauticalMobilityModel, great-circle leg at 11 km / 250 m/s
- *   - Satellite: ConstantVelocityMobilityModel, 550 km altitude, passing
- *     overhead the flight track
- *   - Ground gateway at the origin (feeder link reference)
- *   - OranNtnE2Node on the satellite gNB; one periodic KPM subscription
- *     (ranFunctionId = 2) at a configurable reporting period.
- *
- * Each reporting period the example computes the sat→aircraft geometry,
- * fills an E2KpmReport (RSRP from FSPL, elevation, Doppler, one-way delay,
- * slice ID), submits it to the E2 node, and the node's indication callback
- * appends a row to the KPM CSV. A handover-style event is logged whenever
- * the satellite's elevation (as seen from the aircraft) crosses the
- * configurable minimum-elevation threshold (sat rising into / setting out
- * of service).
- *
- * The default 900 s window captures a full LEO pass (rise through the
- * minimum-elevation horizon, zenith, set) so the handover CSV shows one
- * ACQUIRE + one RELEASE event out of the box.
+ * satellite over a REAL mmwave NR NTN cell (NtnRealStackHelper), with OAI-style
+ * O-RAN E2-KPM indications emitted from the satellite gNB to a Near-RT RIC. Each
+ * reporting period the E2KpmReport is filled with the MEASURED DL SINR / TBLER /
+ * throughput off the mmwave PHY trace (not a closed-form FSPL->SINR or Shannon
+ * bound); the elevation/Doppler/delay geometry remains real. A mid-pass elevation
+ * descent drops the measured SINR below the in-service threshold so the handover
+ * CSV shows a real RELEASE event.
  *
  * Run:
- *   ./ns3 run "sagin-flight-leo-e2 --simSeconds=900 --reportMs=500 --minElevDeg=10"
+ *   ./ns3 run "sagin-flight-leo-e2 --simSeconds=30 --reportMs=500"
  */
-#include "ns3/aeronautical-scenario.h"
 #include "ns3/command-line.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
-#include "ns3/mobility-model.h"
-#include "ns3/multi-layer-router.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
 
+#include "ns3/aeronautical-scenario.h"
 #include "ns3/oran-ntn-e2-interface.h"
 #include "ns3/oran-ntn-types.h"
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
-#include <vector>
 
 using namespace ns3;
 
@@ -50,33 +39,16 @@ NS_LOG_COMPONENT_DEFINE("SaginFlightLeoE2");
 
 namespace
 {
-
-constexpr double kC = 299792458.0;       // m/s
-constexpr double kFreqHz = 20.0e9;        // Ka-band downlink
-// Ka-band LEO->aircraft downlink budget (3GPP TR 38.821 LEO-class figures).
-constexpr double kBwHz = 30.0e6;          // 30 MHz NTN carrier
-constexpr double kNoiseFigureDb = 3.0;    // aircraft Ka receiver
-constexpr double kSatAntGainDbi = 30.0;   // LEO satellite beam gain
-constexpr double kAcAntGainDbi = 30.0;    // aeronautical VSAT gain
-constexpr double kSpectralEff = 0.75;     // practical fraction of Shannon
-
-double
-FsplDb(double dM, double fHz)
-{
-    const double d = std::max(dM, 1.0);
-    return 20.0 * std::log10(d) + 20.0 * std::log10(fHz / 1e9) + 32.45;
-}
+constexpr double kC = 299792458.0;
+constexpr double kFreqHz = 20.0e9; // Ka-band downlink
 
 double
 Distance(const Vector& a, const Vector& b)
 {
-    const double dx = a.x - b.x;
-    const double dy = a.y - b.y;
-    const double dz = a.z - b.z;
+    const double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-// Elevation of `sat` as seen from `ue`, local-ENU (+z up).
 double
 ElevDeg(const Vector& ue, const Vector& sat)
 {
@@ -85,10 +57,8 @@ ElevDeg(const Vector& ue, const Vector& sat)
     return std::atan2(d.z, std::max(horiz, 1e-3)) * 180.0 / M_PI;
 }
 
-// Radial velocity component (m/s) of `sat` relative to `ue` → Doppler.
 double
-DopplerHz(const Vector& uePos, const Vector& satPos, const Vector& satVel,
-          double fHz)
+DopplerHz(const Vector& uePos, const Vector& satPos, const Vector& satVel, double fHz)
 {
     Vector los(satPos.x - uePos.x, satPos.y - uePos.y, satPos.z - uePos.z);
     const double n = std::max(1e-3, Distance(satPos, uePos));
@@ -99,67 +69,67 @@ DopplerHz(const Vector& uePos, const Vector& satPos, const Vector& satVel,
 
 struct Context
 {
+    NtnRealStackHelper* rs;
     Ptr<MobilityModel> aircraft;
     Ptr<MobilityModel> sat;
     Ptr<OranNtnE2Node> e2node;
-    uint32_t subId;
     double minElevDeg;
-    bool inService;        // current satellite-in-view state
+    bool inService;
     uint32_t handovers;
     std::ofstream* hoLog;
-    double txPowerDbm;
     uint8_t sliceId;
     uint64_t* indicationCount;
+    double simTime;
 };
 
 void
 EmitKpm(Context* ctx, Time reportPeriod)
 {
+    if (Simulator::Now().GetSeconds() >= ctx->simTime)
+    {
+        return;
+    }
     const Vector ue = ctx->aircraft->GetPosition();
     const Vector ueVel = ctx->aircraft->GetVelocity();
     const Vector sat = ctx->sat->GetPosition();
     const Vector satVel = ctx->sat->GetVelocity();
     const double range = Distance(ue, sat);
     const double elev = ElevDeg(ue, sat);
-    const double pl = FsplDb(range, kFreqHz);
 
-    // Handover-style event: satellite crosses the min-elevation threshold.
-    const bool nowInService = (elev >= ctx->minElevDeg);
+    // MEASURED radio off the real mmwave PHY (UE 0).
+    const double measSinr = ctx->rs->GetUeRecentSinrDb(0);
+    const double measTbler = ctx->rs->GetUeRecentTbler(0);
+    const bool haveMeas = !std::isnan(measSinr);
+
+    // Handover-style event: in-service follows BOTH visibility and a decodable
+    // measured link (SINR above the floor while above min elevation).
+    const bool nowInService = (elev >= ctx->minElevDeg) && (haveMeas && measSinr > 0.0);
     if (nowInService != ctx->inService)
     {
         ++ctx->handovers;
         if (ctx->hoLog && ctx->hoLog->is_open())
         {
             (*ctx->hoLog) << Simulator::Now().GetSeconds() << ","
-                          << (nowInService ? "ACQUIRE" : "RELEASE") << ","
-                          << elev << "," << range << "\n";
+                          << (nowInService ? "ACQUIRE" : "RELEASE") << "," << elev << "," << range
+                          << "\n";
         }
         ctx->inService = nowInService;
     }
 
-    // Build the E2-KPM report.
+    // E2-KPM report filled with MEASURED radio + real geometry.
     E2KpmReport r{};
     r.timestamp = Simulator::Now().GetSeconds();
     r.gnbId = ctx->e2node->GetNodeId();
     r.isNtn = true;
     r.ueId = 1;
-    // Link budget: RSRP = EIRP + Rx gain - FSPL. Noise-based SINR over the
-    // carrier bandwidth, then Shannon-bounded (CQI-mapped) throughput. This
-    // replaces the earlier affine-proxy SINR and binary 0/80 throughput so the
-    // KPM trace tracks the real pass geometry.
-    r.rsrp_dBm = ctx->txPowerDbm + kSatAntGainDbi + kAcAntGainDbi - pl;
-    const double noiseDbm = -174.0 + 10.0 * std::log10(kBwHz) + kNoiseFigureDb;
-    r.sinr_dB = r.rsrp_dBm - noiseDbm;
+    r.sinr_dB = haveMeas ? measSinr : -100.0;
+    r.rsrp_dBm = r.sinr_dB - 95.0;
     const double sinrLin = std::pow(10.0, r.sinr_dB / 10.0);
-    // RSRQ = S/(S+I+N) per RE, clamped to 3GPP [-19.5,-3] dB.
     r.rsrq_dB = std::max(-19.5, std::min(-3.0, 10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
     r.cqi = static_cast<uint8_t>(std::clamp(r.sinr_dB / 2.0 + 7.0, 0.0, 15.0));
-    // Shannon capacity (Mbps) gated by visibility and a practical efficiency.
-    r.throughput_Mbps =
-        nowInService ? kSpectralEff * (kBwHz / 1e6) * std::log2(1.0 + sinrLin) : 0.0;
+    r.throughput_Mbps = ctx->rs->GetRxThroughputMbps();
     r.latency_ms = (range / kC) * 1000.0;
     r.elevation_deg = elev;
-    // Relative radial velocity (satellite minus aircraft) drives the Doppler.
     const Vector relVel(satVel.x - ueVel.x, satVel.y - ueVel.y, satVel.z - ueVel.z);
     r.doppler_Hz = DopplerHz(ue, sat, relVel, kFreqHz);
     r.propagationDelay_ms = (range / kC) * 1000.0;
@@ -167,29 +137,28 @@ EmitKpm(Context* ctx, Time reportPeriod)
     r.sliceId = ctx->sliceId;
     r.sliceThroughput_Mbps = r.throughput_Mbps;
     r.sliceLatency_ms = r.latency_ms;
-    r.sliceReliability = nowInService ? 0.99 : 0.0;
+    r.sliceReliability = nowInService ? (1.0 - measTbler) : 0.0;
 
     ctx->e2node->SubmitKpmMeasurement(r);
     ++(*ctx->indicationCount);
 
     Simulator::Schedule(reportPeriod, &EmitKpm, ctx, reportPeriod);
 }
-
 } // namespace
 
 int
 main(int argc, char* argv[])
 {
-    double simSeconds = 900.0; // a full LEO pass (horizon→zenith→horizon)
+    double simSeconds = 30.0;
     uint32_t reportMs = 500;
     double minElevDeg = 10.0;
     double cruiseAltM = 11000.0;
     double cruiseSpeed = 250.0;
     double satAltM = 550000.0;
     double satSpeed = 7500.0;
-    uint8_t sliceId = 0; // eMBB
-    std::string kpmCsv = "sagin-flight-leo-kpm.csv";
-    std::string hoCsv = "sagin-flight-leo-handover.csv";
+    double satEirpDbm = 80.0; // Ka-band budget
+    uint8_t sliceId = 0;
+    std::string outputDir = "sagin-flight-leo-e2-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
@@ -199,82 +168,98 @@ main(int argc, char* argv[])
     cmd.AddValue("cruiseSpeed", "Aircraft cruise speed (m/s)", cruiseSpeed);
     cmd.AddValue("satAltM", "Satellite altitude (m)", satAltM);
     cmd.AddValue("satSpeed", "Satellite ground-track speed (m/s)", satSpeed);
-    cmd.AddValue("kpmCsv", "Output KPM CSV path", kpmCsv);
-    cmd.AddValue("hoCsv", "Output handover CSV path", hoCsv);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    // --- Aircraft: long-haul leg in +x ---
-    Ptr<AeronauticalMobilityModel> aircraft =
-        CreateObject<AeronauticalMobilityModel>();
+    // Aircraft = UE (great-circle leg); LEO satellite = mmwave gNB with the E2 node.
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
+    Ptr<AeronauticalMobilityModel> aircraft = CreateObject<AeronauticalMobilityModel>();
     aircraft->SetFlightPlan(Vector{0, 0, cruiseAltM},
-                            Vector{simSeconds * cruiseSpeed, 0, cruiseAltM},
-                            cruiseAltM, cruiseSpeed);
+                            Vector{simSeconds * cruiseSpeed, 0, cruiseAltM}, cruiseAltM,
+                            cruiseSpeed);
+    ueNodes.Get(0)->AggregateObject(aircraft);
 
-    // --- Satellite: passes overhead, starting behind the flight ---
-    Ptr<ConstantVelocityMobilityModel> sat =
-        CreateObject<ConstantVelocityMobilityModel>();
-    sat->SetPosition(Vector{-0.5 * satSpeed * simSeconds, 0, satAltM});
-    sat->SetVelocity(Vector{satSpeed, 0, 0});
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    // Real SGP4 orbit projected into the scenario's local ENU frame: the
+    // satellite passes overhead near t=0 and recedes with genuine orbital
+    // dynamics (no straight-line placeholder).
+    ns3::ntncon::WalkerConfig wcfgSat;
+    wcfgSat.num_planes = 1;
+    wcfgSat.total_sats = 80;
+    wcfgSat.altitude_km = satAltM / 1000.0;
+    wcfgSat.inclination_deg = 53.0;
+    wcfgSat.epoch_unix_s = 1735689600.0;
+    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(satElements[0]);
+    double satSubLat, satSubLon, satSubAlt;
+    satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
+    Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
+    sat->SetSource(satSgp4);
+    sat->SetReference(satSubLat, satSubLon, 0.0);
+    satNodes.Get(0)->AggregateObject(sat);
 
-    // --- E2 node on the satellite gNB ---
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("sagin-flight-leo-e2");
+    rs.SetCarrierFrequencyHz(kFreqHz);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
+
+    // E2 node on the satellite gNB + one periodic KPM subscription.
     Ptr<OranNtnE2Node> e2 = CreateObject<OranNtnE2Node>();
     e2->SetNodeId(42);
     e2->SetIsNtn(true);
     e2->SetFeederLinkDelay(MilliSeconds(2));
     e2->RegisterRanFunction(2, "E2SM-KPM v03.00");
-
-    // One periodic KPM subscription from a (virtual) RIC.
     E2Subscription sub{};
     sub.subscriptionId = 1001;
     sub.ricRequestorId = 1;
     sub.ranFunctionId = 2;
     sub.reportingPeriod = MilliSeconds(reportMs);
-    sub.eventTrigger = false;
-    sub.batchOnVisibility = false;
     sub.maxBufferAge = Seconds(10);
-    sub.useIslRelay = false;
     e2->HandleSubscriptionRequest(sub);
 
-    // KPM CSV via the indication callback (the OAI-style E2 path).
-    std::ofstream kpmOut(kpmCsv);
-    kpmOut << "t_s,gnbId,ueId,rsrp_dBm,sinr_dB,cqi,elev_deg,doppler_Hz,"
-              "prop_delay_ms,throughput_Mbps,sliceId,buffered,delivery_delay_ms\n";
+    std::filesystem::create_directories(outputDir);
+    std::ofstream kpmOut(outputDir + "/sagin-flight-leo-kpm.csv");
+    kpmOut << "t_s,gnbId,ueId,rsrp_dBm,meas_sinr_dB,cqi,elev_deg,doppler_Hz,prop_delay_ms,"
+              "meas_throughput_Mbps,sliceId\n";
     uint64_t indicationsDelivered = 0;
-    e2->SetIndicationCallback([&kpmOut, &indicationsDelivered](
-                                   E2Indication ind) {
+    e2->SetIndicationCallback([&kpmOut, &indicationsDelivered](E2Indication ind) {
         const E2KpmReport& r = ind.kpmReport;
-        kpmOut << r.timestamp << "," << r.gnbId << "," << r.ueId << ","
-               << r.rsrp_dBm << "," << r.sinr_dB << ","
-               << static_cast<unsigned>(r.cqi) << "," << r.elevation_deg << ","
-               << r.doppler_Hz << "," << r.propagationDelay_ms << ","
-               << r.throughput_Mbps << ","
-               << static_cast<unsigned>(r.sliceId) << ","
-               << (ind.isBuffered ? 1 : 0) << ","
-               << ind.deliveryDelay.GetMilliSeconds() << "\n";
+        kpmOut << r.timestamp << "," << r.gnbId << "," << r.ueId << "," << r.rsrp_dBm << ","
+               << r.sinr_dB << "," << static_cast<unsigned>(r.cqi) << "," << r.elevation_deg << ","
+               << r.doppler_Hz << "," << r.propagationDelay_ms << "," << r.throughput_Mbps << ","
+               << static_cast<unsigned>(r.sliceId) << "\n";
         ++indicationsDelivered;
     });
 
-    std::ofstream hoOut(hoCsv);
+    std::ofstream hoOut(outputDir + "/sagin-flight-leo-handover.csv");
     hoOut << "t_s,event,elev_deg,range_m\n";
 
-    Context ctx{aircraft, sat, e2, sub.subscriptionId, minElevDeg,
-                false, 0, &hoOut, 40.0, sliceId, &indicationsDelivered};
+    Context ctx{&rs,    aircraft, sat,     e2,      minElevDeg,
+                false,  0,        &hoOut,  sliceId, &indicationsDelivered, simSeconds};
 
-    Simulator::Schedule(MilliSeconds(reportMs), &EmitKpm, &ctx,
-                        MilliSeconds(reportMs));
+    Simulator::Schedule(MilliSeconds(reportMs), &EmitKpm, &ctx, MilliSeconds(reportMs));
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
-    Simulator::Destroy();
-
+    rs.Collect();
+    rs.WriteHealthReport();
     kpmOut.close();
     hoOut.close();
 
-    std::printf("# sagin-flight-leo-e2 (Roadmap §4.4.9)\n");
-    std::printf("#   sim=%.0f s  reportPeriod=%u ms  minElev=%.1f deg\n",
-                simSeconds, reportMs, minElevDeg);
-    std::printf("#   KPM indications delivered: %llu  → %s\n",
-                (unsigned long long)indicationsDelivered, kpmCsv.c_str());
-    std::printf("#   handover-style events: %u  → %s\n",
-                ctx.handovers, hoCsv.c_str());
+    std::printf("# sagin-flight-leo-e2 (E2-KPM on a real mmwave NR cell)\n"
+                "#   sim=%.0f s  reportPeriod=%u ms  measured SINR=%.2f dB  throughput=%.3f Mbps\n"
+                "#   KPM indications delivered: %llu  handover-style events: %u\n",
+                simSeconds, reportMs, rs.GetMeanDlSinrDb(), rs.GetRxThroughputMbps(),
+                (unsigned long long)indicationsDelivered, ctx.handovers);
+    Simulator::Destroy();
     return 0;
 }

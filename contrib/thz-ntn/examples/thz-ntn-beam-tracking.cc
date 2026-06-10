@@ -1,321 +1,295 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
- * Copyright (c) 2026
+ * Copyright (c) 2026 Muhammad Uzair
  * SPDX-License-Identifier: GPL-2.0-only
- * Author: Muhammad Uzair
  *
- * Example: EKF Beam Tracking for THz LEO Satellite Pass
+ * thz-ntn-beam-tracking — EKF beam tracking of a REAL SGP4 LEO pass, closed
+ * over a REAL mmwave NR NTN cell.
  *
- * Demonstrates Extended Kalman Filter beam tracking during a 60-second
- * LEO satellite pass.  Compares EKF vs position-based tracking and
- * shows tracking error, gain loss, and beam state over time.
+ * Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06): the old version drove
+ * the EKF with a sinusoidal fake pass and a synthetic SINR (15+10*sin), and
+ * its bolted-on traffic helper never saw the tracking. Now:
+ *
+ *   - the TRUE beam direction (az/el) comes from the live SGP4 geometry of a
+ *     genuine Walker element (ENU-projected), not a sine profile;
+ *   - the EKF measurement update is fed the MEASURED DL SINR off the mmwave
+ *     PHY trace (beam-failure detection sees the real link state);
+ *   - the tracker's prediction error maps through the ThzNtnAntennaArray
+ *     3-dB beamwidth to a pointing loss that is applied as a LIVE channel
+ *     reconfiguration (NtnStaticExtraLossModel), so mispointing degrades the
+ *     MEASURED SINR / TBLER / goodput of the real packets — the tracking
+ *     loop and the data plane are finally the same loop.
+ *
+ * --trackingMode=EKF steers the beam with the filter prediction;
+ * --trackingMode=POSITION_BASED steers with the last (noisy) measurement
+ * (dead reckoning), so the two modes produce measurably different links.
+ *
+ * Quick test:  --simSeconds=40 --updateRate=10
  */
 
-#include <ns3/command-line.h>
-#include <ns3/core-module.h>
-#include <ns3/mobility-module.h>
-#include <ns3/node-container.h>
-
-#include <cmath>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-
-#include "ns3/ntn-realistic-traffic-helper.h"
-
-// Forward declarations
-namespace ns3
-{
-class ThzNtnHelper;
-class ThzNtnBeamTracking;
-class ThzNtnAntennaArray;
-class ThzNtnBeamforming;
-} // namespace ns3
-
-#include "ns3/thz-ntn-helper.h"
-#include "ns3/thz-ntn-beam-tracking.h"
+#include "ns3/core-module.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-static-extra-loss-model.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
 #include "ns3/thz-ntn-antenna-array.h"
-#include "ns3/thz-ntn-beamforming.h"
+#include "ns3/thz-ntn-beam-tracking.h"
+#include "ns3/thz-ntn-helper.h"
+#include "ns3/walker-constellation.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <string>
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ThzNtnBeamTrackingExample");
 
-/**
- * \brief Simulate satellite angular position during a pass.
- *
- * Models a LEO satellite passing overhead.  The elevation angle
- * rises from low elevation, peaks near zenith, then descends.
- *
- * \param t time since start of pass (seconds)
- * \param passDuration total pass duration (seconds)
- * \param maxElev maximum elevation during pass (degrees)
- * \param elev output elevation angle
- * \param azim output azimuth angle
- */
-static void
-SimulateSatellitePass(double t,
-                      double passDuration,
-                      double maxElev,
-                      double& elev,
-                      double& azim)
+namespace
 {
-    // Elevation follows a sinusoidal profile
-    double phase = M_PI * t / passDuration;
-    elev = maxElev * std::sin(phase);
-    if (elev < 0.0)
-    {
-        elev = 0.0;
-    }
 
-    // Azimuth sweeps from 0 to 180 degrees during the pass
-    azim = 180.0 * t / passDuration;
+/// True az/el (deg) of the satellite seen from the ground terminal, from the
+/// LIVE ENU geometry (no sine-profile placeholder).
+void
+TrueBeamDirection(const Vector& gnd, const Vector& sat, double& elevDeg, double& azimDeg)
+{
+    const double dx = sat.x - gnd.x;
+    const double dy = sat.y - gnd.y;
+    const double dz = sat.z - gnd.z;
+    const double horiz = std::max(std::sqrt(dx * dx + dy * dy), 1e-3);
+    elevDeg = std::atan2(dz, horiz) * 180.0 / M_PI;
+    azimDeg = std::fmod(std::atan2(dx, dy) * 180.0 / M_PI + 360.0, 360.0);
 }
+
+} // namespace
 
 int
 main(int argc, char* argv[])
 {
-    // ---- Default parameters ----
     std::string trackingMode = "EKF";
-    double updateRate = 100.0;
-    double passDuration = 60.0;
-    double maxElevation = 75.0;
-    double freq = 300e9;
+    double updateRate = 10.0; // Hz
+    double simSeconds = 40.0;
+    double freqGHz = 100.0; // sub-THz (3GPP spectrum model upper bound)
+    double satEirpDbm = 115.0;
     uint32_t arraySize = 32;
+    double measNoiseDeg = 0.05;
     std::string outputDir = "thz-beam-track-out";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("trackingMode", "Tracking mode: EKF or POSITION_BASED", trackingMode);
     cmd.AddValue("updateRate", "Tracking update rate in Hz", updateRate);
-    cmd.AddValue("passDuration", "Satellite pass duration (s)", passDuration);
-    cmd.AddValue("maxElevation", "Maximum elevation angle", maxElevation);
+    cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
+    cmd.AddValue("freqGHz", "Carrier frequency (GHz), capped at 100", freqGHz);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("arraySize", "UM-MIMO array side (NxN)", arraySize);
+    cmd.AddValue("measNoiseDeg", "Beam measurement noise RMS (deg)", measNoiseDeg);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    std::cout << "=============================================================\n";
-    std::cout << "  THz Beam Tracking During LEO Satellite Pass\n";
-    std::cout << "=============================================================\n";
-    std::cout << "  Tracking Mode:  " << trackingMode << "\n";
-    std::cout << "  Update Rate:    " << updateRate << " Hz\n";
-    std::cout << "  Pass Duration:  " << passDuration << " s\n";
-    std::cout << "  Max Elevation:  " << maxElevation << " deg\n";
-    std::cout << "  Frequency:      " << freq / 1e9 << " GHz\n";
-    std::cout << "  Array:          " << arraySize << "x" << arraySize << " UM-MIMO\n";
-    std::cout << "-------------------------------------------------------------\n\n";
+    if (freqGHz > 100.0)
+    {
+        freqGHz = 100.0;
+    }
 
-    // ---- Create nodes ----
+    std::printf("# thz-ntn-beam-tracking (EKF on a REAL SGP4 pass, loss in the real "
+                "packet path)\n");
+    std::printf("#   mode=%s rate=%.0fHz sim=%.0fs freq=%.0fGHz array=%ux%u\n",
+                trackingMode.c_str(), updateRate, simSeconds, freqGHz, arraySize,
+                arraySize);
+
+    // --- REAL mobility: SGP4 Walker element, ENU-projected ---
     NodeContainer satNodes;
     satNodes.Create(1);
-
     NodeContainer gtNodes;
     gtNodes.Create(1);
 
-    Ptr<ConstantPositionMobilityModel> satMob = CreateObject<ConstantPositionMobilityModel>();
-    satMob->SetPosition(Vector(0.0, 0.0, 550e3));
-    satNodes.Get(0)->AggregateObject(satMob);
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = 550.0;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(elements[0]);
+    double subLat, subLon, subAlt;
+    satSgp4->GetGeodetic(subLat, subLon, subAlt);
+    Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
+    satEnu->SetSource(satSgp4);
+    satEnu->SetReference(subLat, subLon, 0.0);
+    satNodes.Get(0)->AggregateObject(satEnu);
 
-    Ptr<ConstantPositionMobilityModel> gtMob = CreateObject<ConstantPositionMobilityModel>();
-    gtMob->SetPosition(Vector(0.0, 0.0, 0.0));
-    gtNodes.Get(0)->AggregateObject(gtMob);
+    MobilityHelper mob;
+    mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    Ptr<ListPositionAllocator> gtPos = CreateObject<ListPositionAllocator>();
+    gtPos->Add(Vector(0.0, 0.0, 1.5));
+    mob.SetPositionAllocator(gtPos);
+    mob.Install(gtNodes);
+    Ptr<MobilityModel> gtMob = gtNodes.Get(0)->GetObject<MobilityModel>();
 
-    // ---- Create THz-NTN components ----
+    // --- the module's array physics (sets beamwidth -> pointing-loss map) ---
     Ptr<ThzNtnHelper> helper = CreateObject<ThzNtnHelper>();
+    Ptr<ThzNtnAntennaArray> array = helper->CreateAntennaArray("GT-100GHz");
+    array->Configure(arraySize, arraySize, freqGHz * 1e9, ThzArrayType::UPA);
+    const double beamwidth = array->ComputeBeamwidth3dB_deg();
+    const double maxGain = array->ComputeMaxGain_dBi();
+    std::printf("#   array 3-dB beamwidth=%.3f deg, max gain=%.1f dBi\n", beamwidth,
+                maxGain);
 
-    // Create antenna array for gain computation
-    Ptr<ThzNtnAntennaArray> array = helper->CreateAntennaArray("ISL-300GHz");
-    array->Configure(arraySize, arraySize, freq, ThzArrayType::UPA);
+    // --- REAL radio with the pointing loss in the packet path ---
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("thz-ntn-beam-tracking");
+    rs.SetCarrierFrequencyHz(freqGHz * 1e9);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, gtNodes);
 
-    double beamwidth = array->ComputeBeamwidth3dB_deg();
-    double maxGain = array->ComputeMaxGain_dBi();
+    Ptr<NtnStaticExtraLossModel> pointing = CreateObject<NtnStaticExtraLossModel>();
+    pointing->SetLossDb(0.0);
+    rs.AddExtraPropagationLoss(pointing);
 
-    std::cout << "  Array 3-dB beamwidth: " << std::fixed << std::setprecision(3)
-              << beamwidth << " deg\n";
-    std::cout << "  Array max gain:       " << std::setprecision(1)
-              << maxGain << " dBi\n\n";
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
 
-    // ---- EKF Tracking ----
-    Ptr<ThzNtnBeamTracking> ekfTracker = helper->CreateBeamTracking();
-
-    // Get initial satellite position
-    double initElev;
-    double initAzim;
-    SimulateSatellitePass(0.0, passDuration, maxElevation, initElev, initAzim);
-
-    // Estimate initial angular rates
-    double dt_init = 0.01;
-    double elev2;
-    double azim2;
-    SimulateSatellitePass(dt_init, passDuration, maxElevation, elev2, azim2);
-    double elevRate = (elev2 - initElev) / dt_init;
-    double azimRate = (azim2 - initAzim) / dt_init;
-
-    ekfTracker->Initialize(initElev, initAzim, elevRate, azimRate);
-
-    // ---- Position-based tracking (for comparison) ----
-    Ptr<ThzNtnBeamTracking> posTracker = helper->CreateBeamTracking();
-    posTracker->Initialize(initElev, initAzim, elevRate, azimRate);
-
-    // ---- Simulate the pass ----
-    double dt = 1.0 / updateRate;
-    uint32_t numSteps = static_cast<uint32_t>(passDuration * updateRate);
-    uint32_t printInterval = numSteps / 30; // Print ~30 rows
-    if (printInterval == 0) printInterval = 1;
-
-    std::cout << "  Beam Tracking Time Series (EKF vs Position-Based):\n";
-    std::cout << "  " << std::string(86, '-') << "\n";
-    std::cout << std::setw(8) << "Time"
-              << std::setw(10) << "TrueElev"
-              << std::setw(10) << "TrueAzim"
-              << std::setw(10) << "EKF Elev"
-              << std::setw(10) << "EKF Azim"
-              << std::setw(10) << "EKF Err"
-              << std::setw(10) << "Pos Err"
-              << std::setw(10) << "GainLoss"
-              << std::setw(10) << "State"
-              << "\n";
-    std::cout << std::setw(8) << "(s)"
-              << std::setw(10) << "(deg)"
-              << std::setw(10) << "(deg)"
-              << std::setw(10) << "(deg)"
-              << std::setw(10) << "(deg)"
-              << std::setw(10) << "(deg)"
-              << std::setw(10) << "(deg)"
-              << std::setw(10) << "(dB)"
-              << std::setw(10) << ""
-              << "\n";
-    std::cout << "  " << std::string(86, '-') << "\n";
-
-    double ekfTotalError = 0.0;
-    double posTotalError = 0.0;
-    uint32_t ekfFailures = 0;
-
-    for (uint32_t step = 0; step < numSteps; step++)
+    // --- EKF tracker initialised from the REAL geometry ---
+    Ptr<ThzNtnBeamTracking> tracker = helper->CreateBeamTracking();
     {
-        double t = step * dt;
-
-        // True satellite angular position
-        double trueElev;
-        double trueAzim;
-        SimulateSatellitePass(t, passDuration, maxElevation, trueElev, trueAzim);
-
-        if (trueElev < 5.0)
-        {
-            continue; // Below minimum elevation
-        }
-
-        // Add measurement noise (simulate realistic beam measurement)
-        double measNoise = 0.05; // degrees RMS
-        double noisyElev = trueElev + measNoise * (2.0 * ((step % 7) / 6.0) - 1.0);
-        double noisyAzim = trueAzim + measNoise * (2.0 * ((step % 11) / 10.0) - 1.0);
-
-        // Compute SNR at true pointing (for beam failure detection)
-        double sinr = 15.0 + 10.0 * std::sin(M_PI * t / passDuration);
-
-        // EKF update
-        ekfTracker->UpdateMeasurement(noisyElev, noisyAzim, sinr, t);
-        std::pair<double, double> ekfPred = ekfTracker->PredictBeamDirection(t + dt);
-
-        // Position-based prediction (uses ephemeris)
-        std::pair<double, double> posPred = posTracker->PredictFromEphemeris(
-            0.0, t * 0.05, 550.0, 0.0, 0.0); // simplified ephemeris
-
-        posTracker->UpdateMeasurement(noisyElev, noisyAzim, sinr, t);
-
-        // Compute tracking errors
-        double ekfError = std::sqrt(
-            std::pow(ekfPred.first - trueElev, 2.0) +
-            std::pow(ekfPred.second - trueAzim, 2.0));
-        double posError = std::sqrt(
-            std::pow(posPred.first - trueElev, 2.0) +
-            std::pow(posPred.second - trueAzim, 2.0));
-
-        ekfTotalError += ekfError;
-        posTotalError += posError;
-
-        // Gain loss from pointing error
-        double gainLoss = 0.0;
-        if (beamwidth > 0.0)
-        {
-            // Approximate: 3 dB loss at beamwidth/2, quadratic rolloff
-            gainLoss = 3.0 * std::pow(2.0 * ekfError / beamwidth, 2.0);
-            if (gainLoss > 20.0) gainLoss = 20.0; // cap
-        }
-
-        // Beam state
-        ThzBeamTrackingState state = ekfTracker->GetTrackingState();
-        std::string stateStr;
-        switch (state)
-        {
-            case ThzBeamTrackingState::TRACKING: stateStr = "TRACK"; break;
-            case ThzBeamTrackingState::SEARCHING: stateStr = "SEARCH"; break;
-            case ThzBeamTrackingState::BEAM_FAILURE: stateStr = "FAIL"; ekfFailures++; break;
-            case ThzBeamTrackingState::RECOVERY: stateStr = "RECOV"; break;
-        }
-
-        if (step % printInterval == 0)
-        {
-            std::cout << std::fixed << std::setprecision(2)
-                      << std::setw(8) << t
-                      << std::setprecision(2)
-                      << std::setw(10) << trueElev
-                      << std::setw(10) << trueAzim
-                      << std::setw(10) << ekfPred.first
-                      << std::setw(10) << ekfPred.second
-                      << std::setprecision(4)
-                      << std::setw(10) << ekfError
-                      << std::setw(10) << posError
-                      << std::setprecision(2)
-                      << std::setw(10) << gainLoss
-                      << std::setw(10) << stateStr
-                      << "\n";
-        }
+        double e0, a0, e1, a1;
+        TrueBeamDirection(gtMob->GetPosition(), satEnu->GetPosition(), e0, a0);
+        // Angular rates estimated from the real ephemeris a moment later.
+        const Vector satNow = satEnu->GetPosition();
+        const Vector satVel = satEnu->GetVelocity();
+        const Vector satSoon(satNow.x + satVel.x, satNow.y + satVel.y,
+                             satNow.z + satVel.z); // +1 s along the real velocity
+        TrueBeamDirection(gtMob->GetPosition(), satSoon, e1, a1);
+        tracker->Initialize(e0, a0, e1 - e0, a1 - a0);
     }
 
-    // ---- Summary ----
-    uint32_t validSteps = 0;
-    for (uint32_t step = 0; step < numSteps; step++)
+    const bool useEkf = (trackingMode == "EKF");
+    const double dt = 1.0 / updateRate;
+    struct TrackState
     {
-        double t = step * dt;
-        double elev;
-        double azim;
-        SimulateSatellitePass(t, passDuration, maxElevation, elev, azim);
-        if (elev >= 5.0) validSteps++;
-    }
+        double sumErr = 0.0;
+        uint64_t n = 0;
+        double sumErrConverged = 0.0; // after the acquisition window (t > 5 s)
+        uint64_t nConverged = 0;
+        double lastErr = 0.0;
+        uint32_t failures = 0;
+        double lastMeasElev = 0.0;
+        double lastMeasAzim = 0.0;
+    };
+    static TrackState st;
+    static uint32_t step = 0;
 
-    ThzTrackingMetrics metrics = ekfTracker->GetTrackingMetrics();
-    double overhead = ekfTracker->ComputeTrackingOverhead(updateRate, 50.0);
+    // Tracking tick: real geometry -> noisy measurement -> filter -> steer ->
+    // pointing loss applied to the LIVE channel.
+    rs.RegisterPeriodicCallback(
+        Seconds(dt),
+        [&rs, gtMob, satEnu, tracker, pointing, useEkf, beamwidth, measNoiseDeg,
+         dt](Time now) {
+            double trueElev, trueAzim;
+            TrueBeamDirection(gtMob->GetPosition(), satEnu->GetPosition(), trueElev,
+                              trueAzim);
+            if (trueElev < 5.0)
+            {
+                pointing->SetLossDb(200.0); // below the service mask
+                return;
+            }
+            // Deterministic pseudo-noise (reproducible runs).
+            const double nE = measNoiseDeg * (2.0 * ((step % 7) / 6.0) - 1.0);
+            const double nA = measNoiseDeg * (2.0 * ((step % 11) / 10.0) - 1.0);
+            ++step;
+            const double measElev = trueElev + nE;
+            const double measAzim = trueAzim + nA;
 
-    std::cout << "\n  " << std::string(50, '-') << "\n";
-    std::cout << "  Tracking Performance Summary:\n";
-    std::cout << "    EKF avg tracking error:  " << std::fixed << std::setprecision(4)
-              << (validSteps > 0 ? ekfTotalError / validSteps : 0.0) << " deg\n";
-    std::cout << "    Pos-based avg error:     "
-              << (validSteps > 0 ? posTotalError / validSteps : 0.0) << " deg\n";
-    std::cout << "    Beam failures:           " << metrics.beamFailureCount << "\n";
-    std::cout << "    Tracking overhead:       " << std::setprecision(2)
-              << overhead * 100.0 << " %\n";
-    std::cout << "    Prediction accuracy:     " << std::setprecision(4)
-              << metrics.predictionAccuracy_deg << " deg (RMS)\n";
-    std::cout << "    3-dB beamwidth:          " << std::setprecision(3)
-              << beamwidth << " deg\n";
+            // Feed the filter the MEASURED link SINR (beam-failure detection
+            // sees the real radio, not a formula).
+            double sinr = rs.GetUeRecentSinrDb(0);
+            if (std::isnan(sinr))
+            {
+                sinr = 0.0;
+            }
+            tracker->UpdateMeasurement(measElev, measAzim, sinr, now.GetSeconds());
 
-    // ---- Real packet plane (v2 event-driven) ----
-    NtnRealisticTrafficHelper traffic;
-    traffic.SetSimTime(Seconds(passDuration));
-    traffic.SetOutputDir(outputDir);
-    traffic.SetRunTag("thz-ntn-beam-tracking");
-    traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::EmbbStreaming);
-    traffic.InstallUes(6);
-    traffic.Wire();
+            double steerElev, steerAzim;
+            if (useEkf)
+            {
+                const auto pred = tracker->PredictBeamDirection(now.GetSeconds() + dt);
+                steerElev = pred.first;
+                steerAzim = pred.second;
+            }
+            else
+            {
+                steerElev = st.lastMeasElev != 0.0 ? st.lastMeasElev : measElev;
+                steerAzim = st.lastMeasAzim != 0.0 ? st.lastMeasAzim : measAzim;
+            }
+            st.lastMeasElev = measElev;
+            st.lastMeasAzim = measAzim;
 
-    Simulator::Stop(Seconds(passDuration + 0.5));
+            const double err = std::sqrt(std::pow(steerElev - trueElev, 2.0) +
+                                         std::pow(steerAzim - trueAzim, 2.0));
+            st.sumErr += err;
+            st.n++;
+            st.lastErr = err;
+            if (now.GetSeconds() > 5.0)
+            {
+                st.sumErrConverged += err;
+                st.nConverged++;
+            }
+
+            // Pointing error -> array gain loss (3 dB at half beamwidth,
+            // quadratic rolloff, 20 dB cap) applied to REAL packets.
+            double lossDb = 0.0;
+            if (beamwidth > 0.0)
+            {
+                lossDb = std::min(20.0, 3.0 * std::pow(2.0 * err / beamwidth, 2.0));
+            }
+            pointing->SetLossDb(lossDb);
+
+            if (tracker->GetTrackingState() == ThzBeamTrackingState::BEAM_FAILURE)
+            {
+                st.failures++;
+            }
+        });
+
+    std::printf("# %5s  %8s  %8s  %8s  %8s  %8s  %9s\n",
+                "t_s", "trueElev", "trkErr", "loss_dB", "sinr_dB", "tbler", "goodput");
+    uint64_t lastRx = 0;
+    rs.RegisterPeriodicCallback(
+        Seconds(1.0),
+        [&rs, gtMob, satEnu, pointing, &lastRx](Time now) {
+            double trueElev, trueAzim;
+            TrueBeamDirection(gtMob->GetPosition(), satEnu->GetPosition(), trueElev,
+                              trueAzim);
+            const uint64_t rx = rs.GetUeRxBytes(0);
+            const double mbps = (rx - lastRx) * 8.0 / 1e6;
+            lastRx = rx;
+            std::printf("  %5.1f  %8.2f  %8.4f  %8.2f  %8.2f  %8.3f  %9.3f\n",
+                        now.GetSeconds(), trueElev, st.lastErr, pointing->GetLossDb(),
+                        rs.GetUeRecentSinrDb(0), rs.GetUeRecentTbler(0), mbps);
+        });
+
+    Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
-    traffic.WriteHealthReport();
+    rs.Collect();
+    rs.WriteHealthReport();
+
+    const ThzTrackingMetrics metrics = tracker->GetTrackingMetrics();
+    std::printf("# === summary ===  mode=%s mean tracking error=%.4f deg "
+                "(converged, t>5s: %.4f deg), beam failures=%u, prediction "
+                "RMS=%.4f deg\n",
+                trackingMode.c_str(), st.n ? st.sumErr / st.n : 0.0,
+                st.nConverged ? st.sumErrConverged / st.nConverged : 0.0, st.failures,
+                metrics.predictionAccuracy_deg);
+    std::printf("#                  measured cell SINR=%.2f dB TBLER=%.4f "
+                "throughput=%.3f Mbps (pointing loss applied to real packets)\n",
+                rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());
+
     Simulator::Destroy();
-
-    std::cout << "\n  Simulation complete.\n";
-    std::cout << "=============================================================\n";
-
     return 0;
 }

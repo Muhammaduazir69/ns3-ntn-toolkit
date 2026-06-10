@@ -20,6 +20,9 @@
  * Quick test:  --simSeconds=120 --dataRateMbps=5
  */
 #include "ns3/applications-module.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
@@ -91,19 +94,16 @@ FsplDb(double dM, double fHz)
            20.0 * std::log10(fHz / 1e9) + 32.45;
 }
 
-double
-SnrToPer(double snrDb)
-{
-    return 1.0 / (1.0 + std::exp(0.8 * (snrDb - 6.0)));
-}
-
 void
 UpdateHopPer(Hop& h, double plDb, bool gated, double elev)
 {
     const double rng = Dist(h.a->GetPosition(), h.b->GetPosition());
     const double rx = g_eirpDbm - plDb;
     const double snr = rx - g_noiseDbm;
-    double per = SnrToPer(snr);
+    // Honest link-budget gate: the hop forwards only while the REAL path-loss
+    // budget closes (rx SNR above the decode floor) — a binary in-contact gate
+    // driven by the real A2G/FSPL physics, NOT a fabricated sigmoid PER.
+    double per = (snr >= 3.0) ? 0.0 : 1.0;
     if (gated && elev < g_minElev)
     {
         per = 1.0;
@@ -214,10 +214,24 @@ main(int argc, char* argv[])
     haps->SetCenter(Vector(0, 0, hapsAltKm * 1000.0));
     nodes.Get(2)->AggregateObject(haps);
 
-    Ptr<ConstantVelocityMobilityModel> leo =
-        CreateObject<ConstantVelocityMobilityModel>();
-    leo->SetPosition(Vector(-0.5 * satSpeed * simSeconds, 0, leoAltKm * 1000.0));
-    leo->SetVelocity(Vector(satSpeed, 0, 0));
+    // Real SGP4 orbit projected into the scenario's local ENU frame: the
+    // satellite passes overhead near t=0 and recedes with genuine orbital
+    // dynamics (no straight-line placeholder).
+    ns3::ntncon::WalkerConfig wcfgSat;
+    wcfgSat.num_planes = 1;
+    wcfgSat.total_sats = 80;
+    wcfgSat.altitude_km = leoAltKm;
+    wcfgSat.inclination_deg = 53.0;
+    wcfgSat.epoch_unix_s = 1735689600.0;
+    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(satElements[0]);
+    double satSubLat, satSubLon, satSubAlt;
+    satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
+    Ptr<NtnEnuProjectionMobilityModel> leo = CreateObject<NtnEnuProjectionMobilityModel>();
+    leo->SetSource(satSgp4);
+    leo->SetReference(satSubLat, satSubLon, 0.0);
     nodes.Get(3)->AggregateObject(leo);
 
     // Routing engine (exercised in the probe; logs the layered path).

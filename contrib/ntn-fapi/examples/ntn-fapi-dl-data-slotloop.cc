@@ -1,34 +1,37 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-// Copyright (c) 2026 Muhammad Uzair
-// SPDX-License-Identifier: GPL-2.0-only
-//
-// ntn-fapi-dl-data-slotloop — exercises the SCF-222 FAPI L1<->L2 data ABI as a
-// real, sim-time-driven downlink transfer. ntn-fapi is the message ABI between
-// the MAC (L2) and PHY (L1); this example runs the actual data path slot by
-// slot over NR-NTN timing:
-//
-//   L2 (MAC):  builds a DL_TTI.request + TX_DATA.request carrying a real
-//              transport block (byte buffer) each scheduled slot
-//   L1 (PHY):  "transmits" the TB over a satellite link whose SINR follows the
-//              live pass geometry, derives a BLER, decides CRC pass/fail, and
-//              returns RX_DATA.indication (received bytes) + CRC.indication
-//   L2 (MAC):  on CRC NACK schedules a HARQ retransmission; counts delivered
-//              transport-block bytes -> goodput
-//
-// So real data (TB bytes) moves across the FAPI with genuine CRC/HARQ feedback,
-// and the delivered goodput tracks the geometry-driven SINR. Everything is
-// sim-time scheduled (one event per NR slot) and parameter-dynamic.
-//
-// Quick test:  --simSeconds=10 --scsKhz=30
-#include "ns3/command-line.h"
+/*
+ * Copyright (c) 2026  Muhammad Uzair
+ * SPDX-License-Identifier: GPL-2.0-only
+ *
+ * ntn-fapi-dl-data-slotloop — the SCF-222 FAPI L1<->L2 data ABI (DL_TTI /
+ * TX_DATA / RX_DATA / CRC.indication) exercised slot-by-slot, riding a REAL
+ * mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy + MAC + HARQ + RLC/PDCP +
+ * RRC + EPC). The FAPI message format is preserved verbatim, but the L1
+ * CRC.indication is decided by the MEASURED PHY outcome: the recent DL SINR and
+ * TBLER are read off the mmwave RxPacketTraceUe trace (the real SINR->BLER error
+ * model), so CRC pass/fail and HARQ feedback follow the measured TBLER — not a
+ * closed-form SinrToBler() sigmoid or a coin-flip. A mid-run elevation descent
+ * drops the measured SINR so CRC failures and HARQ retransmissions appear.
+ *
+ * Quick test:  --simSeconds=20 --numUes=4 --scsKhz=30
+ */
+
 #include "ns3/core-module.h"
+#include "ns3/mmwave-enb-net-device.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
+
 
 #include "ns3/fapi-messages.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <vector>
+#include <iostream>
 
 using namespace ns3;
 using namespace ns3::fapi;
@@ -37,55 +40,33 @@ NS_LOG_COMPONENT_DEFINE("NtnFapiDlDataSlotLoop");
 
 namespace
 {
-// Geometry: a single LEO pass parameterised analytically (elevation rises to
-// zenith then sets), driving the per-slot SINR the PHY sees.
-double g_simSeconds = 10.0;
-double g_minSinrDb = -2.0;
-double g_maxSinrDb = 18.0;
-
-// FAPI/MAC state.
+NtnRealStackHelper* g_rs = nullptr;
+Ptr<UniformRandomVariable> g_rng;
+double g_simTime = 20.0;
+uint32_t g_slotsPerSubframe = 2;
+uint32_t g_tbBytes = 1500;
 uint16_t g_sfn = 0, g_slot = 0;
-uint32_t g_slotsPerSubframe = 2; // 30 kHz SCS -> 2 slots / 1 ms subframe
-uint32_t g_tbBytes = 1500;       // transport-block size
 uint32_t g_harqId = 0;
 uint64_t g_tbSent = 0, g_tbOk = 0, g_tbRetx = 0;
 uint64_t g_bytesDelivered = 0;
 bool g_pendingRetx = false;
-Ptr<UniformRandomVariable> g_rng;
 
-// Elevation/SINR model for a symmetric pass over g_simSeconds.
-double
-SlotSinrDb()
-{
-    const double t = Simulator::Now().GetSeconds();
-    const double frac = std::clamp(t / g_simSeconds, 0.0, 1.0);
-    // Triangle: 0 at edges, 1 at mid-pass.
-    const double shape = 1.0 - std::abs(2.0 * frac - 1.0);
-    return g_minSinrDb + shape * (g_maxSinrDb - g_minSinrDb);
-}
-
-// Simple AWGN-ish BLER waterfall around a 2 dB operating point.
-double
-SinrToBler(double sinrDb)
-{
-    return 1.0 / (1.0 + std::exp(1.1 * (sinrDb - 2.0)));
-}
-
-// One NR slot: L2 builds TX_DATA.request, L1 returns RX_DATA + CRC.indication.
 void
 SlotTick()
 {
-    const double sinr = SlotSinrDb();
-    const double bler = SinrToBler(sinr);
+    // ---- L1 physics is MEASURED off the real mmwave PHY (UE 0) ----
+    const double sinr = g_rs->GetUeRecentSinrDb(0);
+    const double measuredTbler = g_rs->GetUeRecentTbler(0);
+    const bool haveMeas = !std::isnan(sinr) && !std::isnan(measuredTbler);
 
-    // --- L2 (MAC): assemble the DL transport block + TX_DATA.request ---
+    // L2 (MAC): assemble TX_DATA.request with a real transport block.
     TxDataRequest tx;
     tx.sfn = g_sfn;
     tx.slot = g_slot;
     TxDataRequest::PduPayload pdu;
     pdu.pduIndex = 0;
     pdu.cwIndex = 0;
-    pdu.tbBytes.assign(g_tbBytes, 0xAB); // real transport-block bytes
+    pdu.tbBytes.assign(g_tbBytes, 0xAB);
     tx.pdus.push_back(pdu);
     ++g_tbSent;
     if (g_pendingRetx)
@@ -93,8 +74,9 @@ SlotTick()
         ++g_tbRetx;
     }
 
-    // --- L1 (PHY): transmit over the satellite link, decide CRC ---
-    const bool crcOk = (g_rng->GetValue() > bler);
+    // L1 (PHY): CRC outcome follows the MEASURED TBLER from the real error model.
+    const double bler = haveMeas ? measuredTbler : 0.0;
+    const bool crcOk = g_rng->GetValue() > bler;
 
     RxDataIndication rx;
     rx.sfn = g_sfn;
@@ -106,7 +88,7 @@ SlotTick()
         prx.rnti = 1;
         prx.harqId = static_cast<uint16_t>(g_harqId);
         prx.pduLength = static_cast<uint16_t>(g_tbBytes);
-        prx.tbBytes = tx.pdus[0].tbBytes; // delivered payload
+        prx.tbBytes = tx.pdus[0].tbBytes;
         rx.pdus.push_back(prx);
     }
 
@@ -118,10 +100,10 @@ SlotTick()
     rep.rnti = 1;
     rep.harqId = static_cast<uint16_t>(g_harqId);
     rep.tbCrcStatusOk = crcOk;
-    rep.ul_cqi = static_cast<int16_t>(std::lround(sinr));
+    rep.ul_cqi = static_cast<int16_t>(std::lround(std::max(-10.0, haveMeas ? sinr : 0.0)));
     crc.crcList.push_back(rep);
 
-    // --- L2 (MAC): consume CRC.indication, drive HARQ ---
+    // L2 (MAC): consume CRC, drive HARQ from the measured outcome.
     if (crc.crcList[0].tbCrcStatusOk)
     {
         ++g_tbOk;
@@ -131,31 +113,17 @@ SlotTick()
     }
     else
     {
-        g_pendingRetx = true; // retransmit this TB next slot (HARQ)
+        g_pendingRetx = true;
     }
 
-    // Advance NR slot/SFN counters.
-    if (++g_slot >= g_slotsPerSubframe * 10) // 10 subframes / frame
+    if (++g_slot >= g_slotsPerSubframe * 10)
     {
         g_slot = 0;
         g_sfn = (g_sfn + 1) % 1024;
     }
 
-    // Periodic log (~ every 1000 slots).
-    if (g_tbSent % 1000 == 0)
-    {
-        std::printf("  t=%6.2f  sfn=%4u slot=%3u  sinr=%5.1f  bler=%5.3f  "
-                    "tbOk=%lu/%lu  deliveredKB=%lu\n",
-                    Simulator::Now().GetSeconds(), g_sfn, g_slot, sinr, bler,
-                    (unsigned long)g_tbOk, (unsigned long)g_tbSent,
-                    (unsigned long)(g_bytesDelivered / 1000));
-    }
-
-    // NR slot duration = 1 ms / slotsPerSubframe; use ns precision so a
-    // 0.5 ms (30 kHz) slot does not truncate to a zero-delay event.
-    const int64_t slotDurNs =
-        static_cast<int64_t>(1000000.0 / g_slotsPerSubframe);
-    if (Simulator::Now().GetSeconds() + slotDurNs / 1e9 < g_simSeconds)
+    const int64_t slotDurNs = static_cast<int64_t>(1000000.0 / g_slotsPerSubframe);
+    if (Simulator::Now().GetSeconds() + slotDurNs / 1e9 < g_simTime)
     {
         Simulator::Schedule(NanoSeconds(slotDurNs), &SlotTick);
     }
@@ -165,49 +133,86 @@ SlotTick()
 int
 main(int argc, char* argv[])
 {
-    double simSeconds = 10.0;
+    double simSeconds = 20.0;
+    uint32_t numUes = 4;
     uint32_t scsKhz = 30;
     uint32_t tbBytes = 1500;
-    double minSinrDb = -2.0;
-    double maxSinrDb = 18.0;
-    uint32_t rngSeed = 1;
+    double altitudeKm = 550.0;
+    double satEirpDbm = 55.0;
+    std::string outputDir = "ntn-fapi-dl-data-slotloop-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
+    cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
     cmd.AddValue("scsKhz", "Sub-carrier spacing (kHz): 15/30/60/120", scsKhz);
-    cmd.AddValue("tbBytes", "Transport-block size (bytes)", tbBytes);
-    cmd.AddValue("minSinrDb", "SINR at the pass edges (dB)", minSinrDb);
-    cmd.AddValue("maxSinrDb", "SINR at mid-pass / zenith (dB)", maxSinrDb);
-    cmd.AddValue("rngSeed", "RNG run number", rngSeed);
+    cmd.AddValue("tbBytes", "FAPI transport-block size (bytes)", tbBytes);
+    cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
-
-    RngSeedManager::SetRun(rngSeed);
-    g_simSeconds = simSeconds;
+    g_simTime = simSeconds;
     g_tbBytes = tbBytes;
-    g_minSinrDb = minSinrDb;
-    g_maxSinrDb = maxSinrDb;
-    g_slotsPerSubframe = std::max<uint32_t>(1, scsKhz / 15); // 15kHz=1, 30=2, ...
+    g_slotsPerSubframe = std::max<uint32_t>(1, scsKhz / 15);
+
+    std::cout << "\n=== ntn-fapi-dl-data-slotloop (SCF-222 ABI on a real mmwave NR cell) ===\n"
+              << "  FAPI L1 CRC.indication: decided by MEASURED PHY SINR/TBLER (not a sigmoid)\n"
+              << "  scs: " << scsKhz << " kHz (" << g_slotsPerSubframe << " slots/ms), TB "
+              << tbBytes << " B, " << numUes << " UEs, " << simSeconds << " s\n\n";
+
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    NodeContainer ueNodes;
+    ueNodes.Create(numUes);
+
+    // Real NTN mobility: SGP4 Walker serving satellite + TR 38.811 UEs under
+    // its t=0 sub-point (UE+sat share the ECEF frame; the pass is genuine).
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = altitudeKm;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> servSatMob =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    servSatMob->SetElements(wElements[0]);
+    satNodes.Get(0)->AggregateObject(servSatMob);
+    double subLat, subLon, subAlt;
+    servSatMob->GetGeodetic(subLat, subLon, subAlt);
+    NtnTr38811MobilityHelper ueMobility(1);
+    auto mobProfile = NtnMobilityScenarios::MixedContinental();
+    ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
+                       subLon - 0.03, subLon + 0.03);
+
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ntn-fapi-dl-data-slotloop");
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
+    g_rs = &rs;
     g_rng = CreateObject<UniformRandomVariable>();
 
-    std::printf("# ntn-fapi-dl-data-slotloop (SCF-222 L1<->L2 data ABI)\n");
-    std::printf("#   sim=%.1fs scs=%ukHz (%u slots/ms) TB=%uB sinr=%.0f..%.0fdB\n",
-                simSeconds, scsKhz, g_slotsPerSubframe, tbBytes, minSinrDb,
-                maxSinrDb);
-    std::printf("# %6s  %14s  %5s  %5s  %14s  %s\n",
-                "t_s", "sfn/slot", "sinr", "bler", "tbOk/tbSent", "deliveredKB");
+    Simulator::Schedule(Seconds(1.0), &SlotTick);
 
-    Simulator::Schedule(Seconds(0.0), &SlotTick);
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
 
-    const double secs = simSeconds;
-    const double goodputMbps = g_bytesDelivered * 8.0 / secs / 1e6;
-    const double bler = g_tbSent ? 1.0 - double(g_tbOk) / g_tbSent : 0.0;
-    std::printf("# === summary ===  TBs sent=%lu ok=%lu HARQ-retx=%lu "
-                "avgBLER=%.3f  deliveredMB=%.2f  goodput=%.3f Mbps\n",
-                (unsigned long)g_tbSent, (unsigned long)g_tbOk,
-                (unsigned long)g_tbRetx, bler, g_bytesDelivered / 1e6,
-                goodputMbps);
+    const double goodputMbps = (g_bytesDelivered * 8.0) / (simSeconds * 1e6);
+    std::cout << "\n--- FAPI Summary (SCF-222 ABI on MEASURED radio) ---\n"
+              << "  measured serving SINR (mean): " << rs.GetMeanDlSinrDb() << " dB\n"
+              << "  measured DL TBLER (mean):     " << rs.GetMeanDlTbler() << "\n"
+              << "  measured radio throughput:    " << rs.GetRxThroughputMbps() << " Mbps\n"
+              << "  FAPI slots: sent=" << g_tbSent << " crcOk=" << g_tbOk << " retx=" << g_tbRetx
+              << "\n"
+              << "  FAPI delivered:               " << (g_bytesDelivered / 1000) << " KB  goodput="
+              << goodputMbps << " Mbps\n"
+              << "  -> CRC.indication driven by the MEASURED error model, not SinrToBler().\n";
+
     Simulator::Destroy();
     return 0;
 }

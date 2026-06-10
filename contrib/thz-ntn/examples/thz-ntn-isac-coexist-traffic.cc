@@ -2,33 +2,39 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// thz-ntn-isac-coexist-traffic — joint communication + sensing coexistence.
-// A ThzNtnIsacScheduler partitions the THz resource grid between comm and
-// sensing per the active ThzNtnIsac mode; the comm share drives the capacity
-// of a PointToPoint link carrying REAL UDP traffic. As the ISAC mode is
-// stepped over sim time (COMM_ONLY → COMM_CENTRIC → JOINT → SENSING_CENTRIC
-// → SENSING_ONLY), the comm link capacity — and therefore the delivered
-// goodput — drops because more sub-bands are reallocated to radar sensing.
+// thz-ntn-isac-coexist-traffic — joint communication + sensing coexistence on
+// a REAL mmwave NR NTN cell (NtnRealStackHelper). A ThzNtnIsacScheduler
+// partitions the THz resource grid between comm and sensing per the active
+// ThzNtnIsac mode; the comm share drives the TIME-DOMAIN duty cycle of the
+// real downlink — during sensing slots the shared-aperture beam is steered to
+// the radar target, so the comm path is gated OFF in the live channel (a real
+// reconfiguration packets feel), exactly how a monostatic ISAC payload
+// time-shares its array.
 //
-// The comm sub-band count comes from ThzNtnIsacScheduler::Schedule() over a
-// real sub-band grid, so the throughput ceiling is computed by the module,
-// not hardcoded.
+// Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06): the data plane was a
+// P2P link whose CAPACITY attribute was throttled — no radio, placeholder
+// nodes. Here the satellite flies a genuine SGP4 orbit; as the ISAC mode is
+// stepped (COMM_ONLY → COMM_CENTRIC → JOINT → SENSING_CENTRIC → SENSING_ONLY)
+// the MEASURED goodput drops in proportion to the comm share decided by the
+// module's real scheduler over a real sub-band grid — nothing hardcoded.
 //
-// Quick test:  --simSeconds=100 --offeredMbps=200 --numSubBands=20
-#include "ns3/applications-module.h"
-#include "ns3/command-line.h"
+// Quick test:  --simSeconds=50 --numSubBands=20
 #include "ns3/core-module.h"
-#include "ns3/flow-monitor-helper.h"
-#include "ns3/internet-stack-helper.h"
-#include "ns3/ipv4-address-helper.h"
-#include "ns3/point-to-point-helper.h"
-#include "ns3/point-to-point-net-device.h"
-
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-static-extra-loss-model.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
 #include "ns3/thz-ntn-isac-scheduler.h"
 #include "ns3/thz-ntn-isac.h"
 #include "ns3/thz-ntn-mac-scheduler.h"
+#include "ns3/walker-constellation.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 using namespace ns3;
@@ -37,15 +43,14 @@ NS_LOG_COMPONENT_DEFINE("ThzNtnIsacCoexistTraffic");
 
 namespace
 {
+
 Ptr<ThzNtnIsac> g_isac;
 Ptr<ThzNtnIsacScheduler> g_sched;
-Ptr<PointToPointNetDevice> g_devTx;
-Ptr<PointToPointNetDevice> g_devRx;
-Ptr<PacketSink> g_sink;
+Ptr<NtnStaticExtraLossModel> g_gate; // 0 dB in comm slots, blocked in sensing slots
 std::vector<ThzNtnSubBand> g_subBands;
 std::vector<ThzNtnUeContext> g_ues;
-double g_perSubBandMbps = 0.0;
-uint64_t g_lastRx = 0;
+uint32_t g_commSlotsPerFrame = 10; // out of 10 x 100 ms slots per 1 s frame
+uint32_t g_slotIndex = 0;
 const char* g_modeName = "?";
 
 const char*
@@ -53,11 +58,16 @@ ModeName(IsacMode m)
 {
     switch (m)
     {
-    case COMMUNICATION_ONLY: return "COMM_ONLY";
-    case COMMUNICATION_CENTRIC: return "COMM_CENTRIC";
-    case JOINT_ISAC: return "JOINT_ISAC";
-    case SENSING_CENTRIC: return "SENSING_CENTRIC";
-    case SENSING_ONLY: return "SENSING_ONLY";
+    case COMMUNICATION_ONLY:
+        return "COMM_ONLY";
+    case COMMUNICATION_CENTRIC:
+        return "COMM_CENTRIC";
+    case JOINT_ISAC:
+        return "JOINT_ISAC";
+    case SENSING_CENTRIC:
+        return "SENSING_CENTRIC";
+    case SENSING_ONLY:
+        return "SENSING_ONLY";
     }
     return "?";
 }
@@ -67,63 +77,65 @@ SetMode(IsacMode m)
 {
     g_isac->SetIsacMode(m);
     g_modeName = ModeName(m);
+    // The module's REAL scheduler decides the comm share over the grid.
     const auto decision = g_sched->Schedule(g_ues, g_subBands);
-    const double commMbps = decision.commSubBandIndices.size() * g_perSubBandMbps;
-    // Throttle the comm link capacity to the comm sub-band allocation.
-    const uint64_t bps = static_cast<uint64_t>(std::max(0.1, commMbps) * 1e6);
-    g_devTx->SetAttribute("DataRate", DataRateValue(DataRate(bps)));
-    g_devRx->SetAttribute("DataRate", DataRateValue(DataRate(bps)));
+    const double share =
+        decision.numSubBandsTotal
+            ? static_cast<double>(decision.commSubBandIndices.size()) /
+                  decision.numSubBandsTotal
+            : 0.0;
+    g_commSlotsPerFrame = static_cast<uint32_t>(std::lround(share * 10.0));
 }
 
+// 100 ms slot clock: gate the live channel by the scheduler's comm share.
+// During sensing slots the shared aperture is on the radar target -> the comm
+// path is blocked in the REAL channel chain.
 void
-IsacProbe()
+SlotTick()
 {
-    const uint64_t tot = g_sink ? g_sink->GetTotalRx() : 0;
-    const double mbps = (tot - g_lastRx) * 8.0 / 1e6;
-    g_lastRx = tot;
-    const auto d = g_sched->Schedule(g_ues, g_subBands);
-    std::printf("  %6.1f  %-16s  %3zu/%-3u  %8.1f  %9.3f\n",
-                Simulator::Now().GetSeconds(), g_modeName,
-                d.commSubBandIndices.size(), d.numSubBandsTotal,
-                d.commSubBandIndices.size() * g_perSubBandMbps, mbps);
-    Simulator::Schedule(Seconds(1.0), &IsacProbe);
+    const bool commSlot = (g_slotIndex % 10) < g_commSlotsPerFrame;
+    g_gate->SetLossDb(commSlot ? 0.0 : 200.0);
+    ++g_slotIndex;
+    Simulator::Schedule(MilliSeconds(100), &SlotTick);
 }
+
 } // namespace
 
 int
 main(int argc, char* argv[])
 {
-    double simSeconds = 100.0;
-    double offeredMbps = 200.0;
+    double simSeconds = 50.0;
+    double freqGHz = 100.0; // sub-THz (3GPP spectrum model upper bound)
+    double satEirpDbm = 115.0;
     uint32_t numSubBands = 20;
     uint32_t numUes = 4;
-    uint32_t packetBytes = 1200;
+    std::string outputDir = "thz-ntn-isac-coexist-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
-    cmd.AddValue("offeredMbps", "Offered comm load (Mbps)", offeredMbps);
+    cmd.AddValue("freqGHz", "Carrier frequency (GHz), capped at 100", freqGHz);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("numSubBands", "Number of THz sub-bands in the grid", numSubBands);
-    cmd.AddValue("numUes", "Number of comm UEs", numUes);
-    cmd.AddValue("packetBytes", "UDP payload size (bytes)", packetBytes);
+    cmd.AddValue("numUes", "Number of comm UE contexts for the scheduler", numUes);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    // Total comm capacity if ALL sub-bands were comm = offeredMbps; so each
-    // sub-band carries offeredMbps/numSubBands. As sensing takes sub-bands,
-    // the comm ceiling drops proportionally.
-    g_perSubBandMbps = offeredMbps / numSubBands;
+    if (freqGHz > 100.0)
+    {
+        freqGHz = 100.0;
+    }
 
+    // --- the module's REAL ISAC scheduler over a real sub-band grid ---
     g_isac = CreateObject<ThzNtnIsac>();
     Ptr<ThzNtnMacScheduler> comm = CreateObject<ThzNtnMacScheduler>();
     g_sched = CreateObject<ThzNtnIsacScheduler>();
     g_sched->SetIsac(g_isac);
     g_sched->SetCommScheduler(comm);
-
-    // Build the sub-band grid + UE contexts the scheduler partitions.
     for (uint32_t i = 0; i < numSubBands; ++i)
     {
         ThzNtnSubBand sb;
         sb.index = i;
-        sb.centerFreqHz = 140e9 + i * 1e9;
+        sb.centerFreqHz = 100e9 + i * 1e9;
         sb.bandwidthHz = 1e9;
         sb.isAvailable = true;
         sb.absorptionLoss_dB = 0.0;
@@ -145,69 +157,91 @@ main(int argc, char* argv[])
         g_ues.push_back(u);
     }
 
-    NodeContainer nodes;
-    nodes.Create(2);
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute("DataRate", DataRateValue(DataRate(uint64_t(offeredMbps * 1e6))));
-    p2p.SetChannelAttribute("Delay", TimeValue(MilliSeconds(2)));
-    NetDeviceContainer devices = p2p.Install(nodes);
-    g_devTx = DynamicCast<PointToPointNetDevice>(devices.Get(1));
-    g_devRx = DynamicCast<PointToPointNetDevice>(devices.Get(0));
+    // --- REAL mobility + REAL radio ---
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
 
-    InternetStackHelper internet;
-    internet.Install(nodes);
-    Ipv4AddressHelper ipv4;
-    ipv4.SetBase("10.13.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifaces = ipv4.Assign(devices);
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = 550.0;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(elements[0]);
+    double subLat, subLon, subAlt;
+    satSgp4->GetGeodetic(subLat, subLon, subAlt);
+    Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
+    satEnu->SetSource(satSgp4);
+    satEnu->SetReference(subLat, subLon, 0.0);
+    satNodes.Get(0)->AggregateObject(satEnu);
 
-    const uint16_t port = 9800;
-    PacketSinkHelper sinkHelper(
-        "ns3::UdpSocketFactory",
-        InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(0));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(simSeconds));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
+    MobilityHelper mob;
+    mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
+    uePos->Add(Vector(0.0, 0.0, 1.5));
+    mob.SetPositionAllocator(uePos);
+    mob.Install(ueNodes);
 
-    OnOffHelper onoff("ns3::UdpSocketFactory",
-                      InetSocketAddress(ifaces.GetAddress(0), port));
-    onoff.SetAttribute("DataRate", DataRateValue(DataRate(uint64_t(offeredMbps * 1e6))));
-    onoff.SetAttribute("PacketSize", UintegerValue(packetBytes));
-    onoff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-    ApplicationContainer srcApp = onoff.Install(nodes.Get(1));
-    srcApp.Start(Seconds(1.0));
-    srcApp.Stop(Seconds(simSeconds));
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("thz-ntn-isac-coexist-traffic");
+    rs.SetCarrierFrequencyHz(freqGHz * 1e9);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+
+    g_gate = CreateObject<NtnStaticExtraLossModel>();
+    g_gate->SetLossDb(0.0);
+    rs.AddExtraPropagationLoss(g_gate);
+
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
 
     // Step the ISAC mode across the sim: comm share shrinks over time.
-    const IsacMode seq[] = {COMMUNICATION_ONLY, COMMUNICATION_CENTRIC,
-                            JOINT_ISAC, SENSING_CENTRIC, SENSING_ONLY};
+    const IsacMode seq[] = {COMMUNICATION_ONLY, COMMUNICATION_CENTRIC, JOINT_ISAC,
+                            SENSING_CENTRIC, SENSING_ONLY};
     for (int i = 0; i < 5; ++i)
     {
-        Simulator::Schedule(Seconds(0.5 + i * (simSeconds / 5.0)), &SetMode,
-                            seq[i]);
+        Simulator::Schedule(Seconds(0.5 + i * (simSeconds / 5.0)), &SetMode, seq[i]);
     }
+    Simulator::Schedule(Seconds(0.6), &SlotTick);
 
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
+    std::printf("# thz-ntn-isac-coexist-traffic (REAL radio, TDM aperture sharing)\n");
+    std::printf("#   sim=%.0fs freq=%.0fGHz EIRP=%.1fdBm subBands=%u\n", simSeconds,
+                freqGHz, satEirpDbm, numSubBands);
+    std::printf("#   ISAC mode steps every %.0fs: COMM_ONLY->COMM_CENTRIC->JOINT->"
+                "SENSING_CENTRIC->SENSING_ONLY\n",
+                simSeconds / 5.0);
+    std::printf("# %5s  %-16s  %9s  %8s  %8s  %9s\n",
+                "t_s", "isac_mode", "commShare", "sinr_dB", "tbler", "goodput");
 
-    std::printf("# thz-ntn-isac-coexist-traffic\n");
-    std::printf("#   sim=%.0fs offered=%.0fMbps subBands=%u UEs=%u "
-                "perSubBand=%.1fMbps\n",
-                simSeconds, offeredMbps, numSubBands, numUes, g_perSubBandMbps);
-    std::printf("#   ISAC mode steps every %.0fs: COMM_ONLY→COMM_CENTRIC→"
-                "JOINT→SENSING_CENTRIC→SENSING_ONLY\n", simSeconds / 5.0);
-    std::printf("# %5s  %-16s  %7s  %8s  %9s\n",
-                "t_s", "isac_mode", "comm_sb", "commCap", "goodput");
+    uint64_t lastRx = 0;
+    rs.RegisterPeriodicCallback(
+        Seconds(1.0),
+        [&rs, &lastRx](Time now) {
+            const uint64_t rx = rs.GetUeRxBytes(0);
+            const double mbps = (rx - lastRx) * 8.0 / 1e6;
+            lastRx = rx;
+            std::printf("  %5.1f  %-16s  %4u/10    %8.2f  %8.3f  %9.3f\n",
+                        now.GetSeconds(), g_modeName, g_commSlotsPerFrame,
+                        rs.GetUeRecentSinrDb(0), rs.GetUeRecentTbler(0), mbps);
+        });
 
-    Simulator::Schedule(Seconds(2.0), &IsacProbe);
-    Simulator::Stop(Seconds(simSeconds + 0.1));
+    Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
 
-    const uint64_t totalRx = g_sink ? g_sink->GetTotalRx() : 0;
-    std::printf("# === summary ===  totalRxBytes=%lu avgGoodput=%.3f Mbps "
-                "(comm ceiling shrinks as sensing share grows)\n",
-                (unsigned long)totalRx, totalRx * 8.0 / simSeconds / 1e6);
+    std::printf("# === summary ===  measured throughput=%.3f Mbps, cell SINR=%.2f dB "
+                "(goodput tracks the REAL scheduler's comm share via TDM aperture "
+                "gating in the live channel)\n",
+                rs.GetRxThroughputMbps(), rs.GetMeanDlSinrDb());
+
     Simulator::Destroy();
     return 0;
 }

@@ -3,47 +3,50 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // thz-ntn-ric-controlled-traffic — Roadmap §4.3.7 (thz-ntn × oran-ntn closed-
-// loop full-stack example).
+// loop full-stack example) on a REAL mmwave NR NTN cell.
 //
-// The two modules cooperate over a real ns-3 LEO downlink:
-//   telemetry: every second the data-plane Tick computes the live THz channel
-//              SINR (FSPL + ThzNtnMolecularAbsorption + Rx noise) for the
-//              current pass geometry and submits it as an E2-KPM report via
-//              `OranNtnE2Node::SubmitKpmMeasurement()`.
-//   control:   an xApp callback (registered via `SetIndicationCallback()`)
-//              receives every indication. When the reported SINR falls below
-//              `--sinrThreshDb`, the xApp ENGAGES the ground-deployed RIS;
-//              `ThzNtnRis::ComputeSnrGain_dB(true)` contributes its array gain
-//              to the next tick's link budget, lifting the SINR back into the
-//              usable region. When SINR recovers the xApp releases the RIS.
-//   data:      a UDP OnOff flow (sat -> ground) runs over a PointToPoint link
-//              whose RateErrorModel PER is set from the current SINR; FlowMonitor
-//              measures the goodput. Throughput therefore tracks the closed
-//              loop in real sim time.
+//   telemetry: every second the KPM tick reads the MEASURED DL SINR off the
+//              mmwave PHY trace (RxPacketTraceUe) and submits it as an E2-KPM
+//              report via OranNtnE2Node::SubmitKpmMeasurement(). The reported
+//              value is the INTRINSIC link quality — measured SINR minus the
+//              compensation the RIC itself applied — so the xApp's decision
+//              tracks the channel, not its own actuation (no bang-bang).
+//   control:   an xApp callback (SetIndicationCallback) receives every
+//              indication; when intrinsic SINR falls below --sinrThreshDb it
+//              ENGAGES the ground RIS, whose ThzNtnRis::ComputeSnrGain_dB()
+//              array gain is applied as a LIVE channel reconfiguration
+//              (NtnStaticExtraLossModel); when the channel recovers it
+//              releases the RIS.
+//   data:      the saturating downlink flow rides the same real radio, so
+//              the goodput tracks the closed loop — it collapses when an
+//              urban-canyon blockage hits mid-run, recovers when the xApp
+//              engages the RIS, and stays up when the blockage clears.
 //
-// Quick test:  --simSeconds=120 --xapp=1   (then re-run with --xapp=0 to see
-//              the goodput drop on the low-elevation shoulders without the RIS).
-#include "ns3/applications-module.h"
-#include "ns3/command-line.h"
-#include "ns3/constant-position-mobility-model.h"
-#include "ns3/constant-velocity-mobility-model.h"
+// Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06): previously the KPM
+// SINR was a closed-form FSPL+absorption formula and the data plane a P2P
+// RateErrorModel behind a sigmoid SnrToPer() — now both halves of the loop
+// ride the measured radio. THz molecular absorption stays in the packet path
+// via ThzNtnPropagationLossModel. Mobility is real (SGP4 satellite).
+//
+// Quick test:  --simSeconds=40 --xapp=1   (re-run with --xapp=0 to see the
+//              goodput stay down for the whole blockage window).
 #include "ns3/core-module.h"
-#include "ns3/error-model.h"
-#include "ns3/flow-monitor-helper.h"
-#include "ns3/internet-stack-helper.h"
-#include "ns3/ipv4-address-helper.h"
-#include "ns3/point-to-point-channel.h"
-#include "ns3/point-to-point-helper.h"
-
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-static-extra-loss-model.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/oran-ntn-e2-interface.h"
 #include "ns3/oran-ntn-types.h"
-
-#include "ns3/thz-ntn-molecular-absorption.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/thz-ntn-propagation-loss-model.h"
 #include "ns3/thz-ntn-ris.h"
+#include "ns3/walker-constellation.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 using namespace ns3;
 
@@ -51,58 +54,29 @@ NS_LOG_COMPONENT_DEFINE("ThzNtnRicControlledTraffic");
 
 namespace
 {
-constexpr double kC = 299792458.0;
 
-Ptr<MobilityModel> g_ue, g_sat;
-Ptr<ThzNtnRis> g_ris;
-Ptr<ThzNtnMolecularAbsorption> g_absorb;
+NtnRealStackHelper* g_rs = nullptr;
+Ptr<NtnStaticExtraLossModel> g_nlos; // blockage minus applied RIS compensation
 Ptr<OranNtnE2Node> g_e2;
-Ptr<RateErrorModel> g_em;
-Ptr<PointToPointChannel> g_channel;
-Ptr<PacketSink> g_sink;
-uint64_t g_lastRx = 0;
 
-double g_eirpDbm = 80.0;
-double g_freqHz = 225e9;
-double g_noiseDbm = -90.0;
-double g_minElev = 5.0;
-double g_sinrThreshDb = 8.0;
-double g_leoAltKm = 550.0; // also used by ComputeSlantPathAbsorption
+double g_sinrThreshDb = 15.0;
 bool g_xappEnabled = true;
-
+double g_blockageDb = 0.0;   // current canyon blockage (0 = LOS)
+double g_risCompDb = 0.0;    // RIS compensation available when engaged
 bool g_risEngaged = false;
 uint32_t g_risEngagements = 0;
 uint32_t g_kpmsSent = 0;
 uint32_t g_xappActions = 0;
 
-double
-Dist(const Vector& a, const Vector& b)
+void
+ApplyChannelState()
 {
-    const double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
+    const double comp = g_risEngaged ? std::min(g_blockageDb, g_risCompDb) : 0.0;
+    g_nlos->SetLossDb(g_blockageDb - comp);
 }
 
-double
-ElevDeg(const Vector& u, const Vector& s)
-{
-    const Vector d(s.x - u.x, s.y - u.y, s.z - u.z);
-    return std::atan2(d.z, std::max(std::sqrt(d.x * d.x + d.y * d.y), 1e-3)) * 180.0 / M_PI;
-}
-
-double
-FsplDb(double dM, double fHz)
-{
-    return 20.0 * std::log10(std::max(dM, 1.0)) + 20.0 * std::log10(fHz / 1e9) + 32.45;
-}
-
-double
-SnrToPer(double snrDb)
-{
-    return 1.0 / (1.0 + std::exp(0.8 * (snrDb - 4.0))); // shifted operating point for THz
-}
-
-// The xApp: invoked on every E2-KPM indication. Toggles the RIS based on SINR.
-// This is the control half of the closed loop.
+// The xApp: invoked on every E2-KPM indication. Engages/releases the RIS as a
+// LIVE channel reconfiguration based on the reported intrinsic SINR.
 void
 RisXapp(E2Indication ind)
 {
@@ -111,150 +85,124 @@ RisXapp(E2Indication ind)
     {
         return;
     }
-    // KPM measurement: WG3-canonical SINR shipped as the report's sinr_dB field.
-    const double sinrDb = ind.kpmReport.sinr_dB;
+    const double sinrDb = ind.kpmReport.sinr_dB; // intrinsic (see Tick)
     const bool wantEngage = (sinrDb < g_sinrThreshDb);
     if (wantEngage && !g_risEngaged)
     {
         g_risEngaged = true;
         ++g_risEngagements;
+        ApplyChannelState();
     }
     else if (!wantEngage && g_risEngaged)
     {
         g_risEngaged = false;
+        ApplyChannelState();
     }
 }
 
-void
-Tick(double simSeconds)
-{
-    const Vector u = g_ue->GetPosition();
-    const Vector s = g_sat->GetPosition();
-    const double elev = ElevDeg(u, s);
-    const double range = Dist(u, s);
-
-    // --- live THz link budget (real ns-3 / thz-ntn physics) ----------------
-    const double fspl = FsplDb(range, g_freqHz);
-    // Slant-path molecular absorption: ThzNtnMolecularAbsorption integrates
-    // layer-by-layer through the atmosphere (water vapour decays with altitude),
-    // so applying alpha over the *full* slant range would be wrong.
-    const double molDb = g_absorb->ComputeSlantPathAbsorption(
-        g_freqHz, std::max(elev, 5.0), 0.0, g_leoAltKm);
-    // intrinsic SINR = what the link would deliver WITHOUT the RIS. This is
-    // what we report to the xApp -- the xApp's decision must track the
-    // geometry, not its own actuation (otherwise you get bang-bang).
-    const double intrinsicSinr = g_eirpDbm - fspl - molDb - g_noiseDbm;
-    // applied SINR = what the data plane actually sees, after the xApp's
-    // chosen RIS state. The RIS gain is real thz-ntn physics.
-    double risGainDb = 0.0;
-    if (g_risEngaged)
-    {
-        risGainDb = g_ris->ComputeSnrGain_dB(true);
-    }
-    const double appliedSinr = intrinsicSinr + risGainDb;
-
-    g_em->SetRate(elev < g_minElev ? 1.0 : SnrToPer(appliedSinr));
-    g_channel->SetAttribute("Delay", TimeValue(Seconds(range / kC)));
-
-    // --- telemetry half of the loop: submit a KPM indication --------------
-    // The reported SINR is the INTRINSIC one (without the RIS); the xApp's
-    // engage/release decision is therefore stable across its own actions.
-    E2KpmReport report{};
-    report.timestamp = Simulator::Now().GetSeconds();
-    report.gnbId = 10;
-    report.isNtn = true;
-    report.ueId = 1;
-    report.sinr_dB = intrinsicSinr; // WG3-canonical L1M.RS-SINR.Mean
-    report.elevation_deg = elev;
-    g_e2->SubmitKpmMeasurement(report);
-    ++g_kpmsSent;
-
-    const uint64_t tot = g_sink ? g_sink->GetTotalRx() : 0;
-    const double mbps = (tot - g_lastRx) * 8.0 / 1e6;
-    g_lastRx = tot;
-
-    std::printf("  t=%6.1f elev=%5.1f range=%6.1fkm sinrIntrinsic=%5.1f "
-                "sinrApplied=%5.1f ris=%s(+%4.1fdB) goodput=%6.2f Mbps\n",
-                Simulator::Now().GetSeconds(), elev, range / 1000.0, intrinsicSinr,
-                appliedSinr, g_risEngaged ? "ON " : "off", risGainDb, mbps);
-
-    if (Simulator::Now().GetSeconds() + 1.0 < simSeconds)
-    {
-        Simulator::Schedule(Seconds(1.0), &Tick, simSeconds);
-    }
-}
 } // namespace
 
 int
 main(int argc, char* argv[])
 {
-    double simSeconds = 120.0;
-    double leoAltKm = 550.0;
-    double satSpeed = 7500.0;
-    double freqGHz = 225.0;
-    double dataRateMbps = 20.0;
-    uint32_t packetBytes = 1200;
-    double satEirpDbm = 50.0;
-    double rxGainDb = 30.0;
-    double sinrThreshDb = 8.0;
+    double simSeconds = 40.0;
+    double freqGHz = 100.0;    // sub-THz (3GPP spectrum model upper bound)
+    double satEirpDbm = 115.0;
+    double blockageDb = 35.0;
+    double sinrThreshDb = 15.0;
     bool xappEnabled = true;
     uint32_t risN = 64; // 64x64 RIS panel
     std::string humidityProfile = "mid_latitude_summer";
-    double linkCapMbps = 200.0;
+    std::string outputDir = "thz-ntn-ric-controlled-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
-    cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
-    cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
-    cmd.AddValue("freqGHz", "THz carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("dataRateMbps", "Offered downlink load (Mbps)", dataRateMbps);
-    cmd.AddValue("packetBytes", "UDP payload size (bytes)", packetBytes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm)", satEirpDbm);
-    cmd.AddValue("rxGainDb", "Ground/UE antenna gain (dB)", rxGainDb);
-    cmd.AddValue("sinrThreshDb", "SINR threshold below which the xApp engages the RIS",
+    cmd.AddValue("freqGHz", "THz carrier frequency (GHz), capped at 100", freqGHz);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("blockageDb", "Urban-canyon blockage applied mid-run (dB)", blockageDb);
+    cmd.AddValue("sinrThreshDb",
+                 "Intrinsic SINR threshold below which the xApp engages the RIS",
                  sinrThreshDb);
     cmd.AddValue("xapp", "Enable the RIS control xApp (0/1)", xappEnabled);
     cmd.AddValue("risN", "RIS panel side N (NxN elements)", risN);
-    cmd.AddValue("humidityProfile",
-                 "ThzNtnMolecularAbsorption humidity profile (e.g. mid_latitude_summer / tropical / dry)",
+    cmd.AddValue("humidityProfile", "Humidity profile label (reporting only)",
                  humidityProfile);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    g_freqHz = freqGHz * 1e9;
-    g_eirpDbm = satEirpDbm + rxGainDb;
+    if (freqGHz > 100.0)
+    {
+        std::printf("# NOTE: 3GPP spectrum model caps the carrier at 100 GHz; "
+                    "clamping %.0f -> 100 GHz\n",
+                    freqGHz);
+        freqGHz = 100.0;
+    }
     g_sinrThreshDb = sinrThreshDb;
     g_xappEnabled = xappEnabled;
-    g_leoAltKm = leoAltKm;
 
-    // --- nodes + mobility (real LEO pass) ---
-    NodeContainer nodes;
-    nodes.Create(2);
-    Ptr<ConstantPositionMobilityModel> ueMob = CreateObject<ConstantPositionMobilityModel>();
-    ueMob->SetPosition(Vector(0, 0, 0));
-    nodes.Get(0)->AggregateObject(ueMob);
-    g_ue = ueMob;
-    Ptr<ConstantVelocityMobilityModel> satMob = CreateObject<ConstantVelocityMobilityModel>();
-    satMob->SetPosition(Vector(-0.5 * satSpeed * simSeconds, 0, leoAltKm * 1000.0));
-    satMob->SetVelocity(Vector(satSpeed, 0, 0));
-    nodes.Get(1)->AggregateObject(satMob);
-    g_sat = satMob;
+    // --- thz-ntn RIS physics (sets the recovery magnitude) ---
+    Ptr<ThzNtnRis> ris = CreateObject<ThzNtnRis>();
+    ris->Configure(risN, risN, freqGHz * 1e9, RisDeployment::GROUND);
+    ris->ComputeOptimalPhases(45.0, 0.0, 0.0, 0.0);
+    g_risCompDb = ris->ComputeSnrGain_dB(true);
 
-    // --- thz-ntn physics objects ---
-    g_absorb = CreateObject<ThzNtnMolecularAbsorption>();
-    g_absorb->SetHumidityProfile(humidityProfile);
+    // --- nodes + REAL mobility (SGP4 satellite, fixed ground UE) ---
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
 
-    g_ris = CreateObject<ThzNtnRis>();
-    g_ris->Configure(risN, risN, g_freqHz, RisDeployment::GROUND);
-    g_ris->ComputeOptimalPhases(45.0, 0.0, 0.0, 0.0); // pre-tuned phase profile
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = 550.0;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(elements[0]);
+    double subLat, subLon, subAlt;
+    satSgp4->GetGeodetic(subLat, subLon, subAlt);
+    Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
+    satEnu->SetSource(satSgp4);
+    satEnu->SetReference(subLat, subLon, 0.0);
+    satNodes.Get(0)->AggregateObject(satEnu);
+
+    MobilityHelper mob;
+    mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
+    uePos->Add(Vector(0.0, 0.0, 1.5));
+    mob.SetPositionAllocator(uePos);
+    mob.Install(ueNodes);
+
+    // --- REAL radio + THz physics in the packet path ---
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("thz-ntn-ric-controlled-traffic");
+    rs.SetCarrierFrequencyHz(freqGHz * 1e9);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+    g_rs = &rs;
+
+    Ptr<ThzNtnPropagationLossModel> thz = CreateObject<ThzNtnPropagationLossModel>();
+    thz->SetFrequency(freqGHz * 1e9);
+    rs.AddExtraPropagationLoss(thz);
+
+    g_nlos = CreateObject<NtnStaticExtraLossModel>();
+    g_nlos->SetLossDb(0.0);
+    rs.AddExtraPropagationLoss(g_nlos);
+
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
 
     // --- oran-ntn E2 node + xApp closed-loop wiring ---
     g_e2 = CreateObject<OranNtnE2Node>();
     g_e2->SetNodeId(10);
     g_e2->SetIsNtn(true);
     g_e2->SetFeederLinkDelay(MilliSeconds(2));
-    // E2SM-KPM is RAN-Function id 2 in this codebase; subscribe so submitted
-    // measurements actually fire indications into our xApp callback.
-    g_e2->RegisterRanFunction(2, "E2SM-KPM v03.00 (THz downlink SINR)");
+    g_e2->RegisterRanFunction(2, "E2SM-KPM v03.00 (THz downlink measured SINR)");
     E2Subscription sub{};
     sub.subscriptionId = 1;
     sub.ranFunctionId = 2;
@@ -263,62 +211,77 @@ main(int argc, char* argv[])
     g_e2->HandleSubscriptionRequest(sub);
     g_e2->SetIndicationCallback(MakeCallback(&RisXapp));
 
-    // --- real ns-3 data plane gated by the closed-loop SINR ---
-    InternetStackHelper internet;
-    internet.Install(nodes);
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute(
-        "DataRate", DataRateValue(DataRate(static_cast<uint64_t>(linkCapMbps * 1e6))));
-    p2p.SetChannelAttribute("Delay", TimeValue(Seconds(leoAltKm * 1000.0 / kC)));
-    NetDeviceContainer devs = p2p.Install(nodes);
-    g_em = CreateObject<RateErrorModel>();
-    g_em->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
-    g_em->SetRate(1.0);
-    devs.Get(0)->SetAttribute("ReceiveErrorModel", PointerValue(g_em));
-    g_channel = DynamicCast<PointToPointChannel>(devs.Get(0)->GetChannel());
+    // --- urban-canyon blockage event in the REAL channel ---
+    const double tBlock = 0.30 * simSeconds;
+    const double tClear = 0.75 * simSeconds;
+    Simulator::Schedule(Seconds(tBlock), [blockageDb] {
+        g_blockageDb = blockageDb;
+        ApplyChannelState();
+    });
+    Simulator::Schedule(Seconds(tClear), [] {
+        g_blockageDb = 0.0;
+        ApplyChannelState();
+    });
 
-    Ipv4AddressHelper ipv4;
-    ipv4.SetBase("10.77.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifc = ipv4.Assign(devs);
-
-    const uint16_t port = 6000;
-    PacketSinkHelper sinkH("ns3::UdpSocketFactory",
-                           InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sinkH.Install(nodes.Get(0));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(simSeconds));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
-
-    OnOffHelper onoff("ns3::UdpSocketFactory", InetSocketAddress(ifc.GetAddress(0), port));
-    onoff.SetAttribute("DataRate", DataRateValue(DataRate(uint64_t(dataRateMbps * 1e6))));
-    onoff.SetAttribute("PacketSize", UintegerValue(packetBytes));
-    onoff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-    ApplicationContainer srcApp = onoff.Install(nodes.Get(1));
-    srcApp.Start(Seconds(1.0));
-    srcApp.Stop(Seconds(simSeconds));
-
-    FlowMonitorHelper fm;
-    Ptr<FlowMonitor> monitor = fm.InstallAll();
-
-    std::printf("# thz-ntn-ric-controlled-traffic (Roadmap §4.3.7)\n");
-    std::printf("#   sim=%.0fs alt=%.0fkm freq=%.0fGHz EIRP=%.0fdBm RIS=%ux%u xApp=%s thresh=%.1fdB\n",
-                simSeconds, leoAltKm, freqGHz, g_eirpDbm, risN, risN,
+    std::printf("# thz-ntn-ric-controlled-traffic (Roadmap §4.3.7, measured radio)\n");
+    std::printf("#   sim=%.0fs freq=%.0fGHz EIRP=%.1fdBm RIS=%ux%u (gain %.1f dB) "
+                "xApp=%s thresh=%.1fdB\n",
+                simSeconds, freqGHz, satEirpDbm, risN, risN, g_risCompDb,
                 xappEnabled ? "on" : "off", sinrThreshDb);
-    std::printf("#   thz-ntn cascade: ThzNtnMolecularAbsorption (humidity=%s) +\n"
-                "#                    ThzNtnRis (max gain %.1f dB)\n",
-                humidityProfile.c_str(), g_ris->ComputeSnrGain_dB(true));
+    std::printf("#   blockage: %.0f dB @%.0fs, clears @%.0fs (live channel events)\n",
+                blockageDb, tBlock, tClear);
+    std::printf("# %5s  %9s  %9s  %5s  %8s  %8s  %9s\n",
+                "t_s", "measured", "intrinsic", "ris", "extra_dB", "tbler", "goodput");
 
-    Simulator::Schedule(Seconds(2.0), &Tick, simSeconds);
-    Simulator::Stop(Seconds(simSeconds + 0.1));
+    // KPM tick: telemetry half of the loop, on the MEASURED radio.
+    Ptr<MobilityModel> ueMob = ueNodes.Get(0)->GetObject<MobilityModel>();
+    uint64_t lastRx = 0;
+    rs.RegisterPeriodicCallback(
+        Seconds(1.0),
+        [ueMob, satEnu, &lastRx](Time now) {
+            const double measured = g_rs->GetUeRecentSinrDb(0);
+            const double comp =
+                g_risEngaged ? std::min(g_blockageDb, g_risCompDb) : 0.0;
+            const double intrinsic = measured - comp;
+            const double tbler = g_rs->GetUeRecentTbler(0);
+            const uint64_t rx = g_rs->GetUeRxBytes(0);
+            const double mbps = (rx - lastRx) * 8.0 / 1e6;
+            lastRx = rx;
+
+            const Vector u = ueMob->GetPosition();
+            const Vector s = satEnu->GetPosition();
+            const double dx = s.x - u.x, dy = s.y - u.y, dz = s.z - u.z;
+            const double elev =
+                std::atan2(dz, std::max(std::sqrt(dx * dx + dy * dy), 1e-3)) * 180.0 / M_PI;
+
+            if (!std::isnan(measured))
+            {
+                E2KpmReport report{};
+                report.timestamp = now.GetSeconds();
+                report.gnbId = 10;
+                report.isNtn = true;
+                report.ueId = 1;
+                report.sinr_dB = intrinsic; // measured minus own actuation
+                report.elevation_deg = elev;
+                g_e2->SubmitKpmMeasurement(report);
+                ++g_kpmsSent;
+            }
+            std::printf("  %5.1f  %9.2f  %9.2f  %5s  %8.2f  %8.3f  %9.3f\n",
+                        now.GetSeconds(), measured, intrinsic,
+                        g_risEngaged ? "ON" : "off", g_nlos->GetLossDb(), tbler, mbps);
+        });
+
+    Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
 
-    monitor->CheckForLostPackets();
-    const uint64_t rx = g_sink ? g_sink->GetTotalRx() : 0;
     std::printf("# === summary ===  KPMs sent=%u  xApp actions=%u  RIS engagements=%u\n"
-                "#                  rxBytes=%lu  avgGoodput=%.3f Mbps\n",
-                g_kpmsSent, g_xappActions, g_risEngagements,
-                (unsigned long)rx, rx * 8.0 / simSeconds / 1e6);
+                "#                  measured cell SINR=%.2f dB  throughput=%.3f Mbps "
+                "(closed loop on the measured radio)\n",
+                g_kpmsSent, g_xappActions, g_risEngagements, rs.GetMeanDlSinrDb(),
+                rs.GetRxThroughputMbps());
+
     Simulator::Destroy();
     return 0;
 }

@@ -3,6 +3,7 @@ set(source_files
     helper/client-rx-trace-plot.cc
     helper/nrtv-helper.cc
     helper/ntn-realistic-traffic-helper.cc
+    helper/ntn-real-stack-helper.cc
     helper/three-gpp-http-satellite-helper.cc
     model/cbr-application.cc
     model/nrtv-header.cc
@@ -12,6 +13,7 @@ set(source_files
     model/nrtv-variables.cc
     model/nrtv-video-worker.cc
     model/traffic-time-tag.cc
+    model/ntn-static-extra-loss-model.cc
     model/three-gpp-http-satellite-client.cc
     stats/application-stats-helper.cc
     stats/application-stats-delay-helper.cc
@@ -25,6 +27,7 @@ set(header_files
     helper/histogram-plot-helper.h
     helper/nrtv-helper.h
     helper/ntn-realistic-traffic-helper.h
+    helper/ntn-real-stack-helper.h
     helper/three-gpp-http-satellite-helper.h
     model/traffic.h
     model/cbr-application.h
@@ -35,6 +38,7 @@ set(header_files
     model/nrtv-variables.h
     model/nrtv-video-worker.h
     model/traffic-time-tag.h
+    model/ntn-static-extra-loss-model.h
     model/three-gpp-http-satellite-client.h
     stats/application-stats-helper.h
     stats/application-stats-delay-helper.h
@@ -54,10 +58,14 @@ build_lib(
   LIBRARIES_TO_LINK
     ${libcore}
     ${libnetwork}
+    ${libmobility}
+    ${libpropagation}
     ${libapplications}
     ${libflow-monitor}
     ${libinternet}
     ${libmagister-stats}
+    ${libmmwave}
+    ${liblte}
     ${libpoint-to-point}
   TEST_SOURCES ${test_sources}
 )

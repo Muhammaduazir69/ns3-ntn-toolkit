@@ -2,60 +2,106 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit, W5)
  *
- * Demo: passenger broadband on a commercial flight (ISL → LEO → aircraft).
- * A 4 000 km flight at 11 km / 250 m/s; LEO satellite passes overhead; the
- * router selects LEO directly (no UAV/HAPS in this scenario).
+ * Demo: passenger broadband on a commercial flight (LEO → aircraft). A great-
+ * circle cruise leg at 11 km / 250 m/s; a LEO satellite passes overhead and
+ * serves the aircraft terminal over a REAL mmwave NR NTN cell (NtnRealStack
+ * Helper). The MultiLayerRouter still selects the access layer and logs the
+ * per-hop elevation/range geometry, but the radio KPIs (SINR/TBLER/throughput)
+ * are now MEASURED off the mmwave PHY trace — no closed-form SINR, no P2P star.
  */
-#include "ns3/aeronautical-scenario.h"
 #include "ns3/command-line.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 #include "ns3/constant-velocity-mobility-model.h"
+#include "ns3/core-module.h"
+#include "ns3/mobility-module.h"
 #include "ns3/multi-layer-router.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
 #include "ns3/sagin-helper.h"
-#include "ns3/simulator.h"
-#include "ns3/ntn-realistic-traffic-helper.h"
 
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 
 using namespace ns3;
 
 int
 main(int argc, char* argv[])
 {
-    double simTimeSec = 3600.0;
-    std::string outputDir = ".";
+    double simTimeSec = 30.0;
+    uint32_t numUes = 1;
     double cruiseAltM = 11000.0;
     double speedMps = 250.0;
+    double leoAltKm = 550.0;
+    double satEirpDbm = 55.0;
+    std::string outputDir = "sagin-aeronautical-output";
     std::string csvPath = "sagin-aeronautical.csv";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
+    cmd.AddValue("numUes", "Number of aircraft terminals (UEs)", numUes);
     cmd.AddValue("cruise", "Cruise altitude (m)", cruiseAltM);
     cmd.AddValue("speed", "Cruise speed (m/s)", speedMps);
-    cmd.AddValue("csv", "Output CSV path", csvPath);
-    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
+    cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("csv", "Output CSV path (router geometry)", csvPath);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
+    // Aircraft terminal = UE (great-circle cruise); LEO satellite = mmwave gNB.
+    NodeContainer ueNodes;
+    ueNodes.Create(numUes);
+    Ptr<ConstantVelocityMobilityModel> acMob = CreateObject<ConstantVelocityMobilityModel>();
+    acMob->SetPosition(Vector(0.0, 0.0, cruiseAltM));
+    acMob->SetVelocity(Vector(speedMps, 0.0, 0.0));
+    ueNodes.Get(0)->AggregateObject(acMob);
+    MobilityHelper mh;
+    mh.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    for (uint32_t i = 1; i < numUes; ++i)
+    {
+        Ptr<ConstantVelocityMobilityModel> m = CreateObject<ConstantVelocityMobilityModel>();
+        m->SetPosition(Vector(1500.0 * i, 0.0, cruiseAltM));
+        m->SetVelocity(Vector(speedMps, 0.0, 0.0));
+        ueNodes.Get(i)->AggregateObject(m);
+    }
+
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    // Real SGP4 orbit projected into the scenario's local ENU frame: the
+    // satellite passes overhead near t=0 and recedes with genuine orbital
+    // dynamics (no straight-line placeholder).
+    ns3::ntncon::WalkerConfig wcfgSat;
+    wcfgSat.num_planes = 1;
+    wcfgSat.total_sats = 80;
+    wcfgSat.altitude_km = leoAltKm;
+    wcfgSat.inclination_deg = 53.0;
+    wcfgSat.epoch_unix_s = 1735689600.0;
+    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(satElements[0]);
+    double satSubLat, satSubLon, satSubAlt;
+    satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
+    Ptr<NtnEnuProjectionMobilityModel> leo = CreateObject<NtnEnuProjectionMobilityModel>();
+    leo->SetSource(satSgp4);
+    leo->SetReference(satSubLat, satSubLon, 0.0);
+    satNodes.Get(0)->AggregateObject(leo);
+
+    // Multi-layer router: selects the LEO access layer, logs per-hop geometry.
     SaginHelper helper;
-
-    auto ac = helper.CreateFlight(Vector{0, 0, 0},
-                                  Vector{2.0e6, 0, 0}, // 2000 km along +x
-                                  cruiseAltM, speedMps);
-
-    Ptr<ConstantVelocityMobilityModel> leo = CreateObject<ConstantVelocityMobilityModel>();
-    leo->SetPosition(Vector{-2.0e6, 0.0, 550e3});
-    leo->SetVelocity(Vector{7590.0, 0.0, 0.0});
-
     Ptr<MultiLayerRouter> router = helper.CreateRouter();
     router->AddNode(SaginLayer::Leo, leo);
 
-    std::ofstream out(csvPath);
-    out << "time_s,ac_x_m,ac_y_m,ac_alt_m,leo_x_m,leo_y_m,leo_z_m,leo_el_deg,slant_km\n";
-
-    for (double t = 0; t < simTimeSec; t += 5.0)
+    std::filesystem::create_directories(outputDir);
+    std::ofstream out(outputDir + "/" + csvPath);
+    out << "time_s,ac_x_m,ac_alt_m,leo_x_m,leo_z_m,leo_el_deg,slant_km\n";
+    for (double t = 0; t < simTimeSec; t += 2.0)
     {
-        Simulator::Schedule(Seconds(t), [&out, ac, leo, router, t]() {
-            auto path = router->Route(ac);
+        Simulator::Schedule(Seconds(t), [&out, acMob, leo, router, t]() {
+            auto path = router->Route(acMob);
             double el = -90, rng = 0;
             for (auto& h : path)
             {
@@ -65,29 +111,33 @@ main(int argc, char* argv[])
                     rng = h.rangeM / 1000.0;
                 }
             }
-            Vector ap = ac->GetPosition();
+            Vector ap = acMob->GetPosition();
             Vector lp = leo->GetPosition();
-            out << std::fixed << std::setprecision(2) << t << ","
-                << ap.x << "," << ap.y << "," << ap.z << ","
-                << lp.x << "," << lp.y << "," << lp.z << ","
-                << el << "," << rng << "\n";
+            out << std::fixed << std::setprecision(2) << t << "," << ap.x << "," << ap.z << ","
+                << lp.x << "," << lp.z << "," << el << "," << rng << "\n";
         });
     }
-    // ==== v2 realistic traffic plane (auto-injected) =====================
-    NtnRealisticTrafficHelper _ntn_traffic;
-    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
-    _ntn_traffic.SetOutputDir(outputDir);
-    _ntn_traffic.SetRunTag("sagin-aeronautical");
-    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
-    _ntn_traffic.InstallUes(8);
-    _ntn_traffic.Wire();
 
-    
+    // Real mmwave NR cell over the flight + measured KPIs.
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simTimeSec));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("sagin-aeronautical");
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simTimeSec - 0.5));
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
-    _ntn_traffic.WriteHealthReport();
+    rs.Collect();
+    rs.WriteHealthReport();
+    out.close();
+
+    std::cout << "sagin-aeronautical complete (commercial flight on a real mmwave NR cell).\n"
+              << "  measured mean SINR : " << rs.GetMeanDlSinrDb() << " dB\n"
+              << "  measured throughput: " << rs.GetRxThroughputMbps() << " Mbps\n"
+              << "  router geometry csv: " << outputDir << "/" << csvPath << "\n";
     Simulator::Destroy();
-    std::cout << "Wrote " << csvPath << " (" << simTimeSec << " s commercial flight)\n";
     return 0;
 }

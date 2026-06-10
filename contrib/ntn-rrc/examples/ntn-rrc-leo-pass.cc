@@ -2,18 +2,30 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// Demonstrates ephemeris-driven Timing Advance pre-compensation across a
-// LEO pass. Logs total/common/UE-specific TA each second so the resulting
-// CSV can be plotted to show the classic "smile" curve.
+// ntn-rrc-leo-pass — ephemeris-driven Timing Advance + SIB19 (TS 38.331
+// NTN-Config) on a REAL mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy +
+// MAC + HARQ + RLC/PDCP + RRC + EPC). The TA total/common/UE-specific values and
+// the TA drift rate are taken from the live LEO-pass geometry (the classic NTN
+// "smile" curve), SIB19 is re-broadcast from the live ephemeris, and the RRC
+// connection-quality measurement report fires on the MEASURED DL SINR off the
+// mmwave RxPacketTraceUe trace — no closed-form SINR anywhere. Writes a TA/SINR
+// trace CSV and an honest sim_health.csv (phy-trace provenance).
 
-#include "ns3/constant-position-mobility-model.h"
-#include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
+#include "ns3/mmwave-enb-net-device.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
+
 #include "ns3/ntn-rrc-helper.h"
+#include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
-#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -21,77 +33,172 @@
 using namespace ns3;
 using namespace ns3::ntnrrc;
 
+NS_LOG_COMPONENT_DEFINE("NtnRrcLeoPass");
+
 namespace
 {
+NtnRealStackHelper* g_rs = nullptr;
+Ptr<NtnTimingAdvance> g_ta;
+Ptr<NtnSib19Broadcaster> g_sib;
+std::ofstream g_csv;
+double g_simTime = 20.0;
+double g_measThreshDb = 14.0;
+uint32_t g_measReports = 0;
+uint32_t g_sib19Refresh = 0;
+bool g_belowThresh = false;
 
 void
-SampleTa(Ptr<NtnTimingAdvance> ta, std::ostream* out)
+Sample()
 {
-    const Time total = ta->ComputeTotalTa();
-    const Time common = ta->ComputeCommonTa();
-    const Time residual = ta->ComputeUeSpecificTa();
-    const double drift = ta->ComputeTaDriftRate(MilliSeconds(10));
-    if (out)
+    const double t = Simulator::Now().GetSeconds();
+    if (t >= g_simTime)
     {
-        *out << std::fixed << std::setprecision(6) << Simulator::Now().GetSeconds() << ","
-             << total.GetMicroSeconds() << "," << common.GetMicroSeconds() << ","
-             << residual.GetMicroSeconds() << "," << std::scientific << std::setprecision(3)
-             << (drift * 1e6) << "\n"; // s/s -> us/s for the CSV column
+        return;
     }
-    Simulator::Schedule(Seconds(1.0), &SampleTa, ta, out);
-}
+    const Time total = g_ta->ComputeTotalTa();
+    const Time common = g_ta->ComputeCommonTa();
+    const Time residual = g_ta->ComputeUeSpecificTa();
+    const double drift = g_ta->ComputeTaDriftRate(MilliSeconds(10));
+    const double slantKm = g_ta->GetSlantRangeMetres() / 1000.0;
 
+    g_sib->RefreshNow();
+    ++g_sib19Refresh;
+
+    const double sinr = g_rs->GetUeRecentSinrDb(0);
+    if (!std::isnan(sinr))
+    {
+        const bool below = sinr < g_measThreshDb;
+        if (below && !g_belowThresh)
+        {
+            ++g_measReports;
+            std::printf("  %6.1fs  RRC measurement report: serving SINR meas=%.1f dB "
+                        "< %.1f dB (slant %.0f km, TA=%lld us)\n",
+                        t, sinr, g_measThreshDb, slantKm,
+                        static_cast<long long>(total.GetMicroSeconds()));
+        }
+        g_belowThresh = below;
+    }
+
+    if (g_csv.is_open())
+    {
+        g_csv << std::fixed << std::setprecision(3) << t << "," << slantKm << ","
+              << total.GetMicroSeconds() << "," << common.GetMicroSeconds() << ","
+              << residual.GetMicroSeconds() << "," << std::scientific << std::setprecision(3)
+              << (drift * 1e6) << "," << std::fixed << std::setprecision(2)
+              << (std::isnan(sinr) ? 0.0 : sinr) << "\n";
+    }
+    Simulator::Schedule(MilliSeconds(500), &Sample);
+}
 } // namespace
 
 int
 main(int argc, char* argv[])
 {
-    double simTimeSec = 600.0;
-    std::string outputDir = ".";
+    double simTime = 20.0;
+    uint32_t numUes = 4;
+    double altitudeKm = 550.0;
+    double satEirpDbm = 55.0;
+    double freqGhz = 2.0;
     bool transparent = true;
-    std::string csvPath = "ntn-rrc-leo-pass.csv";
+    std::string outputDir = "ntn-rrc-leo-pass-output";
 
     CommandLine cmd(__FILE__);
-    cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
-    cmd.AddValue("transparent", "Transparent (true) vs regenerative (false)", transparent);
-    cmd.AddValue("csv", "Output CSV path", csvPath);
-    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
+    cmd.AddValue("simTime", "Simulation duration (s)", simTime);
+    cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
+    cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
+    cmd.AddValue("transparent", "Transparent (true) vs regenerative (false) payload", transparent);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+    g_simTime = simTime;
 
-    // 550-km LEO circular orbit moving along +x at 7.59 km/s, fly-over geometry.
-    Ptr<ConstantPositionMobilityModel> ueMob = CreateObject<ConstantPositionMobilityModel>();
-    ueMob->SetPosition(Vector{0.0, 0.0, 0.0});
+    std::cout << "\n=== ntn-rrc-leo-pass (SIB19 + TA on a real mmwave NR NTN cell) ===\n"
+              << "  serving cell: real mmwave NR link, " << numUes << " UEs\n"
+              << "  TA + SIB19 ephemeris: live LEO-pass geometry (TS 38.331 NTN-Config)\n"
+              << "  RRC measurement trigger: MEASURED DL SINR (not a formula)\n"
+              << "  duration: " << simTime << " s\n\n";
 
-    Ptr<ConstantVelocityMobilityModel> satMob = CreateObject<ConstantVelocityMobilityModel>();
-    satMob->SetPosition(Vector{-2.0e6, 0.0, 550e3}); // start 2000 km west
-    satMob->SetVelocity(Vector{7590.0, 0.0, 0.0});
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    NodeContainer ueNodes;
+    ueNodes.Create(numUes);
 
-    NtnRrcHelper helper;
-    helper.SetPayloadMode(transparent ? PayloadMode::Transparent : PayloadMode::RegenerativeFull);
-    helper.SetReferencePosition(Vector{0.0, 0.0, 0.0}); // beam centre = sub-UE point
+    // Real SGP4 Walker orbit for the serving satellite (genuine LEO pass).
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = altitudeKm;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(wElements[0]);
+    satNodes.Get(0)->AggregateObject(satSgp4);
+    Ptr<MobilityModel> satMob = satSgp4;
+    double subLat, subLon, subAlt;
+    satSgp4->GetGeodetic(subLat, subLon, subAlt);
 
-    Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ueMob, satMob);
+    // TR 38.811 class UEs (real MobilityModel) under the t=0 sub-point.
+    NtnTr38811MobilityHelper ueMobility(1);
+    auto mobProfile = NtnMobilityScenarios::MixedContinental();
+    auto ueModels = ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
+                                       subLon - 0.03, subLon + 0.03);
+    Ptr<MobilityModel> ueMob = ueModels[0];
 
-    std::ofstream out(csvPath);
-    out << "time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate_us_per_s\n";
-    Simulator::ScheduleNow(&SampleTa, ta, &out);
-    // ==== v2 realistic traffic plane (auto-injected) =====================
-    NtnRealisticTrafficHelper _ntn_traffic;
-    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
-    _ntn_traffic.SetOutputDir(outputDir);
-    _ntn_traffic.SetRunTag("ntn-rrc-leo-pass");
-    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
-    _ntn_traffic.InstallUes(8);
-    _ntn_traffic.Wire();
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simTime));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ntn-rrc-leo-pass");
+    rs.SetCarrierFrequencyHz(freqGhz * 1e9);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simTime - 0.5));
+    g_rs = &rs;
 
-    
+    NtnRrcHelper rrc;
+    rrc.SetPayloadMode(transparent ? PayloadMode::Transparent : PayloadMode::RegenerativeFull);
+    rrc.SetReferencePosition(ntngeo::GeodeticToEcef(subLat, subLon, 0.0));
+    g_ta = rrc.InstallTimingAdvance(ueMob, satMob);
 
-    Simulator::Stop(Seconds(simTimeSec));
+    Ptr<mmwave::MmWaveEnbNetDevice> enb =
+        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
+    const uint16_t cellId = enb ? enb->GetCellId() : 1;
+    g_sib = rrc.InstallSib19Broadcaster(satMob, cellId, g_ta, MilliSeconds(160));
+    g_sib->Start();
+
+    std::filesystem::create_directories(outputDir);
+    g_csv.open(outputDir + "/ntn-rrc-leo-pass-ta.csv");
+    g_csv << "time_s,slant_km,ta_total_us,ta_common_us,ta_ue_us,ta_drift_us_per_s,"
+             "measured_sinr_db\n";
+
+    // The serving satellite flies its REAL SGP4 pass: the slant range, TA and
+    // measured SINR all evolve with genuine orbital dynamics (no teleports).
+    Simulator::Schedule(Seconds(1.0), &Sample);
+
+    Simulator::Stop(Seconds(simTime));
     Simulator::Run();
-    _ntn_traffic.WriteHealthReport();
-    Simulator::Destroy();
+    rs.Collect();
+    rs.WriteHealthReport();
+    if (g_csv.is_open())
+    {
+        g_csv.close();
+    }
 
-    std::cout << "Wrote " << csvPath << " (" << simTimeSec << " s pass, "
-              << (transparent ? "transparent" : "regenerative") << " payload)\n";
+    std::cout << "\n--- RRC Summary (real SIB19/TA on MEASURED radio) ---\n"
+              << "  measured serving SINR (mean): " << rs.GetMeanDlSinrDb() << " dB\n"
+              << "  measured DL throughput:       " << rs.GetRxThroughputMbps() << " Mbps\n"
+              << "  final slant range:            " << g_ta->GetSlantRangeMetres() / 1000.0
+              << " km\n"
+              << "  final total TA:               " << g_ta->ComputeTotalTa().GetMicroSeconds()
+              << " us\n"
+              << "  SIB19 ephemeris refreshes:    " << g_sib19Refresh << "\n"
+              << "  RRC measurement reports:      " << g_measReports
+              << "  (on MEASURED SINR < " << g_measThreshDb << " dB)\n"
+              << "  TA/SINR trace:                " << outputDir << "/ntn-rrc-leo-pass-ta.csv\n";
+
+    Simulator::Destroy();
     return 0;
 }

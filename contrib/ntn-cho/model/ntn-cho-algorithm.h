@@ -68,7 +68,29 @@ class NtnChoAlgorithm : public Object
         TRIGGER_LOCATION_D1,       //!< 3GPP condEventD1: distance to beam center
         TRIGGER_TIME_BASED,        //!< Timer-based beam dwell trigger
         TRIGGER_TTE_AWARE,         //!< NOVEL: TTE + location + quality
-        TRIGGER_THZ_BEAM_QUALITY   //!< Handover when THz beam tracking error exceeds threshold
+        TRIGGER_THZ_BEAM_QUALITY,  //!< Handover when THz beam tracking error exceeds threshold
+        /**
+         * NOVEL (3GPP Rel-19 conditional LTM): L1/L2-Triggered Mobility combined
+         * with CHO reliability. Candidates are admitted on L1-filtered (moving-
+         * average) low-latency measurements crossing serving + hysteresis for N
+         * consecutive L1 reports AND passing the TTE stability filter; execution
+         * is a MAC-CE-style fast cell switch (ltmSwitchDelay, tens of ms) instead
+         * of the full RRC reconfiguration (t304-scale). Refs: 3GPP Rel-19 NR
+         * mobility WI (conditional LTM); Ericsson Technology Review, "Reducing
+         * handover interruption with L1/L2-Triggered Mobility".
+         */
+        TRIGGER_LTM_CONDITIONAL,
+        /**
+         * NOVEL (PCHO — trajectory-prediction CHO for LEO): per-candidate SINR
+         * trajectories are forecast over predictionHorizon by a linear-trend
+         * predictor over the measurement history (documented stand-in for the
+         * GRU predictor of Yang et al., "A Conditional Handover Strategy Based
+         * on Trajectory Prediction for High-Speed Terminals in LEO Satellite
+         * Networks") and fused with the ephemeris TTE; the handover triggers
+         * BEFORE the predicted serving outage, toward the candidate that
+         * maximizes the predicted time-of-stay.
+         */
+        TRIGGER_TRAJECTORY_PREDICTIVE
     };
 
     /**
@@ -87,6 +109,37 @@ class NtnChoAlgorithm : public Object
         Time tteEpsilon = Seconds(2.0);       //!< TTE tie-breaking window
         double a3Offset_dB = 3.0;             //!< A3 event offset (for baseline)
         Time a3TimeToTrigger = MilliSeconds(160); //!< A3 TTT (for baseline)
+
+        // ---- Rel-19 conditional LTM (TRIGGER_LTM_CONDITIONAL) ----
+        uint8_t ltmL1FilterK = 4;             //!< L1 moving-average window (reports)
+        double ltmHysteresis_dB = 1.0;        //!< L1 SINR hysteresis over serving
+        uint8_t ltmConsecutiveReports = 2;    //!< consecutive L1 reports to trigger
+        Time ltmSwitchDelay = MilliSeconds(25); //!< MAC-CE cell-switch latency
+
+        // ---- Trajectory-predictive CHO (TRIGGER_TRAJECTORY_PREDICTIVE) ----
+        Time predictionHorizon = Seconds(8.0);  //!< SINR forecast horizon
+        uint8_t predictionMinSamples = 4;       //!< min history for a forecast
+        Time minPredictedTos = Seconds(5.0);    //!< min predicted time-of-stay
+        double pchoHysteresis_dB = 1.0;         //!< predicted best-server margin
+
+        // ---- RACH-less execution (RCHO; orthogonal to the trigger) ----
+        bool rachLess = false;                  //!< skip RACH using ephemeris TA
+        Time rachDuration = MilliSeconds(80);   //!< NTN RACH incl. slant RTT
+        Time choExecutionDelay = MilliSeconds(50); //!< RRC reconfig execution time
+    };
+
+    /**
+     * \brief Counters/latencies for the novel 6G handover mechanisms.
+     */
+    struct MechanismStats
+    {
+        uint32_t ltmSwitches = 0;        //!< LTM fast cell switches executed
+        uint32_t pchoTriggers = 0;       //!< trajectory-predicted handovers
+        uint32_t rachLessExecutions = 0; //!< handovers executed without RACH
+        uint32_t rachExecutions = 0;     //!< handovers paying the full RACH
+        double lastInterruptionMs = 0.0; //!< interruption of the last handover
+        double totalInterruptionMs = 0.0;//!< cumulative interruption
+        double lastPreCompTaUs = 0.0;    //!< last ephemeris-pre-computed TA (us)
     };
 
     /**
@@ -104,6 +157,18 @@ class NtnChoAlgorithm : public Object
         Time d1MetSince = Seconds(0);     //!< When D1 was first met
         bool admitted = false;            //!< Passed TTE + quality filter
         Time lastUpdate = Seconds(0);     //!< Last measurement update time
+
+        // ---- Rel-19 conditional LTM state ----
+        double l1Filtered_dB = -100.0;    //!< L1 moving-average SINR
+        uint8_t l1AboveCount = 0;         //!< consecutive L1 reports above thresh
+
+        // ---- Trajectory-predictive CHO state ----
+        std::vector<std::pair<double, double>> sinrHistory; //!< (t_s, sinr_dB)
+        double predictedSinr_dB = -100.0; //!< forecast SINR at +horizon
+        Time predictedTos = Seconds(0);   //!< predicted time-of-stay
+
+        // ---- RACH-less execution state ----
+        double slantRangeM = 0.0;         //!< ephemeris/GNSS slant range to sat
     };
 
     static TypeId GetTypeId();
@@ -155,6 +220,29 @@ class NtnChoAlgorithm : public Object
      * \param gain_dB Measured beam gain
      */
     void UpdateMeasurement(uint16_t cellId, double sinr_dB, double gain_dB);
+
+    /**
+     * \brief Update the MEASURED serving-cell SINR (drives the LTM hysteresis
+     *        comparison and the trajectory-predicted serving outage).
+     */
+    void UpdateServingMeasurement(double sinr_dB);
+
+    /**
+     * \brief Set the serving cell (initial attach or after an external HO).
+     */
+    void SetServingCell(uint16_t cellId);
+
+    /**
+     * \brief Feed the live ephemeris/GNSS slant range (m) for a candidate's
+     *        satellite. Enables RACH-less execution: TA = 2*slant/c is
+     *        pre-compensated (TS 38.821 §6.3.3) so the RACH is skipped.
+     */
+    void UpdateCandidateSlantRange(uint16_t cellId, double slantRangeM);
+
+    /**
+     * \brief Counters/latencies of the novel mechanisms (LTM/PCHO/RACH-less).
+     */
+    MechanismStats GetMechanismStats() const;
 
     /**
      * \brief Start condition monitoring
@@ -293,6 +381,25 @@ class NtnChoAlgorithm : public Object
 
     HandoverExecutionCallback m_hoCallback;
     CandidateAdmittedCallback m_admitCallback;
+
+    // ---- Novel 6G mechanism state (LTM / PCHO / RACH-less) ----
+    double m_servingSinr_dB{-100.0};   //!< latest MEASURED serving SINR
+    std::vector<std::pair<double, double>> m_servingSinrHistory; //!< (t_s, sinr)
+    MechanismStats m_mechStats;        //!< novel-mechanism counters
+
+    /**
+     * \brief Linear-trend forecast of a SINR history at +horizon seconds
+     *        (documented stand-in for the PCHO GRU predictor).
+     * \return forecast SINR (dB), or the last sample if history is too short.
+     */
+    double ForecastSinr(const std::vector<std::pair<double, double>>& history,
+                        double horizonS) const;
+
+    /// Evaluate the Rel-19 conditional-LTM admission for one candidate.
+    void EvaluateLtmConditional(CandidateInfo& cand);
+
+    /// Evaluate the trajectory-predictive (PCHO) admission for one candidate.
+    void EvaluateTrajectoryPredictive(CandidateInfo& cand);
 
     /**
      * \brief Evaluate THz beam quality for a candidate

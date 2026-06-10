@@ -59,6 +59,10 @@ Distance(const Vector& a, const Vector& b)
 int
 main(int argc, char* argv[])
 {
+    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
+                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
+                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
+                "module's *-traffic / *-real-stack examples.\n\n");
     std::string host = "127.0.0.1";
     uint16_t port = 8765;
     double freqHz = 2.0e9;

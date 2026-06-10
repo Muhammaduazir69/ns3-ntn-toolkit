@@ -42,6 +42,8 @@ class ThzNtnAntennaArray;
 #include "ns3/thz-ntn-antenna-array.h"
 #include "ns3/thz-ntn-channel-model.h"
 
+#include <cstdio>
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ThzNtnLeoGround");
@@ -70,6 +72,10 @@ ComputeSlantRange(double elevDeg, double altKm)
 int
 main(int argc, char* argv[])
 {
+    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
+                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
+                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
+                "module's *-traffic / *-real-stack examples.\n\n");
     // ---- Default parameters ----
     double freq = 225e9;       // 225 GHz
     double altitude = 550.0;   // km

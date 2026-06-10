@@ -2,31 +2,28 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit)
  *
- * sagin-maritime-leo-traffic — a maritime VSAT terminal aboard a vessel whose
- * motion is replayed from an AIS trace (AisMobilityModel) receives REAL UDP
- * downlink traffic from a passing LEO satellite. The vessel sails a course
- * (built inline as an AisMaritimeTrace) while the satellite crosses overhead;
- * a per-second probe forms the satellite→vessel SNR from FSPL at the live
- * geometry, maps it to a packet-error rate on the P2P link's RateErrorModel,
- * and updates the propagation delay. Delivered goodput tracks the pass.
+ * sagin-maritime-leo-traffic — a vessel terminal whose motion is replayed from
+ * an AIS trace (AisMobilityModel) is served by a passing LEO satellite over a
+ * REAL mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy + MAC + HARQ +
+ * RLC/PDCP + RRC + EPC). The DL SINR/TBLER/throughput are MEASURED off the
+ * mmwave PHY trace as the vessel sails and the satellite crosses overhead — no
+ * closed-form FSPL->SINR, no sigmoid error model.
  *
- * Covers the AisMobilityModel / AisMaritimeTrace classes with a real data
- * plane. Quick test:  --simSeconds=120 --dataRateMbps=5
+ * Covers the AisMobilityModel / AisMaritimeTrace classes with a real measured
+ * data plane. Quick test:  --simSeconds=30 --vesselSpeedKn=20
  */
-#include "ns3/applications-module.h"
-#include "ns3/command-line.h"
 #include "ns3/constant-velocity-mobility-model.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 #include "ns3/core-module.h"
-#include "ns3/error-model.h"
-#include "ns3/flow-monitor-helper.h"
-#include "ns3/internet-stack-helper.h"
-#include "ns3/ipv4-address-helper.h"
-#include "ns3/point-to-point-channel.h"
-#include "ns3/point-to-point-helper.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
 
+#include "ns3/ais-maritime-trace.h"
 #include "ns3/ais-mobility-model.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -36,100 +33,48 @@ NS_LOG_COMPONENT_DEFINE("SaginMaritimeLeoTraffic");
 
 namespace
 {
-constexpr double kC = 299792458.0;
+NtnRealStackHelper* g_rs = nullptr;
 Ptr<MobilityModel> g_vessel;
-Ptr<MobilityModel> g_sat;
-Ptr<RateErrorModel> g_em;
-Ptr<PointToPointChannel> g_channel;
-Ptr<PacketSink> g_sink;
-uint64_t g_lastRx = 0;
-double g_eirpDbm = 80.0;
-double g_freqHz = 12e9;
-double g_noiseDbm = -95.0;
-double g_minElev = 5.0;
-
-double
-ElevDeg(const Vector& u, const Vector& s)
-{
-    const Vector d(s.x - u.x, s.y - u.y, s.z - u.z);
-    return std::atan2(d.z, std::max(std::sqrt(d.x * d.x + d.y * d.y), 1e-3)) *
-           180.0 / M_PI;
-}
-
-double
-Dist(const Vector& a, const Vector& b)
-{
-    const double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
-}
-
-double
-FsplDb(double dM, double fHz)
-{
-    return 20.0 * std::log10(std::max(dM, 1.0)) +
-           20.0 * std::log10(fHz / 1e9) + 32.45;
-}
-
-double
-SnrToPer(double snrDb)
-{
-    return 1.0 / (1.0 + std::exp(0.8 * (snrDb - 6.0)));
-}
+double g_simTime = 30.0;
 
 void
 LinkProbe()
 {
+    if (Simulator::Now().GetSeconds() >= g_simTime)
+    {
+        return;
+    }
     const Vector u = g_vessel->GetPosition();
-    const Vector s = g_sat->GetPosition();
-    const double elev = ElevDeg(u, s);
-    const double range = Dist(u, s);
-    const double rx = g_eirpDbm - FsplDb(range, g_freqHz);
-    const double snr = rx - g_noiseDbm;
-    const double per = (elev < g_minElev) ? 1.0 : SnrToPer(snr);
-    g_em->SetRate(per);
-    g_channel->SetAttribute("Delay", TimeValue(Seconds(range / kC)));
-
-    const uint64_t tot = g_sink ? g_sink->GetTotalRx() : 0;
-    const double mbps = (tot - g_lastRx) * 8.0 / 1e6;
-    g_lastRx = tot;
-    std::printf("  %6.1f  (%8.0f,%8.0f)  %7.2f  %7.2f  %9.3f\n",
-                Simulator::Now().GetSeconds(), u.x, u.y, elev, snr, mbps);
-    Simulator::Schedule(Seconds(1.0), &LinkProbe);
+    const double sinr = g_rs->GetUeRecentSinrDb(0);
+    std::printf("  %6.1f  vessel=(%9.0f,%6.0f)  measSINR=%7.2f dB\n",
+                Simulator::Now().GetSeconds(), u.x, u.z, std::isnan(sinr) ? 0.0 : sinr);
+    Simulator::Schedule(Seconds(2.0), &LinkProbe);
 }
 } // namespace
 
 int
 main(int argc, char* argv[])
 {
-    double simSeconds = 600.0;
+    double simSeconds = 30.0;
     double leoAltKm = 550.0;
     double satSpeed = 7500.0;
-    double freqGHz = 12.0;
-    double dataRateMbps = 20.0;
-    uint32_t packetBytes = 1200;
-    double txPowerDbm = 33.0;
-    double antennaGainDb = 55.0;
-    double vesselSpeedKn = 18.0; // knots
-    double linkCapacityMbps = 50.0;
+    double freqGHz = 2.0;
+    double satEirpDbm = 55.0;
+    double vesselSpeedKn = 20.0;
+    std::string outputDir = "sagin-maritime-leo-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
     cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("dataRateMbps", "Offered downlink load (Mbps)", dataRateMbps);
-    cmd.AddValue("packetBytes", "UDP payload size (bytes)", packetBytes);
-    cmd.AddValue("txPowerDbm", "Satellite HPA output power (dBm)", txPowerDbm);
-    cmd.AddValue("antennaGainDb", "Combined antenna gain (dB)", antennaGainDb);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("vesselSpeedKn", "Vessel speed over ground (knots)", vesselSpeedKn);
-    cmd.AddValue("linkCapacityMbps", "P2P link capacity (Mbps)", linkCapacityMbps);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+    g_simTime = simSeconds;
 
-    g_eirpDbm = txPowerDbm + antennaGainDb;
-    g_freqHz = freqGHz * 1e9;
-
-    // Build an AIS trace inline: a vessel sailing due east (course 090) at
-    // vesselSpeedKn from a reference lat/lon, sampled every 30 s.
+    // Build an AIS trace inline: a vessel sailing due east (course 090).
     sagin::AisMaritimeTrace trace;
     trace.mmsi = 244000000;
     const double refLat = 56.0, refLon = 11.0; // Danish waters
@@ -137,7 +82,6 @@ main(int argc, char* argv[])
     {
         sagin::AisSample smp;
         smp.time_s = t;
-        // ~1 deg lon ≈ 111320*cos(lat) m; advance east at the SOG.
         const double mEast = vesselSpeedKn * 0.5144 * t;
         smp.lat_deg = refLat;
         smp.lon_deg = refLon + mEast / (111320.0 * std::cos(refLat * M_PI / 180.0));
@@ -147,93 +91,61 @@ main(int argc, char* argv[])
         trace.samples.push_back(smp);
     }
 
-    NodeContainer nodes;
-    nodes.Create(2); // 0=vessel terminal, 1=satellite
-    Ptr<sagin::AisMobilityModel> vessel =
-        CreateObject<sagin::AisMobilityModel>();
+    // Vessel terminal = UE (real AIS mobility); LEO satellite = mmwave gNB.
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
+    Ptr<sagin::AisMobilityModel> vessel = CreateObject<sagin::AisMobilityModel>();
     vessel->SetReference(refLat, refLon);
     vessel->SetTrace(trace);
-    nodes.Get(0)->AggregateObject(vessel);
+    ueNodes.Get(0)->AggregateObject(vessel);
     g_vessel = vessel;
 
-    Ptr<ConstantVelocityMobilityModel> sat =
-        CreateObject<ConstantVelocityMobilityModel>();
-    sat->SetPosition(Vector(-0.5 * satSpeed * simSeconds, 0, leoAltKm * 1000.0));
-    sat->SetVelocity(Vector(satSpeed, 0, 0));
-    nodes.Get(1)->AggregateObject(sat);
-    g_sat = sat;
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    // Real SGP4 orbit projected into the scenario's local ENU frame: the
+    // satellite passes overhead near t=0 and recedes with genuine orbital
+    // dynamics (no straight-line placeholder).
+    ns3::ntncon::WalkerConfig wcfgSat;
+    wcfgSat.num_planes = 1;
+    wcfgSat.total_sats = 80;
+    wcfgSat.altitude_km = leoAltKm;
+    wcfgSat.inclination_deg = 53.0;
+    wcfgSat.epoch_unix_s = 1735689600.0;
+    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(satElements[0]);
+    double satSubLat, satSubLon, satSubAlt;
+    satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
+    Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
+    sat->SetSource(satSgp4);
+    sat->SetReference(satSubLat, satSubLon, 0.0);
+    satNodes.Get(0)->AggregateObject(sat);
 
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute(
-        "DataRate",
-        DataRateValue(DataRate(static_cast<uint64_t>(linkCapacityMbps * 1e6))));
-    p2p.SetChannelAttribute("Delay", TimeValue(Seconds(leoAltKm * 1000.0 / kC)));
-    NetDeviceContainer devices = p2p.Install(nodes);
-    Ptr<RateErrorModel> em = CreateObject<RateErrorModel>();
-    em->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
-    em->SetRate(1.0);
-    devices.Get(0)->SetAttribute("ReceiveErrorModel", PointerValue(em));
-    g_em = em;
-    g_channel = DynamicCast<PointToPointChannel>(devices.Get(0)->GetChannel());
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("sagin-maritime-leo-traffic");
+    rs.SetCarrierFrequencyHz(freqGHz * 1e9);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
+    g_rs = &rs;
 
-    InternetStackHelper internet;
-    internet.Install(nodes);
-    Ipv4AddressHelper ipv4;
-    ipv4.SetBase("10.31.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifaces = ipv4.Assign(devices);
-
-    const uint16_t port = 7200;
-    PacketSinkHelper sinkHelper(
-        "ns3::UdpSocketFactory",
-        InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(0));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(simSeconds));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
-
-    OnOffHelper onoff("ns3::UdpSocketFactory",
-                      InetSocketAddress(ifaces.GetAddress(0), port));
-    onoff.SetAttribute("DataRate",
-                       DataRateValue(DataRate(static_cast<uint64_t>(
-                           dataRateMbps * 1e6))));
-    onoff.SetAttribute("PacketSize", UintegerValue(packetBytes));
-    onoff.SetAttribute("OnTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute("OffTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-    ApplicationContainer srcApp = onoff.Install(nodes.Get(1));
-    srcApp.Start(Seconds(1.0));
-    srcApp.Stop(Seconds(simSeconds));
-
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
-
-    std::printf("# sagin-maritime-leo-traffic (AIS vessel terminal + LEO)\n");
-    std::printf("#   sim=%.0fs leoAlt=%.0fkm freq=%.0fGHz load=%.1fMbps "
-                "EIRP=%.1fdBm vessel=%.0fkn\n",
-                simSeconds, leoAltKm, freqGHz, dataRateMbps, g_eirpDbm,
-                vesselSpeedKn);
-    std::printf("# %5s  %19s  %7s  %7s  %9s\n",
-                "t_s", "vessel_xy_m", "elev", "snr_dB", "goodput");
+    std::printf("# sagin-maritime-leo-traffic (vessel terminal on a real mmwave NR cell)\n"
+                "#   sim=%.0fs leoAlt=%.0fkm freq=%.1fGHz EIRP=%.1fdBm vesselSpeed=%.0fkn\n",
+                simSeconds, leoAltKm, freqGHz, satEirpDbm, vesselSpeedKn);
 
     Simulator::Schedule(Seconds(2.0), &LinkProbe);
-    Simulator::Stop(Seconds(simSeconds + 0.1));
+    Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
 
-    monitor->CheckForLostPackets();
-    const auto stats = monitor->GetFlowStats();
-    uint64_t txP = 0, rxP = 0;
-    for (const auto& kv : stats)
-    {
-        txP += kv.second.txPackets;
-        rxP += kv.second.rxPackets;
-    }
-    const uint64_t totalRx = g_sink ? g_sink->GetTotalRx() : 0;
-    std::printf("# === summary ===  txPackets=%lu rxPackets=%lu PDR=%.2f%% "
-                "avgGoodput=%.3f Mbps\n",
-                (unsigned long)txP, (unsigned long)rxP,
-                txP ? 100.0 * rxP / txP : 0.0,
-                totalRx * 8.0 / simSeconds / 1e6);
+    std::printf("# === summary ===  measured SINR=%.2f dB  measured TBLER=%.4f  "
+                "measured throughput=%.3f Mbps\n",
+                rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());
     Simulator::Destroy();
     return 0;
 }

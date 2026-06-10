@@ -1,62 +1,61 @@
+# SAGIN terminals (HAPS / UAV / aircraft / train / vessel) served by a LEO over a
+# REAL mmwave NR NTN cell (NtnRealStackHelper), with measured SINR/TBLER/throughput.
+set(_sagin_real_libs
+  ${libntn-sagin}
+  ${libntn-traffic}
+  ${libntn-cho}
+  ${libntn-constellation}
+  ${libcore}
+  ${libnetwork}
+  ${libmobility}
+  ${libspectrum}
+  ${libpropagation}
+  ${libinternet}
+  ${libapplications}
+  ${libmmwave}
+  ${liblte}
+)
+
 build_lib_example(
   NAME sagin-haps-leo-relay
   SOURCE_FILES sagin-haps-leo-relay.cc
-  LIBRARIES_TO_LINK
-    ${libntn-sagin}
-    ${libcore}
-    ${libmobility}
-    ${libntn-traffic}
-    ${libnetwork}
-    ${libinternet}
-    ${libapplications}
-    ${libpoint-to-point}
+  LIBRARIES_TO_LINK ${_sagin_real_libs}
 )
 build_lib_example(
   NAME sagin-uav-swarm
   SOURCE_FILES sagin-uav-swarm.cc
-  LIBRARIES_TO_LINK
-    ${libntn-sagin}
-    ${libcore}
-    ${libmobility}
-    ${libntn-traffic}
-    ${libnetwork}
-    ${libinternet}
-    ${libapplications}
-    ${libpoint-to-point}
+  LIBRARIES_TO_LINK ${_sagin_real_libs}
+)
+
+# Phase-2 real-stack (channel-plugin recipe): TR 36.777 A2G path loss re-homed as
+# a real PropagationLossModel and chained on a real mmwave NR link; SINR measured.
+build_lib_example(
+  NAME sagin-a2g-real-stack
+  SOURCE_FILES sagin-a2g-real-stack.cc
+  LIBRARIES_TO_LINK ${_sagin_real_libs}
 )
 build_lib_example(
   NAME sagin-aeronautical
   SOURCE_FILES sagin-aeronautical.cc
-  LIBRARIES_TO_LINK
-    ${libntn-sagin}
-    ${libcore}
-    ${libmobility}
-    ${libntn-traffic}
-    ${libnetwork}
-    ${libinternet}
-    ${libapplications}
-    ${libpoint-to-point}
+  LIBRARIES_TO_LINK ${_sagin_real_libs}
 )
 
 # Roadmap §4.4.9 — commercial-flight + LEO with O-RAN E2-KPM indications.
 build_lib_example(
   NAME sagin-flight-leo-e2
   SOURCE_FILES sagin-flight-leo-e2.cc
-  LIBRARIES_TO_LINK
-    ${libntn-sagin}
-    ${liboran-ntn}
-    ${libcore}
-    ${libmobility}
-    ${libnetwork}
+  LIBRARIES_TO_LINK ${_sagin_real_libs} ${liboran-ntn}
 )
 
-# Real end-to-end multi-hop forwarding Ground→UAV→HAPS→LEO with per-hop
-# geometry-driven error models and IPv4 global routing.
+# Real end-to-end multi-hop forwarding Ground→UAV→HAPS→LEO; the air-to-ground hop
+# uses the TR 36.777 A2G PropagationLossModel, the rest real IPv4 global routing.
 build_lib_example(
   NAME sagin-multihop-traffic
   SOURCE_FILES sagin-multihop-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-sagin}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libnetwork}
     ${libmobility}
@@ -81,55 +80,28 @@ build_lib_example(
     ${libflow-monitor}
 )
 
-# Maritime AIS vessel terminal + LEO downlink (AisMobilityModel), real traffic.
+# Maritime AIS vessel terminal + LEO downlink (AisMobilityModel), real mmwave cell.
 build_lib_example(
   NAME sagin-maritime-leo-traffic
   SOURCE_FILES sagin-maritime-leo-traffic.cc
-  LIBRARIES_TO_LINK
-    ${libntn-sagin}
-    ${libcore}
-    ${libnetwork}
-    ${libmobility}
-    ${libpoint-to-point}
-    ${libinternet}
-    ${libapplications}
-    ${libflow-monitor}
+  LIBRARIES_TO_LINK ${_sagin_real_libs}
 )
 
-# High-speed-train terminal + LEO downlink (HstMobilityModel), real traffic.
+# High-speed-train terminal + LEO downlink (HstMobilityModel), real mmwave cell.
 build_lib_example(
   NAME sagin-hst-leo-traffic
   SOURCE_FILES sagin-hst-leo-traffic.cc
-  LIBRARIES_TO_LINK
-    ${libntn-sagin}
-    ${libcore}
-    ${libnetwork}
-    ${libmobility}
-    ${libpoint-to-point}
-    ${libinternet}
-    ${libapplications}
-    ${libflow-monitor}
+  LIBRARIES_TO_LINK ${_sagin_real_libs}
 )
 
-# ADS-B aircraft terminal + LEO downlink (OpenSkyMobilityModel), real traffic.
+# ADS-B aircraft terminal + LEO downlink (OpenSkyMobilityModel), real mmwave cell.
 build_lib_example(
   NAME sagin-adsb-flight-leo-traffic
   SOURCE_FILES sagin-adsb-flight-leo-traffic.cc
-  LIBRARIES_TO_LINK
-    ${libntn-sagin}
-    ${libcore}
-    ${libnetwork}
-    ${libmobility}
-    ${libpoint-to-point}
-    ${libinternet}
-    ${libapplications}
-    ${libflow-monitor}
+  LIBRARIES_TO_LINK ${_sagin_real_libs}
 )
 
 # Roadmap §4.4.4/§4.4.5 — SGP4-driven SAGIN with graph shortest-path ISL routing.
-# Composes ntn-constellation (Sgp4MobilityModel + ContactGraphScheduler +
-# ContactGraphRouter) with a real ns-3 IP data plane whose link states follow
-# the live contact graph.
 build_lib_example(
   NAME sagin-sgp4-routed-traffic
   SOURCE_FILES sagin-sgp4-routed-traffic.cc

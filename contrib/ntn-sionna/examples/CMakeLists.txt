@@ -3,9 +3,32 @@ build_lib_example(
   SOURCE_FILES leo-pass-sionna-vs-tr38811.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
     ${libpropagation}
+)
+
+# Phase-2 real-stack (channel-plugin recipe): the FULL Sionna RT CIR (multipath +
+# Doppler) fades real packets on a real mmwave NR link; SINR is measured.
+build_lib_example(
+  NAME ntn-sionna-cir-real-stack
+  SOURCE_FILES ntn-sionna-cir-real-stack.cc
+  LIBRARIES_TO_LINK
+    ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
 )
 
 # Roadmap §4.2.12 — mMIMO precoder vs codebook beamformer comparison.
@@ -14,6 +37,8 @@ build_lib_example(
   SOURCE_FILES mmimo-vs-codebook-leo.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
     ${libpropagation}
@@ -25,6 +50,8 @@ build_lib_example(
   SOURCE_FILES ris-assisted-leo-link.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
     ${libpropagation}
@@ -36,6 +63,8 @@ build_lib_example(
   SOURCE_FILES city-block-4ue-cache.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
     ${libpropagation}
@@ -47,85 +76,116 @@ build_lib_example(
   SOURCE_FILES sionna-calibration-harness.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
     ${libpropagation}
 )
 
-# End-to-end packet transmission: LEO downlink whose Wi-Fi PHY link is gated
-# by the NTN cascade channel; real UDP traffic + FlowMonitor.
+# LEO downlink on a real mmwave NR cell; ITU-R atmospheric cascade (P.676 +
+# P.618/P.838 + optional P.681 LMS) as a live channel plug-in (measured KPIs).
 build_lib_example(
   NAME ntn-sionna-leo-downlink-traffic
   SOURCE_FILES ntn-sionna-leo-downlink-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
+    ${libnetwork}
     ${libmobility}
+    ${libspectrum}
     ${libpropagation}
-    ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
-# Dynamic rain cell sweeping over the gateway during a LEO pass; real traffic.
+# Dynamic rain cell sweeping over the gateway during a LEO pass — the ITU-R
+# rain physics is a LIVE channel plug-in on a real mmwave NR cell (measured).
 build_lib_example(
   NAME ntn-sionna-rain-event-traffic
   SOURCE_FILES ntn-sionna-rain-event-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
+    ${libnetwork}
     ${libmobility}
+    ${libspectrum}
     ${libpropagation}
-    ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
-# RIS recovers a blocked NLOS LEO link mid-sim; real traffic before/after.
+# RIS recovers a blocked NLOS LEO link mid-sim — blockage + RIS engagement
+# are LIVE channel events on a real mmwave NR cell (measured KPIs).
 build_lib_example(
   NAME ntn-sionna-ris-relay-traffic
   SOURCE_FILES ntn-sionna-ris-relay-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
+    ${libnetwork}
     ${libmobility}
+    ${libspectrum}
     ${libpropagation}
-    ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
-# SISO vs N×N MIMO terminals on the same LEO pass; real traffic to both.
+# SISO vs NxN MIMO terminals on ONE real mmwave NR cell; the array gain is a
+# per-UE channel plug-in, so the SISO/MIMO gap is measured, not asserted.
 build_lib_example(
   NAME ntn-sionna-mimo-traffic
   SOURCE_FILES ntn-sionna-mimo-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
+    ${libnetwork}
     ${libmobility}
+    ${libspectrum}
     ${libpropagation}
-    ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
-# Multi-satellite hand-over: UE follows the best LEO; traffic spans hand-overs.
+# Multi-satellite hand-over on measured radio + real SGP4 Walker geometry;
+# candidates projected from the one real measurement via the Friis ratio.
 build_lib_example(
   NAME ntn-sionna-constellation-handover-traffic
   SOURCE_FILES ntn-sionna-constellation-handover-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
+    ${libnetwork}
     ${libmobility}
+    ${libspectrum}
     ${libpropagation}
-    ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
 # Roadmap §4.2.8 — compose the ntn-sionna cascade channel with the oran-ntn
@@ -136,12 +196,17 @@ build_lib_example(
   SOURCE_FILES ntn-sionna-composed-channel-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-sionna}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${liboran-ntn}
+    ${libntn-traffic}
     ${libcore}
+    ${libnetwork}
     ${libmobility}
+    ${libspectrum}
     ${libpropagation}
-    ${libpoint-to-point}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )

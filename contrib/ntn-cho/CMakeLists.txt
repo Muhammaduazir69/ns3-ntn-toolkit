@@ -4,6 +4,9 @@ set(source_files
     model/ntn-cho-algorithm.cc
     model/ntn-measurement-model.cc
     model/ntn-ai-interface.cc
+    # Real 3GPP TR 38.811 UE-class mobility as an ns-3 MobilityModel (ECEF,
+    # SGP4-compatible) -- the toolkit's core NTN UE mobility architecture.
+    model/ntn-tr38811-mobility-model.cc
     helper/ntn-cho-helper.cc
     helper/ntn-realistic-mobility.cc
 )
@@ -14,6 +17,7 @@ set(header_files
     model/ntn-cho-algorithm.h
     model/ntn-measurement-model.h
     model/ntn-ai-interface.h
+    model/ntn-tr38811-mobility-model.h
     helper/ntn-cho-helper.h
     helper/ntn-realistic-mobility.h
 )

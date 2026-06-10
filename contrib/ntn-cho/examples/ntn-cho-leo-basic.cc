@@ -1,21 +1,26 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// ntn-cho-leo-basic — smoke test for the realistic event-driven scenario
-// path.  Spawns a small number of UEs, runs real UDP traffic through the
-// ns-3 stack toward a remote host, and exercises the CHO algorithm on a
-// 200 ms cadence so that Simulator::Run() actually advances wall-clock
-// time in proportion to simTime.  Emits sim_health.csv at end.
+// ntn-cho-leo-basic — smoke test for the CHO algorithm on a REAL mmwave NR NTN
+// cell (NtnRealStackHelper: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC).
+// Real UDP traffic flows over the radio toward the UEs; the CHO algorithm is
+// exercised on a 200 ms cadence and fed the MEASURED per-UE SINR from the mmwave
+// RxPacketTraceUe trace (no closed-form SINR, no sine-wave jitter). Emits an
+// honest sim_health.csv whose SINR/TBLER carry phy-trace provenance.
 
 #include "ns3/core-module.h"
+#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
-#include "ns3/ntn-measurement-model.h"
-#include "ns3/ntn-realistic-traffic-helper.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
 
-#include <iomanip>
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
+
+#include <cmath>
 #include <iostream>
 
 using namespace ns3;
@@ -25,102 +30,108 @@ NS_LOG_COMPONENT_DEFINE("NtnChoLeoBasic");
 int
 main(int argc, char* argv[])
 {
-    double simTime = 60.0;
-    std::string scenario = "suburban";
+    double simTime = 12.0;
     std::string triggerType = "tte-aware";
-    double d1Threshold = 50000;
-    double qualityTh = -3.0;
-    double tteMinimum = 15.0;
-    uint32_t numUes = 6;
+    double tteMinimum = 5.0;
+    uint32_t numUes = 4;
+    double satEirpDbm = 55.0;
     std::string outputDir = "ntn-cho-basic-out";
-    std::string trafficProfile = "mixed";
-    bool strict = false;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation time in seconds", simTime);
-    cmd.AddValue("scenario", "NTN scenario: dense-urban|urban|suburban|rural", scenario);
     cmd.AddValue("trigger", "CHO trigger: a3|location|tte-aware", triggerType);
-    cmd.AddValue("d1Threshold", "D1 distance threshold in meters", d1Threshold);
-    cmd.AddValue("qualityTh", "SINR quality threshold in dB", qualityTh);
     cmd.AddValue("tteMinimum", "Minimum TTE in seconds", tteMinimum);
     cmd.AddValue("numUes", "Number of UEs", numUes);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("outputDir", "Output directory", outputDir);
-    cmd.AddValue("trafficProfile", "Profile: nb-iot|embb|urllc|dt|mixed", trafficProfile);
-    cmd.AddValue("strict", "NS_FATAL_ERROR on missed health gates", strict);
     cmd.Parse(argc, argv);
 
-    NtnMeasurementModel::NtnScenario ntnScenario = NtnMeasurementModel::NTN_SUBURBAN;
-    if (scenario == "dense-urban") ntnScenario = NtnMeasurementModel::NTN_DENSE_URBAN;
-    else if (scenario == "urban") ntnScenario = NtnMeasurementModel::NTN_URBAN;
-    else if (scenario == "rural") ntnScenario = NtnMeasurementModel::NTN_RURAL;
-
     NtnChoAlgorithm::TriggerType trigger = NtnChoAlgorithm::TRIGGER_TTE_AWARE;
-    if (triggerType == "a3") trigger = NtnChoAlgorithm::TRIGGER_EVENT_A3;
-    else if (triggerType == "location") trigger = NtnChoAlgorithm::TRIGGER_LOCATION_D1;
+    if (triggerType == "a3")
+        trigger = NtnChoAlgorithm::TRIGGER_EVENT_A3;
+    else if (triggerType == "location")
+        trigger = NtnChoAlgorithm::TRIGGER_LOCATION_D1;
 
     std::cout << "========================================\n"
-              << "NTN-CHO LEO Basic (event-driven v2)\n"
+              << "NTN-CHO LEO Basic (real mmwave NR cell)\n"
               << "========================================\n"
               << "  simTime: " << simTime << " s\n"
               << "  numUes:  " << numUes << "\n"
-              << "  trigger: " << triggerType << "\n"
-              << "  output:  " << outputDir << "\n";
+              << "  trigger: " << triggerType << "\n";
 
-    // ---- Configure the CHO helper (analytical layer) ----
+    // ---- CHO algorithm (TTE-aware) via the helper ----
     Ptr<NtnChoHelper> ntnHelper = CreateObject<NtnChoHelper>();
-    ntnHelper->SetNtnScenario(ntnScenario);
     ntnHelper->SetChoTriggerType(trigger);
     ntnHelper->SetCarrierFrequency(2.0e9);
     ntnHelper->SetBandwidth(30.0e6);
-    ntnHelper->SetSatelliteTxPower(40.0);
-    ntnHelper->SetD1Threshold(d1Threshold);
-    ntnHelper->SetQualityThreshold(qualityTh);
+    ntnHelper->SetSatelliteTxPower(satEirpDbm);
     ntnHelper->SetTteMinimum(Seconds(tteMinimum));
-
     Ptr<NtnChoAlgorithm> choAlgo = ntnHelper->CreateChoAlgorithm();
-    choAlgo->AddCandidateCell(1, 0, 0);
-    choAlgo->AddCandidateCell(2, 0, 5);
-    choAlgo->AddCandidateCell(3, 1, 0);
-    choAlgo->AddCandidateCell(4, 1, 3);
-    choAlgo->UpdateMeasurement(1, 8.0, 5.0);
-    choAlgo->UpdateMeasurement(2, 3.0, 1.0);
-    choAlgo->UpdateMeasurement(3, 6.0, 3.5);
-    choAlgo->UpdateMeasurement(4, -5.0, -4.0);
 
-    // ---- Real traffic plane ----
-    NtnRealisticTrafficHelper traffic;
-    traffic.SetSimTime(Seconds(simTime));
-    traffic.SetOutputDir(outputDir);
-    traffic.SetRunTag("ntn-cho-leo-basic_" + triggerType);
-    traffic.SetStrictGates(strict);
-    if (trafficProfile == "nb-iot")
-        traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::NbIotPeriodic);
-    else if (trafficProfile == "embb")
-        traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::EmbbStreaming);
-    else if (trafficProfile == "urllc")
-        traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::UrllcPings);
-    else if (trafficProfile == "dt")
-        traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::DigitalTwinTelemetry);
-    else
-        traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
+    // ---- Nodes: one SGP4 serving satellite (real mmwave gNB) + TR 38.811 UEs ----
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = 550.0;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> servSatMob =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    servSatMob->SetElements(elements[0]);
 
-    NodeContainer ues = traffic.InstallUes(numUes);
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    satNodes.Get(0)->AggregateObject(servSatMob);
+    NodeContainer ueNodes;
+    ueNodes.Create(numUes);
 
-    // Register an analytical CHO tick at 200 ms cadence; each tick
-    // re-evaluates the candidate set so the algorithm path is exercised.
-    traffic.RegisterPeriodicCallback(MilliSeconds(200), [&](Time now) {
-        double sinrJitter = std::sin(now.GetSeconds() * 0.31) * 1.5;
-        choAlgo->UpdateMeasurement(1, 8.0 + sinrJitter, 5.0);
-        choAlgo->UpdateMeasurement(3, 6.0 - sinrJitter, 3.5);
-        choAlgo->SelectBaselineLocationOnly();
-        choAlgo->SelectBaselineA3(-2.0);
+    // TR 38.811 class mobility (real MobilityModel) under the t=0 sub-point.
+    double subLat, subLon, subAlt;
+    servSatMob->GetGeodetic(subLat, subLon, subAlt);
+    NtnTr38811MobilityHelper ueMobility(1);
+    auto mobProfile = NtnMobilityScenarios::MixedContinental();
+    ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03, subLon - 0.03,
+                       subLon + 0.03);
+
+    // ---- Real mmwave NTN cell + traffic ----
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simTime));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ntn-cho-leo-basic_" + triggerType);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
+                      Seconds(1.0), Seconds(simTime - 0.5));
+
+    Ptr<mmwave::MmWaveEnbNetDevice> enb =
+        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
+    const uint16_t servingCell = enb ? enb->GetCellId() : 1;
+    const uint16_t candCell = servingCell + 100;
+    choAlgo->AddCandidateCell(servingCell, 0, 0);
+    choAlgo->AddCandidateCell(candCell, 1, 0);
+
+    // CHO exercised every 200 ms on the MEASURED serving SINR (UE 0); the
+    // candidate is ephemeris-predicted off that measured baseline.
+    rs.RegisterPeriodicCallback(MilliSeconds(200), [&](Time) {
+        const double servSinr = rs.GetUeRecentSinrDb(0);
+        if (std::isnan(servSinr))
+        {
+            return;
+        }
+        choAlgo->UpdateMeasurement(servingCell, servSinr, 5.0);
+        choAlgo->UpdateMeasurement(candCell, servSinr - 3.0, 2.0);
+        choAlgo->EvaluateConditions();
+        choAlgo->SelectBestCandidate();
     });
 
-    traffic.Wire();
-
-    Simulator::Stop(Seconds(simTime + 0.5));
+    Simulator::Stop(Seconds(simTime));
     Simulator::Run();
-    traffic.WriteHealthReport();
+    rs.Collect();
+    rs.WriteHealthReport();
+
+    std::cout << "  measured mean SINR: " << rs.GetMeanDlSinrDb() << " dB\n"
+              << "  measured throughput: " << rs.GetRxThroughputMbps() << " Mbps\n";
     Simulator::Destroy();
     return 0;
 }

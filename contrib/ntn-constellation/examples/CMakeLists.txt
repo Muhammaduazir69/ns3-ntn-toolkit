@@ -1,9 +1,11 @@
-# Real ISL-routed packet forwarding GS1 -> satA -> [ISL] -> satB -> GS2.
+# Real ISL-routed packet forwarding GS1 -> satA -> [ISL] -> satB -> GS2: real
+# Ipv4 forwarding through the sat nodes, real range delays, geometry contact gates.
 build_lib_example(
   NAME ntn-constellation-isl-routed-traffic
   SOURCE_FILES ntn-constellation-isl-routed-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-constellation}
+    ${libntn-cho}
     ${libcore}
     ${libnetwork}
     ${libmobility}
@@ -13,32 +15,54 @@ build_lib_example(
     ${libflow-monitor}
 )
 
-# Roadmap §4.4.5 — Walker constellation driving a real UDP data plane
-# through NtnRealisticTrafficHelper, sampling the ContactGraphScheduler
-# every second to log live ISL connectivity changes alongside the flow.
+# Walker constellation as ephemeris/contact-graph context; ONE serving satellite
+# carries a real mmwave NR cell to a ground terminal (measured SINR/throughput).
 build_lib_example(
   NAME ntn-constellation-walker-traffic
   SOURCE_FILES ntn-constellation-walker-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-constellation}
     ${libntn-traffic}
+    ${libntn-cho}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
-# Roadmap §4.4.4 — Single SGP4 LEO pass over a configurable ground station
-# with realistic data plane and GSL up/down sampling.
+# Single SGP4 LEO pass driving a real mmwave NR cell over a ground station at the
+# sub-point, with GSL up/down sampling (measured SINR/throughput).
 build_lib_example(
   NAME ntn-constellation-sgp4-mobility-traffic
   SOURCE_FILES ntn-constellation-sgp4-mobility-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-constellation}
     ${libntn-traffic}
+    ${libntn-cho}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
+)
+
+# Real-stack flagship: ContactGraphRouter INSTALLS routes; real packets traverse
+# the satellite nodes and adaptively reroute as the constellation moves.
+build_lib_example(
+  NAME ntn-constellation-real-routed
+  SOURCE_FILES ntn-constellation-real-routed.cc
+  LIBRARIES_TO_LINK
+    ${libntn-constellation}
+    ${libntn-cho}
     ${libcore}
     ${libnetwork}
     ${libmobility}

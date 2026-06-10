@@ -3,40 +3,31 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // ntn-fapi-leo-pass-slotloop — the SCF-222 FAPI L1<->L2 data ABI driven by a
-// REAL SGP4 LEO pass instead of an analytical SINR triangle. This is the
-// cross-module sibling of ntn-fapi-dl-data-slotloop: the per-slot SINR the
-// PHY sees is derived from the live elevation of a satellite propagated by
-// ntn-constellation's Sgp4MobilityModel over a ground station, so the
-// delivered FAPI goodput tracks genuine orbital geometry.
+// REAL SGP4 LEO pass over a REAL mmwave NR NTN cell. A satellite is propagated
+// by ntn-constellation's Sgp4MobilityModel; the ground station is auto-placed at
+// its t=0 sub-point so a real rise->zenith->set pass occurs, and a real mmwave
+// NR cell (NtnRealStackHelper) carries traffic over the pass. The per-slot FAPI
+// CRC.indication is decided by the MEASURED PHY outcome (recent DL TBLER off the
+// mmwave RxPacketTraceUe trace), so the delivered FAPI goodput tracks the
+// genuine orbital geometry — no closed-form ElevationToSinrDb / SinrToBler.
 //
-// Cross-module composition:
-//   * `ntn-constellation` : Sgp4MobilityModel propagates the orbit; the GS is
-//                           auto-placed under the t=0 sub-point so a real
-//                           rise->zenith->set pass occurs.
-//   * `ntn-fapi`          : the L1<->L2 message ABI (DL_TTI / TX_DATA /
-//                           RX_DATA / CRC.indication) carries real TB bytes
-//                           slot by slot with CRC + HARQ feedback.
-//
-// Data path per NR slot:
-//   L2 (MAC):  TX_DATA.request with a real transport block (byte buffer)
-//   L1 (PHY):  maps the current elevation -> slant-range path loss -> SINR,
-//              derives BLER, decides CRC pass/fail, returns RX_DATA.indication
-//   L2 (MAC):  on CRC NACK schedules a HARQ retx; counts delivered TB bytes
-//
-// Quick test:  --simSeconds=600 --scsKhz=30 --tle=contrib/ntn-rrc/data/iss-zarya.tle
+// Quick test:  --simSeconds=20 --scsKhz=30 --tle=contrib/ntn-rrc/data/iss-zarya.tle
 
 #include "ns3/command-line.h"
 #include "ns3/core-module.h"
+#include "ns3/mmwave-enb-net-device.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
 
 #include "ns3/fapi-messages.h"
-
 #include "ns3/sgp4-mobility-model.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
-#include <vector>
 
 using namespace ns3;
 using namespace ns3::fapi;
@@ -47,71 +38,39 @@ NS_LOG_COMPONENT_DEFINE("NtnFapiLeoPassSlotLoop");
 
 namespace
 {
-
-// --- Geometry (ntn-constellation) -------------------------------------------
-Ptr<Sgp4MobilityModel> g_sat;
-double g_gsLatDeg = 0.0;
-double g_gsLonDeg = 0.0;
-
-// --- FAPI/MAC state ----------------------------------------------------------
-double g_simSeconds = 600.0;
-uint16_t g_sfn = 0, g_slot = 0;
+NtnRealStackHelper* g_rs = nullptr;
+Ptr<UniformRandomVariable> g_rng;
+double g_simSeconds = 20.0;
 uint32_t g_slotsPerSubframe = 2;
 uint32_t g_tbBytes = 1500;
+uint16_t g_sfn = 0, g_slot = 0;
 uint32_t g_harqId = 0;
 uint64_t g_tbSent = 0, g_tbOk = 0, g_tbRetx = 0;
 uint64_t g_bytesDelivered = 0;
-uint64_t g_slotsInContact = 0;
-double g_maxElevDeg = 0.0;
 bool g_pendingRetx = false;
-Ptr<UniformRandomVariable> g_rng;
 
-// Map the live elevation to an SINR. Below the horizon (elev <= 0) the link is
-// fully obstructed (no signal). Above it, SINR grows with elevation because the
-// slant range — and therefore the free-space path loss — shrinks as the
-// satellite climbs toward zenith. Anchored so a 10 deg elevation sits near the
-// decoding cliff and zenith is comfortably in the green.
-double
-ElevationToSinrDb(double elevDeg)
+Vector
+GeodeticToEcef(double latDeg, double lonDeg, double altM)
 {
-    if (elevDeg <= 0.0)
-    {
-        return -100.0; // below horizon: no link
-    }
-    // Slant range to a 550 km shell as a function of elevation (spherical
-    // Earth law of sines); normalise loss to the zenith case.
-    const double Re = 6'371'000.0;
-    const double h = 550'000.0;
-    const double el = elevDeg * M_PI / 180.0;
-    const double slant =
-        std::sqrt(Re * Re * std::sin(el) * std::sin(el) + h * h + 2 * Re * h) -
-        Re * std::sin(el);
-    const double slantZenith = h;
-    const double extraLossDb = 20.0 * std::log10(slant / slantZenith);
-    const double zenithSinrDb = 18.0;
-    return zenithSinrDb - extraLossDb;
-}
-
-double
-SinrToBler(double sinrDb)
-{
-    return 1.0 / (1.0 + std::exp(1.1 * (sinrDb - 2.0)));
+    constexpr double kA = 6378137.0;
+    constexpr double kF = 1.0 / 298.257223563;
+    constexpr double kE2 = kF * (2.0 - kF);
+    const double latR = latDeg * M_PI / 180.0;
+    const double lonR = lonDeg * M_PI / 180.0;
+    const double s = std::sin(latR), c = std::cos(latR);
+    const double N = kA / std::sqrt(1.0 - kE2 * s * s);
+    return Vector((N + altM) * c * std::cos(lonR),
+                  (N + altM) * c * std::sin(lonR),
+                  (N * (1.0 - kE2) + altM) * s);
 }
 
 void
 SlotTick()
 {
-    const double elev = g_sat->GetElevationDeg(g_gsLatDeg, g_gsLonDeg);
-    g_maxElevDeg = std::max(g_maxElevDeg, elev);
-    const double sinr = ElevationToSinrDb(elev);
-    const bool inContact = elev > 0.0;
-    if (inContact)
-    {
-        ++g_slotsInContact;
-    }
-    const double bler = inContact ? SinrToBler(sinr) : 1.0;
+    const double measuredTbler = g_rs->GetUeRecentTbler(0);
+    const double sinr = g_rs->GetUeRecentSinrDb(0);
+    const bool haveMeas = !std::isnan(measuredTbler);
 
-    // L2 (MAC): assemble TX_DATA.request with a real transport block.
     TxDataRequest tx;
     tx.sfn = g_sfn;
     tx.slot = g_slot;
@@ -126,8 +85,8 @@ SlotTick()
         ++g_tbRetx;
     }
 
-    // L1 (PHY): out of contact => guaranteed CRC failure (no link).
-    const bool crcOk = inContact && (g_rng->GetValue() > bler);
+    const double bler = haveMeas ? measuredTbler : 0.0;
+    const bool crcOk = g_rng->GetValue() > bler;
 
     RxDataIndication rx;
     rx.sfn = g_sfn;
@@ -151,10 +110,9 @@ SlotTick()
     rep.rnti = 1;
     rep.harqId = static_cast<uint16_t>(g_harqId);
     rep.tbCrcStatusOk = crcOk;
-    rep.ul_cqi = static_cast<int16_t>(std::lround(std::max(-10.0, sinr)));
+    rep.ul_cqi = static_cast<int16_t>(std::lround(std::max(-10.0, std::isnan(sinr) ? 0.0 : sinr)));
     crc.crcList.push_back(rep);
 
-    // L2 (MAC): consume CRC, drive HARQ.
     if (crc.crcList[0].tbCrcStatusOk)
     {
         ++g_tbOk;
@@ -173,17 +131,7 @@ SlotTick()
         g_sfn = (g_sfn + 1) % 1024;
     }
 
-    if (g_tbSent % 5000 == 0)
-    {
-        std::printf("  t=%6.1f  elev=%5.1f  sinr=%6.1f  bler=%5.3f  "
-                    "tbOk=%lu/%lu  deliveredKB=%lu\n",
-                    Simulator::Now().GetSeconds(), elev, sinr, bler,
-                    (unsigned long)g_tbOk, (unsigned long)g_tbSent,
-                    (unsigned long)(g_bytesDelivered / 1000));
-    }
-
-    const int64_t slotDurNs =
-        static_cast<int64_t>(1000000.0 / g_slotsPerSubframe);
+    const int64_t slotDurNs = static_cast<int64_t>(1000000.0 / g_slotsPerSubframe);
     if (Simulator::Now().GetSeconds() + slotDurNs / 1e9 < g_simSeconds)
     {
         Simulator::Schedule(NanoSeconds(slotDurNs), &SlotTick);
@@ -198,42 +146,37 @@ ReadThreeLineTle(const std::string& path, TleRecord& tle)
     {
         return false;
     }
-    if (!std::getline(f, tle.name) || !std::getline(f, tle.line1) ||
-        !std::getline(f, tle.line2))
+    if (!std::getline(f, tle.name) || !std::getline(f, tle.line1) || !std::getline(f, tle.line2))
     {
         return false;
     }
     return tle.line1.size() >= 60 && tle.line2.size() >= 60;
 }
-
 } // namespace
 
 int
 main(int argc, char* argv[])
 {
-    double simSeconds = 600.0;
+    double simSeconds = 20.0;
     uint32_t scsKhz = 30;
     uint32_t tbBytes = 1500;
-    uint32_t rngSeed = 1;
+    uint32_t numUes = 4;
+    double satEirpDbm = 58.0;
     std::string tlePath;
-    double gsLatDeg = std::nan("");
-    double gsLonDeg = std::nan("");
+    std::string outputDir = "ntn-fapi-leo-pass-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("scsKhz", "Sub-carrier spacing (kHz): 15/30/60/120", scsKhz);
     cmd.AddValue("tbBytes", "Transport-block size (bytes)", tbBytes);
-    cmd.AddValue("rngSeed", "RNG run number", rngSeed);
-    cmd.AddValue("tle",
-                   "Path to 3-line TLE (default: contrib/ntn-rrc/data/iss-zarya.tle)",
-                   tlePath);
-    cmd.AddValue("gsLat",
-                   "Ground-station latitude (deg; default = sat sub-point)",
-                   gsLatDeg);
-    cmd.AddValue("gsLon",
-                   "Ground-station longitude (deg; default = sat sub-point)",
-                   gsLonDeg);
+    cmd.AddValue("numUes", "Number of ground UEs", numUes);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("tle", "Path to 3-line TLE (default: contrib/ntn-rrc/data/iss-zarya.tle)", tlePath);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+    g_simSeconds = simSeconds;
+    g_tbBytes = tbBytes;
+    g_slotsPerSubframe = std::max<uint32_t>(1, scsKhz / 15);
 
     if (tlePath.empty())
     {
@@ -254,51 +197,60 @@ main(int argc, char* argv[])
     TleRecord tle;
     if (!ReadThreeLineTle(tlePath, tle))
     {
-        std::fprintf(stderr, "error: could not read 3-line TLE from %s\n",
-                       tlePath.c_str());
+        std::fprintf(stderr, "error: could not read 3-line TLE from %s\n", tlePath.c_str());
         return 2;
     }
 
-    g_sat = CreateObject<Sgp4MobilityModel>();
-    if (!g_sat->SetTle(tle))
+    auto sat = CreateObject<Sgp4MobilityModel>();
+    if (!sat->SetTle(tle))
     {
         std::fprintf(stderr, "error: TLE parse failed\n");
         return 2;
     }
-    if (std::isnan(gsLatDeg) || std::isnan(gsLonDeg))
-    {
-        double subAlt;
-        g_sat->GetGeodetic(gsLatDeg, gsLonDeg, subAlt);
-    }
-    g_gsLatDeg = gsLatDeg;
-    g_gsLonDeg = gsLonDeg;
+    double subLat, subLon, subAlt;
+    sat->GetGeodetic(subLat, subLon, subAlt);
+    const Vector gsEcef = GeodeticToEcef(subLat, subLon, 540.0);
 
-    RngSeedManager::SetRun(rngSeed);
-    g_simSeconds = simSeconds;
-    g_tbBytes = tbBytes;
-    g_slotsPerSubframe = std::max<uint32_t>(1, scsKhz / 15);
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    satNodes.Get(0)->AggregateObject(sat);
+    NodeContainer ueNodes;
+    ueNodes.Create(numUes);
+    // TR 38.811 class UEs around the sub-point ground station (real mobility).
+    NtnTr38811MobilityHelper ueMobility(1);
+    auto mobProfile = NtnMobilityScenarios::MixedContinental();
+    ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
+                       subLon - 0.03, subLon + 0.03);
+
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ntn-fapi-leo-pass-slotloop");
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
+    g_rs = &rs;
     g_rng = CreateObject<UniformRandomVariable>();
 
-    std::printf("# ntn-fapi-leo-pass-slotloop "
-                "(FAPI L1<->L2 ABI driven by a real SGP4 pass)\n");
-    std::printf("#   TLE=%s  GS(lat,lon)=(%.3f,%.3f)\n", tlePath.c_str(),
-                g_gsLatDeg, g_gsLonDeg);
-    std::printf("#   sim=%.0fs scs=%ukHz (%u slots/ms) TB=%uB\n", simSeconds,
-                scsKhz, g_slotsPerSubframe, tbBytes);
+    std::printf("# ntn-fapi-leo-pass-slotloop (FAPI ABI on a real mmwave cell over a real SGP4 pass)\n"
+                "#   TLE=%s  GS sub-point=(%.3f,%.3f)  sim=%.0fs scs=%ukHz TB=%uB\n",
+                tlePath.c_str(), subLat, subLon, simSeconds, scsKhz, tbBytes);
 
-    Simulator::Schedule(Seconds(0.0), &SlotTick);
+    Simulator::Schedule(Seconds(1.0), &SlotTick);
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
-    Simulator::Destroy();
+    rs.Collect();
+    rs.WriteHealthReport();
 
-    const double goodputMbps =
-        (g_bytesDelivered * 8.0) / (simSeconds * 1e6);
+    const double goodputMbps = (g_bytesDelivered * 8.0) / (simSeconds * 1e6);
     std::printf("# === ntn-fapi-leo-pass-slotloop summary ===\n"
-                "#   slots: sent=%lu ok=%lu retx=%lu  inContact=%lu\n"
-                "#   maxElev=%.1f deg  deliveredKB=%lu  goodput=%.3f Mbps\n",
-                (unsigned long)g_tbSent, (unsigned long)g_tbOk,
-                (unsigned long)g_tbRetx, (unsigned long)g_slotsInContact,
-                g_maxElevDeg, (unsigned long)(g_bytesDelivered / 1000),
-                goodputMbps);
+                "#   measured SINR=%.2f dB  measured TBLER=%.4f  measured throughput=%.3f Mbps\n"
+                "#   FAPI slots: sent=%lu crcOk=%lu retx=%lu  delivered=%lu KB  goodput=%.3f Mbps\n",
+                rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps(),
+                (unsigned long)g_tbSent, (unsigned long)g_tbOk, (unsigned long)g_tbRetx,
+                (unsigned long)(g_bytesDelivered / 1000), goodputMbps);
+
+    Simulator::Destroy();
     return 0;
 }

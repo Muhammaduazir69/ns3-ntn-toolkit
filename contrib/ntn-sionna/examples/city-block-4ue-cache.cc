@@ -19,6 +19,9 @@
  *   ./ns3 run "city-block-4ue-cache --freqHz=2e9 --steps=60"
  */
 #include "ns3/command-line.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
@@ -79,6 +82,10 @@ Tick(double t,
 int
 main(int argc, char* argv[])
 {
+    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
+                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
+                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
+                "module's *-traffic / *-real-stack examples.\n\n");
     std::string host = "127.0.0.1";
     uint16_t port = 8765;
     double freqHz = 2.0e9;
@@ -146,11 +153,23 @@ main(int argc, char* argv[])
         CreateObject<ConstantPositionMobilityModel>();
     ueD->SetPosition(Vector(-100.0, -100.0, 0)); // SW
 
-    Ptr<ConstantVelocityMobilityModel> sat =
-        CreateObject<ConstantVelocityMobilityModel>();
-    sat->SetPosition(Vector(-300e3, 0, altKm * 1000.0));
-    sat->SetVelocity(Vector(20e3, 0, 0));
-
+    // Real SGP4 orbit projected into the scenario's local ENU frame (genuine
+    // pass dynamics; replaces the straight-line placeholder satellite).
+    ns3::ntncon::WalkerConfig wcfgSat;
+    wcfgSat.num_planes = 1;
+    wcfgSat.total_sats = 80;
+    wcfgSat.altitude_km = 550.0;
+    wcfgSat.inclination_deg = 53.0;
+    wcfgSat.epoch_unix_s = 1735689600.0;
+    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(satElements[0]);
+    double satSubLat, satSubLon, satSubAlt;
+    satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
+    Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
+    sat->SetSource(satSgp4);
+    sat->SetReference(satSubLat, satSubLon, 0.0);
     std::vector<Sample> samples;
     for (uint32_t i = 1; i <= steps; ++i)
     {

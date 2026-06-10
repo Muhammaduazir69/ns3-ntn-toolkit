@@ -3,6 +3,8 @@ build_lib_example(
   SOURCE_FILES thz-ntn-leo-ground.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libntn-traffic}
     ${libcore}
     ${libnetwork}
@@ -12,19 +14,25 @@ build_lib_example(
     ${libapplications}
 )
 
-# Real packet transmission: sub-THz LEO downlink gated by molecular absorption.
+# Sub-THz LEO downlink on a real mmwave NR cell; molecular absorption is a
+# channel plug-in attenuating real packets (measured SINR/TBLER/goodput).
 build_lib_example(
   NAME thz-ntn-leo-ground-downlink-traffic
   SOURCE_FILES thz-ntn-leo-ground-downlink-traffic.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
 build_lib_example(
@@ -32,6 +40,8 @@ build_lib_example(
   SOURCE_FILES thz-ntn-isl.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libntn-traffic}
     ${libcore}
     ${libnetwork}
@@ -41,33 +51,46 @@ build_lib_example(
     ${libapplications}
 )
 
-# Real packet transmission over a 300 GHz ISL gated by ThzNtnIslChannel SNR.
+# Real mmwave NR ISL between two cross-plane SGP4 satellites of a Starlink-
+# class shell; ThzNtnIslChannel's analytic budget printed beside measured SINR.
 build_lib_example(
   NAME thz-ntn-isl-traffic
   SOURCE_FILES thz-ntn-isl-traffic.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
+# EKF beam tracking of a real SGP4 pass; the tracker's pointing loss is a
+# live channel reconfiguration on a real mmwave NR cell (measured KPIs).
 build_lib_example(
   NAME thz-ntn-beam-tracking
   SOURCE_FILES thz-ntn-beam-tracking.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
+    ${libmmwave}
+    ${liblte}
 )
 
 # UM-MIMO array + beam-squint analysis. Drives the real beamforming engine:
@@ -78,53 +101,73 @@ build_lib_example(
   SOURCE_FILES thz-ntn-um-mimo.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
 )
 
-# Real packet transmission: RIS recovers a blocked THz link mid-sim.
+# RIS recovers a blocked THz link mid-sim — blockage + RIS engagement are
+# LIVE channel events on a real mmwave NR cell (measured SINR/TBLER/goodput).
 build_lib_example(
   NAME thz-ntn-ris-relay-traffic
   SOURCE_FILES thz-ntn-ris-relay-traffic.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
-# Real packet transmission: ISAC comm/sense coexistence via ThzNtnIsacScheduler.
+# ISAC comm/sense coexistence on a real mmwave NR cell: the real
+# ThzNtnIsacScheduler's comm share gates the live channel TDM-style (measured).
 build_lib_example(
   NAME thz-ntn-isac-coexist-traffic
   SOURCE_FILES thz-ntn-isac-coexist-traffic.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
-# Real packet transmission: weather front (fog/rain/snow) over a THz downlink.
+# Weather front (fog/rain/snow) as a LIVE channel plug-in on a real mmwave NR
+# NTN cell — the weather attenuates real packets (measured SINR/TBLER/goodput).
 build_lib_example(
   NAME thz-ntn-weather-traffic
   SOURCE_FILES thz-ntn-weather-traffic.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
 # RIS-assisted THz downlink analysis: direct vs RIS-assisted SNR, N^2 scaling
@@ -135,6 +178,8 @@ build_lib_example(
   SOURCE_FILES thz-ntn-ris-assisted.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
 )
@@ -149,6 +194,8 @@ build_lib_example(
   SOURCE_FILES thz-ntn-isac.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
 )
@@ -159,6 +206,8 @@ build_lib_example(
   SOURCE_FILES thz-ntn-dband-constellation.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
 )
@@ -171,6 +220,8 @@ build_lib_example(
   SOURCE_FILES thz-ntn-full-stack.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libmobility}
 )
@@ -184,12 +235,37 @@ build_lib_example(
   SOURCE_FILES thz-ntn-ric-controlled-traffic.cc
   LIBRARIES_TO_LINK
     ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${liboran-ntn}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
+)
+
+# Phase-1 real-stack flagship: THz physics as a channel plug-in on a real radio.
+build_lib_example(
+  NAME thz-ntn-real-stack
+  SOURCE_FILES thz-ntn-real-stack.cc
+  LIBRARIES_TO_LINK
+    ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
 )

@@ -40,6 +40,8 @@
 #include <string>
 #include <vector>
 
+#include <cstdio>
+
 using namespace ns3;
 
 static constexpr double R_E = 6371000.0;
@@ -572,6 +574,10 @@ WriteSummary()
 int
 main(int argc, char* argv[])
 {
+    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
+                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
+                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
+                "module's *-traffic / *-real-stack examples.\n\n");
     int example = 0;  // 0 = all
     CommandLine cmd;
     cmd.AddValue("example", "Example number to run (1-8), 0=all", example);

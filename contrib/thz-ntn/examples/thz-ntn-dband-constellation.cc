@@ -33,6 +33,8 @@ class ThzNtnLinkBudget;
 #include "ns3/thz-ntn-channel-model.h"
 #include "ns3/thz-ntn-link-budget.h"
 
+#include <cstdio>
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ThzNtnDbandConstellation");
@@ -94,6 +96,10 @@ ComputeGeometry(const TerminalPosition& gt,
 int
 main(int argc, char* argv[])
 {
+    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
+                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
+                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
+                "module's *-traffic / *-real-stack examples.\n\n");
     // ---- Default parameters ----
     uint32_t numSats = 4;
     uint32_t numUts = 10;

@@ -2,38 +2,42 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// W1 + W2 integration: read a real TLE (the kind ntn-constellation pulls
-// from CelesTrak), drive a SNS3 SatelliteSGP4MobilityModel from it, and
-// log NtnTimingAdvance values across a pass.
-//
-// Output CSV columns:
-//   time_s, sat_x_m, sat_y_m, sat_z_m, slant_km, ta_total_us, ta_drift_rate_us_per_s
+// ntn-rrc-from-tle — W1 + W2 integration: read a real TLE (the kind
+// ntn-constellation pulls from CelesTrak), drive a SNS3 SatelliteSGP4Mobility
+// Model from it, and run a REAL mmwave NR NTN cell (NtnRealStackHelper) under
+// the satellite. The UE is auto-placed at the satellite's t=0 sub-point so a
+// real overhead pass occurs; NtnTimingAdvance is logged from the live SGP4
+// geometry and the DL SINR/TBLER/throughput are MEASURED off the mmwave PHY
+// trace. Output CSV: time_s, sat_x/y/z, slant_km, ta_total_us, drift, meas_sinr.
 
-#include "ns3/constant-position-mobility-model.h"
 #include "ns3/core-module.h"
+#include "ns3/mmwave-enb-net-device.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-timing-advance.h"
 #include "ns3/satellite-sgp4-mobility-model.h"
-#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <sstream>
 #include <string>
+#include <vector>
 
 using namespace ns3;
 using namespace ns3::ntnrrc;
 
 namespace
 {
+NtnRealStackHelper* g_rs = nullptr;
 
 struct TleFile
 {
-    std::string name;
-    std::string line1;
-    std::string line2;
+    std::string name, line1, line2;
 };
 
 bool
@@ -63,6 +67,22 @@ ReadTle(const std::string& path, TleFile& out)
     return true;
 }
 
+// WGS84 geodetic -> ECEF (m).
+Vector
+GeodeticToEcef(double latDeg, double lonDeg, double altM)
+{
+    constexpr double kA = 6378137.0;
+    constexpr double kF = 1.0 / 298.257223563;
+    constexpr double kE2 = kF * (2.0 - kF);
+    const double latR = latDeg * M_PI / 180.0;
+    const double lonR = lonDeg * M_PI / 180.0;
+    const double s = std::sin(latR), c = std::cos(latR);
+    const double N = kA / std::sqrt(1.0 - kE2 * s * s);
+    return Vector((N + altM) * c * std::cos(lonR),
+                  (N + altM) * c * std::sin(lonR),
+                  (N * (1.0 - kE2) + altM) * s);
+}
+
 void
 SampleStep(Ptr<NtnTimingAdvance> ta,
            Ptr<SatSGP4MobilityModel> sat,
@@ -78,45 +98,39 @@ SampleStep(Ptr<NtnTimingAdvance> ta,
     const double slant = ta->GetSlantRangeMetres() / 1000.0;
     const double taTotalUs = ta->ComputeTotalTa().GetMicroSeconds();
     const double drift = ta->ComputeTaDriftRate(MilliSeconds(10));
+    const double sinr = g_rs ? g_rs->GetUeRecentSinrDb(0) : std::nan("");
     *csv << std::fixed << std::setprecision(3) << Simulator::Now().GetSeconds() << ","
          << std::setprecision(2) << p.x << "," << p.y << "," << p.z << "," << std::setprecision(3)
          << slant << "," << static_cast<long long>(taTotalUs) << "," << std::scientific
-         << std::setprecision(3) << (drift * 1e6) << "\n"; // s/s -> us/s
+         << std::setprecision(3) << (drift * 1e6) << "," << std::fixed << std::setprecision(2)
+         << (std::isnan(sinr) ? 0.0 : sinr) << "\n";
     Simulator::Schedule(step, &SampleStep, ta, sat, csv, step, stopAt);
 }
-
 } // namespace
 
 int
 main(int argc, char* argv[])
 {
     std::string tlePath;
-    std::string startUtc;     // "YYYY-MM-DD HH:MM:SS"
-    double ueLatDeg = 33.6844;
-    double ueLonDeg = 73.0479;
-    double ueAltM = 540.0;
-    double simTimeSec = 600.0;
-    std::string outputDir = ".";
+    std::string startUtc;
+    double simTimeSec = 20.0;
+    uint32_t numUes = 4;
+    double satEirpDbm = 58.0;
     double stepSec = 1.0;
     bool transparent = true;
-    std::string csvPath = "ntn-rrc-from-tle.csv";
+    std::string outputDir = "ntn-rrc-from-tle-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("tle", "Path to a 3-line TLE file (name, line1, line2)", tlePath);
-    cmd.AddValue("start", "Scenario start UTC, ISO format YYYY-MM-DD HH:MM:SS", startUtc);
-    cmd.AddValue("ueLat", "UE latitude (deg)", ueLatDeg);
-    cmd.AddValue("ueLon", "UE longitude (deg)", ueLonDeg);
-    cmd.AddValue("ueAlt", "UE altitude (m)", ueAltM);
+    cmd.AddValue("start", "Scenario start UTC, ISO format YYYY-MM-DDTHH:MM:SS", startUtc);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
+    cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("step", "Sample period (s)", stepSec);
     cmd.AddValue("transparent", "Transparent (true) vs regenerative (false)", transparent);
-    cmd.AddValue("csv", "Output CSV path", csvPath);
-    cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    // Default to a bundled ISS TLE when --tle is not supplied so the
-    // example smoke-runs without external state. Search a few standard
-    // paths so the binary works from build root, contrib/, or install.
     if (tlePath.empty())
     {
         for (const std::string& candidate : {
@@ -137,41 +151,20 @@ main(int argc, char* argv[])
     if (tlePath.empty() || !ReadTle(tlePath, tle))
     {
         std::cerr << "error: --tle is required and must be a 3-line file "
-                     "(default ISS TLE in contrib/ntn-rrc/data/iss-zarya.tle "
-                     "not found from cwd)\n";
+                     "(bundled ISS TLE in contrib/ntn-rrc/data/iss-zarya.tle not found)\n";
         return 2;
     }
-    // Default the start UTC to the ISS TLE's anchor epoch when not
-    // provided, so smoke runs work with bundled data.
     if (startUtc.empty())
     {
         startUtc = "2024-01-01 12:00:00";
     }
-
-    // ---- UE in ECEF ----
-    constexpr double kA = 6378137.0;
-    constexpr double kF = 1.0 / 298.257223563;
-    constexpr double kE2 = kF * (2.0 - kF);
-    const double latR = ueLatDeg * M_PI / 180.0;
-    const double lonR = ueLonDeg * M_PI / 180.0;
-    const double sLat = std::sin(latR);
-    const double cLat = std::cos(latR);
-    const double N = kA / std::sqrt(1.0 - kE2 * sLat * sLat);
-    const Vector ueEcef{(N + ueAltM) * cLat * std::cos(lonR),
-                        (N + ueAltM) * cLat * std::sin(lonR),
-                        (N * (1.0 - kE2) + ueAltM) * sLat};
-
-    Ptr<ConstantPositionMobilityModel> ueMob = CreateObject<ConstantPositionMobilityModel>();
-    ueMob->SetPosition(ueEcef);
-
-    // CommandLine truncates arg values at whitespace, so `--start` accepts
-    // either "YYYY-MM-DDTHH:MM:SS" (ISO with T separator) or just the date.
-    // We translate the T separator back to a space for SNS3's parser.
     std::string startSpace = startUtc;
     for (auto& ch : startSpace)
     {
         if (ch == 'T')
+        {
             ch = ' ';
+        }
     }
 
     // ---- Satellite via SGP4 (SNS3) ----
@@ -179,31 +172,63 @@ main(int argc, char* argv[])
     satMob->SetStartDate(startSpace);
     satMob->SetTleInfo(tle.line1 + "\n" + tle.line2);
 
-    // ---- TA pre-comp ----
+    // Auto-place the UE at the satellite's t=0 sub-point so the mmwave cell is in
+    // view (a real overhead pass), then build nodes/mobility around it.
+    const Vector sat0 = satMob->GetPosition();
+    const double subLat = std::asin(std::max(-1.0, std::min(1.0, sat0.z / sat0.GetLength()))) *
+                          180.0 / M_PI;
+    const double subLon = std::atan2(sat0.y, sat0.x) * 180.0 / M_PI;
+    const Vector ueEcef = GeodeticToEcef(subLat, subLon, 540.0);
+
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    satNodes.Get(0)->AggregateObject(satMob);
+    NodeContainer ueNodes;
+    ueNodes.Create(numUes);
+    // TR 38.811 class UEs (real MobilityModel) around the sub-point.
+    NtnTr38811MobilityHelper ueMobility(1);
+    auto mobProfile = NtnMobilityScenarios::MixedContinental();
+    auto ueModels = ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
+                                       subLon - 0.03, subLon + 0.03);
+    Ptr<MobilityModel> ueMob = ueModels[0];
+
+    // ---- real mmwave NR cell + measured traffic ----
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simTimeSec));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ntn-rrc-from-tle");
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simTimeSec - 0.5));
+    g_rs = &rs;
+
+    // ---- TA pre-comp from the real SGP4 geometry ----
     NtnRrcHelper helper;
     helper.SetPayloadMode(transparent ? PayloadMode::Transparent : PayloadMode::RegenerativeFull);
     helper.SetReferencePosition(ueEcef);
     Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ueMob, satMob);
 
-    std::ofstream csv(csvPath);
-    csv << "time_s,sat_x_m,sat_y_m,sat_z_m,slant_km,ta_total_us,ta_drift_rate_us_per_s\n";
-    Simulator::ScheduleNow(&SampleStep, ta, satMob, &csv, Seconds(stepSec),
-                           Seconds(simTimeSec));
+    std::filesystem::create_directories(outputDir);
+    std::ofstream csv(outputDir + "/ntn-rrc-from-tle.csv");
+    csv << "time_s,sat_x_m,sat_y_m,sat_z_m,slant_km,ta_total_us,ta_drift_rate_us_per_s,"
+           "measured_sinr_db\n";
+    Simulator::ScheduleNow(&SampleStep, ta, satMob, &csv, Seconds(stepSec), Seconds(simTimeSec));
 
-    NtnRealisticTrafficHelper _ntn_traffic;
-    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
-    _ntn_traffic.SetOutputDir(outputDir);
-    _ntn_traffic.SetRunTag("ntn-rrc-from-tle");
-    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
-    _ntn_traffic.InstallUes(8);
-    _ntn_traffic.Wire();
-
-    Simulator::Stop(Seconds(simTimeSec) + MilliSeconds(1));
+    Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
-    _ntn_traffic.WriteHealthReport();
-    Simulator::Destroy();
+    rs.Collect();
+    rs.WriteHealthReport();
+    csv.close();
 
-    std::cout << "wrote " << csvPath << " (" << simTimeSec << " s pass of " << tle.name
-              << ", step " << stepSec << " s)\n";
+    std::cout << "ntn-rrc-from-tle complete (real SGP4 pass of " << tle.name
+              << " over its sub-point).\n"
+              << "  UE sub-point: lat " << subLat << ", lon " << subLon << "\n"
+              << "  measured mean SINR : " << rs.GetMeanDlSinrDb() << " dB\n"
+              << "  measured throughput: " << rs.GetRxThroughputMbps() << " Mbps\n"
+              << "  final slant range  : " << ta->GetSlantRangeMetres() / 1000.0 << " km\n"
+              << "  csv: " << outputDir << "/ntn-rrc-from-tle.csv\n";
+
+    Simulator::Destroy();
     return 0;
 }

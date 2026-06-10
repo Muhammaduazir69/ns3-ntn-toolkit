@@ -59,6 +59,8 @@ class ThzNtnMac;
 // Ptr<ThzNtnMolecularAbsorption> argument.
 #include "ns3/thz-ntn-molecular-absorption.h"
 
+#include <cstdio>
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ThzNtnFullStack");
@@ -91,6 +93,10 @@ ComputeElevation(double t, double duration, double maxElev)
 int
 main(int argc, char* argv[])
 {
+    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
+                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
+                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
+                "module's *-traffic / *-real-stack examples.\n\n");
     // ---- Default parameters ----
     double duration = 30.0;                // seconds
     std::string preset = "TeraLink-225GHz";

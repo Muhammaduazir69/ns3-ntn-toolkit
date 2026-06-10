@@ -2,212 +2,171 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// thz-ntn-isl-traffic — REAL packet transmission over a 300 GHz inter-
-// satellite link whose SNR is computed by ThzNtnIslChannel from the live
-// inter-satellite geometry (vacuum FSPL + space noise temperature, no
-// atmosphere). Two satellites drift apart and back together; the ISL SNR
-// and the delivered goodput track the changing inter-satellite range.
+// thz-ntn-isl-traffic — REAL packet transmission over a sub-THz inter-
+// satellite link between two CROSS-PLANE neighbours of a Starlink-class
+// Walker shell (72 planes x 22 sats, 53 deg, 550 km). Both satellites fly
+// genuine SGP4 orbits, so the inter-satellite range oscillates as the planes
+// converge toward the high-latitude crossings and diverge at the equator —
+// real constellation geometry, not a scripted drift.
 //
-// The ISL channel's ComputeIslSnr_dB(satA, satB) is evaluated every second
-// and mapped to a packet-error rate on the receiver's RateErrorModel, while
-// the P2P channel delay is set from the inter-satellite slant range. So when
-// the satellites are close the ISL carries full rate; as they separate the
-// SNR falls and (beyond the link's max range) the link drops — all from the
-// thz-ntn ISL physics, nothing hardcoded.
+// Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06): the old version mapped
+// ThzNtnIslChannel::ComputeIslSnr_dB() through a sigmoid SnrToPer() onto a
+// P2P RateErrorModel — no packet crossed a radio, and the satellites were
+// ConstantPosition/ConstantVelocity placeholders. Here the ISL is a REAL
+// mmwave NR link (NtnRealStackHelper: SpectrumPhy + MAC + RLC/PDCP + RRC)
+// between the two satellites: the SINR is MEASURED off the PHY trace and
+// tracks the live SGP4 range through the stack's own Friis loss. The
+// module's analytic ComputeIslSnr_dB() is printed alongside the measurement
+// so the formula-vs-measured gap is visible. The ThzNtnPropagationLossModel
+// plug-in stays in the packet path and correctly reports ~0 dB excess —
+// an exo-atmospheric ISL sees no molecular absorption (vacuum).
 //
-// Quick test:  --simSeconds=120 --dataRateMbps=20
-#include "ns3/applications-module.h"
-#include "ns3/command-line.h"
-#include "ns3/constant-position-mobility-model.h"
-#include "ns3/constant-velocity-mobility-model.h"
+// The carrier is capped at 100 GHz by the 3GPP spectrum model; the 300 GHz
+// D-band study stays in the analytic thz-ntn-isl link-budget tool. The high
+// EIRP reflects UM-MIMO array gains at sub-THz (~50+ dBi per end).
+//
+// Quick test:  --simSeconds=60
 #include "ns3/core-module.h"
-#include "ns3/error-model.h"
-#include "ns3/flow-monitor-helper.h"
-#include "ns3/internet-stack-helper.h"
-#include "ns3/ipv4-address-helper.h"
-#include "ns3/point-to-point-channel.h"
-#include "ns3/point-to-point-helper.h"
-
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
 #include "ns3/thz-ntn-isl-channel.h"
+#include "ns3/thz-ntn-propagation-loss-model.h"
+#include "ns3/walker-constellation.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ThzNtnIslTraffic");
 
-namespace
-{
-constexpr double kC = 299792458.0;
-Ptr<ThzNtnIslChannel> g_isl;
-Ptr<MobilityModel> g_satA;
-Ptr<MobilityModel> g_satB;
-Ptr<RateErrorModel> g_em;
-Ptr<PointToPointChannel> g_channel;
-Ptr<PacketSink> g_sink;
-uint64_t g_lastRx = 0;
-double g_minSnrDb = 3.0;
-
-double
-SnrToPer(double snrDb)
-{
-    return 1.0 / (1.0 + std::exp(0.8 * (snrDb - 6.0)));
-}
-
-void
-LinkProbe()
-{
-    const double snr = g_isl->ComputeIslSnr_dB(g_satA, g_satB);
-    const double cap = g_isl->ComputeIslCapacity_Gbps(snr);
-    const double dist = g_satA->GetDistanceFrom(g_satB);
-    const double per = (snr < g_minSnrDb) ? 1.0 : SnrToPer(snr);
-    g_em->SetRate(per);
-    g_channel->SetAttribute("Delay", TimeValue(Seconds(dist / kC)));
-
-    const uint64_t tot = g_sink ? g_sink->GetTotalRx() : 0;
-    const double mbps = (tot - g_lastRx) * 8.0 / 1e6;
-    g_lastRx = tot;
-    std::printf("  %6.1f  %10.1f  %8.2f  %10.3f  %9.3f\n",
-                Simulator::Now().GetSeconds(), dist / 1000.0, snr, cap, mbps);
-    Simulator::Schedule(Seconds(1.0), &LinkProbe);
-}
-} // namespace
-
 int
 main(int argc, char* argv[])
 {
-    double simSeconds = 600.0;
-    double freqGHz = 300.0;
-    double txPowerDbm = 30.0;
-    double txGainDb = 55.0;
-    double rxGainDb = 55.0;
-    double bandwidthGHz = 10.0;
-    double startSepKm = 200.0;
-    double maxSepKm = 5000.0;
-    double dataRateMbps = 100.0;
-    uint32_t packetBytes = 1200;
-    double minSnrDb = 3.0;
-    double linkCapacityMbps = 500.0;
+    double simSeconds = 60.0;
+    double freqGHz = 100.0;    // sub-THz (3GPP spectrum model upper bound)
+    double islEirpDbm = 110.0; // UM-MIMO ISL beam (closes ~189 dB FSPL at ~700 km)
+    uint32_t numPlanes = 72;
+    uint32_t satsPerPlane = 22;
+    std::string outputDir = "thz-ntn-isl-traffic-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
-    cmd.AddValue("freqGHz", "ISL carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("txPowerDbm", "ISL Tx power (dBm)", txPowerDbm);
-    cmd.AddValue("txGainDb", "ISL Tx antenna gain (dBi)", txGainDb);
-    cmd.AddValue("rxGainDb", "ISL Rx antenna gain (dBi)", rxGainDb);
-    cmd.AddValue("bandwidthGHz", "ISL bandwidth (GHz)", bandwidthGHz);
-    cmd.AddValue("startSepKm", "Initial inter-satellite separation (km)", startSepKm);
-    cmd.AddValue("maxSepKm", "Max separation at mid-sim (km)", maxSepKm);
-    cmd.AddValue("dataRateMbps", "Offered ISL load (Mbps)", dataRateMbps);
-    cmd.AddValue("packetBytes", "UDP payload size (bytes)", packetBytes);
-    cmd.AddValue("minSnrDb", "Min SNR for a usable ISL (dB)", minSnrDb);
-    cmd.AddValue("linkCapacityMbps", "P2P link capacity (Mbps)", linkCapacityMbps);
+    cmd.AddValue("freqGHz", "ISL carrier frequency (GHz), capped at 100", freqGHz);
+    cmd.AddValue("islEirpDbm", "ISL EIRP / gNB Tx power (dBm)", islEirpDbm);
+    cmd.AddValue("numPlanes", "Walker shell planes", numPlanes);
+    cmd.AddValue("satsPerPlane", "Satellites per plane", satsPerPlane);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    g_minSnrDb = minSnrDb;
-
-    NodeContainer nodes;
-    nodes.Create(2);
-    // Sat A fixed; Sat B drifts away to maxSep at mid-sim then returns.
-    Ptr<ConstantPositionMobilityModel> a =
-        CreateObject<ConstantPositionMobilityModel>();
-    a->SetPosition(Vector(0, 0, 600000.0));
-    nodes.Get(0)->AggregateObject(a);
-    Ptr<ConstantVelocityMobilityModel> b =
-        CreateObject<ConstantVelocityMobilityModel>();
-    b->SetPosition(Vector(startSepKm * 1000.0, 0, 600000.0));
-    // Velocity so B reaches maxSep at mid-sim (relative drift).
-    const double driftMps = (maxSepKm - startSepKm) * 1000.0 / (0.5 * simSeconds);
-    b->SetVelocity(Vector(driftMps, 0, 0));
-    nodes.Get(1)->AggregateObject(b);
-    // At mid-sim reverse the drift so they close again.
-    Simulator::Schedule(Seconds(0.5 * simSeconds), [b, driftMps]() {
-        b->SetVelocity(Vector(-driftMps, 0, 0));
-    });
-    g_satA = a;
-    g_satB = b;
-
-    g_isl = CreateObject<ThzNtnIslChannel>();
-    g_isl->SetAttribute("Frequency", DoubleValue(freqGHz * 1e9));
-    g_isl->SetAttribute("TxPower", DoubleValue(txPowerDbm));
-    g_isl->SetAttribute("TxGain", DoubleValue(txGainDb));
-    g_isl->SetAttribute("RxGain", DoubleValue(rxGainDb));
-    g_isl->SetAttribute("Bandwidth", DoubleValue(bandwidthGHz * 1e9));
-
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute(
-        "DataRate",
-        DataRateValue(DataRate(static_cast<uint64_t>(linkCapacityMbps * 1e6))));
-    p2p.SetChannelAttribute("Delay",
-                            TimeValue(Seconds(startSepKm * 1000.0 / kC)));
-    NetDeviceContainer devices = p2p.Install(nodes);
-    Ptr<RateErrorModel> em = CreateObject<RateErrorModel>();
-    em->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
-    em->SetRate(0.0);
-    devices.Get(0)->SetAttribute("ReceiveErrorModel", PointerValue(em));
-    g_em = em;
-    g_channel = DynamicCast<PointToPointChannel>(devices.Get(0)->GetChannel());
-
-    InternetStackHelper internet;
-    internet.Install(nodes);
-    Ipv4AddressHelper ipv4;
-    ipv4.SetBase("10.11.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifaces = ipv4.Assign(devices);
-
-    const uint16_t port = 9600;
-    PacketSinkHelper sinkHelper(
-        "ns3::UdpSocketFactory",
-        InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(0));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(simSeconds));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
-
-    OnOffHelper onoff("ns3::UdpSocketFactory",
-                      InetSocketAddress(ifaces.GetAddress(0), port));
-    onoff.SetAttribute("DataRate",
-                       DataRateValue(DataRate(static_cast<uint64_t>(
-                           dataRateMbps * 1e6))));
-    onoff.SetAttribute("PacketSize", UintegerValue(packetBytes));
-    onoff.SetAttribute("OnTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute("OffTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-    ApplicationContainer srcApp = onoff.Install(nodes.Get(1));
-    srcApp.Start(Seconds(1.0));
-    srcApp.Stop(Seconds(simSeconds));
-
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
-
-    std::printf("# thz-ntn-isl-traffic\n");
-    std::printf("#   sim=%.0fs freq=%.0fGHz P=%.0fdBm G=%.0f+%.0fdBi BW=%.0fGHz "
-                "sep=%.0f→%.0f→%.0fkm load=%.1fMbps\n",
-                simSeconds, freqGHz, txPowerDbm, txGainDb, rxGainDb,
-                bandwidthGHz, startSepKm, maxSepKm, startSepKm, dataRateMbps);
-    std::printf("# %5s  %10s  %8s  %10s  %9s\n",
-                "t_s", "sep_km", "snr_dB", "cap_Gbps", "goodput");
-
-    Simulator::Schedule(Seconds(2.0), &LinkProbe);
-    Simulator::Stop(Seconds(simSeconds + 0.1));
-    Simulator::Run();
-
-    monitor->CheckForLostPackets();
-    const auto stats = monitor->GetFlowStats();
-    uint64_t txP = 0, rxP = 0;
-    for (const auto& kv : stats)
+    if (freqGHz > 100.0)
     {
-        txP += kv.second.txPackets;
-        rxP += kv.second.rxPackets;
+        std::printf("# NOTE: 3GPP spectrum model caps the carrier at 100 GHz; "
+                    "clamping %.0f -> 100 GHz\n",
+                    freqGHz);
+        freqGHz = 100.0;
     }
-    const uint64_t totalRx = g_sink ? g_sink->GetTotalRx() : 0;
-    std::printf("# === summary ===  txPackets=%lu rxPackets=%lu PDR=%.2f%% "
-                "avgGoodput=%.3f Mbps\n",
-                (unsigned long)txP, (unsigned long)rxP,
-                txP ? 100.0 * rxP / txP : 0.0,
-                totalRx * 8.0 / simSeconds / 1e6);
+
+    std::printf("# thz-ntn-isl-traffic (REAL radio between two SGP4 satellites)\n");
+    std::printf("#   shell: %u planes x %u sats, 53 deg, 550 km; link: plane0/slot0 <-> "
+                "plane1/slot0\n",
+                numPlanes, satsPerPlane);
+    std::printf("#   sim=%.0fs freq=%.0fGHz EIRP=%.1fdBm\n", simSeconds, freqGHz,
+                islEirpDbm);
+
+    // Starlink-class Walker delta shell; the two ISL endpoints are the first
+    // satellites of two ADJACENT planes (RAAN 5 deg apart), whose separation
+    // breathes with latitude over the orbit.
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = numPlanes;
+    wcfg.total_sats = numPlanes * satsPerPlane;
+    wcfg.altitude_km = 550.0;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+
+    NodeContainer satA;
+    satA.Create(1);
+    NodeContainer satB;
+    satB.Create(1);
+
+    Ptr<ns3::ntncon::Sgp4MobilityModel> sgpA = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    sgpA->SetElements(elements[0]); // plane 0, slot 0
+    Ptr<ns3::ntncon::Sgp4MobilityModel> sgpB = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    sgpB->SetElements(elements[satsPerPlane]); // plane 1, slot 0
+
+    // Project BOTH orbits into one common local ENU frame at sat A's initial
+    // sub-point so the helper's Friis loss sees the true inter-satellite range.
+    double refLat, refLon, refAlt;
+    sgpA->GetGeodetic(refLat, refLon, refAlt);
+    Ptr<NtnEnuProjectionMobilityModel> enuA = CreateObject<NtnEnuProjectionMobilityModel>();
+    enuA->SetSource(sgpA);
+    enuA->SetReference(refLat, refLon, 0.0);
+    satA.Get(0)->AggregateObject(enuA);
+    Ptr<NtnEnuProjectionMobilityModel> enuB = CreateObject<NtnEnuProjectionMobilityModel>();
+    enuB->SetSource(sgpB);
+    enuB->SetReference(refLat, refLon, 0.0);
+    satB.Get(0)->AggregateObject(enuB);
+
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("thz-ntn-isl-traffic");
+    rs.SetCarrierFrequencyHz(freqGHz * 1e9);
+    rs.SetSatEirpDbm(islEirpDbm);
+    rs.SetBackhaulDelay(MilliSeconds(1)); // on-board switch, not a ground feeder
+    rs.Build(satA, satB); // sat A is the gNB end, sat B the UE end of the ISL
+
+    // The THz plug-in stays in the packet path: for an exo-atmospheric ISL it
+    // correctly contributes ~0 dB (vacuum — no O2/H2O column at 550 km).
+    Ptr<ThzNtnPropagationLossModel> thz = CreateObject<ThzNtnPropagationLossModel>();
+    thz->SetFrequency(freqGHz * 1e9);
+    rs.AddExtraPropagationLoss(thz);
+
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
+
+    // The module's analytic ISL budget, evaluated on the SAME live geometry,
+    // printed beside the measured SINR (formula vs measurement).
+    Ptr<ThzNtnIslChannel> isl = CreateObject<ThzNtnIslChannel>();
+    isl->SetAttribute("Frequency", DoubleValue(freqGHz * 1e9));
+    isl->SetAttribute("TxPower", DoubleValue(30.0));
+    isl->SetAttribute("TxGain", DoubleValue((islEirpDbm - 30.0) / 2.0));
+    isl->SetAttribute("RxGain", DoubleValue((islEirpDbm - 30.0) / 2.0));
+    isl->SetAttribute("Bandwidth", DoubleValue(50.0e6));
+
+    std::printf("# %5s  %10s  %10s  %8s  %8s  %8s  %9s\n",
+                "t_s", "sep_km", "formula", "molAbs", "sinr_dB", "tbler", "goodput");
+
+    uint64_t lastRx = 0;
+    rs.RegisterPeriodicCallback(
+        Seconds(1.0),
+        [&rs, thz, isl, enuA, enuB, &lastRx](Time now) {
+            const double sepKm = enuA->GetDistanceFrom(enuB) / 1000.0;
+            const double formulaSnr = isl->ComputeIslSnr_dB(enuA, enuB);
+            const double sinr = rs.GetUeRecentSinrDb(0);
+            const double tbler = rs.GetUeRecentTbler(0);
+            const uint64_t rx = rs.GetUeRxBytes(0);
+            const double mbps = (rx - lastRx) * 8.0 / 1e6;
+            lastRx = rx;
+            std::printf("  %5.1f  %10.1f  %10.2f  %8.2f  %8.2f  %8.3f  %9.3f\n",
+                        now.GetSeconds(), sepKm, formulaSnr, thz->GetLastLossDb(),
+                        sinr, tbler, mbps);
+        });
+
+    Simulator::Stop(Seconds(simSeconds));
+    Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
+
+    std::printf("# === summary ===  measured ISL SINR=%.2f dB TBLER=%.4f "
+                "throughput=%.3f Mbps (real packets between two SGP4 satellites)\n",
+                rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());
+
     Simulator::Destroy();
     return 0;
 }

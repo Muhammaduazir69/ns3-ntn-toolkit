@@ -10,6 +10,11 @@
 //   ns3.43-ntn-observability-demo-default --simTime=120 --udpHost=127.0.0.1
 
 #include "ns3/constant-position-mobility-model.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
+#include "ns3/network-module.h"
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
 #include "ns3/ntn-drx.h"
@@ -21,7 +26,6 @@
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
 #include "ns3/ntn-ue-location-report.h"
-#include "ns3/ntn-realistic-traffic-helper.h"
 
 #include <cstdio>
 #include <iostream>
@@ -43,6 +47,7 @@ struct Wiring
     Ptr<NtnDrxStateMachine> drx;
     Ptr<MobilityModel> ueMob;
     Ptr<MobilityModel> satMob;
+    NtnRealStackHelper* rs{nullptr};
     std::string runId;
     uint32_t satNodeId{1};
     uint32_t ueNodeId{2};
@@ -92,23 +97,23 @@ SampleEverySecond(Wiring* w)
              w->drx->GetTimeInState(DrxState::OnDuration)).GetMilliSeconds();
         w->sink->Push(p);
     }
-    // Synthetic RSRP signal that breathes with slant range so the dashboard
-    // demo has something interesting to show. Not based on a real link budget.
-    const double slantKm = w->ta->GetSlantRangeMetres() / 1000.0;
-    const double syntheticRsrp = -90.0 - 30.0 * (slantKm / 2000.0);
+    // MEASURED radio KPIs from the real mmwave NR cell (phy-trace provenance):
+    // the dashboard now shows the genuine link, not a synthetic curve.
+    const double measSinr = w->rs ? w->rs->GetUeRecentSinrDb(0) : std::nan("");
+    const double measRsrp = std::isnan(measSinr) ? -120.0 : measSinr - 95.0;
     {
         Point p;
         p.measurement = measurement::kRadio;
         p.tags[tag::kRunId] = w->runId;
         p.tags[tag::kCellId] = "C-1";
         p.tags[tag::kUeImsi] = "100001";
-        p.fieldsFloat[field::kRsrpDbm] = syntheticRsrp;
-        p.fieldsFloat[field::kSinrDb] = 20.0 - 0.005 * slantKm;
+        p.fieldsFloat[field::kRsrpDbm] = measRsrp;
+        p.fieldsFloat[field::kSinrDb] = std::isnan(measSinr) ? -30.0 : measSinr;
         w->sink->Push(p);
     }
     w->netSim->SampleSeries(w->taSeriesIdx, now,
                             w->ta->ComputeTotalTa().GetMicroSeconds());
-    w->netSim->SampleSeries(w->rsrpSeriesIdx, now, syntheticRsrp);
+    w->netSim->SampleSeries(w->rsrpSeriesIdx, now, measRsrp);
 
     Simulator::Schedule(Seconds(1.0), &SampleEverySecond, w);
 }
@@ -153,7 +158,7 @@ OnUeReport(Wiring* w, const UeLocationReport& r)
 int
 main(int argc, char* argv[])
 {
-    double simTimeSec = 600.0;
+    double simTimeSec = 20.0;
     std::string outputDir = ".";
     std::string runId = "demo-1";
     std::string influxFile = "/tmp/ntn-observability-demo.lp";
@@ -176,19 +181,49 @@ main(int argc, char* argv[])
     Wiring w;
     w.runId = runId;
 
-    // ---- mobility ----
-    Ptr<ConstantPositionMobilityModel> ueMob = CreateObject<ConstantPositionMobilityModel>();
-    ueMob->SetPosition(Vector{1146054.7, 5567530.7, 3525200.6});
-    Ptr<ConstantVelocityMobilityModel> satMob = CreateObject<ConstantVelocityMobilityModel>();
-    satMob->SetPosition(Vector{-1.5e6, 5.5e6, 4.0e6});
-    satMob->SetVelocity(Vector{7590.0, 0.0, 0.0});
+    // ---- mobility: real SGP4 Walker sat + TR 38.811 UE at its sub-point ----
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = 550.0;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satMob =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satMob->SetElements(wElements[0]);
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    satNodes.Get(0)->AggregateObject(satMob);
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
+    double subLat, subLon, subAlt;
+    satMob->GetGeodetic(subLat, subLon, subAlt);
+    NtnTr38811MobilityHelper ueMobility(1);
+    auto mobProfile = NtnMobilityScenarios::MixedContinental();
+    auto ueModels = ueMobility.Install(ueNodes, mobProfile, subLat - 0.02, subLat + 0.02,
+                                       subLon - 0.02, subLon + 0.02);
+    Ptr<MobilityModel> ueMob = ueModels[0];
     w.ueMob = ueMob;
     w.satMob = satMob;
+
+    // ---- real mmwave NR cell: the MEASURED radio the dashboard observes ----
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simTimeSec));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ntn-observability-demo");
+    rs.SetSatEirpDbm(55.0);
+    rs.Build(satNodes, ueNodes);
+    // One UE -> a saturating eMBB stream so the dashboard observes a live
+    // data plane (MixedBouquet would give the single UE the 1 kbps NB-IoT mix).
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simTimeSec - 0.5));
+    w.rs = &rs;
 
     // ---- W2 components ----
     NtnRrcHelper rrcHelper;
     rrcHelper.SetPayloadMode(PayloadMode::Transparent);
-    rrcHelper.SetReferencePosition(Vector{1146054.7, 5567530.7, 3525200.6});
+    rrcHelper.SetReferencePosition(ntngeo::GeodeticToEcef(subLat, subLon, 0.0));
 
     w.ta = rrcHelper.InstallTimingAdvance(ueMob, satMob);
     w.sib19 = rrcHelper.InstallSib19Broadcaster(satMob, /*cellId=*/100, w.ta, MilliSeconds(160));
@@ -239,19 +274,11 @@ main(int argc, char* argv[])
     w.netSim->Start();
 
     Simulator::ScheduleNow(&SampleEverySecond, &w);
-    // ==== v2 realistic traffic plane (auto-injected) =====================
-    NtnRealisticTrafficHelper _ntn_traffic;
-    _ntn_traffic.SetSimTime(Seconds(simTimeSec));
-    _ntn_traffic.SetOutputDir(outputDir);
-    _ntn_traffic.SetRunTag("ntn-observability-demo");
-    _ntn_traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
-    _ntn_traffic.InstallUes(8);
-    _ntn_traffic.Wire();
-
     
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
-    _ntn_traffic.WriteHealthReport();
+    rs.Collect();
+    rs.WriteHealthReport();
 
     w.sib19->Stop();
     w.ueRep->Stop();

@@ -14,6 +14,10 @@ set(source_files
     bridge/sionna-replay-transport.cc
     # Roadmap §4.2.11 — paths.apply_doppler() C++ equivalent
     bridge/cir-doppler-synth.cc
+    # Fidelity Phase 2 — full-CIR multipath fading as a real PropagationLossModel
+    bridge/sionna-cir-propagation-loss-model.cc
+    # Fidelity Phase 2 — ITU-R atmospheric EXCESS as a real PropagationLossModel
+    bridge/ntn-atmospheric-propagation-loss-model.cc
     # Roadmap §4.3.3 — Sionna vs propagation-model calibrator
     bridge/sionna-calibrator.cc
 )
@@ -34,6 +38,10 @@ set(header_files
     bridge/sionna-replay-transport.h
     # Roadmap §4.2.11 — paths.apply_doppler() C++ equivalent
     bridge/cir-doppler-synth.h
+    # Fidelity Phase 2 — full-CIR multipath fading as a real PropagationLossModel
+    bridge/sionna-cir-propagation-loss-model.h
+    # Fidelity Phase 2 — ITU-R atmospheric EXCESS as a real PropagationLossModel
+    bridge/ntn-atmospheric-propagation-loss-model.h
     # Roadmap §4.3.3 — Sionna vs propagation-model calibrator
     bridge/sionna-calibrator.h
 )

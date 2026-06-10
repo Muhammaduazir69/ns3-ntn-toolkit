@@ -14,6 +14,9 @@
 //
 // Quick test:  --simSeconds=120 --dataRateMbps=5 --out=/tmp/ntn-obs.lp
 #include "ns3/applications-module.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
@@ -155,10 +158,24 @@ main(int argc, char* argv[])
     ue->SetPosition(Vector(0, 0, 0));
     nodes.Get(0)->AggregateObject(ue);
     g_ue = ue;
-    Ptr<ConstantVelocityMobilityModel> sat =
-        CreateObject<ConstantVelocityMobilityModel>();
-    sat->SetPosition(Vector(-0.5 * satSpeed * simSeconds, 0, leoAltKm * 1000.0));
-    sat->SetVelocity(Vector(satSpeed, 0, 0));
+    // Real SGP4 orbit projected into the scenario's local ENU frame: the
+    // satellite passes overhead near t=0 and recedes with genuine orbital
+    // dynamics (no straight-line placeholder).
+    ns3::ntncon::WalkerConfig wcfgSat;
+    wcfgSat.num_planes = 1;
+    wcfgSat.total_sats = 80;
+    wcfgSat.altitude_km = leoAltKm;
+    wcfgSat.inclination_deg = 53.0;
+    wcfgSat.epoch_unix_s = 1735689600.0;
+    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(satElements[0]);
+    double satSubLat, satSubLon, satSubAlt;
+    satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
+    Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
+    sat->SetSource(satSgp4);
+    sat->SetReference(satSubLat, satSubLon, 0.0);
     nodes.Get(1)->AggregateObject(sat);
     g_sat = sat;
 

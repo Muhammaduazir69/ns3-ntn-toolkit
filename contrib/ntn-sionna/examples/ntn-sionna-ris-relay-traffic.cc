@@ -4,258 +4,175 @@
  *
  * ntn-sionna-ris-relay-traffic — a LEO downlink whose direct path is blocked
  * (NLOS, e.g. urban canyon / terrain) is recovered by a Reconfigurable
- * Intelligent Surface that is switched ON mid-simulation. REAL UDP traffic
- * flows the whole time; goodput is near-zero while the link is blocked, then
- * jumps once the RIS provides a coherent specular path.
+ * Intelligent Surface switched ON mid-simulation, while REAL traffic flows on
+ * a REAL mmwave NR NTN cell (NtnRealStackHelper).
+ *
+ * Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06, channel-plugin recipe):
+ * the old version folded the blockage and the RIS array gain into a
+ * closed-form SNR and drove a P2P RateErrorModel through a sigmoid
+ * SnrToPer() — packets never felt the blockage. Here the blockage onset and
+ * the RIS engagement are LIVE channel reconfigurations
+ * (NtnStaticExtraLossModel chained onto the real spectrum channel): the
+ * MEASURED SINR collapses when the path is blocked and recovers when the RIS
+ * engages. The ITU-R atmospheric cascade also stays in the packet path.
  *
  * The RIS gain is the standard perfect-CSI coherent-combining law
  *   G_ris(N) = 20*log10(N_elements)   [dB]
- * computed from the RisConfig rows*cols supplied on the channel (the same
- * descriptor the Sionna RT server consumes). With a live Sionna server the
- * gain comes from actual ray tracing of the surface; in the standalone
- * FSPL-fallback run shown here it is the closed-form array gain, so the
- * example runs without a GPU while still being parameter-driven (try
- * --risRows / --risCols / --blockageDb).
+ * from --risRows x --risCols (the same rows/cols descriptor a live Sionna RT
+ * server consumes), clamped at the LOS level — a passive reflector cannot
+ * beat the unobstructed direct path in this abstraction.
  *
- * Quick test:  --simSeconds=120 --dataRateMbps=5
+ * Mobility is real: SGP4 satellite (ENU-projected), fixed ground terminal.
+ *
+ * Quick test:  --simSeconds=40 --risRows=32 --risCols=32
  */
-#include "ns3/applications-module.h"
-#include "ns3/command-line.h"
-#include "ns3/constant-position-mobility-model.h"
-#include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
-#include "ns3/error-model.h"
-#include "ns3/flow-monitor-helper.h"
-#include "ns3/internet-stack-helper.h"
-#include "ns3/ipv4-address-helper.h"
-#include "ns3/point-to-point-channel.h"
-#include "ns3/point-to-point-helper.h"
-
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
 #include "ns3/ntn-atmospheric-loss-chain.h"
-#include "ns3/ntn-sionna-cascade-channel.h"
-#include "ns3/sionna-transport.h"
+#include "ns3/ntn-atmospheric-propagation-loss-model.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-static-extra-loss-model.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("NtnSionnaRisRelayTraffic");
 
-namespace
-{
-constexpr double kC = 299792458.0;
-Ptr<NtnSionnaCascadeChannel> g_loss;
-Ptr<MobilityModel> g_gnd;
-Ptr<MobilityModel> g_sat;
-Ptr<RateErrorModel> g_em;
-Ptr<PointToPointChannel> g_channel;
-Ptr<PacketSink> g_sink;
-uint64_t g_lastRx = 0;
-double g_baseEirpDbm = 88.0;
-double g_blockageDb = 30.0; // NLOS blockage on the direct path
-double g_risGainDb = 0.0;   // active RIS coherent gain (0 until engaged)
-double g_noiseDbm = -98.0;
-double g_minElev = 5.0;
-bool g_risOn = false;
-
-double
-ElevDeg(const Vector& u, const Vector& s)
-{
-    const Vector d(s.x - u.x, s.y - u.y, s.z - u.z);
-    return std::atan2(d.z, std::max(std::sqrt(d.x * d.x + d.y * d.y), 1e-3)) *
-           180.0 / M_PI;
-}
-
-double
-Dist(const Vector& a, const Vector& b)
-{
-    const double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
-}
-
-double
-SnrToPer(double snrDb)
-{
-    return 1.0 / (1.0 + std::exp(0.8 * (snrDb - 6.0)));
-}
-
-void
-EngageRis(double gainDb)
-{
-    g_risOn = true;
-    g_risGainDb = gainDb;
-}
-
-void
-LinkProbe()
-{
-    const Vector u = g_gnd->GetPosition();
-    const Vector s = g_sat->GetPosition();
-    const double elev = ElevDeg(u, s);
-    const double range = Dist(u, s);
-    // Effective EIRP = base EIRP - NLOS blockage + RIS coherent gain (if on).
-    const double effEirp = g_baseEirpDbm - g_blockageDb + g_risGainDb;
-    const double rxDbm = g_loss->CalcRxPower(effEirp, g_sat, g_gnd);
-    const double snr = rxDbm - g_noiseDbm;
-    double per = (elev < g_minElev) ? 1.0 : SnrToPer(snr);
-    g_em->SetRate(per);
-    g_channel->SetAttribute("Delay", TimeValue(Seconds(range / kC)));
-
-    const uint64_t tot = g_sink ? g_sink->GetTotalRx() : 0;
-    const double mbps = (tot - g_lastRx) * 8.0 / 1e6;
-    g_lastRx = tot;
-    std::printf("  %6.1f  %7.2f  %5s  %8.2f  %8.2f  %9.3f\n",
-                Simulator::Now().GetSeconds(), elev,
-                g_risOn ? "ON" : "off", g_risGainDb, snr, mbps);
-    Simulator::Schedule(Seconds(1.0), &LinkProbe);
-}
-} // namespace
-
 int
 main(int argc, char* argv[])
 {
-    double simSeconds = 600.0;
-    double altKm = 550.0;
-    double satSpeed = 7500.0;
-    double freqHz = 2.0e9;
-    double dataRateMbps = 20.0;
-    uint32_t packetBytes = 1200;
-    double txPowerDbm = 33.0;
-    double antennaGainDb = 55.0;
+    double simSeconds = 40.0;
+    double freqGHz = 12.0;
+    double satEirpDbm = 75.0;
     double blockageDb = 30.0;
     uint32_t risRows = 32;
     uint32_t risCols = 32;
-    double risOnFraction = 0.4; // engage RIS at 40% of the sim
-    double linkCapacityMbps = 50.0;
+    double blockFraction = 0.25;
+    double risOnFraction = 0.55;
+    std::string outputDir = "ntn-sionna-ris-relay-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
-    cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
-    cmd.AddValue("satSpeed", "Satellite ground-track speed (m/s)", satSpeed);
-    cmd.AddValue("freqHz", "Carrier frequency (Hz)", freqHz);
-    cmd.AddValue("dataRateMbps", "Offered downlink load (Mbps)", dataRateMbps);
-    cmd.AddValue("packetBytes", "UDP payload size (bytes)", packetBytes);
-    cmd.AddValue("txPowerDbm", "Satellite HPA output power (dBm)", txPowerDbm);
-    cmd.AddValue("antennaGainDb", "Combined antenna gain (dB)", antennaGainDb);
+    cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("blockageDb", "NLOS blockage on the direct path (dB)", blockageDb);
     cmd.AddValue("risRows", "RIS element rows", risRows);
     cmd.AddValue("risCols", "RIS element cols", risCols);
-    cmd.AddValue("risOnFraction", "Fraction of sim at which RIS engages",
-                  risOnFraction);
-    cmd.AddValue("linkCapacityMbps", "P2P link capacity (Mbps)", linkCapacityMbps);
+    cmd.AddValue("blockFraction", "Fraction of sim at which the blockage starts",
+                 blockFraction);
+    cmd.AddValue("risOnFraction", "Fraction of sim at which the RIS engages",
+                 risOnFraction);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    g_baseEirpDbm = txPowerDbm + antennaGainDb;
-    g_blockageDb = blockageDb;
     const double risGainDb = 20.0 * std::log10(std::max(1u, risRows * risCols));
+    const double risCompDb = std::min(blockageDb, risGainDb);
 
-    NodeContainer nodes;
-    nodes.Create(2);
-    Ptr<ConstantPositionMobilityModel> gnd =
-        CreateObject<ConstantPositionMobilityModel>();
-    gnd->SetPosition(Vector(0, 0, 0));
-    nodes.Get(0)->AggregateObject(gnd);
-    Ptr<ConstantVelocityMobilityModel> sat =
-        CreateObject<ConstantVelocityMobilityModel>();
-    sat->SetPosition(Vector(-0.5 * satSpeed * simSeconds, 0, altKm * 1000.0));
-    sat->SetVelocity(Vector(satSpeed, 0, 0));
-    nodes.Get(1)->AggregateObject(sat);
-    g_gnd = gnd;
-    g_sat = sat;
+    std::printf("# ntn-sionna-ris-relay-traffic (REAL radio, blockage + RIS in the "
+                "packet path)\n");
+    std::printf("#   sim=%.0fs freq=%.1fGHz EIRP=%.1fdBm blockage=%.0fdB "
+                "RIS=%ux%u->%.1fdB gain (%.1f dB applied)\n",
+                simSeconds, freqGHz, satEirpDbm, blockageDb, risRows, risCols,
+                risGainDb, risCompDb);
 
-    Ptr<NtnSionnaChannel> base = CreateObject<NtnSionnaChannel>();
-    base->SetFrequencyHz(freqHz);
-    // Attach the RIS descriptor to the channel (consumed by a live Sionna
-    // server; informational in FSPL-fallback runs).
-    RisConfig ris;
-    ris.rows = static_cast<uint16_t>(risRows);
-    ris.cols = static_cast<uint16_t>(risCols);
-    ris.phase_profile = "focus";
-    base->SetRis(ris);
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    NodeContainer gndNodes;
+    gndNodes.Create(1);
+
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = 550.0;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(elements[0]);
+    double subLat, subLon, subAlt;
+    satSgp4->GetGeodetic(subLat, subLon, subAlt);
+    Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
+    satEnu->SetSource(satSgp4);
+    satEnu->SetReference(subLat, subLon, 0.0);
+    satNodes.Get(0)->AggregateObject(satEnu);
+
+    MobilityHelper mob;
+    mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    Ptr<ListPositionAllocator> gndPos = CreateObject<ListPositionAllocator>();
+    gndPos->Add(Vector(0.0, 0.0, 1.5));
+    mob.SetPositionAllocator(gndPos);
+    mob.Install(gndNodes);
+
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ntn-sionna-ris-relay-traffic");
+    rs.SetCarrierFrequencyHz(freqGHz * 1e9);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, gndNodes);
+
+    // ITU-R atmospheric excess stays in the packet path the whole run.
     Ptr<NtnAtmosphericLossChain> chain = CreateObject<NtnAtmosphericLossChain>();
-    chain->SetFrequencyHz(freqHz);
-    Ptr<NtnSionnaCascadeChannel> loss = CreateObject<NtnSionnaCascadeChannel>();
-    loss->SetSionnaChannel(base);
-    loss->SetAtmosphericChain(chain);
-    g_loss = loss;
+    chain->SetFrequencyHz(freqGHz * 1e9);
+    Ptr<NtnAtmosphericPropagationLossModel> atmo =
+        CreateObject<NtnAtmosphericPropagationLossModel>();
+    atmo->SetChain(chain);
+    rs.AddExtraPropagationLoss(atmo);
 
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute(
-        "DataRate",
-        DataRateValue(DataRate(static_cast<uint64_t>(linkCapacityMbps * 1e6))));
-    p2p.SetChannelAttribute("Delay", TimeValue(Seconds(altKm * 1000.0 / kC)));
-    NetDeviceContainer devices = p2p.Install(nodes);
-    Ptr<RateErrorModel> em = CreateObject<RateErrorModel>();
-    em->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
-    em->SetRate(1.0);
-    devices.Get(0)->SetAttribute("ReceiveErrorModel", PointerValue(em));
-    g_em = em;
-    g_channel = DynamicCast<PointToPointChannel>(devices.Get(0)->GetChannel());
+    // Blockage / RIS as a LIVE channel reconfiguration in the real path.
+    Ptr<NtnStaticExtraLossModel> nlos = CreateObject<NtnStaticExtraLossModel>();
+    nlos->SetLossDb(0.0);
+    rs.AddExtraPropagationLoss(nlos);
 
-    InternetStackHelper internet;
-    internet.Install(nodes);
-    Ipv4AddressHelper ipv4;
-    ipv4.SetBase("10.3.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifaces = ipv4.Assign(devices);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(simSeconds - 0.5));
 
-    const uint16_t port = 9200;
-    PacketSinkHelper sinkHelper(
-        "ns3::UdpSocketFactory",
-        InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApp = sinkHelper.Install(nodes.Get(0));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(simSeconds));
-    g_sink = DynamicCast<PacketSink>(sinkApp.Get(0));
+    const double tBlock = blockFraction * simSeconds;
+    const double tRis = risOnFraction * simSeconds;
+    bool risOn = false;
+    Simulator::Schedule(Seconds(tBlock), [nlos, blockageDb] {
+        nlos->SetLossDb(blockageDb);
+    });
+    Simulator::Schedule(Seconds(tRis), [nlos, blockageDb, risCompDb, &risOn] {
+        risOn = true;
+        nlos->SetLossDb(blockageDb - risCompDb);
+    });
+    std::printf("#   timeline: LOS -> blocked@%.0fs -> RIS ON@%.0fs\n", tBlock, tRis);
+    std::printf("# %5s  %5s  %8s  %8s  %8s  %9s\n",
+                "t_s", "ris", "extra_dB", "sinr_dB", "tbler", "goodput");
 
-    OnOffHelper onoff("ns3::UdpSocketFactory",
-                      InetSocketAddress(ifaces.GetAddress(0), port));
-    onoff.SetAttribute("DataRate",
-                       DataRateValue(DataRate(static_cast<uint64_t>(
-                           dataRateMbps * 1e6))));
-    onoff.SetAttribute("PacketSize", UintegerValue(packetBytes));
-    onoff.SetAttribute("OnTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute("OffTime",
-                       StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-    ApplicationContainer srcApp = onoff.Install(nodes.Get(1));
-    srcApp.Start(Seconds(1.0));
-    srcApp.Stop(Seconds(simSeconds));
+    uint64_t lastRx = 0;
+    rs.RegisterPeriodicCallback(
+        Seconds(1.0),
+        [&rs, nlos, &risOn, &lastRx](Time now) {
+            const double sinr = rs.GetUeRecentSinrDb(0);
+            const double tbler = rs.GetUeRecentTbler(0);
+            const uint64_t rx = rs.GetUeRxBytes(0);
+            const double mbps = (rx - lastRx) * 8.0 / 1e6;
+            lastRx = rx;
+            std::printf("  %5.1f  %5s  %8.2f  %8.2f  %8.3f  %9.3f\n",
+                        now.GetSeconds(), risOn ? "ON" : "off", nlos->GetLossDb(),
+                        sinr, tbler, mbps);
+        });
 
-    Simulator::Schedule(Seconds(risOnFraction * simSeconds), &EngageRis,
-                        risGainDb);
-
-    FlowMonitorHelper fmHelper;
-    Ptr<FlowMonitor> monitor = fmHelper.InstallAll();
-
-    std::printf("# ntn-sionna-ris-relay-traffic\n");
-    std::printf("#   sim=%.0fs alt=%.0fkm freq=%.1fGHz load=%.1fMbps "
-                "baseEIRP=%.1fdBm blockage=%.0fdB RIS=%ux%u→%.1fdB @%.0fs\n",
-                simSeconds, altKm, freqHz / 1e9, dataRateMbps, g_baseEirpDbm,
-                blockageDb, risRows, risCols, risGainDb,
-                risOnFraction * simSeconds);
-    std::printf("# %5s  %7s  %5s  %8s  %8s  %9s\n",
-                "t_s", "elev", "ris", "ris_dB", "snr_dB", "goodput");
-
-    Simulator::Schedule(Seconds(2.0), &LinkProbe);
-    Simulator::Stop(Seconds(simSeconds + 0.1));
+    Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
 
-    monitor->CheckForLostPackets();
-    const auto stats = monitor->GetFlowStats();
-    uint64_t txP = 0, rxP = 0;
-    for (const auto& kv : stats)
-    {
-        txP += kv.second.txPackets;
-        rxP += kv.second.rxPackets;
-    }
-    const uint64_t totalRx = g_sink ? g_sink->GetTotalRx() : 0;
-    std::printf("# === summary ===  txPackets=%lu rxPackets=%lu PDR=%.2f%% "
-                "avgGoodput=%.3f Mbps (RIS gain %.1f dB)\n",
-                (unsigned long)txP, (unsigned long)rxP,
-                txP ? 100.0 * rxP / txP : 0.0,
-                totalRx * 8.0 / simSeconds / 1e6, risGainDb);
+    std::printf("# === summary ===  measured cell SINR=%.2f dB TBLER=%.4f "
+                "throughput=%.3f Mbps (blockage + RIS applied to real packets)\n",
+                rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());
+
     Simulator::Destroy();
     return 0;
 }
