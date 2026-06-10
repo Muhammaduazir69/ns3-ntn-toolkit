@@ -26,11 +26,14 @@ build_lib_example(
     ${libntn-observability}
     ${libntn-cho}
     ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )

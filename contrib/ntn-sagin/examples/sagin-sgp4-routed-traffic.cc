@@ -21,8 +21,9 @@
 // The five SPACE links (HAPS-satA, HAPS-satB, satA-satB ISL, GW-satA, GW-satB)
 // are gated by the contact graph: when the scheduler reports a contact UP we
 // bring the corresponding ns-3 Ipv4 interface UP, set its channel delay from the
-// real slant range and its packet-error rate from the geometry SINR; on a
-// contact DOWN we bring the interface DOWN. After every transition we call
+// real slant range and gate usability on an honest binary link budget (closes /
+// does not close — no sigmoid PER); on a contact DOWN we bring the interface
+// DOWN. After every transition we call
 // Ipv4GlobalRoutingHelper::RecomputeRoutingTables(), so ns-3's own global
 // routing re-routes the live UDP flow over whatever space path currently exists.
 //
@@ -112,14 +113,14 @@ FsplDb(double dM, double fHz)
     return 20.0 * std::log10(std::max(dM, 1.0)) + 20.0 * std::log10(fHz / 1e9) + 32.45;
 }
 
-double
-SnrToPer(double snrDb)
-{
-    return 1.0 / (1.0 + std::exp(0.8 * (snrDb - 6.0)));
-}
+double g_minSnrDb = 6.0; // decode threshold for the binary link-budget gate
 
-// Bring an ns-3 Ipv4 link up/down to mirror a contact-graph transition, set the
-// channel delay from the true slant range and the PER from the geometry SINR.
+// Bring an ns-3 Ipv4 link up/down to mirror a contact-graph transition, set
+// the channel delay from the true slant range, and gate usability on an
+// HONEST binary link budget: a Ka GSL/ISL with high-gain dishes either closes
+// its budget (clean decode at these SNRs) or is unusable. No sigmoid PER —
+// partial-loss radio behaviour belongs to the real-stack (mmwave) examples;
+// this example's contribution is real contact-driven ROUTING.
 void
 ApplyContact(ContactEvent ev)
 {
@@ -134,13 +135,13 @@ ApplyContact(ContactEvent ev)
 
     if (ev.up)
     {
+        const double sinr = g_eirpDbm - FsplDb(ev.range_m, g_freqHz) - g_noiseDbm;
+        const bool budgetCloses = sinr >= g_minSnrDb;
         l.ipA->SetUp(l.ifA);
         l.ipB->SetUp(l.ifB);
         l.chan->SetAttribute("Delay", TimeValue(Seconds(ev.range_m / kC)));
-        const double sinr = g_eirpDbm - FsplDb(ev.range_m, g_freqHz) - g_noiseDbm;
-        const double per = SnrToPer(sinr);
-        l.emA->SetRate(per);
-        l.emB->SetRate(per);
+        l.emA->SetRate(budgetCloses ? 0.0 : 1.0);
+        l.emB->SetRate(budgetCloses ? 0.0 : 1.0);
     }
     else
     {
@@ -273,6 +274,8 @@ main(int argc, char* argv[])
     cmd.AddValue("packetBytes", "UDP payload (bytes)", packetBytes);
     cmd.AddValue("spaceCapMbps", "Space-link capacity (Mbps)", spaceCapMbps);
     cmd.AddValue("eirpDbm", "Space-link EIRP (dBm, tx power + antenna gain)", eirpDbm);
+    cmd.AddValue("minSnrDb", "Decode threshold for the binary link-budget gate (dB)",
+                 g_minSnrDb);
     cmd.Parse(argc, argv);
 
     const double a = kRe + altKm * 1000.0;

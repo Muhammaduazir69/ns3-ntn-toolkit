@@ -131,6 +131,13 @@ REAL_STACK_EXAMPLES = [
     ("ntn-observability-demo",
      "build/contrib/ntn-observability/examples/ns3.43-ntn-observability-demo-default",
      "--simTime", ""),
+    # WS0 (AI-Native ORAN-NTN plan) — last SnrToPer stragglers on the real cell.
+    ("oran-ntn-ric-controlled-traffic",
+     "build/contrib/oran-ntn/examples/ns3.43-oran-ntn-ric-controlled-traffic-default",
+     "--simSeconds", ""),
+    ("ntn-observability-traffic",
+     "build/contrib/ntn-observability/examples/ns3.43-ntn-observability-traffic-default",
+     "--simSeconds", "--out=/tmp/ntn-obs-gate.lp"),
 ]
 
 # Provenance values that prove a measured (not computed) origin.

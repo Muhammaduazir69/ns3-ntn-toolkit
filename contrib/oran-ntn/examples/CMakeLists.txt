@@ -44,13 +44,16 @@ build_lib_example(
     ${liboran-ntn}
     ${libntn-cho}
     ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
-    ${libpoint-to-point}
+    ${libspectrum}
+    ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libflow-monitor}
+    ${libmmwave}
+    ${liblte}
 )
 
 # Phase-3 composition: one shared mmwave cell feeds RIC + slice + observability.
