@@ -149,3 +149,23 @@ build_lib_example(
     ${libapplications}
     ${libpoint-to-point}
 )
+
+# WS6 — post-disaster emergency communication flagship.
+build_lib_example(
+  NAME oran-ntn-emergency-communication
+  SOURCE_FILES oran-ntn-emergency-communication.cc
+  LIBRARIES_TO_LINK
+    ${liboran-ntn}
+    ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
+)

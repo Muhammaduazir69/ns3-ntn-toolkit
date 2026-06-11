@@ -138,6 +138,16 @@ REAL_STACK_EXAMPLES = [
     ("ntn-observability-traffic",
      "build/contrib/ntn-observability/examples/ns3.43-ntn-observability-traffic-default",
      "--simSeconds", "--out=/tmp/ntn-obs-gate.lp"),
+    # WS6 (AI-Native ORAN-NTN plan) — use-case flagships on the real cell.
+    ("oran-ntn-emergency-communication",
+     "build/contrib/oran-ntn/examples/ns3.43-oran-ntn-emergency-communication-default",
+     "--simSeconds", "--disasterAt=3"),
+    ("ntn-sagin-remote-coverage",
+     "build/contrib/ntn-sagin/examples/ns3.43-ntn-sagin-remote-coverage-default",
+     "--simSeconds", "--sharing=1"),
+    ("ntn-v2x-edge-urllc",
+     "build/contrib/ntn-v2x/examples/ns3.43-ntn-v2x-edge-urllc-default",
+     "--simSeconds", "--edge=sat"),
 ]
 
 # Provenance values that prove a measured (not computed) origin.

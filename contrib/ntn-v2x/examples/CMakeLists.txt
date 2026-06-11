@@ -54,3 +54,24 @@ build_lib_example(
     ${libapplications}
     ${libntn-traffic}
 )
+
+# WS6 — V2X edge URLLC with sat-vs-ground inference placement.
+build_lib_example(
+  NAME ntn-v2x-edge-urllc
+  SOURCE_FILES ntn-v2x-edge-urllc.cc
+  LIBRARIES_TO_LINK
+    ${libntn-v2x}
+    ${liboran-ntn}
+    ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
+)

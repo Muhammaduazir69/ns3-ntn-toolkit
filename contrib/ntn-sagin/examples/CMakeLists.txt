@@ -116,3 +116,10 @@ build_lib_example(
     ${libapplications}
     ${libntn-traffic}
 )
+
+# WS6 — remote coverage with multi-MNO infrastructure sharing.
+build_lib_example(
+  NAME ntn-sagin-remote-coverage
+  SOURCE_FILES ntn-sagin-remote-coverage.cc
+  LIBRARIES_TO_LINK ${_sagin_real_libs}
+)
