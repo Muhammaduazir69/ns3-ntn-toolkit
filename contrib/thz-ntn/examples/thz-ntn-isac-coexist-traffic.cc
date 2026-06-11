@@ -11,7 +11,7 @@
 // reconfiguration packets feel), exactly how a monostatic ISAC payload
 // time-shares its array.
 //
-// Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06): the data plane was a
+// Audit fix (2026-06 protocol-fidelity audit): the data plane was a
 // P2P link whose CAPACITY attribute was throttled — no radio, placeholder
 // nodes. Here the satellite flies a genuine SGP4 orbit; as the ISAC mode is
 // stepped (COMM_ONLY → COMM_CENTRIC → JOINT → SENSING_CENTRIC → SENSING_ONLY)

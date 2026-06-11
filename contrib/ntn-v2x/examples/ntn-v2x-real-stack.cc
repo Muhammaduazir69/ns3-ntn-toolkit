@@ -3,7 +3,7 @@
  * Copyright (c) 2026  Muhammad Uzair
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * ntn-v2x-real-stack — Phase 2 of PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06
+ * ntn-v2x-real-stack — Phase 2 of 2026-06 protocol-fidelity audit
  * (RAN recipe).
  *
  * Audit finding for ntn-v2x: the direct-vs-relay decision (V2xLeoRelay) was

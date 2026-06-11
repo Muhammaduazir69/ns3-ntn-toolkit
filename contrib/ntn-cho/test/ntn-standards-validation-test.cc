@@ -21,7 +21,8 @@
 #include "ns3/test.h"
 #include "ns3/walker-constellation.h"
 
-#include <algorithm>\n#include <cmath>
+#include <algorithm>
+#include <cmath>
 
 using namespace ns3;
 using namespace ns3::ntncon;

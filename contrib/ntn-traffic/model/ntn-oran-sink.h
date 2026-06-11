@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // NtnOranSink — measuring server of the AI-Native ORAN-NTN application suite
-// (AI_NATIVE_ORAN_NTN_ADOPTION_PLAN WS1). Receives NtnOranApplication /
+// (AI-Native ORAN-NTN adoption WS1). Receives NtnOranApplication /
 // NtnCommandAndControlApp packets and computes, PER QoS FLOW (keyed by
 // srcId + 5QI + S-NSSAI from the in-band NtnOranPayloadHeader):
 //   * one-way delay  — RX time minus the in-band TX timestamp,

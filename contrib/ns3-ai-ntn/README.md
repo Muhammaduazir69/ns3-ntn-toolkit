@@ -1,6 +1,6 @@
-<h1 align="center">ns3-ai (modernised fork)</h1>
+<h1 align="center">ns3-ai-ntn</h1>
 
-<p align="center"><strong>ns-3.43 + Python 3.13 + NumPy 2 + Gymnasium 1.0 compatibility patches for the ns3-ai shared-memory bridge</strong></p>
+<p align="center"><strong>Modernised ns3-ai fork for ns-3.43 + Python 3.13 + NumPy 2 + Gymnasium 1.0, extended with NTN RL environments and an AI-RAN inference contract</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
@@ -18,7 +18,7 @@
 
 ## Why this fork
 
-Upstream [ns3-ai](https://github.com/hust-diangroup/ns3-ai) hasn't tracked the modern Python / ns-3 stack: it crashes on NumPy 2.0, fails to import on Python 3.13, and loses pybind11 module symbols under ns-3.43's link-time optimisation. This fork modernises the bridge for **ns-3.43**, **Python 3.13**, **NumPy 2.0**, and **Gymnasium 1.0**, fixing 11 issues including critical bugs that caused data corruption, crashes, and silent import failures on every modern system.
+Upstream [ns3-ai](https://github.com/hust-diangroup/ns3-ai) hasn't tracked the modern Python / ns-3 stack: it crashes on NumPy 2.0, fails to import on Python 3.13, and loses pybind11 module symbols under ns-3.43's link-time optimisation. This fork modernises the bridge for **ns-3.43**, **Python 3.13**, **NumPy 2.0**, and **Gymnasium 1.0**, fixing 11 issues including critical bugs that caused data corruption, crashes, and silent import failures on every modern system. On top of that it adds NTN-specific RL tooling (`python_utils/ns3_ai_ntn`) and an AI-RAN inference contract (`grpc/`).
 
 ## At a glance
 
@@ -30,7 +30,8 @@ Upstream [ns3-ai](https://github.com/hust-diangroup/ns3-ai) hasn't tracked the m
 | pybind11 | **2.13** |
 | Gymnasium | **1.0+** |
 | Round-trip IPC latency | **≤ 50 µs** in steady state (zero-copy buffer protocol) |
-| Working examples | 4 (a-plus-b, lte-cqi, multi-bss, RL-TCP) |
+| Working examples | 5 (a-plus-b, lte-cqi, multi-bss, rate-control, RL-TCP) |
+| NTN Gymnasium environments | 4 (`HandoverEnv`, `BeamMgmtEnv`, `SliceEnv`, `PowerCtrlEnv`) |
 | Critical bugs fixed | 11 (LTO/import, static shared mem, std::exit in lib, NumPy 2.0, Py 3.13, …) |
 
 ## What it does
@@ -38,6 +39,8 @@ Upstream [ns3-ai](https://github.com/hust-diangroup/ns3-ai) hasn't tracked the m
 - High-performance ns-3 ↔ Python data interaction via **shared-memory ring buffer** (Boost.Interprocess)
 - High-level [Gym interface](model/gym-interface) for Gymnasium 1.0 APIs
 - Low-level [message interface](model/msg-interface) for arbitrary fixed-layout structs
+- **AI-RAN inference contract** (`grpc/`): `AiranInferenceClient` / `AiranInferenceServer` exchange length-prefixed protobuf (`grpc/proto/airan_inference.proto`) over a pluggable `InferenceChannel` — an in-process FIFO and a length-prefixed TCP transport that mirrors the wire format a grpc++ server would expose from the same `.proto` (a native grpc++ transport is planned). Ships a Triton `config.pbtxt` parser plus two model-repository skeletons (`beam_index_classifier`, `precoder_csi_to_weights`) and deterministic mock runtimes (`AiranMockRuntime`) for testing
+- **NTN RL extensions** ([python_utils/](python_utils)): the `ns3_ai_ntn` Python package with 4 Gymnasium environments (`HandoverEnv`, `BeamMgmtEnv`, `SliceEnv`, `PowerCtrlEnv`), Stable-Baselines3 PPO training, PyTorch Geometric GAT models for constellation-graph learning, MAPPO / MASAC multi-agent baselines, and an `ns3gym` compatibility shim
 - **Per-target LTO disable** via `ns3ai_add_pybind_module()` CMake helper — fixes the #1 reported import failure on ns-3.43
 - Proper RAII over `managed_shared_memory` (no more stale-segment data corruption)
 - `Simulator::Stop()` instead of `std::exit(0)` in library code (no more zombie processes / leaked SHM segments)
@@ -59,23 +62,59 @@ Upstream [ns3-ai](https://github.com/hust-diangroup/ns3-ai) hasn't tracked the m
 
 ## Install & run
 
-See [**INSTALL.md**](INSTALL.md) for full setup.
+The module ships in `contrib/ns3-ai-ntn` as part of the
+[ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit). It needs
+**Boost ≥ 1.70** (interprocess + program_options), **pybind11** (CMake config
+package), and **protobuf** — see [INSTALL.md](INSTALL.md) for full setup.
+Dropping a `libtensorflow` or `libtorch` distribution into `model/` enables the
+optional pure-C++ ML examples; otherwise they are skipped automatically at
+configure time.
 
 Quick taste:
 
 ```bash
-git clone -b fix/ns3-43-compatibility-and-critical-bugs \
-  https://github.com/Muhammaduazir69/ns3-ai.git contrib/ai
+# from the ns-3-dev root
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
-cd contrib/ai/examples/a-plus-b/use-gym/
-python3 a-plus-b.py    # works on Py 3.13 + NumPy 2.0
+
+# hello-world: C++ side passes numbers to Python over shared memory
+./ns3 build ns3ai_apb_gym
+cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/
+python3 apb.py    # works on Py 3.13 + NumPy 2.0
+```
+
+## Examples
+
+Each example directory has its own README with full run instructions. The
+Python script drives the simulation: it spawns the matching ns-3 binary itself.
+
+| Example | CMake targets | What it shows |
+|---|---|---|
+| [a-plus-b](examples/a-plus-b) | `ns3ai_apb_gym`, `ns3ai_apb_msg_stru`, `ns3ai_apb_msg_vec` | Hello-world for both interfaces: C++ sends numbers, Python returns the sum |
+| [rl-tcp](examples/rl-tcp) | `ns3ai_rltcp_gym`, `ns3ai_rltcp_msg`, `ns3ai_rltcp_purecpp` | DQN congestion control over the Gym or message interface |
+| [rate-control](examples/rate-control) | `ns3ai_ratecontrol_constant`, `ns3ai_ratecontrol_ts` | Wi-Fi rate control (constant / Thompson sampling) via the message interface |
+| [lte-cqi](examples/lte-cqi) | `ns3ai_ltecqi_msg`, `ns3ai_ltecqi_purecpp` | Online LSTM CQI prediction in an LTE scheduler |
+| [multi-bss](examples/multi-bss) | `ns3ai_multibss` | Multi-BSS Wi-Fi channel-access optimisation with a bundled VR traffic app |
+
+## Tests
+
+```bash
+# C++ AI-RAN inference contract (9 cases: codec round-trips, in-proc/TCP
+# channels, Triton config parsing, failure modes, in-simulator workload)
+./test.py -s oran-ntn-airan-inference
+
+# Python NTN RL extensions
+cd contrib/ns3-ai-ntn/python_utils
+pip install -e .[test] && pytest tests/ -v
 ```
 
 ## Documentation
 
 - [INSTALL.md](INSTALL.md) — full setup + dependency notes
 - [docs/architecture.png](docs/architecture.png) — module architecture
+- [model/gym-interface/README.md](model/gym-interface) and [model/msg-interface/README.md](model/msg-interface) — interface guides
+- [python_utils/README.md](python_utils/README.md) — NTN RL extensions (envs, SB3, GNN, MARL)
+- [docs/using-pure-cpp.md](docs/using-pure-cpp.md) — pure-C++ inference with libtensorflow / libtorch
 - Upstream README (kept for reference) — see git history
 
 ## Cite this work
@@ -108,7 +147,7 @@ Original work:
 | ntn-constellation | [ntn-constellation](https://github.com/Muhammaduazir69/ntn-constellation) |
 | ntn-rrc | [ntn-rrc](https://github.com/Muhammaduazir69/ntn-rrc) |
 | ntn-observability | [ntn-observability](https://github.com/Muhammaduazir69/ntn-observability) |
-| **ns3-ai (fork)** | this repo |
+| **ns3-ai-ntn (this fork)** | this repo |
 | ntn-sagin | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) |
 | ntn-slice | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) |
 | ntn-v2x | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) |

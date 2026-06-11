@@ -4,7 +4,7 @@
 //
 // SionnaCirPropagationLossModel — re-homes the FULL Sionna RT channel-impulse
 // response (multipath taps + per-tap Doppler) as a real ns-3
-// PropagationLossModel (Phase 2 of PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06,
+// PropagationLossModel (Phase 2 of 2026-06 protocol-fidelity audit,
 // channel-plugin recipe).
 //
 // Audit finding for ntn-sionna: the RT result was collapsed to a single scalar

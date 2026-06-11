@@ -14,7 +14,7 @@
 //   https://docs.nvidia.com/aerial/cuda-accelerated-ran/latest/cubb/cubb_integration_guide/scf_fapi/message_details.html
 //   https://github.com/OPENAIRINTERFACE/openairinterface5g/tree/develop/nfapi
 //
-// (Realism-Adoption-Roadmap-2026 §3 T1.)
+// (2026 realism roadmap §3 T1.)
 
 #include "fapi-common.h"
 

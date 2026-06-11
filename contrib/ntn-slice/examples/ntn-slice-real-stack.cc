@@ -3,7 +3,7 @@
  * Copyright (c) 2026  Muhammad Uzair
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * ntn-slice-real-stack — Phase 2 of PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06
+ * ntn-slice-real-stack — Phase 2 of 2026-06 protocol-fidelity audit
  * (RAN recipe).
  *
  * The audit found ntn-slice's "isolation" was trivial — each slice was a separate

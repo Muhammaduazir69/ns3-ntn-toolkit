@@ -24,13 +24,14 @@ LEO non-terrestrial networks introduce one-way delays and Doppler trajectories t
 - **Pass-aware DRX** — NR connected-mode DRX state machine (`Active / OnDuration / ShortSleep / LongSleep`) extended with an NTN `AwaitingPass` deep-sleep state between visibility windows (TS 38.321 + TR 38.821 §6.3.4).
 - **UE location report** — GNSS-assisted reporting in periodic / event-triggered / on-demand modes, with closed-form ECEF↔WGS-84 conversion (TS 38.331 §5.7.4).
 
-## What's new in v2
+## What's new
 
 See [CHANGELOG.md](CHANGELOG.md) for this module's history.
 
-- **`ntn-rrc-full-stack` now flies an orbital `SatSGP4MobilityModel`** (driven from the bundled ISS TLE) instead of the old straight-line constant-velocity model that climbed out of the orbital shell over the pass. The UE now sits at ground level (Islamabad, lat 33.6844°, lon 73.0479°), and the beam-centre reference position is offset ~50 km north of the UE so the UE-specific TA residual (`ta_ue`) is genuinely non-zero rather than collapsing to 0.
-- **`ta_drift_rate` is now emitted in µs/s** — all CSV columns are renamed `*_us_per_s`. The underlying timing-advance model (`ComputeTaDriftRate()`) and the SIB19 codec ABI keep their native s/s convention; only the CSV presentation is scaled.
-- **`ntn-rrc-from-tle` ships a default ISS TLE** (`data/iss-zarya.tle`) and runs with zero arguments — it auto-discovers the bundled TLE from the build root, `contrib/`, or install layout and defaults the scenario start to the TLE epoch.
+- **All examples now run on a real mmwave NR NTN cell.** Every example builds the radio through `NtnRealStackHelper` (from the sibling `ntn-traffic` module): SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC, with real UDP traffic over the radio and the DL SINR/TBLER/throughput **measured off the mmwave PHY trace** — no closed-form SINR, no synthetic link models. Each example also writes a `sim_health.csv` with phy-trace provenance.
+- **Real mobility everywhere.** Serving satellites fly genuine SGP4 orbits — a Walker-Delta element from `ntn-constellation` (`Sgp4MobilityModel`) in `ntn-rrc-leo-pass`, `ntn-rrc-full-stack`, `ntn-rrc-drx-data-traffic`, and `ntn-rrc-real-stack`, or a real TLE through the SNS3 `SatSGP4MobilityModel` in `ntn-rrc-from-tle`. UEs move under 3GPP TR 38.811 §6.1.1.1 class mobility (`NtnTr38811MobilityModel` from `ntn-cho`), placed under the satellite's t=0 sub-point so a real overhead pass occurs.
+- **RRC measurement reports on measured radio** — `ntn-rrc-leo-pass` and `ntn-rrc-real-stack` fire a connection-quality measurement report when the **measured** DL SINR crosses a threshold, alongside the live TA/SIB19 machinery.
+- **`ntn-rrc-from-tle` ships a default ISS TLE** (`data/iss-zarya.tle`) and runs with zero arguments — it auto-discovers the bundled TLE relative to the working directory and defaults the scenario start.
 
 ## Models, helpers & key classes
 
@@ -47,41 +48,41 @@ See [CHANGELOG.md](CHANGELOG.md) for this module's history.
 
 ## Examples
 
-All four examples are built when `--enable-examples` is configured. Each block gives the `./ns3 run` form and the direct-binary form (binaries live under `build/contrib/ntn-rrc/examples/` as `ns3.43-<name>-default`).
+All five examples are built when `--enable-examples` is configured. Each block gives the `./ns3 run` form and the direct-binary form (binaries live under `build/contrib/ntn-rrc/examples/` as `ns3.43-<name>-default`). Every example runs real UDP traffic over a real mmwave NR NTN cell and writes a `sim_health.csv` to `--outputDir`.
 
 ### ntn-rrc-leo-pass
 
-Single-component demo: ephemeris-driven Timing Advance over a 600 s LEO pass (straight-line fly-over geometry), sampled once per second. Produces the classic NTN "smile" curve. A realistic UDP traffic plane is auto-injected so a `sim_health.csv` is also written.
+Ephemeris-driven Timing Advance + SIB19 on a real mmwave NR NTN cell over a genuine SGP4 LEO pass, sampled twice per second. Produces the classic NTN "smile" curve from the live slant-range geometry; an RRC measurement report fires whenever the measured DL SINR drops below the threshold.
 
 ```bash
-./ns3 run "ntn-rrc-leo-pass --simTime=600 --transparent=true --csv=ntn-rrc-leo-pass.csv --outputDir=."
+./ns3 run "ntn-rrc-leo-pass --simTime=20 --transparent=true --outputDir=ntn-rrc-leo-pass-output"
 ```
 ```bash
 LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-leo-pass-default \
-    --simTime=600 --transparent=true --csv=ntn-rrc-leo-pass.csv --outputDir=.
+    --simTime=20 --transparent=true --outputDir=ntn-rrc-leo-pass-output
 ```
 
-**Outputs:** `ntn-rrc-leo-pass.csv` (columns `time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate_us_per_s`); `sim_health.csv` in `--outputDir`.
-**Key args:** `--simTime` (s), `--transparent` (true=transparent / false=regenerative), `--csv` (output path), `--outputDir` (sim_health.csv directory).
+**Outputs (in `--outputDir`):** `ntn-rrc-leo-pass-ta.csv` (columns `time_s,slant_km,ta_total_us,ta_common_us,ta_ue_us,ta_drift_us_per_s,measured_sinr_db`) and `sim_health.csv`; summary on stdout (measured mean SINR, measured DL throughput, final slant/TA, SIB19 refreshes, measurement reports).
+**Key args:** `--simTime` (s), `--numUes`, `--altitude` (km), `--satEirpDbm`, `--freqGhz`, `--transparent` (true=transparent / false=regenerative), `--outputDir`.
 
 ### ntn-rrc-full-stack
 
-End-to-end pass exercising all four NTN-RRC components at once — TA pre-comp, SIB19 broadcast, UE GNSS reporting, and the DRX state machine — over a real SGP4 orbit (bundled ISS TLE) with the UE on the ground in Islamabad. A realistic UDP traffic plane is auto-injected.
+End-to-end pass exercising all four NTN-RRC components at once — TA pre-comp, SIB19 broadcast, UE GNSS reporting, and the DRX state machine — over a real SGP4 Walker orbit with TR 38.811 class UEs under the sub-point and real traffic on the mmwave cell. The beam-centre reference is offset ~50 km north of the sub-point so the UE-specific TA residual (`ta_ue`) is genuinely non-zero.
 
 ```bash
-./ns3 run "ntn-rrc-full-stack --simTime=600 --transparent=true --passAwareDrx=true --prefix=ntn-rrc-full --outputDir=."
+./ns3 run "ntn-rrc-full-stack --simTime=20 --transparent=true --passAwareDrx=true --prefix=ntn-rrc-full"
 ```
 ```bash
 LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-full-stack-default \
-    --simTime=600 --transparent=true --passAwareDrx=true --prefix=ntn-rrc-full --outputDir=.
+    --simTime=20 --transparent=true --passAwareDrx=true --prefix=ntn-rrc-full
 ```
 
-**Outputs:** `<prefix>-ta.csv` (`time_s,ta_total_us,ta_common_us,ta_ue_us,ta_drift_rate_us_per_s`), `<prefix>-sib19.csv` (`time_s,broadcast_seq,cell_id,sat_x,sat_y,sat_z,ta_common_us,drift_rate_us_per_s`), `<prefix>-ue.csv` (`time_s,sequence,lat_deg,lon_deg,alt_m`), `<prefix>-drx.csv` (`time_s,state,active_ms,onDuration_ms,shortSleep_ms,longSleep_ms,awaitingPass_ms`); `sim_health.csv` in `--outputDir`.
-**Key args:** `--simTime` (s), `--transparent` (payload mode), `--passAwareDrx` (enable `AwaitingPass` deep sleep), `--prefix` (CSV filename prefix), `--outputDir` (sim_health.csv directory).
+**Outputs (in `--outputDir`):** `<prefix>-ta.csv` (`time_s,ta_total_us,ta_common_us,ta_ue_us,measured_sinr_db`), `<prefix>-sib19.csv` (`time_s,broadcast_seq,cell_id,sat_x,sat_y,sat_z,ta_common_us,drift_rate_us_per_s`), `<prefix>-ue.csv` (`time_s,sequence,lat_deg,lon_deg,alt_m`), `<prefix>-drx.csv` (`time_s,state,active_ms,onDuration_ms,shortSleep_ms,longSleep_ms,awaitingPass_ms`); `sim_health.csv`.
+**Key args:** `--simTime` (s), `--numUes`, `--altitude` (km), `--satEirpDbm`, `--transparent` (payload mode), `--passAwareDrx` (enable `AwaitingPass` deep sleep), `--prefix` (CSV filename prefix), `--outputDir`.
 
 ### ntn-rrc-from-tle
 
-Reads a real 3-line TLE, drives a SNS3 `SatSGP4MobilityModel` from it, and logs Timing Advance across a pass. Ships with a bundled ISS TLE (`data/iss-zarya.tle`) and **runs with no arguments** — `--tle` is optional. A realistic UDP traffic plane is auto-injected.
+Reads a real 3-line TLE, drives a SNS3 `SatSGP4MobilityModel` from it, and runs the mmwave NR cell under the satellite. The UEs are auto-placed at the satellite's t=0 sub-point so a real overhead pass occurs; Timing Advance is logged from the live SGP4 geometry next to the measured DL SINR. Ships with a bundled ISS TLE (`data/iss-zarya.tle`) and **runs with no arguments** — `--tle` is optional.
 
 ```bash
 ./ns3 run "ntn-rrc-from-tle"
@@ -93,30 +94,45 @@ LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-from-t
 With an explicit TLE and scenario start:
 
 ```bash
-./ns3 run "ntn-rrc-from-tle --tle=contrib/ntn-rrc/data/iss-zarya.tle --start=2024-01-01T12:00:00 --csv=ntn-rrc-from-tle.csv --outputDir=."
+./ns3 run "ntn-rrc-from-tle --tle=contrib/ntn-rrc/data/iss-zarya.tle --start=2024-01-01T12:00:00"
 ```
 ```bash
 LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-from-tle-default \
-    --tle=contrib/ntn-rrc/data/iss-zarya.tle --start=2024-01-01T12:00:00 --csv=ntn-rrc-from-tle.csv --outputDir=.
+    --tle=contrib/ntn-rrc/data/iss-zarya.tle --start=2024-01-01T12:00:00
 ```
 
-**Outputs:** `ntn-rrc-from-tle.csv` (columns `time_s,sat_x_m,sat_y_m,sat_z_m,slant_km,ta_total_us,ta_drift_rate_us_per_s`); `sim_health.csv` in `--outputDir`.
-**Key args:** `--tle` (3-line TLE file; defaults to bundled ISS TLE), `--start` (scenario start UTC, `YYYY-MM-DDTHH:MM:SS`; the `T` separator avoids whitespace truncation), `--ueLat` / `--ueLon` / `--ueAlt` (UE geodetic position), `--simTime` (s), `--step` (sample period s), `--transparent` (payload mode), `--csv` (output path), `--outputDir`.
+**Outputs (in `--outputDir`):** `ntn-rrc-from-tle.csv` (columns `time_s,sat_x_m,sat_y_m,sat_z_m,slant_km,ta_total_us,ta_drift_rate_us_per_s,measured_sinr_db`) and `sim_health.csv`; summary on stdout (sub-point, measured mean SINR, measured throughput, final slant).
+**Key args:** `--tle` (3-line TLE file; defaults to the bundled ISS TLE), `--start` (scenario start UTC, `YYYY-MM-DDTHH:MM:SS`; the `T` separator avoids whitespace truncation), `--simTime` (s), `--numUes`, `--satEirpDbm`, `--step` (sample period s), `--transparent` (payload mode), `--outputDir`.
 
 ### ntn-rrc-drx-data-traffic
 
-Real UDP downlink to a UE whose receiver is gated by the NTN RRC procedures: SIB19 broadcast + live timing advance + connected-mode DRX. On every DRX `StateChange` the receive link opens (awake) or closes (asleep), so delivered goodput tracks the DRX on-fraction — the power-saving vs throughput trade-off, measured on a real data plane (P2P link, `RateErrorModel`, FlowMonitor). Compare `--drxOn=true` vs `--drxOn=false`.
+Real UDP downlink to UEs on the mmwave NR cell with the NTN RRC procedures running on the live geometry: SIB19 broadcast, live timing advance, and the connected-mode DRX cycle. The summary reports the measured link KPIs together with the DRX on-duty fraction and the resulting effective goodput (measured goodput × on-duty) — the power-saving vs throughput trade-off. Compare `--drxOn=true` vs `--drxOn=false`.
 
 ```bash
-./ns3 run "ntn-rrc-drx-data-traffic --simSeconds=60 --dataRateMbps=5 --drxOn=true"
+./ns3 run "ntn-rrc-drx-data-traffic --simSeconds=20 --numUes=4 --drxOn=true"
 ```
 ```bash
 LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-drx-data-traffic-default \
-    --simSeconds=60 --dataRateMbps=5 --drxOn=true
+    --simSeconds=20 --numUes=4 --drxOn=true
 ```
 
-**Outputs:** per-second console trace (elevation, slant range, TA, DRX state, goodput) and a summary line (PDR, average goodput, on-duty %). No CSV.
-**Key args:** `--simSeconds` (s), `--leoAltKm`, `--satSpeed` (m/s), `--freqGHz`, `--dataRateMbps` (offered load), `--packetBytes`, `--txPowerDbm`, `--antennaGainDb`, `--drxOn` (enable DRX gating), `--drxLongCycleMs`, `--drxOnDurationMs`, `--linkCapacityMbps`.
+**Outputs:** per-second console trace (slant range, TA, DRX state, measured SINR), a summary line (measured SINR/TBLER/goodput, DRX on-duty %, effective goodput), and `sim_health.csv` in `--outputDir`.
+**Key args:** `--simSeconds` (s), `--numUes`, `--leoAltKm`, `--freqGHz`, `--satEirpDbm`, `--drxOn` (enable DRX gating), `--drxLongCycleMs`, `--drxOnDurationMs`, `--outputDir`.
+
+### ntn-rrc-real-stack
+
+Real-stack flagship: `NtnTimingAdvance` + `NtnSib19Broadcaster` (TS 38.331 NTN-Config) on the real mmwave NR cell, with SIB19 re-broadcast every si-period from the live ephemeris while packets traverse the radio. The TA total/common/UE-specific decomposition and drift come from the real slant-range geometry, and the RRC connection-quality measurement report triggers on the measured DL SINR.
+
+```bash
+./ns3 run "ntn-rrc-real-stack --duration=20 --numUes=4"
+```
+```bash
+LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-real-stack-default \
+    --duration=20 --numUes=4
+```
+
+**Outputs (in `--outputDir`):** `ntn-rrc-real-stack-ta.csv` (columns `time_s,slant_km,ta_total_us,ta_common_us,ta_ue_us,ta_drift_us_per_s,measured_sinr_db`) and `sim_health.csv`; summary on stdout (measured mean SINR, measured DL throughput, final slant/TA, SIB19 refreshes, measurement reports).
+**Key args:** `--duration` (s), `--numUes`, `--altitude` (km), `--satEirpDbm`, `--freqGhz`, `--transparent` (payload mode), `--outputDir`.
 
 ## Build, run & test
 
@@ -128,12 +144,12 @@ LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-drx-da
 Run the unit-test suite:
 
 ```bash
-./build/utils/ns3.43-test-runner-default --suite=ntn-rrc
+./test.py -s ntn-rrc
 ```
 
 The suite (`Type::UNIT`) covers the closed-form TA (transparent and regenerative), the common/UE-specific decomposition, the LEO drift-rate bound, SIB19 codec round-trip and truncation rejection, broadcaster cadence, ECEF↔WGS-84 round-trip, all three location-report modes, the standard DRX cycle and data-activity override, pass-aware deep sleep, and invalid-config rejection.
 
-For full setup notes (SNS3 / satellite-module dependency, traffic helper, toolkit layout) see [INSTALL.md](INSTALL.md).
+For full setup notes (SNS3 / satellite-module dependency, the `ntn-traffic` / `ntn-cho` / `ntn-constellation` sibling modules used by the examples, toolkit layout) see [INSTALL.md](INSTALL.md).
 
 ## License & author
 

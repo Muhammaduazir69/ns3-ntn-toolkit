@@ -5,7 +5,7 @@
 #ifndef ORAN_NTN_SERVICE_MODEL_H
 #define ORAN_NTN_SERVICE_MODEL_H
 
-// Service-Model plugin ABI (Realism-Adoption-Roadmap-2026 §3 T4).
+// Service-Model plugin ABI (2026 realism roadmap §3 T4).
 //
 // Every Service Model the toolkit ships — KPM v3, RC v1.03 (with Style 3
 // Connected-Mode Mobility from 4.1.3), E2SM-CCC, NTN-Ephemeris-SM, THz-RIS-SM

@@ -3,7 +3,7 @@
  * Copyright (c) 2026  Muhammad Uzair
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * thz-ntn-real-stack — Phase 1 of PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06
+ * thz-ntn-real-stack — Phase 1 of 2026-06 protocol-fidelity audit
  * (channel-plugin pattern).
  *
  * The audit found every thz-ntn example was a CSV calculator (or an empty Run()):

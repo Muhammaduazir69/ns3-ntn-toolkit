@@ -7,7 +7,7 @@
  * Intelligent Surface switched ON mid-simulation, while REAL traffic flows on
  * a REAL mmwave NR NTN cell (NtnRealStackHelper).
  *
- * Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06, channel-plugin recipe):
+ * Audit fix (2026-06 protocol-fidelity audit, channel-plugin recipe):
  * the old version folded the blockage and the RIS array gain into a
  * closed-form SNR and drove a P2P RateErrorModel through a sigmoid
  * SnrToPer() — packets never felt the blockage. Here the blockage onset and

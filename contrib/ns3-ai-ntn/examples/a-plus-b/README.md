@@ -32,7 +32,7 @@ cd YOUR_NS3_DIRECTORY
 3. Run Python script
 
 ```bash
-cd contrib/ai/examples/a-plus-b/use-gym
+cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym
 python apb.py
 ```
 
@@ -49,7 +49,7 @@ cd YOUR_NS3_DIRECTORY
 3. Run Python script
 
 ```bash
-cd contrib/ai/examples/a-plus-b/use-msg-stru
+cd contrib/ns3-ai-ntn/examples/a-plus-b/use-msg-stru
 python apb.py
 ```
 
@@ -66,7 +66,7 @@ cd YOUR_NS3_DIRECTORY
 3. Run Python script
 
 ```bash
-cd contrib/ai/examples/a-plus-b/use-msg-vec
+cd contrib/ns3-ai-ntn/examples/a-plus-b/use-msg-vec
 python apb.py
 ```
 

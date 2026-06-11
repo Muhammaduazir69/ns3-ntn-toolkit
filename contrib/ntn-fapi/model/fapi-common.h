@@ -21,7 +21,7 @@ inline constexpr const char* kScfFapiBase = "SCF FAPI 222.10.02";
 inline constexpr const char* kScfFapiAddendum = "SCF FAPI 222.10.04";
 
 /// FAPI message IDs (subset implemented in v2.1). Values are the message-type
-/// codes used on the SCF FAPI wire. (Realism-Adoption-Roadmap-2026 §3 T1.)
+/// codes used on the SCF FAPI wire. (2026 realism roadmap §3 T1.)
 enum MessageId : uint16_t
 {
     // P5 / P7 — TTI-level scheduling and indication.

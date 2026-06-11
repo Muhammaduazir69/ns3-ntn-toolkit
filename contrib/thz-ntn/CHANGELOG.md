@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `HitranLut` (namespace `ns3::thzntn`): bundled HITRAN-2024 specific-attenuation
+  lookup table + generator script (`tools/hitran2024-lut-gen.py`)
+- ITU-R reference wrappers: `Itu838RainModel`, `Itu618LossModel`,
+  `Itu676AbsorptionModel`, `Itu681LmsModel` (`thz-ntn-itu-recommendations`)
+- `ThzNtnAlphaMuFading` small-scale fading
+- `ThzNtnIsacScheduler` comm/sense sub-band partitioning
+- `ThzNtnNyusimReference` / `ThzNtnNyusimCalibrator` (NYUSIM-140 calibration,
+  `data/nyusim-140-reference.csv`)
+- `ThzNtnRisServiceModel` + `ThzNtnRisXapp` for O-RAN-style closed-loop RIS control
+- `ThzNtnPropagationLossModel`: molecular absorption + weather as a real
+  `PropagationLossModel`, chainable onto a live spectrum channel
+
+### Changed
+- All traffic examples converted from P2P/error-model data planes to a real
+  mmwave NR NTN stack (`NtnRealStackHelper`) with SGP4/Walker satellite mobility,
+  TR 38.811 ground terminals, `NtnOranApplication` QoS flows measured at
+  `NtnOranSink`, and honest `sim_health.csv` reports; new flagship example
+  `thz-ntn-real-stack`
+
 ## [1.0.0] - 2026-04-20
 
 Initial public release.

@@ -12,6 +12,30 @@ No shortcut formulas for capacity, no hardcoded fading tables, no synthetic gain
 
 ---
 
+## Integration point 0: `ThzNtnPropagationLossModel` — the channel-plugin path
+
+This is the path the shipped traffic examples use. The molecular-absorption and
+weather calculators are re-homed as a real `PropagationLossModel`
+(`thz-ntn-propagation-loss-model.h`) computing the atmospheric **excess** loss
+(gaseous absorption + rain/fog/snow) per transmission from the Tx/Rx geometry.
+It is chained onto the live mmwave NR NTN spectrum channel via
+`NtnRealStackHelper::AddExtraPropagationLoss()` (`contrib/ntn-traffic`), with
+FSPL coming from the stack's own Friis model:
+
+```cpp
+auto thzLoss = CreateObject<ThzNtnPropagationLossModel>();
+thzLoss->SetFrequency(100e9);
+thzLoss->SetRainRate(25.0);          // mm/h; 0 = clear sky
+rs.AddExtraPropagationLoss(thzLoss); // NtnRealStackHelper
+```
+
+Every transmitted packet now traverses the THz atmospheric loss, so it shows up
+in the measured SINR / TBLER / goodput — and reconfiguring the model mid-run
+(e.g. toggling rain) is a live channel event. See `examples/thz-ntn-real-stack.cc`
+for the minimal end-to-end wiring.
+
+---
+
 ## Integration point 1: `ThzNtnFreeSpaceLoss` extends `SatFreeSpaceLoss`
 
 The satellite module's `SatChannel::DoRxPowerCalculation()` calls `SatFreeSpaceLoss::GetFsl(mobilityA, mobilityB, freqHz)` to get the linear FSPL ratio. By **extending** `SatFreeSpaceLoss` rather than replacing it, `ThzNtnFreeSpaceLoss` becomes a drop-in replacement:

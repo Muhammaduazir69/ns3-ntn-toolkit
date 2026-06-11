@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // oran-ntn-ric-placement-ab — RIC placement as a measured experiment variable
-// (AI_NATIVE_ORAN_NTN_ADOPTION_PLAN WS3; Deng 2026 Sec. IV-B).
+// (AI-Native ORAN-NTN adoption WS3; Deng 2026 Sec. IV-B).
 //
 // One REAL mmwave NR NTN cell (Ka 20 GHz, SGP4 satellite), healthy at ~18 dB.
 // Periodic deep fades (15 dB extra loss, a real PropagationLossModel in the

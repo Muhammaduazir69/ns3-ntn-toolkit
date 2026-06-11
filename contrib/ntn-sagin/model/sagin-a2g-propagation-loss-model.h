@@ -4,7 +4,7 @@
  *
  * SaginA2gPropagationLossModel — re-homes the ntn-sagin A2gChannelTr36777
  * CALCULATOR as a real ns-3 PropagationLossModel (Phase 2 of
- * PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06, channel-plugin pattern).
+ * 2026-06 protocol-fidelity audit, channel-plugin pattern).
  *
  * Before, A2gChannelTr36777::PathLossDb() was only invoked from user-space loops
  * and written to CSV; no packet ever saw it. As a PropagationLossModel it can be

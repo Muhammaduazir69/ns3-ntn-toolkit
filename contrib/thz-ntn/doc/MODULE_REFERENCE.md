@@ -1,7 +1,10 @@
 # THz-NTN Module Reference
 
-Per-class reference documentation for all 24 major classes in the module.
+Per-class reference documentation for the module's core classes.
 Each section covers: purpose, public API, ns-3 attributes, and key formulas.
+Classes added after the first release are summarised in
+[Newer classes (v2)](#newer-classes-v2) at the end; their headers in `model/`
+are the authoritative reference.
 
 ---
 
@@ -711,3 +714,20 @@ double ComputeThzBeamTte(double satAlt_km, double satVelocity_km_s,
 double ComputeThzEffectiveCoverage_km(double satAlt_km, double beamwidth_deg,
                                        double pointingError_deg) const;
 ```
+
+---
+
+## Newer classes (v2)
+
+Added after the sections above were written; see the `model/*.h` headers for
+the full API.
+
+| Class | Header | Role |
+|---|---|---|
+| `ThzNtnAlphaMuFading` | `thz-ntn-alpha-mu-fading.h` | alpha-mu small-scale fading (Rayleigh / Nakagami special cases) |
+| `HitranLut` (namespace `ns3::thzntn`) | `thz-ntn-hitran-lut.h` | Bundled HITRAN-2024 specific-attenuation lookup table (`data/hitran2024-lut-subthz.csv`) |
+| `Itu838RainModel`, `Itu618LossModel`, `Itu676AbsorptionModel`, `Itu681LmsModel` | `thz-ntn-itu-recommendations.h` | ITU-R P.838 / P.618 / P.676 / P.681 reference implementations |
+| `ThzNtnNyusimReference`, `ThzNtnNyusimCalibrator` | `thz-ntn-nyusim-reference.h`, `thz-ntn-nyusim-calibrator.h` | NYUSIM-140 GHz calibration reference (`data/nyusim-140-reference.csv`) + calibrator |
+| `ThzNtnIsacScheduler` | `thz-ntn-isac-scheduler.h` | Comm/sense sub-band partitioning per ISAC mode |
+| `ThzNtnRisServiceModel`, `ThzNtnRisXapp` | `thz-ntn-ris-service-model.h`, `thz-ntn-ris-xapp.h` | O-RAN service model + xApp for closed-loop RIS control |
+| `ThzNtnPropagationLossModel` | `thz-ntn-propagation-loss-model.h` | Atmospheric excess loss (gaseous absorption + rain/fog/snow) as a real `PropagationLossModel`, chainable onto a live spectrum channel |

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// NtnRealStackHelper — the Phase-0 keystone of PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06.
+// NtnRealStackHelper — the Phase-0 keystone of 2026-06 protocol-fidelity audit.
 //
 // Unlike NtnRealisticTrafficHelper (a plain PointToPoint star whose packets
 // never touch any radio physics), this helper installs a REAL NR-style air

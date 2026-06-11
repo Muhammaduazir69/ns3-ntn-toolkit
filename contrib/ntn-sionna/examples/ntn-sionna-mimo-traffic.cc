@@ -10,7 +10,7 @@
  * array gain (10*log10(N_elements) dB) is applied as a real gain in its
  * packet path.
  *
- * Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06, channel-plugin recipe):
+ * Audit fix (2026-06 protocol-fidelity audit, channel-plugin recipe):
  * the old version computed two closed-form SNRs and drove two P2P
  * RateErrorModels through a sigmoid SnrToPer() — no packet crossed a radio.
  * Here both UEs ride ONE real cell; the MIMO terminal's array gain is a

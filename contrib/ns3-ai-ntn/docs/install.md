@@ -37,8 +37,8 @@ git clone https://github.com/hust-diangroup/ns3-ai.git contrib/ai
 3. Setup Python interfaces.
 
 ```shell
-pip install -e contrib/ai/python_utils
-pip install -e contrib/ai/model/gym-interface/py
+pip install -e contrib/ns3-ai-ntn/python_utils
+pip install -e contrib/ns3-ai-ntn/model/gym-interface/py
 ```
 
 4. Build the examples (optional)

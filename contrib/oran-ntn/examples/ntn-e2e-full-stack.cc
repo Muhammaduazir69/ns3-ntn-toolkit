@@ -3,7 +3,7 @@
  * Copyright (c) 2026  Muhammad Uzair
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * ntn-e2e-full-stack — Phase 3 of PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06
+ * ntn-e2e-full-stack — Phase 3 of 2026-06 protocol-fidelity audit
  * (composition / silo-breaker).
  *
  * The audit's anti-pattern #6: the modules are siloed — each re-derives its own

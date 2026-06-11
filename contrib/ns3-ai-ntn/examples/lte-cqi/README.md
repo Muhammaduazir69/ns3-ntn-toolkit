@@ -49,8 +49,8 @@ cd YOUR_NS3_DIRECTORY
 3. Run Python script
 
 ```shell
-pip install -r contrib/ai/examples/lte-cqi/requirements.txt
-cd contrib/ai/examples/lte-cqi/use-msg
+pip install -r contrib/ns3-ai-ntn/examples/lte-cqi/requirements.txt
+cd contrib/ns3-ai-ntn/examples/lte-cqi/use-msg
 python run_online_lstm.py 1
 ```
 

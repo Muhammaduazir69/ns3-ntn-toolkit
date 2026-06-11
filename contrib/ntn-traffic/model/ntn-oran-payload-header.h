@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // NtnOranPayloadHeader — the in-band user-plane header of the AI-Native
-// ORAN-NTN application suite (AI_NATIVE_ORAN_NTN_ADOPTION_PLAN WS1).
+// ORAN-NTN application suite (AI-Native ORAN-NTN adoption WS1).
 //
 // Every NtnOranApplication packet carries this header as REAL serialized
 // bytes, so QoS/slice identity (5QI, S-NSSAI, QFI) and the measurement

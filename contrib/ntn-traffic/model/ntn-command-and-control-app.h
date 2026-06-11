@@ -2,7 +2,7 @@
 //
 // NtnCommandAndControlApp — the paper's (Deng 2026, Sec. III-C) NTN platform
 // command-and-control interface as a REAL application
-// (AI_NATIVE_ORAN_NTN_ADOPTION_PLAN WS1). Each period it samples the node's
+// (AI-Native ORAN-NTN adoption WS1). Each period it samples the node's
 // REAL ns-3 MobilityModel (SGP4 satellite / TR 38.811 HAPS / UAV), derives
 // attitude from the velocity frame, updates a linear battery model, and sends
 // the NtnCncTelemetry record as real bytes (after an NtnOranPayloadHeader with

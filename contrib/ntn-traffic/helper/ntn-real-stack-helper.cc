@@ -602,7 +602,7 @@ NtnRealStackHelper::WriteHealthReport()
                             .count();
     double wallSec = (wallEndNs - m_wallStartNs) / 1e9;
 
-    // ---- HONEST gates (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06 §8) ----
+    // ---- HONEST gates (2026-06 protocol-fidelity audit §8) ----
     bool gateStackDepth = (m_phyRxTb >= m_gates.minPhyRxTb);          // packets crossed the radio PHY
     bool gateThroughput = (m_rxThroughputMbps >= m_gates.minRxThroughputMbps); // measured app KPI
     bool gateProvenance = (!m_gates.requireSinrProvenance) || (m_dlGlobal.n > 0); // SINR from PHY trace

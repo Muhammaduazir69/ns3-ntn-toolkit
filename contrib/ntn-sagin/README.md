@@ -1,6 +1,6 @@
 # ntn-sagin
 
-> Space-Air-Ground Integrated Network for ns-3.43 — LEO space layer, an air layer of aircraft / HAPS / UAV swarms, and a ground layer of maritime, high-speed-train and ADS-B terminals, stitched together by a multi-layer / slice-aware router. Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
+> Space-Air-Ground Integrated Network for ns-3.43 — LEO space layer, an air layer of aircraft / HAPS / UAV swarms, and a ground layer of maritime, high-speed-train and ADS-B terminals, stitched together by a multi-layer / slice-aware router and carried over a real mmwave NR NTN cell. Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
@@ -24,31 +24,47 @@ single session frequently traverses two or three of them. `ntn-sagin` models all
 
 ```
 ground UE  ──►  UAV-relay  ──►  HAPS (20 km)  ──►  LEO (550 km)
-              ▲ TR 36.777 A2G channel ▲                ▲ free-space / Ka-band link budget
+              ▲ TR 36.777 A2G channel ▲                ▲ SGP4 pass + measured NR radio
 ```
 
-- **Space.** LEO passes driven either by analytic ground-track velocity or, via
-  `ntn-constellation`, by SGP4 + contact-graph shortest-path ISL routing.
+- **Space.** LEO passes driven by SGP4 (`Sgp4MobilityModel` from `ntn-constellation`, Walker
+  geometry) and, for routed scenarios, contact-graph shortest-path ISL routing.
 - **Air.** HAPS station-keeping (figure-8 lemniscate + waypoint trajectory), three UAV mobility
   patterns (waypoint / patrol / search-lawnmower), and constant-altitude aeronautical cruise.
 - **Ground / mobile terminals.** Maritime **AIS** vessels, **OpenSky ADS-B** aircraft, and
   **high-speed-train** mobility, each with replayable trace feeds.
 - **Channel.** 3GPP TR 36.777 v15.0.0 air-to-ground path loss and LOS probability for the
-  UMa-AV / RMa-AV / UMi-AV reference scenarios; Ka-band free-space link budgets for the space hops.
+  UMa-AV / RMa-AV / UMi-AV reference scenarios — available both as the `A2gChannelTr36777`
+  calculator and as a real `PropagationLossModel` (`SaginA2gPropagationLossModel`) that
+  attenuates actual packets on a real mmwave NR spectrum channel.
 - **Routing.** A greedy max-elevation `MultiLayerRouter` (Ground → UAV → HAPS → LEO) and a
   QFI → S-NSSAI slice-aware `SaginSliceRouter` that biases the layer choice by latency budget.
+- **Measured KPIs.** Radio examples ride a real mmwave NR NTN cell (`NtnRealStackHelper`:
+  SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC), so SINR / TBLER / throughput are measured
+  off the PHY trace. Data-plane examples carry `NtnOranApplication` traffic whose in-band
+  `NtnOranPayloadHeader` lets the `NtnOranSink` measure one-way delay, jitter, loss and goodput
+  per flow — no closed-form KPI formulas, no `OnOffApplication`.
 
-## What's new in v2
+## What's new (June 2026)
 
 See the [CHANGELOG](CHANGELOG.md) for the full history.
 
-- **Flight-LEO KPM now uses a full Ka-band link budget.** EIRP + satellite/aircraft antenna
-  gains → realistic RSRP (≈ −73 … −80 dBm), noise-based SINR over the carrier bandwidth,
-  Shannon/CQI-driven throughput, and relative-velocity Doppler — replacing the earlier affine SINR
-  proxy and the binary 0/80 Mbps throughput.
-- **A2G channel applies the TR 36.777 NLOS floor `max(PL_LOS, PL'_NLOS)`.** An obstructed link can
-  never report *less* loss than the LOS reference, fixing the short-range dip where the raw NLOS
-  formula fell below LOS.
+- **New flagship example `ntn-sagin-remote-coverage`** — a multi-MNO shared LEO cell for
+  remote/rural coverage. Two MNOs serve four village households; with `--sharing=1` MNO-B's UEs
+  ride MNO-A's real cell on their own S-NSSAI, and the per-MNO delivered volume — measured
+  in-band by the KPM monitor — yields the cost-sharing split. With `--sharing=0` MNO-B's
+  households simply have no service.
+- **Measured radio everywhere.** The radio examples (HAPS relay, UAV swarm, aeronautical,
+  flight-E2, maritime, HST, ADS-B) now build a real mmwave NR NTN cell via `NtnRealStackHelper`;
+  SINR / TBLER / throughput come off the PHY trace, not closed-form link budgets. The TR 36.777
+  A2G channel was re-homed as `SaginA2gPropagationLossModel` so it attenuates real packets
+  (see `sagin-a2g-real-stack`).
+- **`NtnOranApplication` traffic suite.** The data-plane examples (multihop, slice, SGP4-routed)
+  replaced `OnOffApplication` with `NtnOranApplication` sources and `NtnOranSink` sinks: every
+  packet carries an in-band payload header (flow identity, 5QI, S-NSSAI, timestamps), so per-slice
+  one-way delay / jitter / loss are measured from the packets themselves — e.g. the mMTC slice
+  steered onto the GEO leg measures ≈119 ms one-way delay, exactly the 35 786 km physical
+  propagation time.
 
 ## Models, helpers & key classes
 
@@ -70,149 +86,221 @@ Derived from `model/*.h` and `helper/*.h`.
 | `HstMobilityModel` | `hst-mobility-model.h` | High-speed-train mobility along a track |
 | *(trace)* | `hst-trace.h` | HST position/speed trace feed |
 | `A2gChannelTr36777` | `a2g-channel-tr36777.h` | TR 36.777 v15.0.0 path loss (LOS + NLOS floor) and LOS probability for UMa-AV / RMa-AV / UMi-AV |
+| `SaginA2gPropagationLossModel` | `sagin-a2g-propagation-loss-model.h` | The TR 36.777 A2G model as a real ns-3 `PropagationLossModel`; chained onto a real mmwave NR spectrum channel it attenuates actual packets (returns the excess over free space to avoid double-counting) |
 | `MultiLayerRouter` | `multi-layer-router.h` | Greedy max-elevation Ground→UAV→HAPS→LEO routing; pluggable `SaginScoreCallback` for RL/external scoring |
 | `SaginSliceRouter` | `sagin-slice-router.h` | 5G QFI → S-NSSAI → `SliceProfile` mapping; biases layer choice by latency budget + GEO allowance |
 | `SaginHelper` | `sagin-helper.h` | Factory façade: builds a ready-to-route 4-layer scene in one call |
 
 ## Examples
 
-Ten example programs ship under `examples/`. Build any of them with `./ns3 build <NAME>`; the binary
-lands at `build/contrib/ntn-sagin/examples/ns3.43-<NAME>-default`. Each example below lists two run
-forms (via `./ns3 run` and the direct binary), its outputs, and its real `--`args.
+Twelve example programs ship under `examples/`. Build any of them with `./ns3 build <NAME>`; the
+binary lands at `build/contrib/ntn-sagin/examples/ns3.43-<NAME>-default`.
 
-The four traffic examples (`-traffic`, multihop, slice, sgp4) instantiate a real ns-3 IP data plane
-(NetDevice + IPv4 + applications) and print a **FlowMonitor** summary (throughput, loss, delay) to
-the console — they do not write a CSV.
+They fall into two families:
+
+- **Real-cell examples** (`ntn-sagin-remote-coverage`, `sagin-haps-leo-relay`, `sagin-uav-swarm`,
+  `sagin-a2g-real-stack`, `sagin-aeronautical`, `sagin-flight-leo-e2`,
+  `sagin-maritime-leo-traffic`, `sagin-hst-leo-traffic`, `sagin-adsb-flight-leo-traffic`) build a
+  real mmwave NR NTN cell with `NtnRealStackHelper`; measured SINR / TBLER / throughput are printed
+  to the console and an honest `sim_health.csv` is written to `--outputDir`.
+- **Data-plane examples** (`sagin-multihop-traffic`, `sagin-slice-traffic`,
+  `sagin-sgp4-routed-traffic`) build a point-to-point IP data plane with geometry-driven error
+  models and carry `NtnOranApplication` traffic; the `NtnOranSink` prints measured in-band KPIs
+  (one-way delay, jitter, loss, goodput) to the console.
 
 ---
 
-### sagin-haps-leo-relay
+### ntn-sagin-remote-coverage  *(flagship)*
 
-1 h SAGIN scenario emitting the full 4-layer hop path per second, driven by `NtnRealisticTrafficHelper`.
+Remote/rural coverage with **multi-MNO infrastructure sharing** on a real LEO cell. A remote
+village has four households: two subscribe to MNO-A, two to MNO-B; only MNO-A has a satellite
+overhead (SGP4 Walker LEO at 550 km). With `--sharing=1` the cell is shared — MNO-B's UEs ride
+MNO-A's real cell on their own S-NSSAI (SST 1 / SD 0xB) — and the per-MNO delivered volume,
+measured in-band, yields the cost-sharing split. With `--sharing=0` MNO-B's households have no
+service. Run both and compare.
 
 ```bash
-./ns3 run "sagin-haps-leo-relay --simTime=3600 --csv=/tmp/sagin.csv"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-haps-leo-relay-default --simTime=3600 --csv=/tmp/sagin.csv
+./ns3 run "ntn-sagin-remote-coverage --sharing=0"
+./ns3 run "ntn-sagin-remote-coverage --sharing=1"
 ```
 
-**Outputs:** `sagin-haps-leo-relay.csv` (per-second hop selection); `sim_health.csv` (written by the
-traffic helper, location set by `--outputDir`).
-**Key args:** `--simTime`, `--csv`, `--outputDir`.
+**Outputs:** console report — per-MNO households served, delivered Mbps, measured cost-sharing
+split, village coverage and cell SINR / throughput / one-way delay; `sim_health.csv` and
+`kpm_series.csv` in `--outputDir`.
+**Key args:** `--simSeconds`, `--sharing`, `--outputDir`.
+
+### sagin-haps-leo-relay
+
+Ground-UE → UAV-relay → HAPS → LEO multi-layer route. The `MultiLayerRouter` selects the layered
+path every second and logs per-hop elevation/range, while the access hop (ground UE ↔ UAV relay)
+is a real mmwave NR cell carrying the TR 36.777 A2G channel — access SINR/TBLER/throughput are
+measured off the PHY trace.
+
+```bash
+./ns3 run "sagin-haps-leo-relay --simTime=30 --csv=sagin.csv"
+```
+
+**Outputs:** `<outputDir>/<csv>` with columns
+`time_s,n_hops,uav_el_deg,uav_range_km,haps_el_deg,haps_range_km,leo_el_deg,leo_range_km`;
+`sim_health.csv` in `--outputDir`.
+**Key args:** `--simTime`, `--numUes`, `--uavAlt`, `--gnbTxDbm`, `--csv`, `--outputDir`.
 
 ### sagin-uav-swarm
 
-8-UAV swarm (mix of waypoint/patrol/search patterns) with TR 36.777 A2G path-loss spot-checks.
+8-UAV swarm (2 random-waypoint, 4 patrol, 2 search-pattern) served by a ground gNB over a real
+mmwave NR cell carrying the TR 36.777 RMa-AV A2G channel. Each UAV is a UE; per-UAV measured SINR
+is printed each second as the swarm manoeuvres.
 
 ```bash
-./ns3 run "sagin-uav-swarm --simTime=600 --fcGHz=2.0 --csv=/tmp/uav.csv"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-uav-swarm-default --simTime=600 --fcGHz=2.0 --csv=/tmp/uav.csv
+./ns3 run "sagin-uav-swarm --simTime=30 --fcGHz=2.0"
 ```
 
-**Outputs:** `sagin-uav-swarm.csv`; `sim_health.csv` (traffic helper, via `--outputDir`).
-**Key args:** `--simTime`, `--fcGHz`, `--csv`, `--outputDir`.
+**Outputs:** per-UAV measured-SINR table on the console; `sim_health.csv` in `--outputDir`.
+**Key args:** `--simTime`, `--fcGHz`, `--gnbTxDbm`, `--outputDir`.
+
+### sagin-a2g-real-stack
+
+Channel-plugin recipe: the TR 36.777 A2G model re-homed as `SaginA2gPropagationLossModel` and
+chained onto a real mmwave NR air interface. A UAV/HAPS aerial platform is the gNB, ground nodes
+are UEs; the LOS-vs-NLOS branch shows up as a real measured SINR / throughput gap.
+
+```bash
+./ns3 run "sagin-a2g-real-stack --duration=12 --link=NLOS --scenario=UMa_AV"
+```
+
+**Outputs:** measured SINR/throughput summary on the console; `sim_health.csv` in `--outputDir`.
+**Key args:** `--duration`, `--numUes`, `--uavAlt`, `--gnbTxDbm`, `--freqGhz`,
+`--link` (LOS | NLOS), `--scenario` (UMa_AV | RMa_AV | UMi_AV), `--outputDir`.
 
 ### sagin-aeronautical
 
-1 h commercial-flight cruise under a passing LEO satellite, driven by `NtnRealisticTrafficHelper`.
+Passenger broadband on a commercial flight: a great-circle cruise leg at 11 km / 250 m/s served by
+a passing LEO over a real mmwave NR NTN cell. The `MultiLayerRouter` logs the per-hop geometry;
+the radio KPIs are measured off the PHY trace.
 
 ```bash
-./ns3 run "sagin-aeronautical --simTime=3600 --cruise=11000 --speed=250 --csv=/tmp/aero.csv"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-aeronautical-default --simTime=3600 --cruise=11000 --speed=250 --csv=/tmp/aero.csv
+./ns3 run "sagin-aeronautical --simTime=30 --cruise=11000 --speed=250"
 ```
 
-**Outputs:** `sagin-aeronautical.csv`; `sim_health.csv` (traffic helper, via `--outputDir`).
-**Key args:** `--simTime`, `--cruise`, `--speed`, `--csv`, `--outputDir`.
+**Outputs:** `<outputDir>/<csv>` with columns
+`time_s,ac_x_m,ac_alt_m,leo_x_m,leo_z_m,leo_el_deg,slant_km`; `sim_health.csv` in `--outputDir`.
+**Key args:** `--simTime`, `--numUes`, `--cruise`, `--speed`, `--leoAltKm`, `--satEirpDbm`,
+`--csv`, `--outputDir`.
 
 ### sagin-flight-leo-e2
 
-Roadmap §4.4.9 — commercial flight + LEO pass emitting OAI-style O-RAN E2-KPM indications (RSRP /
-SINR / CQI / elevation / Doppler / one-way delay) to a Near-RT RIC over a Ka-band link budget; logs
-ACQUIRE/RELEASE handover events. **Uses `--simSeconds`/`--reportMs`/… and dedicated CSV args — there
-is no `--outputDir`.**
+Commercial long-haul flight served by a passing LEO over a real mmwave NR NTN cell, with OAI-style
+O-RAN E2-KPM indications emitted from the satellite gNB to a Near-RT RIC. Each reporting period the
+KPM report carries the measured DL SINR / TBLER / throughput plus real elevation / Doppler / delay
+geometry; a mid-pass elevation descent drops the measured SINR below the in-service threshold so
+the handover CSV shows a real RELEASE event.
 
 ```bash
-./ns3 run "sagin-flight-leo-e2 --simSeconds=600 --reportMs=100 --minElevDeg=10 --kpmCsv=/tmp/kpm.csv --hoCsv=/tmp/ho.csv"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-flight-leo-e2-default --simSeconds=600 --reportMs=100 --minElevDeg=10 --kpmCsv=/tmp/kpm.csv --hoCsv=/tmp/ho.csv
+./ns3 run "sagin-flight-leo-e2 --simSeconds=30 --reportMs=500"
 ```
 
-**Outputs:** `sagin-flight-leo-kpm.csv` (KPM indications), `sagin-flight-leo-handover.csv` (ACQUIRE/RELEASE events) — default names, overridable with `--kpmCsv` / `--hoCsv`.
-**Key args:** `--simSeconds`, `--reportMs`, `--minElevDeg`, `--cruiseAltM`, `--cruiseSpeed`, `--satAltM`, `--satSpeed`, `--kpmCsv`, `--hoCsv`.
+**Outputs:** `sagin-flight-leo-kpm.csv` (KPM indications), `sagin-flight-leo-handover.csv`
+(ACQUIRE/RELEASE events) and `sim_health.csv`, all in `--outputDir`.
+**Key args:** `--simSeconds`, `--reportMs`, `--minElevDeg`, `--cruiseAltM`, `--cruiseSpeed`,
+`--satAltM`, `--satSpeed`, `--satEirpDbm`, `--outputDir`.
 
 ### sagin-multihop-traffic
 
-Real end-to-end multi-hop forwarding Ground→UAV→HAPS→LEO with per-hop geometry-driven error models,
-EIRP-based link budgets, and IPv4 global routing.
+Real end-to-end multi-hop forwarding Ground→UAV→HAPS→LEO: three point-to-point hops joined by an
+IPv4 stack with global routing, each hop with its own geometry-driven error model (TR 36.777 A2G,
+free space, free space + min-elevation gate). An `NtnOranApplication` UDP flow is forwarded
+hop-by-hop; the end-to-end PDR / delay / jitter / goodput are measured at the `NtnOranSink` from
+the in-band payload header and track the live geometry.
 
 ```bash
 ./ns3 run "sagin-multihop-traffic --simSeconds=60 --dataRateMbps=20 --eirpDbm=43"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-multihop-traffic-default --simSeconds=60 --dataRateMbps=20 --eirpDbm=43
 ```
 
-**Outputs:** FlowMonitor summary to console (no CSV).
-**Key args:** `--simSeconds`, `--freqGHz`, `--dataRateMbps`, `--packetBytes`, `--uavAltM`, `--hapsAltKm`, `--leoAltKm`, `--satSpeed`, `--linkCapacityMbps`, `--eirpDbm`.
+**Outputs:** per-second hop/path-loss/goodput table and a measured end-to-end summary
+(txPackets, rxPackets, PDR, mean delay, jitter, goodput) on the console.
+**Key args:** `--simSeconds`, `--freqGHz`, `--dataRateMbps`, `--packetBytes`, `--uavAltM`,
+`--hapsAltKm`, `--leoAltKm`, `--satSpeed`, `--linkCapacityMbps`, `--eirpDbm`.
 
 ### sagin-slice-traffic
 
-Cross-layer network-slice steering via `SaginSliceRouter` with real per-slice traffic (URLLC / eMBB /
-mMTC mapped onto HAPS / LEO / GEO by latency budget).
+Cross-layer network-slice steering via `SaginSliceRouter` with real per-slice traffic. Three
+concurrent flows (URLLC QFI 1 / 5QI 82, eMBB QFI 7 / 5QI 2, mMTC QFI 50 / 5QI 9) are steered onto
+HAPS / LEO / GEO legs by latency budget; each leg's channel delay is the physical one-way
+propagation time for that layer's altitude. Per-slice delay / jitter / loss are measured by
+`NtnOranSink` from the in-band header — the mMTC slice on the GEO leg measures ≈119 ms one-way
+delay (35 786 km / c), while the tight-URLLC slice is forced down to the HAPS layer.
 
 ```bash
 ./ns3 run "sagin-slice-traffic --simSeconds=60 --dataRateMbps=10"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-slice-traffic-default --simSeconds=60 --dataRateMbps=10
 ```
 
-**Outputs:** FlowMonitor summary to console (no CSV).
-**Key args:** `--simSeconds`, `--dataRateMbps`, `--packetBytes`, `--hapsAltKm`, `--leoAltKm`, `--geoAltKm`.
+**Outputs:** slice→layer decision table plus per-slice measured results (rx bytes, one-way delay,
+jitter, loss, goodput) on the console.
+**Key args:** `--simSeconds`, `--dataRateMbps`, `--packetBytes`, `--hapsAltKm`, `--leoAltKm`,
+`--geoAltKm`.
 
 ### sagin-maritime-leo-traffic
 
-Maritime AIS vessel terminal + LEO downlink (`AisMobilityModel`) carrying real traffic.
+Maritime AIS vessel terminal (`AisMobilityModel`) served by a passing LEO over a real mmwave NR
+NTN cell. DL SINR/TBLER/throughput are measured off the PHY trace as the vessel sails and the
+satellite crosses overhead.
 
 ```bash
-./ns3 run "sagin-maritime-leo-traffic --simSeconds=120 --vesselSpeedKn=18 --dataRateMbps=5"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-maritime-leo-traffic-default --simSeconds=120 --vesselSpeedKn=18 --dataRateMbps=5
+./ns3 run "sagin-maritime-leo-traffic --simSeconds=30 --vesselSpeedKn=20"
 ```
 
-**Outputs:** FlowMonitor summary to console (no CSV).
-**Key args:** `--simSeconds`, `--leoAltKm`, `--satSpeed`, `--freqGHz`, `--dataRateMbps`, `--packetBytes`, `--txPowerDbm`, `--antennaGainDb`, `--vesselSpeedKn`, `--linkCapacityMbps`.
+**Outputs:** per-second link probe and measured summary on the console; `sim_health.csv` in
+`--outputDir`.
+**Key args:** `--simSeconds`, `--leoAltKm`, `--satSpeed`, `--freqGHz`, `--satEirpDbm`,
+`--vesselSpeedKn`, `--outputDir`.
 
 ### sagin-hst-leo-traffic
 
-High-speed-train terminal + LEO downlink (`HstMobilityModel`) carrying real traffic.
+High-speed-train terminal (`HstMobilityModel`, TR 38.901-style track) served by a passing LEO over
+a real mmwave NR NTN cell, with measured DL KPIs as the train races along the track.
 
 ```bash
-./ns3 run "sagin-hst-leo-traffic --simSeconds=120 --trainSpeedKmh=300 --dataRateMbps=5"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-hst-leo-traffic-default --simSeconds=120 --trainSpeedKmh=300 --dataRateMbps=5
+./ns3 run "sagin-hst-leo-traffic --simSeconds=30 --trainSpeedKmh=500"
 ```
 
-**Outputs:** FlowMonitor summary to console (no CSV).
-**Key args:** `--simSeconds`, `--leoAltKm`, `--satSpeed`, `--freqGHz`, `--dataRateMbps`, `--packetBytes`, `--txPowerDbm`, `--antennaGainDb`, `--trainSpeedKmh`, `--linkCapacityMbps`.
+**Outputs:** per-second link probe and measured summary on the console; `sim_health.csv` in
+`--outputDir`.
+**Key args:** `--simSeconds`, `--leoAltKm`, `--satSpeed`, `--freqGHz`, `--satEirpDbm`,
+`--trainSpeedKmh`, `--outputDir`.
 
 ### sagin-adsb-flight-leo-traffic
 
-ADS-B aircraft terminal + LEO downlink (`OpenSkyMobilityModel`) carrying real traffic.
+In-flight-connectivity terminal aboard a commercial aircraft replayed from an ADS-B trace
+(`OpenSkyMobilityModel`), served by a passing LEO over a real mmwave NR NTN cell with measured DL
+KPIs.
 
 ```bash
-./ns3 run "sagin-adsb-flight-leo-traffic --simSeconds=120 --cruiseAltM=11000 --dataRateMbps=5"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-adsb-flight-leo-traffic-default --simSeconds=120 --cruiseAltM=11000 --dataRateMbps=5
+./ns3 run "sagin-adsb-flight-leo-traffic --simSeconds=30 --cruiseAltM=11000"
 ```
 
-**Outputs:** FlowMonitor summary to console (no CSV).
-**Key args:** `--simSeconds`, `--leoAltKm`, `--satSpeed`, `--freqGHz`, `--dataRateMbps`, `--packetBytes`, `--txPowerDbm`, `--antennaGainDb`, `--cruiseAltM`, `--cruiseSpeedMps`, `--linkCapacityMbps`.
+**Outputs:** per-second link probe and measured summary on the console; `sim_health.csv` in
+`--outputDir`.
+**Key args:** `--simSeconds`, `--leoAltKm`, `--satSpeed`, `--freqGHz`, `--satEirpDbm`,
+`--cruiseAltM`, `--cruiseSpeedMps`, `--outputDir`.
 
 ### sagin-sgp4-routed-traffic
 
-Roadmap §4.4.4/§4.4.5 — SGP4-driven SAGIN with graph shortest-path ISL routing. Composes
-`ntn-constellation` (`Sgp4MobilityModel` + `ContactGraphScheduler` + `ContactGraphRouter`) with a real
-ns-3 IP data plane whose link states follow the live contact graph.
+SGP4-driven SAGIN with graph shortest-path ISL routing. Composes `ntn-constellation`
+(`Sgp4MobilityModel` + `ContactGraphScheduler` + `ContactGraphRouter`) with a real ns-3 IP data
+plane whose space links follow the live contact graph: contacts bring IPv4 interfaces up/down,
+channel delays follow the real slant range, and global routing re-routes the live
+`NtnOranApplication` flow as satellites hand over. The measured in-band goodput / one-way delay
+tracks the actual end-to-end connectivity, cross-checked each second against the router's Dijkstra
+path.
 
 ```bash
 ./ns3 run "sagin-sgp4-routed-traffic --simSeconds=120 --altKm=550 --inclDeg=53 --minElevDeg=10"
-build/contrib/ntn-sagin/examples/ns3.43-sagin-sgp4-routed-traffic-default --simSeconds=120 --altKm=550 --inclDeg=53 --minElevDeg=10
 ```
 
-**Outputs:** FlowMonitor summary to console (no CSV).
-**Key args:** `--simSeconds`, `--altKm`, `--inclDeg`, `--leadSeconds`, `--minElevDeg`, `--dataRateMbps`, `--packetBytes`, `--spaceCapMbps`, `--eirpDbm`.
+**Outputs:** per-second contact-graph/path/goodput trace and a measured summary (GSL/ISL
+transitions, delivered packets, in-band one-way delay / jitter / loss) on the console.
+**Key args:** `--simSeconds`, `--altKm`, `--inclDeg`, `--leadSeconds`, `--minElevDeg`,
+`--dataRateMbps`, `--packetBytes`, `--spaceCapMbps`, `--eirpDbm`, `--minSnrDb`.
 
 ## Build, run & test
 
@@ -221,11 +309,12 @@ build/contrib/ntn-sagin/examples/ns3.43-sagin-sgp4-routed-traffic-default --simS
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 
-# Build a single example.
-./ns3 build sagin-haps-leo-relay
+# Build / run a single example.
+./ns3 build ntn-sagin-remote-coverage
+./ns3 run "ntn-sagin-remote-coverage --sharing=1"
 
-# Run the unit-test suite for this module.
-./test.py --suite=ntn-sagin
+# Run the unit-test suite for this module (32 test cases).
+./test.py -s ntn-sagin
 ```
 
 For module setup (dependencies, enabling modules, environment), see [INSTALL.md](INSTALL.md). For the full toolkit, see [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).

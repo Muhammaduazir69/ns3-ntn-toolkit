@@ -3,7 +3,7 @@
  * Copyright (c) 2026  Muhammad Uzair
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * sagin-a2g-real-stack — Phase 2 of PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06
+ * sagin-a2g-real-stack — Phase 2 of 2026-06 protocol-fidelity audit
  * (channel-plugin recipe).
  *
  * Audit finding for ntn-sagin: A2gChannelTr36777::PathLossDb() (3GPP TR 36.777

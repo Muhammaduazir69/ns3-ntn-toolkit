@@ -6,7 +6,7 @@
 #define ORAN_NTN_DATA_REPOSITORY_H
 
 // Persistent data store for KPM reports, RC actions and xApp decisions
-// (Realism-Adoption-Roadmap-2026 §4.1.4 — "OranNtnDataRepository SQLite
+// (2026 realism roadmap §4.1.4 — "OranNtnDataRepository SQLite
 // logger (NIST pattern)").
 //
 // Two backends:

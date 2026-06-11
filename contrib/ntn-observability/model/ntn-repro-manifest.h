@@ -16,7 +16,7 @@ namespace ntnobs
 {
 
 /**
- * Reproducibility manifest — Realism-Adoption-Roadmap-2026 §3 T9.
+ * Reproducibility manifest — 2026 realism roadmap §3 T9.
  *
  * Every example writes one of these JSON files alongside its CSV/Parquet
  * outputs. A subsequent run can pass `--replay-manifest=path.json` to

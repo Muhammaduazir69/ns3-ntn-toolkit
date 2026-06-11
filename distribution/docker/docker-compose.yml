@@ -13,13 +13,13 @@ services:
       context: ../..
       dockerfile: distribution/docker/Dockerfile
     ports:
-      - "8000:8000"     # ntn-twin-api (FastAPI)
+      - "8090:8090"     # ntn-twin-api (FastAPI)
     environment:
       - NTN_INFLUX_URL=http://influxdb:8086
       - NTN_INFLUX_BUCKET=ntn
     depends_on:
       - influxdb
-    command: ["/bin/bash", "-lc", "ntn-twin-api --host 0.0.0.0 --port 8000"]
+    command: ["/bin/bash", "-lc", "ntn-twin-api --host 0.0.0.0 --port 8090"]
     restart: unless-stopped
 
   influxdb:

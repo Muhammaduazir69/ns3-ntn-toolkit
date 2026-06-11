@@ -9,7 +9,7 @@
 // converge toward the high-latitude crossings and diverge at the equator —
 // real constellation geometry, not a scripted drift.
 //
-// Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06): the old version mapped
+// Audit fix (2026-06 protocol-fidelity audit): the old version mapped
 // ThzNtnIslChannel::ComputeIslSnr_dB() through a sigmoid SnrToPer() onto a
 // P2P RateErrorModel — no packet crossed a radio, and the satellites were
 // ConstantPosition/ConstantVelocity placeholders. Here the ISL is a REAL

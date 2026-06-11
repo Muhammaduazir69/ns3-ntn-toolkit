@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Honest protocol-fidelity gate checker (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06).
+"""Honest protocol-fidelity gate checker (2026-06 protocol-fidelity audit).
 
 Unlike check_simulation_health.py — which only verified that a generic UDP-over-
 PointToPoint flow advanced the clock — this checker verifies that an example's

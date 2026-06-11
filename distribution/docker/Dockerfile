@@ -3,7 +3,7 @@
 # ns3-ntn-toolkit — pre-built ns-3.43 + 13 contrib modules + Python utilities
 #
 # Build:  docker build -t uzairdocker69/ns3-ntn-toolkit:latest -f distribution/docker/Dockerfile .
-# Run:    docker run --rm -it -p 8000:8000 -p 3000:3000 uzairdocker69/ns3-ntn-toolkit:latest
+# Run:    docker run --rm -it -p 8090:8090 -p 3000:3000 uzairdocker69/ns3-ntn-toolkit:latest
 #
 # Maintainer: Muhammad Uzair, Independent Researcher
 # License:    GPL-2.0-only
@@ -35,6 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libboost-all-dev \
         pybind11-dev \
         protobuf-compiler libprotobuf-dev \
+        libabsl-dev \
+        libsctp-dev \
         ca-certificates git \
         wget curl \
     && rm -rf /var/lib/apt/lists/*
@@ -51,17 +53,15 @@ WORKDIR /home/ntn/ns-3-dev
 # (The .dockerignore at repo root excludes build artefacts and venvs.)
 COPY --chown=ntn:ntn ns-3-dev/ /home/ntn/ns-3-dev/
 
-# Configure the libraries + tests. We intentionally do NOT enable examples in
-# the runtime image:
-#   - Some upstream third-party examples in ns3-ai-ntn (multi-bss WiFi VR-app)
-#     pull in heavy deps (Abseil) that aren't needed for the toolkit itself.
-#   - The runtime image is meant for running user scenarios from `scratch/`,
-#     not building example apps. Users who want examples can rebuild inside
-#     the container (cmake / ninja / g++ are present in the runtime image):
-#         ./ns3 configure --enable-examples --enable-tests
-#         ./ns3 build -j$(nproc)
+# Configure libraries + tests + examples. As of v2 the image ships with
+# examples built so every reference scenario (TTE-aware CHO, orbital RRC,
+# SAGIN flight-LEO, O-RAN full scenario, THz, the new cross-module
+# *-traffic examples, …) is runnable out of the box with `./ns3 run "<name>"`.
+# The multi-bss WiFi VR-app under ns3-ai-ntn pulls in Abseil, hence the
+# `libabsl-dev` dependency installed above.
 RUN ./ns3 configure \
         --enable-tests \
+        --enable-examples \
         --build-profile=optimized \
     && ./ns3 build -j"$(nproc)"
 
@@ -73,13 +73,13 @@ FROM ubuntu:${UBUNTU_VERSION} AS runtime
 ARG DEBIAN_FRONTEND=noninteractive
 
 LABEL org.opencontainers.image.title="ns3-ntn-toolkit"
-LABEL org.opencontainers.image.description="Open-source ns-3.43 distribution for 6G non-terrestrial network research: 13 integrated modules covering SGP4 LEO constellations, 3GPP NR-NTN, O-RAN + FlexRIC, sub-THz physics, NVIDIA Sionna, SAGIN, V2X, slicing, AI/ML, digital twin."
+LABEL org.opencontainers.image.description="Open-source ns-3.43 distribution for 6G non-terrestrial network research: 15 integrated modules covering SGP4 LEO constellations, 3GPP NR-NTN, O-RAN + FlexRIC, measured in-band QoS-flow KPIs, multi-tier RIC, sub-THz physics, NVIDIA Sionna, SAGIN, V2X, slicing, AI/ML, digital twin."
 LABEL org.opencontainers.image.url="https://ns3-ntn-toolkit.dev/"
 LABEL org.opencontainers.image.source="https://github.com/Muhammaduazir69/ns3-ntn-toolkit"
 LABEL org.opencontainers.image.documentation="https://ns3-ntn-toolkit.dev/"
 LABEL org.opencontainers.image.authors="Muhammad Uzair <muhammaduzairr69@gmail.com>"
 LABEL org.opencontainers.image.licenses="GPL-2.0-only"
-LABEL org.opencontainers.image.version="2.0.1"
+LABEL org.opencontainers.image.version="2.1.0"
 
 # Runtime deps — note this is intentionally NOT a slim "runtime-only" set.
 # ns-3's `./ns3 run` wrapper unconditionally invokes the CMake build system
@@ -104,6 +104,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libboost-all-dev \
         pybind11-dev \
         protobuf-compiler libprotobuf-dev \
+        libabsl-dev \
+        libsctp-dev \
         ca-certificates git \
         wget curl \
     && rm -rf /var/lib/apt/lists/*
@@ -148,12 +150,14 @@ RUN ./ns3 show version \
     && test -e build/lib/libns3.43-ntn-cho-optimized.so \
     && test -e build/lib/libns3.43-oran-ntn-optimized.so \
     && test -e build/lib/libns3.43-thz-ntn-optimized.so \
+    && test -e build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-walker-traffic-optimized \
+    && test -e build/contrib/ntn-fapi/examples/ns3.43-ntn-fapi-leo-pass-slotloop-optimized \
     && python3 -c "import ntn_constellation, ntn_digital_twin; print('Python utilities OK')"
 
 # Ports:
-#   8000 — ntn-twin-api (FastAPI)
+#   8090 — ntn-twin-api (FastAPI)
 #   3000 — Grafana (when observability stack is brought up)
-EXPOSE 8000 3000
+EXPOSE 8090 3000
 
 # Default: drop into a shell. Users can override with `docker run … cmd`.
 CMD ["/bin/bash"]

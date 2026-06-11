@@ -51,8 +51,8 @@ cd YOUR_NS3_DIRECTORY
 3. Run Python script
 
 ```shell
-pip install -r contrib/ai/examples/rate-control/requirements.txt
-cd contrib/ai/examples/rate-control/constant
+pip install -r contrib/ns3-ai-ntn/examples/rate-control/requirements.txt
+cd contrib/ns3-ai-ntn/examples/rate-control/constant
 python ai_constant_rate.py
 ```
 
@@ -69,8 +69,8 @@ cd YOUR_NS3_DIRECTORY
 3. Run Python script
 
 ```shell
-pip install -r contrib/ai/examples/rate-control/requirements.txt
-cd contrib/ai/examples/rate-control/thompson-sampling
+pip install -r contrib/ns3-ai-ntn/examples/rate-control/requirements.txt
+cd contrib/ns3-ai-ntn/examples/rate-control/thompson-sampling
 python ai_thompson_sampling.py
 ```
 

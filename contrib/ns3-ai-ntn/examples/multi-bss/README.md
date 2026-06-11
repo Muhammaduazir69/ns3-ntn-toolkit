@@ -109,8 +109,8 @@ cd YOUR_NS3_DIRECTORY
 3. Run Python script
 
 ```shell
-pip install -r contrib/ai/examples/multi-bss/requirements.txt
-cd contrib/ai/examples/multi-bss
+pip install -r contrib/ns3-ai-ntn/examples/multi-bss/requirements.txt
+cd contrib/ns3-ai-ntn/examples/multi-bss
 python run_multi_bss.py
 ```
 

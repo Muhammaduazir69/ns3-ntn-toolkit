@@ -8,7 +8,7 @@
  * it can be chained onto a real spectrum channel that already applies Friis
  * (e.g. NtnRealStackHelper::AddExtraPropagationLoss) without double-counting.
  *
- * Phase 2 of PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06 (channel-plugin recipe):
+ * Phase 2 of 2026-06 protocol-fidelity audit (channel-plugin recipe):
  * before, the chain was only queried in user-space probe loops that drove a
  * sigmoid SnrToPer() RateErrorModel; packets never saw the atmosphere. As a
  * PropagationLossModel the ITU-R physics attenuates the transmitted packets

@@ -7,7 +7,7 @@
 // flows on a REAL mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy + MAC +
 // HARQ + RLC/PDCP + RRC + EPC).
 //
-// Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06, channel-plugin recipe):
+// Audit fix (2026-06 protocol-fidelity audit, channel-plugin recipe):
 // the old version folded fog/rain/snow attenuation into a closed-form SNR and
 // drove a P2P RateErrorModel through a sigmoid SnrToPer() — no packet ever saw
 // the weather. Here the SAME module physics (ThzNtnWeatherAttenuation +

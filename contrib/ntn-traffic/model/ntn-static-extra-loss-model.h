@@ -5,7 +5,7 @@
 // ns-3 PropagationLossModel, for chaining onto a real spectrum channel via
 // NtnRealStackHelper::AddExtraPropagationLoss().
 //
-// PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06 (channel-plugin recipe): scenario
+// 2026-06 protocol-fidelity audit (channel-plugin recipe): scenario
 // events that used to be folded into closed-form SNR formulas — NLOS blockage
 // onset, a RIS engaging/releasing, beam-pointing loss — become live channel
 // reconfigurations that real packets feel, so the event shows up in the

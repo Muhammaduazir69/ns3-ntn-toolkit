@@ -6,7 +6,7 @@
 #define NTN_FAPI_MESSAGES_H
 
 // SCF FAPI 222.10.02 / 222.10.04 message-level typedefs.
-// (Realism-Adoption-Roadmap-2026 §3 T1.)
+// (2026 realism roadmap §3 T1.)
 //
 // These structs are intentionally header-only and free of algorithmic logic;
 // the role of T1 is to provide an ABI shape against which mmwave / oran-ntn

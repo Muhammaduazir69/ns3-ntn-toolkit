@@ -14,8 +14,8 @@ are automatically enabled.
 
 ```shell
 cd YOUR_NS3_DIRECTORY
-mkdir contrib/ai/model/libtensorflow
-tar -xf PATH_TO_TARBALL -C contrib/ai/model/libtensorflow
+mkdir contrib/ns3-ai-ntn/model/libtensorflow
+tar -xf PATH_TO_TARBALL -C contrib/ns3-ai-ntn/model/libtensorflow
 ```
 
 #### For arm64-based macOS
@@ -32,7 +32,7 @@ brew install tensorflow
 
 ```shell
 cd YOUR_NS3_DIRECTORY
-cp -r /opt/homebrew/Cellar/libtensorflow/YOUR_VERSION/ contrib/ai/model/libtensorflow
+cp -r /opt/homebrew/Cellar/libtensorflow/YOUR_VERSION/ contrib/ns3-ai-ntn/model/libtensorflow
 ```
 
 ### Cmake settings
@@ -73,7 +73,7 @@ automatically enabled.
 
 ```shell
 cd YOUR_NS3_DIRECTORY
-unzip PATH_TO_ZIP -d contrib/ai/model/
+unzip PATH_TO_ZIP -d contrib/ns3-ai-ntn/model/
 ```
 
 #### For arm64-based macOS
@@ -90,7 +90,7 @@ brew install pytorch
 
 ```shell
 cd YOUR_NS3_DIRECTORY
-cp -r /opt/homebrew/Cellar/pytorch/YOUR_VERSION/ contrib/ai/model/libtorch
+cp -r /opt/homebrew/Cellar/pytorch/YOUR_VERSION/ contrib/ns3-ai-ntn/model/libtorch
 ```
 
 ### Cmake settings
@@ -117,6 +117,6 @@ default apply deep Q-learning algorithm (DQN) to choose TCP parameters, with sta
 and actions printing in the console.
 
 ```shell
-pip install -r contrib/ai/examples/rl-tcp/requirements.txt
+pip install -r contrib/ns3-ai-ntn/examples/rl-tcp/requirements.txt
 ./ns3 run ns3ai_rltcp_purecpp
 ```

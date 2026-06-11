@@ -7,7 +7,7 @@
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
   <img src="https://img.shields.io/badge/Sionna%20RT-2.0-orange.svg"/>
   <img src="https://img.shields.io/badge/3GPP-TR%2038.811%20reference-purple.svg"/>
-  <img src="https://img.shields.io/badge/RTT-%E2%89%A510%20ms%20steady--state-success.svg"/>
+  <img src="https://img.shields.io/badge/loopback%20RTT%20gate-%3C50%20ms-success.svg"/>
   <img src="https://img.shields.io/badge/tests-38%20C%2B%2B%20%2B%203%20Python%20PASS-blue.svg"/>
 </p>
 
@@ -34,8 +34,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
 - **Cascade / caching / RIS channel bridges** — `NtnSionnaCascadeChannel` composes Sionna RT with the ITU-R `NtnAtmosphericLossChain`; `SionnaCachingTransport` is a 4-D LRU decorator over any transport; RIS Tx surfaces are carried in the request and installed in the scene per query.
 - **Sionna calibrator** — `SionnaCalibrator` measures the residual of the ray-traced channel against a reference propagation model and feeds the calibration harness.
 - **Batch client + replay transport + CIR Doppler synthesis** — `SionnaBatchClient` for async batched queries, `SionnaReplayTransport` (writer + reader) for record/replay runs without a GPU, and `CirDopplerSynthesizer` to advance a captured CIR snapshot to a Doppler-shifted offset.
-- **Real data-plane `*-traffic` examples** — six drivers carry an actual ns-3 UDP data plane (P2P + IP + apps + FlowMonitor) gated by the cascade channel: LEO downlink, rain event, RIS relay, MIMO, constellation handover, and a composed channel with `oran-ntn`.
-- **Verification** — physics-only examples (channel-model comparisons, RIS link budget, calibration harness) run cleanly; the `*-traffic` examples carry a real UDP data plane.
+- **Channel plug-ins for real radio stacks** — `NtnAtmosphericPropagationLossModel` re-homes the ITU-R chain as a real `PropagationLossModel` charging pure atmospheric *excess* (no FSPL double-count), and `SionnaCirPropagationLossModel` keeps the **full CIR** (multipath taps + per-tap Doppler) so the measured SINR exhibits genuine constructive/destructive fading. Both chain onto any spectrum channel.
+- **Measured-radio `*-traffic` examples** — seven drivers run on a **real mmwave NR NTN cell** (`NtnRealStackHelper` from `contrib/ntn-traffic`: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) with genuine SGP4 Walker mobility. The channel physics sits in the packet path as chained `PropagationLossModel`s; traffic is `NtnOranApplication` QoS flows (in-band 5QI / S-NSSAI / seq / timestamp payload headers) with KPIs measured at `NtnOranSink` and the PHY trace — SINR, TBLER and goodput are measured, not asserted.
+- **Verification** — physics-only examples (channel-model comparisons, RIS link budget, calibration harness) run cleanly with or without a live GPU server; the `*-traffic` examples carry real packets over the real radio.
 
 ## Models / bridges / key classes
 
@@ -50,6 +51,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
 | `SionnaBatchClient` | `bridge/sionna-batch-client.h` | Async batched query client |
 | `NtnSionnaCascadeChannel` | `bridge/ntn-sionna-cascade-channel.h` | Sionna RT base + ITU-R atmospheric cascade |
 | `NtnAtmosphericLossChain` (`Itu618`/`Itu676`/`Itu681`) | `bridge/ntn-atmospheric-loss-chain.h` | Composite gaseous + rain + LMS attenuation chain |
+| `NtnAtmosphericPropagationLossModel` | `bridge/ntn-atmospheric-propagation-loss-model.h` | ITU-R atmospheric **excess** as a real `PropagationLossModel` — chains onto a Friis spectrum channel without double-counting FSPL |
+| `SionnaCirPropagationLossModel` | `bridge/sionna-cir-propagation-loss-model.h` | Full-CIR multipath fading (per-tap Doppler via `CirDopplerSynthesizer`) as a real `PropagationLossModel` |
 | `SionnaCalibrator` | `bridge/sionna-calibrator.h` | Residual calibration of Sionna RT vs a reference propagation model |
 | `CirDopplerSynthesizer` | `bridge/cir-doppler-synth.h` | Synthesise a Doppler-shifted CIR from a captured snapshot |
 
@@ -57,34 +60,35 @@ Python side: `bridge/sionna-server.py` (live GPU server loading a Mitsuba scene 
 
 ## Examples
 
-All 11 examples build to `build/contrib/ntn-sionna/examples/ns3.43-<NAME>-default`. Each can be run two ways — through the `./ns3 run` wrapper or by invoking the built binary directly:
+All 12 examples build to `build/contrib/ntn-sionna/examples/ns3.43-<NAME>-default`. Each can be run two ways — through the `./ns3 run` wrapper or by invoking the built binary directly:
 
 ```bash
 ./ns3 run "<NAME> --arg=value"
 ./build/contrib/ntn-sionna/examples/ns3.43-<NAME>-default --arg=value
 ```
 
-Every example tolerates a missing Sionna server: with no transport answering, the channel falls back to closed-form FSPL so smoke runs still finish; with a live (or replay/caching) transport they print real ray-traced figures. Outputs are printed to stdout (per-step / per-flow tables); none write files.
+No GPU is required for any example. The physics examples tolerate a missing Sionna server — with no transport answering, the channel falls back to closed-form FSPL so smoke runs still finish; with a live (or replay/caching) transport they print real ray-traced figures. The measured-radio examples run the ITU-R chain and array/CIR plug-ins closed-form, so they are fully headless.
 
-### Real data-plane examples
+### Measured-radio examples
 
-These carry a real ns-3 UDP data plane (P2P link + error model + Internet stack + applications + FlowMonitor) gated by the cascade channel.
+These run a real mmwave NR NTN cell (`NtnRealStackHelper`: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) with SGP4 Walker satellite mobility projected into the local ENU frame. The channel physics is chained into the packet path as real `PropagationLossModel`s (`AddExtraPropagationLoss`), traffic is `NtnOranApplication` QoS flows, and SINR / TBLER / goodput are measured off the PHY trace and `NtnOranSink`. They link the sibling toolkit modules `ntn-traffic`, `ntn-cho`, `ntn-constellation` and the in-tree `mmwave` stack (all present in the toolkit tree).
 
 | Example | What it shows | Key args |
 |---|---|---|
-| `ntn-sionna-leo-downlink-traffic` | LEO downlink whose PHY link is gated by the NTN cascade; per-flow throughput / loss vs elevation | `simSeconds altKm satSpeed rainMmH freqHz dataRateMbps packetBytes txPowerDbm antennaGainDb noiseFloorDbm minElevDeg linkCapacityMbps sionnaHost sionnaPort` |
-| `ntn-sionna-rain-event-traffic` | Dynamic rain cell sweeping over the gateway during a pass; throughput collapse + recovery | `simSeconds altKm satSpeed freqHz dataRateMbps packetBytes txPowerDbm antennaGainDb peakRainMmH linkCapacityMbps` |
-| `ntn-sionna-ris-relay-traffic` | RIS recovers a blocked NLOS link mid-sim; traffic before/after | `simSeconds altKm satSpeed freqHz dataRateMbps packetBytes txPowerDbm antennaGainDb blockageDb risRows risCols risOnFraction linkCapacityMbps` |
-| `ntn-sionna-mimo-traffic` | SISO vs N×N MIMO terminals on the same pass; traffic to both | `simSeconds altKm satSpeed freqHz dataRateMbps packetBytes txPowerDbm antennaGainDb rows cols linkCapacityMbps` |
-| `ntn-sionna-constellation-handover-traffic` | UE follows the best LEO across a constellation; traffic spans hand-overs | `simSeconds altKm satSpeed freqHz dataRateMbps packetBytes txPowerDbm antennaGainDb numSats linkCapacityMbps` |
-| `ntn-sionna-composed-channel-traffic` | Composes the cascade channel with the `oran-ntn` TR 38.811 channel via `PropagationLossModel` chaining; real data plane off the composed `CalcRxPower()` | `simSeconds leoAltKm satSpeed freqGHz dataRateMbps packetBytes satEirpDbm rxGainDb rainRateMmH env nakagamiM linkCapacityMbps` |
+| `ntn-sionna-leo-downlink-traffic` | Ku-band LEO downlink with the ITU-R cascade (P.676 gaseous + P.618/P.838 rain + optional P.681 LMS) live in the packet path; per-second elevation / attenuation / SINR / TBLER / goodput | `simSeconds freqGHz satEirpDbm rainMmH lms outputDir` |
+| `ntn-sionna-rain-event-traffic` | Convective rain cell sweeps over a Ka-band gateway mid-pass; the rain schedule reconfigures the live chain, so the measured SINR and goodput dip and recover | `simSeconds freqGHz satEirpDbm peakRainMmH outputDir` |
+| `ntn-sionna-ris-relay-traffic` | Direct path blocked mid-sim (NLOS), then a RIS engages; blockage and RIS gain are live channel reconfigurations the measured SINR responds to | `simSeconds freqGHz satEirpDbm blockageDb risRows risCols blockFraction risOnFraction outputDir` |
+| `ntn-sionna-mimo-traffic` | SISO vs N×N MIMO terminals on one shared cell; the array gain is a per-UE channel plug-in, so the SISO/MIMO gap is measured, not asserted | `simSeconds freqGHz satEirpDbm rows cols outputDir` |
+| `ntn-sionna-constellation-handover-traffic` | UE follows the best satellite of an SGP4 Walker constellation; candidates are projected from the one measured link via the ephemeris Friis ratio; hand-overs logged with genuine orbital timing | `simSeconds freqGHz satEirpDbm numSats hysteresisDb outputDir` |
+| `ntn-sionna-composed-channel-traffic` | Standard ns-3 `SetNext()` composition — Friis → ITU-R excess → Nakagami fading → spectrum PHY; the `oran-ntn` TR 38.811 model is evaluated on the same live geometry beside the measured SINR | `simSeconds freqGHz satEirpDbm rainRateMmH outputDir` |
+| `ntn-sionna-cir-real-stack` | Full Sionna-RT-style CIR (LOS + reflected taps, per-tap Doppler) on `SionnaCirPropagationLossModel`; the measured SINR exhibits genuine multipath fading variance a scalar path loss cannot reproduce | `duration numUes altitude satEirpDbm freqGhz platformSpeed outputDir` |
 
 ```bash
-./ns3 run "ntn-sionna-leo-downlink-traffic --simSeconds=30 --altKm=550 --rainMmH=10 --freqHz=12e9"
-./build/contrib/ntn-sionna/examples/ns3.43-ntn-sionna-ris-relay-traffic-default --risRows=32 --risCols=32 --blockageDb=20
+./ns3 run "ntn-sionna-leo-downlink-traffic --simSeconds=60 --rainMmH=10 --lms=1"
+./build/contrib/ntn-sionna/examples/ns3.43-ntn-sionna-ris-relay-traffic-default --risRows=32 --risCols=32 --blockageDb=30
 ```
 
-**Outputs:** per-flow FlowMonitor summary (throughput, loss, delay) plus per-step Rx/elevation traces on stdout.
+**Outputs:** per-second trace tables (elevation, attenuation, SINR, TBLER, goodput) and a measured-KPI summary on stdout, plus per-run KPI files and a `sim_health.csv` gate report under `--outputDir`.
 
 ### Physics / channel examples
 

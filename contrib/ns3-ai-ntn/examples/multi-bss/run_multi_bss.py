@@ -73,7 +73,7 @@ ns3Settings = {
     'pktInterval': 5000,
     'boxsize': 25,
     'drl': True,
-    'configFile': 'contrib/ai/examples/multi-bss/config.txt',
+    'configFile': 'contrib/ns3-ai-ntn/examples/multi-bss/config.txt',
 }
 n_ap = int(ns3Settings['apNodes'])
 n_sta = int(ns3Settings['networkSize'])

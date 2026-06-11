@@ -23,20 +23,24 @@ simulation, and turns the resulting time-varying geometry into the link-up/link-
 events that the rest of the data plane consumes. Everything lives in the
 `ns3::ntncon` namespace.
 
-- **Walker-Delta / Walker-Star generator** — `WalkerConstellation` builds a full
-  constellation from a `WalkerConfig` (planes, satellites per plane, altitude,
-  inclination), emitting SGP4-parseable orbital state.
+- **Walker-Delta / Walker-Star generator** — `WalkerConstellation::BuildDelta()` /
+  `BuildStar()` build a full constellation from a `WalkerConfig` (planes,
+  satellites per plane, altitude, inclination), emitting classical orbital
+  elements ready for the mobility model.
 - **Orbital propagation** — `Sgp4MobilityModel` is an ns-3 `MobilityModel` that
   propagates a satellite from a `TleRecord` (or `KeplerianElements`) using an
   analytic Kepler propagator with secular J2 corrections (RAAN and
   argument-of-perigee) and an SGP4-compatible TLE interface, so position queries
-  during `Simulator::Run()` follow the orbit. Full Vallado SGP4 is a planned
+  during `Simulator::Run()` follow the orbit. ECEF/ECI/geodetic surfaces and a
+  ground-station elevation query are built in. Full Vallado SGP4 is a planned
   follow-on; the TLE drag (B*) field is parsed but not yet used by this model.
 - **Contact-graph scheduling** — `ContactGraphScheduler` evaluates GSL (ground↔sat)
   and ISL (sat↔sat) visibility over the simulation timeline and raises
   `ContactEvent`s as links come up and go down.
 - **Contact-graph routing** — `ContactGraphRouter` turns the contact graph into
-  forwarding decisions across the time-varying topology.
+  forwarding decisions across the time-varying topology: direct contacts, BFS
+  shortest path, edge-weighted Dijkstra, and a regenerative-vs-bent-pipe mode
+  (`SetRegenMode`) that routes around bent-pipe transit nodes.
 - **Calibration corpus** — `tr38821-corpus` (`Tr38821CorpusReader`,
   `CalibrationHarness`) ships 3GPP TR 38.821 reference scenarios/link budgets plus
   a Starlink-EU latency/station corpus to validate toolkit predictions against
@@ -53,20 +57,27 @@ tool-side Python package (`ntn_constellation`) is different: it uses the real
 TLEs, ephemerides, and export files offline. So "SGP4" claims below apply to the
 Python side; the C++ side is Kepler+J2 for now.
 
-## What's new in v2
+## What's new
 
 See [CHANGELOG.md](CHANGELOG.md) for this module's changelog.
 
-- **New cross-module examples driving a REAL UDP data plane** via
-  `NtnRealisticTrafficHelper` (from the `ntn-traffic` module), so packets actually
-  traverse the time-varying topology instead of a static round-trip:
-  - **`ntn-constellation-walker-traffic`** — a Walker-Delta constellation whose ISL
-    connectivity is sampled every second from the `ContactGraphScheduler` and logged
-    alongside the live UDP flow.
-  - **`ntn-constellation-sgp4-mobility-traffic`** — a single LEO pass propagated by
-    the `Sgp4MobilityModel` (Kepler + secular J2); the ground station is auto-placed
-    under the satellite's t=0 sub-point so a real GSL up/down pass always occurs
-    regardless of TLE epoch.
+- **Measured radio in the access-link examples.** `ntn-constellation-walker-traffic`
+  and `ntn-constellation-sgp4-mobility-traffic` now drive a **real mmwave NR NTN
+  cell** through `NtnRealStackHelper` (from the `ntn-traffic` module): SpectrumPhy +
+  MAC + HARQ + RLC/PDCP + RRC + EPC, with SINR/TBLER/throughput **measured off the
+  mmwave PHY traces** — no closed-form SINR, no P2P star. Ground UEs use TR 38.811
+  mobility classes (`NtnTr38811MobilityHelper`, from `ntn-cho`).
+- **Measured application KPIs in the routed examples.** The
+  `ntn-constellation-isl-routed-traffic` and `ntn-constellation-real-routed`
+  examples carry traffic with `NtnOranApplication` / `NtnOranSink` (from
+  `ntn-traffic`): every packet carries a 24-byte in-band `NtnOranPayloadHeader`
+  (5QI, S-NSSAI, QFI, sequence, TX timestamp), and one-way delay, RFC 3550
+  jitter, and loss are **measured at the sink** from those header primitives.
+  `OnOffApplication` traffic is gone toolkit-wide.
+- **Real orbital dynamics in the routed examples.** Satellites in the routed
+  examples are SGP4/Walker neighbours projected into a local ENU frame
+  (`NtnEnuProjectionMobilityModel`, from `ntn-cho`), so the satA-sets / satB-rises
+  reroute emerges from genuine orbital motion.
 
 ## Models, helpers & key classes
 
@@ -74,67 +85,63 @@ Derived from `model/*.h`:
 
 | Header | Key types | Role |
 |---|---|---|
-| `walker-constellation.h` | `WalkerConfig`, `WalkerConstellation` | Walker-Delta / Walker-Star constellation generation (planes, sats/plane, altitude, inclination). |
-| `sgp4-mobility-model.h` | `Sgp4MobilityModel` | ns-3 `MobilityModel` that propagates a satellite during the simulation via an analytic Kepler + secular-J2 propagator with an SGP4-compatible TLE interface (full Vallado SGP4 planned). |
+| `walker-constellation.h` | `WalkerConfig`, `WalkerConstellation` (`BuildDelta`, `BuildStar`) | Walker-Delta / Walker-Star constellation generation (planes, sats/plane, altitude, inclination). |
+| `sgp4-mobility-model.h` | `Sgp4MobilityModel` | ns-3 `MobilityModel` that propagates a satellite during the simulation via an analytic Kepler + secular-J2 propagator with an SGP4-compatible TLE interface (full Vallado SGP4 planned). ECEF/ECI/geodetic accessors and `GetElevationDeg()`. |
 | `orbital-elements.h` | `TleRecord`, `KeplerianElements` | TLE / Keplerian element records consumed by the mobility model. |
-| `contact-graph-scheduler.h` | `ContactGraphScheduler`, `ContactEvent` | Computes GSL/ISL visibility and emits link up/down events over time. |
-| `contact-graph-router.h` | `ContactGraphRouter` | Routes over the time-varying contact graph. |
+| `contact-graph-scheduler.h` | `ContactGraphScheduler`, `ContactEvent` | Computes GSL/ISL visibility and emits link up/down events over time; up/down event counters per link class. |
+| `contact-graph-router.h` | `ContactGraphRouter` | Routes over the time-varying contact graph: BFS shortest path, weighted Dijkstra, regenerative-vs-bent-pipe constrained routing. |
 | `tr38821-corpus.h` | `Tr38821CorpusReader`, `Tr38821Scenario`, `Tr38821LinkBudget`, `StarlinkLatencySample`, `StarlinkStation`, `CalibrationResidual` | TR 38.821 + Starlink calibration corpus and harness. |
 
 ## Examples
 
 Built binaries land in `build/contrib/ntn-constellation/examples/` as
 `ns3.43-<NAME>-default`. Each can be launched through `./ns3 run` (from the repo
-root) or invoked directly.
+root) or invoked directly. The two access-link examples (`walker-traffic`,
+`sgp4-mobility-traffic`) require the toolkit's `mmwave` module; the two routed
+examples need only core ns-3 plus `ntn-traffic`/`ntn-cho`.
 
 ### ntn-constellation-walker-traffic
 
-A Walker-Delta constellation generated in-sim, with a real UDP data plane carried
-by `NtnRealisticTrafficHelper`. The `ContactGraphScheduler` is sampled every second
-to log live ISL connectivity changes alongside the flow.
+A Walker-Delta constellation provides the ephemeris and ISL/GSL contact-graph
+context (`ContactGraphScheduler`), while ONE serving satellite carries a real
+mmwave NR NTN cell (`NtnRealStackHelper`) to TR 38.811 ground UEs placed at its
+sub-point. Radio KPIs (SINR/TBLER/throughput) are measured off the mmwave PHY
+trace; constellation-scale connectivity is reported from the contact graph.
 
 ```bash
 # via ns3 (from repo root)
-./ns3 run "ntn-constellation-walker-traffic --simSeconds=120 --numPlanes=6 --satsPerPlane=11 --altKm=550 --inclinationDeg=53 --outputDir=results/walker"
+./ns3 run "ntn-constellation-walker-traffic --simSeconds=20 --numPlanes=4 --satsPerPlane=11 --altKm=550 --inclinationDeg=53 --outputDir=results/walker"
 ```
 
-```bash
-# direct binary
-./build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-walker-traffic-default \
-    --simSeconds=120 --numPlanes=6 --satsPerPlane=11 --altKm=550 \
-    --inclinationDeg=53 --islRangeCapKm=5000 --outputDir=results/walker
-```
-
-**Outputs:** `sim_health.csv` (packets_tx, … health counters) in `--outputDir`, plus
+**Outputs:** `sim_health.csv` (measured-KPI fidelity gates) in `--outputDir`, plus
 a summary block printed to stdout:
 
 ```
 # === ntn-constellation-walker-traffic summary ===
-#   GS-A=(lat=35,lon=-75)  GS-B=(lat=35,lon=15)  ISL cap=<N> km
+#   Walker: planes=<P> sats/plane=<S> total=<N> altKm=<A> inc=<I> deg
+#   serving cell on sat 0 (sub-point lat <..> lon <..>)
+#   measured SINR=<..> dB  measured throughput=<..> Mbps
 #   GSL up=<N> down=<N>  ISL up=<N> down=<N>
 ```
 
 **Key args:** `--simSeconds`, `--numPlanes`, `--satsPerPlane`, `--altKm`,
-`--inclinationDeg`, `--islRangeCapKm`, `--outputDir`.
+`--inclinationDeg`, `--islRangeCapKm`, `--numUes`, `--satEirpDbm`, `--outputDir`.
 
 ### ntn-constellation-sgp4-mobility-traffic
 
-A single LEO satellite (propagated by the `Sgp4MobilityModel`: Kepler + secular J2)
-passing over a ground station, with a real
-UDP data plane and GSL up/down sampling. If `--gsLat`/`--gsLon` are not supplied, the
-ground station is auto-placed beneath the satellite's t=0 sub-point so a real GSL
-up+down pass always occurs.
+A single LEO satellite from a TLE drives a real mmwave NR NTN cell
+(`NtnRealStackHelper`) toward TR 38.811 ground UEs, while the
+`ContactGraphScheduler` tracks GSL up/down events from the live orbital geometry.
+If `--gsLat`/`--gsLon` are not supplied, the ground station is auto-placed beneath
+the satellite's t=0 sub-point so a real rise→zenith→set pass always occurs
+regardless of TLE epoch.
 
 ```bash
 # via ns3 (from repo root)
-./ns3 run "ntn-constellation-sgp4-mobility-traffic --simSeconds=600 --tle=contrib/ntn-rrc/data/iss-zarya.tle --outputDir=results/sgp4"
-```
+./ns3 run "ntn-constellation-sgp4-mobility-traffic --simSeconds=20 --tle=contrib/ntn-rrc/data/iss-zarya.tle --outputDir=results/sgp4"
 
-```bash
-# direct binary (pin a fixed ground site)
-./build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-sgp4-mobility-traffic-default \
-    --simSeconds=600 --tle=contrib/ntn-rrc/data/iss-zarya.tle \
-    --gsLat=33.6844 --gsLon=73.0479 --minElev=10 --outputDir=results/sgp4
+# pin a fixed ground site
+./ns3 run "ntn-constellation-sgp4-mobility-traffic --simSeconds=20 --gsLat=33.6844 --gsLon=73.0479 --minElev=10 --outputDir=results/sgp4"
 ```
 
 **Outputs:** `sim_health.csv` in `--outputDir`, plus a summary block printed to
@@ -142,26 +149,54 @@ stdout:
 
 ```
 # === ntn-constellation-sgp4-mobility-traffic summary ===
-#   GSL up=<N>  down=<N>
+#   TLE: <path>   GS(lat,lon)=(..)  minElev=<..> deg
+#   measured SINR=<..> dB  measured throughput=<..> Mbps  GSL up=<N> down=<N>
 ```
 
 **Key args:** `--simSeconds`, `--tle` (default: `contrib/ntn-rrc/data/iss-zarya.tle`),
-`--gsLat` / `--gsLon` (default: satellite t=0 sub-point), `--minElev`, `--outputDir`.
+`--gsLat` / `--gsLon` (default: satellite t=0 sub-point), `--minElev`, `--numUes`,
+`--satEirpDbm`, `--outputDir`.
 
 ### ntn-constellation-isl-routed-traffic
 
-Real ISL-routed packet forwarding `GS1 -> satA -> [ISL] -> satB -> GS2` over a
-point-to-point data plane with `FlowMonitor` instrumentation.
+Real ISL-routed packet forwarding `GS1 -> satA -> [ISL] -> satB -> GS2`: real Ipv4
+forwarding through the satellite nodes, per-hop propagation delay set to the real
+slant/ISL range over c, and a binary geometry contact gate per hop (GSL above
+minimum elevation, ISL within the range cap) — when a hop falls out of contact its
+link drops and delivery recovers when contact resumes. Traffic is an
+`NtnOranApplication` CBR flow; delivery/delay/jitter/loss are measured end-to-end
+at the `NtnOranSink` from the in-band `NtnOranPayloadHeader`.
 
 ```bash
-# via ns3 (from repo root)
-./ns3 run ntn-constellation-isl-routed-traffic
+./ns3 run "ntn-constellation-isl-routed-traffic --duration=40"
 ```
 
+**Outputs:** `sim_health.csv` (throughput, mean e2e delay, jitter, loss, delivery
+ratio, out-of-contact ticks — each tagged with its measurement provenance) in
+`--outputDir`, plus a measured summary on stdout.
+
+**Key args:** `--duration`, `--altKm`, `--satSpeed`, `--minElev`,
+`--islRangeCapKm`, `--outputDir`.
+
+### ntn-constellation-real-routed
+
+Routing-pattern flagship: the geometry-driven routing decision actually INSTALLS
+Ipv4 static routes, so real UDP packets are forwarded through the satellite nodes
+and adaptively REROUTE as the constellation moves — `gs1 -> satA -> gs2` while
+satA is in contact, then `gs1 -> satB -> gs2` once satA sets and satB rises (the
+two satellites are real SGP4 Walker neighbours projected into a local ENU frame).
+Per-link delay is the real slant range over c; KPIs are measured at the
+`NtnOranSink`.
+
 ```bash
-# direct binary
-./build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-isl-routed-traffic-default
+./ns3 run "ntn-constellation-real-routed --duration=40"
 ```
+
+**Outputs:** `sim_health.csv` (throughput, delay, jitter, loss, route installs,
+reroute count) in `--outputDir`, plus per-event `ROUTE INSTALLED via satA/satB`
+lines and a measured summary on stdout.
+
+**Key args:** `--duration`, `--altKm`, `--satSpeed`, `--outputDir`.
 
 ## Python package
 
@@ -242,11 +277,20 @@ From the repository root:
 ./ns3 build
 
 # Run an example
-./ns3 run ntn-constellation-isl-routed-traffic
+./ns3 run "ntn-constellation-real-routed --duration=40"
 
 # Run this module's test suite
 ./test.py --suite=ntn-constellation
 ```
+
+The `ntn-constellation` suite has 20 unit tests covering TLE parsing/checksums,
+periodic-return and ECEF-altitude propagation checks, Walker-Delta geometry,
+contact scheduling (LEO pass + same-plane ISL pair), contact-graph routing
+(direct edges, BFS, weighted Dijkstra, regenerative-only routing — including
+600 s `Simulator::Run()` cases), and the TR 38.821 + Starlink calibration
+harness. The constellation mobility models are additionally cross-validated
+against Kepler orbital theory, the Doppler envelope, and TR 38.821 geometry by
+the toolkit's standards-validation campaign (in `ntn-cho`'s test suite).
 
 For prerequisites and per-module setup, see [INSTALL.md](INSTALL.md). For the full
 toolkit build, see the [toolkit repository](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).

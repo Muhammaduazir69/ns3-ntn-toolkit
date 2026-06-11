@@ -2,7 +2,7 @@
 //
 // ThzNtnPropagationLossModel — re-homes the thz-ntn molecular-absorption and
 // weather-attenuation CALCULATORS as a real ns-3 PropagationLossModel (Phase 1
-// of PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06, channel-plugin pattern).
+// of 2026-06 protocol-fidelity audit, channel-plugin pattern).
 //
 // Before, these physics were only invoked as Compute*() in user-space loops and
 // written to CSV; packets never saw them. As a PropagationLossModel this can be

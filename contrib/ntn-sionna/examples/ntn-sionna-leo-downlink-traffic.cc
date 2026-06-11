@@ -8,7 +8,7 @@
  * cascade (P.676 gaseous + P.618/P.838 rain + optional P.681 LMS shadowing)
  * as a LIVE channel plug-in.
  *
- * Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06, channel-plugin recipe):
+ * Audit fix (2026-06 protocol-fidelity audit, channel-plugin recipe):
  * the old version asked NtnSionnaCascadeChannel for an Rx power in a probe
  * loop and drove a P2P RateErrorModel through a sigmoid SnrToPer() — packets
  * never crossed a radio. Here the atmospheric physics is re-homed as

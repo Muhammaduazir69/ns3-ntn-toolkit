@@ -16,11 +16,20 @@ Overview
 ProtoBuf binding, and Gym-style environment wrapper of upstream, and
 adds:
 
-* NTN-specific Gym environments that wrap ``ntn-cho`` state.
-* A Flower AI adaptor for federated learning across ns-3 instances.
-* FedAvg / FedProx / FedNova / SCAFFOLD benchmarks for the NTN CHO
-  decision task.
-* ns-3.43 build fixes.
+* ns-3.43 / Python 3.13 / NumPy 2.0 / Gymnasium 1.0 compatibility
+  fixes (per-target LTO disable, shared-memory RAII, no ``std::exit``
+  in library code).
+* The ``ns3_ai_ntn`` Python package (``python_utils/``): four NTN
+  Gymnasium environments (``HandoverEnv``, ``BeamMgmtEnv``,
+  ``SliceEnv``, ``PowerCtrlEnv``), Stable-Baselines3 PPO training,
+  PyTorch Geometric GAT constellation-graph models, MAPPO / MASAC
+  multi-agent baselines, and an ``ns3gym`` compatibility shim.
+* An AI-RAN inference contract (``grpc/``):
+  ``AiranInferenceClient`` / ``AiranInferenceServer`` exchanging
+  length-prefixed protobuf over pluggable in-process or TCP
+  ``InferenceChannel`` transports, a Triton ``config.pbtxt`` parser,
+  two shipped Triton model-repository skeletons, and deterministic
+  mock runtimes for testing.
 
 Upstream attribution
 ~~~~~~~~~~~~~~~~~~~~
@@ -44,6 +53,21 @@ Please cite:
 Usage
 -----
 
-See ``examples/ntn-handover-gym.cc`` for the NTN CHO RL environment,
-and ``python_utils/flower_adaptor.py`` for the federated-learning
-adaptor.
+Build as part of the toolkit tree::
+
+   ./ns3 configure --enable-examples --enable-tests
+   ./ns3 build
+
+The bundled examples (``a-plus-b``, ``rl-tcp``, ``rate-control``,
+``lte-cqi``, ``multi-bss``) each carry a README with run instructions;
+the Python script spawns the matching ns-3 binary itself. The NTN RL
+environments and trainers live in ``python_utils/`` (see its README).
+
+Testing
+-------
+
+Run the C++ AI-RAN inference test suite with::
+
+   ./test.py -s oran-ntn-airan-inference
+
+and the Python tests with ``pytest python_utils/tests/``.

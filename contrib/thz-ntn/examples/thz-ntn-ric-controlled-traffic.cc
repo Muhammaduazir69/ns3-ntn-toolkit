@@ -22,7 +22,7 @@
 //              urban-canyon blockage hits mid-run, recovers when the xApp
 //              engages the RIS, and stays up when the blockage clears.
 //
-// Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06): previously the KPM
+// Audit fix (2026-06 protocol-fidelity audit): previously the KPM
 // SINR was a closed-form FSPL+absorption formula and the data plane a P2P
 // RateErrorModel behind a sigmoid SnrToPer() — now both halves of the loop
 // ride the measured radio. THz molecular absorption stays in the packet path

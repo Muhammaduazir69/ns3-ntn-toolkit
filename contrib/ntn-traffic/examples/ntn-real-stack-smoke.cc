@@ -6,7 +6,7 @@
 // REAL mmwave NR air interface (SpectrumPhy + MAC + HARQ + RLC/PDCP + EPC),
 // runs UDP traffic over the radio, and reports MEASURED SINR/TBLER/throughput
 // from PHY trace sources + FlowMonitor. This is the template every NTN module
-// adopts in Phase 1+ (see PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06.md).
+// adopts in Phase 1+ (see 2026-06 protocol-fidelity audit.md).
 //
 // Run:
 //   ./ns3 run "ntn-real-stack-smoke --simTime=10 --numUes=4 --altKm=600"

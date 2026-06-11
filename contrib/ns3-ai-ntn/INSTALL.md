@@ -75,7 +75,7 @@ Verify the bridge module is built:
 
 ```bash
 ./ns3 show profile | grep ai
-ls build/contrib/ai/python/  # should show ns3ai_*.so files
+ls build/contrib/ns3-ai-ntn/python/  # should show ns3ai_*.so files
 ```
 
 ---
@@ -87,7 +87,7 @@ Each example pairs a C++ ns-3 binary with a Python driver.
 ### 5a. Hello-world (`a-plus-b`)
 
 ```bash
-cd contrib/ai/examples/a-plus-b/use-gym/
+cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/
 python3 a-plus-b.py     # Python launches the ns-3 binary internally
 ```
 
@@ -96,7 +96,7 @@ Expected output: a stream of `(a, b, c=a+b)` triples.
 ### 5b. LTE CQI prediction
 
 ```bash
-cd contrib/ai/examples/lte-cqi/
+cd contrib/ns3-ai-ntn/examples/lte-cqi/
 python3 run_baseline.py
 python3 run_dqn.py --episodes=100
 ```
@@ -104,14 +104,14 @@ python3 run_dqn.py --episodes=100
 ### 5c. Multi-BSS Wi-Fi RL
 
 ```bash
-cd contrib/ai/examples/multi-bss/
+cd contrib/ns3-ai-ntn/examples/multi-bss/
 python3 multi_bss.py --episodes=200
 ```
 
 ### 5d. RL-TCP
 
 ```bash
-cd contrib/ai/examples/rl-tcp/
+cd contrib/ns3-ai-ntn/examples/rl-tcp/
 python3 run_rl_tcp.py
 ```
 

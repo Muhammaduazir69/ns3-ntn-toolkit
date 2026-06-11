@@ -6,7 +6,7 @@
  * thz-ntn-beam-tracking — EKF beam tracking of a REAL SGP4 LEO pass, closed
  * over a REAL mmwave NR NTN cell.
  *
- * Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06): the old version drove
+ * Audit fix (2026-06 protocol-fidelity audit): the old version drove
  * the EKF with a sinusoidal fake pass and a synthetic SINR (15+10*sin), and
  * its bolted-on traffic helper never saw the tracking. Now:
  *

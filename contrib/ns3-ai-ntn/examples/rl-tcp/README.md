@@ -84,8 +84,8 @@ cd YOUR_NS3_DIRECTORY
 The following code selects deep Q-learning to TCP congestion control.
 
 ```shell
-pip install -r contrib/ai/examples/rl-tcp/requirements.txt
-cd contrib/ai/examples/rl-tcp/use-gym
+pip install -r contrib/ns3-ai-ntn/examples/rl-tcp/requirements.txt
+cd contrib/ns3-ai-ntn/examples/rl-tcp/use-gym
 python run_rl_tcp.py --use_rl --result --show_log --seed=10
 ```
 
@@ -104,8 +104,8 @@ cd YOUR_NS3_DIRECTORY
 The following code selects deep Q-learning to TCP congestion control.
 
 ```shell
-pip install -r contrib/ai/examples/rl-tcp/requirements.txt
-cd contrib/ai/examples/rl-tcp/use-msg
+pip install -r contrib/ns3-ai-ntn/examples/rl-tcp/requirements.txt
+cd contrib/ns3-ai-ntn/examples/rl-tcp/use-msg
 python run_rl_tcp.py --use_rl --rl_algo=DeepQ --result --show_log --seed=10
 ```
 

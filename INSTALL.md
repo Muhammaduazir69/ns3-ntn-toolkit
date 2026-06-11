@@ -13,17 +13,21 @@ This guide walks you through getting `ns3-ntn-toolkit` from a fresh checkout to 
 | CMake | ≥ 3.24 |
 | Python | ≥ 3.10 (3.13 supported) |
 | Boost | ≥ 1.74 (interprocess) |
-| Disk | **≥ 10 GB** after build (toolkit + SNS3 TLE data + outputs) |
+| Disk | **≥ 20 GB** after build (toolkit + SNS3 satellite data + build tree + outputs) |
 | RAM | 8 GB build, 4 GB runtime |
 
 ### Distro packages (Ubuntu 22.04)
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential cmake git python3 python3-pip \
-    libboost-all-dev libgsl-dev libxml2-dev libsqlite3-dev \
+sudo apt install -y build-essential cmake ninja-build git python3 python3-pip \
+    libboost-all-dev libgsl-dev libxml2-dev libsqlite3-dev libpcap-dev \
+    pybind11-dev libprotobuf-dev protobuf-compiler \
     g++-11 gcc-11
 ```
+
+(`pybind11-dev` and the protobuf packages are needed by the `ns3-ai-ntn`
+bridge; everything else is the standard ns-3 toolchain.)
 
 ### Python deps (only needed if you'll use the RL bridge or rebuild figures)
 
@@ -40,8 +44,8 @@ git clone https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 cd ns3-ntn-toolkit
 ```
 
-Branch `ntn-integration` is the default and contains the patched LTE,
-mmWave, and the five custom modules.
+Branch `ntn-integration-v2` is the current release line and contains the
+patched LTE, mmWave, and all 14 custom contrib modules.
 
 ---
 
@@ -62,8 +66,12 @@ Without this, `ntn-cho`, `oran-ntn`, and `thz-ntn` will silently fail to registe
 
 ## 4. (Optional) clone the standalone module repos
 
-The five custom modules are all already inside this toolkit's `contrib/` —
-but if you want to get fresher commits or contribute back upstream:
+All custom modules are already inside this toolkit's `contrib/` — but most
+also live in standalone repos if you want fresher commits or to contribute
+back upstream (`ntn-cho-framework`, `oran-ntn`, `ns3-thz-ntn`, `ns3-ai`,
+`ntn-constellation`, `ntn-rrc`, `ntn-observability`, `ntn-sagin`,
+`ntn-slice`, `ntn-v2x`, `ntn-sionna`, `ntn-digital-twin`, `flexric-bridge`
+under <https://github.com/Muhammaduazir69>). For example:
 
 ```bash
 cd contrib/
@@ -74,6 +82,8 @@ git clone -b fix/ns3-43-compatibility-and-critical-bugs \
   https://github.com/Muhammaduazir69/ns3-ai.git ai-fresh
 cd ..
 ```
+
+`ntn-traffic` and `ntn-fapi` ship only inside this toolkit tree.
 
 ---
 
@@ -122,34 +132,49 @@ Output files land in the working directory:
 | Module | Command |
 |---|---|
 | `ntn-cho` | `./ns3 run "ntn-cho-full-constellation --algorithm=tte-aware --simTime=600"` |
+| `ntn-cho` (trigger classes) | `./ns3 run "ntn-cho-handover-traffic --trigger=t1"` (a3 / d1 / t1 / elevation / ta) |
 | `oran-ntn` | `./ns3 run "oran-ntn-full-scenario --simTime=600 --xapps=ho,beamhop,slice,doppler,tnntn"` |
+| `oran-ntn` (RIC placement A/B) | `./ns3 run "oran-ntn-ric-placement-ab"` |
+| `ntn-traffic` | `./ns3 run "ntn-oran-qos-flows"` — 4 5QI flows + C&C on a real NR NTN cell |
+| `ntn-traffic` (calibration) | `./ns3 run "ntn-tr38821-calibration"` — TR 38.821 Set-1 LEO-600 gate |
 | `thz-ntn` | `./ns3 run "thz-ntn-demo --example=8"` |
-| `ai` | `cd contrib/ai/examples/a-plus-b/use-gym/ && python3 a-plus-b.py` |
+| `ns3-ai-ntn` | `cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/ && python3 a-plus-b.py` |
 
-Per-module install/run details: see each module's own `INSTALL.md`.
+Per-module run details: see each module's own `README.md`.
 
 ---
 
-## 8. Reproduce the paper Monte-Carlo
+## 8. Run the repo-wide validation gates
+
+Two aggregate gates assert that every example runs on a measured radio and
+that the radio matches 3GPP study-case numbers:
 
 ```bash
-cd papers/sim_runs/
-./run_mc_sweep.sh                      # 10 seeds × 600 s × 4 algorithms (~5 min)
-python3 build_figures.py               # publication-ready PDFs
-python3 build_figures_thz_oran.py      # THz + O-RAN extra panels
+python3 tools/check_protocol_fidelity.py    # 36 checks — measured-KPI fidelity per example
+python3 tools/check_ntn_standards.py        # 12 checks — orbital theory, Doppler, TR 38.821
+                                            #             calibration, platform latency bands,
+                                            #             5 NTN handover trigger classes
 ```
 
-Outputs land in `papers/figures/`.
+Both exit non-zero on any failure, so they are CI-friendly.
 
 ---
 
 ## 9. Run the test suites
 
 ```bash
-./ns3 run "test-runner --suite=ntn-cho --verbose"     # 3 / 3 passing
-./ns3 run "test-runner --suite=oran-ntn --verbose"
-./ns3 run "test-runner --suite=thz-ntn --verbose"     # 12 / 12 passing
+./test.py -s ntn-cho
+./test.py -s oran-ntn
+./test.py -s oran-ntn-multi-tier-ric
+./test.py -s oran-ntn-ws4
+./test.py -s ntn-oran-application
+./test.py -s ntn-oran-ai-flow-monitor
+./test.py -s ntn-standards-validation
+./test.py -s thz-ntn
 ```
+
+(`./test.py` with no arguments runs everything, including the upstream ns-3
+suites — expect a long run.)
 
 ---
 
@@ -162,7 +187,7 @@ You skipped step 3 (SNS3 satellite clone). It's required.
 mmWave isn't built. Verify `contrib/mmwave/` exists and re-configure.
 
 **ns3-ai `ImportError: dynamic module does not define module export function`**
-LTO bug — make sure you're on the modernised fork (this toolkit's bundled `contrib/ai/` is already on the right branch).
+LTO bug — make sure you're on the modernised fork (this toolkit's bundled `contrib/ns3-ai-ntn/` is already on the right branch).
 
 **Build cache filtering modules**
 Run a clean configure: `./ns3 configure --enable-modules=''`.
@@ -193,9 +218,11 @@ cd contrib/satellite/data/constellations/
 | Module | Detailed install guide |
 |---|---|
 | ntn-cho | [contrib/ntn-cho/INSTALL.md](contrib/ntn-cho/INSTALL.md) |
-| oran-ntn | [contrib/oran-ntn/INSTALL.md](contrib/oran-ntn/INSTALL.md) |
 | thz-ntn | [contrib/thz-ntn/INSTALL.md](contrib/thz-ntn/INSTALL.md) |
-| ai (fork) | [contrib/ai/INSTALL.md](contrib/ai/INSTALL.md) |
+| ns3-ai-ntn (fork) | [contrib/ns3-ai-ntn/INSTALL.md](contrib/ns3-ai-ntn/INSTALL.md) |
+
+All other modules document their install/run details in their own
+`contrib/<module>/README.md`.
 
 ---
 

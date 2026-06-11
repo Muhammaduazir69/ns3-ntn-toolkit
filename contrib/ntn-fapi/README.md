@@ -7,16 +7,19 @@
 
 `ntn-fapi` provides the **SCF-222 functional API between the MAC (L2) and the PHY (L1)** as a clean, header-only C++ ABI for NR-NTN simulation. It mirrors the message and PDU layout of the Small Cell Forum FAPI specification (SCF FAPI 222.10.02 + the 222.10.04 addendum) so that scheduler-side code in ns-3 (mmwave, oran-ntn), NVIDIA Aerial cuPHY, and OAI's nfapi can all link against the same struct shapes without touching scheduler logic.
 
-The message and PDU types carry **real transport-block bytes slot-by-slot over NR-NTN timing**: the MAC builds a `DL_TTI.request` plus a `TX_DATA.request` carrying the actual TB byte buffer each scheduled slot, the PHY "transmits" it over a satellite link and returns an `RX_DATA.indication` (received bytes) plus a `CRC.indication` (pass/fail + UL CQI), and the MAC drives **HARQ retransmission** on a CRC NACK. So genuine data crosses the FAPI with real CRC and HARQ feedback, with goodput tracking the geometry-driven SINR.
+The message and PDU types carry **real transport-block bytes slot-by-slot over NR-NTN timing**: the MAC builds a `DL_TTI.request` plus a `TX_DATA.request` carrying the actual TB byte buffer each scheduled slot, the PHY returns an `RX_DATA.indication` (received bytes) plus a `CRC.indication` (pass/fail + UL CQI), and the MAC drives **HARQ retransmission** on a CRC NACK. In the shipped examples the L1 outcome that fills the `CRC.indication` is **measured** off a real mmwave NR NTN cell (the recent DL SINR/TBLER from the PHY trace), so genuine data crosses the FAPI with real CRC and HARQ feedback and goodput tracks the measured radio.
 
-The structs are intentionally free of algorithmic logic — the role of this module (Realism-Adoption-Roadmap-2026 §3 T1) is to provide a stable ABI shape, plus a couple of conversion helpers, against which other modules and external PHYs can interoperate.
+The structs are intentionally free of algorithmic logic — the role of this module is to provide a stable ABI shape, plus a couple of conversion helpers, against which other modules and external PHYs can interoperate.
 
 ## What's new in v2
 
 See the toolkit [CHANGELOG](../../CHANGELOG.md).
 
-- **NEW example `ntn-fapi-leo-pass-slotloop`** drives the FAPI data ABI from a **real SGP4 LEO pass** (`ntn-constellation`'s `Sgp4MobilityModel`): per-slot SINR follows the **live satellite elevation** over a ground station (slant-range → free-space path loss → SINR), with HARQ retransmission and Shannon-tracked goodput. Out-of-contact slots (elevation ≤ 0°) correctly fall to **BLER = 1.0** with no delivery.
-- The original `ntn-fapi-dl-data-slotloop` continues to exercise the same data path with an **analytical triangular SINR** (edges → zenith → edges) for a deterministic, dependency-free demo.
+- **All three examples now ride a REAL mmwave NR NTN cell** (`NtnRealStackHelper` from `ntn-traffic`: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC). The per-slot FAPI `CRC.indication` is decided by the **measured** PHY outcome — recent DL SINR/TBLER read off the mmwave `RxPacketTraceUe` trace (the real SINR→BLER error model) — not a closed-form `SinrToBler()` sigmoid or a coin flip.
+- **Real NTN mobility everywhere**: the serving satellite is an SGP4/Walker `Sgp4MobilityModel` (from `ntn-constellation`) and the ground UEs use TR 38.811 mobility classes (`NtnTr38811MobilityHelper`, from `ntn-cho`), so the pass geometry is genuine.
+- **NEW flagship example `ntn-fapi-real-stack`** — the canonical "FAPI ABI on a measured radio" scenario.
+- `ntn-fapi-leo-pass-slotloop` drives the FAPI data ABI from a **real SGP4 LEO pass from a TLE**, with the ground station auto-placed at the satellite's t=0 sub-point so a real rise→zenith→set pass occurs.
+- The earlier closed-form variants (analytical triangular SINR, `ElevationToSinrDb`) are gone.
 
 ## Models, helpers & key classes
 
@@ -29,35 +32,40 @@ All types live in `namespace ns3::fapi`. Headers under `model/`:
 
 ## Examples
 
-Both examples are listed in `examples/CMakeLists.txt` and build to `build/contrib/ntn-fapi/examples/`.
+All three examples are listed in `examples/CMakeLists.txt` and build to `build/contrib/ntn-fapi/examples/`. They depend on the toolkit's `mmwave`, `ntn-traffic`, `ntn-constellation`, and `ntn-cho` modules. Each writes an honest `sim_health.csv` (measured-KPI fidelity gates, via `NtnRealStackHelper::WriteHealthReport()`) to `--outputDir` in addition to its stdout summary.
+
+### ntn-fapi-real-stack
+
+Real-stack flagship: the SCF-222 data ABI (DL_TTI / TX_DATA / RX_DATA / CRC.indication) exercised slot-by-slot on a real mmwave NR NTN cell. The serving satellite is an SGP4 Walker satellite; TR 38.811 UEs sit under its t=0 sub-point; CRC pass/fail and HARQ feedback follow the measured TBLER.
+
+```sh
+./ns3 run "ntn-fapi-real-stack --duration=20 --numUes=4 --scsKhz=30"
+```
+
+- **Outputs:** stdout — a header block and a final `--- FAPI Summary (SCF-222 ABI on MEASURED radio) ---` with measured mean SINR, measured mean DL TBLER, measured radio throughput, FAPI slots sent/crcOk/retx, delivered KB, and FAPI goodput (Mbps); plus `sim_health.csv` in `--outputDir`.
+- **Key args:** `--duration` (s), `--numUes`, `--scsKhz` (15/30/60/120 → slots per ms), `--tbBytes`, `--altitude` (km), `--satEirpDbm`, `--outputDir`.
 
 ### ntn-fapi-dl-data-slotloop
 
-DL FAPI data path over an **analytical triangular** pass SINR with CRC/HARQ.
+The original slot-loop demo, now on the same measured radio: per-slot `TX_DATA.request` → `RX_DATA.indication` / `CRC.indication` with the CRC outcome drawn from the measured TBLER of UE 0; the natural elevation descent of the pass drops the measured SINR so CRC failures and HARQ retransmissions appear.
 
 ```sh
-./ns3 run "ntn-fapi-dl-data-slotloop --simSeconds=10 --scsKhz=30 --tbBytes=1500"
-```
-```sh
-LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-fapi/examples/ns3.43-ntn-fapi-dl-data-slotloop-default --simSeconds=10 --scsKhz=30 --tbBytes=1500
+./ns3 run "ntn-fapi-dl-data-slotloop --simSeconds=20 --numUes=4 --scsKhz=30 --tbBytes=1500"
 ```
 
-- **Outputs:** stdout — a header line, periodic per-slot progress lines (`t`, `sfn/slot`, `sinr`, `bler`, `tbOk/tbSent`, `deliveredKB`), and a final `# === summary ===` line with TBs sent/ok, HARQ-retx count, average BLER, delivered MB, and goodput (Mbps).
-- **Key args:** `--simSeconds` (sim duration, s), `--scsKhz` (sub-carrier spacing 15/30/60/120 → slots per ms), `--tbBytes` (transport-block size), `--minSinrDb` (SINR at pass edges), `--maxSinrDb` (SINR at zenith), `--rngSeed` (RNG run number).
+- **Outputs:** stdout header + `--- FAPI Summary (SCF-222 ABI on MEASURED radio) ---` (same fields as above); `sim_health.csv` in `--outputDir`.
+- **Key args:** `--simSeconds`, `--numUes`, `--scsKhz`, `--tbBytes`, `--altitude` (km), `--satEirpDbm`, `--outputDir`.
 
 ### ntn-fapi-leo-pass-slotloop
 
-Same FAPI data path, but per-slot SINR is derived from a **real SGP4 LEO pass** (`ntn-constellation`).
+Same FAPI data path, but the serving satellite is propagated from a **TLE** by `ntn-constellation`'s `Sgp4MobilityModel`, and the ground station is auto-placed at the satellite's t=0 sub-point so a real rise→zenith→set pass occurs regardless of TLE epoch.
 
 ```sh
-./ns3 run "ntn-fapi-leo-pass-slotloop --simSeconds=600 --scsKhz=30 --tle=contrib/ntn-rrc/data/iss-zarya.tle"
-```
-```sh
-LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-fapi/examples/ns3.43-ntn-fapi-leo-pass-slotloop-default --simSeconds=600 --scsKhz=30 --tle=contrib/ntn-rrc/data/iss-zarya.tle
+./ns3 run "ntn-fapi-leo-pass-slotloop --simSeconds=20 --scsKhz=30 --tle=contrib/ntn-rrc/data/iss-zarya.tle"
 ```
 
-- **Outputs:** stdout — a header (TLE path, GS lat/lon, sim config), periodic per-slot progress lines (`t`, `elev`, `sinr`, `bler`, `tbOk/tbSent`, `deliveredKB`), and a final `# === ntn-fapi-leo-pass-slotloop summary ===` block with slots sent/ok/retx, slots in contact, max elevation, delivered KB, and goodput (Mbps).
-- **Key args:** `--simSeconds`, `--scsKhz`, `--tbBytes`, `--rngSeed`, `--tle` (path to a 3-line TLE; defaults to `contrib/ntn-rrc/data/iss-zarya.tle`), `--gsLat` / `--gsLon` (ground-station coordinates in degrees; default to the satellite's t=0 sub-point so a real rise→zenith→set pass occurs).
+- **Outputs:** stdout — a header (TLE path, GS sub-point, sim config) and a final `# === ntn-fapi-leo-pass-slotloop summary ===` block with measured SINR/TBLER/throughput, FAPI slots sent/crcOk/retx, delivered KB, and goodput (Mbps); `sim_health.csv` in `--outputDir`.
+- **Key args:** `--simSeconds`, `--scsKhz`, `--tbBytes`, `--numUes`, `--satEirpDbm`, `--tle` (path to a 3-line TLE; defaults to `contrib/ntn-rrc/data/iss-zarya.tle`), `--outputDir`.
 
 ## Build, run & test
 
@@ -67,7 +75,7 @@ LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-fapi/examples/ns3.43-ntn-fapi-leo-
 ./test.py --suite=ntn-fapi
 ```
 
-The `ntn-fapi` test suite covers the message/PDU ABI and the DMRS bitmap helpers. See [INSTALL](../../INSTALL.md) for full toolkit setup.
+The `ntn-fapi` test suite (5 unit tests) covers SCF 222.10.02/.04 message-ID stability and names, Numerology→SCS mapping against TS 38.211 Table 4.2-1, DMRS bitmap round-trips, DL_TTI PDCCH+PDSCH PDU ordering, and the UL indication shapes (CRC/SRS/RACH). See [INSTALL](../../INSTALL.md) for full toolkit setup.
 
 ## License & author
 

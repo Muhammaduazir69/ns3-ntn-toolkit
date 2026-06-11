@@ -4,6 +4,77 @@ All notable changes to the toolkit and its custom modules. The toolkit and each
 standalone module are versioned as release lines; branch `ntn-integration-v2`
 (toolkit) and `<module>-v2` (per module) carry the v2 work below.
 
+## [v2.1] — 2026-06
+
+This release lands the **AI-Native ORAN-NTN adoption**: a real measured data
+plane and O-RAN control plane across the whole toolkit. Synthetic traffic
+generators and closed-form KPI shortcuts are gone — every delay, jitter, loss
+and throughput figure in every example is now measured in-band on a real
+mmWave NR NTN cell with SGP4 satellite mobility.
+
+### Added — NTN/O-RAN application layer (`ntn-traffic`)
+
+- **`NtnOranApplication` suite** replaces `OnOffApplication` toolkit-wide:
+  6 traffic profiles with 5QI-correct defaults (conversational voice, eMBB
+  video, URLLC periodic, mMTC periodic, Poisson background, CBR saturating),
+  a 24-byte in-band **`NtnOranPayloadHeader`** (version, type, sequence,
+  TX timestamp, 5QI, S-NSSAI SST/SD, QFI, src/dst id — real wire bytes, so it
+  survives GTP tunneling), **`NtnOranSink`** (per-flow one-way delay,
+  RFC 3550 jitter, sequence-gap loss, throughput, measured from received
+  bytes) and **`NtnCommandAndControlApp`** (real-mobility telemetry +
+  battery model, 5QI 69).
+- **`NtnOranAiFlowMonitor`**: flow classifier/probe built on ns-3's
+  FlowMonitor infrastructure, keyed by srcId+dstId+5QI+S-NSSAI, exporting
+  TS 28.552 / E2SM-KPM-named series (`DRB.UEThpDl`, `DRB.RlcSduDelayDl`,
+  `DRB.PacketLossRateDl`, `DRB.PdcpSduVolumeDl`, `L1M.RS-SINR`), AI feature
+  windows, EWMA z-score anomaly events, and XML/CSV/InfluxDB/E2 exporters.
+- **`NtnRealStackHelper`**: one call builds a real mmWave NR NTN cell
+  (SpectrumPhy/MAC/RLC/PDCP/RRC/EPC) under an SGP4 satellite, with
+  `InstallOranFlow()`, `EnableOranFlowMonitor()`, regenerative-payload
+  options and live feeder geometry.
+
+### Added — multi-tier RIC and payload architecture (`oran-ntn`)
+
+- RT-RIC tier with an enforced <10 ms control-loop bound; RIC placement
+  model (on-board / gateway / ground-cloud) with E2 latency from live slant
+  geometry; NWDAF slice analytics + transport-path controller + cross-domain
+  SMO loop; ONNX Runtime xApp inference as an optional CMake-detected
+  dependency (heuristic fallback otherwise).
+- Payload options A/B (transparent vs regenerative RU / RU+DU / full gNB),
+  fronthaul split model (Opt 2 / 7.2a / 7.2b / Opt 8), platform latency
+  classes (UAV/HAPS/LEO/MEO/GEO) with endurance enforcement, and
+  measured-trigger role switching.
+- New examples: `oran-ntn-ric-placement-ab`, `oran-ntn-cross-domain-slice`,
+  `oran-ntn-payload-options-ab`, `ntn-platform-latency-validation`,
+  `oran-ntn-emergency-communication`.
+
+### Added — standards validation campaign
+
+- **TR 38.821 Set-1 LEO-600 S-band calibration** (`ntn-tr38821-calibration`):
+  measured CNR-vs-elevation tracks the study-case link budget (constant
+  array-gain offset, FSPL slope within 0.2 dB of theory).
+- **Five 3GPP NTN handover trigger classes** in `ntn-cho`: measurement (A3),
+  location (D1), time (T1), elevation, and timing-advance — all executing
+  handovers on the real radio (`ntn-cho-handover-traffic --trigger=...`).
+- Orbital-theory test suite (SGP4 vs Kepler, Doppler envelope, ENU pass
+  geometry, slant/elevation relation incl. the TR 38.821 1932 km @ 10° case).
+- Repo-wide gates: `tools/check_protocol_fidelity.py` (36 checks) and
+  `tools/check_ntn_standards.py` (12 checks) both PASS.
+
+### Added — use-case flagships
+
+- `oran-ntn-emergency-communication` — disaster scenario: payload role-switch
+  to full gNB, SST=5 emergency slice, eMBB throttled live.
+- `ntn-sagin-remote-coverage` — multi-MNO shared LEO cell with measured
+  cost split.
+- `ntn-v2x-edge-urllc` — platoon URLLC on a real LEO cell with on-board vs
+  ground edge-AI placement and measured decision latency.
+
+### Removed
+
+- `OnOffApplication`-based traffic and every remaining closed-form
+  `SnrToPer`-style KPI path in toolkit modules.
+
 ## [v2] — 2026-05
 
 This release closes an end-to-end **CSV output-realism audit**: every column of

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // NtnOranAiFlowMonitor — the AI-native measurement layer of the ORAN-NTN
-// adoption plan (AI_NATIVE_ORAN_NTN_ADOPTION_PLAN WS2). Built on the REAL
+// adoption plan (AI-Native ORAN-NTN adoption WS2). Built on the REAL
 // ns-3 flow-monitor infrastructure, deeply:
 //
 //   * NtnOranFlowClassifier : FlowClassifier — flows are keyed by the ORAN

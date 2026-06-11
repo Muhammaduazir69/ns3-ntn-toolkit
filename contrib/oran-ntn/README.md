@@ -1,6 +1,6 @@
 # oran-ntn
 
-> O-RAN over Non-Terrestrial Networks: a Near-RT RIC, an on-board Space-RIC, E2/canonical-KPM telemetry, A1 policy, xApps, and conflict management for ns-3.43.
+> O-RAN over Non-Terrestrial Networks: a multi-tier RIC (RT / Near-RT / Space-RIC), E2/canonical-KPM telemetry, A1 policy, xApps with conflict management, cross-domain SMO analytics, and AI-native payload/fronthaul models for ns-3.43.
 > Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
 
 <p align="center">
@@ -13,7 +13,7 @@
 | ns-3 version | `release ns-3.43` |
 | License | GPL-2.0-only |
 | Maintainer | Muhammad Uzair, Independent Researcher (ORCID 0009-0002-4104-2680) |
-| Test suite | `oran-ntn` |
+| Test suites | `oran-ntn`, `oran-ntn-multi-tier-ric`, `oran-ntn-ws4` |
 | Default scenario | `examples/oran-ntn-full-scenario.cc` |
 
 ## Overview
@@ -25,37 +25,53 @@ a Non-RT RIC, and a multi-xApp **conflict manager**. KPM telemetry is
 exported both as a flat record stream and in a **canonical KPM**
 encoding (stable measurement IDs / labels). On top of the WG2/WG3 ground
 control plane it adds an on-board **Space-RIC** that takes over autonomously
-when the satellite loses its feeder link, running local KPM-driven inference
-so handover and beam decisions continue through the outage.
+when the satellite loses its feeder link, and — new in the AI-native
+release — a **real-time RIC tier** (`OranNtnRtRic`) co-located with the
+O-DU on the satellite, whose control loop is hard-bounded below the O-RAN
+10 ms RT limit and acts directly on measured PHY KPIs.
 
-The module targets LEO constellations: a satellite bridge supplies orbit
-geometry (elevation → slant range → propagation delay), link-budget /
-C/N₀, and ISL topology, while xApps cover handover prediction, beam
-hopping, slice management, Doppler compensation, and TN-NTN steering. A
-second example closes a real data-plane control loop, where an mMIMO
-precoder xApp reacts to live E2-KPM SINR and changes the delivered
-goodput over a point-to-point satellite downlink.
+The module is built around a **real data plane**: it links against
+`ntn-traffic`, whose `NtnRealStackHelper` stands up an actual mmwave NR NTN
+cell (SpectrumPhy + MAC + HARQ/AMC + RLC/PDCP + RRC + EPC) on SGP4 satellite
+orbits with TR 38.811 UE mobility. All KPIs the RICs consume are measured
+in-band on that stack — there are no synthetic KPI generators. RIC
+**placement** (on-board / HAPS / gateway / cloud) is an experiment variable
+whose E2 latency is computed from the live slant geometry, and the
+satellite **payload architecture** (transparent / regenerative O-RU /
+O-RU+O-DU / full gNB), **fronthaul split**, **platform class**, and
+**functional role switching** are first-class measurable models.
 
-## What's new in v2
+## What's new — AI-native ORAN-NTN release (June 2026)
 
-See [`../../CHANGELOG.md`](../../CHANGELOG.md) for the full toolkit changelog.
+See [`CHANGELOG.md`](CHANGELOG.md) and the toolkit
+[`../../CHANGELOG.md`](../../CHANGELOG.md) for earlier releases (v2 realism
+fixes, the original RIC/xApp framework).
 
-- **RSRQ is now clamped to the 3GPP range [−19.5, −3] dB** (it was
-  previously reaching +17 dB, which is non-physical).
-- **`action_log` success now reflects xApp confidence** instead of a
-  hardcoded `true`.
-- **`latency` / `propagation_delay` now derive from the slant range**
-  (elevation → range), per-slice 5QI is mapped correctly
-  (eMBB → 9, URLLC → 82, mMTC → 79), `slice_id` is serialized correctly,
-  and per-cell PRB usage, active-UE count, and throughput now vary with
-  both time and cell.
-- **The Space-RIC is now fed live KPM** and the feeder-link outage scales
-  to the run length, so on-board autonomous handover decisions are actually
-  exercised — `space_ric_metrics.csv` is no longer all-zero on short runs.
-- **Note:** an empty `conflict_log.csv` is *correct* for the shipped xApp
-  mix. The active xApps contend on disjoint resource keys, so the conflict
-  manager has nothing to resolve; the file is written but stays at headers
-  only.
+- **Multi-tier RIC.** `OranNtnRtRic` adds the real-time tier (<10 ms,
+  enforced at `Start()`) next to the existing Near-RT RIC and Space-RIC;
+  `OranNtnRicPlacement` makes RIC siting (on-board satellite, HAPS, ground
+  gateway, ground cloud) an experiment variable with E2 delay derived from
+  the live slant range.
+- **Cross-domain SMO.** `OranNtnNwdaf` (per-slice analytics + SLA-risk
+  score from measured KPM), `OranNtnTpnController` (transport-path ranking
+  and per-slice switching), and `OranNtnCrossDomainSmo` (one closed loop
+  coordinating RAN quota, transport path, and edge compute).
+- **ONNX inference xApp.** `OranNtnOnnxXapp` loads `.onnx` models exported
+  from the toolkit gym environments and infers on live measured feature
+  vectors. ONNX Runtime is an **optional** dependency auto-detected at
+  configure time; without it the xApp transparently falls back to a
+  caller-registered heuristic, so every example still runs.
+- **Payload & fronthaul models.** `NtnFhSplitModel` (split options Opt 2 /
+  7.2a / 7.2b / Opt 8 with one-way latency bounds and fronthaul-rate
+  multipliers, plus `ChooseBestSplit()`), `NtnPlatformSpec` (UAV / HAPS /
+  LEO / MEO / GEO platform classes with latency bands and enforceable UAV
+  endurance), and `OranNtnRoleSwitch` (regenerative-payload role elevation
+  RU → RU+DU → full gNB on measured triggers: battery telemetry, fronthaul
+  latency, injected failures — with a real service-interruption window).
+- **Five new examples** (see below): RIC-placement A/B, cross-domain slice
+  adaptation, payload-options A/B, per-platform latency validation, and a
+  post-disaster emergency-communication flagship.
+- **Two new test suites**: `oran-ntn-multi-tier-ric` and `oran-ntn-ws4`.
 
 ## Models, helpers & key classes
 
@@ -69,6 +85,64 @@ Derived from `model/*.h` and `helper/*.h`.
   conflict resolution; strategy selectable via `ConflictResolutionStrategy`
   (`PRIORITY_BASED`, `TEMPORAL`, `MERGE`, …). Writes `conflict_log.csv`.
 
+### Multi-tier RIC (real-time tier & placement)
+- `OranNtnRtRic` (`model/oran-ntn-rt-ric.h`) — real-time RIC co-located
+  with the O-DU on the satellite, so its loop sees zero feeder-link
+  latency. Registers named `RtAction`s evaluated per UE per loop against
+  measured PHY KPIs (per-UE SINR / TBLER wired from `NtnRealStackHelper`
+  accessors); a loop period ≥ 10 ms refuses to start (O-RAN RT bound).
+- `OranNtnRicPlacement` (`model/oran-ntn-ric-placement.h`) — RIC siting as
+  an experiment variable (`Site::OnBoardSatellite`, `Site::Haps`,
+  `Site::GroundGateway`, `Site::GroundCloud`). `ComputeE2Delay()` derives
+  the one-way E2 latency from the current slant range plus site terms;
+  `BindToGeometry()` keeps an `OranNtnE2Node`'s feeder delay tracking the
+  live slant range of the real (SGP4 / TR 38.811) mobility models.
+
+### Cross-domain SMO
+All in `model/oran-ntn-cross-domain.h`:
+- `OranNtnNwdaf` — CN-domain analytics function: consumes
+  `NtnOranAiFlowMonitor` KPM indications (measured, in-band) and maintains
+  per-slice load / delay / loss EWMAs plus an SLA-risk score from the
+  delay-budget headroom and trend.
+- `OranNtnTpnController` — transport-domain controller: ranks registered
+  transport paths by live latency (provider callbacks) and switches the
+  active path per slice within its latency budget.
+- `OranNtnCrossDomainSmo` — closed coordination loop across RAN (A1-style
+  radio quota), transport (path selection via the TPN controller), and
+  CN/edge (compute allocation), driven by NWDAF analytics only.
+
+### AI-native inference
+- `OranNtnOnnxXapp` (`model/oran-ntn-onnx-xapp.h`) — closes the
+  train → export → infer lifecycle: train offline on the toolkit gym
+  environments (`ns3-ai-ntn`), export to `.onnx`, load with ONNX Runtime,
+  and infer on live measured feature vectors. ONNX Runtime is optional and
+  auto-detected by CMake (`onnxruntime_cxx_api.h` + `libonnxruntime`);
+  absent, `Infer()` runs the registered heuristic policy.
+  `IsOnnxAvailable()` / `IsModelLoaded()` report which path is live.
+- Gym environments (`model/oran-ntn-gym-*.h`) — handover, beam-hop, slice,
+  steering, predictive; plus `OranNtnFederatedLearning` aggregators.
+
+### Payload, fronthaul split, platform & role switch
+- `NtnFhSplitModel` (`model/oran-ntn-fh-split.h`) — 3GPP TR 38.801 / O-RAN
+  WG4 fronthaul split options with one-way latency bounds and
+  fronthaul-rate multipliers relative to the user-plane rate
+  (Opt 2: 1.5–10 ms, ~1.05×; Opt 7.2a: ≤0.25 ms, ~10×; Opt 7.2b:
+  ≤0.25 ms, ~7×; Opt 8: ≤0.25 ms, ~16×). `IsFeasible()` checks a split
+  against the measured feeder one-way delay and available capacity;
+  `ChooseBestSplit()` returns the most centralized feasible option —
+  at LEO slant delays every lower-PHY split fails, which is the standard
+  argument for regenerative payloads.
+- `NtnPlatformSpec` (`model/ntn-platform-spec.h`) — per-platform-class
+  constraints (UAV untethered/tethered, HAP, LEO, MEO, GEO): payload mass,
+  bus power, endurance, one-way latency class, network role.
+  `ScheduleEnduranceEnd()` enforces a UAV's endurance with a real
+  end-of-service event.
+- `OranNtnRoleSwitch` (`model/ntn-platform-spec.h`) — SMO-side functional
+  role switching (RU → RU+DU → full gNB) on measured triggers: battery
+  fraction, measured fronthaul latency vs. the split bound, and injected
+  failures. Each switch applies after a configurable service-interruption
+  window and is recorded as a `SwitchEvent`.
+
 ### E2 interface & KPM
 - `OranNtnE2Node` / `OranNtnE2Termination` (`model/oran-ntn-e2-interface.h`) —
   E2AP-style subscription / indication path; `OranNtnE2Node` carries the
@@ -76,13 +150,23 @@ Derived from `model/*.h` and `helper/*.h`.
 - Canonical KPM IDs (`model/oran-ntn-kpm-canonical-ids.h`) — stable
   measurement and label identifiers under `ns3::oranntn::kpm` /
   `ns3::oranntn::label`, used to emit `kpm_canonical.csv`.
-- KPM / RC / CCC / ephemeris service models
-  (`model/oran-ntn-service-model-*.h`).
+- KPM / RC / CCC / ephemeris service models behind a plugin ABI
+  (`model/oran-ntn-service-model*.h`, `OranNtnServiceModelRegistry`),
+  including E2SM-RC Style 3 connected-mode mobility
+  (`model/oran-ntn-rc-style3.h`).
+- ASN.1 Aligned-PER codec for E2AP / E2SM-KPM / E2SM-RC (`asn1/`) and an
+  SCTP/TCP E2 listener for external RIC bridging (`flexric-bridge/`,
+  FlexRIC-compatible field names in `model/oran-ntn-flexric-types.h`).
+- `OranNtnDataRepository` (`model/oran-ntn-data-repository.h`) — NIST-style
+  data repository (in-memory; SQLite-backed when ns-3 is configured with
+  SQLite).
 
 ### A1 policy
 - `OranNtnA1PolicyManager` / `OranNtnA1Adapter`
   (`model/oran-ntn-a1-interface.h`) — A1 policy ingest from the Non-RT RIC;
   orbit-aware constellation policies are generated by the helper.
+- OSC-aligned A1 policy schema registry
+  (`model/oran-ntn-a1-policy-schema.h`, JSON schemas in `a1-policies/`).
 
 ### Space-RIC (on-board)
 - `OranNtnSpaceRic` (`model/oran-ntn-space-ric.h`) — on-board RIC that enters
@@ -93,12 +177,16 @@ Derived from `model/*.h` and `helper/*.h`.
   unreachable.
 - `OranNtnIslHeader` (`model/oran-ntn-isl-header.h`) — ISL transport header.
 
-### Satellite bridge & PHY
+### Satellite bridge, PHY & disaggregated gNB
 - `OranNtnSatBridge` (`model/oran-ntn-sat-bridge.h`) — orbit geometry,
   link budget / C/N₀, ISL topology, mmWave hooks.
 - `OranNtnMmwaveBeamforming`, `OranNtnChannelModel`, `OranNtnNtnScheduler`,
   `OranNtnPhyKpmExtractor`, `OranNtnDualConnectivity`,
   `OranNtnMmimoCodebook`, `OranNtnMmimoPrecoderXapp`.
+- CU/DU/RU split with per-entity E2 termination: `OranNtnSplitGnbEntity`,
+  `OranNtnF1Interface`, `OranNtnOfhInterface`
+  (`model/oran-ntn-split-gnb.h`, `-f1-`, `-ofh-`), built via
+  `OranNtnSplitGnbHelper`.
 
 ### xApps
 All derive from `OranNtnXappBase` (`model/oran-ntn-xapp-base.h`). The full
@@ -107,17 +195,31 @@ Doppler Comp, and TN-NTN Steering (`model/oran-ntn-xapp-*.h`). Additional
 advanced xApps (interference mgmt, energy harvest, predictive alloc,
 multi-connectivity, ISAC, THz beam/RIS/spectrum) ship in the same directory.
 
-### Helper
+### Helpers
 - `OranNtnHelper` (`helper/oran-ntn-helper.h`) — one-call construction of the
   Non-RT RIC, Near-RT RIC, satellite/terrestrial E2 nodes, Space-RICs, A1
   policies, and xApps; KPM injection (`InjectKpmReport`); and the CSV writers
   (`WriteAllMetrics`).
+- `OranNtnSplitGnbHelper` (`helper/oran-ntn-split-gnb-helper.h`) — builds the
+  disaggregated CU/DU/RU gNB with per-entity E2 terminations.
 
 ## Examples
 
-The two examples build to `build/contrib/oran-ntn/examples/`. Each can be
-launched through `./ns3 run` or by the direct binary path
-`build/contrib/oran-ntn/examples/ns3.43-<NAME>-default`.
+All examples build to `build/contrib/oran-ntn/examples/` and can be
+launched through `./ns3 run "<name> [--args]"` or by the direct binary path
+`build/contrib/oran-ntn/examples/ns3.43-<name>-default`.
+
+| Example | What it measures |
+|---|---|
+| `oran-ntn-full-scenario` | end-to-end constellation + 5 xApps + Space-RIC autonomy |
+| `oran-ntn-real-stack-scenario` | Near-RT RIC driven by measured mmwave PHY KPM |
+| `oran-ntn-ric-controlled-traffic` | closed RIC loop changing delivered goodput |
+| `ntn-e2e-full-stack` | RIC + slice SLA + observability on one shared cell |
+| `oran-ntn-ric-placement-ab` | control-loop reaction time per RIC placement |
+| `oran-ntn-cross-domain-slice` | NWDAF + SMO + TPN path switch at the latency crossover |
+| `oran-ntn-payload-options-ab` | measured one-way delay per payload architecture |
+| `ntn-platform-latency-validation` | per-platform RTT vs. its latency band |
+| `oran-ntn-emergency-communication` | disaster recovery via role switch + emergency slice |
 
 ### oran-ntn-full-scenario
 
@@ -131,32 +233,42 @@ and a real ns-3 traffic plane that emits the run-health report.
 > satellite-data lookup that resolves against the working directory.
 
 ```bash
-# via ns3 wrapper
 ./ns3 run "oran-ntn-full-scenario --duration=600 --numUes=100 --outputDir=oran-ntn-output"
-
-# direct binary (run from ns-3-dev/)
-./build/contrib/oran-ntn/examples/ns3.43-oran-ntn-full-scenario-default \
-    --duration=600 --numUes=100 --outputDir=oran-ntn-output
 ```
 
 **Outputs:** written to `--outputDir` —
 `kpm_dataset.csv`, `kpm_canonical.csv`, `action_log.csv`, `conflict_log.csv`,
-`xapp_metrics.csv`, `space_ric_metrics.csv`, `sim_health.csv`.
+`xapp_metrics.csv`, `space_ric_metrics.csv`, `ric_metrics.txt`,
+`sim_health.csv`.
 
-**Key args** (only those exposed via `cmd.AddValue()`):
+**Key args:** `--duration` (s, default 600), `--numUes`, `--numPlanes`,
+`--satsPerPlane`, `--altitude`, `--inclination`, `--numTnGnbs`,
+`--kpmInterval`, `--enableSpaceRic`,
+`--conflictStrategy` {`priority`,`temporal`,`merge`}, `--enableFL`,
+`--outputDir`.
 
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `--duration` | 600 | simulation duration (s) — **not** `--simTime` |
-| `--numUes` | 100 | number of UEs |
-| `--numPlanes` | 6 | orbital planes |
-| `--satsPerPlane` | 11 | satellites per plane |
-| `--enableSpaceRic` | true | enable on-board Space-RICs |
-| `--outputDir` | `oran-ntn-output` | CSV output directory |
+> An empty `conflict_log.csv` is *correct* for the shipped xApp mix: the
+> active xApps contend on disjoint resource keys, so the conflict manager
+> has nothing to resolve.
 
-(Additional flags: `--altitude`, `--inclination`, `--numTnGnbs`,
-`--kpmInterval`, `--conflictStrategy` {`priority`,`temporal`,`merge`},
-`--enableFL`.)
+### oran-ntn-real-stack-scenario
+
+The real-stack flagship. The KPM that drives the Near-RT RIC + xApps is
+built from **measured** per-UE SINR/TBLER of a real mmwave NR NTN access
+link (`NtnRealStackHelper`), and the satellite enrichment data (elevation,
+Doppler, time-to-exit) comes from real SGP4 Walker orbits — the serving LEO
+passes zenith and recedes while in-plane neighbours approach. UEs move under
+TR 38.811 class mobility. The real radio runs on the serving cell over a
+tractable UE set while the wider Walker constellation provides the orbital
+and handover context (the accepted ns-O-RAN pattern).
+
+```bash
+./ns3 run "oran-ntn-real-stack-scenario --duration=30 --numUes=6"
+```
+
+**Key args:** `--duration`, `--numUes`, `--numSats`, `--altitude`,
+`--satEirpDbm`, `--freqGhz`, `--bwMhz`, `--minElev`, `--conflictStrategy`,
+`--outputDir` (CSV outputs as in the full scenario).
 
 ### oran-ntn-ric-controlled-traffic
 
@@ -169,39 +281,186 @@ its array gain — raising EIRP and recovering goodput during the
 low-elevation part of the pass. Compare `--xapp=true` vs `--xapp=false`.
 
 ```bash
-# via ns3 wrapper
 ./ns3 run "oran-ntn-ric-controlled-traffic --simSeconds=120 --dataRateMbps=5 --xapp=true"
-
-# direct binary
-./build/contrib/oran-ntn/examples/ns3.43-oran-ntn-ric-controlled-traffic-default \
-    --simSeconds=120 --dataRateMbps=5 --xapp=true
 ```
 
-**Outputs:** per-second progress lines and an end-of-run summary printed to
-stdout (FlowMonitor PDR, beam activations, average goodput). No CSV files.
+**Outputs:** per-second progress lines and an end-of-run summary on stdout
+(FlowMonitor PDR, beam activations, average goodput). No CSV files.
 
 **Key args:** `--simSeconds`, `--dataRateMbps`, `--xapp`, `--numTx`,
 `--sinrThreshDb`, `--baseEirpDbm`, `--leoAltKm`, `--satSpeed`, `--freqGHz`,
 `--packetBytes`, `--linkCapacityMbps`.
 
+### ntn-e2e-full-stack
+
+Composition example: **one** real mmwave NR NTN cell whose measured PHY
+SINR simultaneously drives (a) the oran-ntn Near-RT RIC + xApps (measured
+KPM → RC actions), (b) the `ntn-slice` `SliceIsolationMonitor` (per-slice
+SLA on measured KPIs), and (c) a measured-KPI observability CSV. One
+NodeContainer, one channel, one packet flow, many consumers.
+
+```bash
+./ns3 run "ntn-e2e-full-stack --duration=15 --numUes=9"
+```
+
+**Key args:** `--duration`, `--numUes`, `--altitude`, `--satEirpDbm`,
+`--outputDir`.
+
+### oran-ntn-ric-placement-ab
+
+RIC placement as a measured experiment variable. One real mmwave NR NTN
+cell (Ka 20 GHz, SGP4 satellite) is hit by periodic deep fades (a real
+extra-loss model in the channel chain). A beam-restoration xApp reacts to
+50 ms KPM reports — but **both** legs of its loop (KPM uplink, control
+downlink) ride the E2 latency of the chosen RIC placement, computed by
+`OranNtnRicPlacement` from the live slant range:
+
+- `--placement=onboard` — processing only (Space-RIC),
+- `--placement=gateway` — slant/c + processing,
+- `--placement=cloud` — slant/c + 20 ms backhaul + processing.
+
+Two measured outcomes per placement with identical control logic:
+control-loop **reaction time** (fade onset → beam actuation), and PHY
+**recovery time** (TBLER back under 0.2). The latter is largely
+placement-invariant because the real AMC also adapts MCS to the fade — a
+genuine lower-layer self-healing effect the experiment surfaces honestly.
+
+```bash
+for p in onboard gateway cloud; do
+  ./ns3 run "oran-ntn-ric-placement-ab --simSeconds=40 --placement=$p"
+done
+```
+
+**Key args:** `--simSeconds`, `--placement`, `--fadePeriodS`, `--fadeDurS`,
+`--satEirpDbm`, `--outputDir`.
+
+### oran-ntn-cross-domain-slice
+
+The representative cross-domain closed loop on a real routed data plane:
+two real SGP4 Walker satellites form two transport paths whose P2P delays
+are re-set every second from the live slant geometry (satA serves at t=0
+and recedes; satB trails on the same plane). Three `NtnOranApplication`
+QoS flows (URLLC SST=2 / eMBB SST=1 / mMTC SST=3) cross gateway → edge
+server, each packet carrying its slice identity in-band.
+`NtnOranAiFlowMonitor` produces per-slice KPM (TS 28.552 names), consumed
+by `OranNtnNwdaf`; `OranNtnOnnxXapp` flags URLLC degradation from the
+measured feature window; `OranNtnCrossDomainSmo` then actuates three
+domains — RAN quota (live eMBB offered-rate cap), transport path
+(`OranNtnTpnController` re-routes the static route to satB), and edge
+compute (edge-link service rate). Watch the measured URLLC one-way delay
+climb as satA recedes, then snap back when the TPN switches to the rising
+satB.
+
+```bash
+./ns3 run "oran-ntn-cross-domain-slice --simSeconds=120"
+```
+
+**Key args:** `--simSeconds`, `--leoAltKm`.
+
+### oran-ntn-payload-options-ab
+
+The four satellite payload architectures measured on one real scenario.
+A real mmwave NR NTN cell serves a ground UE from an SGP4 LEO satellite;
+the EPC backhaul behind the satellite is driven live from the real feeder
+slant range per the selected option
+(`NtnRealStackHelper::SetFeederGeometry`):
+
+- `--payload=transparent` — user plane rides the RF feeder leg too,
+- `--payload=ru` — O-RU on sat, Open-FH over the feeder,
+- `--payload=rudu` — O-DU on sat, F1 midhaul over the feeder,
+- `--payload=fullgnb` — full gNB on sat, GTP backhaul.
+
+The one-way delay is **measured** by `NtnOranSink` from in-band timestamps
+that crossed radio + GTP + backhaul, and the measured feeder delay is
+checked against `NtnFhSplitModel` feasibility (LEO latencies rule out the
+lower-PHY splits).
+
+```bash
+for p in transparent ru rudu fullgnb; do
+  ./ns3 run "oran-ntn-payload-options-ab --payload=$p"
+done
+```
+
+**Key args:** `--simSeconds`, `--payload`, `--outputDir`.
+
+### ntn-platform-latency-validation
+
+Validates the toolkit's user-plane latency per NTN platform class with real
+packets. For each class (UAV, HAP, LEO, MEO, GEO) a bent-pipe path
+UE → platform → gateway is built from two P2P legs whose delay is the
+physical slant/c at the 10° cell-edge elevation; an `NtnOranApplication`
+URLLC flow crosses it, the sink measures the one-way delay from in-band
+timestamps, and the reported round trip must land in the platform's
+latency band. Runs all five classes in one process; no arguments required.
+
+```bash
+./ns3 run "ntn-platform-latency-validation"
+```
+
+**Key args:** `--simSeconds` (per-class measurement duration).
+
+### oran-ntn-emergency-communication
+
+Post-disaster use case, end to end on a real LEO cell. Timeline (everything
+measured, in-band): normal eMBB operation on four ground UEs; at t=20 s the
+terrestrial gateway fails and `OranNtnRoleSwitch` elevates the satellite to
+a full on-board gNB (failure-injected switch with a real 500 ms
+service-interruption window) while the feeder re-points to a surviving
+gateway; at t=22 s emergency responders join with two URLLC flows on a
+**dedicated emergency slice (SST=5)** and the SMO protects them RIC-style by
+throttling the eMBB quota. Reports the measured recovery timeline
+(disaster → first emergency byte delivered) and per-slice OWD/loss/
+throughput before and after, from `NtnOranSink` and the KPM monitor on the
+real radio.
+
+```bash
+./ns3 run "oran-ntn-emergency-communication --simSeconds=60"
+```
+
+**Key args:** `--simSeconds`, `--disasterAt`, `--outputDir`.
+
 ## Build, run & test
 
-The module builds with the parent toolkit. To configure and build it on its
-own from the ns-3 root:
+The module builds with the parent toolkit from the ns-3 root:
 
 ```bash
 cd ns-3-dev
-./ns3 configure --enable-tests --enable-examples --build-profile=optimized
-./ns3 build oran-ntn -j$(nproc)
+./ns3 configure --enable-examples --enable-tests
+./ns3 build
 ```
 
-Run the test suite (either form):
+To build only this module: `./ns3 build oran-ntn -j$(nproc)`.
+
+Run examples through the wrapper, e.g.:
 
 ```bash
-./ns3 test --suite=oran-ntn
-# or, directly:
-./build/utils/ns3.43-test-runner-default --suite=oran-ntn
+./ns3 run "oran-ntn-ric-placement-ab --simSeconds=40 --placement=cloud"
 ```
+
+Run the test suites:
+
+```bash
+./test.py -s oran-ntn                  # core RIC / SM / A1 / Space-RIC (58 cases)
+./test.py -s oran-ntn-multi-tier-ric   # RT-RIC bound, placement geometry, cross-domain loop, ONNX fallback
+./test.py -s oran-ntn-ws4              # payload delay ladder, FH-split feasibility, endurance, role switch
+```
+
+(`./ns3 test --suite=<name>` works too.)
+
+### Dependencies
+
+- **Required (in-tree):** `ntn-traffic` (real mmwave NR NTN stack via
+  `NtnRealStackHelper`, `NtnOranApplication`/`NtnOranSink`,
+  `NtnOranAiFlowMonitor`), `mmwave`, `satellite`, `ns3-ai-ntn`. Several
+  examples additionally use `ntn-constellation` (SGP4 / Walker) and
+  `ntn-cho`; `ntn-e2e-full-stack` also uses `ntn-slice`.
+- **Optional, auto-detected at configure time:**
+  - **ONNX Runtime** (`onnxruntime_cxx_api.h` + `libonnxruntime`) — enables
+    real `.onnx` inference in `OranNtnOnnxXapp`; without it the xApp uses
+    its registered heuristic and everything still builds and runs.
+  - **SQLite** — enables the SQLite-backed `OranNtnDataRepository`.
+  - **libsctp** — SCTP transport for the FlexRIC E2 bridge (runtime
+    fallback to TCP when absent).
 
 For full prerequisites and toolkit-wide setup see [`../../INSTALL.md`](../../INSTALL.md).
 

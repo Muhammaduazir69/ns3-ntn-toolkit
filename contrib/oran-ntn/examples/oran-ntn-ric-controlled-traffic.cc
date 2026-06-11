@@ -17,7 +17,7 @@
 //                 gain as a LIVE channel reconfiguration — real packets feel
 //                 the beam, so the MEASURED SINR/TBLER/goodput recover.
 //
-// Audit fix (AI_NATIVE_ORAN_NTN_ADOPTION_PLAN WS0): previously the KPM SINR
+// Audit fix (AI-Native ORAN-NTN adoption WS0): previously the KPM SINR
 // was a closed-form FSPL budget and the data plane a P2P RateErrorModel behind
 // a sigmoid SnrToPer() — now both halves of the loop ride the measured radio.
 // Mobility is real: SGP4 Walker element (ENU-projected), fixed ground UE.

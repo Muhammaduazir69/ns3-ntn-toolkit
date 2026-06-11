@@ -7,7 +7,7 @@
  * REAL traffic flows on a REAL mmwave NR NTN cell (NtnRealStackHelper:
  * SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC).
  *
- * Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06, channel-plugin recipe):
+ * Audit fix (2026-06 protocol-fidelity audit, channel-plugin recipe):
  * the old version queried the cascade in a probe loop and drove a P2P
  * RateErrorModel through a sigmoid SnrToPer() — packets never saw the rain.
  * Here the SAME ITU-R physics (P.676 gaseous + P.618/P.838 rain), re-homed as

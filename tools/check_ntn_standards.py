@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Muhammad Uzair
 # SPDX-License-Identifier: GPL-2.0-only
-"""WS5 standards-validation gate (AI_NATIVE_ORAN_NTN_ADOPTION_PLAN).
+"""WS5 standards-validation gate (AI-Native ORAN-NTN adoption).
 
 Aggregates every standards check into one PASS/FAIL:
   1. unit/e2e test suites (orbital theory, ORAN apps, KPM monitor, multi-tier

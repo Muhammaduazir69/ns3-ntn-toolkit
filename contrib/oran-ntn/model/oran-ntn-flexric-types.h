@@ -5,7 +5,7 @@
 #ifndef ORAN_NTN_FLEXRIC_TYPES_H
 #define ORAN_NTN_FLEXRIC_TYPES_H
 
-// FlexRIC field-name parity layer (Realism-Adoption-Roadmap-2026 §4.1.1).
+// FlexRIC field-name parity layer (2026 realism roadmap §4.1.1).
 //
 // This header mirrors the verbatim field names and struct shapes of
 // FlexRIC's E2AP v2.03 / v3.01 + E2SM-KPM v3.00 C structs so that the

@@ -9,7 +9,7 @@
  * and a neighbour rises, the serving selection flips (hand-over) and is
  * logged with genuine orbital timing.
  *
- * Audit fix (PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06): the old version ran
+ * Audit fix (2026-06 protocol-fidelity audit): the old version ran
  * one P2P link per satellite with sigmoid SnrToPer() RateErrorModels — no
  * packet crossed a radio, and the satellites were ConstantVelocity
  * placeholders. Here every satellite flies a genuine SGP4 orbit; the radio

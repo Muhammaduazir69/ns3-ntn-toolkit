@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // NtnOranApplication — QoS-flow-aware traffic source of the AI-Native
-// ORAN-NTN suite (AI_NATIVE_ORAN_NTN_ADOPTION_PLAN WS1). Replaces bare
+// ORAN-NTN suite (AI-Native ORAN-NTN adoption WS1). Replaces bare
 // OnOffHelper in every toolkit example: each packet carries an
 // NtnOranPayloadHeader (5QI / S-NSSAI / QFI / seq / TX timestamp as real
 // bytes), so the receiving NtnOranSink measures one-way delay, RFC 3550

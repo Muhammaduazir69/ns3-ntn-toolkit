@@ -19,7 +19,7 @@
   <img src="https://img.shields.io/badge/THz-100%20GHz%20%E2%80%93%201%20THz-success.svg"/>
   <img src="https://img.shields.io/badge/Sionna%20RT-2.0%20GPU-red.svg"/>
   <img src="https://img.shields.io/badge/RL-Gymnasium%201.0-yellow.svg"/>
-  <img src="https://img.shields.io/badge/modules-13%20custom-informational.svg"/>
+  <img src="https://img.shields.io/badge/modules-15%20custom-informational.svg"/>
 </p>
 
 <p align="center">
@@ -38,20 +38,33 @@
 
 ---
 
-> **What's new in v2 (2026-05).** End-to-end CSV output-realism audit across
+> **What's new in v2.1 (2026-06) — AI-Native ORAN-NTN.** Every example now
+> runs on a **real mmWave NR NTN cell** (SpectrumPhy/MAC/RLC/PDCP/RRC/EPC)
+> under SGP4 satellite mobility, and every KPI is **measured in-band**:
+> a new NTN/O-RAN application layer (`NtnOranApplication` + 24-byte wire
+> payload header carrying 5QI/S-NSSAI/seq/timestamp) replaces OnOff traffic
+> toolkit-wide; an E2SM-KPM/TS 28.552 flow monitor (`NtnOranAiFlowMonitor`)
+> feeds AI xApps; a multi-tier RIC (on-board RT / gateway / cloud) takes its
+> E2 latency from live slant geometry; regenerative-payload options, FH
+> splits, platform latency classes and role switching are modelled per the
+> AI-native Space-O-RAN literature; and a standards campaign calibrates the
+> radio against **TR 38.821 Set-1 LEO-600** and implements **all five 3GPP
+> NTN handover trigger classes**. Gates: 36/36 protocol-fidelity checks,
+> 12/12 standards checks. See **[CHANGELOG.md](CHANGELOG.md)**.
+>
+> **v2 (2026-05).** End-to-end CSV output-realism audit across
 > every example (signed LEO Doppler, 3GPP-bounded RSRQ, slant-range latency,
 > Ka link budgets, TR 36.777 NLOS floor, orbital SGP4 RRC, on-board O-RAN
 > autonomy) plus new cross-module examples that compose the contrib modules
-> over a real ns-3 data plane. See **[CHANGELOG.md](CHANGELOG.md)** and
-> **[CSV_REALISM_FIXES_2026-05.md](CSV_REALISM_FIXES_2026-05.md)**.
+> over a real ns-3 data plane. See **[CSV_REALISM_FIXES_2026-05.md](CSV_REALISM_FIXES_2026-05.md)**.
 
 ---
 
 ## Try it in 30 seconds
 
-### 🐳 Docker (recommended — full toolkit, no build, ~3.4 GB pull)
+### 🐳 Docker (recommended — full toolkit, no build)
 
-The entire toolkit — ns-3.43, all 13 contrib modules, SNS3 satellite, mmWave 5G NR,
+The entire toolkit — ns-3.43, all 15 bundled modules, SNS3 satellite, mmWave 5G NR,
 Python utilities, FastAPI digital-twin server, NetSimulyzer + InfluxDB sinks —
 is pre-built in a single image on Docker Hub:
 
@@ -67,11 +80,11 @@ docker run --rm -it -p 8090:8090 -p 3000:3000 \
   uzairdocker69/ns3-ntn-toolkit:latest bash
 
 # Pin to a tagged release for reproducibility:
-docker pull uzairdocker69/ns3-ntn-toolkit:2.0.0
+docker pull uzairdocker69/ns3-ntn-toolkit:2.1.0
 ```
 
-Image digest pinned to `sha256:8b29bc9dacbf…c102`. 3.4 GB compressed on the
-registry, 5.2 GB extracted. The Hub page at
+The current release tag is `2.1.0` (~7.5 GB extracted; the pull is
+network-bound). The Hub page at
 <https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit> has the full
 description, tag list, and pull stats.
 
@@ -111,12 +124,18 @@ Open research on 6G non-terrestrial networks is held back by **tool fragmentatio
 | Capability | Numbers |
 |---|---|
 | ns-3 base | **3.43** (patched LTE for dual connectivity) |
-| Custom modules contributed by this work | **13** (see *Bundled modules* below) |
-| Combined unit + integration tests | **80+** across 13 repos, all passing |
-| 3GPP NTN procedures implemented | TS 38.213 TA · TS 38.331 SIB19 + UE Location Report · TS 38.321 NTN-DRX · TR 36.777 A2G |
-| 3GPP slicing | TS 23.501 + TS 22.261 default profiles, eMBB / URLLC / mMTC / V2X |
-| O-RAN xApps shipped | 16 (13 in `oran-ntn` + 3 NTN-aware in `flexric-bridge`) |
+| Custom modules contributed by this work | **15** (see *Bundled modules* below) |
+| Combined unit + integration tests | **100+** across the bundled modules, all passing |
+| Data plane | real mmWave NR NTN cell (SpectrumPhy/MAC/RLC/PDCP/RRC/EPC) under SGP4 mobility; all KPIs **measured in-band** |
+| NTN/O-RAN application layer | `NtnOranApplication` 5QI profiles + 24-byte wire payload header (5QI / S-NSSAI / seq / timestamp) |
+| KPM monitoring | `NtnOranAiFlowMonitor` — TS 28.552 / E2SM-KPM series, AI feature windows, anomaly events, CSV/XML/Influx/E2 export |
+| 3GPP NTN procedures implemented | TS 38.213 TA · TS 38.331 SIB19 + UE Location Report · TS 38.321 NTN-DRX · TR 36.777 A2G · all 5 NTN HO trigger classes |
+| Standards calibration | TR 38.821 Set-1 LEO-600 S-band link budget · orbital-theory test campaign · 36/36 fidelity + 12/12 standards gates |
+| 3GPP slicing | TS 23.501 + TS 22.261 default profiles, eMBB / URLLC / mMTC / V2X (S-NSSAI carried in-band) |
+| O-RAN xApps shipped | 16 (13 in `oran-ntn` + 3 NTN-aware in `flexric-bridge`) + ONNX Runtime xApp inference (optional) |
+| O-RAN RIC tiers | on-board RT-RIC (<10 ms enforced) · gateway / cloud Near-RT placement with E2 latency from live slant geometry |
 | O-RAN E2 wire | live FlexRIC SCTP/E2AP via Docker; CI-friendly TCP/JSON stub for the same xApp logic |
+| Regenerative payloads | transparent / RU / RU+DU / full-gNB options · FH split model (Opt 2, 7.2a, 7.2b, 8) · role switching |
 | Reinforcement-learning bridge | Gymnasium 1.0 over patched ns3-ai (Py 3.13 + NumPy 2 ready); SB3 PPO + PyG GAT |
 | Channel models | TR 38.811 closed-form (default) · NVIDIA Sionna RT GPU ray-tracing (opt-in) |
 | Vehicular | SUMO TraCI v20+ live + FCD-trace replay |
@@ -139,8 +158,10 @@ Open research on 6G non-terrestrial networks is held back by **tool fragmentatio
 | 9 | `ntn-sionna` | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) | NVIDIA Sionna RT bridge: GPU-accelerated ray-traced sat-to-ground channel |
 | 10 | `ntn-digital-twin` | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) | Live TLE refresher + FastAPI predict-handover + CesiumJS Live mode |
 | 11 | `ntn-cho` | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) | TTE-aware 3GPP Rel-17 conditional handover + 7-class realistic UE mobility |
-| 12 | `oran-ntn` | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) | Space O-RAN: 13 xApps, dual Near-RT/Space RIC, conflict mgr, 4 FL aggregators |
+| 12 | `oran-ntn` | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) | Space O-RAN: 13 xApps, multi-tier RIC (on-board RT / gateway / cloud), payload options + FH splits + role switch, NWDAF/TPN/SMO cross-domain, ONNX xApps |
 | 13 | `thz-ntn` | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) | 100 GHz – 1 THz physics: HITRAN-2020, UM-MIMO ≤ 128×128, RIS, ISAC, EKF beam tracking |
+| 14 | `ntn-traffic` | [contrib/ntn-traffic](contrib/ntn-traffic) | NTN/O-RAN application layer: `NtnRealStackHelper` real NR NTN cell, `NtnOranApplication` 5QI profiles + in-band payload header, `NtnOranSink` measured KPIs, `NtnOranAiFlowMonitor` E2SM-KPM monitor |
+| 15 | `ntn-fapi` | [contrib/ntn-fapi](contrib/ntn-fapi) | SCF-222 FAPI L1↔L2 message ABI (DL_TTI / TX_DATA / RX_DATA / CRC.indication) driven by measured per-slot SINR |
 
 Plus the upstream packages this distribution patches and integrates:
 
@@ -365,17 +386,17 @@ maintainers and anyone customising the C++ modules.
 
 The entire toolkit is published to Docker Hub as
 [`uzairdocker69/ns3-ntn-toolkit`](https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit).
-SNS3 satellite, mmWave, all 13 contrib modules, Python utilities, FastAPI
+SNS3 satellite, mmWave, all 15 bundled modules, Python utilities, FastAPI
 digital-twin server, NetSimulyzer + InfluxDB sinks are all baked in.
 
 ```bash
-# 1. Pull (~3.4 GB compressed, ~5.2 GB extracted)
-docker pull uzairdocker69/ns3-ntn-toolkit:2.0.0     # pinned digest sha256:8b29bc9dacbf…c102
+# 1. Pull (current release; ~7.5 GB extracted)
+docker pull uzairdocker69/ns3-ntn-toolkit:2.1.0
 # or:
 docker pull uzairdocker69/ns3-ntn-toolkit:latest    # tracks the most recent release
 
 # 2. Run a reference scenario in one shot
-docker run --rm uzairdocker69/ns3-ntn-toolkit:2.0.0 \
+docker run --rm uzairdocker69/ns3-ntn-toolkit:2.1.0 \
   ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
 
 # 3. Or drop into an interactive shell with the standard ports exposed
@@ -428,11 +449,14 @@ cd contrib/ntn-observability/docker && docker compose up -d
 ### Building your own Docker image
 
 If you've modified the source and want to ship a custom image, the canonical
-recipe sits at `distribution/docker/Dockerfile`:
+recipe sits at `distribution/docker/Dockerfile`. It copies `ns-3-dev/` from
+the build context, so build from the **parent** of a clone named `ns-3-dev`:
 
 ```bash
+# layout:  work/ns-3-dev  (this repo, with contrib/satellite cloned)
+cd work/
 docker build -t my-fork/ns3-ntn-toolkit:dev \
-  -f distribution/docker/Dockerfile .
+  -f ns-3-dev/distribution/docker/Dockerfile .
 ```
 
 The full step-by-step (system requirements, SNS3 satellite clone, build flags,
@@ -456,6 +480,15 @@ GPU prerequisites for Sionna RT, troubleshooting) lives in
 | `ntn-v2x-rural-highway` | ntn-v2x | ~30 s | 100-vehicle 5-min trace |
 | `leo-pass-sionna-vs-tr38811` | ntn-sionna | ~5 s* | 30-step Sionna vs TR 38.811 PL log |
 | `ntn-tn-integrated-analysis` | toolkit | ~20 s | TN+NTN integrated traces |
+| `ntn-oran-qos-flows` | ntn-traffic | ~30 s | 4 5QI flows + C&C on a real NR NTN cell; KPM CSV + measured per-flow KPIs |
+| `ntn-tr38821-calibration` | ntn-traffic | ~60 s | measured CNR vs TR 38.821 Set-1 LEO-600 link budget (calibration gate) |
+| `ntn-cho-handover-traffic --trigger=a3\|d1\|t1\|elevation\|ta` | ntn-cho | ~30 s | real-radio handovers under each 3GPP NTN trigger class |
+| `oran-ntn-ric-placement-ab` | oran-ntn | ~60 s | measured control-loop reaction per RIC placement (on-board / gateway / cloud) |
+| `oran-ntn-payload-options-ab` | oran-ntn | ~60 s | transparent vs regenerative payload measured OWD + FH-split feasibility |
+| `ntn-platform-latency-validation` | oran-ntn | ~60 s | measured RTT vs UAV/HAPS/LEO/MEO/GEO platform latency bands |
+| `oran-ntn-emergency-communication` | oran-ntn | ~60 s | disaster role-switch to full gNB + SST=5 emergency slice |
+| `ntn-sagin-remote-coverage` | ntn-sagin | ~60 s | multi-MNO shared LEO cell, measured cost split |
+| `ntn-v2x-edge-urllc` | ntn-v2x | ~60 s | platoon URLLC, on-board vs ground edge AI, measured decision latency |
 
 \* needs `python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765` running on a CUDA host.
 
@@ -478,6 +511,8 @@ Every contributed module ships with a numerical verification harness. Headline n
 | `ntn-cho` | 10-seed × 600-s × 66-sat Walker-Star: HOs **135 ± 12** vs A3 463 ± 48; ping-pong 57 % → **0 %**; Wilcoxon p < 0.005 |
 | `oran-ntn` | 600-s scenario, 5 live xApps: **85 074** actions, 0 reported conflicts |
 | `thz-ntn` | atm windows match ITU-R P.676/618; UM-MIMO ≤ 128×128 demonstrated; ISAC CRB tracked over LEO pass |
+| `ntn-traffic` | TR 38.821 Set-1 LEO-600 calibration: constant array-gain offset (σ < 1 dB), FSPL slope within 0.2 dB of theory; byte-exact KPM-vs-sink cross-check |
+| toolkit gates | `tools/check_protocol_fidelity.py` **36/36** · `tools/check_ntn_standards.py` **12/12** (orbital theory, Doppler envelope, TR 38.821 geometry, Table-style platform latency bands, 5 HO trigger classes) |
 
 ## Documentation
 

@@ -11,7 +11,7 @@
 // default, or UDP to a Telegraf/InfluxDB endpoint). The exported time series
 // is a faithful telemetry trace of the pass: nothing closed-form anywhere.
 //
-// Audit fix (AI_NATIVE_ORAN_NTN_ADOPTION_PLAN WS0): the previous version
+// Audit fix (AI-Native ORAN-NTN adoption WS0): the previous version
 // drove a P2P RateErrorModel from a sigmoid SnrToPer() and exported THAT
 // formula value as "sinr_db" — the dashboard observed a synthetic link.
 //

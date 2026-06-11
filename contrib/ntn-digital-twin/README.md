@@ -21,7 +21,7 @@
 
 ## What's new in v2
 
-Documentation refreshed to match the v2 toolkit release; the FastAPI service (`/health`, `/constellation/state`, `/predict/handover`) and the refresher loop are unchanged. See the [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) for the toolkit-wide changelog.
+Documentation refreshed to match the v2 toolkit release; the FastAPI service (`/health`, `/constellation/state`, `/predict/handover`, default port 8090) and the refresher loop are unchanged. This module is a pure-Python service package with no ns-3 C++ examples, so the toolkit-wide migration of example traffic to `NtnOranApplication` (`contrib/ntn-traffic`) does not affect it. See the [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) for the toolkit-wide changelog.
 
 ## Why this module
 
@@ -31,7 +31,7 @@ A simulator that mirrors a real LEO constellation in near-real time stops being 
 
 | Capability | Backing |
 |---|---|
-| TLE refresh | CelesTrak fetch (with embedded fallback) on a configurable interval |
+| TLE refresh | CelesTrak fetch with an on-disk TLE cache (6 h TTL) on a configurable interval |
 | Propagator | `ntn-constellation` SGP4-direct (raw `Satrec` for highest fidelity) |
 | Geometry on the hot API path | closed-form ECEF→ENU elevation (no Skyfield) |
 | Output sinks | CesiumJS CZML · InfluxDB line-protocol (file or UDP) |
@@ -57,7 +57,7 @@ A simulator that mirrors a real LEO constellation in near-real time stops being 
            │
            ├── 1. CelesTrak fetch  (W1)
            ├── 2. Constellation propagate
-           ├── 3. CZML write       → CesiumJS "Live" toggle picks up the file
+           ├── 3. CZML write       → CesiumJS asset; its mtime tells the API to reload
            └── 4. Line-protocol    → InfluxDB bucket "ntn"
 
            ┌───────────── parallel ─────────────┐
@@ -75,10 +75,12 @@ A simulator that mirrors a real LEO constellation in near-real time stops being 
 - **REST API** (`ntn_digital_twin/api/server.py`) — FastAPI with `/health`, `/constellation/state`, `/predict/handover`. Closed-form ECEF→ENU elevation on the hot path keeps p99 under 30 ms for a 50-sat / 10-min horizon.
 - **Pydantic v2 schemas** (`ntn_digital_twin/api/schemas.py`) — typed request / response shapes.
 - **systemd units** — `ntn-twin.service` runs the refresher loop with `StateDirectory=ntn-twin`; `ntn-twin-api.service` runs the API and depends on the refresher.
-- **Viewer patch** (`viewer-patches/index.html.patch`) — adds a "Live" toggle to the existing `contrib/ntn-cho/visualization/public/index.html` viewer; connects to the API and refreshes satellite positions every 5 s.
+- **Viewer patch** (`viewer-patches/index.html.patch`) — adds a "Live" toggle to a CesiumJS viewer page: it polls `GET /constellation/state` every 5 s and redraws the satellite entities from the live snapshot. The patch was written against the former `ntn-cho` CesiumJS viewer (since retired from the toolkit); it remains as the reference integration pattern for any CesiumJS page.
 - **Schema compatibility** — the loop emits line-protocol points using the canonical `ntn-observability` schema (`ntn_sat_pos` measurement with `sat_norad` / `run_id` tags and `sat_x_m / sat_y_m / sat_z_m` fields). The W3 Grafana dashboards pick the data up immediately.
 
 ## Install & run
+
+Requires Python >= 3.10 and the sibling `ntn-constellation` Python package (install it first — see [INSTALL.md](INSTALL.md)).
 
 ```bash
 git clone https://github.com/Muhammaduazir69/ntn-digital-twin.git contrib/ntn-digital-twin

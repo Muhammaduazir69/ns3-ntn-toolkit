@@ -42,6 +42,18 @@ P.676-13, P.618-13, and S. Paine's *am* atmospheric model.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
+- **THz physics is now a real channel plug-in.** `ThzNtnPropagationLossModel`
+  re-homes the molecular-absorption and weather calculators as an ns-3
+  `PropagationLossModel` that is chained onto a real mmwave NR NTN spectrum
+  channel (via `NtnRealStackHelper::AddExtraPropagationLoss` from
+  `contrib/ntn-traffic`), so the atmospheric loss attenuates actual packets and
+  shows up in the **measured** SINR / TBLER / goodput.
+- **All traffic examples were converted to the real radio.** They run a full
+  mmwave NR NTN stack (SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) with
+  SGP4/Walker satellite mobility and TR 38.811 ground terminals, and carry
+  `NtnOranApplication` QoS flows (in-band 24-byte payload headers with
+  5QI / S-NSSAI / sequence / timestamp) whose KPIs are measured at
+  `NtnOranSink`. Each writes an honest `sim_health.csv`.
 - **Atmospheric-window fields are documented as INDEPENDENT inputs.**
   `AtmosphericWindow::peakTransmittance` (best-case in-band factor at band centre)
   and `AtmosphericWindow::maxZenithAttenuation_dB` (worst-case one-way zenith gaseous
@@ -54,8 +66,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
   and Shannon capacity.
 - **alpha-mu fading**, **HITRAN-2024 LUT**, **NYUSIM-140** calibration reference, and a
   **RIS service model + xApp** for O-RAN-style closed-loop control.
-- New **real-data-plane traffic examples** (NetDevice + IP + apps + FlowMonitor) for
-  LEO downlink, ISL, RIS relay, ISAC coexistence, weather, and RIC-controlled scenarios.
 
 ## Models, helpers & key classes
 
@@ -69,6 +79,7 @@ Derived from `model/*.h`:
 | `Itu838RainModel`, `Itu618LossModel`, `Itu676AbsorptionModel`, `Itu681LmsModel` (`thz-ntn-itu-recommendations`) | ITU-R P.838 / P.618 / P.676 / P.681 reference implementations |
 | `ThzNtnAlphaMuFading` (`thz-ntn-alpha-mu-fading`) | alpha-mu small-scale fading distribution |
 | `ThzNtnFreeSpaceLoss`, `ThzNtnChannelModel` | FSPL + composite cascade propagation loss |
+| `ThzNtnPropagationLossModel` (`thz-ntn-propagation-loss-model`) | Atmospheric excess loss (gaseous absorption + rain/fog/snow) as a real `PropagationLossModel`, chainable onto a live spectrum channel |
 | `ThzNtnWeatherAttenuation`, `ThzNtnScintillation`, `ThzNtnPointingError`, `ThzNtnHardwareImpairments` | Weather, scintillation, pointing, and RF-chain impairments |
 | `ThzNtnAntennaArray`, `ThzNtnBeamforming` (`um-mimo`) | UPA / UCA / Cassegrain arrays, DFT codebook, `ComputeBeamSquintLoss_dB` |
 | `ThzNtnBeamTracking` (`thz-ntn-beam-tracking`) | EKF / position-based satellite-ephemeris beam tracker |
@@ -92,14 +103,14 @@ Each example has two equivalent run forms:
 ./build/contrib/thz-ntn/examples/ns3.43-thz-ntn-<name>-default
 ```
 
-### Physics-only examples (analytical link budgets / sweeps, CSV output)
+### Analytic examples (link budgets / sweeps)
 
 #### thz-ntn-leo-ground
 LEO-to-ground sub-THz downlink link budget over a pass (gated by molecular absorption).
 - **Key args:** `--freq` (Hz, def 225e9), `--altitude` (km, def 550), `--txPower` (dBm,
   def 34.77), `--bandwidth` (Hz, def 10e9), `--txGain` (dBi, def 40), `--rxGain` (dBi,
   def 45), `--simTime` (s, def 60), `--outputDir` (def `thz-leo-ground-out`).
-- **Outputs:** `thz-leo-ground-out/pass_timeseries.csv`.
+- **Outputs:** `thz-leo-ground-out/pass_timeseries.csv` + `sim_health.csv`.
 
 ```bash
 ./ns3 run thz-ntn-leo-ground
@@ -111,23 +122,11 @@ Inter-satellite link SNR / capacity / Doppler vs separation (vacuum, 300 GHz).
 - **Key args:** `--freq` (Hz, def 300e9), `--txPower` (dBm, def 30), `--bandwidth` (Hz,
   def 20e9), `--txGain` (dBi, def 40), `--rxGain` (dBi, def 40), `--simTime` (s),
   `--outputDir` (def `thz-isl-out`).
-- **Outputs:** `thz-isl-out/isl_timeseries.csv`.
+- **Outputs:** `thz-isl-out/isl_timeseries.csv` + `sim_health.csv`.
 
 ```bash
 ./ns3 run thz-ntn-isl
 ./ns3 run "thz-ntn-isl --freq=300e9 --bandwidth=20e9"
-```
-
-#### thz-ntn-beam-tracking
-EKF / position-based beam tracking through a LEO pass; drives a traffic helper for the
-health report.
-- **Key args:** `--trackingMode` (`EKF` | `POSITION_BASED`), `--updateRate` (Hz),
-  `--passDuration` (s), `--maxElevation` (deg), `--outputDir` (def `thz-beam-track-out`).
-- **Outputs:** `thz-beam-track-out/sim_health.csv` (traffic-helper health report).
-
-```bash
-./ns3 run thz-ntn-beam-tracking
-./ns3 run "thz-ntn-beam-tracking --trackingMode=EKF --updateRate=20"
 ```
 
 #### thz-ntn-um-mimo
@@ -178,42 +177,72 @@ mobility, ISAC debris sensing, EKF beam tracking, and achievable spectral effici
 ./ns3 run "thz-ntn-full-stack --preset=TeraLink-225GHz --debrisRangeKm=0.5"
 ```
 
-### Real-data-plane traffic examples (NetDevice + IP + apps + FlowMonitor)
+### Real-radio examples (mmwave NR NTN stack, measured KPIs)
 
-These build a point-to-point data plane gated by the THz channel and report
-FlowMonitor statistics; those using the `ntn-traffic` helper also emit
-`<outputDir>/sim_health.csv`.
+These run a full mmwave NR NTN cell via `NtnRealStackHelper` (SpectrumPhy + MAC +
+HARQ + RLC/PDCP + RRC + EPC) with **SGP4/Walker satellite mobility** and TR 38.811
+ground terminals. The THz physics enter the packet path as live channel plug-ins
+(`ThzNtnPropagationLossModel`, `NtnStaticExtraLossModel`), traffic is carried by
+`NtnOranApplication` QoS flows measured at `NtnOranSink`, and each example writes
+`<outputDir>/sim_health.csv` plus a console KPI summary (measured SINR / TBLER /
+goodput). The carrier is capped at **100 GHz** (sub-THz / W-band) by the 3GPP
+spectrum model; the higher-band studies stay in the analytic examples above.
+
+#### thz-ntn-real-stack
+Flagship channel-plugin demo: gaseous absorption + rain chained onto the real mmwave
+channel; toggling rain mid-run visibly degrades the measured link.
+- **Key args:** `--duration` (s, def 16), `--numUes` (def 4), `--altitude` (km, def 550),
+  `--freqGhz` (def 100), `--satEirpDbm` (def 92), `--rainMmH` (def 4, applied in the
+  2nd half), `--outputDir` (def `thz-ntn-real-stack-output`).
+
+```bash
+./ns3 run thz-ntn-real-stack
+./ns3 run "thz-ntn-real-stack --duration=16 --freqGhz=100 --rainMmH=25"
+```
 
 #### thz-ntn-leo-ground-downlink-traffic
-Real UDP downlink over a LEO sub-THz link gated by molecular absorption.
-- **Key args:** `--simSeconds`, `--altKm`, `--satSpeed` (m/s), `--freqGHz`,
-  `--dataRateMbps`, `--packetBytes`, `--txPowerDbm`, `--antennaGainDb`, `--noiseDbm`,
-  `--minElevDeg`, `--linkCapacityMbps`.
-- **Outputs:** FlowMonitor stats to console.
+End-to-end downlink over a receding SGP4 satellite: molecular absorption
+(`ThzNtnPropagationLossModel`) attenuates the real packets; FSPL comes from the
+stack's own Friis model over the live geometry.
+- **Key args:** `--simSeconds` (def 60), `--freqGHz` (def 100, capped at 100),
+  `--satEirpDbm` (def 115), `--outputDir` (def `thz-ntn-leo-ground-downlink-output`).
 
 ```bash
 ./ns3 run thz-ntn-leo-ground-downlink-traffic
-./ns3 run "thz-ntn-leo-ground-downlink-traffic --freqGHz=225 --dataRateMbps=500"
+./ns3 run "thz-ntn-leo-ground-downlink-traffic --simSeconds=40"
 ```
 
 #### thz-ntn-isl-traffic
-Real packet transmission over a 300 GHz ISL gated by `ThzNtnIslChannel` SNR.
-- **Key args:** `--simSeconds`, `--freqGHz`, `--txPowerDbm`, `--txGainDb`, `--rxGainDb`,
-  `--bandwidthGHz`, `--startSepKm`, `--maxSepKm`, `--dataRateMbps`, `--packetBytes`,
-  `--minSnrDb`, `--linkCapacityMbps`.
-- **Outputs:** FlowMonitor stats to console.
+Real mmwave NR ISL between two cross-plane SGP4 satellites of a Starlink-class
+Walker shell; `ThzNtnIslChannel`'s analytic budget is printed beside the measured SINR.
+- **Key args:** `--simSeconds`, `--freqGHz` (capped at 100), `--islEirpDbm`,
+  `--numPlanes`, `--satsPerPlane`, `--outputDir` (def `thz-ntn-isl-traffic-output`).
 
 ```bash
 ./ns3 run thz-ntn-isl-traffic
-./ns3 run "thz-ntn-isl-traffic --freqGHz=300 --maxSepKm=2000"
+./ns3 run "thz-ntn-isl-traffic --numPlanes=6 --satsPerPlane=10"
+```
+
+#### thz-ntn-beam-tracking
+EKF beam tracking of a real SGP4 pass, closed over the real radio: the EKF is fed
+the measured DL SINR, and its prediction error maps through the `ThzNtnAntennaArray`
+3-dB beamwidth to a pointing loss applied as a live channel reconfiguration —
+`EKF` and `POSITION_BASED` modes produce measurably different links.
+- **Key args:** `--trackingMode` (`EKF` | `POSITION_BASED`), `--updateRate` (Hz, def 10),
+  `--simSeconds` (def 40), `--freqGHz` (capped at 100), `--satEirpDbm`, `--arraySize`
+  (NxN side, def 32), `--measNoiseDeg` (def 0.05), `--outputDir` (def `thz-beam-track-out`).
+
+```bash
+./ns3 run thz-ntn-beam-tracking
+./ns3 run "thz-ntn-beam-tracking --trackingMode=POSITION_BASED --updateRate=10"
 ```
 
 #### thz-ntn-ris-relay-traffic
-RIS recovers a blocked THz link mid-simulation (real data plane).
-- **Key args:** `--simSeconds`, `--altKm`, `--satSpeed`, `--freqGHz`, `--dataRateMbps`,
-  `--packetBytes`, `--txPowerDbm`, `--antennaGainDb`, `--blockageDb`, `--risX`, `--risY`,
-  `--phaseBits` (1–4), `--reflEff` (0–1), `--risOnFraction`, `--linkCapacityMbps`.
-- **Outputs:** FlowMonitor stats to console.
+RIS recovers a blocked THz link mid-simulation: blockage and RIS engagement are
+live channel events on the real cell.
+- **Key args:** `--simSeconds`, `--freqGHz` (capped at 100), `--satEirpDbm`,
+  `--blockageDb`, `--risX`, `--risY`, `--reflEff` (0–1), `--blockFraction`,
+  `--risOnFraction`, `--outputDir` (def `thz-ntn-ris-relay-output`).
 
 ```bash
 ./ns3 run thz-ntn-ris-relay-traffic
@@ -221,43 +250,46 @@ RIS recovers a blocked THz link mid-simulation (real data plane).
 ```
 
 #### thz-ntn-isac-coexist-traffic
-ISAC comm/sense coexistence via `ThzNtnIsacScheduler` over a real data plane.
-- **Key args:** `--simSeconds`, `--offeredMbps`, `--numSubBands`, `--numUes`,
-  `--packetBytes`.
-- **Outputs:** FlowMonitor stats to console.
+ISAC comm/sense coexistence: the real `ThzNtnIsacScheduler` partitions the sub-band
+grid per ISAC mode (COMM_ONLY → … → SENSING_ONLY) and its comm share gates the live
+downlink TDM-style, so measured goodput tracks the scheduler's decisions.
+- **Key args:** `--simSeconds`, `--freqGHz` (capped at 100), `--satEirpDbm`,
+  `--numSubBands`, `--numUes`, `--outputDir` (def `thz-ntn-isac-coexist-output`).
 
 ```bash
 ./ns3 run thz-ntn-isac-coexist-traffic
-./ns3 run "thz-ntn-isac-coexist-traffic --numSubBands=8 --offeredMbps=400"
+./ns3 run "thz-ntn-isac-coexist-traffic --simSeconds=50 --numSubBands=20"
 ```
 
 #### thz-ntn-weather-traffic
-Weather front (fog / rain / snow) over a THz downlink with a real data plane.
-- **Key args:** `--simSeconds`, `--altKm`, `--satSpeed`, `--freqGHz`, `--dataRateMbps`,
-  `--packetBytes`, `--txPowerDbm`, `--antennaGainDb`, `--rainMmH`, `--fogLwc` (g/m^3),
-  `--snowMmH`, `--linkCapacityMbps`.
-- **Outputs:** FlowMonitor stats to console.
+Weather front (fog / rain / snow phases) as a live channel plug-in on the real cell:
+the weather attenuates real packets.
+- **Key args:** `--simSeconds`, `--freqGHz`, `--satEirpDbm`, `--rainMmH`,
+  `--fogLwc` (g/m^3), `--snowMmH`, `--outputDir` (def `thz-ntn-weather-traffic-output`).
 
 ```bash
 ./ns3 run thz-ntn-weather-traffic
-./ns3 run "thz-ntn-weather-traffic --rainMmH=25 --freqGHz=225"
+./ns3 run "thz-ntn-weather-traffic --rainMmH=25"
 ```
 
 #### thz-ntn-ric-controlled-traffic
-Closed-loop thz-ntn × oran-ntn demo: THz KPIs feed an `OranNtnE2Node` KPM report; an
-xApp toggles the RIS when SINR crosses a threshold; data-plane goodput tracks the loop.
-- **Key args:** `--simSeconds`, `--leoAltKm`, `--satSpeed`, `--freqGHz`, `--dataRateMbps`,
-  `--packetBytes`, `--satEirpDbm`, `--rxGainDb`, `--sinrThreshDb`, `--xapp` (0/1),
-  `--risN`, `--humidityProfile` (def `mid_latitude_summer`).
-- **Outputs:** FlowMonitor stats to console.
+Closed-loop thz-ntn × oran-ntn demo on the real radio: a KPM tick reads the measured
+DL SINR off the mmwave PHY trace and submits it via `OranNtnE2Node`; an xApp engages
+the ground RIS (its `ComputeSnrGain_dB()` applied as a live channel reconfiguration)
+when intrinsic SINR falls below the threshold. Goodput collapses on a mid-run
+urban-canyon blockage and recovers when the xApp engages the RIS.
+- **Key args:** `--simSeconds`, `--freqGHz` (capped at 100), `--satEirpDbm`,
+  `--blockageDb`, `--sinrThreshDb`, `--xapp` (0/1), `--risN`, `--humidityProfile`,
+  `--outputDir` (def `thz-ntn-ric-controlled-output`).
 
 ```bash
 ./ns3 run thz-ntn-ric-controlled-traffic
-./ns3 run "thz-ntn-ric-controlled-traffic --xapp=1 --sinrThreshDb=5"
+./ns3 run "thz-ntn-ric-controlled-traffic --simSeconds=40 --xapp=1"
 ```
 
-> Note: `thz-ntn-isac.cc` (legacy ISAC API) is currently excluded from the build pending
-> the Q4 2026 ISAC scheduler redesign and is not produced as a binary.
+> Note: two sources in `examples/` are not built: `thz-ntn-isac.cc` (legacy ISAC API,
+> excluded pending the Q4 2026 ISAC scheduler redesign) and `thz-ntn-demo.cc`
+> (not registered in `examples/CMakeLists.txt`).
 
 ## Build, run & test
 

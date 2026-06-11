@@ -37,6 +37,11 @@ Key classes (from ``model/*.h``):
   and ships ``data/hitran2024-lut-subthz.csv``.
 * ``ThzNtnFreeSpaceLoss`` - free-space path loss; extends ``SatFreeSpaceLoss``.
 * ``ThzNtnChannelModel`` - composite cascade propagation loss model.
+* ``ThzNtnPropagationLossModel`` - the molecular-absorption and weather
+  calculators re-homed as a real ``PropagationLossModel`` (atmospheric excess
+  loss only), so they can be chained onto a live spectrum channel (e.g. via
+  ``NtnRealStackHelper::AddExtraPropagationLoss`` in ``contrib/ntn-traffic``)
+  and attenuate actual packets.
 * ``Itu838RainModel``, ``Itu618LossModel``, ``Itu676AbsorptionModel``,
   ``Itu681LmsModel`` (``thz-ntn-itu-recommendations.h``) - per-recommendation
   reference implementations.
@@ -58,10 +63,12 @@ Scope
 -----
 
 The module models the PHY-layer link physics (channel, antenna/beamforming,
-ISL, RIS, ISAC) plus link-budget and waveform utilities. The
-hardware-impairment stage is registered but not active (see Design). The ISAC
-scheduler is under redesign; the legacy ``thz-ntn-isac.cc`` example is excluded
-from the build.
+ISL, RIS, ISAC) plus link-budget and waveform utilities. The traffic examples
+apply this physics to a real mmwave NR NTN data plane (via
+``ThzNtnPropagationLossModel`` and ``NtnRealStackHelper``), with SGP4 satellite
+mobility and TR 38.811 ground terminals. The hardware-impairment stage is
+registered but not active (see Design). The ISAC scheduler is under redesign;
+the legacy ``thz-ntn-isac.cc`` example is excluded from the build.
 
 Usage
 -----

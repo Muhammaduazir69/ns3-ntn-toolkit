@@ -20,7 +20,7 @@ namespace oranntn
 /**
  * Canonical KPM metric IDs aligned to O-RAN WG3 E2SM-KPM v03.00 and the
  * srsRAN / OAI naming used by FlexRIC's KPM SM.
- * (Realism-Adoption-Roadmap-2026 §3 T8.)
+ * (2026 realism roadmap §3 T8.)
  *
  * Reviewers can grep these strings in the KPM CSV output and in any KPM
  * Indication-Message blob emitted on the wire. Adding a new ID is fine;
