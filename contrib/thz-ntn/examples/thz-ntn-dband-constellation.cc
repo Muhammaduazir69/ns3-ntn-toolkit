@@ -9,6 +9,19 @@
  * Demonstrates multiple LEO satellites in a Walker constellation providing
  * D-band (140 GHz) access to ground terminals.  Each terminal selects
  * the satellite with the highest elevation angle and computes link quality.
+ *
+ * Analysis-only example: link-budget evaluation on real SGP4 constellation
+ * geometry, no packet transmission. The access set is the slot-0 satellite
+ * of `numSats` adjacent planes of a Starlink-class Walker delta shell
+ * (72 planes x 22 sats, 53 deg), all projected into one local ENU frame, so
+ * several spacecraft are simultaneously visible at different elevations.
+ *
+ * Geometry fix (2026-06 audit): the old hand-rolled placement mixed a
+ * geocentric x-y ring of radius Re+h with a flat-Earth z = h and local-frame
+ * terminals, which put every "550 km" satellite ~6900 km from the terminals
+ * at ~4 deg elevation (effectively at sea level on the equator). Positions
+ * now come from Sgp4MobilityModel (|ECEF position| = Re + altitude,
+ * ~6921 km for a 550 km orbit) via NtnEnuProjectionMobilityModel.
  */
 
 #include <ns3/command-line.h>
@@ -16,6 +29,11 @@
 #include <ns3/mobility-module.h>
 #include <ns3/node-container.h>
 
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
+
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
@@ -40,7 +58,7 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("ThzNtnDbandConstellation");
 
 /**
- * \brief Satellite position in a Walker constellation.
+ * \brief Satellite position in a Walker constellation (local ENU frame).
  */
 struct SatPosition
 {
@@ -48,13 +66,13 @@ struct SatPosition
     double latDeg;
     double lonDeg;
     double altKm;
-    double x; // Cartesian x (metres)
-    double y; // Cartesian y (metres)
-    double z; // Cartesian z (metres)
+    double x; // ENU east (metres)
+    double y; // ENU north (metres)
+    double z; // ENU up (metres)
 };
 
 /**
- * \brief Ground terminal position.
+ * \brief Ground terminal position (local ENU frame, z = 0 ground plane).
  */
 struct TerminalPosition
 {
@@ -68,6 +86,10 @@ struct TerminalPosition
 
 /**
  * \brief Compute elevation angle and slant range between ground and satellite.
+ *
+ * Both positions are in the same local ENU frame (z = up), so the elevation
+ * is atan2(dz, horizontal distance); satellites beyond the horizon project to
+ * negative `up` and correctly yield negative elevations ("No cover").
  */
 static void
 ComputeGeometry(const TerminalPosition& gt,
@@ -131,22 +153,57 @@ main(int argc, char* argv[])
     std::cout << "  Bandwidth:    " << bandwidth / 1e9 << " GHz\n";
     std::cout << "-------------------------------------------------------------\n\n";
 
-    // ---- Create satellite constellation (Walker star) ----
-    // Distribute satellites evenly across orbital positions
+    // ---- Create satellite constellation (Starlink-class Walker delta) ----
+    // Real SGP4 orbits: slot-0 satellites of `numSats` ADJACENT planes
+    // (RAAN 5 deg apart), projected into one local ENU frame anchored at
+    // satellite 0's initial sub-point. Sanity: in ECEF each satellite sits at
+    // |position| = Re + altitude (~6921 km for 550 km), so in ENU the serving
+    // satellite is ~altitude*1000 m "up" while far-plane neighbours drop
+    // toward (and below) the horizon.
+    const uint32_t satsPerPlane = 22;
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 72;
+    wcfg.total_sats = 72 * satsPerPlane;
+    wcfg.altitude_km = altitude;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    numSats = std::min(numSats, wcfg.num_planes);
+
     std::vector<SatPosition> sats(numSats);
-    double orbitRadius = (6371.0 + altitude) * 1000.0; // metres
+    std::vector<Ptr<NtnEnuProjectionMobilityModel>> satEnu(numSats);
+    double refLat = 0.0;
+    double refLon = 0.0;
+    double refAlt = 0.0;
 
     for (uint32_t i = 0; i < numSats; i++)
     {
-        double angleDeg = 360.0 * i / numSats;
-        double angleRad = angleDeg * M_PI / 180.0;
+        Ptr<ns3::ntncon::Sgp4MobilityModel> sgp4 =
+            CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+        sgp4->SetElements(elements[i * satsPerPlane]); // plane i, slot 0
+        if (i == 0)
+        {
+            sgp4->GetGeodetic(refLat, refLon, refAlt);
+        }
+        Ptr<NtnEnuProjectionMobilityModel> enu =
+            CreateObject<NtnEnuProjectionMobilityModel>();
+        enu->SetSource(sgp4);
+        enu->SetReference(refLat, refLon, 0.0);
+        satEnu[i] = enu;
+
+        double latDeg;
+        double lonDeg;
+        double altM;
+        sgp4->GetGeodetic(latDeg, lonDeg, altM);
+        const Vector p = enu->GetPosition(); // ENU position at t = 0
+
         sats[i].id = i;
-        sats[i].latDeg = 0.0; // Equatorial orbit for simplicity
-        sats[i].lonDeg = angleDeg;
-        sats[i].altKm = altitude;
-        sats[i].x = orbitRadius * std::cos(angleRad);
-        sats[i].y = orbitRadius * std::sin(angleRad);
-        sats[i].z = altitude * 1000.0; // Simplified: height above ground plane
+        sats[i].latDeg = latDeg;
+        sats[i].lonDeg = lonDeg;
+        sats[i].altKm = altM / 1000.0;
+        sats[i].x = p.x;
+        sats[i].y = p.y;
+        sats[i].z = p.z;
     }
 
     // ---- Create ground terminals distributed over a region ----
@@ -163,8 +220,10 @@ main(int argc, char* argv[])
         terminals[i].x = rng->GetValue();
         terminals[i].y = rng->GetValue();
         terminals[i].z = 0.0;
-        terminals[i].latDeg = terminals[i].y / 111e3; // approximate
-        terminals[i].lonDeg = terminals[i].x / 111e3;
+        // Approximate geodetic position around the ENU reference point.
+        terminals[i].latDeg = refLat + terminals[i].y / 111e3;
+        terminals[i].lonDeg =
+            refLon + terminals[i].x / (111e3 * std::cos(refLat * M_PI / 180.0));
     }
 
     // ---- Create ns-3 nodes ----
@@ -174,12 +233,11 @@ main(int argc, char* argv[])
     NodeContainer gtNodes;
     gtNodes.Create(numUts);
 
-    // Set up mobility
+    // Set up mobility: satellites carry their live SGP4 (ENU-projected)
+    // models; the association tables above sample them at t = 0.
     for (uint32_t i = 0; i < numSats; i++)
     {
-        Ptr<ConstantPositionMobilityModel> mob = CreateObject<ConstantPositionMobilityModel>();
-        mob->SetPosition(Vector(sats[i].x, sats[i].y, sats[i].z));
-        satNodes.Get(i)->AggregateObject(mob);
+        satNodes.Get(i)->AggregateObject(satEnu[i]);
     }
 
     for (uint32_t i = 0; i < numUts; i++)

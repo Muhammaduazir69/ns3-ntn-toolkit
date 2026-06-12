@@ -15,12 +15,23 @@
  *   - MAC layer with DAMC resource allocation
  *
  * Simulates a 30-second scenario and prints aggregate results.
+ *
+ * Analysis-only example: link budgets / sensing / tracking evaluated over
+ * real SGP4 orbital geometry, no packet transmission. Both satellites are
+ * slot-0 spacecraft of two ADJACENT planes of a Starlink-class Walker delta
+ * shell (72 x 22, 53 deg, 550 km), projected into one local ENU frame, so
+ * the downlink elevation profile and the ISL separation come from genuine
+ * orbital dynamics rather than the old sin()-shaped pass.
  */
 
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
 #include <ns3/mobility-module.h>
 #include <ns3/node-container.h>
+
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 
 #include <cmath>
 #include <iomanip>
@@ -66,28 +77,23 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("ThzNtnFullStack");
 
 /**
- * \brief Compute slant range from elevation angle and altitude.
+ * \brief True elevation / azimuth (deg) and slant range (m) of the satellite
+ *        seen from the ground terminal, from the live ENU geometry.
  */
-static double
-ComputeSlantRange(double elevDeg, double altKm)
+static void
+LiveGeometry(const Vector& gnd,
+             const Vector& sat,
+             double& elevDeg,
+             double& azimDeg,
+             double& slantRangeM)
 {
-    const double Re = 6371.0;
-    double elevRad = elevDeg * M_PI / 180.0;
-    double ratio = (Re + altKm) / Re;
-    double d_km = Re * (std::sqrt(ratio * ratio - std::cos(elevRad) * std::cos(elevRad))
-                        - std::sin(elevRad));
-    return d_km * 1000.0;
-}
-
-/**
- * \brief Simulate satellite elevation profile.
- */
-static double
-ComputeElevation(double t, double duration, double maxElev)
-{
-    double phase = M_PI * t / duration;
-    double elev = maxElev * std::sin(phase);
-    return (elev > 0.0) ? elev : 0.0;
+    const double dx = sat.x - gnd.x;
+    const double dy = sat.y - gnd.y;
+    const double dz = sat.z - gnd.z;
+    const double horiz = std::max(std::sqrt(dx * dx + dy * dy), 1e-3);
+    elevDeg = std::atan2(dz, horiz) * 180.0 / M_PI;
+    azimDeg = std::fmod(std::atan2(dx, dy) * 180.0 / M_PI + 360.0, 360.0);
+    slantRangeM = std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 int
@@ -105,7 +111,6 @@ main(int argc, char* argv[])
     double downlinkBw = 10e9;              // 10 GHz
     double islBw = 20e9;                   // 20 GHz
     double altitude = 550.0;               // km
-    double islDistance = 2000.0;            // km between satellites
     double debrisRangeKm = 0.5;            // ISAC debris target range
 
     // ---- Parse command-line arguments ----
@@ -126,7 +131,7 @@ main(int argc, char* argv[])
     std::cout << "  ISL:           " << islFreq / 1e9 << " GHz, "
               << islBw / 1e9 << " GHz BW\n";
     std::cout << "  Altitude:      " << altitude << " km\n";
-    std::cout << "  ISL Distance:  " << islDistance << " km\n";
+    std::cout << "  ISL:           cross-plane (adjacent Walker planes, live SGP4 range)\n";
     std::cout << "-------------------------------------------------------------\n\n";
 
     // ---- Create nodes ----
@@ -139,13 +144,40 @@ main(int argc, char* argv[])
     NodeContainer risNodes;
     risNodes.Create(1);
 
-    // Mobility: Sat1 moving overhead, Sat2 at ISL distance
-    Ptr<ConstantPositionMobilityModel> sat1Mob = CreateObject<ConstantPositionMobilityModel>();
-    sat1Mob->SetPosition(Vector(0.0, 0.0, altitude * 1000.0));
+    // Mobility: REAL SGP4 orbits. Sat1 = plane 0 / slot 0 (zenith at t=0,
+    // recedes with genuine orbital dynamics); Sat2 = plane 1 / slot 0 (the
+    // cross-plane ISL neighbour, RAAN 5 deg away). Both are projected into a
+    // common local ENU frame at Sat1's initial sub-point. Sanity: in ECEF
+    // |position| = Re + altitude (~6921 km for 550 km), so Sat1 starts
+    // ~altitude*1000 m straight "up" in ENU.
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 72;
+    wcfg.total_sats = 72 * 22;
+    wcfg.altitude_km = altitude;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+
+    Ptr<ns3::ntncon::Sgp4MobilityModel> sat1Sgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    sat1Sgp4->SetElements(elements[0]); // plane 0, slot 0
+    Ptr<ns3::ntncon::Sgp4MobilityModel> sat2Sgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    sat2Sgp4->SetElements(elements[22]); // plane 1, slot 0
+
+    double refLat;
+    double refLon;
+    double refAlt;
+    sat1Sgp4->GetGeodetic(refLat, refLon, refAlt);
+
+    Ptr<NtnEnuProjectionMobilityModel> sat1Mob = CreateObject<NtnEnuProjectionMobilityModel>();
+    sat1Mob->SetSource(sat1Sgp4);
+    sat1Mob->SetReference(refLat, refLon, 0.0);
     satNodes.Get(0)->AggregateObject(sat1Mob);
 
-    Ptr<ConstantPositionMobilityModel> sat2Mob = CreateObject<ConstantPositionMobilityModel>();
-    sat2Mob->SetPosition(Vector(islDistance * 1000.0, 0.0, altitude * 1000.0));
+    Ptr<NtnEnuProjectionMobilityModel> sat2Mob = CreateObject<NtnEnuProjectionMobilityModel>();
+    sat2Mob->SetSource(sat2Sgp4);
+    sat2Mob->SetReference(refLat, refLon, 0.0);
     satNodes.Get(1)->AggregateObject(sat2Mob);
 
     Ptr<ConstantPositionMobilityModel> gtMob = CreateObject<ConstantPositionMobilityModel>();
@@ -230,13 +262,26 @@ main(int argc, char* argv[])
     std::cout << "\n";
 
     // ---- Simulate 30-second scenario ----
-    double maxElev = 70.0;
     double dt = 1.0; // 1-second time steps
     uint32_t numSteps = static_cast<uint32_t>(duration / dt);
 
-    // Initialize beam tracker
-    double initElev = ComputeElevation(0.0, duration, maxElev);
-    tracker->Initialize(initElev, 90.0, 2.0, 3.0);
+    // Initialize beam tracker from the REAL t=0 geometry, with angular rates
+    // estimated one second along the real ephemeris velocity.
+    {
+        double e0;
+        double a0;
+        double r0;
+        LiveGeometry(gtMob->GetPosition(), sat1Mob->GetPosition(), e0, a0, r0);
+        const Vector satNow = sat1Mob->GetPosition();
+        const Vector satVel = sat1Mob->GetVelocity();
+        const Vector satSoon(satNow.x + satVel.x, satNow.y + satVel.y,
+                             satNow.z + satVel.z); // +1 s along the real velocity
+        double e1;
+        double a1;
+        double r1;
+        LiveGeometry(gtMob->GetPosition(), satSoon, e1, a1, r1);
+        tracker->Initialize(e0, a0, e1 - e0, a1 - a0);
+    }
 
     // ISAC target: a 10 cm debris fragment at the configured range. Detection
     // is decided by the radar equation in PerformSensing (TX power, array gain,
@@ -278,19 +323,21 @@ main(int argc, char* argv[])
               << "\n";
     std::cout << "  " << std::string(90, '-') << "\n";
 
-    for (uint32_t step = 0; step < numSteps; step++)
-    {
+    // Each step is a scheduled simulator event so the SGP4 mobility models
+    // advance with simulation time (the pass recedes from zenith for real).
+    auto stepFn = [&](uint32_t step) {
         double t = step * dt;
-        double elev = ComputeElevation(t, duration, maxElev);
+        double elev;
+        double azim;
+        double slantRange;
+        LiveGeometry(gtMob->GetPosition(), sat1Mob->GetPosition(), elev, azim,
+                     slantRange);
 
         if (elev < 5.0)
         {
-            continue; // Below minimum elevation
+            return; // Below minimum elevation
         }
         validSteps++;
-
-        double slantRange = ComputeSlantRange(elev, altitude);
-        double azim = 90.0 + 3.0 * t; // slowly changing azimuth
 
         // ---- 1. Downlink: Sat1 -> Ground Terminal ----
         ThzNtnLinkBudget::LinkBudgetResult dlResult = linkBudget->ComputeLinkBudget(
@@ -378,7 +425,16 @@ main(int argc, char* argv[])
                       << std::setw(10) << spectralEff
                       << "\n";
         }
+    };
+
+    for (uint32_t step = 0; step < numSteps; step++)
+    {
+        Simulator::Schedule(Seconds(step * dt), [&stepFn, step] { stepFn(step); });
     }
+
+    // ---- Run ns-3 simulation (drives the SGP4 mobility) ----
+    Simulator::Stop(Seconds(duration));
+    Simulator::Run();
 
     // ---- Summary ----
     std::cout << "\n  " << std::string(60, '=') << "\n";
@@ -394,11 +450,13 @@ main(int argc, char* argv[])
     std::cout << "    Active time:            " << validSteps << " s / "
               << numSteps << " s\n";
 
-    // ISL
+    // ISL (final live SGP4 separation at t = duration)
     double islSnr = islChannel->ComputeIslSnr_dB(sat1Mob, sat2Mob);
     double islCap = islChannel->ComputeIslCapacity_Gbps(islSnr);
+    double islSepKm = sat1Mob->GetDistanceFrom(sat2Mob) / 1000.0;
     std::cout << "\n  ISL (Sat1 <-> Sat2):\n";
-    std::cout << "    Distance:      " << islDistance << " km\n";
+    std::cout << "    Distance:      " << std::setprecision(1) << islSepKm
+              << " km (live cross-plane separation)\n";
     std::cout << "    SNR:           " << std::setprecision(1) << islSnr << " dB\n";
     std::cout << "    Capacity:      " << std::setprecision(2) << islCap << " Gbps\n";
 
@@ -447,9 +505,6 @@ main(int argc, char* argv[])
     std::cout << "    Sensitivity:  " << std::setprecision(1)
               << rxSensitivity << " dBm\n";
 
-    // ---- Run ns-3 simulation ----
-    Simulator::Stop(Seconds(duration));
-    Simulator::Run();
     Simulator::Destroy();
 
     std::cout << "\n  ns-3 simulation complete.\n";

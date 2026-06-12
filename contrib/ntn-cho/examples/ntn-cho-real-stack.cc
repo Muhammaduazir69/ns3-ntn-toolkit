@@ -219,6 +219,7 @@ main(int argc, char* argv[])
     rs.Build(servSat, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));
+    rs.EnableAiFlowMonitor("ntn-cho-real-stack"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 
     // ---- The CHO algorithm with the selected novel 6G mechanism ----

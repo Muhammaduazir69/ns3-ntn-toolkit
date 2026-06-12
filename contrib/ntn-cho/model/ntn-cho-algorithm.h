@@ -19,6 +19,15 @@
  *    signal quality is selected
  * 5. Handover executes to pre-selected candidate when serving cell degrades
  *
+ * Standards positioning of the trigger classes (precise):
+ *   - CondEvents A4, T1 (time) and D1 (distance) are Rel-17 NORMATIVE
+ *     (TS 38.331 §5.5.4); in Rel-17 T1/D1 are configured TOGETHER WITH A4,
+ *     not standalone (see ChoConfig::combineWithA4).
+ *   - CondEvent D2 (distance with MOVING reference locations derived from
+ *     the broadcast ephemeris) is Rel-18 (TS 38.331 §5.5.4.15a).
+ *   - The elevation and timing-advance triggers are TR 38.821 §6 STUDIED
+ *     mechanisms, not standardized CondEvents.
+ *
  * Reference: 3GPP TS 38.331 Section 5.3.5.8
  */
 
@@ -112,7 +121,18 @@ class NtnChoAlgorithm : public Object
          * candidate offers at least taAdvantage less TA. The paper's
          * "timing-advance" trigger class.
          */
-        TRIGGER_TIMING_ADVANCE
+        TRIGGER_TIMING_ADVANCE,
+        /**
+         * 3GPP Rel-18 NTN CondEventD2 (TS 38.331 §5.5.4.15a): distance-based
+         * CHO with MOVING reference locations derived from the broadcast
+         * ephemeris. Entering condition: distance(UE, serving moving ref)
+         * - hysteresisLocation > d2Thresh1_m AND distance(UE, candidate
+         * moving ref) + hysteresisLocation < d2Thresh2_m. The moving
+         * references are the live beam centers from the orbit predictor, so
+         * they track the satellites (Earth-moving cells), unlike D1's fixed
+         * reference semantics.
+         */
+        TRIGGER_DISTANCE_D2
     };
 
     /**
@@ -152,9 +172,34 @@ class NtnChoAlgorithm : public Object
         Time taServingMax = MilliSeconds(8);   //!< max acceptable serving TA (2*slant/c)
         Time taAdvantage = MilliSeconds(1);    //!< min TA gain to admit a candidate
 
+        // ---- Rel-18 CondEventD2 (TRIGGER_DISTANCE_D2) ----
+        double d2Thresh1_m = 600000.0;  //!< serving moving-ref distance must EXCEED this
+        double d2Thresh2_m = 500000.0;  //!< candidate moving-ref distance must be BELOW this
+        double d2HysteresisLocation_m = 10000.0; //!< hysteresisLocation (TS 38.331)
+
+        /**
+         * Rel-17 combination semantics: TS 38.331 configures the T1/D1 (and
+         * Rel-18 D2) CondEvents TOGETHER WITH a measurement event (A4), not
+         * standalone. The quality precondition (sinr >= qualityThreshold_dB)
+         * already implements the A4 entering condition with Thresh =
+         * qualityThreshold_dB; setting combineWithA4 = true additionally
+         * enforces the A4 time-to-trigger (a3TimeToTrigger): the candidate
+         * must satisfy the quality threshold CONTINUOUSLY for the TTT before
+         * a T1/D1/D2 admission may fire.
+         */
+        bool combineWithA4 = false;
+
         // ---- RACH-less execution (RCHO; orthogonal to the trigger) ----
         bool rachLess = false;                  //!< skip RACH using ephemeris TA
-        Time rachDuration = MilliSeconds(80);   //!< NTN RACH incl. slant RTT
+        /**
+         * Fallback NTN RACH duration when no slant range is known for the
+         * target. When the target's slant range IS known, the RACH cost is
+         * computed slant-dependently as 2*slant/c + rachProcessingDelay
+         * instead of this constant (a fixed 80 ms misprices the RACH across
+         * a LEO pass where the slant RTT varies by several ms).
+         */
+        Time rachDuration = MilliSeconds(80);
+        Time rachProcessingDelay = MilliSeconds(20); //!< gNB/UE RACH processing on top of slant RTT
         Time choExecutionDelay = MilliSeconds(50); //!< RRC reconfig execution time
     };
 
@@ -187,6 +232,7 @@ class NtnChoAlgorithm : public Object
         Time d1MetSince = Seconds(0);     //!< When D1 was first met
         bool admitted = false;            //!< Passed TTE + quality filter
         Time lastUpdate = Seconds(0);     //!< Last measurement update time
+        Time a4MetSince = Seconds(-1.0);  //!< When the A4 quality condition was first met (-1 = not met)
 
         // ---- Rel-19 conditional LTM state ----
         double l1Filtered_dB = -100.0;    //!< L1 moving-average SINR
@@ -393,6 +439,13 @@ class NtnChoAlgorithm : public Object
      * \brief Check D1 condition for a candidate
      */
     bool CheckD1Condition(const CandidateInfo& cand) const;
+
+    /**
+     * \brief Distance (m) from the UE to a cell's MOVING reference location
+     * (the live ephemeris-derived beam center), used by CondEventD2.
+     * \return distance in meters, or -1 when no orbit predictor / snapshot.
+     */
+    double DistanceToMovingReference(const CandidateInfo& cand) const;
 
     ChoState m_state;                                  //!< Current state
     ChoConfig m_config;                                //!< Configuration

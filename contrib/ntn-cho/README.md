@@ -29,13 +29,13 @@ is also distributed as part of the
 
 ## Overview
 
-`ntn-cho` implements **3GPP Release-17 Conditional Handover (CHO)** for **Non-Terrestrial Networks (NTN)**, with a focus on LEO satellite constellations where rapid beam-coverage changes drive frequent, often premature, handovers. The module adds a **Time-to-Exit (TTE)-aware** candidate selection that admits a target beam only when it will stay in coverage long enough to be worth the switch. Alongside the TTE-aware novelty it implements the **five standardized 3GPP NTN handover trigger classes** — measurement-based (event A3), location-based (CondEventD1), time-based (CondEventT1, ephemeris-scheduled), elevation-based, and timing-advance-based — plus two forward-looking mechanisms: **Rel-19 conditional LTM** (L1-filtered measurements with a MAC-CE-style fast cell switch) and **trajectory-predictive CHO** (forecast serving outage, maximum predicted time-of-stay), with optional **RACH-less execution** from ephemeris/GNSS TA pre-compensation. It is built around a 3GPP-aligned CHO state machine, an orbit/beam predictor, and a 3GPP TR 38.811 NTN measurement model so that handover decisions fall out of live geometry rather than hardcoded scripts.
+`ntn-cho` implements **3GPP Release-17 Conditional Handover (CHO)** for **Non-Terrestrial Networks (NTN)**, with a focus on LEO satellite constellations where rapid beam-coverage changes drive frequent, often premature, handovers. The module adds a **Time-to-Exit (TTE)-aware** candidate selection that admits a target beam only when it will stay in coverage long enough to be worth the switch. Alongside the TTE-aware novelty it implements the NTN handover trigger classes with precise standards positioning — **Rel-17 normative CondEvents** measurement-based A4-style (event A3 baseline), location-based (CondEventD1) and time-based (CondEventT1, ephemeris-scheduled), the **Rel-18 CondEventD2** (distance with MOVING ephemeris-derived reference locations, TS 38.331 §5.5.4.15a), and the **TR 38.821 §6-studied** elevation-based and timing-advance-based mechanisms (studied, not standardized CondEvents) — plus two forward-looking mechanisms: **Rel-19 conditional LTM** (L1-filtered measurements with a MAC-CE-style fast cell switch) and **trajectory-predictive CHO** (forecast serving outage, maximum predicted time-of-stay), with optional **RACH-less execution** from ephemeris/GNSS TA pre-compensation. It is built around a 3GPP-aligned CHO state machine, an orbit/beam predictor, and a 3GPP TR 38.811 NTN measurement model so that handover decisions fall out of live geometry rather than hardcoded scripts.
 
 ## What's new
 
 See the [CHANGELOG](CHANGELOG.md).
 
-- **Five standardized 3GPP NTN trigger classes** in `NtnChoAlgorithm`:
+- **Six NTN trigger classes** in `NtnChoAlgorithm` (Rel-17 A3/D1/T1 + Rel-18 D2 + TR 38.821-studied elevation/TA; `combineWithA4` enforces the Rel-17 rule that T1/D1/D2 are configured together with the A4 measurement leg):
   `TRIGGER_EVENT_A3`, `TRIGGER_LOCATION_D1`, `TRIGGER_TIME_T1` (CondEventT1
   handover window from the serving cell's remaining time-of-service),
   `TRIGGER_ELEVATION` (serving elevation below `elevationMinDeg`, candidate
@@ -109,7 +109,7 @@ Key args: `simTime`, `numUes`, `scenario`, `algorithm` (a3|location|time|tte-awa
 
 ### ntn-cho-handover-traffic
 
-Real UDP downlink to TR 38.811 UEs on a **real mmwave NR NTN cell**, handed over by the actual `NtnChoAlgorithm` while the constellation flies real SGP4 Walker orbits: the serving satellite passes zenith and recedes, the in-plane neighbour approaches, and the handover falls out of the genuine orbital crossover. The serving SINR fed to the algorithm is **measured** from the PHY; the candidate SINR is ephemeris-predicted (measured baseline plus the real Friis slant-range ratio). All eight trigger mechanisms are selectable — including the five standardized 3GPP NTN classes.
+Real UDP downlink to TR 38.811 UEs on a **real mmwave NR NTN cell**, handed over by the actual `NtnChoAlgorithm` while the constellation flies real SGP4 Walker orbits: the serving satellite passes zenith and recedes, the in-plane neighbour approaches, and the handover falls out of the genuine orbital crossover. The serving SINR fed to the algorithm is **measured** from the PHY; the candidate SINR is ephemeris-predicted (measured baseline plus the real Friis slant-range ratio). All nine trigger mechanisms are selectable — including Rel-17 A3/D1/T1, Rel-18 D2 and the TR 38.821-studied elevation/TA classes.
 
 ```bash
 ./ns3 run "ntn-cho-handover-traffic --simSeconds=60 --trigger=elevation"

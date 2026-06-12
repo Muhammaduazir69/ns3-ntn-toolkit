@@ -129,6 +129,8 @@ class NtnRealStackHelper
     void SetRunTag(std::string t) { m_runTag = std::move(t); }
     void SetCarrierFrequencyHz(double f) { m_freqHz = f; }
     void SetBandwidthHz(double b) { m_bwHz = b; }
+    double GetBandwidthHz() const { return m_bwHz; }
+    double GetCarrierFrequencyHz() const { return m_freqHz; }
     void SetSatEirpDbm(double p) { m_satEirpDbm = p; }   ///< gNB (satellite) Tx power / EIRP
     void SetUeTxPowerDbm(double p) { m_ueTxDbm = p; }
     void SetBackhaulDelay(Time t) { m_backhaulDelay = t; } ///< feeder+core one-way delay
@@ -144,6 +146,28 @@ class NtnRealStackHelper
      */
     void SetFeederGeometry(Ptr<MobilityModel> satMobility, Ptr<MobilityModel> gwMobility);
     void SetHarqEnabled(bool h) { m_harq = h; }
+    /**
+     * \brief Optional NTN-stretched HARQ profile (call before Build()).
+     *
+     * Default (and \p enable = false) keeps today's behavior: HARQ off, because
+     * mmwave's terrestrial HARQ defaults (HarqDlTimeout = 20 slots,
+     * NumHarqProcess = 20) assume a feedback round trip of a few slots and
+     * break over a LEO slant. When enabled, HARQ is turned ON and the two
+     * knobs the in-tree mmwave module actually exposes —
+     * ns3::MmWavePhyMacCommon::HarqDlTimeout and
+     * ns3::MmWavePhyMacCommon::NumHarqProcess — are stretched to
+     * NTN-compatible values derived from the slant geometry of the nodes
+     * passed to Build() (see ConfigureNtnHarqProfile() for the math; budget:
+     * LEO-600 one-way ~2.2 ms at zenith, 4 HARQ rounds).
+     *
+     * Residual limitation: mmwave exposes no UE-side HARQ feedback-timing or
+     * max-retransmission attribute (feedback rides the in-band control path
+     * with a fixed L1L2 latency, and the retx count is bounded only by the
+     * process timeout), and no Rel-17 K_offset scheduling-offset knob — so
+     * this profile prevents premature HARQ-process recycling over the slant
+     * but cannot reproduce the full TS 38.331 NTN timing relationships.
+     */
+    void SetNtnHarqProfile(bool enable);
     void SetRlcAmEnabled(bool a) { m_rlcAm = a; }
     void SetUplink(bool u) { m_uplink = u; }
     void SetGates(HealthGates g) { m_gates = g; }
@@ -196,6 +220,26 @@ class NtnRealStackHelper
      */
     Ptr<NtnOranAiFlowMonitor> EnableOranFlowMonitor();
 
+    /**
+     * \brief Canonical KPM wiring (audit 2026-06-12 §4.2): stand up ONE
+     *        NtnOranAiFlowMonitor over this helper's flows and auto-export
+     *        its KPM series at end of simulation.
+     *
+     * May be called any time after Build() — before or after
+     * InstallTraffic()/InstallOranFlow(). Every NtnOranApplication/NtnOranSink
+     * the helper has already installed is attached immediately, and any flow
+     * installed later is attached automatically. The monitor reads this
+     * helper's PHY trace for L1M.RS-SINR, and at Simulator::Destroy() writes
+     * `<outputPrefix>_kpm_series.csv` and `<outputPrefix>_kpm_series.lp`
+     * (\p outputPrefix is used verbatim as a path prefix; parent directories
+     * are created if needed).
+     */
+    void EnableAiFlowMonitor(const std::string& outputPrefix);
+    /// The monitor created by EnableAiFlowMonitor()/EnableOranFlowMonitor(),
+    /// or nullptr if neither has been called yet. (Defined out-of-line so
+    /// callers need not pull in the monitor header.)
+    Ptr<NtnOranAiFlowMonitor> GetAiFlowMonitor() const;
+
     // ---- Post-run measurement (call after Simulator::Run) ----------------
     /// Aggregate FlowMonitor + PHY-sink samples into the measured KPI set.
     void Collect();
@@ -242,6 +286,14 @@ class NtnRealStackHelper
     Ptr<Node> GetRemoteHost() const { return m_remoteHost; }
 
   private:
+    // Create the ORAN AI flow monitor (idempotent) and wire the PHY source.
+    void EnsureOranMonitor();
+    // Attach every helper-installed source/sink not yet attached to the monitor.
+    void AttachInstalledFlowsToMonitor();
+    // End-of-sim KPM export registered by EnableAiFlowMonitor().
+    void ExportAiFlowMonitor();
+    // Stretch mmwave HARQ knobs to the slant geometry (NTN HARQ profile).
+    void ConfigureNtnHarqProfile();
     // PHY measured-KPI sink (connected to RxPacketTraceUe).
     void DlRxTrace(mmwave::RxPacketTraceParams params);
     // App-layer measured counters (connected to OnOff "Tx" / PacketSink "Rx").
@@ -270,6 +322,7 @@ class NtnRealStackHelper
     Ptr<MobilityModel> m_feederSat;
     Ptr<MobilityModel> m_feederGw;
     bool m_harq{false};
+    bool m_ntnHarqProfile{false};
     bool m_rlcAm{false};
     bool m_uplink{false};
     HealthGates m_gates{};
@@ -308,6 +361,7 @@ class NtnRealStackHelper
     double m_meanJitterMs{0.0};
     double m_appLossRatio{0.0};
     uint16_t m_nextDlPort{1234};
+    uint16_t m_flowSeq{0}; ///< monotonic ORAN srcId allocator (never a recycled port)
     uint64_t m_appTxPackets{0};
     uint64_t m_appRxPackets{0};
 
@@ -318,6 +372,11 @@ class NtnRealStackHelper
     };
     std::vector<PeriodicEntry> m_periodics;
     Ptr<NtnOranAiFlowMonitor> m_oranMonitor;
+    bool m_autoAttachMonitor{false};      ///< EnableAiFlowMonitor: attach later flows too
+    std::string m_aiMonitorPrefix;        ///< KPM export path prefix
+    bool m_aiExportScheduled{false};      ///< end-of-sim export registered once
+    uint32_t m_monAttachedClients{0};     ///< m_clientApps already attached to monitor
+    uint32_t m_monAttachedSinks{0};       ///< m_dlSinks already attached to monitor
 
     bool m_built{false};
     int64_t m_wallStartNs{0};

@@ -61,6 +61,7 @@ set(test_sources
     test/nrtv-test.cc
     test/ntn-oran-ai-flow-monitor-test.cc
     test/ntn-oran-application-test.cc
+    test/ntn-real-stack-helper-test.cc
 )
 
 build_lib(

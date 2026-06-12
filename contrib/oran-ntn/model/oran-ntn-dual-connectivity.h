@@ -42,6 +42,8 @@ class OranNtnSatBridge;
 /**
  * \ingroup oran-ntn
  * \brief Dual Connectivity manager for TN-NTN networks
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnDualConnectivity : public Object
 {

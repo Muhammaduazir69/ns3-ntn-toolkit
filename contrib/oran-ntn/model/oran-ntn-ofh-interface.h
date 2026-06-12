@@ -73,6 +73,8 @@ struct OfhMessage
 /**
  * \ingroup oran-ntn
  * \brief OFH-lite interface between DU and RU.
+ *
+ * \note Currently exercised by unit tests only (via OranNtnSplitGnbHelper).
  */
 class OranNtnOfhInterface : public Object
 {

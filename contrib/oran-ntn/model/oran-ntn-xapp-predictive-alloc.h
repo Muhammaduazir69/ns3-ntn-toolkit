@@ -37,6 +37,9 @@ class OranNtnGymPredictive;
 /**
  * \ingroup oran-ntn
  * \brief Predictive Resource Allocation xApp
+ *
+ * \note Currently exercised by unit tests only. The SetGymEnv() RL hook
+ *       (OranNtnGymPredictive) has no in-tree caller yet.
  */
 class OranNtnXappPredictiveAlloc : public OranNtnXappBase
 {

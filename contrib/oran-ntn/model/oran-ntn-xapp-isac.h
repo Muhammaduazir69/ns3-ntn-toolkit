@@ -32,6 +32,8 @@ namespace ns3
 /**
  * \ingroup oran-ntn
  * \brief ISAC xApp for integrated sensing and communication management
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnXappIsac : public OranNtnXappBase
 {

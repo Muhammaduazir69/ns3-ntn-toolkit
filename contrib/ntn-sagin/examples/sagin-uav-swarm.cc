@@ -111,6 +111,7 @@ main(int argc, char* argv[])
     rs.AddExtraPropagationLoss(a2g);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
+    rs.EnableAiFlowMonitor("sagin-uav-swarm"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 
     std::printf("# sagin-uav-swarm (%u UAVs on a real mmwave NR cell, TR 36.777 RMa-AV A2G)\n",

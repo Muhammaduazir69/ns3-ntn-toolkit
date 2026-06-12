@@ -6,6 +6,7 @@
 
 #include <ns3/log.h>
 #include <ns3/simulator.h>
+#include <ns3/uinteger.h>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -155,10 +156,18 @@ NS_OBJECT_ENSURE_REGISTERED(NtnInfluxSink);
 TypeId
 NtnInfluxSink::GetTypeId()
 {
-    static TypeId tid = TypeId("ns3::ntnobs::NtnInfluxSink")
-                            .SetParent<Object>()
-                            .SetGroupName("NtnObservability")
-                            .AddConstructor<NtnInfluxSink>();
+    static TypeId tid =
+        TypeId("ns3::ntnobs::NtnInfluxSink")
+            .SetParent<Object>()
+            .SetGroupName("NtnObservability")
+            .AddConstructor<NtnInfluxSink>()
+            .AddAttribute("MaxBufferPoints",
+                          "Maximum number of Points buffered between flushes; when "
+                          "exceeded the OLDEST points are dropped (and counted via "
+                          "GetDroppedPoints) instead of exhausting RAM on long runs.",
+                          UintegerValue(1000000),
+                          MakeUintegerAccessor(&NtnInfluxSink::m_maxBufferPoints),
+                          MakeUintegerChecker<uint32_t>(1));
     return tid;
 }
 
@@ -217,6 +226,21 @@ NtnInfluxSink::Push(const Point& p)
     {
         copy.timestamp = Simulator::Now();
     }
+    if (m_buffer.size() >= m_maxBufferPoints)
+    {
+        // Bounded buffer (audit issue 14): drop the oldest point so a long
+        // run without flushes degrades gracefully instead of exhausting RAM.
+        m_buffer.erase(m_buffer.begin());
+        m_droppedPoints++;
+        if (!m_dropWarned)
+        {
+            m_dropWarned = true;
+            NS_LOG_WARN("NtnInfluxSink buffer reached MaxBufferPoints="
+                        << m_maxBufferPoints
+                        << "; dropping oldest points (check the flush period / "
+                           "transport, see GetDroppedPoints())");
+        }
+    }
     m_buffer.push_back(std::move(copy));
     m_emitted++;
 }
@@ -270,6 +294,12 @@ uint64_t
 NtnInfluxSink::GetEmittedCount() const
 {
     return m_emitted;
+}
+
+uint64_t
+NtnInfluxSink::GetDroppedPoints() const
+{
+    return m_droppedPoints;
 }
 
 void

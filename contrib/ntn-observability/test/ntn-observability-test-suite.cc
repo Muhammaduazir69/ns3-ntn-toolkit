@@ -10,6 +10,7 @@
 #include "ns3/ntn-repro-manifest.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
+#include "ns3/uinteger.h"
 
 #include <cstdio>
 #include <fstream>
@@ -141,6 +142,59 @@ class InfluxFileSinkRoundTripTest : public TestCase
         NS_TEST_EXPECT_MSG_EQ(count, 2, "two lines expected");
         NS_TEST_EXPECT_MSG_NE(body.find("rsrp_dbm=-100"), std::string::npos, "first point");
         NS_TEST_EXPECT_MSG_NE(body.find("rsrp_dbm=-90.5"), std::string::npos, "second point");
+
+        Simulator::Destroy();
+    }
+};
+
+class InfluxSinkBoundedBufferTest : public TestCase
+{
+  public:
+    InfluxSinkBoundedBufferTest()
+        : TestCase("MaxBufferPoints drops the OLDEST points and counts them")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string path = "/tmp/ntn-observability-bounded-buffer-test.lp";
+        std::remove(path.c_str());
+
+        Ptr<NtnInfluxSink> sink = CreateObject<NtnInfluxSink>();
+        sink->SetAttribute("MaxBufferPoints", UintegerValue(10));
+        sink->SetTransport(NtnInfluxSink::Transport::File);
+        sink->SetFilePath(path);
+
+        // 15 pushes into a 10-point buffer with no flush in between: the 5
+        // OLDEST points (seq 0..4) must be dropped and counted.
+        for (int i = 0; i < 15; ++i)
+        {
+            Point p;
+            p.measurement = measurement::kRadio;
+            p.fieldsInt["seq"] = i;
+            p.timestamp = NanoSeconds(i + 1);
+            sink->Push(p);
+        }
+        NS_TEST_EXPECT_MSG_EQ(sink->GetEmittedCount(), 15u, "all pushes counted");
+        NS_TEST_EXPECT_MSG_EQ(sink->GetDroppedPoints(), 5u, "five points dropped");
+
+        sink->Flush();
+        const std::string body = ReadFile(path);
+        const auto lines = std::count(body.begin(), body.end(), '\n');
+        NS_TEST_EXPECT_MSG_EQ(lines, 10, "buffer was capped at MaxBufferPoints");
+        for (int i = 0; i < 5; ++i)
+        {
+            NS_TEST_EXPECT_MSG_EQ(body.find("seq=" + std::to_string(i) + "i"),
+                                  std::string::npos,
+                                  "oldest point seq=" << i << " was dropped");
+        }
+        for (int i = 5; i < 15; ++i)
+        {
+            NS_TEST_EXPECT_MSG_NE(body.find("seq=" + std::to_string(i) + "i"),
+                                  std::string::npos,
+                                  "newest point seq=" << i << " survived");
+        }
 
         Simulator::Destroy();
     }
@@ -437,6 +491,7 @@ class NtnObservabilityTestSuite : public TestSuite
         AddTestCase(new LineProtocolBasicEncodeTest, TestCase::Duration::QUICK);
         AddTestCase(new LineProtocolEscapeTest, TestCase::Duration::QUICK);
         AddTestCase(new InfluxFileSinkRoundTripTest, TestCase::Duration::QUICK);
+        AddTestCase(new InfluxSinkBoundedBufferTest, TestCase::Duration::QUICK);
         AddTestCase(new NetSimulyzerJsonShapeTest, TestCase::Duration::QUICK);
         AddTestCase(new MetricSchemaStableTest, TestCase::Duration::QUICK);
         AddTestCase(new ReproManifestRoundTripTest, TestCase::Duration::QUICK);

@@ -5,13 +5,17 @@
 #ifndef NTN_CONSTELLATION_SGP4_MOBILITY_MODEL_H
 #define NTN_CONSTELLATION_SGP4_MOBILITY_MODEL_H
 
-// SGP4 / Kepler+J2 mobility model (Roadmap §3 T5).
+// Kepler + J2 secular propagator with a TLE-compatible interface
+// (Roadmap §3 T5). Despite the class name, this is NOT a full SGP4
+// implementation.
 //
 // The v2.1 baseline uses an analytic Kepler propagator with secular J2
 // corrections to RAAN and argument-of-perigee. This is accurate to within
 // a few km over hours of propagation for the typical near-circular LEO
 // constellations this module targets (Walker-Delta Starlink shell 1,
-// OneWeb, Kuiper). Full Vallado SGP4 is a Q4 2026 T5 follow-on; the
+// OneWeb, Kuiper). Full Vallado SGP4 — including atmospheric drag — is
+// planned for Q4 2026 (T5 follow-on); until then the TLE drag term (B*)
+// is parsed by TleRecord but UNUSED by this propagator. The
 // classical-element interface is identical so the backend swap is
 // transparent to consumers.
 //

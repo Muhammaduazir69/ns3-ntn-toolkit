@@ -7,6 +7,8 @@
 
 #include "oran-ntn-e2-interface.h"
 
+#include <ns3/boolean.h>
+#include <ns3/double.h>
 #include <ns3/log.h>
 #include <ns3/simulator.h>
 #include <ns3/uinteger.h>
@@ -40,6 +42,27 @@ OranNtnE2Node::GetTypeId()
                           UintegerValue(1000),
                           MakeUintegerAccessor(&OranNtnE2Node::m_maxBufferSize),
                           MakeUintegerChecker<uint32_t>())
+            .AddAttribute("AlignToControlLoop",
+                          "When true, indications that crossed the feeder link are "
+                          "queued and dispatched to the RIC/xApp callback only on the "
+                          "next control-loop tick (measure -> feeder -> loop tick -> "
+                          "feeder -> apply) instead of inline execution.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&OranNtnE2Node::m_alignToControlLoop),
+                          MakeBooleanChecker())
+            .AddAttribute("ControlLoopPeriod",
+                          "Near-RT RIC control-loop tick period used when "
+                          "AlignToControlLoop is enabled.",
+                          TimeValue(MilliSeconds(100)),
+                          MakeTimeAccessor(&OranNtnE2Node::m_controlLoopPeriod),
+                          MakeTimeChecker())
+            .AddAttribute("UnixEpochOffset",
+                          "Offset (seconds) added to indication timestamps. 0 keeps "
+                          "pure simulation time; set a Unix epoch to produce wall-"
+                          "clock-like stamps for external consumers (FlexRIC bridge).",
+                          DoubleValue(0.0),
+                          MakeDoubleAccessor(&OranNtnE2Node::m_unixEpochOffset),
+                          MakeDoubleChecker<double>(0.0))
             .AddTraceSource("KpmReportSent",
                             "A KPM report was sent to the RIC",
                             MakeTraceSourceAccessor(&OranNtnE2Node::m_kpmReportSent),
@@ -65,6 +88,9 @@ OranNtnE2Node::OranNtnE2Node()
       m_feederLinkDelay(MilliSeconds(20)),
       m_feederLinkAvailable(true),
       m_maxBufferSize(1000),
+      m_alignToControlLoop(false),
+      m_controlLoopPeriod(MilliSeconds(100)),
+      m_unixEpochOffset(0.0),
       m_totalReportsSent(0),
       m_totalReportsDropped(0),
       m_totalActionsExecuted(0)
@@ -87,6 +113,8 @@ OranNtnE2Node::DoDispose()
     }
     m_reportTimers.clear();
     Simulator::Cancel(m_bufferCheckEvent);
+    Simulator::Cancel(m_alignedDispatchEvent);
+    m_alignedQueue.clear();
     m_subscriptions.clear();
     m_reportBuffer.clear();
     m_ranFunctions.clear();
@@ -223,7 +251,9 @@ OranNtnE2Node::SubmitKpmMeasurement(const E2KpmReport& report)
         E2Indication indication;
         indication.subscriptionId = subId;
         indication.ranFunctionId = 2;
-        indication.timestamp = Simulator::Now().GetSeconds();
+        // UnixEpochOffset = 0 keeps pure sim time; nonzero yields Unix-like
+        // stamps so an external RIC (FlexRIC bridge) accepts the indication.
+        indication.timestamp = m_unixEpochOffset + Simulator::Now().GetSeconds();
         indication.kpmReport = report;
         indication.originalTimestamp = Simulator::Now();
 
@@ -283,6 +313,30 @@ OranNtnE2Node::DeliverReport(const E2Indication& indication)
     m_totalReportsSent++;
     m_kpmReportSent(m_gnbId, indication.kpmReport);
 
+    if (m_alignToControlLoop)
+    {
+        // Hold the indication until the next Near-RT RIC control-loop tick so
+        // xApps cannot react inline (the optimistic-loop artifact found in the
+        // 2026-06-12 audit). Tick boundaries are multiples of
+        // m_controlLoopPeriod on the simulation clock.
+        m_alignedQueue.push_back(indication);
+        if (!m_alignedDispatchEvent.IsPending())
+        {
+            const Time now = Simulator::Now();
+            const int64_t period = m_controlLoopPeriod.GetNanoSeconds();
+            const int64_t nextTick = ((now.GetNanoSeconds() / period) + 1) * period;
+            m_alignedDispatchEvent = Simulator::Schedule(NanoSeconds(nextTick) - now,
+                                                         &OranNtnE2Node::DispatchAlignedIndications,
+                                                         this);
+        }
+        return;
+    }
+    DispatchIndication(indication);
+}
+
+void
+OranNtnE2Node::DispatchIndication(const E2Indication& indication)
+{
     if (!m_indicationCb.IsNull())
     {
         m_indicationCb(indication);
@@ -290,9 +344,43 @@ OranNtnE2Node::DeliverReport(const E2Indication& indication)
 }
 
 void
+OranNtnE2Node::DispatchAlignedIndications()
+{
+    NS_LOG_FUNCTION(this << m_alignedQueue.size());
+    std::deque<E2Indication> batch;
+    batch.swap(m_alignedQueue);
+    for (const auto& ind : batch)
+    {
+        DispatchIndication(ind);
+    }
+}
+
+void
 OranNtnE2Node::SetRcActionCallback(RcActionCallback cb)
 {
     m_rcActionCb = cb;
+}
+
+Time
+OranNtnE2Node::GetFeederLinkDelay() const
+{
+    return m_feederLinkDelay;
+}
+
+void
+OranNtnE2Node::ReceiveRcAction(const E2RcAction& action)
+{
+    NS_LOG_FUNCTION(this << static_cast<uint8_t>(action.actionType));
+    // Return feeder path: the RIC's command crosses the feeder link too, so a
+    // full control loop costs one feeder delay in EACH direction (E2AP/SCTP
+    // itself is not simulated; see the class doc).
+    Simulator::Schedule(m_feederLinkDelay, &OranNtnE2Node::ExecuteRcActionEvent, this, action);
+}
+
+void
+OranNtnE2Node::ExecuteRcActionEvent(E2RcAction action)
+{
+    ExecuteRcAction(action);
 }
 
 bool

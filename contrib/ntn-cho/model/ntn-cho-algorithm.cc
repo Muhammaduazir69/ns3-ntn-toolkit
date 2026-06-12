@@ -299,7 +299,21 @@ NtnChoAlgorithm::EvaluateStandardNtnTrigger(CandidateInfo& cand)
     cand.tte = Seconds(0);
     if (cand.sinr_dB < m_config.qualityThreshold_dB)
     {
+        // The quality precondition IS the A4 entering condition (Thresh =
+        // qualityThreshold_dB); leaving it resets the A4 time-to-trigger.
+        cand.a4MetSince = Seconds(-1.0);
         return; // every class keeps the radio-quality precondition
+    }
+    if (cand.a4MetSince < Seconds(0))
+    {
+        cand.a4MetSince = Simulator::Now();
+    }
+    if (m_config.combineWithA4 &&
+        Simulator::Now() - cand.a4MetSince < m_config.a3TimeToTrigger)
+    {
+        // Rel-17 combination semantics: the A4 leg must hold for the TTT
+        // before a T1/D1/D2 CondEvent may admit the candidate.
+        return;
     }
     constexpr double kC = 299792458.0;
 
@@ -350,6 +364,26 @@ NtnChoAlgorithm::EvaluateStandardNtnTrigger(CandidateInfo& cand)
         const Time taCand = Seconds(2.0 * cand.slantRangeM / kC);
         cand.admitted = (taServing > m_config.taServingMax) ||
                         (taServing - taCand >= m_config.taAdvantage);
+        break;
+    }
+    case TRIGGER_DISTANCE_D2: {
+        // Rel-18 CondEventD2 (TS 38.331 §5.5.4.15a): both reference
+        // locations MOVE with the satellites (live ephemeris beam centers).
+        // Entering condition: Ml1 - Hys > Thresh1 AND Ml2 + Hys < Thresh2.
+        auto servingIt = m_candidates.find(m_servingCellId);
+        if (servingIt == m_candidates.end())
+        {
+            return;
+        }
+        const double dServing = DistanceToMovingReference(servingIt->second);
+        const double dCand = DistanceToMovingReference(cand);
+        if (dServing < 0.0 || dCand < 0.0)
+        {
+            return; // no ephemeris for one of the moving references
+        }
+        const double hys = m_config.d2HysteresisLocation_m;
+        cand.admitted = (dServing - hys > m_config.d2Thresh1_m) &&
+                        (dCand + hys < m_config.d2Thresh2_m);
         break;
     }
     default:
@@ -519,7 +553,8 @@ NtnChoAlgorithm::EvaluateConditions()
         }
         if (m_config.triggerType == TRIGGER_TIME_T1 ||
             m_config.triggerType == TRIGGER_ELEVATION ||
-            m_config.triggerType == TRIGGER_TIMING_ADVANCE)
+            m_config.triggerType == TRIGGER_TIMING_ADVANCE ||
+            m_config.triggerType == TRIGGER_DISTANCE_D2)
         {
             EvaluateStandardNtnTrigger(cand);
             m_candidateEvalTrace(cellId, cand.sinr_dB, cand.tte, cand.admitted);
@@ -803,7 +838,21 @@ NtnChoAlgorithm::ExecuteHandover(uint16_t targetCellId)
     }
     else
     {
-        interruptionMs += m_config.rachDuration.GetMilliSeconds();
+        // Slant-dependent RACH cost: the 4-step RACH pays at least one slant
+        // round-trip plus processing; the constant rachDuration misprices it
+        // across a LEO pass (slant RTT varies by several ms). Fall back to
+        // the constant only when the target's slant range is unknown.
+        if (haveSlant)
+        {
+            const double rachMs =
+                2.0 * targetIt->second.slantRangeM / 299792458.0 * 1e3 +
+                m_config.rachProcessingDelay.GetMilliSeconds();
+            interruptionMs += rachMs;
+        }
+        else
+        {
+            interruptionMs += m_config.rachDuration.GetMilliSeconds();
+        }
         ++m_mechStats.rachExecutions;
     }
     if (isLtm)
@@ -930,6 +979,22 @@ NtnChoAlgorithm::CheckD1Condition(const CandidateInfo& cand) const
     double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
 
     return (dist <= m_config.d1Threshold_m);
+}
+
+double
+NtnChoAlgorithm::DistanceToMovingReference(const CandidateInfo& cand) const
+{
+    if (!m_orbitPredictor)
+    {
+        return -1.0;
+    }
+    auto snap = m_orbitPredictor->GetBeamSnapshot(cand.satId, cand.beamId, m_uePosition);
+    const Vector ueCart = m_uePosition.ToVector();
+    const Vector refCart = snap.beamCenter.ToVector();
+    const double dx = ueCart.x - refCart.x;
+    const double dy = ueCart.y - refCart.y;
+    const double dz = ueCart.z - refCart.z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 void

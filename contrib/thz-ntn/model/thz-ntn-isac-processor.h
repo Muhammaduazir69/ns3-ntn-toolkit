@@ -73,6 +73,8 @@ struct CfarResult
  * ThzNtnPhy and ThzNtnAntennaArray are set, signal parameters and
  * beam patterns come from actual configurations rather than passed
  * values.
+ *
+ * \warning Experimental: not yet exercised by any example or test.
  */
 class ThzNtnIsacProcessor : public Object
 {

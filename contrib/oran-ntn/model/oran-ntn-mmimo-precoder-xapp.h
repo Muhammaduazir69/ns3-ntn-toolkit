@@ -85,6 +85,10 @@ class OranNtnMmimoTwoStageComposer
 /**
  * \ingroup oran-ntn
  * \brief Two-stage NN+codebook mMIMO precoder xApp (Roadmap §4.1.12).
+ *
+ * \note Currently exercised by unit tests only (round-trip / failure-mode /
+ *       simulator-time cases); the ric-controlled-traffic example implements
+ *       its control loop directly on OranNtnMmimoCodebook.
  */
 class OranNtnMmimoPrecoderXapp : public Object
 {

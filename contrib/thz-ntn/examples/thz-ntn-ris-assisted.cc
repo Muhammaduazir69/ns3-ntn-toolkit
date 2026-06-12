@@ -10,6 +10,13 @@
  * Reconfigurable Intelligent Surface (RIS) to assist a THz satellite
  * downlink.  Compares direct vs RIS-assisted link performance and
  * verifies the N^2 scaling law.
+ *
+ * Analysis-only example: parametric geometry, no packet transmission.
+ * The configurable elevation angle IS the experiment, so the satellite is
+ * placed parametrically along the actual line of sight (local ENU frame),
+ * making the node positions consistent with the parametric slant range used
+ * by the link budget. For a measured-radio RIS scenario see
+ * thz-ntn-ris-relay-traffic.
  */
 
 #include <ns3/command-line.h>
@@ -103,10 +110,18 @@ main(int argc, char* argv[])
     NodeContainer risNodes;
     risNodes.Create(1);
 
-    // Set up mobility
+    // Set up mobility (local ENU frame, ground terminal at the origin).
+    // Geometry fix (2026-06 audit): the satellite used to sit at zenith
+    // (0, 0, h) regardless of the --elevation argument, so the cascaded
+    // Sat->RIS->GT path loss disagreed with the parametric slant range. It
+    // now sits ON the line of sight at the requested elevation:
+    // |position - GT| = slantRange exactly, z ~= altitude (537 km up for a
+    // 550 km orbit seen at 30 deg through the curved-Earth slant relation).
     double slantRange = ComputeSlantRange(elevation, altitude);
+    double elevRad = elevation * M_PI / 180.0;
     Ptr<ConstantPositionMobilityModel> satMob = CreateObject<ConstantPositionMobilityModel>();
-    satMob->SetPosition(Vector(0.0, 0.0, altitude * 1000.0));
+    satMob->SetPosition(Vector(slantRange * std::cos(elevRad), 0.0,
+                               slantRange * std::sin(elevRad)));
     satNodes.Get(0)->AggregateObject(satMob);
 
     Ptr<ConstantPositionMobilityModel> gtMob = CreateObject<ConstantPositionMobilityModel>();

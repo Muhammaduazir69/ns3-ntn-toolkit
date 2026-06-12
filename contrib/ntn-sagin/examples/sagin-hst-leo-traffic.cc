@@ -118,6 +118,7 @@ main(int argc, char* argv[])
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("sagin-hst-leo-traffic"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 
     std::printf("# sagin-hst-leo-traffic (HST terminal on a real mmwave NR cell)\n"

@@ -32,6 +32,9 @@ namespace ns3
 /**
  * \ingroup oran-ntn
  * \brief THz Spectrum Management xApp for atmospheric window selection
+ *
+ * \warning Experimental: not yet exercised by any example or test; API may
+ *          change.
  */
 class OranNtnXappThzSpectrum : public OranNtnXappBase
 {

@@ -22,6 +22,13 @@ namespace ns3
 class OranNtnXappSliceManager;
 class OranNtnSatBridge;
 
+/**
+ * \ingroup oran-ntn
+ * \brief Gymnasium environment for slice-management RL training
+ *
+ * \warning Experimental: not yet exercised by any example or test; API may
+ *          change.
+ */
 class OranNtnGymSlice : public OpenGymEnv
 {
   public:

@@ -67,6 +67,10 @@ typedef Callback<std::vector<double>, const std::vector<double>&> RisPhasePredic
  * Manages the phase configuration of one or more ThzNtnRis panels.
  * Supports codebook-based beam selection using MobilityModel positions,
  * iterative optimization, and an external DRL callback.
+ *
+ * \warning Experimental: consumed by ThzNtnRisServiceModel and validated by
+ * the unit test suite (test/thz-ntn-test-suite.cc), but not yet exercised by
+ * any example.
  */
 class ThzNtnRisController : public Object
 {

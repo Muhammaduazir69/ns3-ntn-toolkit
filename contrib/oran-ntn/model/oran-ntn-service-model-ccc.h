@@ -163,6 +163,8 @@ struct CccControlAction
  *
  * RIC Function ID 1000. Encodes/decodes CccIndMsgFormat1 and
  * CccControlAction via the T2 Aligned-PER codec.
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnServiceModelCcc : public OranNtnServiceModel
 {

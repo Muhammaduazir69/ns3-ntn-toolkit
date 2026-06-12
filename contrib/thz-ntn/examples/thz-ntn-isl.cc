@@ -9,6 +9,12 @@
  * Demonstrates THz ISL between two LEO satellites at 300 GHz.
  * Evaluates link performance at various inter-satellite distances
  * and compares Shannon vs hardware-limited capacity.
+ *
+ * Analysis-only example: parametric distance sweep plus an ISL time series,
+ * no measured radio. The distance-sweep table is parametric by design; the
+ * per-second time series is driven by two REAL SGP4 cross-plane neighbours
+ * of a Starlink-class Walker shell (72 x 22, 53 deg, 550 km), whose
+ * separation breathes with latitude — not the old sinusoidal drift.
  */
 
 #include <ns3/command-line.h>
@@ -23,6 +29,9 @@
 #include <iostream>
 
 #include "ns3/ntn-realistic-traffic-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 
 // Forward declarations of THz-NTN classes
 namespace ns3
@@ -83,16 +92,43 @@ main(int argc, char* argv[])
     std::cout << "  Channel:    Vacuum (no molecular absorption)\n";
     std::cout << "-------------------------------------------------------------\n\n";
 
-    // ---- Create nodes: two satellites at 550 km ----
+    // ---- Create nodes: two REAL SGP4 satellites at 550 km ----
+    // Cross-plane neighbours (plane 0 / slot 0 and plane 1 / slot 0) of a
+    // Starlink-class Walker delta shell, projected into one common local ENU
+    // frame at sat 1's initial sub-point. Sanity: in ECEF each satellite sits
+    // at |position| = Re + altitude (~6921 km for 550 km); their cross-plane
+    // separation oscillates with latitude over the orbit.
     NodeContainer satNodes;
     satNodes.Create(2);
 
-    Ptr<ConstantPositionMobilityModel> sat1Mob = CreateObject<ConstantPositionMobilityModel>();
-    sat1Mob->SetPosition(Vector(0.0, 0.0, altitude * 1000.0));
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 72;
+    wcfg.total_sats = 72 * 22;
+    wcfg.altitude_km = altitude;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+
+    Ptr<ns3::ntncon::Sgp4MobilityModel> sat1Sgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    sat1Sgp4->SetElements(elements[0]); // plane 0, slot 0
+    Ptr<ns3::ntncon::Sgp4MobilityModel> sat2Sgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    sat2Sgp4->SetElements(elements[22]); // plane 1, slot 0
+
+    double refLat;
+    double refLon;
+    double refAlt;
+    sat1Sgp4->GetGeodetic(refLat, refLon, refAlt);
+
+    Ptr<NtnEnuProjectionMobilityModel> sat1Mob = CreateObject<NtnEnuProjectionMobilityModel>();
+    sat1Mob->SetSource(sat1Sgp4);
+    sat1Mob->SetReference(refLat, refLon, 0.0);
     satNodes.Get(0)->AggregateObject(sat1Mob);
 
-    Ptr<ConstantPositionMobilityModel> sat2Mob = CreateObject<ConstantPositionMobilityModel>();
-    sat2Mob->SetPosition(Vector(500e3, 0.0, altitude * 1000.0)); // 500 km apart initially
+    Ptr<NtnEnuProjectionMobilityModel> sat2Mob = CreateObject<NtnEnuProjectionMobilityModel>();
+    sat2Mob->SetSource(sat2Sgp4);
+    sat2Mob->SetReference(refLat, refLon, 0.0);
     satNodes.Get(1)->AggregateObject(sat2Mob);
 
     // ---- Create THz-NTN components ----
@@ -223,11 +259,21 @@ main(int argc, char* argv[])
 
     traffic.RegisterPeriodicCallback(Seconds(1.0), [&](Time nowT) {
         double t = nowT.GetSeconds();
-        // Sinusoidal in-plane separation between 100 km and 5000 km
-        double d_km = 100.0 + (4900.0) * 0.5 * (1 - std::cos(2 * M_PI * t / simTime));
+        // REAL cross-plane separation and radial velocity from the two live
+        // SGP4 (ENU-projected) mobility models.
+        const Vector p1 = sat1Mob->GetPosition();
+        const Vector p2 = sat2Mob->GetPosition();
+        const Vector v1 = sat1Mob->GetVelocity();
+        const Vector v2 = sat2Mob->GetVelocity();
+        const Vector dp(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+        const double d_m = std::max(
+            std::sqrt(dp.x * dp.x + dp.y * dp.y + dp.z * dp.z), 1.0);
+        const double d_km = d_m / 1000.0;
         auto r = linkBudget->ComputeLinkBudget(ThzNtnLinkBudget::INTER_SATELLITE,
-            freq, d_km * 1000.0, 90.0, txPower, txGain, rxGain, bandwidth, 10.0);
-        double relV = 100.0 * std::sin(2 * M_PI * t / simTime);
+            freq, d_m, 90.0, txPower, txGain, rxGain, bandwidth, 10.0);
+        // Radial (range-rate) component of the relative velocity -> Doppler.
+        const double relV = ((v2.x - v1.x) * dp.x + (v2.y - v1.y) * dp.y +
+                             (v2.z - v1.z) * dp.z) / d_m;
         double doppler_MHz = relV / 299792458.0 * freq / 1e6;
         isltimes << std::fixed << std::setprecision(2)
                  << t << "," << d_km << "," << r.fspl_dB << "," << r.snr_dB

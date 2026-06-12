@@ -37,6 +37,9 @@ namespace ns3
  * \ingroup thz-ntn
  *
  * \brief α-μ generalised fading sample generator.
+ *
+ * \warning Experimental: validated by the unit test suite
+ * (test/thz-ntn-test-suite.cc) but not yet exercised by any example.
  */
 class ThzNtnAlphaMuFading : public Object
 {

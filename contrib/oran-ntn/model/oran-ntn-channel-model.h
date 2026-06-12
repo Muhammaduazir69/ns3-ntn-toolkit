@@ -40,6 +40,10 @@ class OranNtnSatBridge;
 /**
  * \ingroup oran-ntn
  * \brief Composite NTN channel model combining satellite and mmWave propagation
+ *
+ * \note Consumed cross-module: ntn-sionna's
+ *       `ntn-sionna-composed-channel-traffic` example chains this model onto
+ *       the real spectrum channel; also covered by unit tests.
  */
 class OranNtnChannelModel : public PropagationLossModel
 {

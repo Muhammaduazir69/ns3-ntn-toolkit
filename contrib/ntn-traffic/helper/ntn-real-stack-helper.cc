@@ -50,6 +50,89 @@ NtnRealStackHelper::NtnRealStackHelper() = default;
 NtnRealStackHelper::~NtnRealStackHelper() = default;
 
 void
+NtnRealStackHelper::SetNtnHarqProfile(bool enable)
+{
+    NS_ABORT_MSG_IF(m_built, "SetNtnHarqProfile must be called before Build()");
+    m_ntnHarqProfile = enable;
+    if (enable)
+    {
+        m_harq = true; // the profile is meaningless with HARQ off
+    }
+    // enable == false keeps today's defaults exactly (HARQ off unless the
+    // caller separately opted in via SetHarqEnabled(true)).
+}
+
+void
+NtnRealStackHelper::ConfigureNtnHarqProfile()
+{
+    // NTN-stretched HARQ (audit issue 13, Rel-17 K_offset domain). The in-tree
+    // mmwave module exposes exactly two usable HARQ timing knobs:
+    //   ns3::MmWavePhyMacCommon::HarqDlTimeout  (slots a HARQ process waits
+    //       for feedback before the scheduler force-recycles it; default 20)
+    //   ns3::MmWavePhyMacCommon::NumHarqProcess (stop-and-wait process pool
+    //       per UE; default 20)
+    // Both defaults assume a terrestrial feedback round trip of a few slots.
+    //
+    // Math (documented per the audit):
+    //   * one-way propagation at LEO-600 zenith = 600 km / c ~= 2.0 ms
+    //     (~2.2 ms including payload processing); RTT = 2 * slant / c, which
+    //     grows to ~12.9 ms at 10 deg elevation (slant ~1932 km).
+    //   * one HARQ round = RTT + ~1 ms gNB/UE processing budget
+    //     (TbDecodeLatency 100 us + L1L2 latency + scheduling).
+    //   * budget 4 HARQ rounds (initial TX + 3 retransmissions), so a process
+    //     must survive 4 * (2 * slant / c + 1 ms) before being recycled.
+    //   * the process pool must cover at least one feedback RTT worth of
+    //     slots so the stop-and-wait pipe stays full while feedback is in
+    //     flight: NumHarqProcess >= ceil(RTT / slot) + margin.
+    //   * slot = 0.25 ms (mmwave default numerology 2: 14 symbols, 60 kHz
+    //     SCS, 4 slots per 1 ms subframe).
+    // Both attributes are uint8_t, so values clamp at 255 (covers slants up
+    // to ~2200 km for the 4-round budget, i.e. a LEO-600 pass down to
+    // ~8 deg elevation).
+    constexpr double kC = 299792458.0;
+    constexpr double kSlotS = 250e-6;   // numerology-2 slot
+    constexpr double kProcS = 1e-3;     // per-round processing budget
+    constexpr double kHarqRounds = 4.0; // initial TX + 3 retx
+
+    double slantM = 0.0;
+    for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
+    {
+        Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
+        for (uint32_t u = 0; u < m_ue.GetN(); ++u)
+        {
+            Ptr<MobilityModel> um = m_ue.Get(u)->GetObject<MobilityModel>();
+            if (gm && um)
+            {
+                slantM = std::max(slantM, gm->GetDistanceFrom(um));
+            }
+        }
+    }
+    if (slantM <= 0.0)
+    {
+        slantM = 600e3; // no usable geometry: assume LEO-600 zenith
+    }
+    const double rttS = 2.0 * slantM / kC;
+    const double roundS = rttS + kProcS;
+    const double timeoutSlotsExact = kHarqRounds * roundS / kSlotS;
+    const auto timeoutSlots = static_cast<uint64_t>(
+        std::min(255.0, std::ceil(timeoutSlotsExact)));
+    const auto numProc = static_cast<uint64_t>(std::min(
+        255.0, std::max(20.0, std::ceil(rttS / kSlotS) + kHarqRounds)));
+    if (timeoutSlotsExact > 255.0)
+    {
+        NS_LOG_WARN("NTN HARQ profile: slant " << slantM / 1e3
+                                               << " km needs more than 255 slots for "
+                                               << kHarqRounds
+                                               << " HARQ rounds; clamping HarqDlTimeout to 255");
+    }
+    Config::SetDefault("ns3::MmWavePhyMacCommon::HarqDlTimeout", UintegerValue(timeoutSlots));
+    Config::SetDefault("ns3::MmWavePhyMacCommon::NumHarqProcess", UintegerValue(numProc));
+    NS_LOG_INFO("NTN HARQ profile: slant=" << slantM / 1e3 << " km rtt=" << rttS * 1e3
+                                           << " ms -> HarqDlTimeout=" << timeoutSlots
+                                           << " slots, NumHarqProcess=" << numProc);
+}
+
+void
 NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
 {
     NS_ABORT_MSG_IF(m_built, "NtnRealStackHelper::Build() called twice");
@@ -68,6 +151,10 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
     Config::SetDefault("ns3::MmWaveHelper::RlcAmEnabled", BooleanValue(m_rlcAm));
     Config::SetDefault("ns3::MmWaveHelper::HarqEnabled", BooleanValue(m_harq));
     Config::SetDefault("ns3::MmWaveFlexTtiMacScheduler::HarqEnabled", BooleanValue(m_harq));
+    if (m_ntnHarqProfile)
+    {
+        ConfigureNtnHarqProfile();
+    }
 
     m_mmwave = CreateObject<MmWaveHelper>();
     m_mmwave->SetSchedulerType("ns3::MmWaveFlexTtiMacScheduler");
@@ -216,6 +303,12 @@ NtnRealStackHelper::InstallTraffic(TrafficProfile profile, Time start, Time stop
         }
     }
 
+    // Pick up the uplink clients (added after each InstallOranFlow call) too.
+    if (m_oranMonitor && m_autoAttachMonitor)
+    {
+        AttachInstalledFlowsToMonitor();
+    }
+
     m_serverApps.Start(Seconds(0.0));
     m_serverApps.Stop(m_simTime);
     m_clientApps.Start(start);
@@ -286,7 +379,13 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
         client->SetAttribute("PacketSize", UintegerValue(1400));
         break;
     }
-    client->SetFlowIdentity(fiveQi, sst, sd, /*srcId=*/dlPort, /*dstId=*/ueIdx);
+    // srcId is a helper-scoped monotonically increasing flow counter, NOT the
+    // recycled DL port number (audit issue 15): port allocation restarts at
+    // 1234 per helper/run, so port-derived srcIds could collide across
+    // scenarios in any tooling that merges flow keys. dstId stays the UE
+    // index. The UDP port allocation itself is unchanged.
+    const uint16_t srcId = ++m_flowSeq;
+    client->SetFlowIdentity(fiveQi, sst, sd, srcId, /*dstId=*/ueIdx);
     m_remoteHost->AddApplication(client);
     m_clientApps.Add(client);
     client->TraceConnectWithoutContext("Tx",
@@ -296,6 +395,12 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
     sink->SetStopTime(m_simTime);
     client->SetStartTime(start);
     client->SetStopTime(stop);
+
+    // Flows installed after EnableAiFlowMonitor() attach automatically.
+    if (m_oranMonitor && m_autoAttachMonitor)
+    {
+        AttachInstalledFlowsToMonitor();
+    }
 
     ApplicationContainer apps;
     apps.Add(client);
@@ -343,19 +448,22 @@ NtnRealStackHelper::SetFeederGeometry(Ptr<MobilityModel> satMobility,
     m_backhaulCh->SetAttribute("Delay", TimeValue(ComputePayloadExtraDelay(slantM)));
 }
 
-Ptr<NtnOranAiFlowMonitor>
-NtnRealStackHelper::EnableOranFlowMonitor()
+void
+NtnRealStackHelper::EnsureOranMonitor()
 {
-    NS_ABORT_MSG_IF(!m_built, "EnableOranFlowMonitor before Build()");
-    NS_ABORT_MSG_IF(m_dlSinks.GetN() == 0,
-                    "EnableOranFlowMonitor before InstallTraffic/InstallOranFlow");
     if (m_oranMonitor)
     {
-        return m_oranMonitor;
+        return;
     }
     m_oranMonitor = CreateObject<NtnOranAiFlowMonitor>();
     m_oranMonitor->SetPhySource(this);
-    for (uint32_t i = 0; i < m_clientApps.GetN(); ++i)
+    m_oranMonitor->Start();
+}
+
+void
+NtnRealStackHelper::AttachInstalledFlowsToMonitor()
+{
+    for (uint32_t i = m_monAttachedClients; i < m_clientApps.GetN(); ++i)
     {
         Ptr<NtnOranApplication> app = DynamicCast<NtnOranApplication>(m_clientApps.Get(i));
         if (app)
@@ -363,7 +471,8 @@ NtnRealStackHelper::EnableOranFlowMonitor()
             m_oranMonitor->AddSource(app);
         }
     }
-    for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
+    m_monAttachedClients = m_clientApps.GetN();
+    for (uint32_t i = m_monAttachedSinks; i < m_dlSinks.GetN(); ++i)
     {
         Ptr<NtnOranSink> sink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
         if (sink)
@@ -374,8 +483,63 @@ NtnRealStackHelper::EnableOranFlowMonitor()
             m_oranMonitor->AddSink(sink, ue);
         }
     }
-    m_oranMonitor->Start();
+    m_monAttachedSinks = m_dlSinks.GetN();
+}
+
+Ptr<NtnOranAiFlowMonitor>
+NtnRealStackHelper::EnableOranFlowMonitor()
+{
+    NS_ABORT_MSG_IF(!m_built, "EnableOranFlowMonitor before Build()");
+    NS_ABORT_MSG_IF(m_dlSinks.GetN() == 0,
+                    "EnableOranFlowMonitor before InstallTraffic/InstallOranFlow");
+    EnsureOranMonitor();
+    AttachInstalledFlowsToMonitor();
     return m_oranMonitor;
+}
+
+void
+NtnRealStackHelper::EnableAiFlowMonitor(const std::string& outputPrefix)
+{
+    NS_ABORT_MSG_IF(!m_built, "EnableAiFlowMonitor before Build()");
+    EnsureOranMonitor();
+    // Attach everything installed so far; later InstallTraffic/InstallOranFlow
+    // calls auto-attach via this flag.
+    m_autoAttachMonitor = true;
+    AttachInstalledFlowsToMonitor();
+    m_aiMonitorPrefix = outputPrefix;
+    if (!m_aiExportScheduled)
+    {
+        // Same export mechanics as the reference wiring (ntn-oran-qos-flows
+        // used to call WriteCsv/WriteInfluxLp after Simulator::Run()):
+        // ScheduleDestroy fires inside Simulator::Destroy(), after the last
+        // granularity tick, while the helper is still alive in main().
+        Simulator::ScheduleDestroy(&NtnRealStackHelper::ExportAiFlowMonitor, this);
+        m_aiExportScheduled = true;
+    }
+}
+
+Ptr<NtnOranAiFlowMonitor>
+NtnRealStackHelper::GetAiFlowMonitor() const
+{
+    return m_oranMonitor;
+}
+
+void
+NtnRealStackHelper::ExportAiFlowMonitor()
+{
+    if (!m_oranMonitor || m_aiMonitorPrefix.empty())
+    {
+        return;
+    }
+    const std::filesystem::path prefix(m_aiMonitorPrefix);
+    if (prefix.has_parent_path())
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(prefix.parent_path(), ec);
+    }
+    m_oranMonitor->WriteCsv(m_aiMonitorPrefix + "_kpm_series.csv");
+    m_oranMonitor->WriteInfluxLp(m_aiMonitorPrefix + "_kpm_series.lp");
+    NS_LOG_INFO("KPM series exported to " << m_aiMonitorPrefix << "_kpm_series.{csv,lp}");
 }
 
 void

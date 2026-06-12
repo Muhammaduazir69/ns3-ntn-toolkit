@@ -25,7 +25,9 @@ Documentation refreshed to match the v2 toolkit release; the FastAPI service (`/
 
 ## Why this module
 
-A simulator that mirrors a real LEO constellation in near-real time stops being a script and starts being a live operations tool. Researchers building handover-prediction or beam-scheduling systems want to ask the questions an operator would: "where is OneWeb-0512 right now? what handover should UE-X expect in the next 10 minutes? show me the constellation with the same TLE my downstream service is using." `ntn-digital-twin` makes that loop concrete: a small refresher pulls fresh TLEs every few minutes from CelesTrak, propagates state, and emits CZML for the existing CesiumJS viewer plus InfluxDB line-protocol for the dashboards. A FastAPI service answers `/predict/handover` queries with closed-form ECEF→ENU geometry on the hot path, hitting a p99 of 29.9 ms over 100 calls — sixteen times faster than the 500 ms gate that defines a usable interactive system.
+**Scope (read this first):** `ntn-digital-twin` is a **standalone live-constellation mirror**. It consumes live CelesTrak TLEs and serves REST/CZML from them; it does **not** consume ns-3 simulation output. Feeding simulator runs into the twin (sim-state mirroring) is on the roadmap, not in this release.
+
+Researchers building handover-prediction or beam-scheduling systems want to ask the questions an operator would: "where is OneWeb-0512 right now? what handover should UE-X expect in the next 10 minutes? show me the constellation with the same TLE my downstream service is using." `ntn-digital-twin` makes that loop concrete: a small refresher pulls fresh TLEs every few minutes from CelesTrak, propagates state, and emits CZML for the existing CesiumJS viewer plus InfluxDB line-protocol for the dashboards. A FastAPI service answers `/predict/handover` queries with closed-form ECEF→ENU geometry on the hot path, hitting a p99 of 29.9 ms over 100 calls — sixteen times faster than the 500 ms gate that defines a usable interactive system.
 
 ## At a glance
 

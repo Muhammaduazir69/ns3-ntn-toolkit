@@ -9,6 +9,12 @@
  * Demonstrates a single LEO satellite (550 km) to ground terminal link
  * at 225 GHz using the TeraLink preset.  Computes link budget at various
  * elevation angles and prints a detailed results table.
+ *
+ * Analysis-only example: parametric link-budget sweep plus a pass time
+ * series, no measured radio. The elevation-sweep table is parametric by
+ * design; the per-second pass time series is driven by a REAL SGP4 Walker
+ * element (zenith at t=0, receding with genuine orbital dynamics) projected
+ * into the local ENU frame — not the old triangular elevation profile.
  */
 
 #include <ns3/command-line.h>
@@ -23,6 +29,9 @@
 #include <iostream>
 
 #include "ns3/ntn-realistic-traffic-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 
 // Forward declarations of THz-NTN classes
 namespace ns3
@@ -119,9 +128,28 @@ main(int argc, char* argv[])
     NodeContainer gtNodes;
     gtNodes.Create(1);
 
-    // ---- Set up mobility: satellite at altitude, ground at origin ----
-    Ptr<ConstantPositionMobilityModel> satMob = CreateObject<ConstantPositionMobilityModel>();
-    satMob->SetPosition(Vector(0.0, 0.0, altitude * 1000.0));
+    // ---- Set up mobility: REAL SGP4 orbit, ground at origin ----
+    // The serving Walker element is at zenith at t=0 and recedes with genuine
+    // orbital dynamics, projected into the local ENU frame at its sub-point.
+    // Sanity: in ECEF |position| = Re + altitude (~6921 km for 550 km), so at
+    // t=0 the ENU position is ~altitude*1000 m straight "up".
+    ns3::ntncon::WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 80;
+    wcfg.altitude_km = altitude;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0;
+    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(satElements[0]);
+    double subLat;
+    double subLon;
+    double subAlt;
+    satSgp4->GetGeodetic(subLat, subLon, subAlt);
+    Ptr<NtnEnuProjectionMobilityModel> satMob = CreateObject<NtnEnuProjectionMobilityModel>();
+    satMob->SetSource(satSgp4);
+    satMob->SetReference(subLat, subLon, 0.0);
     satNodes.Get(0)->AggregateObject(satMob);
 
     Ptr<ConstantPositionMobilityModel> gtMob = CreateObject<ConstantPositionMobilityModel>();
@@ -271,11 +299,18 @@ main(int argc, char* argv[])
 
     traffic.RegisterPeriodicCallback(Seconds(1.0), [&](Time nowT) {
         double t = nowT.GetSeconds();
-        // Simulate a single LEO pass: triangular elevation profile peaking
-        // at simTime/2.  Floor at 5 deg to keep the link budget defined.
-        double phase = std::min(t, simTime - t) / (simTime / 2.0);
-        double elev = std::max(5.0, 5.0 + 85.0 * phase);
-        double range_m = ComputeSlantRange(elev, altitude);
+        // REAL LEO pass: elevation and slant range from the live SGP4 (ENU)
+        // geometry.  The budget input is floored at 5 deg elevation to keep
+        // the atmospheric models defined near the horizon.
+        const Vector g = gtMob->GetPosition();
+        const Vector s = satMob->GetPosition();
+        const double dx = s.x - g.x;
+        const double dy = s.y - g.y;
+        const double dz = s.z - g.z;
+        const double horiz = std::max(std::sqrt(dx * dx + dy * dy), 1e-3);
+        double elev = std::atan2(dz, horiz) * 180.0 / M_PI;
+        double range_m = std::sqrt(dx * dx + dy * dy + dz * dz);
+        elev = std::max(5.0, elev);
         auto r = linkBudget->ComputeLinkBudget(ThzNtnLinkBudget::SAT_TO_GROUND,
             freq, range_m, elev, txPower, txGain, rxGain, bandwidth, noiseFigure);
         passCsv << std::fixed << std::setprecision(2)

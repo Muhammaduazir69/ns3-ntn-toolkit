@@ -44,6 +44,10 @@ class OranNtnSatBridge;
  *
  * Accounts for satellite-specific geometry: wide beams, elevation-dependent
  * steering, Doppler-induced beam squint, and LEO orbital motion.
+ *
+ * \warning Experimental: not yet exercised by any example or test; API may
+ *          change. The real-stack examples use the in-tree mmwave default
+ *          beamforming instead.
  */
 class OranNtnMmWaveBeamforming : public mmwave::MmWaveBeamformingModel
 {

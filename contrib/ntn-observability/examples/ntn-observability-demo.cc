@@ -27,6 +27,7 @@
 #include "ns3/ntn-timing-advance.h"
 #include "ns3/ntn-ue-location-report.h"
 
+#include <cmath>
 #include <cstdio>
 #include <iostream>
 
@@ -98,22 +99,34 @@ SampleEverySecond(Wiring* w)
         w->sink->Push(p);
     }
     // MEASURED radio KPIs from the real mmwave NR cell (phy-trace provenance):
-    // the dashboard now shows the genuine link, not a synthetic curve.
+    // the dashboard now shows the genuine link, not a synthetic curve. The
+    // radio point is only exported when a measured SINR sample exists — no
+    // heuristic fallback values masquerade as measurements. RSRP is derived
+    // from the cell's actual configuration: this is a single-cell,
+    // noise-limited link, so SINR == SNR and the received signal power is
+    //   RSRP [dBm] = SINR [dB] + noise floor [dBm]
+    //   noise floor = -174 dBm/Hz + NF + 10 log10(BW)
+    // with BW read from the helper's configured carrier bandwidth and NF the
+    // mmwave UE PHY default (5 dB; the helper leaves it untouched).
     const double measSinr = w->rs ? w->rs->GetUeRecentSinrDb(0) : std::nan("");
-    const double measRsrp = std::isnan(measSinr) ? -120.0 : measSinr - 95.0;
+    if (!std::isnan(measSinr))
     {
+        constexpr double kUeNoiseFigureDb = 5.0; // ns3::MmWaveUePhy::NoiseFigure default
+        const double bwHz = w->rs->GetBandwidthHz();
+        const double noiseFloorDbm = -174.0 + kUeNoiseFigureDb + 10.0 * std::log10(bwHz);
+        const double measRsrp = measSinr + noiseFloorDbm;
         Point p;
         p.measurement = measurement::kRadio;
         p.tags[tag::kRunId] = w->runId;
         p.tags[tag::kCellId] = "C-1";
         p.tags[tag::kUeImsi] = "100001";
         p.fieldsFloat[field::kRsrpDbm] = measRsrp;
-        p.fieldsFloat[field::kSinrDb] = std::isnan(measSinr) ? -30.0 : measSinr;
+        p.fieldsFloat[field::kSinrDb] = measSinr;
         w->sink->Push(p);
+        w->netSim->SampleSeries(w->rsrpSeriesIdx, now, measRsrp);
     }
     w->netSim->SampleSeries(w->taSeriesIdx, now,
                             w->ta->ComputeTotalTa().GetMicroSeconds());
-    w->netSim->SampleSeries(w->rsrpSeriesIdx, now, measRsrp);
 
     Simulator::Schedule(Seconds(1.0), &SampleEverySecond, w);
 }

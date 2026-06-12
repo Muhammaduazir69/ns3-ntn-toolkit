@@ -37,6 +37,8 @@ enum class IslMessageType : uint8_t
 /**
  * \ingroup oran-ntn
  * \brief Header for ISL messages between Space RICs
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnIslHeader : public Header
 {

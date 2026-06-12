@@ -42,6 +42,9 @@ class OranNtnSatBridge;
 /**
  * \ingroup oran-ntn
  * \brief NTN-aware MAC scheduler extending mmWave FlexTTI
+ *
+ * \note Currently exercised by unit tests only; the real-stack examples run
+ *       the stock mmwave FlexTTI scheduler.
  */
 class OranNtnScheduler : public mmwave::MmWaveFlexTtiMacScheduler
 {

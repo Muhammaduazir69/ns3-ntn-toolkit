@@ -20,6 +20,9 @@
 //   3GPP TS 38.331 §5.3.5.13.4        (DAPS-HO)
 //   First 5G-Advanced NR-NTN CHO demo, ESA/Eutelsat/Airbus/MediaTek Nov 2025
 //     https://connectivity.esa.int/news/esa-eutelsat-airbus-mediatek-and-partners-successfully-test-5gadvanced-nrntn-connection-over-oneweb-leo-satellites-conditional-handover
+//
+// NOTE: these Style 3 shapes are currently exercised by unit tests only
+// (converter + shape round-trips); no example issues Style 3 controls yet.
 
 #include "oran-ntn-types.h"
 

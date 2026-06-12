@@ -12,6 +12,13 @@
  * (~120 ms one-way) for GEO-served ones — so the URLLC GEO-skip decision is
  * validated against real physics, not a hardcoded 250 ms constant.
  *
+ * Provenance note: the per-slice KPI sample stream fed to the isolation
+ * monitor is synthesized at 5 samples/s/slice FROM the measured cell TBLER
+ * plus the orchestrator's own PRB-starvation ratio (so the allocation
+ * decision acts on the per-slice KPIs); packet-level slice CONTENTION on one
+ * shared real cell is covered by ntn-slice-isolation-traffic and
+ * ntn-slice-real-stack.
+ *
  * Demonstrates W2 (RRC) -> W4 (RL env API) -> W6 (orchestrator) -> W3
  * (observability) integration; same (observation, action) shape as SliceEnv.
  */
@@ -93,6 +100,7 @@ main(int argc, char* argv[])
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
+    rs.EnableAiFlowMonitor("ntn-three-slice-leo-geo"); // WS2 KPM series (TS 28.552 names)
 
     auto stack = NtnSliceHelper::ThreeSliceDefault();
     stack.orchestrator->SetTotalPrb(totalPrb);

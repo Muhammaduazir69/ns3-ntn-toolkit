@@ -129,6 +129,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("thz-ntn-isl-traffic");
 
     // The module's analytic ISL budget, evaluated on the SAME live geometry,
     // printed beside the measured SINR (formula vs measurement).

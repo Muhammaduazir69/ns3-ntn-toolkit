@@ -188,6 +188,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));
+    rs.EnableAiFlowMonitor("ntn-sionna-cir-real-stack"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 
     Simulator::Schedule(Seconds(1.0), &SampleSinr);

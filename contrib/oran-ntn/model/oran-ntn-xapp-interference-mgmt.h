@@ -36,6 +36,8 @@ class OranNtnSatBridge;
 /**
  * \ingroup oran-ntn
  * \brief Interference Management xApp for NTN
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnXappInterferenceMgmt : public OranNtnXappBase
 {

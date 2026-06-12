@@ -230,6 +230,7 @@ main(int argc, char* argv[])
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("ntn-fapi-leo-pass-slotloop"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
     g_rng = CreateObject<UniformRandomVariable>();
 

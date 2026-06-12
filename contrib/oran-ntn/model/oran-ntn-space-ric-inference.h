@@ -39,6 +39,9 @@ namespace ns3
 /**
  * \ingroup oran-ntn
  * \brief On-board inference engine for Space RIC
+ *
+ * \note Consumed internally by OranNtnSpaceRic (so it runs in every Space-RIC
+ *       example); also covered directly by unit tests.
  */
 class OranNtnSpaceRicInference : public Object
 {

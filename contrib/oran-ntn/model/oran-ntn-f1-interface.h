@@ -63,6 +63,8 @@ struct F1apMessage
 /**
  * \ingroup oran-ntn
  * \brief F1AP-lite interface between CU and DU.
+ *
+ * \note Currently exercised by unit tests only (via OranNtnSplitGnbHelper).
  */
 class OranNtnF1Interface : public Object
 {

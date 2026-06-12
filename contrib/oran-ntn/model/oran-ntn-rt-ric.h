@@ -28,6 +28,13 @@
 namespace ns3
 {
 
+/**
+ * \ingroup oran-ntn
+ * \brief Real-time RIC tier (<10 ms loop) co-located with the on-board O-DU.
+ *
+ * \note Currently exercised by unit tests only (oran-ntn-multi-tier-ric
+ *       suite); no example wires an RT-RIC loop yet.
+ */
 class OranNtnRtRic : public Object
 {
   public:

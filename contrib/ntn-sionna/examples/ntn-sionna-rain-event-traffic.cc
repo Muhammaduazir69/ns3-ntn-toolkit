@@ -130,6 +130,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("ntn-sionna-rain-event-traffic"); // WS2 KPM series (TS 28.552 names)
 
     // Rain cell schedule: clear → building → peak → clearing → clear,
     // scaled to simSeconds. Each step reconfigures the live channel plug-in.

@@ -103,6 +103,7 @@ main(int argc, char* argv[])
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTime - 0.5));
+    rs.EnableAiFlowMonitor("ntn-cho-leo-basic"); // WS2 KPM series (TS 28.552 names)
 
     Ptr<mmwave::MmWaveEnbNetDevice> enb =
         DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));

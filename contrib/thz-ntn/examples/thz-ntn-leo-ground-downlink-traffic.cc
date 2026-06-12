@@ -137,6 +137,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("thz-ntn-leo-ground-downlink-traffic");
 
     std::printf("# %5s  %7s  %9s  %8s  %8s  %8s  %9s\n",
                 "t_s", "elev", "slant_km", "molAbs", "sinr_dB", "tbler", "goodput");

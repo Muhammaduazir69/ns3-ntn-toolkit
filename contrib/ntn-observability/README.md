@@ -41,7 +41,9 @@ See the [CHANGELOG](CHANGELOG.md) for the full history.
 - New **`ntn-repro-manifest` model** (`NtnReproManifest`) — a reproducibility manifest that records git SHA, ns-3 version, scenario, TLE epoch, constellation, Sionna / HITRAN / ITU versions, service models, CLI argv and extras, with `WriteJson()` / `LoadJson()` round-tripping.
 - **Both examples now observe a measured radio.** Each builds a real mmwave NR NTN cell (`NtnRealStackHelper` from `ntn-traffic`: SpectrumPhy + MAC + RLC/PDCP + RRC + EPC) on a real SGP4 Walker satellite pass. The exported SINR / TBLER come from the mmwave PHY trace, goodput from the UE sink's byte counter, elevation and slant range from live SGP4 geometry — the dashboard observes a genuine link, not a synthetic curve.
 - **Traffic is `NtnOranApplication` QoS flows** (`ntn-traffic`), not `OnOffApplication`: every packet carries a real 24-byte in-band payload header (5QI / S-NSSAI / QFI / sequence number / TX timestamp), so the goodput the sinks report is a real application-layer measurement.
-- **Interop:** `ntn-traffic`'s `NtnOranAiFlowMonitor` exports per-flow KPIs under official 3GPP TS 28.552 / O-RAN E2SM-KPM metric names as CSV, FlowMonitor-style XML or InfluxDB line protocol (measurement `ntn_oran_kpm`); those `.lp` files ingest through the same Docker stack and Grafana data source as this module's sinks.
+- **Interop:** `ntn-traffic`'s `NtnOranAiFlowMonitor` exports per-flow KPIs under official 3GPP TS 28.552 / O-RAN E2SM-KPM metric names as CSV, FlowMonitor-style XML or InfluxDB line protocol (measurement `ntn_oran_kpm`); those `.lp` files ingest through the same Docker stack and Grafana data source as this module's sinks. The **canonical wiring is `NtnRealStackHelper::EnableAiFlowMonitor(outputPrefix)`** — one call that attaches the monitor to every helper-installed flow and auto-exports `<outputPrefix>_kpm_series.csv` / `.lp` at end of simulation; `ntn-observability-traffic` uses it.
+- **Bounded buffering:** `NtnInfluxSink` caps its in-memory buffer via the `MaxBufferPoints` attribute (default 1,000,000 points); when exceeded the oldest points are dropped (warned once, counted via `GetDroppedPoints()`), so long runs without flushes degrade gracefully instead of exhausting RAM.
+- **Honest RSRP:** `ntn-observability-demo` exports the `radio` measurement only when a measured SINR sample exists, deriving RSRP from the cell's configured noise floor (`-174 dBm/Hz + NF + 10 log10(BW)`) instead of the old `SINR - 95` heuristic / `-120 dBm` fallback.
 
 ## Models, helpers & key classes
 
@@ -94,7 +96,7 @@ LD_LIBRARY_PATH=build/lib \
   --simSeconds=40 --out=/tmp/ntn-obs.lp
 ```
 
-Outputs: InfluxDB line-protocol file at `--out` (default `ntn-observability-traffic.lp`) carrying the measured KPIs — optionally streamed over UDP to `--influxHost:--influxPort` instead of a file — plus a per-second console table and `sim_health.csv` in `--outputDir` (default `ntn-observability-traffic-output`).
+Outputs: InfluxDB line-protocol file at `--out` (default `ntn-observability-traffic.lp`) carrying the measured KPIs — optionally streamed over UDP to `--influxHost:--influxPort` instead of a file — plus per-flow KPM series `ntn-observability-traffic_kpm_series.csv` / `.lp` (auto-exported by `EnableAiFlowMonitor`), a per-second console table and `sim_health.csv` in `--outputDir` (default `ntn-observability-traffic-output`).
 
 Key args: `--simSeconds` (sim duration, s; default 40) · `--leoAltKm` (satellite altitude, km; default 550) · `--freqGHz` (carrier frequency, GHz; default 12, Ku-band) · `--satEirpDbm` (satellite EIRP / gNB Tx power, dBm) · `--out` (line-protocol output file) · `--influxHost` (InfluxDB/Telegraf UDP host; empty = file) · `--influxPort` (InfluxDB/Telegraf UDP port) · `--outputDir` (output directory for `sim_health.csv`).
 

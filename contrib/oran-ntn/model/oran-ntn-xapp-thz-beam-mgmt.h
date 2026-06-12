@@ -32,6 +32,9 @@ namespace ns3
 /**
  * \ingroup oran-ntn
  * \brief THz Beam Management xApp for NTN pencil-beam tracking
+ *
+ * \warning Experimental: not yet exercised by any example or test; API may
+ *          change.
  */
 class OranNtnXappThzBeamMgmt : public OranNtnXappBase
 {

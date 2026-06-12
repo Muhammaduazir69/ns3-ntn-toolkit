@@ -126,3 +126,5 @@ protocol_fidelity_report.md
 /*-out/
 /ntn-oran-monitor-test.*
 /ntn-observability-traffic.lp
+*_kpm_series.csv
+*_kpm_series.lp

@@ -138,6 +138,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("ntn-sionna-composed-channel-traffic"); // WS2 KPM series (TS 28.552 names)
 
     std::printf("# %5s  %8s  %9s  %8s  %8s  %9s\n",
                 "t_s", "ituDb", "oranRxDbm", "sinr_dB", "tbler", "goodput");

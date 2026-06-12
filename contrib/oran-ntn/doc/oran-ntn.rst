@@ -109,18 +109,25 @@ Scope and limitations
 Examples
 ~~~~~~~~
 
-* ``oran-ntn-full-scenario`` — 66-satellite Walker constellation,
-  5 live xApps, real UDP traffic plane, feeder-outage windows with
-  autonomous Space-RIC decisions; writes ``action_log.csv``,
-  ``xapp_metrics.csv``, ``space_ric_metrics.csv``,
-  ``conflict_log.csv``, ``kpm_dataset.csv``, ``kpm_canonical.csv``,
-  ``ric_metrics.txt``, ``sim_health.csv``.
+* ``oran-ntn-full-scenario`` — 66-satellite Walker constellation on
+  real SGP4 mobility (per-UE serving selection by live max-elevation);
+  the first ``--numRealCells`` satellites carry a real measured mmwave
+  cell (provenance ``phy-trace``) while scale-out UEs use a
+  TR 38.821-style budget over the same live geometry (provenance
+  ``geometry-budget``); 5 live xApps, feeder-outage windows with
+  autonomous Space-RIC decisions; writes ``kpm_feed.csv`` (per-row
+  provenance), ``action_log.csv``, ``xapp_metrics.csv``,
+  ``space_ric_metrics.csv``, ``conflict_log.csv``,
+  ``kpm_dataset.csv``, ``kpm_canonical.csv``, ``ric_metrics.txt``,
+  ``sim_health.csv``.
 * ``oran-ntn-real-stack-scenario`` — the Near-RT RIC driven by KPM
   built from the measured per-UE SINR/TBLER of a real mmwave NR NTN
   cell on SGP4 orbits with TR 38.811 UE mobility.
 * ``oran-ntn-ric-controlled-traffic`` — closed RIC loop: E2-KPM →
-  mMIMO precoder xApp → beam gain → delivered goodput on a real UDP
-  flow.
+  mMIMO precoder xApp → E2SM-RC ``BEAM_SWITCH`` via
+  ``ReceiveRcAction()`` (one feeder delay per direction, indications
+  aligned to the 100 ms RIC tick) → beam gain → delivered goodput on
+  a real measured mmwave flow.
 * ``ntn-e2e-full-stack`` — one shared real cell simultaneously feeds
   the Near-RT RIC, the ``ntn-slice`` SLA monitor, and a measured-KPI
   observability CSV.

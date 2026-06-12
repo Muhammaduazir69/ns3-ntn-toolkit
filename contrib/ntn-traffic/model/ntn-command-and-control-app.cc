@@ -102,6 +102,13 @@ void
 NtnCommandAndControlApp::StartApplication()
 {
     m_startTime = Simulator::Now();
+    if (m_powerDrawW > 0.0 && m_batteryCapacityWh <= 0.0)
+    {
+        NS_LOG_WARN("NtnCommandAndControlApp: PowerDrawW="
+                    << m_powerDrawW << " W but BatteryCapacityWh is 0 (no energy "
+                    "source configured) - telemetry will report a constant 100% "
+                    "battery");
+    }
     if (!m_socket)
     {
         m_socket = Socket::CreateSocket(GetNode(), UdpSocketFactory::GetTypeId());

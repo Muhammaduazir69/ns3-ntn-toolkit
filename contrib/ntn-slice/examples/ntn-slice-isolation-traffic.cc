@@ -89,6 +89,7 @@ main(int argc, char* argv[])
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("ntn-slice-isolation-traffic"); // WS2 KPM series (TS 28.552 names)
 
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
@@ -109,6 +110,13 @@ main(int argc, char* argv[])
     const Vector sp = servSat->GetPosition();
     for (uint32_t u = 0; u < numUes; ++u)
     {
+        // Deployment assumption (declared, not discovered): terminals are
+        // provisioned round-robin across the three slice profiles — UE 3k is
+        // a broadband terminal (eMBB), 3k+1 a control unit (URLLC), 3k+2 a
+        // sensor (mMTC) — matching the MixedBouquet per-UE traffic profiles.
+        // In a real network the S-NSSAI comes from subscription data; a
+        // DSCP/QFI classifier (NtnSliceSelector) is exercised in
+        // ntn-slice-real-stack.
         const uint32_t s = u % 3;
         const uint64_t rxBytes = rs.GetUeRxBytes(u);
         const double sinr = rs.GetUeMeanSinrDb(u);

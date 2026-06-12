@@ -133,8 +133,9 @@ main(int argc, char* argv[])
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("tteMinSec", "Minimum TTE for CHO admission (s)", tteMinSec);
     cmd.AddValue("trigger",
-                 "Handover trigger: tte-aware|ltm|pcho|a3|d1|t1|elevation|ta "
-                 "(a3/d1/t1/elevation/ta = the five 3GPP NTN trigger classes)",
+                 "Handover trigger: tte-aware|ltm|pcho|a3|d1|t1|d2|elevation|ta "
+                 "(a3/d1/t1 = Rel-17 CondEvents, d2 = Rel-18 CondEventD2, "
+                 "elevation/ta = TR 38.821-studied mechanisms)",
                  trigger);
     cmd.AddValue("rachLess", "RACH-less execution (ephemeris TA pre-comp)", rachLess);
     cmd.AddValue("satsPerPlane", "Walker in-plane satellites (spacing)", satsPerPlane);
@@ -202,6 +203,7 @@ main(int argc, char* argv[])
     rs.Build(servSat, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("ntn-cho-handover-traffic"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 
     // ---- CHO algorithm + mechanism ----
@@ -239,6 +241,17 @@ main(int argc, char* argv[])
     else if (trigger == "ta") // class 5: timing-advance-based
     {
         cfg.triggerType = NtnChoAlgorithm::TRIGGER_TIMING_ADVANCE;
+    }
+    else if (trigger == "d2") // Rel-18 CondEventD2: moving reference locations
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_DISTANCE_D2;
+        // Scenario-tuned thresholds (set per cell pair by the network in a
+        // real deployment): the serving moving reference must have receded
+        // 250 km from the UE (the serving sub-point starts at zenith and
+        // recedes at the ~7.6 km/s ground-track speed), while the candidate
+        // moving reference must be within 2000 km.
+        cfg.d2Thresh1_m = 250e3;
+        cfg.d2Thresh2_m = 2000e3;
     }
     else
     {

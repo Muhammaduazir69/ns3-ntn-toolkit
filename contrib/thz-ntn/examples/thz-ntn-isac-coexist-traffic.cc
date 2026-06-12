@@ -201,6 +201,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("thz-ntn-isac-coexist-traffic");
 
     // Step the ISAC mode across the sim: comm share shrinks over time.
     const IsacMode seq[] = {COMMUNICATION_ONLY, COMMUNICATION_CENTRIC, JOINT_ISAC,

@@ -114,6 +114,8 @@ struct Sib19NtnConfig
  * RIC Function ID 1001 (toolkit-reserved 1000+ range). Encodes
  * Sib19NtnConfig as an E2 Indication so xApps can subscribe to NTN
  * ephemeris updates and plan ahead.
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnServiceModelNtnEphemeris : public OranNtnServiceModel
 {

@@ -65,8 +65,10 @@ main(int argc, char* argv[])
     NodeContainer ueNodes;
     ueNodes.Create(4);
 
-    // Real SGP4 orbit projected to the local ENU frame (serving element at
-    // zenith at t=0, receding with genuine dynamics).
+    // Real NTN mobility (mobility mandate, audit issue 11): SGP4 Walker
+    // serving satellite + TR 38.811 UE classes under its t=0 sub-point
+    // (UE+sat share the ECEF frame; the pass is genuine) — the exact pattern
+    // proven in ntn-real-stack-smoke.
     ns3::ntncon::WalkerConfig wcfg;
     wcfg.num_planes = 1;
     wcfg.total_sats = 80;
@@ -77,22 +79,13 @@ main(int argc, char* argv[])
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
     satSgp4->SetElements(elements[0]);
+    satNodes.Get(0)->AggregateObject(satSgp4);
     double subLat, subLon, subAlt;
     satSgp4->GetGeodetic(subLat, subLon, subAlt);
-    Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
-    satEnu->SetSource(satSgp4);
-    satEnu->SetReference(subLat, subLon, 0.0);
-    satNodes.Get(0)->AggregateObject(satEnu);
-
-    MobilityHelper mob;
-    mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
-    uePos->Add(Vector(0.0, 0.0, 1.5));
-    uePos->Add(Vector(2000.0, 0.0, 1.5));
-    uePos->Add(Vector(0.0, 2000.0, 1.5));
-    uePos->Add(Vector(-2000.0, -2000.0, 1.5));
-    mob.SetPositionAllocator(uePos);
-    mob.Install(ueNodes);
+    NtnTr38811MobilityHelper ueMobility(1);
+    auto mobProfile = NtnMobilityScenarios::MixedContinental();
+    ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
+                       subLon - 0.03, subLon + 0.03);
 
     NtnRealStackHelper rs;
     rs.SetSimTime(Seconds(simSeconds));
@@ -147,8 +140,11 @@ main(int argc, char* argv[])
     cnc->SetStopTime(Seconds(simSeconds - 0.5));
 
     // WS2: AI-native KPM measurement layer over all four flows — TS 28.552
-    // metric names, AI feature windows, EWMA anomaly events.
-    Ptr<NtnOranAiFlowMonitor> kpm = rs.EnableOranFlowMonitor();
+    // metric names, AI feature windows, EWMA anomaly events. The canonical
+    // one-call wiring also auto-exports
+    // ntn-oran-qos-flows_kpm_series.{csv,lp} at end of simulation.
+    rs.EnableAiFlowMonitor("ntn-oran-qos-flows");
+    Ptr<NtnOranAiFlowMonitor> kpm = rs.GetAiFlowMonitor();
     kpm->RegisterAnomalyCallback([](const NtnOranAiFlowMonitor::AnomalyEvent& ev) {
         std::printf("  [anomaly] t=%.1f flow=%u 5qi=%u %s=%.4f z=%.1f\n",
                     ev.time.GetSeconds(), ev.flowId, ev.key.fiveQi,
@@ -175,12 +171,12 @@ main(int argc, char* argv[])
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
-    kpm->WriteCsv(outputDir + "/kpm_series.csv");
-    kpm->WriteInfluxLp(outputDir + "/kpm_series.lp");
+    // CSV + Influx LP series export automatically at Simulator::Destroy()
+    // (EnableAiFlowMonitor); only the FlowMonitor XML is written manually.
     kpm->SerializeToXmlFile(outputDir + "/oran_flow_monitor.xml");
-    std::printf("# KPM: %zu flows, anomalies=%zu, series -> %s/kpm_series.csv\n",
-                kpm->GetKpmSeries().size(), kpm->GetAnomalies().size(),
-                outputDir.c_str());
+    std::printf("# KPM: %zu flows, anomalies=%zu, series -> "
+                "ntn-oran-qos-flows_kpm_series.{csv,lp}\n",
+                kpm->GetKpmSeries().size(), kpm->GetAnomalies().size());
 
     std::printf("# === per-flow measured KPIs (in-band, through GTP + radio) ===\n");
     std::printf("# %-8s %5s %9s %10s %10s %9s %9s %10s\n",

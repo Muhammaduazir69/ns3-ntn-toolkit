@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ntn-oran-application.h"
 
+#include "ns3/abort.h"
 #include "ns3/address-utils.h"
 #include "ns3/double.h"
 #include "ns3/enum.h"
@@ -146,6 +147,8 @@ NtnOranApplication::ResolveProfile()
         break;
     case EMBB_VIDEO:
         presetQi = 2;
+        NS_ABORT_MSG_IF(m_frameRate <= 0,
+                        "NtnOranApplication: FrameRate must be > 0 for EmbbVideo");
         presetPeriod = Seconds(1.0 / m_frameRate);
         m_payloadType = NtnOranPayloadHeader::EMBB_VIDEO;
         break;
@@ -231,6 +234,8 @@ NtnOranApplication::ScheduleNext()
         const double bitRate = std::max<double>(m_dataRate.GetBitRate(), 1.0);
         if (m_profile == EMBB_VIDEO)
         {
+            NS_ABORT_MSG_IF(m_frameRate <= 0,
+                            "NtnOranApplication: FrameRate must be > 0 for EmbbVideo");
             m_resolvedPeriod = (m_period.IsZero()) ? Seconds(1.0 / m_frameRate) : m_period;
         }
         else if (m_period.IsZero())
@@ -289,6 +294,10 @@ void
 NtnOranApplication::SendFrameBurst()
 {
     // One video frame = DataRate / FrameRate bits, fragmented at PacketSize.
+    NS_ABORT_MSG_IF(m_frameRate <= 0,
+                    "NtnOranApplication: FrameRate must be > 0 for EmbbVideo");
+    NS_ABORT_MSG_IF(m_dataRate.GetBitRate() == 0,
+                    "NtnOranApplication: DataRate must be > 0 for EmbbVideo");
     uint64_t frameBytes =
         static_cast<uint64_t>(m_dataRate.GetBitRate() / m_frameRate / 8.0);
     frameBytes = std::max<uint64_t>(frameBytes, NtnOranPayloadHeader::SERIALIZED_SIZE + 1);

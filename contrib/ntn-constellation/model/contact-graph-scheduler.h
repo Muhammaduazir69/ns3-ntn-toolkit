@@ -10,8 +10,13 @@
 // Periodically samples link geometry between registered satellites and
 // ground stations and emits up / down events when a link's visibility
 // state changes:
-//   GSL (Ground-Satellite Link): up while sat elevation > MinElevationDeg
-//                                from the ground station's local horizon.
+//   GSL (Ground-Satellite Link): comes up when sat elevation reaches
+//                                MinElevationDeg from the ground station's
+//                                local horizon, and goes down only when it
+//                                falls below MinElevationDeg -
+//                                GateHysteresisDeg (default 2 deg) so the
+//                                contact does not flap while the elevation
+//                                hovers at the threshold.
 //   ISL (Inter-Satellite Link):  up while the Euclidean distance is
 //                                <= MaxIslRangeM (default 5000 km, the
 //                                roadmap's LEO-LEO cap).
@@ -64,6 +69,13 @@ class ContactGraphScheduler : public Object
     double GetMinElevationDeg() const { return m_minElevDeg; }
     double GetMaxIslRangeM() const { return m_maxIslRangeM; }
 
+    /// GSL gate hysteresis (deg): a contact comes UP at MinElevationDeg and
+    /// goes DOWN at MinElevationDeg - hysteresis. Default 2.0 (also exposed
+    /// as the `GateHysteresisDeg` attribute). Set 0 for the legacy
+    /// single-threshold gate.
+    void SetGateHysteresisDeg(double h) { m_gateHysteresisDeg = h; }
+    double GetGateHysteresisDeg() const { return m_gateHysteresisDeg; }
+
     /// Register a satellite. `id` must be unique. The scheduler retains
     /// the pointer; the caller owns the object.
     void RegisterSatellite(uint32_t id, Ptr<Sgp4MobilityModel> sat);
@@ -101,6 +113,7 @@ class ContactGraphScheduler : public Object
 
     Time m_dt{Seconds(1.0)};
     double m_minElevDeg{25.0};
+    double m_gateHysteresisDeg{2.0};
     double m_maxIslRangeM{5'000'000.0};
 
     std::map<uint32_t, Ptr<Sgp4MobilityModel>> m_sats;

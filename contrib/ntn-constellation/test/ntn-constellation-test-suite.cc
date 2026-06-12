@@ -15,7 +15,9 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 using namespace ns3;
@@ -365,6 +367,181 @@ class ContactSchedulerIslPairTest : public TestCase
         NS_TEST_ASSERT_MSG_EQ(cg->IslEventsDown(), 0u,
                               "no ISL down inside 60 s");
         NS_TEST_ASSERT_MSG_EQ(cg->NumActiveIsl(), 1u, "pair is active");
+
+        Simulator::Destroy();
+    }
+};
+
+namespace
+{
+
+void
+RecordContactEvent(std::vector<ContactEvent>* out, ContactEvent ev)
+{
+    out->push_back(ev);
+}
+
+} // namespace
+
+class ContactSchedulerGateHysteresisTest : public TestCase
+{
+  public:
+    ContactSchedulerGateHysteresisTest()
+        : TestCase("ContactGraphScheduler: GateHysteresisDeg gates GSL up at "
+                   "MinElevationDeg and down only below MinElevationDeg - "
+                   "hysteresis (no flapping inside the band)")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // Same fixture as ContactSchedulerLeoPassTest: full 11-sat Walker
+        // plane @ 53° / 550 km over a GS at (53°, 0°). Every sat passes the
+        // GS latitude band, so elevations sweep through the 5° threshold
+        // repeatedly during one orbit window.
+        WalkerConfig cfg;
+        cfg.inclination_deg = 53.0;
+        cfg.total_sats = 11;
+        cfg.num_planes = 1;
+        cfg.phasing_f = 0;
+        cfg.altitude_km = 550.0;
+        cfg.epoch_unix_s = 1577836800.0;
+        auto elts = WalkerConstellation::BuildDelta(cfg);
+        NS_TEST_ASSERT_MSG_EQ(elts.size(), 11u, "11 sats");
+
+        const double minElev = 5.0;
+        const double hyst = 5.0;
+
+        // Two schedulers sampling the SAME Sgp4 models over the SAME pass:
+        // one with the legacy single-threshold gate (hysteresis 0), one with
+        // a 5° hysteresis band.
+        Ptr<ContactGraphScheduler> cgZero =
+            CreateObject<ContactGraphScheduler>();
+        cgZero->SetSamplingInterval(Seconds(10.0));
+        cgZero->SetMinElevationDeg(minElev);
+        cgZero->SetGateHysteresisDeg(0.0);
+
+        Ptr<ContactGraphScheduler> cgHyst =
+            CreateObject<ContactGraphScheduler>();
+        cgHyst->SetSamplingInterval(Seconds(10.0));
+        cgHyst->SetMinElevationDeg(minElev);
+        cgHyst->SetGateHysteresisDeg(hyst);
+        NS_TEST_ASSERT_MSG_EQ_TOL(cgHyst->GetGateHysteresisDeg(), hyst, 1e-12,
+                                  "hysteresis setter round-trips");
+
+        for (size_t i = 0; i < elts.size(); ++i)
+        {
+            Ptr<Sgp4MobilityModel> s = CreateObject<Sgp4MobilityModel>();
+            s->SetElements(elts[i]);
+            cgZero->RegisterSatellite(static_cast<uint32_t>(i + 1), s);
+            cgHyst->RegisterSatellite(static_cast<uint32_t>(i + 1), s);
+        }
+        cgZero->RegisterGroundStation(101, 53.0, 0.0);
+        cgHyst->RegisterGroundStation(101, 53.0, 0.0);
+
+        // Record every transition of the hysteresis scheduler (events carry
+        // the elevation at the transition tick).
+        std::vector<ContactEvent> hystEvents;
+        cgHyst->m_contactUp.ConnectWithoutContext(
+            MakeBoundCallback(&RecordContactEvent, &hystEvents));
+        cgHyst->m_contactDown.ConnectWithoutContext(
+            MakeBoundCallback(&RecordContactEvent, &hystEvents));
+
+        cgZero->Start();
+        cgHyst->Start();
+
+        // One full orbital period ~ 5700 s.
+        Simulator::Stop(Seconds(6000.0));
+        Simulator::Run();
+        cgZero->Stop();
+        cgHyst->Stop();
+
+        // The pass actually crosses the gate.
+        NS_TEST_ASSERT_MSG_GT(cgZero->GslEventsUp(), 0u,
+                              "zero-hysteresis gate sees ≥1 GSL rise");
+        NS_TEST_ASSERT_MSG_GT(cgHyst->GslEventsUp(), 0u,
+                              "hysteresis gate sees ≥1 GSL rise");
+
+        // Hysteresis can only merge contacts, never create extra
+        // transitions over the same tick series.
+        NS_TEST_ASSERT_MSG_LT_OR_EQ(cgHyst->GslEventsUp(),
+                                    cgZero->GslEventsUp(),
+                                    "hysteresis up count <= zero-hyst");
+        NS_TEST_ASSERT_MSG_LT_OR_EQ(cgHyst->GslEventsDown(),
+                                    cgZero->GslEventsDown(),
+                                    "hysteresis down count <= zero-hyst");
+        NS_TEST_ASSERT_MSG_LT_OR_EQ(
+            cgHyst->GslEventsUp() + cgHyst->GslEventsDown(),
+            cgZero->GslEventsUp() + cgZero->GslEventsDown(),
+            "hysteresis total events <= zero-hyst total");
+
+        // Gate contract on every recorded transition:
+        //   UP fires at/above MinElevationDeg;
+        //   DOWN fires only strictly below MinElevationDeg - hysteresis —
+        //   i.e. once up, the contact never drops while the elevation stays
+        //   inside the [threshold - hyst, threshold) band.
+        for (const auto& ev : hystEvents)
+        {
+            if (ev.is_isl)
+            {
+                // The 11-sat plane also raises ISL events; the hysteresis
+                // gate under test applies to GSL contacts only.
+                continue;
+            }
+            if (ev.up)
+            {
+                NS_TEST_ASSERT_MSG_GT_OR_EQ(ev.elevation_deg, minElev,
+                                            "contact comes up at the "
+                                            "MinElevationDeg threshold");
+            }
+            else
+            {
+                NS_TEST_ASSERT_MSG_LT(ev.elevation_deg, minElev - hyst,
+                                      "contact drops only below "
+                                      "threshold - hysteresis");
+            }
+        }
+
+        // Per-pair alternation: events for each (sat, gs) pair must be
+        // up, down, up, ... starting with up — no down-then-up flap can
+        // occur inside the hysteresis band.
+        std::map<std::pair<uint32_t, uint32_t>, bool> lastUp;
+        for (const auto& ev : hystEvents)
+        {
+            if (ev.is_isl)
+            {
+                // ISL pair keys (sat, sat) can collide with GSL keys
+                // (sat, gs); the gate under test is GSL-only.
+                continue;
+            }
+            const std::pair<uint32_t, uint32_t> key{ev.node_a, ev.node_b};
+            auto it = lastUp.find(key);
+            if (it == lastUp.end())
+            {
+                NS_TEST_ASSERT_MSG_EQ(ev.up, true,
+                                      "first event per pair is a rise");
+            }
+            else
+            {
+                NS_TEST_ASSERT_MSG_NE(ev.up, it->second,
+                                      "per-pair events alternate up/down");
+            }
+            lastUp[key] = ev.up;
+        }
+
+        // Active-contact bookkeeping matches the recorded event stream.
+        size_t expectedActive = 0;
+        for (const auto& kv : lastUp)
+        {
+            if (kv.second)
+            {
+                ++expectedActive;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(cgHyst->NumActiveGsl(), expectedActive,
+                              "NumActiveGsl matches pairs whose last "
+                              "event was a rise");
 
         Simulator::Destroy();
     }
@@ -1198,6 +1375,7 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new WalkerDeltaShapeTest, Duration::QUICK);
         AddTestCase(new ContactSchedulerLeoPassTest, Duration::QUICK);
         AddTestCase(new ContactSchedulerIslPairTest, Duration::QUICK);
+        AddTestCase(new ContactSchedulerGateHysteresisTest, Duration::QUICK);
         // Roadmap §4.4.4 — ContactGraphRouter.
         AddTestCase(new ContactGraphRouterDirectEdgesTest, Duration::QUICK);
         AddTestCase(new ContactGraphRouterShortestPathTest, Duration::QUICK);

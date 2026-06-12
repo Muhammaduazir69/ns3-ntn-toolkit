@@ -4,6 +4,38 @@ All notable changes to the toolkit and its custom modules. The toolkit and each
 standalone module are versioned as release lines; branch `ntn-integration-v2`
 (toolkit) and `<module>-v2` (per module) carry the v2 work below.
 
+## [Unreleased] — architecture hardening from the 2026-06-12 deep audit
+
+- **Standards precision:** NTN HO triggers relabeled (Rel-17 CondEvents
+  A4/T1/D1, TR 38.821-studied elevation/TA); **Rel-18 CondEventD2**
+  implemented in `NtnChoAlgorithm` (moving ephemeris references,
+  `--trigger=d2`, gate-enforced); `combineWithA4` enforces the Rel-17
+  T1/D1/D2+A4 combination rule; regenerative payloads attributed to Rel-19.
+- **CHO execution realism:** slant-dependent RACH cost
+  (2·slant/c + processing) replaces the constant 80 ms when geometry is known.
+- **E2 loop realism (oran-ntn):** feeder delay now applies to the RIC→node
+  return path (`ReceiveRcAction`); opt-in `AlignToControlLoop` dispatches
+  indications on the control-loop tick instead of inline; `UnixEpochOffset`
+  for external-RIC timestamps; SCTP substitution documented per module.
+- **KPM everywhere:** new `NtnRealStackHelper::EnableAiFlowMonitor(prefix)`
+  wires `NtnOranAiFlowMonitor` in one call; adopted by 40+ examples across
+  all radio modules (auto-exported `*_kpm_series.csv`/`.lp`).
+- **Mobility maturation:** thz-ntn satellite geometry bug fixed
+  (dband-constellation placed sats at sea level) and 8 thz examples moved to
+  SGP4/labeled-parametric; static-UE flagships (`ntn-oran-qos-flows`) moved
+  to TR 38.811 mobility; sagin UAV ConstantVelocity → `UavPatrolMobilityModel`;
+  sagin-slice LEO under SGP4; v2x leo-relay vehicles ride the common SUMO-FCD
+  source with an FSPL fade margin + elevation hysteresis on the gates.
+- **Robustness:** contact-graph GSL gate hysteresis (anti-flapping);
+  NtnOranApplication FrameRate/DataRate guards; NtnOranSink header-version
+  error counter; helper-scoped unique flow srcIds; Influx sink buffer cap;
+  RSRP heuristic fallback removed from observability demo; NTN HARQ profile
+  option (`SetNtnHarqProfile`).
+- **Docs honesty:** `Sgp4MobilityModel` documented as Kepler+J2 (full SGP4
+  Q4 2026); ntn-digital-twin scoped as live-TLE mirror (not a sim-output
+  consumer); experimental/orphan classes labeled per module; Sionna RT 2.x
+  pinned with a graceful import error.
+
 ## [v2.1] — 2026-06
 
 This release lands the **AI-Native ORAN-NTN adoption**: a real measured data

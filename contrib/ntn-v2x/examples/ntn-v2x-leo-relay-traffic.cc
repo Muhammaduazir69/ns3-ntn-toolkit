@@ -13,6 +13,13 @@
  * Delivered BSM rate / latency / jitter / loss are MEASURED end-to-end by
  * NtnOranSink from the in-band NtnOranPayloadHeader (WS1 application suite).
  *
+ * NOTE (simplified link gates): this example deliberately uses binary
+ * geometry gates with an FSPL-equivalent fade margin (--fadeMarginDb shrinks
+ * the V2V contact range) and elevation hysteresis (--gateHysteresisDeg stops
+ * uplink flapping); the real-PHY V2X baseline is ntn-v2x-rural-highway.
+ * Vehicles follow the same SUMO-format FCD trace source as the other v2x
+ * examples (synthetic east-bound highway when no SUMO trace is supplied).
+ *
  * Quick test:  --simSeconds=60 --bsmHz=10
  */
 #include "ns3/applications-module.h"
@@ -21,8 +28,9 @@
 #include "ns3/walker-constellation.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
-#include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
+#include "ns3/ntn-v2x-helper.h"
+#include "ns3/sumo-traci-bridge.h"
 #include "ns3/error-model.h"
 #include "ns3/ntn-oran-application.h"
 #include "ns3/ntn-oran-sink.h"
@@ -45,10 +53,14 @@ Ptr<MobilityModel> g_veh0, g_veh1, g_sat;
 Ptr<RateErrorModel> g_emV2v, g_emUplink;
 Ptr<PointToPointChannel> g_chV2v, g_chUplink;
 Ptr<NtnOranSink> g_sink;
+Ptr<ntnv2x::SumoTraciBridge> g_bridge;
 uint64_t g_lastRx = 0;
 double g_maxV2vRangeM = 1500.0;
 double g_minElev = 10.0;
 double g_simTime = 60.0;
+double g_fadeMarginDb = 3.0;
+double g_gateHystDeg = 2.0;
+bool g_uplinkUp = false;
 
 double
 Dist(const Vector& a, const Vector& b)
@@ -71,16 +83,25 @@ Tick()
     {
         return;
     }
+    if (g_bridge)
+    {
+        g_bridge->Step(); // advance both vehicles along the FCD trace
+    }
     const double dV2v = Dist(g_veh0->GetPosition(), g_veh1->GetPosition());
     const double dUp = Dist(g_veh1->GetPosition(), g_sat->GetPosition());
     const double elevUp = ElevDeg(g_veh1->GetPosition(), g_sat->GetPosition());
 
     // Geometry contact gates (NOT a fabricated SINR): real range delays + a
-    // binary in-contact/out-of-contact gate on each hop.
+    // binary in-contact/out-of-contact gate on each hop. The V2V gate keeps
+    // an FSPL-equivalent fade margin (range x 10^(-margin/20)); the uplink
+    // gate has elevation hysteresis (up at minElev, down at minElev - hyst).
+    const double effV2vRange = g_maxV2vRangeM * std::pow(10.0, -g_fadeMarginDb / 20.0);
     g_chV2v->SetAttribute("Delay", TimeValue(Seconds(dV2v / kC)));
     g_chUplink->SetAttribute("Delay", TimeValue(Seconds(dUp / kC)));
-    g_emV2v->SetRate(dV2v <= g_maxV2vRangeM ? 0.0 : 1.0);
-    g_emUplink->SetRate(elevUp >= g_minElev ? 0.0 : 1.0);
+    g_emV2v->SetRate(dV2v <= effV2vRange ? 0.0 : 1.0);
+    g_uplinkUp = g_uplinkUp ? (elevUp >= g_minElev - g_gateHystDeg)
+                            : (elevUp >= g_minElev);
+    g_emUplink->SetRate(g_uplinkUp ? 0.0 : 1.0);
 
     // V2xLeoRelay decision (which path veh0 should use) — logged.
     auto decisions = g_relay->EvaluateAll();
@@ -128,6 +149,12 @@ main(int argc, char* argv[])
     cmd.AddValue("maxV2vRange", "Max V2V range for relay (m)", maxV2vRangeM);
     cmd.AddValue("minDirectSnr", "Min direct SNR before relaying (dB)", minDirectSnrDb);
     cmd.AddValue("linkCapacityMbps", "Per-hop P2P capacity (Mbps)", linkCapacityMbps);
+    cmd.AddValue("fadeMarginDb",
+                 "FSPL-equivalent fade margin applied to the V2V contact range (dB)",
+                 g_fadeMarginDb);
+    cmd.AddValue("gateHysteresisDeg",
+                 "Uplink elevation gate hysteresis (deg): up at minElev, down at minElev - hyst",
+                 g_gateHystDeg);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
     g_maxV2vRangeM = maxV2vRangeM;
@@ -136,15 +163,32 @@ main(int argc, char* argv[])
     NodeContainer nodes;
     nodes.Create(4); // 0=veh0 1=veh1 2=sat 3=server
 
+    // Vehicles ride the module's common SUMO-format FCD source (trace-replay
+    // mode; synthetic east-bound highway generated when no SUMO trace
+    // exists), exactly like ntn-v2x-rural-highway — one mobility source for
+    // all four v2x examples instead of a hand-rolled constant-velocity line.
+    const std::string tracePath = "/tmp/ntn-v2x-leo-relay-fcd.csv";
+    // Short road segment: the generator spaces vehicles roadLength/nVehicles
+    // apart, so 800 m keeps the platoon pair inside V2V range (~1.06 km
+    // effective at the 3 dB fade margin) while their speed difference makes
+    // the V2V contact genuinely come and go during the run.
+    ntnv2x::NtnV2xHelper::WriteSyntheticFcdCsv(tracePath, 2, 800.0, simSeconds, 1.0,
+                                               relayDriftMps - 5.0, relayDriftMps + 5.0);
+    g_bridge = CreateObject<ntnv2x::SumoTraciBridge>();
+    if (!g_bridge->LoadFcdTrace(tracePath))
+    {
+        NS_FATAL_ERROR("could not load synthetic FCD trace " << tracePath);
+    }
     Ptr<ConstantPositionMobilityModel> veh0 = CreateObject<ConstantPositionMobilityModel>();
     veh0->SetPosition(Vector(0, 0, 1.5));
     nodes.Get(0)->AggregateObject(veh0);
     g_veh0 = veh0;
-    Ptr<ConstantVelocityMobilityModel> veh1 = CreateObject<ConstantVelocityMobilityModel>();
+    g_bridge->RegisterVehicle("veh0", veh0);
+    Ptr<ConstantPositionMobilityModel> veh1 = CreateObject<ConstantPositionMobilityModel>();
     veh1->SetPosition(Vector(50, 0, 1.5));
-    veh1->SetVelocity(Vector(relayDriftMps, 0, 0));
     nodes.Get(1)->AggregateObject(veh1);
     g_veh1 = veh1;
+    g_bridge->RegisterVehicle("veh1", veh1);
     // Real SGP4 orbit projected into the scenario's local ENU frame: the
     // satellite passes overhead near t=0 and recedes with genuine orbital
     // dynamics (no straight-line placeholder).

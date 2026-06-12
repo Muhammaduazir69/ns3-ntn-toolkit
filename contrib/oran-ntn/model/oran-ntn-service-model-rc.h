@@ -20,6 +20,8 @@ namespace ns3
  * ASN.1-PER.
  *
  * RIC Function ID 3 matches the canonical RC SM ID used by FlexRIC / OSC.
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnServiceModelRc : public OranNtnServiceModel
 {

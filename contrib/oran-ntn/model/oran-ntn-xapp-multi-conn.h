@@ -35,6 +35,8 @@ class OranNtnDualConnectivity;
 /**
  * \ingroup oran-ntn
  * \brief Multi-Connectivity Orchestrator xApp
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnXappMultiConn : public OranNtnXappBase
 {

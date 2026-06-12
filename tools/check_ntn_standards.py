@@ -60,8 +60,10 @@ def main():
     r = run("./ns3 run ntn-platform-latency-validation")
     check("table3-latency-bands", r.returncode == 0 and "ALL CLASSES PASS" in r.stdout)
 
-    # 4. five 3GPP NTN trigger classes
-    for trig in ["a3", "d1", "t1", "elevation", "ta"]:
+    # 4. NTN trigger classes: Rel-17 CondEvents A4-combined a3/d1/t1,
+    #    Rel-18 CondEventD2 (moving references), plus the TR 38.821-studied
+    #    elevation and timing-advance mechanisms.
+    for trig in ["a3", "d1", "t1", "d2", "elevation", "ta"]:
         r = run(f'./ns3 run "ntn-cho-handover-traffic --simSeconds=60 --numUes=2 '
                 f'--trigger={trig}"')
         m = re.search(r"handovers=(\d+)", r.stdout)

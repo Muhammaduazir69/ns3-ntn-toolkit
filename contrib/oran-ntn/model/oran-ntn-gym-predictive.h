@@ -28,6 +28,14 @@ namespace ns3
 class OranNtnXappPredictiveAlloc;
 class OranNtnSatBridge;
 
+/**
+ * \ingroup oran-ntn
+ * \brief Gymnasium environment for predictive-allocation RL training
+ *
+ * \warning Experimental: not yet exercised by any example or test; API may
+ *          change. OranNtnXappPredictiveAlloc exposes a SetGymEnv() hook for
+ *          this environment, but no in-tree scenario wires it yet.
+ */
 class OranNtnGymPredictive : public OpenGymEnv
 {
   public:

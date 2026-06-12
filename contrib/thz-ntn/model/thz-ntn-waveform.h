@@ -85,6 +85,8 @@ struct WaveformParams
  * link direction) and computation of waveform-specific metrics such as
  * PAPR reduction, Doppler tolerance, OTFS grid sizing, and AFDM chirp
  * rate configuration.
+ *
+ * \warning Experimental: not yet exercised by any example or test.
  */
 class ThzNtnWaveform : public Object
 {

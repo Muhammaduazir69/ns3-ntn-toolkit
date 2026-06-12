@@ -20,6 +20,13 @@ namespace ns3
 class OranNtnXappTnNtnSteering;
 class OranNtnSatBridge;
 
+/**
+ * \ingroup oran-ntn
+ * \brief Gymnasium environment for TN-NTN steering RL training
+ *
+ * \warning Experimental: not yet exercised by any example or test; API may
+ *          change.
+ */
 class OranNtnGymSteering : public OpenGymEnv
 {
   public:

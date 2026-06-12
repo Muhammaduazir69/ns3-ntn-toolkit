@@ -1,9 +1,14 @@
+# Constellation-scale RIC on real SGP4 geometry: anchored cells measured on a
+# real mmwave NR NTN link, scale-out KPM from a TR 38.821-style budget over the
+# same live geometry (per-row provenance in kpm_feed.csv).
 build_lib_example(
   NAME oran-ntn-full-scenario
   SOURCE_FILES oran-ntn-full-scenario.cc
   LIBRARIES_TO_LINK
     ${liboran-ntn}
     ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libnetwork}
     ${libmobility}
@@ -11,9 +16,8 @@ build_lib_example(
     ${libpropagation}
     ${libinternet}
     ${libapplications}
-    ${libpoint-to-point}
-    ${libsatellite}
     ${libmmwave}
+    ${liblte}
 )
 
 # Phase-1 real-stack flagship: KPM from MEASURED mmwave PHY SINR drives the RIC.

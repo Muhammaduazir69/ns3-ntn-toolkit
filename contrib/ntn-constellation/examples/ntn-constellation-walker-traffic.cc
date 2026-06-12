@@ -133,6 +133,7 @@ main(int argc, char* argv[])
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("ntn-constellation-walker-traffic"); // WS2 KPM series (TS 28.552 names)
 
     scheduler->Start();
     Simulator::Stop(Seconds(simSeconds));

@@ -10,6 +10,12 @@
  * space debris detection using a LEO satellite equipped with a THz
  * UM-MIMO array at 300 GHz.  Evaluates radar detection performance
  * for debris of various sizes and the communication-sensing tradeoff.
+ *
+ * Analysis-only example: parametric geometry (radar-equation sweeps over
+ * debris range), no packet transmission. NOTE: this source is currently
+ * excluded from the build (legacy ThzNtnIsac API; see
+ * examples/CMakeLists.txt) pending the Q4 2026 ISAC scheduler redesign.
+ * For a measured-radio ISAC scenario see thz-ntn-isac-coexist-traffic.
  */
 
 #include <ns3/command-line.h>
@@ -82,6 +88,9 @@ main(int argc, char* argv[])
     NodeContainer satNodes;
     satNodes.Create(1);
 
+    // Local ENU frame (z = altitude): the satellite sits 550 km straight up;
+    // the sensing targets are parametric ranges from the spacecraft, so a
+    // fixed platform is the intended geometry for this radar-equation sweep.
     Ptr<ConstantPositionMobilityModel> satMob = CreateObject<ConstantPositionMobilityModel>();
     satMob->SetPosition(Vector(0.0, 0.0, 550e3));
     satNodes.Get(0)->AggregateObject(satMob);

@@ -4,6 +4,7 @@
 
 #include "contact-graph-scheduler.h"
 
+#include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/simulator.h"
 
@@ -23,7 +24,16 @@ ContactGraphScheduler::GetTypeId()
     static TypeId tid = TypeId("ns3::ntncon::ContactGraphScheduler")
                             .SetParent<Object>()
                             .SetGroupName("NtnConstellation")
-                            .AddConstructor<ContactGraphScheduler>();
+                            .AddConstructor<ContactGraphScheduler>()
+                            .AddAttribute("GateHysteresisDeg",
+                                          "GSL gate hysteresis (deg): a contact comes UP at "
+                                          "MinElevationDeg and goes DOWN only below "
+                                          "MinElevationDeg - hysteresis, so the link does not "
+                                          "flap while the elevation hovers at the threshold. "
+                                          "0 restores the legacy single-threshold gate.",
+                                          DoubleValue(2.0),
+                                          MakeDoubleAccessor(&ContactGraphScheduler::m_gateHysteresisDeg),
+                                          MakeDoubleChecker<double>(0.0));
     return tid;
 }
 
@@ -104,11 +114,15 @@ ContactGraphScheduler::Tick()
             const double elev =
                 satIt.second->GetElevationDeg(gsIt.second.lat_deg,
                                               gsIt.second.lon_deg);
-            const bool visible = elev >= m_minElevDeg;
             const std::pair<uint32_t, uint32_t> key{satIt.first, gsIt.first};
             auto stateIt = m_gslState.find(key);
             const bool prev =
                 (stateIt == m_gslState.end()) ? false : stateIt->second;
+            // Hysteresis gate: UP at MinElevationDeg, DOWN only below
+            // MinElevationDeg - GateHysteresisDeg (anti-flapping).
+            const bool visible =
+                prev ? (elev >= m_minElevDeg - m_gateHysteresisDeg)
+                     : (elev >= m_minElevDeg);
             if (visible != prev)
             {
                 m_gslState[key] = visible;

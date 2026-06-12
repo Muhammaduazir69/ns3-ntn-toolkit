@@ -126,6 +126,9 @@ main(int argc, char* argv[])
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    // Canonical KPM wiring: per-flow TS 28.552 series auto-exported to
+    // ntn-observability-traffic_kpm_series.{csv,lp} at end of simulation.
+    rs.EnableAiFlowMonitor("ntn-observability-traffic");
 
     // Observability sink.
     Ptr<NtnInfluxSink> influx = CreateObject<NtnInfluxSink>();

@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <map>
+#include <set>
 #include <tuple>
 
 namespace ns3
@@ -102,6 +103,9 @@ class NtnOranSink : public Application
     double GetMeanJitterMs() const;
     double GetLossRatio() const;
     const std::map<FlowKey, FlowStats>& GetFlowStats() const { return m_flows; }
+    /// Packets discarded because their NtnOranPayloadHeader carried an
+    /// unexpected wire-format version (excluded from all flow KPIs).
+    uint64_t GetVersionErrors() const { return m_versionErrors; }
     /// Latest platform telemetry seen from \p srcId; false if none yet.
     bool GetLatestTelemetry(uint16_t srcId, NtnCncTelemetry& out) const;
 
@@ -119,6 +123,8 @@ class NtnOranSink : public Application
     std::map<uint16_t, NtnCncTelemetry> m_telemetry;
     uint64_t m_totalRxBytes{0};
     uint64_t m_totalRxPackets{0};
+    uint64_t m_versionErrors{0};
+    std::set<FlowKey> m_versionWarnedFlows; ///< rate-limits the version warning
 
     TracedCallback<Ptr<const Packet>, const Address&> m_rxTrace;
 };

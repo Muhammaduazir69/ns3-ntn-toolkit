@@ -36,6 +36,9 @@ namespace ns3
  * Construct, point at a CSV path (or accept the default location under the
  * shipped `data/` directory), call Load(). The entries are then iterable
  * via `GetEntries()`; selection helpers narrow by environment + scenario.
+ *
+ * \warning Experimental: validated by the unit test suite
+ * (test/thz-ntn-test-suite.cc) but not yet exercised by any example.
  */
 class ThzNtnNyusimReference : public Object
 {

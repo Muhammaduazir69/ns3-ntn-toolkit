@@ -15,7 +15,6 @@
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 #include "ns3/constant-position-mobility-model.h"
-#include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/multi-layer-router.h"
@@ -23,6 +22,7 @@
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/sagin-a2g-propagation-loss-model.h"
 #include "ns3/sagin-helper.h"
+#include "ns3/uav-mobility-models.h"
 
 #include <filesystem>
 #include <fstream>
@@ -65,9 +65,12 @@ main(int argc, char* argv[])
 
     NodeContainer satNodes; // the "gNB" here is the UAV relay
     satNodes.Create(1);
-    Ptr<ConstantVelocityMobilityModel> uav = CreateObject<ConstantVelocityMobilityModel>();
-    uav->SetPosition(Vector(0.0, 0.0, uavAltM));
-    uav->SetVelocity(Vector(25.0, 0.0, 0.0)); // UAV patrol
+    // Deterministic 25 m/s A<->B patrol leg at uavAltM from the module's own
+    // UAV mobility catalog (same pattern as sagin-multihop-traffic) — the UAV
+    // genuinely turns around instead of flying off on a straight line.
+    Ptr<UavPatrolMobilityModel> uav = CreateObject<UavPatrolMobilityModel>();
+    uav->SetAttribute("Speed", DoubleValue(25.0));
+    uav->SetEndpoints(Vector(0.0, 0.0, uavAltM), Vector(750.0, 0.0, uavAltM));
     satNodes.Get(0)->AggregateObject(uav);
 
     // HAPS + LEO backhaul layers (geometry context for the multi-layer router).
@@ -134,6 +137,7 @@ main(int argc, char* argv[])
     rs.AddExtraPropagationLoss(a2g);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
+    rs.EnableAiFlowMonitor("sagin-haps-leo-relay");
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();

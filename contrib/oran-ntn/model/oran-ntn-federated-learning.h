@@ -40,6 +40,8 @@ class OranNtnSatBridge;
 /**
  * \ingroup oran-ntn
  * \brief Federated learning coordinator for Space-O-RAN
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnFederatedLearning : public Object
 {

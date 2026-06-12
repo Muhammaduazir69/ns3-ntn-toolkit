@@ -85,6 +85,8 @@ struct ThzNtnIslRoute
  * Manages the lifecycle of inter-satellite links: establishment based
  * on visibility constraints, adaptive data rate, and multi-hop routing.
  * Integrates with actual MobilityModel positions and PointToPointIslNetDevice.
+ *
+ * \warning Experimental: not yet exercised by any example or test.
  */
 class ThzNtnIslLink : public Object
 {

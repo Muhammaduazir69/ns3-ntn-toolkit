@@ -111,6 +111,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));
+    rs.EnableAiFlowMonitor("thz-ntn-real-stack");
 
     // Rain event over the traffic window -> measured SINR drops (THz physics in
     // the packet path). Run with --rainMmH=0 vs a high value to see the delta.

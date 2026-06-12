@@ -135,6 +135,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("ntn-sionna-ris-relay-traffic"); // WS2 KPM series (TS 28.552 names)
 
     const double tBlock = blockFraction * simSeconds;
     const double tRis = risOnFraction * simSeconds;

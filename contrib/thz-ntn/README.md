@@ -1,11 +1,11 @@
 <h1 align="center">thz-ntn</h1>
 
-<p align="center"><strong>Sub-THz / D-band non-terrestrial PHY for ns-3.43 — LEO-ground & ISL links, RIS, ultra-massive MIMO, ISAC, alpha-mu fading, NYUSIM-140 calibration, HITRAN-2024 atmospheric LUT</strong></p>
+<p align="center"><strong>Sub-THz / D-band non-terrestrial PHY for ns-3.43 — LEO-ground & ISL links, RIS, ultra-massive MIMO, ISAC, alpha-mu fading, NYUSIM-140 calibration, HITRAN-2020-baseline atmospheric absorption</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0--only-green.svg"/></a>
-  <img src="https://img.shields.io/badge/HITRAN-2024-orange.svg"/>
+  <img src="https://img.shields.io/badge/HITRAN-2020%20baseline-orange.svg"/>
   <img src="https://img.shields.io/badge/UM--MIMO-up%20to%20128×128-purple.svg"/>
   <img src="https://img.shields.io/badge/tests-38%2F38%20passing-success.svg"/>
 </p>
@@ -21,9 +21,15 @@
 **100 GHz – 1 THz** band (D-band and sub-THz). The composite channel cascades:
 
 - **Free-space path loss** (`ThzNtnFreeSpaceLoss`) with correct frequency/distance scaling
-- **Molecular absorption** from a HITRAN line-by-line model and a bundled
-  **HITRAN-2024** lookup table (`ThzNtnMolecularAbsorption`, `HitranLut` in
-  namespace `ns3::thzntn`) over an ITU-R P.835 stratified atmosphere
+- **Molecular absorption** from a HITRAN line-by-line model
+  (`ThzNtnMolecularAbsorption`) over an ITU-R P.835 stratified atmosphere.
+  **HITRAN baseline honesty:** the in-process line parameters (14 H2O + 9 O2
+  rotational lines) are drawn from the **HITRAN-2020** release. The optional
+  lookup-table path (`HitranLut` in namespace `ns3::thzntn`,
+  `data/hitran2024-lut-subthz.csv`) is *tagged* HITRAN-2024 but is generated
+  by `tools/hitran2024-lut-gen.py` from the same 23-line model (per-line
+  2020→2024 deltas are < 0.5 %); native ingestion of a HITRAN-2024 `.par`
+  file remains roadmapped (Roadmap §4.3.1 follow-up)
 - **Weather attenuation** (rain / fog / snow) per ITU-R P.838 / P.840 extended to THz
 - **ITU-R P.618 scintillation** (amplitude + phase, AR(1) time series)
 - **alpha-mu small-scale fading** (`ThzNtnAlphaMuFading`)
@@ -64,8 +70,27 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
   range^4 SNR, RCS dBsm ↔ m^2 conversion, RIS `20·log10(N)` array gain, UM-MIMO
   `10·log10(N)` gain with `1/√N` beamwidth narrowing, Fraunhofer near-field boundary,
   and Shannon capacity.
-- **alpha-mu fading**, **HITRAN-2024 LUT**, **NYUSIM-140** calibration reference, and a
-  **RIS service model + xApp** for O-RAN-style closed-loop control.
+- **alpha-mu fading**, **HITRAN-2024-tagged LUT** (generated from the
+  HITRAN-2020-baseline line model, see Overview), **NYUSIM-140** calibration
+  reference, and a **RIS service model + xApp** for O-RAN-style closed-loop
+  control.
+- **Geometry fix (2026-06 audit).** `thz-ntn-dband-constellation` used a
+  broken hand-rolled spherical conversion (geocentric x-y ring of radius
+  Re+h with a flat-Earth z = h against local-frame terminals) that placed
+  every "550 km" satellite ~6900 km from the terminals at ~4° elevation; its
+  outputs were wrong. It now uses real `Sgp4MobilityModel` orbits projected
+  into a local ENU frame (`|ECEF position| = Re + altitude`). The
+  `thz-ntn-ris-assisted` satellite is now placed on the actual line of sight
+  at the requested elevation instead of at zenith.
+- **Mobility maturation (2026-06 audit).** The analytic examples that model a
+  pass or a constellation (`leo-ground`, `isl`, `full-stack`,
+  `dband-constellation`) now derive their time-varying geometry from real
+  SGP4 Walker elements instead of triangular/sinusoidal profiles; the
+  remaining parametric geometries (`um-mimo`, `ris-assisted`, `isac`) are the
+  point of those sweeps and are explicitly labelled analysis-only.
+- **AI flow monitor.** Every measured-radio example calls
+  `rs.EnableAiFlowMonitor("<example-name>")` after traffic install, producing
+  the toolkit-standard KPM flow series alongside `sim_health.csv`.
 
 ## Models, helpers & key classes
 
@@ -75,7 +100,7 @@ Derived from `model/*.h`:
 |---|---|
 | `ThzNtnSpectrum` (`thz-ntn-spectrum`) | Atmospheric transmission windows + THz band classification; `ComputeTransmittance`, `GetStandardWindows`, `GetBestWindow` |
 | `ThzNtnMolecularAbsorption` (`thz-ntn-molecular-absorption`) | HITRAN line-by-line gaseous absorption over P.835 layers |
-| `HitranLut` (`thz-ntn-hitran-lut`, namespace `ns3::thzntn`) | Bundled HITRAN-2024 specific-attenuation lookup table (`data/hitran2024-lut-subthz.csv`) |
+| `HitranLut` (`thz-ntn-hitran-lut`, namespace `ns3::thzntn`) | Bundled specific-attenuation lookup table (`data/hitran2024-lut-subthz.csv`) — tagged HITRAN-2024 but generated from the HITRAN-2020-baseline line model (see Overview) |
 | `Itu838RainModel`, `Itu618LossModel`, `Itu676AbsorptionModel`, `Itu681LmsModel` (`thz-ntn-itu-recommendations`) | ITU-R P.838 / P.618 / P.676 / P.681 reference implementations |
 | `ThzNtnAlphaMuFading` (`thz-ntn-alpha-mu-fading`) | alpha-mu small-scale fading distribution |
 | `ThzNtnFreeSpaceLoss`, `ThzNtnChannelModel` | FSPL + composite cascade propagation loss |
@@ -103,10 +128,22 @@ Each example has two equivalent run forms:
 ./build/contrib/thz-ntn/examples/ns3.43-thz-ntn-<name>-default
 ```
 
-### Analytic examples (link budgets / sweeps)
+### Analytic examples (link budgets / sweeps — analysis-only, no measured radio)
+
+All examples in this group are **analysis-only**: they drive the module's
+physics APIs (link budgets, scaling laws, sensing equations) and print/CSV the
+results — there is **no measured packet data plane** (each prints an
+`[analytic-tool]` banner and carries an "analysis-only" header comment).
+Where a pass or constellation is part of the scenario (`leo-ground`, `isl`,
+`full-stack`, `dband-constellation`), the geometry comes from **real SGP4
+Walker orbits** projected into a local ENU frame; where a single parametric
+sweep IS the experiment (`um-mimo`, `ris-assisted`, the unbuilt `isac`), the
+parametric geometry is kept and physically consistent.
 
 #### thz-ntn-leo-ground
-LEO-to-ground sub-THz downlink link budget over a pass (gated by molecular absorption).
+LEO-to-ground sub-THz downlink link budget over a pass (gated by molecular
+absorption). The elevation-sweep table is parametric; the per-second pass time
+series is driven by a real SGP4 element (zenith at t=0, receding).
 - **Key args:** `--freq` (Hz, def 225e9), `--altitude` (km, def 550), `--txPower` (dBm,
   def 34.77), `--bandwidth` (Hz, def 10e9), `--txGain` (dBi, def 40), `--rxGain` (dBi,
   def 45), `--simTime` (s, def 60), `--outputDir` (def `thz-leo-ground-out`).
@@ -119,6 +156,9 @@ LEO-to-ground sub-THz downlink link budget over a pass (gated by molecular absor
 
 #### thz-ntn-isl
 Inter-satellite link SNR / capacity / Doppler vs separation (vacuum, 300 GHz).
+The distance-sweep table is parametric; the per-second time series uses two
+real SGP4 cross-plane neighbours of a Starlink-class shell (separation and
+range-rate Doppler from the live orbits).
 - **Key args:** `--freq` (Hz, def 300e9), `--txPower` (dBm, def 30), `--bandwidth` (Hz,
   def 20e9), `--txGain` (dBi, def 40), `--rxGain` (dBi, def 40), `--simTime` (s),
   `--outputDir` (def `thz-isl-out`).
@@ -144,7 +184,10 @@ element count, builds a DFT codebook, and reads worst-case wideband squint loss 
 
 #### thz-ntn-ris-assisted
 Direct vs RIS-assisted SNR, N^2 scaling law, and quantisation loss; cascaded path loss
-from actual Sat / RIS / GT mobility positions.
+from actual Sat / RIS / GT mobility positions. The satellite is placed
+parametrically on the line of sight at the requested `--elevation` (the
+configurable elevation IS the experiment), consistent with the parametric
+slant range.
 - **Key args:** `--freq` (Hz, def 300e9), `--risSize` (elements per side, def 64),
   `--elevation` (deg, def 30), `--txPower` (dBm, def 34.77).
 - **Outputs:** console report (no CSV).
@@ -155,7 +198,11 @@ from actual Sat / RIS / GT mobility positions.
 ```
 
 #### thz-ntn-dband-constellation
-D-band constellation UT-to-satellite association and link budgets.
+D-band constellation UT-to-satellite association and link budgets on real SGP4
+geometry: slot-0 satellites of `--numSats` adjacent Walker planes (72 × 22,
+53°), ENU-projected. **Geometry fix (2026-06):** the previous hand-rolled
+placement put every satellite ~6900 km from the terminals at ~4° elevation;
+pre-fix outputs of this example should be discarded.
 - **Key args:** `--numSats` (def 4), `--numUts` (def 10), `--freq` (Hz, def 140e9),
   `--altitude` (km, def 550), `--txPower` (dBm, def 30).
 - **Outputs:** console report (no CSV).
@@ -168,6 +215,9 @@ D-band constellation UT-to-satellite association and link budgets.
 #### thz-ntn-full-stack
 Integration demo: downlink link budget + RIS assist, ISL SNR/capacity from satellite
 mobility, ISAC debris sensing, EKF beam tracking, and achievable spectral efficiency.
+Both satellites fly real SGP4 orbits (adjacent Walker planes, common ENU frame):
+the downlink elevation profile and the ISL separation come from genuine orbital
+dynamics, evaluated in scheduled per-second simulator events.
 - **Key args:** `--duration` (s, def 30), `--preset` (def `TeraLink-225GHz`),
   `--debrisRangeKm` (km, def 0.5).
 - **Outputs:** console report (no CSV).
@@ -185,8 +235,11 @@ ground terminals. The THz physics enter the packet path as live channel plug-ins
 (`ThzNtnPropagationLossModel`, `NtnStaticExtraLossModel`), traffic is carried by
 `NtnOranApplication` QoS flows measured at `NtnOranSink`, and each example writes
 `<outputDir>/sim_health.csv` plus a console KPI summary (measured SINR / TBLER /
-goodput). The carrier is capped at **100 GHz** (sub-THz / W-band) by the 3GPP
-spectrum model; the higher-band studies stay in the analytic examples above.
+goodput). Every example in this group also enables the toolkit's AI flow
+monitor (`rs.EnableAiFlowMonitor("<example-name>")`) right after traffic
+install, exporting the standard per-flow KPM series. The carrier is capped at
+**100 GHz** (sub-THz / W-band) by the 3GPP spectrum model; the higher-band
+studies stay in the analytic examples above.
 
 #### thz-ntn-real-stack
 Flagship channel-plugin demo: gaseous absorption + rain chained onto the real mmwave
@@ -289,7 +342,32 @@ urban-canyon blockage and recovers when the xApp engages the RIS.
 
 > Note: two sources in `examples/` are not built: `thz-ntn-isac.cc` (legacy ISAC API,
 > excluded pending the Q4 2026 ISAC scheduler redesign) and `thz-ntn-demo.cc`
-> (not registered in `examples/CMakeLists.txt`).
+> (not registered in `examples/CMakeLists.txt`). Both carry analysis-only
+> header labels.
+
+## Experimental components
+
+The following exported classes ship with the module but are **not yet
+exercised by any example** (2026-06 orphan audit). Their headers carry a
+matching `\warning`. Nothing here is scheduled for deletion; each item is
+either example-pending or test-validated.
+
+| Class | Status |
+|---|---|
+| `ThzNtnIsacProcessor` (`thz-ntn-isac-processor`) | **Experimental — no example or test.** Range-Doppler/CFAR/tracking processor; example pending the Q4 2026 ISAC scheduler redesign |
+| `ThzNtnIslLink` (`thz-ntn-isl-link`) | **Experimental — no example or test.** ISL lifecycle/routing manager; the measured ISL path uses `NtnRealStackHelper` instead (`thz-ntn-isl-traffic`) |
+| `ThzNtnWaveform` (`thz-ntn-waveform`) | **Experimental — no example or test.** 5-candidate waveform selector (OFDM / DFT-s-OFDM / OTFS / AFDM / SC-FDE) |
+| `ThzNtnAlphaMuFading` | Unit-tested (`test/thz-ntn-test-suite.cc`); no example yet |
+| `ThzNtnRisController` | Unit-tested; consumed by `ThzNtnRisServiceModel`; no example yet |
+| `ThzNtnRisServiceModel` | Unit-tested; no example yet (the measured RIS loop in `thz-ntn-ric-controlled-traffic` drives `ThzNtnRis` directly) |
+| `ThzNtnRisXapp` | Unit-tested; no example yet |
+| `ThzNtnNyusimCalibrator` / `ThzNtnNyusimReference` | Unit-tested against `data/nyusim-140-reference.csv`; no example yet |
+| `Itu838RainModel` / `Itu618LossModel` / `Itu676AbsorptionModel` / `Itu681LmsModel` | Unit-tested against ITU-R reference values; the example channel cascade uses the module's own weather/absorption/scintillation classes |
+
+Cross-module consumers worth knowing about: `HitranLut` is consumed in-module
+by `ThzNtnMolecularAbsorption`; `ThzNtnPhy` is the base class of
+`ThzNtnPhySat` / `ThzNtnPhyGround`; `ThzNtnSpectrum` is unit-tested and used
+by the (unbuilt) `thz-ntn-demo` dataset generator.
 
 ## Build, run & test
 

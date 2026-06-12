@@ -39,6 +39,9 @@ namespace ns3
  *   const auto rep = cal->Run("urban", true);
  *   NS_ASSERT(rep.max_abs_dB < 3.0);
  * \endcode
+ *
+ * \warning Experimental: validated by the unit test suite
+ * (test/thz-ntn-test-suite.cc) but not yet exercised by any example.
  */
 class ThzNtnNyusimCalibrator : public Object
 {

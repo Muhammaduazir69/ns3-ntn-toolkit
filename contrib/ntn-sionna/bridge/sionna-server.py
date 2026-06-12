@@ -36,7 +36,29 @@ from typing import Any
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 import numpy as np  # noqa: E402  (after os.environ)
-import sionna.rt as rt  # noqa: E402
+
+try:
+    import sionna  # noqa: E402
+    import sionna.rt as rt  # noqa: E402
+except ImportError as exc:
+    sys.stderr.write(
+        "ntn-sionna server: Sionna RT is not installed ({}).\n"
+        "Install with:  pip install 'sionna>=2.0,<3'  (tested: 2.0.1; needs\n"
+        "TensorFlow + a CUDA GPU for ray tracing). Without a GPU, use the\n"
+        "C++ side's replay/caching transports or its FSPL fallback instead\n"
+        "of this live server.\n".format(exc)
+    )
+    sys.exit(1)
+
+_SIONNA_MAJOR = int(getattr(sionna, "__version__", "0").split(".")[0] or 0)
+if _SIONNA_MAJOR != 2:
+    sys.stderr.write(
+        "ntn-sionna server: WARNING — Sionna {} detected; this bridge is "
+        "written and tested against Sionna RT 2.x (2.0.1). The request/"
+        "response wire format may not match other majors.\n".format(
+            getattr(sionna, "__version__", "unknown")
+        )
+    )
 
 LOG = logging.getLogger("ntn-sionna.server")
 

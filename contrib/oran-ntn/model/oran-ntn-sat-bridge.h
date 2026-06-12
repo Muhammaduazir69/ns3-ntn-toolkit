@@ -136,6 +136,10 @@ struct UeBridgeState
  * \ingroup oran-ntn
  * \brief Deep integration bridge between O-RAN NTN and SNS3 satellite + mmWave
  *
+ * \note Currently exercised by unit tests only; the real-stack examples use
+ *       NtnRealStackHelper + ntn-constellation SGP4 mobility directly instead
+ *       of this bridge.
+ *
  * This class is the core integration point. It:
  *   1. Wraps satellite module's SGP4 mobility for orbit computation
  *   2. Uses real antenna gain patterns for link budget

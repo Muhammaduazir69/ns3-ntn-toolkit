@@ -50,6 +50,10 @@ struct XappRecord
  *
  * Roadmap §4.1.4. All accesses are by-value to keep the interface
  * portable across the in-memory and SQLite backends.
+ *
+ * \note Currently exercised by unit tests only (both backends, via
+ *       Create("memory") / Create("sqlite")); no example wires a repository
+ *       yet.
  */
 class OranNtnDataRepository : public Object
 {

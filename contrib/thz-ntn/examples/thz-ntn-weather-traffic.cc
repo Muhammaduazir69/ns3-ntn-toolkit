@@ -177,6 +177,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("thz-ntn-weather-traffic");
 
     // Weather front: clear → fog → rain → wet snow → clear across the pass.
     // Each phase reconfigures the LIVE channel plug-in (packets feel it).

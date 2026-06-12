@@ -41,6 +41,10 @@ namespace ns3
  *   - OranNtnServiceModelCcc  E2SM-CCC (planned, 4.1.8)
  *   - OranNtnServiceModelNtnEphemeris (planned, 4.1.7)
  *   - OranNtnServiceModelThzRis (planned, 4.3.6)
+ *
+ * \note The service-model plugin ABI is currently exercised by unit tests
+ *       only; the in-sim E2 path (OranNtnE2Node) delivers structs directly
+ *       and does not serialize through these plugins yet.
  */
 class OranNtnServiceModel : public Object
 {
@@ -82,6 +86,8 @@ class OranNtnServiceModel : public Object
  * One instance per Near-RT RIC. xApps consult `Lookup(RicFunctionId)` at
  * subscription time to find the encoder/decoder for the SM they want to
  * speak.
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnServiceModelRegistry : public Object
 {

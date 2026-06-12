@@ -47,6 +47,9 @@ namespace ns3
  * transport; an external xApp calls `OnControl()` to issue control
  * directives, calls `OnPolicy()` to install an A1 policy, and subscribes
  * to indications via `SubscribeIndications()`.
+ *
+ * \warning Experimental: validated by the unit test suite
+ * (test/thz-ntn-test-suite.cc) but not yet exercised by any example.
  */
 class ThzNtnRisServiceModel : public Object
 {

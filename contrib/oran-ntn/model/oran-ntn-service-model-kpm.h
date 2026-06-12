@@ -22,6 +22,8 @@ namespace ns3
  *
  * RIC Function ID 147 matches the canonical KPM SM ID used by FlexRIC,
  * srsRAN, and OAI's E2 agent.
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnServiceModelKpm : public OranNtnServiceModel
 {

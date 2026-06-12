@@ -8,7 +8,9 @@
 //      with KNOWN delay must match that delay (and zero loss/jitter for CBR),
 //   3. a real RateErrorModel loss window must show up in the seq-gap loss,
 //   4. NtnCommandAndControlApp telemetry must round-trip the REAL mobility
-//      state (position/velocity) and a draining battery through the network.
+//      state (position/velocity) and a draining battery through the network,
+//   5. a packet whose in-band header carries a foreign wire-format version is
+//      counted by GetVersionErrors() and excluded from every flow KPI.
 
 #include "ns3/boolean.h"
 #include "ns3/constant-velocity-mobility-model.h"
@@ -27,9 +29,13 @@
 #include "ns3/pointer.h"
 #include "ns3/rng-seed-manager.h"
 #include "ns3/simulator.h"
+#include "ns3/socket.h"
 #include "ns3/string.h"
 #include "ns3/test.h"
+#include "ns3/udp-socket-factory.h"
 #include "ns3/uinteger.h"
+
+#include <vector>
 
 using namespace ns3;
 
@@ -249,6 +255,76 @@ class NtnCncTelemetryTest : public TestCase
     }
 };
 
+class NtnOranVersionErrorTest : public TestCase
+{
+  public:
+    NtnOranVersionErrorTest()
+        : TestCase("sink discards a foreign payload-header version and counts it")
+    {
+    }
+
+  private:
+    /// Build an ORAN payload packet; optionally corrupt the version byte
+    /// (byte 0 on the wire) to fabricate an incompatible wire format.
+    static Ptr<Packet> MakePacket(uint32_t seq, bool corruptVersion)
+    {
+        NtnOranPayloadHeader hdr;
+        hdr.SetPayloadType(NtnOranPayloadHeader::URLLC_CMD);
+        hdr.SetSeq(seq);
+        hdr.SetTxTimestampNs(Simulator::Now().GetNanoSeconds());
+        hdr.SetFiveQi(82);
+        hdr.SetSnssai(1, 0x000001);
+        hdr.SetSrcId(7);
+        hdr.SetDstId(1);
+        Ptr<Packet> p = Create<Packet>(100);
+        p->AddHeader(hdr);
+        if (!corruptVersion)
+        {
+            return p;
+        }
+        std::vector<uint8_t> buf(p->GetSize());
+        p->CopyData(buf.data(), buf.size());
+        buf[0] = NtnOranPayloadHeader::NTN_ORAN_PAYLOAD_VERSION + 1;
+        return Create<Packet>(buf.data(), buf.size());
+    }
+
+    void DoRun() override
+    {
+        P2pRig rig("10ms", "100Mbps");
+        const uint16_t port = 4003;
+        constexpr uint32_t kPktSize = 100 + NtnOranPayloadHeader::SERIALIZED_SIZE;
+
+        Ptr<NtnOranSink> sink = CreateObject<NtnOranSink>();
+        sink->SetAttribute("Local", AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+        rig.nodes.Get(1)->AddApplication(sink);
+        sink->SetStartTime(Seconds(0.0));
+
+        // Real UDP sends over the P2P link: one valid packet, then one whose
+        // version byte was corrupted in the serialized bytes.
+        Ptr<Socket> sock = Socket::CreateSocket(rig.nodes.Get(0), UdpSocketFactory::GetTypeId());
+        sock->Connect(InetSocketAddress(rig.ifaces.GetAddress(1), port));
+        Simulator::Schedule(Seconds(1.0), [sock] { sock->Send(MakePacket(0, false)); });
+        Simulator::Schedule(Seconds(2.0), [sock] { sock->Send(MakePacket(1, true)); });
+
+        Simulator::Stop(Seconds(3.0));
+        Simulator::Run();
+
+        // Both packets physically arrived (raw counters see them) ...
+        NS_TEST_ASSERT_MSG_EQ(sink->GetRxPackets(), 2, "both packets delivered");
+        NS_TEST_ASSERT_MSG_EQ(sink->GetTotalRx(), 2 * kPktSize, "raw byte counter sees both");
+        // ... but only the valid-version packet is accounted as a flow.
+        NS_TEST_ASSERT_MSG_EQ(sink->GetVersionErrors(), 1, "corrupted version counted once");
+        const auto& flows = sink->GetFlowStats();
+        NS_TEST_ASSERT_MSG_EQ(flows.size(), 1, "only the valid-version flow exists");
+        const auto& fs = flows.begin()->second;
+        NS_TEST_ASSERT_MSG_EQ(fs.rxPackets, 1, "one valid packet in the flow KPIs");
+        NS_TEST_ASSERT_MSG_EQ(fs.rxBytes, kPktSize, "flow bytes == valid packet bytes only");
+        NS_TEST_ASSERT_MSG_EQ(+fs.fiveQi, 82, "flow identity from the valid packet");
+
+        Simulator::Destroy();
+    }
+};
+
 class NtnOranApplicationTestSuite : public TestSuite
 {
   public:
@@ -259,6 +335,7 @@ class NtnOranApplicationTestSuite : public TestSuite
         AddTestCase(new NtnOranKnownDelayTest, Duration::QUICK);
         AddTestCase(new NtnOranRealLossTest, Duration::QUICK);
         AddTestCase(new NtnCncTelemetryTest, Duration::QUICK);
+        AddTestCase(new NtnOranVersionErrorTest, Duration::QUICK);
     }
 };
 

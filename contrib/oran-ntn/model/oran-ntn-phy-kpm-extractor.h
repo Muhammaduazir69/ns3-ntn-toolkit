@@ -47,6 +47,9 @@ class OranNtnSatBridge;
 /**
  * \ingroup oran-ntn
  * \brief Extracts real KPM metrics from mmWave PHY layer
+ *
+ * \note Currently exercised by unit tests only; the real-stack examples read
+ *       measured PHY KPIs through NtnRealStackHelper accessors instead.
  */
 class OranNtnPhyKpmExtractor : public Object
 {

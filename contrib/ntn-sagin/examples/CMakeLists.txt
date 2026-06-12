@@ -71,6 +71,8 @@ build_lib_example(
   SOURCE_FILES sagin-slice-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-sagin}
+    ${libntn-cho}
+    ${libntn-constellation}
     ${libcore}
     ${libnetwork}
     ${libmobility}

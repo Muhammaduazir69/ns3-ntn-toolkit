@@ -141,17 +141,25 @@ class OranNtnHelper : public Object
                           double elevation, double doppler);
 
     // ---- Phase 2: mmWave NTN stack setup ----
+    //
+    // \warning The Phase 2-5 methods below are DECLARED ONLY: no definition
+    //          exists in this release, so calling any of them fails at link
+    //          time (audit 2026-06-12 orphan pass). Real-stack scenarios use
+    //          NtnRealStackHelper (ntn-traffic) instead. Kept as the planned
+    //          API surface; implementations are roadmapped.
 
     /**
      * \brief Setup mmWave NTN PHY stack on satellite gNBs
      *
      * Installs NTN beamforming model, NTN channel model, and NTN scheduler.
+     * \warning Declared but not implemented (link error if called).
      */
     void SetupMmWaveNtnStack(NodeContainer satNodes, NodeContainer ueNodes,
                               double carrierFreqHz = 20e9);
 
     /**
      * \brief Setup dual connectivity between TN and NTN
+     * \warning Declared but not implemented (link error if called).
      */
     void SetupDualConnectivity(NodeContainer tnGnbs, NodeContainer ueNodes);
 
@@ -159,11 +167,13 @@ class OranNtnHelper : public Object
 
     /**
      * \brief Setup ns3-ai Gymnasium environments for all xApps
+     * \warning Declared but not implemented (link error if called).
      */
     void SetupAiIntegration(Ptr<OranNtnNearRtRic> ric, bool useGym = true);
 
     /**
      * \brief Enable real PHY KPM extraction (vs synthetic)
+     * \warning Declared but not implemented (link error if called).
      */
     void EnablePhyKpmExtraction();
 
@@ -171,6 +181,7 @@ class OranNtnHelper : public Object
 
     /**
      * \brief Create and register all 9 xApps (5 original + 4 new)
+     * \warning Declared but not implemented (link error if called).
      */
     std::map<std::string, Ptr<OranNtnXappBase>> CreateAllAdvancedXapps(
         Ptr<OranNtnNearRtRic> ric);
@@ -179,17 +190,20 @@ class OranNtnHelper : public Object
 
     /**
      * \brief Setup ISL network topology between satellites
+     * \warning Declared but not implemented (link error if called).
      */
     void SetupIslNetwork(NodeContainer satNodes, uint32_t numPlanes,
                           uint32_t satsPerPlane, double islDataRate_Mbps = 1000.0);
 
     /**
      * \brief Setup federated learning coordination
+     * \warning Declared but not implemented (link error if called).
      */
     void SetupFederatedLearning(const std::string& modelName, Time roundInterval);
 
     /**
      * \brief Get the satellite bridge (for external access)
+     * \warning Declared but not implemented (link error if called).
      */
     Ptr<OranNtnSatBridge> GetSatBridge() const;
 

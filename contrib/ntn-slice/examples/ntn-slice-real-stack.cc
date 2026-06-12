@@ -96,6 +96,7 @@ main(int argc, char* argv[])
     // MixedBouquet spreads UEs across eMBB/URLLC/mMTC traffic on the shared cell.
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(duration - 0.5));
+    rs.EnableAiFlowMonitor("ntn-slice-real-stack"); // WS2 KPM series (TS 28.552 names)
 
     Simulator::Stop(Seconds(duration));
     Simulator::Run();

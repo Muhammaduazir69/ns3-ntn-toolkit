@@ -15,6 +15,16 @@
  *   - Propagation-delay-tolerant subscription management
  *   - On-board buffering for store-and-forward E2 reports
  *   - ISL relay for multi-hop E2 connectivity
+ *
+ * Transport abstraction (read before citing this model):
+ *   E2AP-over-SCTP is NOT simulated. Indications and RC actions are
+ *   delay-modeled simulator events: each direction is delivered via
+ *   Simulator::Schedule(FeederLinkDelay), i.e. one feeder-link delay on
+ *   the measurement uplink (node -> RIC) and one on the control downlink
+ *   (RIC -> node). ns-3 mainline applies the same substitution for the
+ *   S1-AP/X2-AP control planes (UDP or direct calls instead of SCTP).
+ *   Wire-level E2 (E2AP/ASN.1-PER over SCTP) via flexric-bridge is
+ *   roadmapped (W8, gated on the FlexRIC Docker run).
  */
 
 #ifndef ORAN_NTN_E2_INTERFACE_H
@@ -85,6 +95,24 @@ struct E2Indication
  *
  * Manages E2 subscriptions, collects KPM metrics, executes RC actions,
  * and handles NTN-specific challenges (buffering, ISL relay, timing).
+ *
+ * E2 transport abstraction: E2AP-over-SCTP is NOT simulated.
+ * Indications and RC actions are delay-modeled events — feeder-link
+ * delay applied on EACH direction (uplink indications through
+ * SubmitKpmMeasurement(), downlink actions through ReceiveRcAction()).
+ * This is the same substitution ns-3 mainline uses for S1/X2 control.
+ * Wire-level E2 via flexric-bridge is roadmapped (W8).
+ *
+ * Loop-timing realism knobs:
+ *   - Attribute "AlignToControlLoop" (default false): when true,
+ *     indications that have crossed the feeder link are queued and
+ *     dispatched to the RIC/xApp callback only on the next Near-RT RIC
+ *     control-loop tick ("ControlLoopPeriod"), so the modeled loop is
+ *     measure -> feeder -> loop tick -> feeder -> apply instead of the
+ *     optimistic inline execution.
+ *   - Attribute "UnixEpochOffset" (default 0 = pure simulation time):
+ *     when nonzero, indication timestamps are offset + sim-time so
+ *     external consumers (e.g. the FlexRIC bridge) see Unix-like stamps.
  */
 class OranNtnE2Node : public Object
 {
@@ -101,6 +129,7 @@ class OranNtnE2Node : public Object
 
     uint32_t GetNodeId() const;
     bool IsNtn() const;
+    Time GetFeederLinkDelay() const;
 
     // ---- E2 Setup ----
     /**
@@ -143,6 +172,15 @@ class OranNtnE2Node : public Object
      */
     bool ExecuteRcAction(const E2RcAction& action);
 
+    /**
+     * \brief Deliver an RC action from the RIC over the RETURN feeder path.
+     *
+     * The action executes after FeederLinkDelay, mirroring the uplink
+     * indication delay — so a full control loop costs one feeder delay in
+     * each direction (E2AP-over-SCTP is not simulated; see class doc).
+     */
+    void ReceiveRcAction(const E2RcAction& action);
+
     // ---- NTN-specific ----
     /**
      * \brief Notify E2 node that feeder link is available/unavailable
@@ -171,6 +209,9 @@ class OranNtnE2Node : public Object
   private:
     void PeriodicReportTimer(uint32_t subscriptionId);
     void DeliverReport(const E2Indication& indication);
+    void DispatchIndication(const E2Indication& indication);
+    void DispatchAlignedIndications();
+    void ExecuteRcActionEvent(E2RcAction action);
     void CheckBufferAge();
 
     uint32_t m_gnbId;
@@ -178,6 +219,9 @@ class OranNtnE2Node : public Object
     Time m_feederLinkDelay;
     bool m_feederLinkAvailable;
     uint32_t m_maxBufferSize;
+    bool m_alignToControlLoop;
+    Time m_controlLoopPeriod;
+    double m_unixEpochOffset;
 
     std::map<uint32_t, E2Subscription> m_subscriptions;
     std::map<uint32_t, EventId> m_reportTimers;
@@ -187,6 +231,8 @@ class OranNtnE2Node : public Object
     RcActionCallback m_rcActionCb;
     IndicationCallback m_indicationCb;
 
+    std::deque<E2Indication> m_alignedQueue; //!< Held for the next loop tick
+    EventId m_alignedDispatchEvent;
     EventId m_bufferCheckEvent;
     uint32_t m_totalReportsSent;
     uint32_t m_totalReportsDropped;

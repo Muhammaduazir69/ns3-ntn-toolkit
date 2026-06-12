@@ -191,6 +191,284 @@ class OranNtnE2TestCase : public TestCase
 };
 
 // ============================================================================
+//  Test 2b: E2 return-path RC delivery (downlink feeder delay)
+// ============================================================================
+
+class OranNtnE2ReturnPathRcTestCase : public TestCase
+{
+  public:
+    OranNtnE2ReturnPathRcTestCase()
+        : TestCase("O-RAN NTN E2 ReceiveRcAction executes after one "
+                   "FeederLinkDelay on the return path")
+    {
+    }
+
+  private:
+    std::vector<Time> m_execTimes;
+
+    bool HandleRcAction(E2RcAction action)
+    {
+        m_execTimes.push_back(Simulator::Now());
+        return true;
+    }
+
+    void DoRun() override
+    {
+        auto e2node = CreateObject<OranNtnE2Node>();
+        e2node->SetNodeId(1);
+        e2node->SetIsNtn(true);
+        e2node->SetFeederLinkDelay(MilliSeconds(20));
+        e2node->RegisterRanFunction(3, "RC");
+        e2node->SetRcActionCallback(
+            MakeCallback(&OranNtnE2ReturnPathRcTestCase::HandleRcAction, this));
+
+        E2RcAction action;
+        action.timestamp = 0.0;
+        action.xappId = 7;
+        action.xappName = "test-rc";
+        action.actionType = E2RcActionType::HANDOVER_TRIGGER;
+        action.targetGnbId = 1;
+        action.targetUeId = 42;
+        action.targetBeamId = 0;
+        action.targetSliceId = 0;
+        action.confidence = 1.0;
+        action.parameter1 = 0.0;
+        action.parameter2 = 0.0;
+        action.executed = false;
+
+        // Deliver the RIC's command at t=0; the downlink feeder hop must
+        // defer execution to t=20 ms (mirror of the uplink indication delay).
+        Simulator::Schedule(Seconds(0),
+                            &OranNtnE2Node::ReceiveRcAction,
+                            e2node,
+                            action);
+
+        Simulator::Stop(MilliSeconds(100));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_ASSERT_MSG_EQ(m_execTimes.size(), 1u,
+                               "RC callback should fire exactly once");
+        NS_TEST_ASSERT_MSG_EQ(m_execTimes[0], MilliSeconds(20),
+                               "RC action must execute at t = FeederLinkDelay "
+                               "(20 ms), not inline");
+    }
+};
+
+// ============================================================================
+//  Test 2c: AlignToControlLoop holds indications until the next RIC tick
+// ============================================================================
+
+class OranNtnE2AlignToControlLoopTestCase : public TestCase
+{
+  public:
+    OranNtnE2AlignToControlLoopTestCase()
+        : TestCase("O-RAN NTN E2 AlignToControlLoop defers indication "
+                   "dispatch to the next control-loop tick")
+    {
+    }
+
+  private:
+    std::vector<Time> m_alignedTimes;
+    std::vector<Time> m_inlineTimes;
+
+    void HandleAlignedIndication(E2Indication indication)
+    {
+        m_alignedTimes.push_back(Simulator::Now());
+    }
+
+    void HandleInlineIndication(E2Indication indication)
+    {
+        m_inlineTimes.push_back(Simulator::Now());
+    }
+
+    static Ptr<OranNtnE2Node> MakeKpmNode(uint32_t gnbId)
+    {
+        auto node = CreateObject<OranNtnE2Node>();
+        node->SetNodeId(gnbId);
+        node->SetIsNtn(true);
+        node->SetFeederLinkDelay(MilliSeconds(30));
+        node->RegisterRanFunction(2, "KPM");
+
+        // Subscription driven the same way as the routed E2 test, but
+        // installed directly on the node (no periodic timer: period = 0) so
+        // SubmitKpmMeasurement is the only indication source.
+        E2Subscription sub;
+        sub.subscriptionId = 1;
+        sub.ricRequestorId = 1;
+        sub.ranFunctionId = 2;
+        sub.reportingPeriod = Seconds(0);
+        sub.eventTrigger = false;
+        sub.eventThreshold = 0.0;
+        sub.batchOnVisibility = false;
+        sub.maxBufferAge = Seconds(10);
+        sub.useIslRelay = false;
+        node->HandleSubscriptionRequest(sub);
+        return node;
+    }
+
+    static E2KpmReport MakeReport(uint32_t gnbId)
+    {
+        E2KpmReport report;
+        report.timestamp = 0.0;
+        report.gnbId = gnbId;
+        report.isNtn = true;
+        report.ueId = 42;
+        report.sinr_dB = 10.0;
+        report.rsrp_dBm = -90.0;
+        report.tte_s = 30.0;
+        report.elevation_deg = 45.0;
+        report.doppler_Hz = 1000.0;
+        return report;
+    }
+
+    void DoRun() override
+    {
+        // Aligned node: measurement at t=100 ms crosses the feeder link and
+        // lands at t=130 ms, then waits for the t=200 ms loop tick.
+        auto aligned = MakeKpmNode(1);
+        aligned->SetAttribute("AlignToControlLoop", BooleanValue(true));
+        aligned->SetAttribute("ControlLoopPeriod", TimeValue(MilliSeconds(100)));
+        aligned->SetIndicationCallback(MakeCallback(
+            &OranNtnE2AlignToControlLoopTestCase::HandleAlignedIndication,
+            this));
+
+        // Default node (AlignToControlLoop = false): same delivery lands
+        // inline at t=130 ms.
+        auto inlineNode = MakeKpmNode(2);
+        inlineNode->SetIndicationCallback(MakeCallback(
+            &OranNtnE2AlignToControlLoopTestCase::HandleInlineIndication,
+            this));
+
+        Simulator::Schedule(MilliSeconds(100),
+                            &OranNtnE2Node::SubmitKpmMeasurement,
+                            aligned,
+                            MakeReport(1));
+        Simulator::Schedule(MilliSeconds(100),
+                            &OranNtnE2Node::SubmitKpmMeasurement,
+                            inlineNode,
+                            MakeReport(2));
+
+        Simulator::Stop(MilliSeconds(500));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_ASSERT_MSG_EQ(m_alignedTimes.size(), 1u,
+                               "aligned node delivers exactly one indication");
+        NS_TEST_ASSERT_MSG_EQ(m_alignedTimes[0], MilliSeconds(200),
+                               "delivery at 130 ms must wait for the next "
+                               "control-loop tick at 200 ms");
+
+        NS_TEST_ASSERT_MSG_EQ(m_inlineTimes.size(), 1u,
+                               "default node delivers exactly one indication");
+        NS_TEST_ASSERT_MSG_EQ(m_inlineTimes[0], MilliSeconds(130),
+                               "default (AlignToControlLoop=false) dispatches "
+                               "at delivery time t=130 ms");
+    }
+};
+
+// ============================================================================
+//  Test 2d: UnixEpochOffset shifts indication timestamps
+// ============================================================================
+
+class OranNtnE2UnixEpochOffsetTestCase : public TestCase
+{
+  public:
+    OranNtnE2UnixEpochOffsetTestCase()
+        : TestCase("O-RAN NTN E2 UnixEpochOffset produces Unix-like "
+                   "indication timestamps; default keeps pure sim time")
+    {
+    }
+
+  private:
+    std::vector<double> m_offsetTimestamps;
+    std::vector<double> m_simTimestamps;
+
+    void HandleOffsetIndication(E2Indication indication)
+    {
+        m_offsetTimestamps.push_back(indication.timestamp);
+    }
+
+    void HandleSimIndication(E2Indication indication)
+    {
+        m_simTimestamps.push_back(indication.timestamp);
+    }
+
+    static Ptr<OranNtnE2Node> MakeKpmNode(uint32_t gnbId)
+    {
+        auto node = CreateObject<OranNtnE2Node>();
+        node->SetNodeId(gnbId);
+        node->SetIsNtn(true);
+        node->SetFeederLinkDelay(MilliSeconds(20));
+        node->RegisterRanFunction(2, "KPM");
+
+        E2Subscription sub;
+        sub.subscriptionId = 1;
+        sub.ricRequestorId = 1;
+        sub.ranFunctionId = 2;
+        sub.reportingPeriod = Seconds(0);
+        sub.eventTrigger = false;
+        sub.eventThreshold = 0.0;
+        sub.batchOnVisibility = false;
+        sub.maxBufferAge = Seconds(10);
+        sub.useIslRelay = false;
+        node->HandleSubscriptionRequest(sub);
+        return node;
+    }
+
+    void DoRun() override
+    {
+        auto offsetNode = MakeKpmNode(1);
+        offsetNode->SetAttribute("UnixEpochOffset",
+                                 DoubleValue(1750000000.0));
+        offsetNode->SetIndicationCallback(MakeCallback(
+            &OranNtnE2UnixEpochOffsetTestCase::HandleOffsetIndication, this));
+
+        // Default node keeps UnixEpochOffset = 0 (pure simulation time).
+        auto simNode = MakeKpmNode(2);
+        simNode->SetIndicationCallback(MakeCallback(
+            &OranNtnE2UnixEpochOffsetTestCase::HandleSimIndication, this));
+
+        E2KpmReport report;
+        report.timestamp = 0.0;
+        report.gnbId = 1;
+        report.isNtn = true;
+        report.ueId = 42;
+        report.sinr_dB = 10.0;
+        report.rsrp_dBm = -90.0;
+        report.tte_s = 30.0;
+        report.elevation_deg = 45.0;
+        report.doppler_Hz = 1000.0;
+
+        // Generate both indications at sim t = 2 s; the timestamp is stamped
+        // at generation, not at (delayed) delivery.
+        Simulator::Schedule(Seconds(2),
+                            &OranNtnE2Node::SubmitKpmMeasurement,
+                            offsetNode,
+                            report);
+        Simulator::Schedule(Seconds(2),
+                            &OranNtnE2Node::SubmitKpmMeasurement,
+                            simNode,
+                            report);
+
+        Simulator::Stop(Seconds(3));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_ASSERT_MSG_EQ(m_offsetTimestamps.size(), 1u,
+                               "offset node delivers one indication");
+        NS_TEST_ASSERT_MSG_EQ_TOL(m_offsetTimestamps[0], 1750000002.0, 1e-6,
+                                  "UnixEpochOffset=1750000000 + sim t=2 s "
+                                  "-> 1750000002.0");
+
+        NS_TEST_ASSERT_MSG_EQ(m_simTimestamps.size(), 1u,
+                               "default node delivers one indication");
+        NS_TEST_ASSERT_MSG_EQ_TOL(m_simTimestamps[0], 2.0, 1e-6,
+                                  "default offset 0 keeps pure sim time (2 s)");
+    }
+};
+
+// ============================================================================
 //  Test 3: A1 Policy management
 // ============================================================================
 
@@ -4300,6 +4578,13 @@ class OranNtnTestSuite : public TestSuite
         // Original tests
         AddTestCase(new OranNtnRicTestCase, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2TestCase, TestCase::Duration::QUICK);
+        // E2 loop-timing realism: return-path RC delay, control-loop
+        // alignment, Unix-epoch timestamp offset.
+        AddTestCase(new OranNtnE2ReturnPathRcTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnE2AlignToControlLoopTestCase,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnE2UnixEpochOffsetTestCase,
+                    TestCase::Duration::QUICK);
         AddTestCase(new OranNtnA1TestCase, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnConflictTestCase, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnSpaceRicTestCase, TestCase::Duration::QUICK);

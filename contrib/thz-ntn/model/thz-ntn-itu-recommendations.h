@@ -26,6 +26,12 @@
 // pybind11 path the roadmap calls out) can route through `ITU-Rpy` when
 // `ENABLE_ITURPY` is set at build time.
 //
+// \warning Experimental: all four classes are validated against ITU-R
+// reference values by the unit test suite (test/thz-ntn-test-suite.cc) but
+// are not yet exercised by any example; the example channel cascade uses
+// the module's own ThzNtnWeatherAttenuation / ThzNtnMolecularAbsorption /
+// ThzNtnScintillation implementations.
+//
 // References:
 //   ITU-R P.618-13  "Propagation data and prediction methods for the
 //                    design of Earth-space telecommunication systems"

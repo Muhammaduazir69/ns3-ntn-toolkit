@@ -10,6 +10,10 @@
  * Computes gain, beamwidth, near-field distance, physical size,
  * and beam patterns for various array sizes.  Also compares with
  * a Cassegrain reflector antenna for ground terminal use.
+ *
+ * Analysis-only example: pure array/beamforming characterisation — there is
+ * no scenario geometry and no packet transmission. For arrays closed over a
+ * measured radio see thz-ntn-beam-tracking.
  */
 
 #include <ns3/command-line.h>

@@ -35,6 +35,8 @@ class OranNtnSatBridge;
 /**
  * \ingroup oran-ntn
  * \brief Energy Harvesting xApp for power-aware NTN management
+ *
+ * \note Currently exercised by unit tests only.
  */
 class OranNtnXappEnergyHarvest : public OranNtnXappBase
 {

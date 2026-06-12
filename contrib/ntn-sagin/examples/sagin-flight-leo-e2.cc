@@ -212,6 +212,7 @@ main(int argc, char* argv[])
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("sagin-flight-leo-e2"); // WS2 KPM series (TS 28.552 names)
 
     // E2 node on the satellite gNB + one periodic KPM subscription.
     Ptr<OranNtnE2Node> e2 = CreateObject<OranNtnE2Node>();

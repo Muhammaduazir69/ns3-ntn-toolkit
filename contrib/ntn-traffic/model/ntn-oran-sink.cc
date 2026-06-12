@@ -163,6 +163,19 @@ NtnOranSink::HandleRead(Ptr<Socket> socket)
         copy->RemoveHeader(hdr);
         if (hdr.GetVersion() != NtnOranPayloadHeader::NTN_ORAN_PAYLOAD_VERSION)
         {
+            ++m_versionErrors;
+            // Warn once per flow key (rate-limited, not per packet) so a
+            // version mismatch cannot silently drain a flow undiagnosed.
+            FlowKey badKey{hdr.GetSrcId(), hdr.GetFiveQi(), hdr.GetSst(), hdr.GetSd()};
+            if (m_versionWarnedFlows.insert(badKey).second)
+            {
+                NS_LOG_WARN("NtnOranSink: discarding packet with payload-header version "
+                            << +hdr.GetVersion() << " (expected "
+                            << +NtnOranPayloadHeader::NTN_ORAN_PAYLOAD_VERSION << ") from "
+                            << from << " srcId=" << hdr.GetSrcId()
+                            << "; flow excluded from KPIs (total version errors: "
+                            << m_versionErrors << ")");
+            }
             continue;
         }
 

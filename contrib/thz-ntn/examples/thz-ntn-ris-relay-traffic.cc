@@ -146,6 +146,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("thz-ntn-ris-relay-traffic");
 
     const double tBlock = blockFraction * simSeconds;
     const double tRis = risOnFraction * simSeconds;

@@ -37,6 +37,9 @@ class OranNtnSatBridge;
 /**
  * \ingroup oran-ntn
  * \brief Gymnasium environment for handover RL training
+ *
+ * \warning Experimental: not yet exercised by any example or test; API may
+ *          change.
  */
 class OranNtnGymHandover : public OpenGymEnv
 {

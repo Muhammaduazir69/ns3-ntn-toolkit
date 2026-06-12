@@ -22,6 +22,10 @@ namespace ns3
 /**
  * \ingroup thz-ntn
  * \brief Minimal in-process RIS xApp (Roadmap §4.3.6).
+ *
+ * \warning Experimental: validated by the unit test suite
+ * (test/thz-ntn-test-suite.cc) but not yet exercised by any example;
+ * the measured-radio RIS xApp loop lives in thz-ntn-ric-controlled-traffic.
  */
 class ThzNtnRisXapp : public Object
 {

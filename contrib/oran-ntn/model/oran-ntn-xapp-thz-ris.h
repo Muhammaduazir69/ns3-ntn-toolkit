@@ -31,6 +31,9 @@ namespace ns3
 /**
  * \ingroup oran-ntn
  * \brief THz RIS Management xApp for reconfigurable surface control
+ *
+ * \warning Experimental: not yet exercised by any example or test; API may
+ *          change.
  */
 class OranNtnXappThzRis : public OranNtnXappBase
 {

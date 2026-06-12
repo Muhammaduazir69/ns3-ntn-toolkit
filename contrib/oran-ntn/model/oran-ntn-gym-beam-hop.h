@@ -22,6 +22,13 @@ namespace ns3
 class OranNtnXappBeamHop;
 class OranNtnSatBridge;
 
+/**
+ * \ingroup oran-ntn
+ * \brief Gymnasium environment for beam-hopping RL training
+ *
+ * \warning Experimental: not yet exercised by any example or test; API may
+ *          change.
+ */
 class OranNtnGymBeamHop : public OpenGymEnv
 {
   public:

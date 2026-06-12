@@ -32,8 +32,9 @@ events that the rest of the data plane consumes. Everything lives in the
   analytic Kepler propagator with secular J2 corrections (RAAN and
   argument-of-perigee) and an SGP4-compatible TLE interface, so position queries
   during `Simulator::Run()` follow the orbit. ECEF/ECI/geodetic surfaces and a
-  ground-station elevation query are built in. Full Vallado SGP4 is a planned
-  follow-on; the TLE drag (B*) field is parsed but not yet used by this model.
+  ground-station elevation query are built in. Full Vallado SGP4 (with
+  atmospheric drag / B*) is planned for Q4 2026; the TLE drag (B*) field is
+  parsed but not yet used by this model.
 - **Contact-graph scheduling** — `ContactGraphScheduler` evaluates GSL (ground↔sat)
   and ISL (sat↔sat) visibility over the simulation timeline and raises
   `ContactEvent`s as links come up and go down.
@@ -50,8 +51,10 @@ This module also ships a pip-installable Python companion (`ntn_constellation`) 
 the tool side — see [Python package](#python-package).
 
 **Two propagators, two fidelity levels.** The in-simulation C++ model
-(`Sgp4MobilityModel`) is an analytic Kepler + secular-J2 propagator with an
-SGP4-compatible TLE interface — it is *not* a full SGP4 implementation yet. The
+(`Sgp4MobilityModel`) is a **Kepler + J2 secular propagator with a
+TLE-compatible interface** — it is *not* a full SGP4 implementation yet; full
+Vallado SGP4 (atmospheric drag / B*) is planned for Q4 2026, and the B* field
+is parsed but unused until then. The
 tool-side Python package (`ntn_constellation`) is different: it uses the real
 `sgp4` library and Skyfield for canonical SGP4/SDP4 propagation when it generates
 TLEs, ephemerides, and export files offline. So "SGP4" claims below apply to the
@@ -86,7 +89,7 @@ Derived from `model/*.h`:
 | Header | Key types | Role |
 |---|---|---|
 | `walker-constellation.h` | `WalkerConfig`, `WalkerConstellation` (`BuildDelta`, `BuildStar`) | Walker-Delta / Walker-Star constellation generation (planes, sats/plane, altitude, inclination). |
-| `sgp4-mobility-model.h` | `Sgp4MobilityModel` | ns-3 `MobilityModel` that propagates a satellite during the simulation via an analytic Kepler + secular-J2 propagator with an SGP4-compatible TLE interface (full Vallado SGP4 planned). ECEF/ECI/geodetic accessors and `GetElevationDeg()`. |
+| `sgp4-mobility-model.h` | `Sgp4MobilityModel` | ns-3 `MobilityModel` that propagates a satellite during the simulation via an analytic Kepler + secular-J2 propagator with an SGP4-compatible TLE interface (full Vallado SGP4 with drag/B* planned Q4 2026; B* parsed but unused). ECEF/ECI/geodetic accessors and `GetElevationDeg()`. |
 | `orbital-elements.h` | `TleRecord`, `KeplerianElements` | TLE / Keplerian element records consumed by the mobility model. |
 | `contact-graph-scheduler.h` | `ContactGraphScheduler`, `ContactEvent` | Computes GSL/ISL visibility and emits link up/down events over time; up/down event counters per link class. |
 | `contact-graph-router.h` | `ContactGraphRouter` | Routes over the time-varying contact graph: BFS shortest path, weighted Dijkstra, regenerative-vs-bent-pipe constrained routing. |

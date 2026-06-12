@@ -62,6 +62,8 @@ struct RanFunctionAdvertised
  *
  * Holds an ns-3 Node aggregate, an OranNtnE2Node, and the set of
  * advertised RAN functions for its role.
+ *
+ * \note Currently exercised by unit tests only (via OranNtnSplitGnbHelper).
  */
 class OranNtnSplitGnbEntity : public Object
 {

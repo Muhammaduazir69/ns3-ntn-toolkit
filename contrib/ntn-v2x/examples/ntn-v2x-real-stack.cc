@@ -214,6 +214,7 @@ main(int argc, char* argv[])
     rs.Build(satNodes, g_vehicles);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(duration - 0.5));
+    rs.EnableAiFlowMonitor("ntn-v2x-real-stack"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 
     Simulator::Schedule(Seconds(1.0), &RelayTick);

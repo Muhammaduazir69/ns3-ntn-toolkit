@@ -18,6 +18,10 @@
 
 import setuptools
 
+# NOTE: this legacy setup.py only installs the shared-memory message
+# interface util (ns3ai_utils), which needs psutil alone. The NTN RL
+# package (ns3_ai_ntn: Gymnasium envs, SB3/GNN/MARL extras) is declared in
+# pyproject.toml — install it with `pip install -e .[sb3,gnn,marl]`.
 name = "ns3ai_python_utils"
 
 setuptools.setup(name=name,

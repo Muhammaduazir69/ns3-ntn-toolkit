@@ -45,12 +45,16 @@
 > payload header carrying 5QI/S-NSSAI/seq/timestamp) replaces OnOff traffic
 > toolkit-wide; an E2SM-KPM/TS 28.552 flow monitor (`NtnOranAiFlowMonitor`)
 > feeds AI xApps; a multi-tier RIC (on-board RT / gateway / cloud) takes its
-> E2 latency from live slant geometry; regenerative-payload options, FH
-> splits, platform latency classes and role switching are modelled per the
-> AI-native Space-O-RAN literature; and a standards campaign calibrates the
-> radio against **TR 38.821 Set-1 LEO-600** and implements **all five 3GPP
-> NTN handover trigger classes**. Gates: 36/36 protocol-fidelity checks,
-> 12/12 standards checks. See **[CHANGELOG.md](CHANGELOG.md)**.
+> E2 latency from live slant geometry; regenerative-payload options (a
+> **Rel-19** architecture: gNB-on-board became normative in Release 19,
+> Rel-17 is transparent-only), FH splits, platform latency classes and role
+> switching are modelled per the AI-native Space-O-RAN literature; and a
+> standards campaign calibrates the radio against **TR 38.821 Set-1
+> LEO-600** and implements the NTN handover triggers: **Rel-17 CondEvents
+> A4/T1/D1, Rel-18 CondEventD2 (moving ephemeris references), plus the
+> TR 38.821-studied elevation and timing-advance mechanisms**. Gates: 36/36
+> protocol-fidelity checks, 13/13 standards checks. See
+> **[CHANGELOG.md](CHANGELOG.md)**.
 >
 > **v2 (2026-05).** End-to-end CSV output-realism audit across
 > every example (signed LEO Doppler, 3GPP-bounded RSRQ, slant-range latency,
@@ -129,13 +133,13 @@ Open research on 6G non-terrestrial networks is held back by **tool fragmentatio
 | Data plane | real mmWave NR NTN cell (SpectrumPhy/MAC/RLC/PDCP/RRC/EPC) under SGP4 mobility; all KPIs **measured in-band** |
 | NTN/O-RAN application layer | `NtnOranApplication` 5QI profiles + 24-byte wire payload header (5QI / S-NSSAI / seq / timestamp) |
 | KPM monitoring | `NtnOranAiFlowMonitor` — TS 28.552 / E2SM-KPM series, AI feature windows, anomaly events, CSV/XML/Influx/E2 export |
-| 3GPP NTN procedures implemented | TS 38.213 TA · TS 38.331 SIB19 + UE Location Report · TS 38.321 NTN-DRX · TR 36.777 A2G · all 5 NTN HO trigger classes |
+| 3GPP NTN procedures implemented | TS 38.213 TA · TS 38.331 SIB19 + UE Location Report · TS 38.321 NTN-DRX · TR 36.777 A2G · NTN HO triggers: Rel-17 CondEvents A4/T1/D1 + Rel-18 D2 + TR 38.821-studied elevation/TA |
 | Standards calibration | TR 38.821 Set-1 LEO-600 S-band link budget · orbital-theory test campaign · 36/36 fidelity + 12/12 standards gates |
 | 3GPP slicing | TS 23.501 + TS 22.261 default profiles, eMBB / URLLC / mMTC / V2X (S-NSSAI carried in-band) |
 | O-RAN xApps shipped | 16 (13 in `oran-ntn` + 3 NTN-aware in `flexric-bridge`) + ONNX Runtime xApp inference (optional) |
 | O-RAN RIC tiers | on-board RT-RIC (<10 ms enforced) · gateway / cloud Near-RT placement with E2 latency from live slant geometry |
 | O-RAN E2 wire | live FlexRIC SCTP/E2AP via Docker; CI-friendly TCP/JSON stub for the same xApp logic |
-| Regenerative payloads | transparent / RU / RU+DU / full-gNB options · FH split model (Opt 2, 7.2a, 7.2b, 8) · role switching |
+| Regenerative payloads (Rel-19) | transparent (Rel-17 normative) / RU / RU+DU / full-gNB options · FH split model (Opt 2, 7.2a, 7.2b, 8) · role switching |
 | Reinforcement-learning bridge | Gymnasium 1.0 over patched ns3-ai (Py 3.13 + NumPy 2 ready); SB3 PPO + PyG GAT |
 | Channel models | TR 38.811 closed-form (default) · NVIDIA Sionna RT GPU ray-tracing (opt-in) |
 | Vehicular | SUMO TraCI v20+ live + FCD-trace replay |
@@ -177,6 +181,17 @@ The toolkit is layered top-down: each contrib module is independently buildable
 and testable, all of them sit on a hardened `ns-3.43` core, and an opt-in Python
 plane (Gymnasium / FastAPI / Cesium / Sionna) hangs off the same shared-memory
 bridge.
+
+**Transport realism.** The user plane is standards-correct end to end: UE
+traffic crosses a real SDAP-less NR stack (PDCP/RLC/MAC/PHY) and the core
+transports carry **GTP-U over UDP** exactly as TS 29.281 specifies for
+N3/F1-U/Xn-U, over point-to-point links whose delays follow the live orbital
+geometry (the same modeling Hypatia and SNS3 use for feeder/ISL links). The
+control planes (NGAP, F1AP, XnAP, E2AP) are SCTP in the specifications; in
+simulation they are substituted by delay-modeled events or UDP stand-ins —
+the same documented substitution ns-3 mainline applies to S1-AP/X2-AP — and
+each module's README states its abstraction explicitly. Wire-level
+E2AP-over-SCTP via `flexric-bridge` is the W8 roadmap item.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -512,7 +527,7 @@ Every contributed module ships with a numerical verification harness. Headline n
 | `oran-ntn` | 600-s scenario, 5 live xApps: **85 074** actions, 0 reported conflicts |
 | `thz-ntn` | atm windows match ITU-R P.676/618; UM-MIMO ≤ 128×128 demonstrated; ISAC CRB tracked over LEO pass |
 | `ntn-traffic` | TR 38.821 Set-1 LEO-600 calibration: constant array-gain offset (σ < 1 dB), FSPL slope within 0.2 dB of theory; byte-exact KPM-vs-sink cross-check |
-| toolkit gates | `tools/check_protocol_fidelity.py` **36/36** · `tools/check_ntn_standards.py` **12/12** (orbital theory, Doppler envelope, TR 38.821 geometry, Table-style platform latency bands, 5 HO trigger classes) |
+| toolkit gates | `tools/check_protocol_fidelity.py` **36/36** · `tools/check_ntn_standards.py` **13/13** (orbital theory, Doppler envelope, TR 38.821 geometry, Table-style platform latency bands, 6 HO trigger classes incl. Rel-18 D2) |
 
 ## Documentation
 

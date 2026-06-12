@@ -88,6 +88,10 @@ class NtnInfluxSink : public Object
     /// Number of points emitted since `Start()`. Useful for assertions.
     uint64_t GetEmittedCount() const;
 
+    /// Number of points dropped (oldest-first) because the buffer reached the
+    /// MaxBufferPoints attribute between flushes.
+    uint64_t GetDroppedPoints() const;
+
   protected:
     void DoDispose() override;
 
@@ -102,8 +106,11 @@ class NtnInfluxSink : public Object
     std::string m_filePath;
     Time m_flushPeriod{Seconds(1.0)};
     bool m_useSimulationTime{true};
+    uint32_t m_maxBufferPoints{1000000}; ///< MaxBufferPoints attribute
     std::vector<Point> m_buffer;
     uint64_t m_emitted{0};
+    uint64_t m_droppedPoints{0};
+    bool m_dropWarned{false};
     bool m_running{false};
     EventId m_event;
     int m_udpSocketFd{-1};

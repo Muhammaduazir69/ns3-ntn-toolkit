@@ -196,6 +196,7 @@ main(int argc, char* argv[])
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor("thz-ntn-ric-controlled-traffic");
 
     // --- oran-ntn E2 node + xApp closed-loop wiring ---
     g_e2 = CreateObject<OranNtnE2Node>();
