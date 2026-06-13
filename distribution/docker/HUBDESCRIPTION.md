@@ -27,18 +27,27 @@ docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
   ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10"
 
 # Pin to a specific release
-docker pull uzairdocker69/ns3-ntn-toolkit:2.1.0
+docker pull uzairdocker69/ns3-ntn-toolkit:2.1.1
 ```
 
 ## Tags
 
 | Tag      | Notes |
 |----------|-------|
-| `latest` | Tracks the most recent tagged release (currently `2.1.0`) |
-| `2.1.0`  | **Current stable** — AI-Native ORAN-NTN release: real measured NR NTN data plane, NTN/O-RAN application layer, E2SM-KPM flow monitor, multi-tier RIC, TR 38.821 calibration |
+| `latest` | Tracks the most recent tagged release (currently `2.1.1`) |
+| `2.1.1`  | **Current stable** — 2026-06-12 architecture-audit hardening on top of the AI-Native ORAN-NTN release: Rel-18 CondEventD2 handover trigger, E2 loop realism (return-path feeder delay + control-loop-aligned dispatch), KPM flow monitor wired across 40+ examples, mobility fixes, 13/13 standards gates |
+| `2.1.0`  | AI-Native ORAN-NTN release: real measured NR NTN data plane, NTN/O-RAN application layer, E2SM-KPM flow monitor, multi-tier RIC, TR 38.821 calibration |
 | `2.0.x`  | Previous release line (May 2026 realism audit) |
 
-The `2.1.0` image is **~7.5 GB extracted** (`linux/amd64`); most of that is the SNS3 satellite module's antenna-pattern and constellation data.
+The `2.1.1` image is **~7.5 GB extracted** (`linux/amd64`); most of that is the SNS3 satellite module's antenna-pattern and constellation data.
+
+## What's new in 2.1.1 — architecture-audit hardening
+
+- **Rel-18 CondEventD2** conditional-handover trigger (moving ephemeris reference locations) joins the Rel-17 A4/T1/D1 CondEvents and the TR 38.821-studied elevation/timing-advance mechanisms; standards gate now 13/13.
+- **E2 control-loop realism**: feeder-link delay on the RIC-to-node return path, opt-in control-loop-aligned indication dispatch, Unix-epoch timestamps for external RICs; the SCTP substitution is documented per module.
+- **KPM everywhere**: one-call `EnableAiFlowMonitor()` wires the TS 28.552 / E2SM-KPM flow monitor in 40+ examples (auto-exported CSV + InfluxDB line protocol).
+- **Mobility and physics fixes**: thz-ntn constellation geometry corrected to real SGP4 orbits, the remaining static-placeholder satellites/UEs/vehicles replaced with SGP4 / TR 38.811 / SUMO-FCD mobility, contact-gate hysteresis added.
+- The `oran-ntn-full-scenario` flagship now runs on real SGP4 geometry with per-row KPM provenance (`phy-trace` vs `geometry-budget`).
 
 ## What's new in 2.1.0 — AI-Native ORAN-NTN
 
@@ -91,7 +100,7 @@ A few of the reproducible numbers shipped with the image:
 
 ## Image provenance
 
-- Built from <https://github.com/Muhammaduazir69/ns3-ntn-toolkit> (release line `2.1.0`) using `distribution/docker/Dockerfile`
+- Built from <https://github.com/Muhammaduazir69/ns3-ntn-toolkit> (release line `2.1.1`, branch `ntn-integration-v2`) using `distribution/docker/Dockerfile`
 - The image contains the published source tree plus the SNS3 satellite dependency — no papers, run outputs, or private documents
 
 ## Links
