@@ -80,6 +80,7 @@ struct Context
     uint8_t sliceId;
     uint64_t* indicationCount;
     double simTime;
+    uint64_t lastRxBytes = 0; //!< for live per-window throughput measurement
 };
 
 void
@@ -127,7 +128,14 @@ EmitKpm(Context* ctx, Time reportPeriod)
     const double sinrLin = std::pow(10.0, r.sinr_dB / 10.0);
     r.rsrq_dB = std::max(-19.5, std::min(-3.0, 10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
     r.cqi = static_cast<uint8_t>(std::clamp(r.sinr_dB / 2.0 + 7.0, 0.0, 15.0));
-    r.throughput_Mbps = ctx->rs->GetRxThroughputMbps();
+    // LIVE measured throughput over the report window: GetRxThroughputMbps()
+    // is an end-of-run aggregate (computed in Collect()) and reads 0 during
+    // the run — the regeneration sweep caught this column stuck at zero.
+    const uint64_t rxNow = ctx->rs->GetUeRxBytes(0);
+    const double winS = reportPeriod.GetSeconds();
+    r.throughput_Mbps =
+        (winS > 0.0) ? (rxNow - ctx->lastRxBytes) * 8.0 / winS / 1e6 : 0.0;
+    ctx->lastRxBytes = rxNow;
     r.latency_ms = (range / kC) * 1000.0;
     r.elevation_deg = elev;
     const Vector relVel(satVel.x - ueVel.x, satVel.y - ueVel.y, satVel.z - ueVel.z);

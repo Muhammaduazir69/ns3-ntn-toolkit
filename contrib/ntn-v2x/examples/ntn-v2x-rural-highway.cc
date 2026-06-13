@@ -65,9 +65,29 @@ Step()
         return;
     }
     g_bridge->Step();
-    // MEASURED LEO baseline SINR (mean over the real-cell terminals).
-    const double baseline = g_rs->GetMeanDlSinrDb();
+    // MEASURED LEO baseline SINR — live mean over the real-cell terminals.
+    // GetMeanDlSinrDb() is an end-of-run aggregate (computed in Collect())
+    // and reads 0 during the run, which froze every relay-decision column
+    // at zero (caught by the regeneration sweep). Use the per-UE recent
+    // PHY samples instead and skip the tick until samples exist.
     const uint32_t n = static_cast<uint32_t>(g_vMobs.size());
+    double baseline = 0.0;
+    uint32_t nMeas = 0;
+    for (uint32_t v = 0; v < n; ++v)
+    {
+        const double s = g_rs->GetUeRecentSinrDb(v);
+        if (!std::isnan(s))
+        {
+            baseline += s;
+            ++nMeas;
+        }
+    }
+    if (nMeas == 0)
+    {
+        Simulator::Schedule(Seconds(g_dt), &Step);
+        return; // no PHY samples yet this early in the run
+    }
+    baseline /= nMeas;
 
     std::vector<double> directSinr(n);
     for (uint32_t v = 0; v < n; ++v)
