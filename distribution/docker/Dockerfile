@@ -79,7 +79,7 @@ LABEL org.opencontainers.image.source="https://github.com/Muhammaduazir69/ns3-nt
 LABEL org.opencontainers.image.documentation="https://ns3-ntn-toolkit.dev/"
 LABEL org.opencontainers.image.authors="Muhammad Uzair <muhammaduzairr69@gmail.com>"
 LABEL org.opencontainers.image.licenses="GPL-2.0-only"
-LABEL org.opencontainers.image.version="2.1.0"
+LABEL org.opencontainers.image.version="2.1.1"
 
 # Runtime deps — note this is intentionally NOT a slim "runtime-only" set.
 # ns-3's `./ns3 run` wrapper unconditionally invokes the CMake build system
