@@ -414,9 +414,13 @@ int main(int argc, char* argv[])
             for (uint32_t s = 0; s < numSats; s++) {
                 auto sp = computeSatPosition(s, numPlanes, satsPerPlane, inclination, alt_m, t);
                 double v = std::sqrt(sp.vx*sp.vx + sp.vy*sp.vy + sp.vz*sp.vz);
+                // altitude from the PROPAGATED state (sp.alt_m), not the
+                // config constant — identical for this circular-orbit model,
+                // but the column must carry the measured value (audit rule).
                 satTrackFile << std::fixed << std::setprecision(3) << t << ","
                     << s << "," << std::setprecision(6) << sp.lat << "," << sp.lon << ","
-                    << std::setprecision(1) << altitude_km << "," << std::setprecision(0) << v << "\n";
+                    << std::setprecision(1) << (sp.alt_m / 1000.0) << ","
+                    << std::setprecision(0) << v << "\n";
 
                 if (fmod(t, 30.0) < dt) {
                     if (!fSat) satGeo << ",\n";

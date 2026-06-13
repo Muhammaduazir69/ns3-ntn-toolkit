@@ -1,8 +1,11 @@
 # Install & run — ntn-cho
 
-`ntn-cho` is an ns-3.43 contributed module. It can be built as a standalone
-App Store module on top of a vanilla ns-3.43 tree, or as part of the
-[ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
+`ntn-cho` is an ns-3.43 contributed module. The recommended way to run it is
+inside the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
+tree, where every dependency below is already present. It also builds on a
+vanilla ns-3.43 tree, provided you add the sibling toolkit modules listed in
+section 2 (the library itself needs `satellite`; the examples additionally
+need `ntn-traffic`, `ntn-constellation`, and `mmwave`).
 
 ---
 
@@ -34,16 +37,29 @@ cd ..
 
 > Size note: SNS3 + bundled TLE data is ~3.7 GB.
 
-### 2b. Traffic helper (already included)
+### 2b. Toolkit modules `ntn-traffic` + `ntn-constellation` (REQUIRED for the examples)
 
-The `ntn-cho-leo-basic` and `ntn-cho-full-constellation` examples use
-`NtnRealisticTrafficHelper`. **In this standalone package the helper is
-vendored into the module** (`helper/ntn-realistic-traffic-helper.{h,cc}`), so
-nothing extra is needed. (Inside `ns3-ntn-toolkit` the same class is provided
-by the sibling `ntn-traffic` module instead, and the example `CMakeLists.txt`
-links `${libntn-traffic}` there.)
+Since v2.1 the examples (`ntn-cho-leo-basic`, `ntn-cho-full-constellation`,
+`ntn-cho-handover-traffic`, `ntn-cho-real-stack`) link the toolkit's
+`ntn-traffic` module (`NtnRealStackHelper`, the standards traffic
+applications) and `ntn-constellation` (`Sgp4MobilityModel`,
+`WalkerConstellation`). The traffic helper is **no longer vendored** into
+this module. Inside `ns3-ntn-toolkit` both modules are already in
+`contrib/`; on a vanilla ns-3.43 tree, clone them from the toolkit into
+`contrib/ntn-traffic` and `contrib/ntn-constellation`.
 
-### 2c. `ns3-ai` (OPTIONAL — learning-based path only)
+### 2c. mmWave NR PHY (REQUIRED for the examples)
+
+The same examples run real mmwave NR cells, so `contrib/mmwave` (and its
+bundled `lte` dependency) must be present:
+
+```bash
+cd contrib/
+git clone https://github.com/nyuwireless-unipd/ns3-mmwave.git mmwave
+cd ..
+```
+
+### 2d. `ns3-ai` (OPTIONAL — learning-based path only)
 
 `NtnAiInterface` bridges to a Python agent via `ns3-ai`. The C++ CHO triggers
 (a3 / location / time / tte-aware) build and run **without** it. To enable it:
@@ -139,7 +155,11 @@ are not asserted by the unit suite.
 **`ntn-cho` not registered after configure** — the SNS3 `satellite` module is
 missing; `ntn-cho` will not register without `contrib/satellite/`.
 
-**`ns3-ai` build errors** — only `NtnAiInterface` needs it (step 2c). Without
+**Examples missing after configure** — the examples need `ntn-traffic`,
+`ntn-constellation`, and `mmwave` in `contrib/` (steps 2b–2c); the library
+builds without them, the examples do not.
+
+**`ns3-ai` build errors** — only `NtnAiInterface` needs it (step 2d). Without
 `ns3-ai`, the module still builds and the C++ triggers run.
 
 ---

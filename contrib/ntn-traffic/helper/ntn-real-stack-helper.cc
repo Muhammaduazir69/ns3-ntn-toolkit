@@ -141,6 +141,14 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
     m_gnb = gnbNodes;
     m_ue = ueNodes;
 
+    // Wall-clock measurement starts here, NOT in InstallTraffic: scenarios
+    // that install flows only via InstallOranFlow() previously left
+    // m_wallStartNs at 0 and sim_health.csv reported the steady_clock epoch
+    // (time since boot) as the wall time.
+    m_wallStartNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+
     // ---- NTN-ize the NR air interface via Config defaults (read at CreateObject
     //      time inside MmWaveHelper::DoInitialize) -------------------------------
     // NB: mmwave registers its TypeIds WITHOUT the mmwave:: namespace.
