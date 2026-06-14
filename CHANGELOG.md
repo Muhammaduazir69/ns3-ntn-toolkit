@@ -35,6 +35,21 @@ standalone module are versioned as release lines; branch `ntn-integration-v2`
   Q4 2026); ntn-digital-twin scoped as live-TLE mirror (not a sim-output
   consumer); experimental/orphan classes labeled per module; Sionna RT 2.x
   pinned with a graceful import error.
+- **Space-RIC autonomy demonstrated (`oran-ntn-full-scenario`):** serving
+  selection is now a sticky/hysteretic CHO model; a regional feeder-link
+  outage strands UEs on the receding satellite, and as the serving link
+  crosses the service elevation (default 30°, a realistic NTN minimum) the
+  serving TTE falls below the on-board RIC's 5 s trigger and the Space-RIC
+  AUTONOMOUSLY hands over — `space_ric_metrics.csv` now reports hundreds of
+  real, geometry-driven autonomous decisions (was 0). `--serviceElev`,
+  `--groundHoTteS`, `--measuredWindowS` knobs added.
+- **CSV-output accuracy:** `sim_health.csv` wall-clock now measured from
+  `Build()` (scenarios that install flows only via `InstallOranFlow` no
+  longer report boot time); `satellite_tracks.csv` altitude from the
+  propagated state, not the config constant; live per-window throughput in
+  `sagin-flight-leo-e2` and a live measured SINR baseline in
+  `ntn-v2x-rural-highway` (both columns previously stuck at 0 because they
+  read end-of-run aggregates mid-run).
 
 ## [v2.1] — 2026-06
 
