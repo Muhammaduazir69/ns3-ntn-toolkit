@@ -9,10 +9,26 @@
  * What is REAL here (audit fix 2026-06-12, CRITICAL #1 — the previous version
  * of this example fed the RIC from a sine-formula KPM generator):
  *   - All satellites (default 6 planes x 11 = 66, Walker Delta) are ns-3 nodes
- *     under ns3::ntncon::Sgp4MobilityModel (Kepler+J2, ECEF). The serving
- *     satellite of every UE is selected by LIVE max-elevation over the whole
- *     constellation; elevation, slant range, Doppler and time-to-exit in every
- *     KPM report are derived from the live mobility models.
+ *     under ns3::ntncon::Sgp4MobilityModel (Kepler+J2, ECEF). Elevation, slant
+ *     range, Doppler and time-to-exit in every KPM report are derived from the
+ *     live mobility models.
+ *   - Serving selection is a STICKY (hysteretic) mobility model, not per-tick
+ *     max-elevation reselection: a UE keeps its serving satellite and rides it
+ *     down until the predicted time-to-exit the service elevation falls below
+ *     the ground-handover threshold, then is handed over to the best visible
+ *     candidate — real CHO behavior.
+ *
+ * Space-RIC autonomy demonstration (what the user asked to surface):
+ *   - A regional feeder-link outage (default: first 3 planes, ~t=24..96 s)
+ *     puts those satellites' on-board Space-RICs into autonomous mode. While a
+ *     satellite's feeder is down the GROUND RIC cannot send handover commands,
+ *     so a UE served by it is STRANDED and keeps riding the receding satellite.
+ *     As the serving elevation crosses the service elevation (default 30 deg,
+ *     a realistic NTN minimum service elevation, TR 38.821 VSAT cases) the
+ *     serving TTE drops below 5 s and the on-board RIC AUTONOMOUSLY initiates
+ *     the handover — see space_ric_metrics.csv (autonomous_decisions > 0) and
+ *     the "Space RIC Summary" print. This is the Deng-2026 on-orbit autonomy
+ *     use case, driven by real geometry rather than a scripted event.
  *   - UEs move under 3GPP TR 38.811 §6.1.1.1 class mobility at real ground
  *     positions (clusters under the anchored satellites' t=0 sub-points plus a
  *     wide scale-out field).
@@ -43,7 +59,9 @@
  * <outputDir>/kpm_feed.csv (column "provenance": phy-trace | geometry-budget).
  *
  * Usage:
- *   ./ns3 run "oran-ntn-full-scenario --duration=90 --numUes=30 --numRealCells=1"
+ *   ./ns3 run "oran-ntn-full-scenario --duration=120 --numUes=30 --numRealCells=1"
+ *   ./ns3 run "oran-ntn-full-scenario --numRealCells=0 --duration=400"  (budget +
+ *       Space-RIC over a full pass, no real cell, ~45 s wall, ~500 autonomous HOs)
  */
 
 #include "ns3/core-module.h"
@@ -83,7 +101,10 @@ NS_LOG_COMPONENT_DEFINE("OranNtnFullScenario");
 
 struct SimParams
 {
-    double duration = 90.0;        // seconds (keep <=120 s: 1 real mmwave cell)
+    double duration = 120.0;       // seconds (keep <=120 s: 1 real mmwave cell ~
+                                   // 1.4x real time; long enough that serving
+                                   // sats cross the service elevation and the
+                                   // on-board RIC is exercised)
     uint32_t numPlanes = 6;
     uint32_t satsPerPlane = 11;
     double altitudeKm = 550.0;
@@ -92,8 +113,19 @@ struct SimParams
     uint32_t numUes = 30;
     uint32_t numRealCells = 1;     // anchored measured mmwave cells (sats 0..N-1)
     uint32_t realUesPerCell = 3;   // UEs on each anchored cell's real radio
+    double measuredWindowS = 90.0; // real mmwave cell carries traffic for this
+                                   // long; the geometry+Space-RIC feed runs the
+                                   // full (longer) duration so passes set
     double kpmInterval = 0.1;      // seconds
-    double minElevDeg = 10.0;      // service threshold for TTE estimation
+    double minElevDeg = 10.0;      // hard coverage floor (reacquire below this)
+    double serviceElevDeg = 30.0;  // high-quality service elevation the TTE
+                                   // predictor counts down to (real NTN min
+                                   // service elevation, TR 38.821 VSAT cases);
+                                   // the on-board RIC hands over near here
+    double groundHoTteS = 20.0;    // serving TTE at which the GROUND RIC hands
+                                   // a UE over (sticky/hysteretic mobility); a
+                                   // stranded UE rides past this to the Space
+                                   // RIC's autonomous TTE<5 s trigger
     double satEirpDbm = 55.0;      // shared by measured cells and the budget
     double freqGhz = 2.0;          // S-band (3GPP NR-NTN FR1)
     double bwMhz = 50.0;
@@ -197,6 +229,11 @@ class RealGeometryKpmFeed
             double sinr;
             double rsrp;
             const char* provenance;
+            // Serving TTE: computed ONCE per (ue,sat) per tick (EstimateTteS
+            // mutates its elevation memory, so a second call the same tick
+            // would read a zero rate). chosenTte carries it from the sticky
+            // decision to the report when the UE stays on its serving sat.
+            double chosenTte = -1.0;
             if (ue < m_anchoredUes && m_rs)
             {
                 // Anchored UE: RRC-attached to its real cell; SINR is MEASURED
@@ -212,7 +249,51 @@ class RealGeometryKpmFeed
             }
             else
             {
-                servingSat = best;
+                // Sticky (hysteretic) serving model — real CHO behavior, NOT
+                // per-tick max-elevation reselection. A UE keeps its serving
+                // satellite and rides it down until the predicted time-to-exit
+                // falls below the ground-assisted handover threshold, then is
+                // handed over to the best visible candidate. But when the
+                // serving satellite's feeder link is down, the ground RIC can
+                // no longer issue that handover command: the UE is STRANDED on
+                // the receding satellite until the on-board (Space) RIC
+                // autonomously hands it over. That stranding is what drives the
+                // serving TTE below the Space RIC's autonomous trigger (TTE<5 s)
+                // — the on-orbit autonomy demonstration.
+                uint32_t serv;
+                auto sit = m_serving.find(ue);
+                if (sit != m_serving.end())
+                {
+                    const uint32_t prev = sit->second;
+                    const double prevElev = ntngeo::ElevationDeg(uePos, satPos[prev]);
+                    if (prevElev < m_p.minElevDeg)
+                    {
+                        serv = best; // serving has set below the horizon — reacquire
+                    }
+                    else
+                    {
+                        const bool feederDown =
+                            (m_spaceRics && prev < m_spaceRics->size() &&
+                             (*m_spaceRics)[prev] && (*m_spaceRics)[prev]->IsAutonomous());
+                        const double prevTte = EstimateTteS(ue, prev, prevElev);
+                        if (!feederDown && prevTte < m_p.groundHoTteS && best != prev &&
+                            bestElev > prevElev)
+                        {
+                            serv = best; // ground-assisted CHO before the link sets
+                        }
+                        else
+                        {
+                            serv = prev;        // stay attached (or stranded if feederDown)
+                            chosenTte = prevTte; // reuse — do not re-mutate this tick
+                        }
+                    }
+                }
+                else
+                {
+                    serv = best; // first acquisition
+                }
+                servingSat = serv;
+                m_serving[ue] = servingSat;
                 sinr = BudgetSinrDb(uePos, satPos[servingSat]);
                 rsrp = BudgetRxPowerDbm(uePos, satPos[servingSat]);
                 provenance = "geometry-budget";
@@ -221,27 +302,30 @@ class RealGeometryKpmFeed
             const double elev = ntngeo::ElevationDeg(uePos, satPos[servingSat]);
             const double doppler = ntngeo::DopplerHz(uePos, ueVel, satPos[servingSat],
                                                      satVel[servingSat], m_p.freqGhz * 1e9);
-            const double tte = EstimateTteS(ue, servingSat, elev);
+            const double tte =
+                (chosenTte >= 0.0) ? chosenTte : EstimateTteS(ue, servingSat, elev);
             m_helper->InjectKpmReport(servingSat + 1, ue, sinr, rsrp, tte, elev, doppler);
             LogRow(t, ue, servingSat + 1, "serving", sinr, rsrp, elev, doppler, tte,
                    provenance);
 
-            // ---- Candidate report (ephemeris-predicted handover target) -----
-            bool haveCand = (secondElev > 5.0 && second != servingSat);
+            // ---- Candidate report: best VISIBLE satellite that isn't serving -
+            uint32_t cand = (best != servingSat) ? best : second;
+            double candElev = (best != servingSat) ? bestElev : secondElev;
+            bool haveCand = (candElev > 5.0 && cand != servingSat);
             double cSinr = 0.0;
             double cElev = 0.0;
             double cTte = 0.0;
             if (haveCand)
             {
-                cSinr = BudgetSinrDb(uePos, satPos[second]);
-                const double cRsrp = BudgetRxPowerDbm(uePos, satPos[second]);
-                cElev = ntngeo::ElevationDeg(uePos, satPos[second]);
-                const double cDoppler = ntngeo::DopplerHz(uePos, ueVel, satPos[second],
-                                                          satVel[second], m_p.freqGhz * 1e9);
-                cTte = EstimateTteS(ue, second, cElev);
-                m_helper->InjectKpmReport(second + 1, ue, cSinr, cRsrp, cTte, cElev,
+                cSinr = BudgetSinrDb(uePos, satPos[cand]);
+                const double cRsrp = BudgetRxPowerDbm(uePos, satPos[cand]);
+                cElev = ntngeo::ElevationDeg(uePos, satPos[cand]);
+                const double cDoppler = ntngeo::DopplerHz(uePos, ueVel, satPos[cand],
+                                                          satVel[cand], m_p.freqGhz * 1e9);
+                cTte = EstimateTteS(ue, cand, cElev);
+                m_helper->InjectKpmReport(cand + 1, ue, cSinr, cRsrp, cTte, cElev,
                                           cDoppler);
-                LogRow(t, ue, second + 1, "candidate", cSinr, cRsrp, cElev, cDoppler,
+                LogRow(t, ue, cand + 1, "candidate", cSinr, cRsrp, cElev, cDoppler,
                        cTte, "geometry-budget");
             }
 
@@ -267,16 +351,16 @@ class RealGeometryKpmFeed
                     sric->ProcessLocalKpm(sr);
                     if (haveCand)
                     {
-                        E2KpmReport cand{};
-                        cand.timestamp = t;
-                        cand.gnbId = second + 1;
-                        cand.isNtn = true;
-                        cand.ueId = ue + m_p.numUes;
-                        cand.sinr_dB = cSinr;
-                        cand.tte_s = cTte;
-                        cand.elevation_deg = cElev;
-                        cand.beamId = second + 1;
-                        sric->ProcessLocalKpm(cand);
+                        E2KpmReport candR{};
+                        candR.timestamp = t;
+                        candR.gnbId = cand + 1;
+                        candR.isNtn = true;
+                        candR.ueId = ue + m_p.numUes;
+                        candR.sinr_dB = cSinr;
+                        candR.tte_s = cTte;
+                        candR.elevation_deg = cElev;
+                        candR.beamId = cand + 1;
+                        sric->ProcessLocalKpm(candR);
                     }
                 }
             }
@@ -357,8 +441,13 @@ class RealGeometryKpmFeed
         return kTnEirpDbm + kTnAntennaGainDb - plDb;
     }
 
-    /// TTE (s) until the satellite sets below minElev, from the measured
-    /// elevation rate of the live geometry over the KPM period.
+    /// TTE (s) until the satellite drops below the SERVICE elevation
+    /// (serviceElevDeg, the high-quality-link handover horizon — 25-40 deg in
+    /// real NTN systems, TR 38.821 VSAT cases), from the measured elevation
+    /// rate over the KPM period. This is distinct from minElevDeg, the hard
+    /// coverage floor below which the UE is dropped/reacquired: a UE riding its
+    /// serving satellite from the service elevation down to the floor reports
+    /// TTE<5 s the whole way, which is the on-board RIC's autonomous trigger.
     double EstimateTteS(uint32_t ue, uint32_t satIdx, double elevDeg)
     {
         const uint64_t key = static_cast<uint64_t>(ue) * 1000u + satIdx;
@@ -369,7 +458,10 @@ class RealGeometryKpmFeed
             const double rate = (elevDeg - it->second) / m_p.kpmInterval; // deg/s
             if (rate < -1e-3)
             {
-                tte = std::max(1.0, (elevDeg - m_p.minElevDeg) / -rate);
+                // Below the service elevation the link is already past its
+                // usable horizon: clamp TTE to ~0 (still inside coverage, but
+                // the on-board RIC must have handed over by now).
+                tte = std::max(1.0, (elevDeg - m_p.serviceElevDeg) / -rate);
             }
         }
         m_lastElev[key] = elevDeg;
@@ -394,6 +486,7 @@ class RealGeometryKpmFeed
     NtnRealStackHelper* m_rs{nullptr};
     std::vector<Ptr<OranNtnSpaceRic>>* m_spaceRics{nullptr};
     std::map<uint64_t, double> m_lastElev; // (ue,sat) -> last elevation
+    std::map<uint32_t, uint32_t> m_serving; // ue -> serving sat (sticky mobility)
     std::ofstream m_csv;
     uint32_t m_coverageGaps{0};
 };
@@ -461,9 +554,23 @@ main(int argc, char* argv[])
                  params.numRealCells);
     cmd.AddValue("realUesPerCell", "UEs on each anchored cell's real radio",
                  params.realUesPerCell);
+    cmd.AddValue("measuredWindowS",
+                 "Seconds the real mmwave cell carries traffic (phy-trace KPIs); "
+                 "the geometry + Space-RIC feed runs the full duration",
+                 params.measuredWindowS);
     cmd.AddValue("kpmInterval", "KPM reporting interval (s)", params.kpmInterval);
-    cmd.AddValue("minElev", "Min service elevation for TTE estimation (deg)",
+    cmd.AddValue("minElev", "Hard coverage floor — reacquire below this (deg)",
                  params.minElevDeg);
+    cmd.AddValue("serviceElev",
+                 "High-quality service elevation the TTE predictor counts down "
+                 "to (real NTN min service elevation; the on-board RIC hands "
+                 "over near here)",
+                 params.serviceElevDeg);
+    cmd.AddValue("groundHoTteS",
+                 "Serving TTE (s) at which the ground RIC hands a UE over "
+                 "(sticky mobility; a stranded UE rides past it to the Space "
+                 "RIC's autonomous TTE<5 s trigger)",
+                 params.groundHoTteS);
     cmd.AddValue("satEirpDbm", "Satellite EIRP (measured cells AND budget)",
                  params.satEirpDbm);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", params.freqGhz);
@@ -728,8 +835,14 @@ main(int argc, char* argv[])
         rs.SetBandwidthHz(params.bwMhz * 1e6);
         rs.SetSatEirpDbm(params.satEirpDbm);
         rs.Build(realGnbs, realUes);
+        // The measured mmwave cell carries traffic only for the first
+        // measuredWindowS — long enough to populate phy-trace KPIs — while the
+        // constellation-scale geometry + Space-RIC feed runs the full duration
+        // (a complete LEO pass) so satellites actually set and the on-board RIC
+        // is exercised. Running the real cell the whole pass is ~1.4x real time.
+        const double measWin = std::min(params.duration, params.measuredWindowS);
         rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
-                          Seconds(1.0), Seconds(params.duration - 0.5));
+                          Seconds(1.0), Seconds(measWin - 0.5));
         rs.EnableAiFlowMonitor(params.outputDir + "/full_scenario");
     }
     else
@@ -762,9 +875,11 @@ main(int argc, char* argv[])
         double outageDur = params.feederLinkOutageDuration;
         if (outageStart + outageDur >= params.duration)
         {
-            outageStart = params.duration * 0.3;
-            outageDur = std::min((double)params.feederLinkOutageDuration,
-                                 params.duration * 0.3);
+            // Span most of the run so stranded UEs cycling through their
+            // ground-handover point (TTE~groundHoTteS) have time to ride down
+            // to the Space RIC's autonomous TTE<5 s trigger and back.
+            outageStart = params.duration * 0.2;
+            outageDur = params.duration * 0.6;
         }
         // Regional gateway outage: the first ~3 planes lose their feeder link.
         // Spanning several planes (rather than just plane 0) ensures some of
