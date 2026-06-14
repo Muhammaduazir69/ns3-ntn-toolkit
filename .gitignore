@@ -121,6 +121,8 @@ contrib/ns3-ai-ntn/python_utils/
 # Private planning documents and generated run artefacts — never publish.
 AI_NATIVE_ORAN_NTN_ADOPTION_PLAN_2026-06.md
 PROTOCOL_FIDELITY_AUDIT_AND_FIX_2026-06.md
+TOOLKIT_ARCHITECTURE_AUDIT_*.md
+push-v2-branches.sh
 protocol_fidelity_report.md
 /*-output/
 /*-out/
