@@ -47,7 +47,8 @@ The `2.1.1` image is **~7.5 GB extracted** (`linux/amd64`); most of that is the 
 - **E2 control-loop realism**: feeder-link delay on the RIC-to-node return path, opt-in control-loop-aligned indication dispatch, Unix-epoch timestamps for external RICs; the SCTP substitution is documented per module.
 - **KPM everywhere**: one-call `EnableAiFlowMonitor()` wires the TS 28.552 / E2SM-KPM flow monitor in 40+ examples (auto-exported CSV + InfluxDB line protocol).
 - **Mobility and physics fixes**: thz-ntn constellation geometry corrected to real SGP4 orbits, the remaining static-placeholder satellites/UEs/vehicles replaced with SGP4 / TR 38.811 / SUMO-FCD mobility, contact-gate hysteresis added.
-- The `oran-ntn-full-scenario` flagship now runs on real SGP4 geometry with per-row KPM provenance (`phy-trace` vs `geometry-budget`).
+- The `oran-ntn-full-scenario` flagship now runs on real SGP4 geometry with per-row KPM provenance (`phy-trace` vs `geometry-budget`), and **demonstrates on-orbit Space-RIC autonomy**: a regional feeder-link outage strands UEs on the receding satellite and the on-board RIC autonomously hands them over as the serving link crosses the service elevation (`space_ric_metrics.csv` reports hundreds of real geometry-driven decisions).
+- **CSV-output accuracy**: measured wall-clock for flow-only scenarios, propagated-state satellite altitude, and live per-window throughput / SINR columns that previously read end-of-run aggregates mid-run.
 
 ## What's new in 2.1.0 — AI-Native ORAN-NTN
 
