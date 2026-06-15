@@ -122,6 +122,12 @@ struct SimParams
                                    // predictor counts down to (real NTN min
                                    // service elevation, TR 38.821 VSAT cases);
                                    // the on-board RIC hands over near here
+    bool stickyServing = true;     // true: hysteretic CHO serving (enables the
+                                   // feeder-outage autonomy demonstration).
+                                   // false: per-tick max-elevation reselection
+                                   // (the full-controller LOAD configuration:
+                                   // strong link, busy handover-prediction and
+                                   // steering xApps, high E2 action count)
     double groundHoTteS = 20.0;    // serving TTE at which the GROUND RIC hands
                                    // a UE over (sticky/hysteretic mobility); a
                                    // stranded UE rides past this to the Space
@@ -247,6 +253,20 @@ class RealGeometryKpmFeed
                 rsrp = sinr - 95.0; // module convention (see real-stack scenario)
                 provenance = "phy-trace";
             }
+            else if (!m_p.stickyServing)
+            {
+                // Load-scenario serving model: per-tick max-elevation
+                // reselection. Every UE always rides its best visible
+                // satellite, so the link stays strong (high delivery) and the
+                // frequent reselections keep the handover-prediction and
+                // steering xApps busy. This is the configuration the
+                // full-controller LOAD result uses.
+                servingSat = best;
+                m_serving[ue] = servingSat;
+                sinr = BudgetSinrDb(uePos, satPos[servingSat]);
+                rsrp = BudgetRxPowerDbm(uePos, satPos[servingSat]);
+                provenance = "geometry-budget";
+            }
             else
             {
                 // Sticky (hysteretic) serving model — real CHO behavior, NOT
@@ -259,7 +279,8 @@ class RealGeometryKpmFeed
                 // the receding satellite until the on-board (Space) RIC
                 // autonomously hands it over. That stranding is what drives the
                 // serving TTE below the Space RIC's autonomous trigger (TTE<5 s)
-                // — the on-orbit autonomy demonstration.
+                // — the on-orbit autonomy demonstration. This is the
+                // configuration the AUTONOMY result uses.
                 uint32_t serv;
                 auto sit = m_serving.find(ue);
                 if (sit != m_serving.end())
@@ -566,6 +587,12 @@ main(int argc, char* argv[])
                  "to (real NTN min service elevation; the on-board RIC hands "
                  "over near here)",
                  params.serviceElevDeg);
+    cmd.AddValue("stickyServing",
+                 "true: hysteretic CHO serving that enables the feeder-outage "
+                 "autonomy demonstration; false: per-tick max-elevation "
+                 "reselection (the full-controller LOAD configuration with busy "
+                 "xApps and a strong link)",
+                 params.stickyServing);
     cmd.AddValue("groundHoTteS",
                  "Serving TTE (s) at which the ground RIC hands a UE over "
                  "(sticky mobility; a stranded UE rides past it to the Space "
