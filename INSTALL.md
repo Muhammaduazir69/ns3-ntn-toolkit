@@ -22,11 +22,11 @@ This guide walks you through getting `ns3-ntn-toolkit` from a fresh checkout to 
 sudo apt update
 sudo apt install -y build-essential cmake ninja-build git python3 python3-pip \
     libboost-all-dev libgsl-dev libxml2-dev libsqlite3-dev libpcap-dev \
-    pybind11-dev libprotobuf-dev protobuf-compiler \
+    pybind11-dev libprotobuf-dev protobuf-compiler libabsl-dev \
     g++-11 gcc-11
 ```
 
-(`pybind11-dev` and the protobuf packages are needed by the `ns3-ai-ntn`
+(`pybind11-dev`, `libabsl-dev` and the protobuf packages are needed by the `ns3-ai-ntn`
 bridge; everything else is the standard ns-3 toolchain.)
 
 ### Python deps (only needed if you'll use the RL bridge or rebuild figures)
