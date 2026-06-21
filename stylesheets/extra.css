@@ -1,0 +1,111 @@
+/* ns3-ntn-toolkit site polish + media galleries */
+:root { --ntn-radius: 12px; }
+
+/* Responsive showcase gallery */
+.showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.1rem;
+  margin: 1.4rem 0 2rem;
+}
+.showcase-grid figure {
+  margin: 0;
+  border-radius: var(--ntn-radius);
+  overflow: hidden;
+  background: var(--md-default-fg-color--lightest);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  box-shadow: 0 2px 10px rgba(0,0,0,.10);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.showcase-grid figure:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 26px rgba(0,0,0,.20);
+}
+.showcase-grid img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: #05070d;
+}
+.showcase-grid figcaption {
+  padding: .6rem .85rem .8rem;
+  font-size: .82rem;
+  line-height: 1.35;
+  color: var(--md-default-fg-color--light);
+}
+.showcase-grid figcaption strong { color: var(--md-default-fg-color); }
+
+/* Full-width hero banner image */
+.ntn-hero-banner img {
+  width: 100%;
+  border-radius: var(--ntn-radius);
+  border: 1px solid var(--md-default-fg-color--lightest);
+}
+
+/* Stat strip */
+.ntn-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: .75rem;
+  margin: 1.4rem 0;
+}
+.ntn-stats .stat {
+  text-align: center;
+  padding: 1rem .5rem;
+  border-radius: var(--ntn-radius);
+  background: var(--md-default-fg-color--lightest);
+}
+.ntn-stats .stat .n {
+  display: block;
+  font-size: 1.7rem;
+  font-weight: 800;
+  color: var(--md-primary-fg-color);
+  line-height: 1;
+}
+.ntn-stats .stat .l {
+  font-size: .76rem;
+  color: var(--md-default-fg-color--light);
+}
+
+/* ---- Lightbox ---- */
+.ntn-lightbox {
+  position: fixed; inset: 0; z-index: 2000;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(3, 5, 12, .92); padding: 3vmin; cursor: zoom-out;
+}
+.ntn-lightbox.open { display: flex; }
+.ntn-lightbox img { max-width: 96vw; max-height: 92vh; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+.ntn-lightbox-close {
+  position: fixed; top: 14px; right: 22px; font-size: 2.4rem; line-height: 1;
+  color: #fff; cursor: pointer; opacity: .85;
+}
+.ntn-lightbox-close:hover { opacity: 1; }
+
+/* ---- Responsive tuning ---- */
+@media screen and (max-width: 600px) {
+  .showcase-grid { grid-template-columns: 1fr; gap: .9rem; }
+  .ntn-stats { grid-template-columns: repeat(2, 1fr); }
+  .ntn-stats .stat .n { font-size: 1.4rem; }
+  .md-typeset h1 { font-size: 1.6rem; line-height: 1.2; }
+}
+@media screen and (max-width: 900px) {
+  .showcase-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+}
+/* Make the Material "grid cards" feature responsive down to 1 col on phones */
+@media screen and (max-width: 480px) {
+  .md-typeset .grid.cards > ul,
+  .md-typeset .grid.cards { grid-template-columns: 1fr !important; }
+}
+/* Tables scroll instead of overflowing on small screens */
+.md-typeset__table { overflow-x: auto; }
+
+/* ---- Module "purpose" callout band ---- */
+.ntn-purpose {
+  border-left: 4px solid var(--md-primary-fg-color);
+  background: var(--md-default-fg-color--lightest);
+  padding: .9rem 1.1rem; border-radius: 0 10px 10px 0; margin: 1rem 0 1.4rem;
+  font-size: .95rem;
+}
+.ntn-badges img { margin: 2px 4px 2px 0; }

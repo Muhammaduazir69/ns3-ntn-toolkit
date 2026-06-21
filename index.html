@@ -1,0 +1,1771 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source ns-3.43 distribution for 6G non-terrestrial network research - 13 integrated modules covering LEO constellations, 3GPP NR-NTN, O-RAN, sub-THz, Sionna, SAGIN, V2X, slicing, AI/ML, digital twin.">
+      
+      
+        <meta name="author" content="Muhammad Uzair">
+      
+      
+        <link rel="canonical" href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">
+      
+      
+      
+        <link rel="next" href="getting-started/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="_assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>ns3-ntn-toolkit - ns3-ntn-toolkit</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="stylesheets/extra.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ns3-ntn-toolkit">
+  <meta property="og:title" content="ns3-ntn-toolkit - open-source ns-3 toolkit for 6G non-terrestrial networks">
+  <meta property="og:description" content="Open-source ns-3.43 distribution for 6G non-terrestrial network research - 13 integrated modules covering LEO constellations, 3GPP NR-NTN, O-RAN, sub-THz, Sionna, SAGIN, V2X, slicing, AI/ML, digital twin.">
+  <meta property="og:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/home.png">
+  <meta property="og:url" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ns3-ntn-toolkit - open-source ns-3 toolkit for 6G non-terrestrial networks">
+  <meta name="twitter:description" content="Open-source ns-3.43 distribution for 6G non-terrestrial network research - 13 integrated modules covering LEO constellations, 3GPP NR-NTN, O-RAN, sub-THz, Sionna, SAGIN, V2X, slicing, AI/ML, digital twin.">
+  <meta name="twitter:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/home.png">
+
+  <!-- Keywords / robots -->
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="keywords" content="ns-3, ns3, non-terrestrial networks, NTN, 6G, LEO satellite, SGP4, 3GPP TR 38.811, conditional handover, O-RAN, Near-RT RIC, FlexRIC, xApp, terahertz, sub-THz, NVIDIA Sionna, SAGIN, V2X, network slicing, NetSimulyzer, digital twin, satellite simulation, mmwave, 5G NR NTN">
+  <meta name="author" content="Muhammad Uzair">
+
+  <!-- Structured data (SoftwareApplication) for rich results -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "ns3-ntn-toolkit",
+    "description": "Open-source ns-3.43 distribution for 6G non-terrestrial network research: 13 integrated modules covering SGP4 LEO constellations, 3GPP TR 38.811 channels, Release-17 conditional handover, O-RAN Near-RT RIC + 13 xApps, FlexRIC bridge, 100 GHz\u20131 THz physics with HITRAN-2020, Sionna ray tracing, SAGIN routing, V2X over LEO, network slicing, observability, and a digital-twin dashboard.",
+    "applicationCategory": "Simulation / Research Software",
+    "operatingSystem": "Linux, Docker",
+    "softwareVersion": "2.2.0",
+    "license": "https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html",
+    "url": "https://muhammaduazir69.github.io/ns3-ntn-toolkit/",
+    "image": "https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/home.png",
+    "downloadUrl": "https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit",
+    "codeRepository": "https://github.com/Muhammaduazir69/ns3-ntn-toolkit",
+    "keywords": "ns-3, non-terrestrial networks, 6G, LEO, O-RAN, terahertz, SGP4, NTN simulation",
+    "author": {
+      "@type": "Person",
+      "name": "Muhammad Uzair",
+      "url": "https://orcid.org/0009-0002-4104-2680"
+    }
+  }
+  </script>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ns3-ntn-toolkit" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="." title="ns3-ntn-toolkit" class="md-header__button md-logo" aria-label="ns3-ntn-toolkit" data-md-component="logo">
+      
+  <img src="_assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ns3-ntn-toolkit
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ns3-ntn-toolkit
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-orange"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-orange"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Muhammaduazir69/ns3-ntn-toolkit
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="modules/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Modules
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="papers/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Papers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="community/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Community
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="cite/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Cite
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+                
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" hidden>
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="." title="ns3-ntn-toolkit" class="md-nav__button md-logo" aria-label="ns3-ntn-toolkit" data-md-component="logo">
+      
+  <img src="_assets/logo.svg" alt="logo">
+
+    </a>
+    ns3-ntn-toolkit
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Muhammaduazir69/ns3-ntn-toolkit
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="." class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-ns3-ntn-toolkit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is ns3-ntn-toolkit?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-it-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See it run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quickstart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quickstart
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#module-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module map
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frequently-asked-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frequently asked questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#citation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Citation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#maintainer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Maintainer
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="modules/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Modules
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Modules
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ntn-constellation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W1 ntn-constellation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ntn-rrc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W2 ntn-rrc
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ntn-observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W3 ntn-observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ns3-ai-ntn/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W4 ns3-ai-ntn
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ntn-sagin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W5 ntn-sagin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ntn-slice/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W6 ntn-slice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ntn-v2x/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W7 ntn-v2x
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/oran-ntn/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W8 oran-ntn + FlexRIC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ntn-sionna/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W9 ntn-sionna
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ntn-digital-twin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W10 ntn-digital-twin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/ntn-cho/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ntn-cho (TTE-aware CHO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/thz-ntn/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    thz-ntn (100 GHz–1 THz)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="modules/satellite/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    satellite (SNS3)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="papers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Papers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="community/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Community
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cite/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cite
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+                
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-ns3-ntn-toolkit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is ns3-ntn-toolkit?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-it-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See it run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quickstart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quickstart
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#module-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module map
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frequently-asked-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frequently asked questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#citation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Citation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#maintainer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Maintainer
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+
+
+
+  
+  
+
+
+<p align="center">
+  <img src="_assets/logo_lockup.png" alt="ns3-ntn-toolkit" width="780"/>
+</p>
+
+<h1 id="ns3-ntn-toolkit">ns3-ntn-toolkit<a class="headerlink" href="#ns3-ntn-toolkit" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>The only open-source ns-3 distribution that simulates 3GPP Rel-17/18/19 non-terrestrial networks <strong>end-to-end</strong> - from SGP4 ephemerides through O-RAN xApps to NVIDIA Sionna ray tracing - at mega-constellation scale.</p>
+</blockquote>
+<p><a href="https://www.nsnam.org"><img alt="ns-3 3.43" src="https://img.shields.io/badge/ns--3-3.43-blue.svg" /></a>
+<a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img alt="License GPL-2.0" src="https://img.shields.io/badge/license-GPL--2.0-green.svg" /></a>
+<a href="https://pypi.org/project/ns3-ntn-toolkit/"><img alt="PyPI ns3-ntn-toolkit" src="https://img.shields.io/pypi/v/ns3-ntn-toolkit?label=PyPI&amp;logo=pypi&amp;logoColor=white" /></a>
+<a href="https://huggingface.co/spaces/Muhammaduazir69/ns3-ntn-toolkit-demo"><img alt="HF Space" src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20demo-yellow" /></a>
+<a href="https://orcid.org/0009-0002-4104-2680"><img alt="ORCID" src="https://img.shields.io/badge/ORCID-0009--0002--4104--2680-A6CE39?logo=orcid" /></a>
+<a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-mirror-181717?logo=github" /></a>
+<a href="https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit"><img alt="GitLab" src="https://img.shields.io/badge/GitLab-mirror-FCA121?logo=gitlab" /></a></p>
+<div class="admonition tip">
+<p class="admonition-title">Try it now - no install</p>
+<p>The :material-satellite: <strong><a href="https://huggingface.co/spaces/Muhammaduazir69/ns3-ntn-toolkit-demo">Constellation demo on Hugging Face Spaces</a></strong> propagates real Starlink / OneWeb / Iridium NEXT / GPS TLEs in your browser using the same SGP4 backend the full toolkit uses. World map (Plotly · natural-earth), proper Earth-rotation-aware sub-satellite tracks, topocentric elevation/azimuth/range at any observer location.</p>
+</div>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Python side - pip-installable today</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>pip<span class="w"> </span>install<span class="w"> </span>ns3-ntn-toolkit<span class="w">              </span><span class="c1"># metapackage</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>ns3-ntn-toolkit<span class="w"> </span>info<span class="w">                     </span><span class="c1"># version + module list</span>
+</span></code></pre></div>
+<hr />
+<div class="ntn-stats">
+<div class="stat"><span class="n" data-target="13">13</span><span class="l">integrated ns-3 modules</span></div>
+<div class="stat"><span class="n" data-target="80" data-suffix="+">0</span><span class="l">runnable examples</span></div>
+<div class="stat"><span class="n" data-target="71967">0</span><span class="l">conflict-free O-RAN E2 actions</span></div>
+<div class="stat"><span class="n" data-target="1584">0</span><span class="l">satellites in 32 s on a desktop</span></div>
+</div>
+<h2 id="what-is-ns3-ntn-toolkit">What is ns3-ntn-toolkit?<a class="headerlink" href="#what-is-ns3-ntn-toolkit" title="Permanent link">&para;</a></h2>
+<p><strong>ns3-ntn-toolkit is the open-source <a href="https://www.nsnam.org">ns-3</a> simulation toolkit for 5G/6G non-terrestrial networks (NTN)</strong> - the only ns-3 distribution that models <strong>3GPP Release-17/18/19 satellite networks end-to-end</strong>, from SGP4 LEO ephemerides and TR 38.811 channels through Rel-17 conditional handover and an <strong>O-RAN Near-RT RIC with xApps</strong>, to <strong>NVIDIA Sionna</strong> ray tracing and <strong>sub-THz (100 GHz–1 THz)</strong> physics - at mega-constellation scale, with <strong>measured</strong> SINR / throughput / BLER KPIs rather than closed-form formulas.</p>
+<p>If you are researching <strong>LEO satellite networks, 5G NR-NTN, O-RAN over satellite, conditional handover, terahertz links, SAGIN, V2X-over-LEO, or AI/ML for satellite RANs</strong>, this is a ready-to-run, standards-aligned ns-3 environment built for exactly that.</p>
+<p>It is a research-grade simulation environment built on <strong>ns-3.43</strong> with <strong>13 integrated contrib modules</strong> covering the full 6G non-terrestrial stack. Standards-aligned to 3GPP TR 38.811, TR 38.821, TS 38.213/331/321, TS 22.261/23.501, O-RAN E2AP v2.03, ITU-R P.676/618, and IEEE-validated channel models for sub-THz bands.</p>
+<h2 id="what-it-does">What it does<a class="headerlink" href="#what-it-does" title="Permanent link">&para;</a></h2>
+<div class="grid cards">
+<ul>
+<li>
+<p>:material-satellite-variant: <strong>Live constellations</strong></p>
+<p>SGP4/SDP4 propagation of real Starlink, OneWeb, Kuiper, IRIS², Iridium NEXT, Telesat. Walker-Star and Walker-Delta presets generate valid SGP4-parseable TLEs at any scale.</p>
+</li>
+<li>
+<p>:material-radio-tower: <strong>3GPP NR-NTN protocol stack</strong></p>
+<p>TR 38.811 large-scale + small-scale fading. Rel-17 SIB19 + Timing Advance pre-compensation + UE GNSS location reporting + NTN-extended DRX + regenerative-vs-transparent payload. Conditional handover with TTE estimator.</p>
+</li>
+<li>
+<p>:material-cogs: <strong>O-RAN Near-RT RIC + FlexRIC bridge</strong></p>
+<p>13 xApps spanning beam management, slice orchestration, anomaly detection, predictive handover. 28 E2SM-RC actions, 11 A1 policies. Real ASN.1-compiled E2AP / KPM / RC over SCTP via FlexRIC.</p>
+</li>
+<li>
+<p>:material-wave: <strong>Sub-THz physics (100 GHz – 1 THz)</strong></p>
+<p>HITRAN-2020 atmospheric absorption · ITU-R P.676/618/838 · UM-MIMO · RIS quantisation sweep · ISAC CRB analysis.</p>
+</li>
+<li>
+<p>:material-graph: <strong>AI/ML pipeline</strong></p>
+<p>Stable-Baselines3 + PyTorch Geometric + ns3-gym. Pre-built environments for handover, beam management, slice orchestration, power control. MAPPO + MASAC baselines.</p>
+</li>
+<li>
+<p>:material-cube-outline: <strong>GPU ray tracing (NVIDIA Sionna RT)</strong></p>
+<p>Optional opt-in high-fidelity channel via Mitsuba 3 + TensorFlow 2.20 GPU. Validated within ±0.002 dB of TR 38.811 reference under matched scenarios.</p>
+</li>
+<li>
+<p>:material-airplane: <strong>SAGIN: HAPS + UAV + A2G</strong></p>
+<p>20 km HAPS station-keeping, UAV mobility patterns, 3GPP TR 36.777 air-to-ground channel. Multi-layer routing: ground → UAV → HAPS → LEO.</p>
+</li>
+<li>
+<p>:material-car-traction-control: <strong>V2X over LEO</strong></p>
+<p>SUMO TraCI bridge for vehicular nodes consuming LEO connectivity in rural / oceanic / emergency scenarios.</p>
+</li>
+<li>
+<p>:material-chart-line: <strong>Network slicing</strong></p>
+<p>eMBB / URLLC / mMTC across LEO and GEO. URLLC E2E p99 latency &lt; 50 ms via GEO-mode-skip routing.</p>
+</li>
+<li>
+<p>:material-monitor-dashboard: <strong>Observability stack</strong></p>
+<p>InfluxDB + Grafana + NetSimulyzer 3D playback. Four pre-built Grafana dashboards. Per-slice / per-beam / per-cell KPI panels.</p>
+</li>
+<li>
+<p>:material-earth: <strong>Live digital twin</strong></p>
+<p>FastAPI prediction service + cron-driven TLE refresh + CesiumJS 3D viewer. <code>/predict/handover</code> p99 ≈ 30 ms.</p>
+</li>
+<li>
+<p>:material-server: <strong>Reproducible infrastructure</strong></p>
+<p>Docker compose for InfluxDB + Grafana, Docker compose for FlexRIC RIC + E2 Agent + xApps, every module with CMakeLists, every test gated.</p>
+</li>
+</ul>
+</div>
+<hr />
+<h2 id="see-it-run">See it run<a class="headerlink" href="#see-it-run" title="Permanent link">&para;</a></h2>
+<p>Every animation below is rendered from a <strong>real ns-3 simulation</strong> in the toolkit - measured SINR/throughput off the radio, SGP4-propagated orbits, and live O-RAN xApp control loops.</p>
+<div class="showcase-grid">
+<figure>
+  <img alt="TTE-aware conditional handover over a LEO pass" loading="lazy" src="media/ntn_cho_handover_animation.gif" />
+<br />
+<figcaption><strong>Rel-17 conditional handover</strong> - TTE-aware candidate selection removes every ping-pong across a real LEO pass (<code>ntn-cho</code>).</figcaption>
+</figure>
+<figure>
+  <img alt="O-RAN constellation with Near-RT RIC" loading="lazy" src="media/oran_ntn_constellation_ric.gif" />
+<br />
+<figcaption><strong>Space O-RAN</strong> - on-board Near-RT RIC steering a 66-satellite constellation through feeder-link outages (<code>oran-ntn</code>).</figcaption>
+</figure>
+<figure>
+  <img alt="O-RAN xApp control decisions" loading="lazy" src="media/oran_ntn_xapp_decisions.gif" />
+<br />
+<figcaption><strong>Conflict-free xApp control</strong> - 71,967 E2 actions across 5 concurrent xApps, zero conflicts (<code>oran-ntn</code>).</figcaption>
+</figure>
+<figure>
+  <img alt="Realistic UE mobility under a constellation" loading="lazy" src="media/ntn_realistic_mobility.gif" />
+<br />
+<figcaption><strong>TR 38.811 UE mobility</strong> - pedestrian / vehicular / aviation / maritime UEs moving under propagated orbits (<code>ntn-constellation</code>).</figcaption>
+</figure>
+<figure>
+  <img alt="THz EKF beam tracking" loading="lazy" src="media/thz_beam_tracking.gif" />
+<br />
+<figcaption><strong>Sub-THz beam tracking</strong> - EKF beam tracker holding a 100 GHz–1 THz link through a LEO pass (<code>thz-ntn</code>).</figcaption>
+</figure>
+<figure>
+  <img alt="ns3-ai reinforcement-learning training loop" loading="lazy" src="media/ns3ai_rl_training.gif" />
+<br />
+<figcaption><strong>AI-native control</strong> - RL agents training in-the-loop over the ns3-ai shared-memory bridge (<code>ns3-ai-ntn</code>).</figcaption>
+</figure>
+</div>
+<hr />
+<h2 id="quickstart">Quickstart<a class="headerlink" href="#quickstart" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Clone the repo</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nb">cd</span><span class="w"> </span>ns3-ntn-toolkit/ns-3-dev
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Configure &amp; build</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>./ns3<span class="w"> </span>configure<span class="w"> </span>--enable-examples<span class="w"> </span>--enable-tests
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>./ns3<span class="w"> </span>build
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="c1"># Or pull the pre-built Docker image</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>uzairdocker69/ns3-ntn-toolkit:latest
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="c1"># Run the live-Starlink demo</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>ntn-fetch<span class="w"> </span>starlink<span class="w"> </span>--out<span class="w"> </span>data/starlink-now<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span>--max-sats<span class="w"> </span><span class="m">200</span><span class="w"> </span>--czml<span class="w"> </span>--czml-duration-min<span class="w"> </span><span class="m">120</span><span class="w"> </span>-v
+</span></code></pre></div>
+<p>Full installation instructions: <a href="getting-started/">Getting started</a>.</p>
+<hr />
+<h2 id="module-map">Module map<a class="headerlink" href="#module-map" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Module</th>
+<th>Status</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W1</td>
+<td><a href="modules/ntn-constellation/">ntn-constellation</a></td>
+<td>✅</td>
+<td>Live TLE → SGP4 → SNS3 → CZML pipeline</td>
+</tr>
+<tr>
+<td>W2</td>
+<td><a href="modules/ntn-rrc/">ntn-rrc</a></td>
+<td>✅</td>
+<td>3GPP Rel-18/19 RRC: TA pre-comp, SIB19, UE location, NTN-DRX</td>
+</tr>
+<tr>
+<td>W3</td>
+<td><a href="modules/ntn-observability/">ntn-observability</a></td>
+<td>✅</td>
+<td>InfluxDB + Grafana + NetSimulyzer</td>
+</tr>
+<tr>
+<td>W4</td>
+<td><a href="modules/ns3-ai-ntn/">ns3-ai-ntn</a></td>
+<td>✅</td>
+<td>SB3 + PyG + ns3-gym, 4 RL envs, GAT topology learner</td>
+</tr>
+<tr>
+<td>W5</td>
+<td><a href="modules/ntn-sagin/">ntn-sagin</a></td>
+<td>✅</td>
+<td>HAPS + UAV + TR 36.777 A2G</td>
+</tr>
+<tr>
+<td>W6</td>
+<td><a href="modules/ntn-slice/">ntn-slice</a></td>
+<td>✅</td>
+<td>eMBB / URLLC / mMTC across LEO+GEO</td>
+</tr>
+<tr>
+<td>W7</td>
+<td><a href="modules/ntn-v2x/">ntn-v2x</a></td>
+<td>✅</td>
+<td>SUMO TraCI bridge for vehicular NTN</td>
+</tr>
+<tr>
+<td>W8</td>
+<td><a href="modules/oran-ntn/">oran-ntn + FlexRIC</a></td>
+<td>🟢</td>
+<td>Near-RT RIC, 13 xApps, real E2AP over SCTP</td>
+</tr>
+<tr>
+<td>W9</td>
+<td><a href="modules/ntn-sionna/">ntn-sionna</a></td>
+<td>✅</td>
+<td>NVIDIA Sionna RT bridge</td>
+</tr>
+<tr>
+<td>W10</td>
+<td><a href="modules/ntn-digital-twin/">ntn-digital-twin</a></td>
+<td>✅</td>
+<td>FastAPI + cron + CesiumJS live viewer</td>
+</tr>
+<tr>
+<td>-</td>
+<td><a href="modules/ntn-cho/">ntn-cho</a></td>
+<td>✅</td>
+<td>TTE-aware Conditional Handover</td>
+</tr>
+<tr>
+<td>-</td>
+<td><a href="modules/thz-ntn/">thz-ntn</a></td>
+<td>✅</td>
+<td>100 GHz – 1 THz with HITRAN-2020, RIS, ISAC</td>
+</tr>
+<tr>
+<td>-</td>
+<td><a href="modules/satellite/">satellite (SNS3)</a></td>
+<td>✅</td>
+<td>SGP4 mobility, ISL, CelesTrak bindings</td>
+</tr>
+</tbody>
+</table>
+<p><a href="modules/">See all modules →</a></p>
+<hr />
+<h2 id="frequently-asked-questions">Frequently asked questions<a class="headerlink" href="#frequently-asked-questions" title="Permanent link">&para;</a></h2>
+<details class="question">
+<summary>What is the best open-source ns-3 simulator for LEO satellite / non-terrestrial networks?</summary>
+<p><strong>ns3-ntn-toolkit</strong> is purpose-built for it. Unlike a single channel model or a flow-level LEO simulator, it integrates SGP4 orbit propagation, 3GPP TR 38.811 channels, a real 5G NR data plane, Rel-17 conditional handover, an O-RAN Near-RT RIC, and sub-THz physics in one ns-3.43 distribution - so you simulate the <strong>whole</strong> non-terrestrial stack, not one layer.</p>
+</details>
+<details class="question">
+<summary>How do I simulate 5G NR-NTN conditional handover (CHO) in ns-3?</summary>
+<p>Use the <code>ntn-cho</code> module. It implements the full 3GPP Rel-17/18 NTN CHO trigger set - measurement A3, location-based <strong>condEventD1</strong>, time-based <strong>condEventT1</strong>, timing-advance, elevation, and Rel-18 <strong>condEventD2</strong> - selectable in one example, executed over SGP4-propagated orbits with handovers driven by <strong>measured</strong> serving SINR. <code>./ns3 run "ntn-cho-real-stack --trigger=tte-aware"</code>.</p>
+</details>
+<details class="question">
+<summary>Is there an open-source O-RAN simulator for non-terrestrial networks?</summary>
+<p>Yes - the <code>oran-ntn</code> module provides an O-RAN Near-RT RIC + on-board Space RIC with xApps, <strong>real E2AP/E2SM ASN.1-PER over SCTP</strong>, a FlexRIC bridge, and canonical TS 28.552 KPM metrics measured off the PHY. It is, to our knowledge, the first open-source ns-3 RIC-coupled NTN E2 testbed.</p>
+</details>
+<details class="question">
+<summary>Can ns-3 simulate terahertz / sub-THz (100 GHz–1 THz) satellite links?</summary>
+<p>Yes. The <code>thz-ntn</code> module models molecular absorption (HITRAN), ITU-R P.676/P.618 atmospheric loss, RIS, ISAC, and EKF beam tracking as real ns-3 propagation-loss models chained onto the radio - so THz physics attenuate actual packets and show up in the measured SINR.</p>
+</details>
+<details class="question">
+<summary>Does it support real Starlink / OneWeb / Iridium constellations?</summary>
+<p>Yes - <code>ntn-constellation</code> propagates real CelesTrak TLEs (Starlink, OneWeb, Kuiper, Iridium NEXT, Telesat) with a full Vallado SGP4 backend, and generates Walker-Delta / Walker-Star shells at any scale (a 1,584-satellite scenario runs in ~32 seconds on a desktop).</p>
+</details>
+<details class="question">
+<summary>How is it different from SNS3, Hypatia, or other LEO network simulators?</summary>
+<p>SNS3 is DVB-S2/RCS2 (no NR); Hypatia is flow-level routing/latency. ns3-ntn-toolkit adds the <strong>3GPP 5G NR-NTN protocol stack, O-RAN control, conditional handover, sub-THz physics, Sionna ray tracing, and AI/ML hooks</strong> on top of real orbital mobility - and reuses SNS3's satellite channel where it helps. It targets protocol-level fidelity at constellation scale.</p>
+</details>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type":"Question","name":"What is the best open-source ns-3 simulator for LEO satellite / non-terrestrial networks?","acceptedAnswer":{"@type":"Answer","text":"ns3-ntn-toolkit integrates SGP4 orbit propagation, 3GPP TR 38.811 channels, a real 5G NR data plane, Rel-17 conditional handover, an O-RAN Near-RT RIC, and sub-THz physics in one ns-3.43 distribution, so you simulate the whole non-terrestrial stack."}},
+    {"@type":"Question","name":"How do I simulate 5G NR-NTN conditional handover (CHO) in ns-3?","acceptedAnswer":{"@type":"Answer","text":"Use the ntn-cho module. It implements the full 3GPP Rel-17/18 NTN CHO trigger set (A3, location condEventD1, time condEventT1, timing-advance, elevation, Rel-18 condEventD2) over SGP4 orbits with handovers driven by measured serving SINR."}},
+    {"@type":"Question","name":"Is there an open-source O-RAN simulator for non-terrestrial networks?","acceptedAnswer":{"@type":"Answer","text":"Yes, the oran-ntn module provides an O-RAN Near-RT RIC plus on-board Space RIC with xApps, real E2AP/E2SM ASN.1-PER over SCTP, a FlexRIC bridge, and canonical TS 28.552 KPM metrics measured off the PHY."}},
+    {"@type":"Question","name":"Can ns-3 simulate terahertz sub-THz 100 GHz to 1 THz satellite links?","acceptedAnswer":{"@type":"Answer","text":"Yes. The thz-ntn module models molecular absorption (HITRAN), ITU-R P.676/P.618 atmospheric loss, RIS, ISAC, and EKF beam tracking as real ns-3 propagation-loss models so THz physics attenuate actual packets."}},
+    {"@type":"Question","name":"Does it support real Starlink OneWeb Iridium constellations?","acceptedAnswer":{"@type":"Answer","text":"Yes, ntn-constellation propagates real CelesTrak TLEs (Starlink, OneWeb, Kuiper, Iridium NEXT, Telesat) with a full Vallado SGP4 backend and generates Walker-Delta/Star shells at any scale."}},
+    {"@type":"Question","name":"How is it different from SNS3, Hypatia, or other LEO network simulators?","acceptedAnswer":{"@type":"Answer","text":"It adds the 3GPP 5G NR-NTN protocol stack, O-RAN control, conditional handover, sub-THz physics, Sionna ray tracing, and AI/ML hooks on top of real orbital mobility, targeting protocol-level fidelity at constellation scale."}}
+  ]
+}
+</script>
+
+<hr />
+<h2 id="citation">Citation<a class="headerlink" href="#citation" title="Permanent link">&para;</a></h2>
+<p>If this toolkit helps your research, please cite (see also <a href="cite/">Cite</a>):</p>
+<div class="language-bibtex highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nc">@software</span><span class="p">{</span><span class="nl">uzair_ns3_ntn_toolkit_2026</span><span class="p">,</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="na">author</span><span class="w">       </span><span class="p">=</span><span class="w"> </span><span class="s">{Muhammad Uzair}</span><span class="p">,</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="na">title</span><span class="w">        </span><span class="p">=</span><span class="w"> </span><span class="s">{{ns3-ntn-toolkit: An open-source ns-3 distribution</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s">                   for 6G non-terrestrial network research}}</span><span class="p">,</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="na">year</span><span class="w">         </span><span class="p">=</span><span class="w"> </span><span class="s">{2026}</span><span class="p">,</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="na">url</span><span class="w">          </span><span class="p">=</span><span class="w"> </span><span class="s">{https://github.com/Muhammaduazir69/ns3-ntn-toolkit}</span><span class="p">,</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="na">orcid</span><span class="w">        </span><span class="p">=</span><span class="w"> </span><span class="s">{0009-0002-4104-2680}</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
+</span></code></pre></div>
+<hr />
+<h2 id="maintainer">Maintainer<a class="headerlink" href="#maintainer" title="Permanent link">&para;</a></h2>
+<p><strong>Muhammad Uzair</strong> · Independent Researcher · <a href="mailto:muhammaduzairr69@gmail.com">muhammaduzairr69@gmail.com</a> · <a href="https://orcid.org/0009-0002-4104-2680">ORCID</a></p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+  
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 Muhammad Uzair, Independent Researcher
+    </div>
+  
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit" target="_blank" rel="noopener" title="gitlab.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="m504 204.6-.7-1.8L433.6 21c-1.4-3.6-3.9-6.6-7.2-8.6-2.4-1.6-5.1-2.5-8-2.8s-5.7.1-8.4 1.1-5.1 2.7-7.1 4.8c-1.9 2.1-3.3 4.7-4.1 7.4l-47 144H161.3l-47.1-144c-.8-2.8-2.2-5.3-4.1-7.4-2-2.1-4.4-3.7-7.1-4.8-2.6-1-5.5-1.4-8.4-1.1s-5.6 1.2-8 2.8c-3.2 2-5.8 5.1-7.2 8.6L9.8 202.8l-.8 1.8c-10 26.2-11.3 55-3.5 82 7.7 26.9 24 50.7 46.4 67.6l.3.2.6.4 106 79.5c38.5 29.1 66.7 50.3 84.6 63.9 3.7 1.9 8.3 4.3 13 4.3s9.3-2.4 13-4.3c17.9-13.5 46.1-34.9 84.6-63.9l106.7-79.9.3-.3c22.4-16.9 38.7-40.6 45.6-67.5 8.6-27 7.4-55.8-2.6-82"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://orcid.org/0009-0002-4104-2680" target="_blank" rel="noopener" title="orcid.org" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M294.7 188.2h-45.9V342h47.5c67.6 0 83.1-51.3 83.1-76.9 0-41.6-26.5-76.9-84.7-76.9M256 8a248 248 0 1 0 0 496 248 248 0 1 0 0-496m-80.8 360.8h-29.8V161.3h29.8zM160.3 98.5a19.6 19.6 0 1 1 0 39.2 19.6 19.6 0 1 1 0-39.2M300 369h-81V161.3h80.6c76.7 0 110.4 54.8 110.4 103.9 0 53.3-41.7 103.9-110 103.9z"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="mailto:muhammaduzairr69@gmail.com" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4l208 156a48 48 0 0 0 57.6 0l208-156c12.1-9.1 19.2-23.3 19.2-38.4 0-26.5-21.5-48-48-48zM0 196v188c0 35.3 28.7 64 64 64h384c35.3 0 64-28.7 64-64V196L313.6 344.8c-34.1 25.6-81.1 25.6-115.2 0z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.indexes", "navigation.top", "search.suggest", "search.highlight", "search.share", "content.code.copy", "content.tabs.link", "content.tooltips", "toc.follow"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="javascripts/extra.js"></script>
+      
+    
+  </body>
+</html>
