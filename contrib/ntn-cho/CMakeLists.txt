@@ -7,6 +7,9 @@ set(source_files
     # Real 3GPP TR 38.811 UE-class mobility as an ns-3 MobilityModel (ECEF,
     # SGP4-compatible) -- the toolkit's core NTN UE mobility architecture.
     model/ntn-tr38811-mobility-model.cc
+    # Ground terminal anchored at a true WGS84 geodetic location (ECEF),
+    # for globe-correct placement and physically-anchored sat geometry.
+    model/ntn-geodetic-fixed-mobility-model.cc
     helper/ntn-cho-helper.cc
     helper/ntn-realistic-mobility.cc
 )
@@ -18,6 +21,7 @@ set(header_files
     model/ntn-measurement-model.h
     model/ntn-ai-interface.h
     model/ntn-tr38811-mobility-model.h
+    model/ntn-geodetic-fixed-mobility-model.h
     helper/ntn-cho-helper.h
     helper/ntn-realistic-mobility.h
 )

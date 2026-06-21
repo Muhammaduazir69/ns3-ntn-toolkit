@@ -49,6 +49,8 @@
 #include <map>
 #include <vector>
 
+#include "ns3/ntn-scene-helper.h"
+
 using namespace ns3;
 using ns3::ntncon::Sgp4MobilityModel;
 using ns3::ntncon::WalkerConfig;
@@ -81,6 +83,10 @@ main(int argc, char* argv[])
     cmd.AddValue("minElev", "Min service elevation (deg)", minElevDeg);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("conflictStrategy", "priority|temporal|merge", conflictStrategy);
+    std::string netSimOut;
+    std::string czmlOut;
+    cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
+    cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
 
     std::cout << "\n=== O-RAN NTN REAL-STACK scenario (real SGP4 orbits + TR 38.811 UEs) ===\n"
@@ -215,7 +221,13 @@ main(int argc, char* argv[])
     // ---- Run (the degradation is the REAL pass: serving sets, neighbours rise) --
     std::cout << "Running real-stack O-RAN simulation on real orbits...\n";
     Simulator::Stop(Seconds(duration));
+    ns3::ntnobs::NtnSceneHelper ntnScene;
+    if (!netSimOut.empty()) ntnScene.SetNetSimulyzer(netSimOut);
+    if (!czmlOut.empty()) ntnScene.SetCzml(czmlOut);
+    Ptr<ns3::ntnobs::NtnSceneRecorder> ntnSceneRec = ntnScene.Build(satNodes, ueNodes);
+
     Simulator::Run();
+    if (ntnSceneRec) ntnSceneRec->Stop();
     rs.Collect();
     rs.WriteHealthReport();
     helper->WriteAllMetrics(nearRtRic);

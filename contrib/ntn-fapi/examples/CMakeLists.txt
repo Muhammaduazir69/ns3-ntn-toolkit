@@ -34,4 +34,5 @@ build_lib_example(
   NAME ntn-fapi-real-stack
   SOURCE_FILES ntn-fapi-real-stack.cc
   LIBRARIES_TO_LINK ${_fapi_real_libs}
+    ${libntn-observability}
 )

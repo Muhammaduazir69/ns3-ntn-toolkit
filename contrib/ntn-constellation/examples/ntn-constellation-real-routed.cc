@@ -19,6 +19,8 @@
 
 #include "ns3/applications-module.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/ntn-sat-link-error-model.h"
+#include "ns3/pointer.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 #include "ns3/contact-graph-router.h"
@@ -159,6 +161,13 @@ main(int argc, char* argv[])
     cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
     cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    bool blerLinks = false;
+    double linkEirpDbw = 52.0;
+    cmd.AddValue("blerLinks",
+                 "Attach the per-packet C/N0->BLER error model to the GSL hops "
+                 "(replaces the binary contact gate with measured link quality)",
+                 blerLinks);
+    cmd.AddValue("linkEirpDbw", "Per-hop EIRP (dBW) for the BLER link model", linkEirpDbw);
     cmd.Parse(argc, argv);
     g_simTime = duration;
     g_outDir = outputDir;
@@ -229,6 +238,21 @@ main(int argc, char* argv[])
         NetDeviceContainer d = p2p.Install(nodes.Get(x), nodes.Get(y));
         ipv4.SetBase(net, "255.255.255.252");
         Ipv4InterfaceContainer ic = ipv4.Assign(d);
+        // Replace the binary contact gate with a measured per-packet C/N0->BLER
+        // model on each receive device, fed by the two endpoints' live geometry.
+        if (blerLinks)
+        {
+            Ptr<MobilityModel> mx = nodes.Get(x)->GetObject<MobilityModel>();
+            Ptr<MobilityModel> my = nodes.Get(y)->GetObject<MobilityModel>();
+            for (uint32_t k = 0; k < d.GetN(); ++k)
+            {
+                Ptr<ntncon::NtnSatLinkErrorModel> em =
+                    CreateObject<ntncon::NtnSatLinkErrorModel>();
+                em->SetAttribute("EirpDbw", DoubleValue(linkEirpDbw));
+                em->SetEndpoints(mx, my);
+                d.Get(k)->SetAttribute("ReceiveErrorModel", PointerValue(em));
+            }
+        }
         return std::make_pair(ic, DynamicCast<PointToPointChannel>(d.Get(0)->GetChannel()));
     };
     auto [icA1, chA1] = mkLink(GS1, SATA, "10.1.1.0");

@@ -29,6 +29,8 @@
 #include <cstdio>
 #include <vector>
 
+#include "ns3/ntn-scene-helper.h"
+
 using namespace ns3;
 using ns3::ntncon::ContactGraphScheduler;
 using ns3::ntncon::Sgp4MobilityModel;
@@ -76,6 +78,10 @@ main(int argc, char* argv[])
     cmd.AddValue("numUes", "Number of ground UEs on the serving cell", numUes);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    std::string netSimOut;
+    std::string czmlOut;
+    cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
+    cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
 
     // ---- Build the Walker constellation (ephemeris context) ----
@@ -137,7 +143,13 @@ main(int argc, char* argv[])
 
     scheduler->Start();
     Simulator::Stop(Seconds(simSeconds));
+    ns3::ntnobs::NtnSceneHelper ntnScene;
+    if (!netSimOut.empty()) ntnScene.SetNetSimulyzer(netSimOut);
+    if (!czmlOut.empty()) ntnScene.SetCzml(czmlOut);
+    Ptr<ns3::ntnobs::NtnSceneRecorder> ntnSceneRec = ntnScene.Build(satNodes, ueNodes);
+
     Simulator::Run();
+    if (ntnSceneRec) ntnSceneRec->Stop();
     scheduler->Stop();
     rs.Collect();
     rs.WriteHealthReport();

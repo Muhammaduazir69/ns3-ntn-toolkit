@@ -32,6 +32,7 @@
 #include "ns3/ntn-atmospheric-loss-chain.h"
 #include "ns3/ntn-atmospheric-propagation-loss-model.h"
 #include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-scene-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
@@ -83,6 +84,10 @@ main(int argc, char* argv[])
     cmd.AddValue("rainMmH", "Static rain rate over the run (mm/h)", rainMmH);
     cmd.AddValue("lms", "Enable P.681 LMS Markov shadowing (0/1)", lms);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    std::string netSimOut;
+    std::string czmlOut;
+    cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
+    cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
 
     std::printf("# ntn-sionna-leo-downlink-traffic (REAL radio, ITU-R cascade in the "
@@ -94,6 +99,7 @@ main(int argc, char* argv[])
     satNodes.Create(1);
     NodeContainer gndNodes;
     gndNodes.Create(1);
+    // (3D scene wiring below, after the ENU origin subLat/subLon is known)
 
     // Real SGP4 orbit projected into the local ENU frame: the serving Walker
     // element is at zenith at t=0 and recedes with genuine orbital dynamics.
@@ -167,8 +173,17 @@ main(int argc, char* argv[])
                         tbler, mbps);
         });
 
+    // 3D scene trace in the scenario's local-ENU frame (sat projected about
+    // its sub-point; ground node in the same ENU metres).
+    ns3::ntnobs::NtnSceneHelper ntnScene;
+    if (!netSimOut.empty()) ntnScene.SetNetSimulyzer(netSimOut);
+    if (!czmlOut.empty()) ntnScene.SetCzml(czmlOut);
+    ntnScene.SetEnuFrame(subLat, subLon, 0.0);
+    Ptr<ns3::ntnobs::NtnSceneRecorder> ntnSceneRec = ntnScene.Build(satNodes, gndNodes);
+
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
+    if (ntnSceneRec) ntnSceneRec->Stop();
     rs.Collect();
     rs.WriteHealthReport();
 

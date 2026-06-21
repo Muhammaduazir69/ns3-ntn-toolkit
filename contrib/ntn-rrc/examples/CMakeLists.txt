@@ -41,4 +41,5 @@ build_lib_example(
   NAME ntn-rrc-real-stack
   SOURCE_FILES ntn-rrc-real-stack.cc
   LIBRARIES_TO_LINK ${_rrc_real_libs}
+    ${libntn-observability}
 )

@@ -123,11 +123,16 @@ class OranNtnXappHoPredict : public OranNtnXappBase
     // Per-UE state
     struct UeHoState
     {
-        std::deque<std::pair<double, double>> sinrHistory; //!< (time, sinr)
+        std::deque<std::pair<double, double>> sinrHistory; //!< (time, sinr) of SERVING cell only
         Time lastHandoverTime;
         uint32_t recentHandovers;
         uint32_t servingGnbId;
         bool handoverPending;
+        double servingTte = 1e9;    //!< Latest TTE (s) of the serving NTN cell
+        // Latest NTN SINR per gNB, used to identify the de-facto serving cell
+        // (strongest beam) so the SINR trend is built from one cell, not a mix.
+        std::map<uint32_t, double> lastSinrByGnb;
+        std::map<uint32_t, double> lastTteByGnb;
     };
 
     std::map<uint32_t, UeHoState> m_ueStates;

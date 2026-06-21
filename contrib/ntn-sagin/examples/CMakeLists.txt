@@ -125,3 +125,19 @@ build_lib_example(
   SOURCE_FILES ntn-sagin-remote-coverage.cc
   LIBRARIES_TO_LINK ${_sagin_real_libs}
 )
+
+# Gives the two orphan mobility models (HAPS-trajectory + maritime) a home,
+# with a 3D scene trace.
+build_lib_example(
+  NAME ntn-sagin-orphan-mobility-showcase
+  SOURCE_FILES ntn-sagin-orphan-mobility-showcase.cc
+  LIBRARIES_TO_LINK
+    ${libntn-sagin}
+    ${libntn-v2x}
+    ${libntn-constellation}
+    ${libntn-cho}
+    ${libntn-observability}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+)

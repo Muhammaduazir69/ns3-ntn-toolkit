@@ -26,6 +26,10 @@
 #include "ns3/ntn-measurement-model.h"
 #include "ns3/ntn-realistic-mobility.h"
 #include "ns3/ntn-realistic-traffic-helper.h"
+#include "ns3/ntn-scene-recorder.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 
 #include <cmath>
 #include <fstream>
@@ -264,6 +268,14 @@ int main(int argc, char* argv[])
     uint32_t trafficUesOpt = 0;
     cmd.AddValue("trafficUes",
                  "UEs carrying the real UDP plane (0 = all UEs)", trafficUesOpt);
+    // 3D scene trace (real SGP4 sats + TR 38.811 UEs). Off unless a path is
+    // given; default outputs are unchanged when these are empty.
+    std::string netSimOut;
+    std::string czmlOut;
+    uint32_t sceneMaxSats = 120; // cap streamed sats so the trace stays sane
+    cmd.AddValue("netSim", "NetSimulyzer 3D JSON trace output path (empty = off)", netSimOut);
+    cmd.AddValue("czml", "Cesium CZML 3D trace output path (empty = off)", czmlOut);
+    cmd.AddValue("sceneMaxSats", "Max satellites to stream to the 3D scene", sceneMaxSats);
     cmd.Parse(argc, argv);
 
     int ntnScenario = (scenario == "dense-urban") ? 0 : (scenario == "urban") ? 1 :
@@ -795,8 +807,79 @@ int main(int argc, char* argv[])
     });  // end of periodic-callback lambda
 
     traffic.Wire();
+
+    // ============= Real-mobility 3D scene layer (optional) =============
+    // The analytical loop above drives the CHO statistics; for 3D / NetSimulyzer
+    // / Cesium we install REAL ns-3 mobility nodes — SGP4-propagated satellites
+    // (ntn-constellation) and TR 38.811 UEs (ntn-cho) built from THIS run's
+    // constellation/UE configuration — and stream their real positions. This
+    // gives the flagship genuine streamable node mobility (the analytical
+    // satellite model carries no MobilityModel) without changing any of the
+    // CSV/GeoJSON outputs the dashboard already consumes.
+    Ptr<ntnobs::NtnSceneRecorder> scene;
+    NodeContainer sceneSats;
+    NodeContainer sceneUes;
+    if (!netSimOut.empty() || !czmlOut.empty())
+    {
+        ntncon::WalkerConfig wcfg;
+        wcfg.num_planes = numPlanes;
+        wcfg.total_sats = numSats;
+        wcfg.altitude_km = altitude_km;
+        wcfg.inclination_deg = inclination;
+        wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01, matches real-stack
+        const auto elements = ntncon::WalkerConstellation::BuildDelta(wcfg);
+        const uint32_t nStream = std::min<uint32_t>(numSats, sceneMaxSats);
+        if (nStream < numSats)
+        {
+            std::cout << "  [scene] streaming " << nStream << " of " << numSats
+                      << " satellites (--sceneMaxSats)\n";
+        }
+        sceneSats.Create(nStream);
+        for (uint32_t s = 0; s < nStream; ++s)
+        {
+            Ptr<ntncon::Sgp4MobilityModel> m = CreateObject<ntncon::Sgp4MobilityModel>();
+            m->SetElements(elements[s]);
+            sceneSats.Get(s)->AggregateObject(m);
+        }
+        // Real TR 38.811 UEs over the same geographic box as the analytical UEs.
+        sceneUes.Create(numUes);
+        NtnTr38811MobilityHelper ueMob(static_cast<uint64_t>(rngRun));
+        auto sceneProfile = NtnMobilityScenarios::MixedContinental();
+        ueMob.Install(sceneUes, sceneProfile, 25.0, 65.0, -20.0, 40.0);
+
+        scene = CreateObject<ntnobs::NtnSceneRecorder>();
+        scene->SetFrame(ntnobs::NtnSceneRecorder::EcefGlobal);
+        for (uint32_t s = 0; s < nStream; ++s)
+        {
+            scene->TrackNode(sceneSats.Get(s),
+                             ntnobs::NtnSceneRecorder::Sat,
+                             "sat-" + std::to_string(s));
+        }
+        for (uint32_t i = 0; i < numUes; ++i)
+        {
+            scene->TrackNode(sceneUes.Get(i),
+                             ntnobs::NtnSceneRecorder::Ue,
+                             "ue-" + std::to_string(i));
+        }
+        scene->SetSampleInterval(Seconds(dt));
+        if (!netSimOut.empty())
+        {
+            scene->EnableNetSimulyzer(netSimOut);
+        }
+        if (!czmlOut.empty())
+        {
+            scene->EnableCzml(czmlOut);
+        }
+        scene->Start();
+    }
+
     Simulator::Stop(Seconds(simTime + 0.5));
     Simulator::Run();
+    if (scene)
+    {
+        scene->Stop();
+        std::cout << "  [scene] 3D trace events: " << scene->GetEventCount() << "\n";
+    }
     traffic.WriteHealthReport();
 
     // Close GeoJSON

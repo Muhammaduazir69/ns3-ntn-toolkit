@@ -6,14 +6,26 @@
 
 #include "ns3/double.h"
 #include "ns3/log.h"
+#include "ns3/satellite-sgp4io.h"   // twoline2rv
+#include "ns3/satellite-sgp4unit.h" // elsetrec, sgp4, gravconsttype
 #include "ns3/simulator.h"
 
 #include <cmath>
+#include <cstring>
 
 namespace ns3
 {
 namespace ntncon
 {
+
+/// Full Vallado SGP4 record, reusing the satellite module's reference port.
+struct ValladoState
+{
+    std::string line1;
+    std::string line2;
+    elsetrec rec{};
+    bool ready{false};
+};
 
 NS_LOG_COMPONENT_DEFINE("Sgp4MobilityModel");
 NS_OBJECT_ENSURE_REGISTERED(Sgp4MobilityModel);
@@ -54,6 +66,17 @@ UnixToJulian(double unix_s)
 {
     return 2440587.5 + unix_s / 86400.0;
 }
+
+/// Unix seconds from Julian Date.
+double
+JulianToUnix(double jd)
+{
+    return (jd - 2440587.5) * 86400.0;
+}
+
+/// WGS-72 is the gravity model SGP4 was fit against (Vallado recommendation,
+/// matching the satellite module's SatSGP4MobilityModel).
+constexpr gravconsttype kWGeoSys = wgs72;
 
 /// Greenwich Mean Sidereal Time (radians) from Julian Date. Accurate to
 /// ~arcsec for the v2.1 baseline; we don't need ITRF precision yet.
@@ -103,13 +126,99 @@ Sgp4MobilityModel::SetTle(const TleRecord& tle)
         return false;
     }
     SetElements(el);
+    // Retain the raw lines so the Vallado backend can (re)initialise; both lines
+    // must be present and TLE-sized.
+    if (!m_vallado)
+    {
+        m_vallado = std::make_shared<ValladoState>();
+    }
+    m_vallado->line1 = tle.line1;
+    m_vallado->line2 = tle.line2;
+    m_vallado->ready = false;
+    if (m_useVallado)
+    {
+        InitVallado();
+    }
     return true;
+}
+
+void
+Sgp4MobilityModel::SetUseVallado(bool on)
+{
+    m_useVallado = on;
+    m_cacheValid = false;
+    if (on && m_vallado && !m_vallado->line1.empty() && !m_vallado->ready)
+    {
+        InitVallado();
+    }
+}
+
+bool
+Sgp4MobilityModel::IsValladoReady() const
+{
+    return m_vallado && m_vallado->ready;
+}
+
+void
+Sgp4MobilityModel::InitVallado()
+{
+    if (!m_vallado || m_vallado->line1.size() < 60 || m_vallado->line2.size() < 60)
+    {
+        return;
+    }
+    char l1[130];
+    char l2[130];
+    std::memset(l1, 0, sizeof(l1));
+    std::memset(l2, 0, sizeof(l2));
+    std::memcpy(l1, m_vallado->line1.c_str(),
+                std::min(m_vallado->line1.size(), sizeof(l1) - 1));
+    std::memcpy(l2, m_vallado->line2.c_str(),
+                std::min(m_vallado->line2.size(), sizeof(l2) - 1));
+    double startmfe = 0.0;
+    double stopmfe = 0.0;
+    double deltamin = 0.0;
+    // 'c' catalog run, 'e' epoch-relative time, 'i' improved operation — the
+    // same invocation the satellite module uses.
+    twoline2rv(l1, l2, 'c', 'e', 'i', kWGeoSys, startmfe, stopmfe, deltamin, m_vallado->rec);
+    double r[3];
+    double v[3];
+    const bool ok = sgp4(kWGeoSys, m_vallado->rec, 0.0, r, v);
+    m_vallado->ready = ok && (m_vallado->rec.error == 0);
+    if (m_vallado->ready)
+    {
+        // Anchor the model's epoch to the TLE epoch so tsince == Now exactly.
+        m_elements.epoch_unix_s = JulianToUnix(m_vallado->rec.jdsatepoch);
+        m_cacheValid = false;
+    }
+    else
+    {
+        NS_LOG_WARN("Sgp4MobilityModel::InitVallado: sgp4 init failed (error "
+                    << m_vallado->rec.error << ")");
+    }
 }
 
 void
 Sgp4MobilityModel::Propagate(double unix_s, Vector& pos_eci, Vector& vel_eci)
     const
 {
+    // ---- Full Vallado SGP4 path (drag/B* included) ----
+    if (m_useVallado && m_vallado && m_vallado->ready)
+    {
+        const double tsince_min = (UnixToJulian(unix_s) - m_vallado->rec.jdsatepoch) * 1440.0;
+        double r[3];
+        double v[3];
+        if (sgp4(kWGeoSys, m_vallado->rec, tsince_min, r, v) && m_vallado->rec.error == 0)
+        {
+            // sgp4 returns TEME km / km-s; the GMST-rotation EciToEcef below
+            // (the same the satellite module uses) takes TEME -> ECEF.
+            pos_eci = Vector(r[0] * 1000.0, r[1] * 1000.0, r[2] * 1000.0);
+            vel_eci = Vector(v[0] * 1000.0, v[1] * 1000.0, v[2] * 1000.0);
+            return;
+        }
+        NS_LOG_WARN("sgp4 propagation failed (error " << m_vallado->rec.error
+                                                      << "); falling back to Kepler+J2");
+    }
+
     const double dt = unix_s - m_elements.epoch_unix_s;
     const double a = m_elements.semi_major_axis_m;
     const double e = m_elements.eccentricity;

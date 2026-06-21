@@ -38,6 +38,7 @@
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
 #include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-scene-recorder.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 
 #include "ns3/sgp4-mobility-model.h"
@@ -69,6 +70,15 @@ uint32_t g_handovers = 0;
 uint32_t g_evals = 0;
 double g_simTime = 60.0;
 
+// Optional 3D scene trace (NetSimulyzer + Cesium CZML). Off unless --netSim or
+// --czml is given; when on, the recorder streams the REAL SGP4 sat + TR 38.811
+// UE positions and the MEASURED serving SINR, and logs each handover.
+Ptr<ntnobs::NtnSceneRecorder> g_scene;
+uint32_t g_sinrSeries = 0;
+uint32_t g_servSatNodeId = 0;
+uint32_t g_candSatNodeId = 0;
+uint32_t g_ueNodeId = 0;
+
 void
 ChoTick()
 {
@@ -92,6 +102,11 @@ ChoTick()
         Simulator::Schedule(Seconds(1.0), &ChoTick);
         return;
     }
+    // Feed the measured serving SINR to the 3D scene KPI series (if enabled).
+    if (g_scene)
+    {
+        g_scene->RecordKpi(g_sinrSeries, servSinr);
+    }
     // Candidate SINR: ephemeris-predicted from the REAL slant-range ratio
     // (Friis correction off the measured serving baseline — 3GPP NTN CHO).
     const double candSinr = servSinr + 20.0 * std::log10(servSlant / std::max(1.0, candSlant));
@@ -110,6 +125,10 @@ ChoTick()
     {
         ++g_handovers;
         g_cho->ExecuteHandover(chosen);
+        if (g_scene)
+        {
+            g_scene->OnHandover(g_ueNodeId, g_servSatNodeId, g_candSatNodeId);
+        }
         const auto st = g_cho->GetMechanismStats();
         std::printf("  %6.1fs  HANDOVER cell %u -> %u  (servSINR meas=%.1f dB, candSINR "
                     "pred=%.1f dB, interruption=%.1f ms%s)\n",
@@ -142,6 +161,8 @@ main(int argc, char* argv[])
     bool rachLess = true;
     uint32_t satsPerPlane = 80; // 4.5 deg in-plane spacing -> ~500 km along-track
     std::string outputDir = "ntn-cho-real-stack-output";
+    std::string netSimOut; // NetSimulyzer JSON trace (empty = off)
+    std::string czmlOut;   // Cesium CZML trace (empty = off)
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
@@ -150,10 +171,16 @@ main(int argc, char* argv[])
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
     cmd.AddValue("tteMin", "Minimum TTE for CHO admission (s)", tteMinSec);
-    cmd.AddValue("trigger", "Handover mechanism: tte-aware|ltm|pcho", trigger);
+    cmd.AddValue("trigger",
+                 "Handover trigger: a3|d1|t1|ta|elevation|d2|tte-aware|ltm|pcho",
+                 trigger);
     cmd.AddValue("rachLess", "RACH-less execution (ephemeris TA pre-comp)", rachLess);
     cmd.AddValue("satsPerPlane", "Walker in-plane satellites (spacing)", satsPerPlane);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("netSim", "NetSimulyzer 3D JSON trace output path (empty = off)", netSimOut);
+    cmd.AddValue("czml", "Cesium CZML 3D trace output path (empty = off)", czmlOut);
+    bool liveScene = false;
+    cmd.AddValue("liveScene", "Stream live scene frames to stdout (mid-run globe)", liveScene);
     cmd.Parse(argc, argv);
     g_simTime = duration;
 
@@ -230,7 +257,34 @@ main(int argc, char* argv[])
     g_cho = choHelper->CreateChoAlgorithm();
 
     NtnChoAlgorithm::ChoConfig cfg = g_cho->GetConfig();
-    if (trigger == "ltm")
+    // Full selectable trigger set: Rel-17 standardized (a3 / d1 / t1 / ta /
+    // elevation), Rel-18 (d2), and the toolkit's novel mechanisms (tte-aware /
+    // ltm / pcho).
+    if (trigger == "a3")
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_EVENT_A3;
+    }
+    else if (trigger == "d1")
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_LOCATION_D1;
+    }
+    else if (trigger == "t1")
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_TIME_T1;
+    }
+    else if (trigger == "ta")
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_TIMING_ADVANCE;
+    }
+    else if (trigger == "elevation")
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_ELEVATION;
+    }
+    else if (trigger == "d2")
+    {
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_DISTANCE_D2;
+    }
+    else if (trigger == "ltm")
     {
         cfg.triggerType = NtnChoAlgorithm::TRIGGER_LTM_CONDITIONAL;
     }
@@ -260,10 +314,53 @@ main(int argc, char* argv[])
     g_cho->AddCandidateCell(g_servingCellId, 0, 0);
     g_cho->AddCandidateCell(g_candCellId, 1, 0);
 
+    // ---- Optional 3D scene trace (NetSimulyzer + Cesium CZML) ----
+    // One recorder taps the REAL SGP4 sats + TR 38.811 UEs (all ECEF) and the
+    // MEASURED serving SINR; fans out to both viewers. Off unless a path is set.
+    if (!netSimOut.empty() || !czmlOut.empty() || liveScene)
+    {
+        g_servSatNodeId = servSat.Get(0)->GetId();
+        g_candSatNodeId = candSat.Get(0)->GetId();
+        g_ueNodeId = ueNodes.Get(0)->GetId();
+
+        g_scene = CreateObject<ntnobs::NtnSceneRecorder>();
+        g_scene->SetFrame(ntnobs::NtnSceneRecorder::EcefGlobal);
+        g_scene->TrackNode(servSat.Get(0), ntnobs::NtnSceneRecorder::Sat, "serving-sat");
+        g_scene->TrackNode(candSat.Get(0), ntnobs::NtnSceneRecorder::Sat, "candidate-sat");
+        for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+        {
+            g_scene->TrackNode(ueNodes.Get(i),
+                               ntnobs::NtnSceneRecorder::Ue,
+                               "ue-" + std::to_string(i));
+        }
+        g_sinrSeries = g_scene->TrackKpiSeries(g_ueNodeId,
+                                               ntnobs::NtnSceneRecorder::Sinr,
+                                               "serving-SINR-dl");
+        g_scene->TrackBeam(g_servSatNodeId, g_ueNodeId);
+        if (!netSimOut.empty())
+        {
+            g_scene->EnableNetSimulyzer(netSimOut);
+        }
+        if (!czmlOut.empty())
+        {
+            g_scene->EnableCzml(czmlOut);
+        }
+        if (liveScene)
+        {
+            g_scene->EnableLiveStdout(true);
+        }
+        g_scene->Start();
+    }
+
     Simulator::Schedule(Seconds(1.0), &ChoTick);
 
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
+    if (g_scene)
+    {
+        g_scene->Stop();
+        std::cout << "  3D scene trace events:        " << g_scene->GetEventCount() << "\n";
+    }
     rs.Collect();
     rs.WriteHealthReport();
 

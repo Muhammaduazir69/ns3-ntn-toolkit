@@ -7,6 +7,8 @@ set(source_files
     model/contact-graph-router.cc
     # 4.4.11 — TR 38.821 + Starlink calibration corpus (Roadmap §4.4.11)
     model/tr38821-corpus.cc
+    # Per-packet C/N0 -> BLER error model for GSL/ISL hops (replaces binary gates).
+    model/ntn-sat-link-error-model.cc
 )
 
 set(header_files
@@ -18,6 +20,7 @@ set(header_files
     model/contact-graph-router.h
     # 4.4.11 — TR 38.821 + Starlink calibration corpus (Roadmap §4.4.11)
     model/tr38821-corpus.h
+    model/ntn-sat-link-error-model.h
 )
 
 set(test_sources
@@ -31,5 +34,7 @@ build_lib(
   LIBRARIES_TO_LINK
     ${libcore}
     ${libmobility}
+    # Full Vallado SGP4 backend reuses the satellite module's reference sgp4unit.
+    ${libsatellite}
   TEST_SOURCES ${test_sources}
 )

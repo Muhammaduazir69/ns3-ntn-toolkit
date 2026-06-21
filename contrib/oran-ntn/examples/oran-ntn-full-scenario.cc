@@ -715,19 +715,31 @@ main(int argc, char* argv[])
     gnbNodes.Create(params.numTnGnbs);
     std::vector<Vector> tnGnbEcef;
     {
-        double lat0;
-        double lon0;
-        double alt0;
-        satMobs[0]->GetGeodetic(lat0, lon0, alt0);
         MobilityHelper tnMob;
         tnMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
         Ptr<ListPositionAllocator> tnPos = CreateObject<ListPositionAllocator>();
+        // Terrestrial macro cells co-located with the anchored UE clusters so
+        // the TN-capable UEs actually sit inside terrestrial coverage (a few km
+        // of a tower) and therefore have a genuine TN-vs-NTN choice for the
+        // steering xApp to resolve. A macro cell has ~km range; the previous
+        // 2-degree (~220 km) ring placed every UE far outside terrestrial reach,
+        // so the TN link was never viable and the steering xApp never fired.
+        // Anchored cell c clusters its UEs within +/-0.03 deg (~3 km) of sat c's
+        // t=0 sub-point; one gNB per cell sub-point covers them, and any extra
+        // towers are jittered around cell-0's cluster.
         for (uint32_t g = 0; g < params.numTnGnbs; ++g)
         {
-            // Deterministic ring across the field (fixed towers, ECEF).
+            const uint32_t cell = (g < params.numRealCells) ? g : 0;
+            double sLat;
+            double sLon;
+            double sAlt;
+            satMobs[cell]->GetGeodetic(sLat, sLon, sAlt);
+            // Deterministic small offset (<~1.5 km) so co-located towers do not
+            // overlap; the first tower per cell sits on the sub-point itself.
+            const double jit = (g < params.numRealCells) ? 0.0 : 0.012;
             const double ang = 2.0 * M_PI * g / std::max(1u, params.numTnGnbs);
-            const Vector ecef = ntngeo::GeodeticToEcef(lat0 + 2.0 * std::sin(ang),
-                                                       lon0 + 2.0 * std::cos(ang), 30.0);
+            const Vector ecef = ntngeo::GeodeticToEcef(sLat + jit * std::sin(ang),
+                                                       sLon + jit * std::cos(ang), 30.0);
             tnPos->Add(ecef);
             tnGnbEcef.push_back(ecef);
         }

@@ -21,6 +21,7 @@ build_lib_example(
     ${libntn-cho}
     ${libntn-traffic}
     ${libntn-constellation}
+    ${libntn-observability}
     ${libcore}
     ${libnetwork}
     ${libmobility}
@@ -64,6 +65,7 @@ build_lib_example(
     ${libntn-cho}
     ${libntn-traffic}
     ${libntn-constellation}
+    ${libntn-observability}
     ${libcore}
     ${libnetwork}
     ${libmobility}

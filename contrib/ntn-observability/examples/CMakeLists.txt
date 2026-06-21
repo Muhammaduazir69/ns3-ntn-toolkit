@@ -37,3 +37,20 @@ build_lib_example(
     ${libmmwave}
     ${liblte}
 )
+
+# Path B (optional): drive the OFFICIAL usnistgov NetSimulyzer module from the
+# toolkit's real SGP4 + TR 38.811 mobility. Built only when the vendored
+# netsimulyzer module is present in contrib/.
+if(TARGET ${libnetsimulyzer})
+  build_lib_example(
+    NAME ntn-netsimulyzer-official-demo
+    SOURCE_FILES ntn-netsimulyzer-official-demo.cc
+    LIBRARIES_TO_LINK
+      ${libnetsimulyzer}
+      ${libntn-cho}
+      ${libntn-constellation}
+      ${libcore}
+      ${libnetwork}
+      ${libmobility}
+  )
+endif()

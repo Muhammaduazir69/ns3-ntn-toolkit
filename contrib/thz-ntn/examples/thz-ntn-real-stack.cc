@@ -22,6 +22,7 @@
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-scene-recorder.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/thz-ntn-propagation-loss-model.h"
@@ -52,6 +53,10 @@ main(int argc, char* argv[])
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("rainMmH", "Rain rate applied in the 2nd half (mm/h)", rainMmH);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    std::string netSimOut; // NetSimulyzer JSON (empty = off)
+    std::string czmlOut;   // Cesium CZML (empty = off)
+    cmd.AddValue("netSim", "NetSimulyzer 3D JSON trace output path (empty = off)", netSimOut);
+    cmd.AddValue("czml", "Cesium CZML 3D trace output path (empty = off)", czmlOut);
     cmd.Parse(argc, argv);
 
     std::cout << "\n=== thz-ntn REAL-STACK (THz channel plug-in on a real radio) ===\n"
@@ -117,8 +122,42 @@ main(int argc, char* argv[])
     // the packet path). Run with --rainMmH=0 vs a high value to see the delta.
     Simulator::Schedule(Seconds(1.0), [thz, rainMmH] { thz->SetRainRate(rainMmH); });
 
+    // ---- Optional 3D scene trace (LOCAL-ENU frame) ----
+    // The satellite and UEs live in the scenario's local ENU frame (metres about
+    // the sat's t=0 sub-point). The recorder converts that frame back to ECEF
+    // using the SAME origin, so NetSimulyzer/Cesium place them correctly on Earth.
+    Ptr<ntnobs::NtnSceneRecorder> scene;
+    if (!netSimOut.empty() || !czmlOut.empty())
+    {
+        scene = CreateObject<ntnobs::NtnSceneRecorder>();
+        scene->SetFrame(ntnobs::NtnSceneRecorder::LocalEnu);
+        scene->SetEnuReference(satSubLat, satSubLon, 0.0);
+        scene->TrackNode(satNodes.Get(0), ntnobs::NtnSceneRecorder::Sat, "thz-sat");
+        for (uint32_t i = 0; i < numUes; ++i)
+        {
+            scene->TrackNode(ueNodes.Get(i),
+                             ntnobs::NtnSceneRecorder::Ue,
+                             "ue-" + std::to_string(i));
+        }
+        scene->TrackBeam(satNodes.Get(0)->GetId(), ueNodes.Get(0)->GetId());
+        if (!netSimOut.empty())
+        {
+            scene->EnableNetSimulyzer(netSimOut);
+        }
+        if (!czmlOut.empty())
+        {
+            scene->EnableCzml(czmlOut);
+        }
+        scene->Start();
+    }
+
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
+    if (scene)
+    {
+        scene->Stop();
+        std::cout << "  [scene] 3D trace events: " << scene->GetEventCount() << "\n";
+    }
     rs.Collect();
     rs.WriteHealthReport();
 

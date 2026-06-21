@@ -1174,6 +1174,172 @@ class OranNtnAdvancedXappsTestCase : public TestCase
 };
 
 // ============================================================================
+//  Test 13b: HO-Predict TTE-aware proactive trigger
+//  A serving cell whose remaining lifetime (TTE) drops below the minimum
+//  acceptable candidate TTE must trigger a proactive handover even while its
+//  SINR is still healthy, provided a longer-lived candidate exists. This is the
+//  NTN-correct proactive signal (a setting satellite), distinct from the
+//  SINR-trend path. Regression guard: the xApp previously only reacted to
+//  SINR < 3 dB and thus never fired in a healthy-link scenario.
+// ============================================================================
+
+class OranNtnHoPredictTteTriggerTestCase : public TestCase
+{
+  public:
+    OranNtnHoPredictTteTriggerTestCase()
+        : TestCase("HO-Predict fires a proactive HO when serving TTE expires")
+    {
+    }
+
+  private:
+    bool AcceptRcAction(E2RcAction) { return true; }
+
+    void DoRun() override
+    {
+        auto ric = CreateObject<OranNtnNearRtRic>();
+        ric->Initialize();
+
+        // Serving (gnb 1) and candidate (gnb 2) E2 nodes both exist so the
+        // handover RC action has a real target to route to, each with an RC
+        // actuation callback (the scenario's helper installs one per node).
+        for (uint32_t id = 1; id <= 2; ++id)
+        {
+            auto n = CreateObject<OranNtnE2Node>();
+            n->SetNodeId(id);
+            n->SetIsNtn(true);
+            n->RegisterRanFunction(2, "KPM");
+            n->RegisterRanFunction(3, "RC");
+            n->SetRcActionCallback(
+                MakeCallback(&OranNtnHoPredictTteTriggerTestCase::AcceptRcAction, this));
+            ric->ConnectE2Node(n);
+        }
+
+        auto hoPredict = CreateObject<OranNtnXappHoPredict>();
+        hoPredict->SetXappName("test-ho-tte");
+        hoPredict->SetPriority(10);
+        hoPredict->SetDecisionInterval(MilliSeconds(100));
+        ric->RegisterXapp(hoPredict);
+        hoPredict->Start();
+
+        const uint32_t ueId = 7;
+        const uint32_t servingGnb = 1;
+        const uint32_t candGnb = 2;
+
+        // Feed three serving samples (gnb 1) with healthy, flat SINR but a TTE
+        // that decays below the 30 s minimum, plus a long-lived strong-enough
+        // candidate (gnb 2). The serving SINR stays within the camp-on
+        // hysteresis margin of the candidate, so gnb 1 remains the serving cell.
+        auto feed = [&](uint32_t gnb, double t, double sinr, double tte) {
+            E2KpmReport r{};
+            r.timestamp = t;
+            r.gnbId = gnb;
+            r.isNtn = true;
+            r.ueId = ueId;
+            r.sinr_dB = sinr;
+            r.rsrp_dBm = -90.0;
+            r.tte_s = tte;
+            r.elevation_deg = 35.0;
+            r.doppler_Hz = 1000.0;
+            r.beamId = gnb;
+            hoPredict->HandleKpmIndication(1, r);
+        };
+
+        feed(servingGnb, 0.00, 15.0, 28.0);
+        feed(candGnb, 0.00, 14.0, 300.0);
+        feed(servingGnb, 0.10, 15.1, 22.0);
+        feed(candGnb, 0.10, 14.0, 300.0);
+        feed(servingGnb, 0.20, 14.9, 16.0);
+        feed(candGnb, 0.20, 14.0, 300.0);
+
+        Simulator::Stop(Seconds(1));
+        Simulator::Run();
+
+        auto m = hoPredict->GetMetrics();
+        NS_TEST_ASSERT_MSG_GT(m.totalDecisions, 0u,
+                              "HO-Predict should make at least one decision on TTE expiry");
+        auto hm = hoPredict->GetHoPredictMetrics();
+        NS_TEST_ASSERT_MSG_GT(hm.proactiveHandovers, 0u,
+                              "HO-Predict should record a proactive handover");
+
+        hoPredict->Stop();
+        ric->Dispose();
+        Simulator::Destroy();
+    }
+};
+
+// ============================================================================
+//  Test 13c: TN-NTN steering acts when a terrestrial link is viable
+//  With a UE that has both a usable terrestrial and a usable satellite link,
+//  the latency-optimal default must steer it off the (default) satellite onto
+//  the lower-latency terrestrial network, producing a steering decision.
+//  Regression guard: the scenario previously placed every UE outside
+//  terrestrial range, so the TN link was never viable and the xApp never fired.
+// ============================================================================
+
+class OranNtnSteeringViableTnTestCase : public TestCase
+{
+  public:
+    OranNtnSteeringViableTnTestCase()
+        : TestCase("TN-NTN steering switches to TN when the terrestrial link is viable")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto ric = CreateObject<OranNtnNearRtRic>();
+        ric->Initialize();
+
+        auto e2node = CreateObject<OranNtnE2Node>();
+        e2node->SetNodeId(1);
+        e2node->SetIsNtn(true);
+        e2node->RegisterRanFunction(2, "KPM");
+        e2node->RegisterRanFunction(3, "RC");
+        ric->ConnectE2Node(e2node);
+
+        auto steering = CreateObject<OranNtnXappTnNtnSteering>();
+        steering->SetXappName("test-steering");
+        steering->SetPriority(25);
+        steering->SetSteeringMode("latency-optimal");
+        steering->SetDecisionInterval(MilliSeconds(100));
+        ric->RegisterXapp(steering);
+        steering->Start();
+
+        const uint32_t ueId = 3;
+
+        // One viable NTN report and one viable (strong) TN report for the UE.
+        auto feed = [&](bool isNtn, double sinr) {
+            E2KpmReport r{};
+            r.timestamp = 0.0;
+            r.gnbId = isNtn ? 1 : 10001;
+            r.isNtn = isNtn;
+            r.ueId = ueId;
+            r.sinr_dB = sinr;
+            r.throughput_Mbps = 50.0;
+            r.prbUtilization = 0.3;
+            steering->HandleKpmIndication(1, r);
+        };
+        feed(true, 10.0);   // NTN viable
+        feed(false, 22.0);  // TN viable and lower-latency
+
+        Simulator::Stop(Seconds(1));
+        Simulator::Run();
+
+        auto m = steering->GetMetrics();
+        NS_TEST_ASSERT_MSG_GT(m.totalDecisions, 0u,
+                              "Steering should switch the UE from NTN to the viable TN link");
+        NS_TEST_ASSERT_MSG_EQ(
+            static_cast<uint8_t>(steering->GetUeNetworkSelection(ueId)),
+            static_cast<uint8_t>(NetworkSelection::TERRESTRIAL),
+            "UE should end on the terrestrial network");
+
+        steering->Stop();
+        ric->Dispose();
+        Simulator::Destroy();
+    }
+};
+
+// ============================================================================
 //  Test 14: NTN Scheduler Configuration
 // ============================================================================
 
@@ -3269,6 +3435,91 @@ class OranNtnE2ListenerHandshakeTest : public TestCase
     }
 };
 
+/**
+ * \brief The same E2 Setup -> Subscription -> Indication -> Control handshake
+ *        over a REAL SCTP association (IPPROTO_SCTP), exercising the transport
+ *        the O-RAN E2 interface actually mandates. Skips gracefully if the
+ *        kernel lacks SCTP (the transport otherwise falls back to TCP).
+ */
+class OranNtnE2ListenerSctpHandshakeTest : public TestCase
+{
+  public:
+    OranNtnE2ListenerSctpHandshakeTest()
+        : TestCase("E2 listener completes Setup + Indication + Control over real SCTP loopback")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::flexric;
+
+        Ptr<OranNtnE2Listener> listener = CreateObject<OranNtnE2Listener>();
+        listener->SetTransportKind(E2Transport::Protocol::sctp);
+        const uint16_t port = 56422;
+        if (!listener->Start("127.0.0.1", port))
+        {
+            // No kernel SCTP on this host — not a failure of the E2 code.
+            NS_LOG_UNCOND("  [skip] SCTP unavailable on this host; TCP path covered separately");
+            return;
+        }
+
+        auto client = MakeE2Transport(E2Transport::Protocol::sctp);
+        NS_TEST_ASSERT_MSG_EQ(client->Connect("127.0.0.1", port), true, "SCTP client connect");
+        listener->Poll(50);
+        NS_TEST_ASSERT_MSG_EQ(listener->NumClients(), 1u, "1 SCTP client accepted");
+
+        // SCTP buffering can need several listener poll cycles before a reply is
+        // queued; pump the listener up to a few times, then receive.
+        auto exchange = [&](const E2Message& req, E2Message& reply) -> bool {
+            client->Send(req);
+            for (int i = 0; i < 6; ++i)
+            {
+                listener->Poll(50);
+                if (client->Recv(reply, 100))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        E2Message reply{};
+        // E2 Setup -> Response over real SCTP.
+        E2Message setup{E2MessageType::e2_setup_request, {0x01}};
+        NS_TEST_ASSERT_MSG_EQ(exchange(setup, reply), true, "SCTP setup response received");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(reply.type),
+                              static_cast<int>(E2MessageType::e2_setup_response),
+                              "SCTP setup response type");
+
+        // Subscription succeeds after setup.
+        E2Message subReq{E2MessageType::ric_subscription_request, {0xAA, 0xBB}};
+        NS_TEST_ASSERT_MSG_EQ(exchange(subReq, reply), true, "SCTP sub response received");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(reply.type),
+                              static_cast<int>(E2MessageType::ric_subscription_response),
+                              "SCTP sub response after setup");
+
+        // RIC Indication forwarded (no reply); pump a couple of cycles.
+        E2Message ind{E2MessageType::ric_indication, {0xDE, 0xAD, 0xBE, 0xEF}};
+        client->Send(ind);
+        for (int i = 0; i < 4; ++i)
+        {
+            listener->Poll(50);
+        }
+        NS_TEST_EXPECT_MSG_EQ(listener->IndicationsForwarded(), 1u, "SCTP indication forwarded");
+
+        // Control -> Ack.
+        E2Message ctrl{E2MessageType::ric_control_request, {0x77}};
+        NS_TEST_ASSERT_MSG_EQ(exchange(ctrl, reply), true, "SCTP control ack received");
+        NS_TEST_EXPECT_MSG_EQ(static_cast<int>(reply.type),
+                              static_cast<int>(E2MessageType::ric_control_acknowledge),
+                              "SCTP control ack type");
+
+        client->Close();
+        listener->Stop();
+    }
+};
+
 namespace
 {
 
@@ -4601,6 +4852,8 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnFederatedLearningTestCase, TestCase::Duration::QUICK);
         // Phase 4: Advanced xApps
         AddTestCase(new OranNtnAdvancedXappsTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnHoPredictTteTriggerTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSteeringViableTnTestCase, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnEnergyHarvestTestCase, TestCase::Duration::QUICK);
         // Phase 5: Enhanced Space RIC
         AddTestCase(new OranNtnIslHeaderTestCase, TestCase::Duration::QUICK);
@@ -4650,6 +4903,8 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnAsn1PerPrimitivesTest,
                     TestCase::Duration::QUICK);
         // Realism roadmap T3 — SCTP/TCP E2 listener.
+        AddTestCase(new OranNtnE2ListenerSctpHandshakeTest,
+                    TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2ListenerHandshakeTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2ListenerSimulatorTimeTest,

@@ -42,18 +42,21 @@ SendFramed(int fd, const E2Message& msg)
         return -1;
     const uint16_t type_n = htons(static_cast<uint16_t>(msg.type));
     const uint32_t len_n = htonl(static_cast<uint32_t>(msg.payload.size()));
-    uint8_t header[6];
-    std::memcpy(header, &type_n, 2);
-    std::memcpy(header + 2, &len_n, 4);
-    if (::send(fd, header, 6, 0) != 6)
-    {
-        return -1;
-    }
+    // Emit the whole frame (6-byte header + payload) in ONE send() so that, on
+    // SCTP (a message-oriented transport), each frame is exactly one SCTP
+    // message. The earlier two-send form put the header and payload in separate
+    // SCTP messages, which desynchronised the framed reader after the first
+    // exchange. A single buffer is equally correct for TCP.
+    std::vector<uint8_t> frame;
+    frame.reserve(6 + msg.payload.size());
+    frame.resize(6);
+    std::memcpy(frame.data(), &type_n, 2);
+    std::memcpy(frame.data() + 2, &len_n, 4);
+    frame.insert(frame.end(), msg.payload.begin(), msg.payload.end());
     size_t off = 0;
-    while (off < msg.payload.size())
+    while (off < frame.size())
     {
-        ssize_t n = ::send(fd, msg.payload.data() + off,
-                            msg.payload.size() - off, 0);
+        ssize_t n = ::send(fd, frame.data() + off, frame.size() - off, 0);
         if (n <= 0)
             return -1;
         off += static_cast<size_t>(n);

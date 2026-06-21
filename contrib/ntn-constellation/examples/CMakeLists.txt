@@ -21,6 +21,7 @@ build_lib_example(
   NAME ntn-constellation-walker-traffic
   SOURCE_FILES ntn-constellation-walker-traffic.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-constellation}
     ${libntn-traffic}
     ${libntn-cho}

@@ -35,10 +35,16 @@
 #include "ns3/mobility-model.h"
 #include "ns3/nstime.h"
 
+#include <memory>
+
 namespace ns3
 {
 namespace ntncon
 {
+
+/// Opaque Vallado-SGP4 state (full elsetrec), defined in the .cc so the public
+/// header stays free of the satellite-module sgp4 headers.
+struct ValladoState;
 
 class Sgp4MobilityModel : public MobilityModel
 {
@@ -53,6 +59,15 @@ class Sgp4MobilityModel : public MobilityModel
     /// Convenience: parse a TLE record and install it.
     /// Returns false on parse failure.
     bool SetTle(const TleRecord& tle);
+
+    /// Select the full Vallado SGP4 propagator (drag/B* included) instead of the
+    /// default Kepler + J2-secular backend. Vallado mode requires a TLE-sourced
+    /// orbit (raw lines), so call SetTle() with a real TLE; Walker-generated
+    /// classical elements (SetElements) keep the fast Kepler+J2 path. The order
+    /// of SetUseVallado()/SetTle() does not matter — init is (re)done as needed.
+    void SetUseVallado(bool on);
+    /// True once a TLE has been loaded into the Vallado propagator.
+    bool IsValladoReady() const;
 
     /// Read-only access to the installed elements.
     const KeplerianElements& GetElements() const { return m_elements; }
@@ -87,6 +102,9 @@ class Sgp4MobilityModel : public MobilityModel
     /// Propagate to absolute time `unix_s` and fill ECI position/velocity.
     void Propagate(double unix_s, Vector& pos_eci, Vector& vel_eci) const;
 
+    /// (Re)initialise the Vallado elsetrec from the stored TLE lines.
+    void InitVallado();
+
     /// Convert ECI to ECEF for the given absolute time.
     static Vector EciToEcef(const Vector& eci, double unix_s);
 
@@ -95,6 +113,11 @@ class Sgp4MobilityModel : public MobilityModel
 
     KeplerianElements m_elements;
     Time m_cacheGrain{MilliSeconds(100)};
+
+    // Full Vallado SGP4 backend (opaque; reuses the satellite module's proven
+    // sgp4unit). Null until SetTle() is called; active only when m_useVallado.
+    bool m_useVallado{false};
+    std::shared_ptr<ValladoState> m_vallado;
 
     // Cache.
     mutable bool m_cacheValid{false};

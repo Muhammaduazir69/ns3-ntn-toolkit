@@ -89,6 +89,7 @@ build_lib_example(
   NAME ntn-sionna-leo-downlink-traffic
   SOURCE_FILES ntn-sionna-leo-downlink-traffic.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-sionna}
     ${libntn-cho}
     ${libntn-constellation}

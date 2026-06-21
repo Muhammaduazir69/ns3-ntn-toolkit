@@ -10,8 +10,10 @@
  */
 
 #include "ns3/ntn-cho-algorithm.h"
+#include "ns3/ntn-geodetic-fixed-mobility-model.h"
 #include "ns3/ntn-measurement-model.h"
 #include "ns3/ntn-orbit-predictor.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/ntn-tte-estimator.h"
 
 #include <ns3/log.h>
@@ -583,6 +585,162 @@ class NtnChoRachLessExecutionTestCase : public TestCase
 
 /**
  * \ingroup ntn-cho-test
+ * \brief NtnGeodeticFixedMobilityModel — ground terminal anchored at a real
+ *        geodetic location reports the correct ECEF point (round-trips through
+ *        ntngeo), is stationary in ECEF, and traces the diurnal circle in ECI.
+ */
+class NtnGeodeticFixedMobilityTestCase : public TestCase
+{
+  public:
+    NtnGeodeticFixedMobilityTestCase()
+        : TestCase("NtnGeodeticFixedMobilityModel - ECEF anchor + ECI rotation")
+    {
+    }
+
+    void DoRun() override
+    {
+        // A terminal in Islamabad: 33.6844 N, 73.0479 E, 540 m.
+        const double lat = 33.6844;
+        const double lon = 73.0479;
+        const double alt = 540.0;
+
+        Ptr<NtnGeodeticFixedMobilityModel> m = CreateObject<NtnGeodeticFixedMobilityModel>();
+        m->SetGeodetic(lat, lon, alt);
+
+        // ECEF position must match the independent ntngeo conversion to mm.
+        const Vector expect = ntngeo::GeodeticToEcef(lat, lon, alt);
+        const Vector p0 = m->GetPosition();
+        NS_TEST_ASSERT_MSG_EQ_TOL(p0.x, expect.x, 1e-3, "ECEF x mismatch");
+        NS_TEST_ASSERT_MSG_EQ_TOL(p0.y, expect.y, 1e-3, "ECEF y mismatch");
+        NS_TEST_ASSERT_MSG_EQ_TOL(p0.z, expect.z, 1e-3, "ECEF z mismatch");
+
+        // |ECEF| is sensible for a near-surface point (~6.37e6 m).
+        const double r = std::sqrt(p0.x * p0.x + p0.y * p0.y + p0.z * p0.z);
+        NS_TEST_ASSERT_MSG_GT(r, 6.36e6, "ECEF radius too small");
+        NS_TEST_ASSERT_MSG_LT(r, 6.39e6, "ECEF radius too large");
+
+        // Stationary in the Earth-fixed frame: zero velocity, position constant
+        // across simulated time.
+        const Vector v = m->GetVelocity();
+        NS_TEST_ASSERT_MSG_EQ_TOL(v.x, 0.0, 1e-9, "ECEF vx should be 0");
+        NS_TEST_ASSERT_MSG_EQ_TOL(v.y, 0.0, 1e-9, "ECEF vy should be 0");
+
+        Simulator::Schedule(Seconds(100.0), [&]() {
+            const Vector pt = m->GetPosition();
+            NS_TEST_ASSERT_MSG_EQ_TOL(pt.x, p0.x, 1e-6, "ECEF must not drift in time");
+            NS_TEST_ASSERT_MSG_EQ_TOL(pt.y, p0.y, 1e-6, "ECEF must not drift in time");
+        });
+        Simulator::Stop(Seconds(101.0));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        // ECI mode: at t=0 ECI==ECEF; the ECI velocity is omega x r (eastward),
+        // magnitude ~ omega * sqrt(x^2+y^2).
+        m->SetReportFrame(NtnGeodeticFixedMobilityModel::Eci);
+        const Vector eci0 = m->GetPosition();
+        NS_TEST_ASSERT_MSG_EQ_TOL(eci0.x, p0.x, 1e-3, "ECI==ECEF at t=0 (x)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(eci0.y, p0.y, 1e-3, "ECI==ECEF at t=0 (y)");
+        const Vector eciVel = m->GetVelocity();
+        const double speed = std::sqrt(eciVel.x * eciVel.x + eciVel.y * eciVel.y);
+        const double omega = 7.2921159e-5;
+        const double expectSpeed = omega * std::sqrt(p0.x * p0.x + p0.y * p0.y);
+        NS_TEST_ASSERT_MSG_EQ_TOL(speed, expectSpeed, 1.0, "ECI ground speed ~ omega*rho");
+        NS_TEST_ASSERT_MSG_GT(speed, 100.0, "ECI ground speed should be hundreds of m/s");
+    }
+};
+
+/**
+ * \ingroup ntn-cho-test
+ * \brief Rel-17 standardized NTN CHO triggers — elevation floor and
+ *        timing-advance — fire on the right geometry, independently selectable.
+ *
+ * These two join the already-tested A3 (NtnChoAlgorithmTestCase) and D2
+ * (NtnChoDistanceD2TriggerTestCase) so the full standardized trigger set is
+ * covered. Both are pure slant-range geometry, so they are driven directly via
+ * UpdateCandidateSlantRange with no orbit predictor.
+ */
+class NtnChoStandardizedTriggersTestCase : public TestCase
+{
+  public:
+    NtnChoStandardizedTriggersTestCase()
+        : TestCase("NTN CHO Algorithm - Rel-17 elevation + timing-advance triggers")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // ---- Elevation-floor trigger: serving below floor, candidate above
+        //      floor + hysteresis. (550 km shell.) ----
+        {
+            Ptr<NtnChoAlgorithm> algo = CreateObject<NtnChoAlgorithm>();
+            NtnChoAlgorithm::ChoConfig cfg;
+            cfg.triggerType = NtnChoAlgorithm::TRIGGER_ELEVATION;
+            cfg.qualityThreshold_dB = -20.0; // permissive: geometry decides
+            cfg.orbitAltitudeKm = 550.0;
+            cfg.elevationMinDeg = 10.0;
+            cfg.elevationHystDeg = 2.0;
+            cfg.conditionMonitorPeriod = Seconds(1000.0);
+            algo->Configure(cfg);
+            algo->AddCandidateCell(1, 0, 0); // serving (low elevation)
+            algo->AddCandidateCell(2, 1, 0); // high-elevation candidate
+            algo->AddCandidateCell(3, 2, 0); // marginal candidate (within hyst)
+            algo->SetServingCell(1);
+            algo->UpdateMeasurement(1, 0.0, 0.0);
+            algo->UpdateMeasurement(2, 0.0, 0.0);
+            algo->UpdateMeasurement(3, 0.0, 0.0);
+            algo->UpdateCandidateSlantRange(1, 2000.0e3); // elev ~7.5 deg (< 10)
+            algo->UpdateCandidateSlantRange(2, 700.0e3);  // elev ~50 deg (>= 12)
+            algo->UpdateCandidateSlantRange(3, 1800.0e3); // elev ~10.2 deg (< 12)
+            algo->StartMonitoring(GeoCoordinate(0.0, 0.0, 0.0), Vector(0.0, 0.0, 0.0));
+            NS_TEST_ASSERT_MSG_EQ(algo->GetCandidates()[2].admitted, true,
+                                  "ELEVATION: high-elevation candidate admitted");
+            NS_TEST_ASSERT_MSG_EQ(algo->GetCandidates()[3].admitted, false,
+                                  "ELEVATION: marginal candidate within hysteresis rejected");
+            algo->StopMonitoring();
+            Simulator::Destroy();
+        }
+
+        // ---- Timing-advance trigger: candidate offering >= taAdvantage less
+        //      TA admitted; negligible advantage rejected; serving TA over the
+        //      ceiling admits regardless. ----
+        {
+            Ptr<NtnChoAlgorithm> algo = CreateObject<NtnChoAlgorithm>();
+            NtnChoAlgorithm::ChoConfig cfg;
+            cfg.triggerType = NtnChoAlgorithm::TRIGGER_TIMING_ADVANCE;
+            cfg.qualityThreshold_dB = -20.0;
+            cfg.taServingMax = MilliSeconds(8);
+            cfg.taAdvantage = MilliSeconds(1);
+            cfg.conditionMonitorPeriod = Seconds(1000.0);
+            algo->Configure(cfg);
+            algo->AddCandidateCell(1, 0, 0); // serving (TA below ceiling)
+            algo->AddCandidateCell(2, 1, 0); // candidate with >= 1 ms advantage
+            algo->AddCandidateCell(3, 2, 0); // candidate with negligible advantage
+            algo->SetServingCell(1);
+            algo->UpdateMeasurement(1, 0.0, 0.0);
+            algo->UpdateMeasurement(2, 0.0, 0.0);
+            algo->UpdateMeasurement(3, 0.0, 0.0);
+            algo->UpdateCandidateSlantRange(1, 1000.0e3); // TA = 6.67 ms (< 8)
+            algo->UpdateCandidateSlantRange(2, 700.0e3);  // TA = 4.67 ms (2 ms gain)
+            algo->UpdateCandidateSlantRange(3, 960.0e3);  // TA = 6.40 ms (0.27 ms gain)
+            algo->StartMonitoring(GeoCoordinate(0.0, 0.0, 0.0), Vector(0.0, 0.0, 0.0));
+            NS_TEST_ASSERT_MSG_EQ(algo->GetCandidates()[2].admitted, true,
+                                  "TA: candidate with >= 1 ms advantage admitted");
+            NS_TEST_ASSERT_MSG_EQ(algo->GetCandidates()[3].admitted, false,
+                                  "TA: candidate with negligible advantage rejected");
+            // Serving TA now exceeds the ceiling -> any candidate admitted.
+            algo->UpdateCandidateSlantRange(1, 1500.0e3); // TA = 10 ms (> 8)
+            algo->EvaluateConditions();
+            NS_TEST_ASSERT_MSG_EQ(algo->GetCandidates()[3].admitted, true,
+                                  "TA: serving TA over ceiling admits candidate");
+            algo->StopMonitoring();
+            Simulator::Destroy();
+        }
+    }
+};
+
+/**
+ * \ingroup ntn-cho-test
  * \brief NTN CHO Test Suite
  */
 class NtnChoTestSuite : public TestSuite
@@ -598,6 +756,8 @@ class NtnChoTestSuite : public TestSuite
         AddTestCase(new NtnChoCombineWithA4TttTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnChoSlantRachInterruptionTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnChoRachLessExecutionTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new NtnGeodeticFixedMobilityTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new NtnChoStandardizedTriggersTestCase, TestCase::Duration::QUICK);
     }
 };
 

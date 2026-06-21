@@ -164,23 +164,75 @@ OranNtnXappHoPredict::ProcessKpmReport(const E2KpmReport& report)
 {
     NS_LOG_FUNCTION(this << report.ueId << report.gnbId << report.sinr_dB);
 
-    auto& state = m_ueStates[report.ueId];
-
-    // Update serving gNB tracking
-    state.servingGnbId = report.gnbId;
-
-    // Append SINR measurement to history
-    state.sinrHistory.push_back(std::make_pair(report.timestamp, report.sinr_dB));
-
-    // Trim history to window size
-    while (state.sinrHistory.size() > m_trendWindowSize)
+    // This xApp acts on NTN cells only; terrestrial reports are handled by the
+    // TN-NTN steering xApp. Ignoring them here keeps the per-cell SINR tracks
+    // free of cross-RAT contamination.
+    if (!report.isNtn)
     {
-        state.sinrHistory.pop_front();
+        return;
     }
 
-    NS_LOG_DEBUG("UE " << report.ueId << ": SINR=" << report.sinr_dB
-                 << " dB from gNB " << report.gnbId
-                 << " (history size=" << state.sinrHistory.size() << ")");
+    auto& state = m_ueStates[report.ueId];
+
+    // Track the latest SINR/TTE for every NTN cell this UE measures. The
+    // de-facto serving cell is the strongest beam (standard NTN camp-on-best);
+    // building the trend from a single cell — rather than the previous mix of
+    // serving + candidate reports — is what makes the slope/R^2 meaningful.
+    state.lastSinrByGnb[report.gnbId] = report.sinr_dB;
+    state.lastTteByGnb[report.gnbId] = report.tte_s;
+
+    // Identify the serving cell with hysteretic camp-on (how a real UE behaves):
+    // keep the current serving beam until another exceeds it by a margin. A
+    // plain argmax-SINR mislabels the cell because the setting serving satellite
+    // and the rising candidate carry near-equal SINR right at the crossover —
+    // precisely the low-TTE moment a proactive HO must catch.
+    constexpr double kCampOnHysteresisDb = 2.0;
+    uint32_t serving = state.servingGnbId;
+    if (serving == 0 || state.lastSinrByGnb.find(serving) == state.lastSinrByGnb.end())
+    {
+        // No camp-on yet: take the strongest beam.
+        double bestSinr = -1e30;
+        for (const auto& [gnb, sinr] : state.lastSinrByGnb)
+        {
+            if (sinr > bestSinr)
+            {
+                bestSinr = sinr;
+                serving = gnb;
+            }
+        }
+    }
+    else
+    {
+        const double servSinr = state.lastSinrByGnb[serving];
+        for (const auto& [gnb, sinr] : state.lastSinrByGnb)
+        {
+            if (gnb != serving && sinr > servSinr + kCampOnHysteresisDb)
+            {
+                serving = gnb;
+                break;
+            }
+        }
+    }
+    state.servingGnbId = serving;
+    state.servingTte = state.lastTteByGnb[serving];
+    double bestSinr = state.lastSinrByGnb[serving];
+
+    // Append a SINR sample for the serving cell only, at most once per KPM
+    // tick (the serving and candidate reports for a UE share a timestamp).
+    if (report.gnbId == serving &&
+        (state.sinrHistory.empty() ||
+         report.timestamp > state.sinrHistory.back().first + 1e-9))
+    {
+        state.sinrHistory.push_back(std::make_pair(report.timestamp, report.sinr_dB));
+        while (state.sinrHistory.size() > m_trendWindowSize)
+        {
+            state.sinrHistory.pop_front();
+        }
+    }
+
+    NS_LOG_DEBUG("UE " << report.ueId << ": serving gNB " << serving
+                 << " SINR=" << bestSinr << " dB, TTE=" << state.servingTte
+                 << " s (history size=" << state.sinrHistory.size() << ")");
 }
 
 // ============================================================================
@@ -208,6 +260,15 @@ OranNtnXappHoPredict::DecisionCycle()
         if (state.sinrHistory.size() < 3)
         {
             continue;
+        }
+
+        // A committed handover is considered settled once the ping-pong guard
+        // has elapsed; clearing the flag lets the UE hand over again as the
+        // next serving satellite sets (otherwise each UE fires at most once).
+        if (state.handoverPending && state.lastHandoverTime > Time(0) &&
+            (Simulator::Now() - state.lastHandoverTime) >= m_pingPongGuardTime)
+        {
+            state.handoverPending = false;
         }
 
         // Skip if handover is already pending
@@ -247,6 +308,20 @@ OranNtnXappHoPredict::DecisionCycle()
             needsHandover = (trend.predictedSinr < m_sinrDropThreshold) &&
                             (trend.slope < 0.0) &&
                             (trend.r_squared > 0.3); // Require reasonable fit
+        }
+
+        // TTE-aware proactive trigger: in LEO NTN the dominant reason to hand
+        // over is the serving satellite setting (geometry), not interference.
+        // When the serving link's remaining lifetime drops below the minimum
+        // TTE we would accept from a candidate, hand over proactively even if
+        // the SINR is still healthy — this is the NTN-correct proactive signal
+        // and fires across the abundant windows where a serving pass is ending.
+        if (state.servingTte > 0.0 && state.servingTte < m_tteMinimum.GetSeconds())
+        {
+            NS_LOG_INFO("UE " << ueId << ": proactive HO on serving TTE="
+                        << state.servingTte << " s < min=" << m_tteMinimum.GetSeconds()
+                        << " s");
+            needsHandover = true;
         }
 
         if (!needsHandover)
@@ -380,6 +455,9 @@ OranNtnXappHoPredict::DecisionCycle()
             state.handoverPending = true;
             state.lastHandoverTime = Simulator::Now();
             state.recentHandovers++;
+            // Follow the camp-on to the new serving cell so the next decision
+            // cycle tracks the satellite we just handed over to.
+            state.servingGnbId = bestCandidate;
 
             m_hoPredMetrics.proactiveHandovers++;
 

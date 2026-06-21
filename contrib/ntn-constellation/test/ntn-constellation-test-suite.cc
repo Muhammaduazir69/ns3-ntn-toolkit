@@ -2,9 +2,12 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include "ns3/constant-position-mobility-model.h"
 #include "ns3/contact-graph-router.h"
 #include "ns3/contact-graph-scheduler.h"
+#include "ns3/ntn-sat-link-error-model.h"
 #include "ns3/orbital-elements.h"
+#include "ns3/packet.h"
 #include "ns3/tr38821-corpus.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/simulator.h"
@@ -1362,12 +1365,135 @@ class CalibrationHarnessStarlinkTest : public TestCase
     }
 };
 
+/**
+ * \brief The full Vallado SGP4 backend matches the published SGP4-VER reference
+ *        vectors (catalog 00005, t=0) and diverges from the Kepler+J2 fast path
+ *        over many orbits — i.e. drag/SGP4 perturbations are genuinely active.
+ *
+ * Reference: Vallado, Crawford, Hujsak, Kelso, "Revisiting Spacetrack Report #3"
+ * (AIAA 2006-6753), tcppver.out for catalog 5 at tsince = 0 min.
+ */
+class Sgp4ValladoVerificationTest : public TestCase
+{
+  public:
+    Sgp4ValladoVerificationTest()
+        : TestCase("Sgp4MobilityModel Vallado backend matches SGP4-VER (cat 00005)")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        TleRecord tle;
+        tle.name = "SGP4-VER 00005";
+        tle.line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        tle.line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+
+        Ptr<Sgp4MobilityModel> sat = CreateObject<Sgp4MobilityModel>();
+        sat->SetUseVallado(true);
+        NS_TEST_ASSERT_MSG_EQ(sat->SetTle(tle), true, "TLE must parse");
+        NS_TEST_ASSERT_MSG_EQ(sat->IsValladoReady(), true, "Vallado SGP4 must initialise");
+
+        // Published TEME position at tsince = 0 min (km -> m).
+        const Vector eci0 = sat->GetEciPosition(); // Now()==0 -> tsince 0
+        NS_TEST_ASSERT_MSG_EQ_TOL(eci0.x, 7022465.29, 2000.0, "SGP4-VER x within 2 km");
+        NS_TEST_ASSERT_MSG_EQ_TOL(eci0.y, -1400083.05, 2000.0, "SGP4-VER y within 2 km");
+        NS_TEST_ASSERT_MSG_EQ_TOL(eci0.z, 39.95, 2000.0, "SGP4-VER z within 2 km");
+
+        // A Kepler+J2 model from the same TLE must diverge over many orbits,
+        // proving the Vallado perturbations are real (not a relabelled Kepler).
+        Ptr<Sgp4MobilityModel> kep = CreateObject<Sgp4MobilityModel>();
+        kep->SetTle(tle); // Vallado OFF -> Kepler+J2 fast path
+
+        Simulator::Schedule(Seconds(36000.0), [&]() { // 600 min ~ 4.5 orbits
+            const Vector vEci = sat->GetEciPosition();
+            const Vector kEci = kep->GetEciPosition();
+            const double d = std::sqrt(std::pow(vEci.x - kEci.x, 2) +
+                                       std::pow(vEci.y - kEci.y, 2) +
+                                       std::pow(vEci.z - kEci.z, 2));
+            // Both paths carry J2-secular, so the residual (SGP4 periodic +
+            // drag terms) is km-scale over a few orbits for this low-B* orbit;
+            // a clear, non-trivial divergence proves Vallado is not a relabelled
+            // Kepler path.
+            NS_TEST_ASSERT_MSG_GT(d, 2000.0,
+                                  "Vallado SGP4 must diverge from Kepler+J2 over orbits");
+        });
+        Simulator::Stop(Seconds(36001.0));
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
+/**
+ * \brief NtnSatLinkErrorModel turns the live slant range into a per-packet
+ *        C/N0 -> BLER, replacing the binary contact gate: BLER falls to ~0 at
+ *        short range (high C/N0), sits at ~0.5 at the MODCOD threshold, and
+ *        rises to ~1 at long range — and the realized packet-corruption rate
+ *        tracks the modelled BLER.
+ */
+class SatLinkErrorModelBlerTest : public TestCase
+{
+  public:
+    SatLinkErrorModelBlerTest()
+        : TestCase("NtnSatLinkErrorModel C/N0 -> BLER (replaces binary gate)")
+    {
+    }
+
+  private:
+    static Ptr<ntncon::NtnSatLinkErrorModel> Make(double rangeM)
+    {
+        Ptr<ConstantPositionMobilityModel> tx = CreateObject<ConstantPositionMobilityModel>();
+        Ptr<ConstantPositionMobilityModel> rx = CreateObject<ConstantPositionMobilityModel>();
+        tx->SetPosition(Vector(0.0, 0.0, 0.0));
+        rx->SetPosition(Vector(rangeM, 0.0, 0.0));
+        Ptr<ntncon::NtnSatLinkErrorModel> em = CreateObject<ntncon::NtnSatLinkErrorModel>();
+        em->SetEndpoints(tx, rx);
+        return em;
+    }
+
+    void DoRun() override
+    {
+        // Default link: 20 dBW EIRP, G/T 1 dB/K, 30 MHz, 20 GHz, QEF thresh 1 dB.
+        const double blerShort = Make(300.0e3)->CurrentBler();
+        const double blerMid = Make(587.0e3)->CurrentBler();  // ~ threshold range
+        const double blerLong = Make(2000.0e3)->CurrentBler();
+
+        NS_TEST_ASSERT_MSG_LT(blerShort, 0.05, "short range -> near-zero BLER");
+        NS_TEST_ASSERT_MSG_GT(blerMid, 0.30, "threshold range -> mid BLER (>0.3)");
+        NS_TEST_ASSERT_MSG_LT(blerMid, 0.70, "threshold range -> mid BLER (<0.7)");
+        NS_TEST_ASSERT_MSG_GT(blerLong, 0.95, "long range -> near-one BLER");
+        // Monotonic decreasing C/N0 -> increasing BLER.
+        NS_TEST_ASSERT_MSG_LT(blerShort, blerMid, "BLER increases with range (short<mid)");
+        NS_TEST_ASSERT_MSG_LT(blerMid, blerLong, "BLER increases with range (mid<long)");
+
+        // Realized corruption rate tracks the modelled BLER (statistical).
+        Ptr<ntncon::NtnSatLinkErrorModel> em = Make(587.0e3);
+        const double bler = em->CurrentBler();
+        uint32_t corrupt = 0;
+        const uint32_t n = 4000;
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            Ptr<Packet> p = Create<Packet>(1024);
+            if (em->IsCorrupt(p))
+            {
+                ++corrupt;
+            }
+        }
+        const double rate = static_cast<double>(corrupt) / n;
+        NS_TEST_ASSERT_MSG_EQ_TOL(rate, bler, 0.06,
+                                  "realized corruption rate matches modelled BLER");
+        Simulator::Destroy();
+    }
+};
+
 class NtnConstellationTestSuite : public TestSuite
 {
   public:
     NtnConstellationTestSuite()
         : TestSuite("ntn-constellation", Type::UNIT)
     {
+        AddTestCase(new Sgp4ValladoVerificationTest, Duration::QUICK);
+        AddTestCase(new SatLinkErrorModelBlerTest, Duration::QUICK);
         AddTestCase(new TleParseChecksumTest, Duration::QUICK);
         AddTestCase(new TleStreamParseTest, Duration::QUICK);
         AddTestCase(new Sgp4PeriodicReturnTest, Duration::QUICK);

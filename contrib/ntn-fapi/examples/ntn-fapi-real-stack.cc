@@ -35,6 +35,8 @@
 #include <cstdio>
 #include <iostream>
 
+#include "ns3/ntn-scene-helper.h"
+
 using namespace ns3;
 using namespace ns3::fapi;
 
@@ -147,6 +149,10 @@ main(int argc, char* argv[])
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    std::string netSimOut;
+    std::string czmlOut;
+    cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
+    cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
     g_simTime = duration;
     g_tbBytes = tbBytes;
@@ -197,7 +203,13 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(1.0), &SlotTick);
 
     Simulator::Stop(Seconds(duration));
+    ns3::ntnobs::NtnSceneHelper ntnScene;
+    if (!netSimOut.empty()) ntnScene.SetNetSimulyzer(netSimOut);
+    if (!czmlOut.empty()) ntnScene.SetCzml(czmlOut);
+    Ptr<ns3::ntnobs::NtnSceneRecorder> ntnSceneRec = ntnScene.Build(satNodes, ueNodes);
+
     Simulator::Run();
+    if (ntnSceneRec) ntnSceneRec->Stop();
     rs.Collect();
     rs.WriteHealthReport();
 

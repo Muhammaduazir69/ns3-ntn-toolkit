@@ -2,12 +2,16 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/log.h"
+#include "ns3/node.h"
 #include "ns3/ntn-influx-sink.h"
 #include "ns3/ntn-metric-schema.h"
 #include "ns3/ntn-netsimulyzer-exporter.h"
 #include "ns3/ntn-observability-helper.h"
 #include "ns3/ntn-repro-manifest.h"
+#include "ns3/ntn-scene-recorder.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 #include "ns3/uinteger.h"
@@ -482,6 +486,100 @@ class ReproManifestEscapeRoundTripTest : public TestCase
     }
 };
 
+/**
+ * \brief End-to-end: NtnSceneRecorder taps a moving node + a fixed ground node
+ *        under Simulator::Run(), fans positions + KPI samples to NetSimulyzer
+ *        JSON and CZML, and the files come out non-trivial and well-formed.
+ */
+class SceneRecorderEndToEndTest : public TestCase
+{
+  public:
+    SceneRecorderEndToEndTest()
+        : TestCase("NtnSceneRecorder - real Run() fans positions+KPIs to NetSimulyzer+CZML")
+    {
+    }
+
+    void DoRun() override
+    {
+        const std::string nsPath = "/tmp/ntn-scene-test.json";
+        const std::string czmlPath = "/tmp/ntn-scene-test.czml";
+        std::remove(nsPath.c_str());
+        std::remove(czmlPath.c_str());
+
+        // A "satellite" moving in ECEF (ConstantVelocity stands in for an orbit
+        // here) and a fixed ground terminal, both in the global ECEF frame.
+        Ptr<Node> sat = CreateObject<Node>();
+        Ptr<ConstantVelocityMobilityModel> satMob =
+            CreateObject<ConstantVelocityMobilityModel>();
+        satMob->SetPosition(Vector(7.0e6, 0.0, 0.0));
+        satMob->SetVelocity(Vector(0.0, 7500.0, 0.0)); // ~LEO speed
+        sat->AggregateObject(satMob);
+
+        Ptr<Node> gs = CreateObject<Node>();
+        Ptr<ConstantPositionMobilityModel> gsMob =
+            CreateObject<ConstantPositionMobilityModel>();
+        gsMob->SetPosition(Vector(6.371e6, 0.0, 0.0));
+        gs->AggregateObject(gsMob);
+
+        Ptr<ntnobs::NtnSceneRecorder> rec = CreateObject<ntnobs::NtnSceneRecorder>();
+        rec->SetFrame(ntnobs::NtnSceneRecorder::EcefGlobal);
+        const uint32_t satId = rec->TrackNode(sat, ntnobs::NtnSceneRecorder::Sat, "sat-0");
+        rec->TrackNode(gs, ntnobs::NtnSceneRecorder::Gateway, "gs-0");
+        const uint32_t sinrSeries =
+            rec->TrackKpiSeries(satId, ntnobs::NtnSceneRecorder::Sinr, "SINR-dl");
+        rec->TrackBeam(satId, gs->GetId());
+        rec->SetSampleInterval(Seconds(1.0));
+        rec->EnableNetSimulyzer(nsPath, 1e-6);
+        rec->EnableCzml(czmlPath);
+        rec->Start();
+
+        // Feed a few measured-KPI samples and a handover event during the run.
+        for (int s = 1; s <= 5; ++s)
+        {
+            Simulator::Schedule(Seconds(s), [rec, sinrSeries, s]() {
+                rec->RecordKpi(sinrSeries, 12.0 + s); // dB
+            });
+        }
+        Simulator::Schedule(Seconds(3.0),
+                            [rec, satId, gs]() { rec->OnHandover(gs->GetId(), satId, satId); });
+
+        Simulator::Stop(Seconds(6.0));
+        Simulator::Run();
+        rec->Stop();
+        Simulator::Destroy();
+
+        NS_TEST_ASSERT_MSG_GT(rec->GetEventCount(), 10u, "expected many scene events");
+
+        const std::string js = ReadFile(nsPath);
+        NS_TEST_ASSERT_MSG_NE(js, "", "NetSimulyzer JSON should be written");
+        const bool hasSchema = js.find("\"schema\":\"netsimulyzer-1.0\"") != std::string::npos;
+        const bool hasNodeMove = js.find("\"NodeMove\"") != std::string::npos;
+        const bool hasEarth = js.find("\"earth\"") != std::string::npos;
+        const bool hasHandover = js.find("handover") != std::string::npos;
+        NS_TEST_ASSERT_MSG_EQ(hasSchema, true, "NetSimulyzer schema tag present");
+        NS_TEST_ASSERT_MSG_EQ(hasNodeMove, true, "NodeMove events present");
+        NS_TEST_ASSERT_MSG_EQ(hasEarth, true, "Earth sphere node present");
+        NS_TEST_ASSERT_MSG_EQ(hasHandover, true, "handover log event present");
+
+        const std::string cz = ReadFile(czmlPath);
+        NS_TEST_ASSERT_MSG_NE(cz, "", "CZML should be written");
+        const bool hasDoc = cz.find("\"id\":\"document\"") != std::string::npos;
+        const bool hasFixed = cz.find("\"referenceFrame\":\"FIXED\"") != std::string::npos;
+        const bool hasSatPacket = cz.find("node-" + std::to_string(satId)) != std::string::npos;
+        NS_TEST_ASSERT_MSG_EQ(hasDoc, true, "CZML document packet present");
+        NS_TEST_ASSERT_MSG_EQ(hasFixed, true, "CZML FIXED-frame Cartesian positions present");
+        NS_TEST_ASSERT_MSG_EQ(hasSatPacket, true, "CZML satellite packet present");
+        // The handover scheduled at t=3 must produce an animated arc packet.
+        const bool hasArc =
+            cz.find("\"ho-0\"") != std::string::npos && cz.find("polyline") != std::string::npos &&
+            cz.find("availability") != std::string::npos;
+        NS_TEST_ASSERT_MSG_EQ(hasArc, true, "CZML handover arc packet present");
+
+        std::remove(nsPath.c_str());
+        std::remove(czmlPath.c_str());
+    }
+};
+
 class NtnObservabilityTestSuite : public TestSuite
 {
   public:
@@ -501,6 +599,7 @@ class NtnObservabilityTestSuite : public TestSuite
                     TestCase::Duration::QUICK);
         AddTestCase(new ReproManifestEscapeRoundTripTest,
                     TestCase::Duration::QUICK);
+        AddTestCase(new SceneRecorderEndToEndTest, TestCase::Duration::QUICK);
     }
 };
 

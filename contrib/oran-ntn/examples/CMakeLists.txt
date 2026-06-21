@@ -25,6 +25,7 @@ build_lib_example(
   NAME oran-ntn-real-stack-scenario
   SOURCE_FILES oran-ntn-real-stack-scenario.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${liboran-ntn}
     ${libntn-traffic}
     ${libntn-cho}
@@ -172,4 +173,14 @@ build_lib_example(
     ${libapplications}
     ${libmmwave}
     ${liblte}
+)
+
+# Standalone two-process E2 end-to-end driver (RIC + agent roles) over real SCTP.
+build_lib_example(
+  NAME oran-ntn-e2-termination
+  SOURCE_FILES oran-ntn-e2-termination.cc
+  LIBRARIES_TO_LINK
+    ${liboran-ntn}
+    ${libcore}
+    ${libnetwork}
 )

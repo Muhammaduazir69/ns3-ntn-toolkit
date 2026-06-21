@@ -42,6 +42,7 @@ build_lib_example(
   NAME ntn-slice-real-stack
   SOURCE_FILES ntn-slice-real-stack.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-slice}
     ${libntn-traffic}
     ${libntn-cho}
