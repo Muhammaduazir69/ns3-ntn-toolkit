@@ -62,6 +62,16 @@ cd ..
 
 Without this, `ntn-cho`, `oran-ntn`, and `thz-ntn` will silently fail to register.
 
+After pulling the upstream `satellite` module, add the following libraries to `contrib/satellite/CMakeLists.txt`:
+
+```diff
+     ${libconfig-store}
++    ${libmagister-stats}
++    ${libntn-traffic}
++    ${libpoint-to-point}
+   TEST_SOURCES ${test_sources}
+```
+
 ---
 
 ## 4. (Optional) clone the standalone module repos
