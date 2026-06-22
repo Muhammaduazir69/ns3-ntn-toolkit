@@ -466,7 +466,6 @@ cd contrib/ && git clone https://github.com/sns3/sns3-satellite.git satellite &&
 
 # 4. Run the integrated multi-module example
 ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
-find contrib -type f -exec sed -i 's|ns3/traffic-module.h|ns3/ntn-traffic-module.h|g' {} +
 
 # 5. (Optional) Bring up the observability stack
 cd contrib/ntn-observability/docker && docker compose up -d
