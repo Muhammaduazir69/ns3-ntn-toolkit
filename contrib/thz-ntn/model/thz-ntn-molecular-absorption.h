@@ -266,8 +266,12 @@ class ThzNtnMolecularAbsorption : public Object
     std::vector<AtmosphericLayer> m_layers;  //!< atmospheric layer definitions
     std::vector<AbsorptionLine> m_lines;     //!< absorption line database
 
-    // 4.3.1 — HITRAN-2024 LUT path. When loaded, ComputeAbsorptionCoefficient
-    // routes through `m_lut` and skips the in-process Van Vleck sum.
+    // 4.3.1 — HITRAN-2024 LUT path. When loaded, the SLANT-PATH integration
+    // (ComputeSlantPathAbsorption) and GetTransmittance consult `m_lut` for the
+    // per-sub-layer specific attenuation (dB/km). The single-point
+    // ComputeAbsorptionCoefficient remains the Van Vleck–Weisskopf kernel and is
+    // used as the per-point fallback whenever the LUT returns a non-finite value
+    // (or no LUT is loaded).
     thzntn::HitranLut m_lut;
 };
 

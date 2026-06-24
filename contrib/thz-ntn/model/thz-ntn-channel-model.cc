@@ -423,15 +423,17 @@ ThzNtnChannelModel::DoCalcRxPower(double txPowerDbm,
     m_lastPointingLoss_dB = pointing_dB;
     m_lastScintillationLoss_dB = scintillation_dB;
 
-    // --- 6. Hardware impairment degradation (post-FSL) ---
-    if (m_enableHardware && m_hardwareModel)
-    {
-        // Hardware impairments reduce effective SNR by adding an equivalent
-        // noise contribution.  Modelled as additional power loss.
-        // double hwDegradation_dB = m_hardwareModel->ComputeSnrDegradation_dB(rxPowerDbm);
-        // rxPowerDbm -= hwDegradation_dB;
-        // Placeholder until ThzNtnHardwareImpairments is implemented
-    }
+    // --- 6. Hardware impairment degradation ---
+    // The EVM hardware ceiling is a transform on SNR, not on received power:
+    //   SNR_eff = SNR / (1 + SNR * kappa^2)   (ThzNtnHardwareImpairments)
+    // It can only be applied where the noise reference (kTBF) is known. This
+    // method returns Rx power on a shared channel and has no per-receiver noise
+    // figure / bandwidth, so applying a fixed power-domain penalty here would
+    // double-count and break dB bookkeeping. The impairment is therefore applied
+    // at the SNR stage in ThzNtnLinkBudget::Compute*Budget(), which calls
+    // m_hardwareModel->ComputeEffectiveSnr_dB(result.snr_dB) once N = kTBF is
+    // established. m_enableHardware here only flags that the channel carries a
+    // hardware model for that downstream consumer; Rx power is left unchanged.
 
     // --- 7. Fire traced callbacks ---
     m_pathLossTrace(totalLoss_dB);

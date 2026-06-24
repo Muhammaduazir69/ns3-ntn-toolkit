@@ -212,6 +212,23 @@ build_lib_example(
     ${libmobility}
 )
 
+# Analytic dataset generator: 8 sections driving the module's own physics APIs
+# (ThzNtnLinkBudget, ThzNtnIslChannel, ThzNtnRis, ThzNtnIsac, ThzNtnAntennaArray,
+# ThzNtnBeamTracking, ThzNtnSpectrum). Prints + writes CSVs; prints the
+# [analytic-tool] banner pointing to the *-traffic / *-real-stack siblings for
+# measured packet-plane KPIs. Was previously unbuilt (README §"unbuilt demo").
+build_lib_example(
+  NAME thz-ntn-demo
+  SOURCE_FILES thz-ntn-demo.cc
+  LIBRARIES_TO_LINK
+    ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+)
+
 # Full-stack integration demo: downlink link budget + RIS assist, ISL SNR/
 # capacity from satellite MobilityModels, ISAC debris sensing, EKF beam
 # tracking, and achievable spectral efficiency, all on the current API.
