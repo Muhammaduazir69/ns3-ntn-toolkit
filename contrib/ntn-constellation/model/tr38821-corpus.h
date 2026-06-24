@@ -8,8 +8,8 @@
 // 3GPP TR 38.821 + Starlink EU calibration corpus (Roadmap §4.4.11).
 //
 // Loads the toolkit's bundled reference CSVs from
-//   contrib/ntn-constellation/data/tr38821/   (scenarios + link budgets)
-//   contrib/ntn-constellation/data/starlink_eu/ (latency + PoP locations)
+//   contrib/ntn-constellation/calibration/tr38821/   (scenarios + link budgets)
+//   contrib/ntn-constellation/calibration/starlink_eu/ (latency + PoP locations)
 //
 // and exposes a `CalibrationHarness` that compares a toolkit prediction
 // against the corpus, returning per-row residuals.
