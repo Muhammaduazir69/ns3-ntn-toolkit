@@ -47,10 +47,18 @@ if(TARGET ${libnetsimulyzer})
     SOURCE_FILES ntn-netsimulyzer-official-demo.cc
     LIBRARIES_TO_LINK
       ${libnetsimulyzer}
+      ${libntn-observability}
+      ${libntn-traffic}
       ${libntn-cho}
       ${libntn-constellation}
       ${libcore}
       ${libnetwork}
       ${libmobility}
+      ${libspectrum}
+      ${libpropagation}
+      ${libinternet}
+      ${libapplications}
+      ${libmmwave}
+      ${liblte}
   )
 endif()
