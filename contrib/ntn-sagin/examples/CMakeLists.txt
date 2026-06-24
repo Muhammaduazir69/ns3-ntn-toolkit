@@ -137,7 +137,12 @@ build_lib_example(
     ${libntn-constellation}
     ${libntn-cho}
     ${libntn-observability}
+    ${libntn-traffic}
     ${libcore}
     ${libnetwork}
     ${libmobility}
+    ${libpoint-to-point}
+    ${libinternet}
+    ${libapplications}
+    ${libflow-monitor}
 )
