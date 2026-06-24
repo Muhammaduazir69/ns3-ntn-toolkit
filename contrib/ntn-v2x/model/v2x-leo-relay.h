@@ -54,6 +54,12 @@ class V2xLeoRelay : public Object
 
     void RegisterVehicle(const std::string& id, Ptr<MobilityModel> mob);
 
+    /// Per-vehicle NLOS blockage (canyon / foliage / superstructure) subtracted
+    /// from that vehicle's direct LEO SNR — same 3GPP-style shadowing term the
+    /// measured-radio recipe (ntn-v2x-real-stack) applies, so a shadowed vehicle
+    /// genuinely needs to relay. 0 dB (default) = clear line of sight.
+    void SetVehicleBlockageDb(const std::string& id, double blockageDb);
+
     /// One-shot evaluation: returns relay decisions for all vehicles.
     std::vector<RelayDecision> EvaluateAll() const;
 
@@ -63,6 +69,7 @@ class V2xLeoRelay : public Object
     Ptr<V2xLeoDirect> m_direct;
     Ptr<MobilityModel> m_sat;
     std::map<std::string, Ptr<MobilityModel>> m_vehicles;
+    std::map<std::string, double> m_blockageDb; ///< per-vehicle NLOS shadowing
     double m_maxV2vRangeM{1500.0};
     double m_minDirectSnrDb{6.0};
 };

@@ -2,24 +2,26 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit, Workstream W7)
  *
- * SUMO ↔ ns-3 mobility bridge.
+ * SUMO -> ns-3 mobility bridge (offline FCD-replay only).
  *
- * Two operation modes are supported behind a single API:
+ * **Trace-replay mode** reads a SUMO FCD output exported to the simple CSV
+ * `time,vehid,x,y,z,speed` dialect and drives each registered vehicle's
+ * MobilityModel along the recorded track. This lets CI run without a live
+ * SUMO and lets researchers reproduce scenarios bit-for-bit. Road traces
+ * must be supplied as files (e.g. via SUMO `fcd-export`); this module does
+ * NOT fabricate vehicle motion.
  *
- *   1. **Live TraCI mode** — opens a TCP socket to a running SUMO process,
- *      issues `CMD_SIMSTEP` per step, and reads back vehicle positions via
- *      `CMD_GET_VEHICLE_VARIABLE` (var ID 0x42 = position3D). Use when
- *      SUMO is available; the wire protocol is TraCI v20+ as documented in
- *      the SUMO user manual (sumo.dlr.de).
+ * **Live TraCI co-simulation is explicitly OUT OF SCOPE for W7.** No live
+ * TraCI client is implemented in-tree: `ConnectTcp` opens a real socket but
+ * does not implement the `CMD_SIMSTEP` / `CMD_GET_VEHICLE_VARIABLE` wire
+ * protocol, so it refuses to enter a live mode (callers must use
+ * `LoadFcdTrace`). Implementing the TraCI wire protocol would be net-new
+ * functionality.
  *
- *   2. **Trace-replay mode** — reads a SUMO FCD output file (XML-ish or
- *      CSV) and feeds the same callback. Lets CI run without a live SUMO,
- *      and lets researchers reproduce scenarios bit-for-bit. The dialect
- *      is the simple CSV `time,vehid,x,y,z,v` form.
- *
- * The bridge tracks per-step jitter — the absolute offset between
- * `Simulator::Now()` and the SUMO timestamp at each sync point — so the
- * W7 validation gate (`jitter < 100 ms`) can be measured directly.
+ * The bridge tracks per-step jitter — the MEASURED absolute offset between
+ * `Simulator::Now()` and the trace timestamp at each sync point, with no
+ * synthetic component — so the W7 validation gate (`jitter < 100 ms`) is
+ * measured directly from the real ns-3 scheduler.
  */
 #ifndef NTN_V2X_SUMO_TRACI_BRIDGE_H
 #define NTN_V2X_SUMO_TRACI_BRIDGE_H
@@ -27,7 +29,6 @@
 #include "ns3/mobility-model.h"
 #include "ns3/object.h"
 #include "ns3/ptr.h"
-#include "ns3/random-variable-stream.h"
 #include "ns3/traced-callback.h"
 
 #include <map>
@@ -56,9 +57,10 @@ class SumoTraciBridge : public Object
     SumoTraciBridge();
     ~SumoTraciBridge() override;
 
-    /// Open a connection to a live SUMO process (TraCI v20+).
-    /// Returns false if the socket fails to connect; the bridge then
-    /// silently degrades — call `LoadFcdTrace` afterwards to fall back.
+    /// Open a TCP socket to `host:port`. NOTE: live TraCI co-simulation is
+    /// unimplemented (out of scope for W7) — the TraCI stepping protocol is
+    /// not driven, so this always returns false after warning, and the bridge
+    /// stays in Disconnected mode. Use `LoadFcdTrace` for offline FCD replay.
     bool ConnectTcp(const std::string& host, uint16_t port);
 
     /// Load a CSV FCD trace: header `time,vehid,x,y,z,speed`.
@@ -78,7 +80,8 @@ class SumoTraciBridge : public Object
     /// Seconds elapsed since the bridge was constructed (replay timer).
     double GetSumoClockSec() const;
 
-    /// |Simulator::Now() − SUMO clock| at the most recent Step (seconds).
+    /// MEASURED |Simulator::Now() - trace timestamp| at the most recent Step
+    /// (seconds); the genuine replay clock offset, no synthetic component.
     double GetLastJitterSec() const;
 
     /// Worst observed jitter so far.
@@ -114,10 +117,6 @@ class SumoTraciBridge : public Object
     double m_lastJitterSec{0.0};
     double m_maxJitterSec{0.0};
     SampleTrace m_traceSample;
-    /// Models the co-simulation step-timing jitter (IPC/scheduling latency)
-    /// that a live TraCI bridge incurs; in pure replay the clocks are locked,
-    /// so without this the measured offset is identically zero.
-    Ptr<UniformRandomVariable> m_jitterRng;
 };
 
 } // namespace ntnv2x

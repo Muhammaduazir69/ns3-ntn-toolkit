@@ -78,9 +78,19 @@ SumoTraciBridge::ConnectTcp(const std::string& host, uint16_t port)
         ::close(fd);
         return false;
     }
-    m_socketFd = fd;
-    m_mode = Mode::LiveTraci;
-    return true;
+    // The socket open/connect above is real, but the TraCI stepping wire
+    // protocol (CMD_SIMSTEP / CMD_GET_VEHICLE_VARIABLE) is NOT implemented in
+    // this module — live co-simulation is out of scope for W7. We therefore do
+    // NOT switch to a live mode here: leaving m_mode as Disconnected prevents a
+    // caller from accidentally driving a no-op live loop that silently holds
+    // positions. The caller must use LoadFcdTrace() for offline FCD replay.
+    NS_LOG_WARN("ConnectTcp: socket connected to "
+                << host << ":" << port
+                << " but the TraCI stepping protocol is unimplemented; "
+                   "this module is offline FCD-replay only — call LoadFcdTrace().");
+    ::close(fd);
+    m_socketFd = -1;
+    return false;
 }
 
 bool
@@ -204,28 +214,28 @@ SumoTraciBridge::Step()
         }
         m_currentSumoTime = targetTime;
         double nowSec = Simulator::Now().GetSeconds();
-        // Replay locks ns-3 time to the trace timestamp, so the raw offset is
-        // ~0. Add the IPC/scheduling step-timing jitter a real TraCI bridge
-        // incurs (a few ms, always under the W7 100 ms validation gate) so the
-        // reported jitter reflects realistic co-simulation timing variance.
-        if (!m_jitterRng)
-        {
-            m_jitterRng = CreateObject<UniformRandomVariable>();
-        }
-        const double coSimJitterSec = m_jitterRng->GetValue(0.0, 0.008); // 0-8 ms
-        m_lastJitterSec = std::abs(nowSec - m_currentSumoTime) + coSimJitterSec;
+        // Genuine replay clock offset: the absolute difference between the real
+        // ns-3 scheduler clock and the trace timestamp at this sync point. In
+        // locked trace-replay this is ~0 by construction; it is MEASURED from
+        // Simulator::Now(), with no synthetic/IPC component injected.
+        m_lastJitterSec = std::abs(nowSec - m_currentSumoTime);
         if (m_lastJitterSec > m_maxJitterSec)
             m_maxJitterSec = m_lastJitterSec;
         return emitted;
     }
     if (m_mode == Mode::LiveTraci)
     {
-        // We deliberately keep the live TraCI path minimal — a real
-        // deployment will drop in EURECOM/UPM TraCI clients once we have a
-        // running SUMO. For now: advance ns-3 time and return 0 so callers
-        // know the live path is wired but quiescent.
-        m_currentSumoTime = Simulator::Now().GetSeconds();
-        m_lastJitterSec = 0.0;
+        // Unreachable in practice: ConnectTcp never sets LiveTraci because the
+        // TraCI stepping protocol is unimplemented. Guard honestly anyway —
+        // warn once and return 0 WITHOUT advancing m_currentSumoTime, so no
+        // vehicle position is silently held or fabricated.
+        static bool warned = false;
+        if (!warned)
+        {
+            NS_LOG_WARN("Step(): live TraCI is not implemented; this module is "
+                        "offline FCD-replay only. Use LoadFcdTrace().");
+            warned = true;
+        }
         return 0;
     }
     return 0;

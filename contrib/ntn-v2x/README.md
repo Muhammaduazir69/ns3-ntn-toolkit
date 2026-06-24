@@ -54,8 +54,8 @@ See the [CHANGELOG](CHANGELOG.md) for the full history.
 | `model/sumo-traci-bridge.h` | `SumoTraciBridge` — single API for live TraCI (`ConnectTcp("127.0.0.1", 8813)`) and offline FCD replay (`LoadFcdTrace(csv)`); `RegisterVehicle()`, `Step()` advances regardless of source; tracks per-step sync jitter (`GetLastJitterSec()` / `GetMaxJitterSec()`) and exports per-vehicle samples via a `TracedCallback`. |
 | `model/v2x-leo-direct.h` | `V2xLeoDirect` — closed-form vehicle ↔ LEO uplink budget (free-space PL + SNR + elevation); `ComputeStatic` callable inside hot loops without `Object` allocation overhead. Kept as a reference baseline — the examples decide on measured SINR. |
 | `model/v2x-leo-relay.h` | `V2xLeoRelay` — V2V-via-LEO relay assignment; each vehicle uplinks direct or relays through the best peer within `m_maxV2vRangeM`; `m_minDirectSnrDb` sets the prefer-relay threshold; `EvaluateAll()` returns the per-vehicle decision. |
-| `model/maritime-scenario.h` | `MaritimeMobilityModel` — 2-D vessel mobility for sea-area scenarios; bounces off all four box edges and stays inside the bounded region. |
-| `helper/ntn-v2x-helper.h` | Synthetic FCD generator `WriteSyntheticFcdCsv` — reproducible, RNG-seeded FCD traces so CI runs without a SUMO install and a researcher can re-run the exact scenario by re-using the seed. |
+| `model/maritime-scenario.h` | `MaritimeMobilityModel` — DEPRECATED / offline-test-only synthetic box-bounce vessel motion. The real maritime path reuses ntn-sagin `AisMobilityModel` (recorded AIS replay) via the `ntn-v2x-maritime-ais` example. |
+| `helper/ntn-v2x-helper.h` | Deterministic CI fixture writer `WriteDeterministicTestFcdCsv` — a disclosed, RNG-free FCD trace for the test suite only (fixed per-vehicle speed ramp). NOT a substitute for a real SUMO FCD export; examples require a real `--fcdTrace`/`--trace` file (see `traces/`). |
 
 ## Examples
 

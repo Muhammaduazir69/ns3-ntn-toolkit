@@ -11,7 +11,6 @@
 #include "ns3/v2x-leo-relay.h"
 
 #include <fstream>
-#include <random>
 #include <string>
 
 namespace ns3
@@ -22,14 +21,20 @@ namespace ntnv2x
 class NtnV2xHelper
 {
   public:
-    /// Generate a synthetic FCD CSV trace useful for CI when SUMO isn't available.
-    /// `nVehicles` cars on a straight east-bound highway, length `roadLengthM`,
-    /// `simSeconds` long, sampled every `dtSec`. Vehicles spaced and given
-    /// uniform random speeds in [vMin, vMax]. Returns true on success.
-    static bool WriteSyntheticFcdCsv(const std::string& path,
-                                     std::size_t nVehicles, double roadLengthM,
-                                     double simSeconds, double dtSec = 1.0,
-                                     double vMin = 18.0, double vMax = 28.0);
+    /// Write a DETERMINISTIC synthetic FCD CSV fixture for the CI test suite.
+    /// This is a disclosed deterministic test fixture — NOT a substitute for a
+    /// real SUMO FCD export. `nVehicles` cars on a straight east-bound highway
+    /// of length `roadLengthM`, `simSeconds` long, sampled every `dtSec`.
+    /// Each vehicle i gets a FIXED speed vMin + i*(vMax-vMin)/nVehicles (no
+    /// RNG), so the generated trace is reproducible bit-for-bit. Returns true
+    /// on success. Examples must use a real --fcdTrace file instead.
+    static bool WriteDeterministicTestFcdCsv(const std::string& path,
+                                             std::size_t nVehicles,
+                                             double roadLengthM,
+                                             double simSeconds,
+                                             double dtSec = 1.0,
+                                             double vMin = 18.0,
+                                             double vMax = 28.0);
 };
 
 } // namespace ntnv2x

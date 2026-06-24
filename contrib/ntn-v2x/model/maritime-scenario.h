@@ -2,12 +2,16 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit, Workstream W7)
  *
- * Maritime mobility — vessels at sea level moving at typical merchant
- * speeds (10-25 knots ≈ 5-13 m/s). 2-D constant-velocity inside a
- * configurable bounding box; altitude pinned to 0.
+ * Maritime mobility (DEPRECATED / offline-test-only).
  *
- * The class plugs into the SUMO/V2X path the same way road vehicles do —
- * downstream V2X-LEO and relay code accept any ``MobilityModel``.
+ * This model uses synthetic billiard-ball box-bounce motion: a vessel drifts
+ * at a fixed speed and reflects off a bounding box. It is NOT a real vessel
+ * track and is retained only for the bounded-area unit test.
+ *
+ * The REAL maritime NTN path now reuses ntn-sagin's AisMobilityModel, which
+ * replays a recorded Danish Maritime AIS track (lat/lon/SOG/COG) — see the
+ * example ntn-v2x-maritime-ais. Prefer that for any measured study. Do not
+ * use MaritimeMobilityModel for results; it fabricates motion.
  */
 #ifndef NTN_V2X_MARITIME_SCENARIO_H
 #define NTN_V2X_MARITIME_SCENARIO_H

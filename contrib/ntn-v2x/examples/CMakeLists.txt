@@ -55,6 +55,29 @@ build_lib_example(
     ${libntn-traffic}
 )
 
+# Real maritime NTN access: an AIS-replayed vessel UE (ntn-sagin AisMobilityModel
+# driven by AisDanishImporter on a real Danish Maritime CSV) on a real mmwave NR
+# cell. Replaces the dead box-bounce MaritimeMobilityModel with measured SINR.
+build_lib_example(
+  NAME ntn-v2x-maritime-ais
+  SOURCE_FILES ntn-v2x-maritime-ais.cc
+  LIBRARIES_TO_LINK
+    ${libntn-v2x}
+    ${libntn-sagin}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
+)
+
 # WS6 — V2X edge URLLC with sat-vs-ground inference placement.
 build_lib_example(
   NAME ntn-v2x-edge-urllc

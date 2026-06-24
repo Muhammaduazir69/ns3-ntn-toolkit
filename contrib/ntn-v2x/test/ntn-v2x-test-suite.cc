@@ -27,7 +27,7 @@ class FcdTraceReplayJitterTest : public TestCase
 {
   public:
     FcdTraceReplayJitterTest()
-        : TestCase("Trace replay sync jitter stays under 100 ms")
+        : TestCase("Trace replay MEASURED (not injected) sync offset stays under 100 ms")
     {
     }
 
@@ -37,9 +37,9 @@ class FcdTraceReplayJitterTest : public TestCase
         const std::size_t nVeh = 10;
         const double simSec = 30.0;
         const double dt = 1.0;
-        NS_TEST_ASSERT_MSG_EQ(NtnV2xHelper::WriteSyntheticFcdCsv(trace, nVeh,
-                                                                 1000.0, simSec, dt),
-                              true, "synthetic FCD generation failed");
+        NS_TEST_ASSERT_MSG_EQ(NtnV2xHelper::WriteDeterministicTestFcdCsv(trace, nVeh,
+                                                                         1000.0, simSec, dt),
+                              true, "deterministic FCD fixture generation failed");
 
         Ptr<SumoTraciBridge> br = CreateObject<SumoTraciBridge>();
         NS_TEST_ASSERT_MSG_EQ(br->LoadFcdTrace(trace), true, "trace load failed");
@@ -61,9 +61,12 @@ class FcdTraceReplayJitterTest : public TestCase
         Simulator::Run();
         Simulator::Destroy();
 
+        // The reported offset is now MEASURED from the real ns-3 scheduler vs
+        // the trace timestamp (no injected term): in locked replay it is ~0,
+        // comfortably under the 100 ms W7 gate.
         double maxJitterMs = br->GetMaxJitterSec() * 1000.0;
         NS_TEST_ASSERT_MSG_LT(maxJitterMs, 100.0,
-                              "TraCI replay jitter " << maxJitterMs
+                              "TraCI replay measured offset " << maxJitterMs
                               << " ms exceeded 100 ms gate");
         std::remove(trace.c_str());
     }
@@ -188,8 +191,9 @@ class HundredVehicleSmokeTest : public TestCase
     {
         const std::string trace = "/tmp/ntn-v2x-test-100veh.csv";
         const std::size_t n = 100;
-        NS_TEST_ASSERT_MSG_EQ(NtnV2xHelper::WriteSyntheticFcdCsv(trace, n, 30000.0, 300.0, 1.0),
-                              true, "trace generation failed");
+        NS_TEST_ASSERT_MSG_EQ(
+            NtnV2xHelper::WriteDeterministicTestFcdCsv(trace, n, 30000.0, 300.0, 1.0),
+            true, "deterministic fixture generation failed");
 
         Ptr<SumoTraciBridge> br = CreateObject<SumoTraciBridge>();
         NS_TEST_ASSERT_MSG_EQ(br->LoadFcdTrace(trace), true, "trace load failed");

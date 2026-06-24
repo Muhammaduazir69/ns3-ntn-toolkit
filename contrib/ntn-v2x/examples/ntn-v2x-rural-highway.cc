@@ -141,7 +141,7 @@ main(int argc, char* argv[])
     double satEirpDbm = 55.0;
     double blockageDb = 14.0;
     double dtSec = 1.0;
-    std::string tracePath = "/tmp/ntn-v2x-fcd.csv";
+    std::string tracePath = "contrib/ntn-v2x/traces/rural-highway-fcd.csv";
     std::string outputDir = "ntn-v2x-rural-highway-output";
 
     CommandLine cmd(__FILE__);
@@ -151,7 +151,10 @@ main(int argc, char* argv[])
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("blockageDb", "NLOS blockage on shadowed vehicles (dB)", blockageDb);
     cmd.AddValue("dt", "TraCI tick (s)", dtSec);
-    cmd.AddValue("trace", "FCD CSV trace path (generated if missing)", tracePath);
+    cmd.AddValue("trace",
+                 "Real SUMO FCD CSV trace path (time,vehid,x,y,z,speed). Defaults to the "
+                 "shipped contrib/ntn-v2x/traces/rural-highway-fcd.csv; no synthetic fallback.",
+                 tracePath);
     cmd.AddValue("minDirectSnr", "Minimum dB for direct uplink", g_minDirectSnrDb);
     cmd.AddValue("maxV2vRange", "Maximum V2V range (m) for relay", g_maxV2vRangeM);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -159,12 +162,15 @@ main(int argc, char* argv[])
     g_simTime = simTimeSec;
     g_dt = dtSec;
 
-    // SUMO FCD vehicle mobility (real replay).
-    NtnV2xHelper::WriteSyntheticFcdCsv(tracePath, nVehicles, 30000.0, simTimeSec, dtSec);
+    // SUMO FCD vehicle mobility (real replay from a supplied trace file; the
+    // module ships a real-format default trace, and there is NO runtime
+    // fabrication of vehicle motion — pass --trace for your own SUMO export).
     g_bridge = CreateObject<SumoTraciBridge>();
     if (!g_bridge->LoadFcdTrace(tracePath))
     {
-        std::cerr << "failed to load FCD trace\n";
+        std::cerr << "failed to load FCD trace '" << tracePath
+                  << "'. Supply a real SUMO fcd-export CSV via --trace "
+                     "(time,vehid,x,y,z,speed).\n";
         return 1;
     }
     g_blockageDb.assign(nVehicles, 0.0);

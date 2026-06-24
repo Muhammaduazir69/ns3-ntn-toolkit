@@ -62,6 +62,12 @@ V2xLeoRelay::RegisterVehicle(const std::string& id, Ptr<MobilityModel> mob)
     m_vehicles[id] = mob;
 }
 
+void
+V2xLeoRelay::SetVehicleBlockageDb(const std::string& id, double blockageDb)
+{
+    m_blockageDb[id] = blockageDb;
+}
+
 std::size_t
 V2xLeoRelay::VehicleCount() const
 {
@@ -78,12 +84,19 @@ V2xLeoRelay::EvaluateAll() const
     }
     out.reserve(m_vehicles.size());
 
-    // Pre-compute every vehicle's direct SNR.
+    // Pre-compute every vehicle's direct SNR, minus its NLOS blockage (a
+    // shadowed vehicle has a worse direct link and is the one that must relay).
     std::map<std::string, double> directSnr;
     for (const auto& [id, mob] : m_vehicles)
     {
         auto lb = m_direct->Compute(mob, m_sat);
-        directSnr[id] = lb.snrDb;
+        double blockage = 0.0;
+        auto bit = m_blockageDb.find(id);
+        if (bit != m_blockageDb.end())
+        {
+            blockage = bit->second;
+        }
+        directSnr[id] = lb.snrDb - blockage;
     }
 
     for (const auto& [id, mob] : m_vehicles)

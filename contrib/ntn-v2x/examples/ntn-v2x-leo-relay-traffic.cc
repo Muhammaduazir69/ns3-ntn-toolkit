@@ -6,21 +6,25 @@
  * messages to a ground server through a peer vehicle (veh1) and a LEO satellite:
  * veh0 --V2V--> veh1 --uplink--> LEO --feeder--> server. Real UDP BSMs are
  * forwarded THROUGH the relay nodes (real Ipv4 routing); each hop's propagation
- * delay is the real slant range / c, and a hop carries traffic only while it is
- * in contact — the V2V hop within range, the uplink above the minimum elevation.
- * The contact gate is driven by the live geometry, NOT a closed-form SINR /
- * sigmoid; the V2xLeoRelay engine logs when veh0 must relay vs go direct.
+ * delay is the real slant range / c.
+ *
+ * The per-hop contact gates are driven by the V2xLeoRelay engine itself, NOT
+ * by an inline geometry test: V2xLeoRelay::EvaluateAll() returns, per vehicle,
+ * the route decision (direct vs relay), the chosen peer, the V2V range, and the
+ * direct/via-relay SNRs; the example sets the V2V and uplink error-model rates
+ * straight off that RelayDecision (V2V up only when the engine selects a relay
+ * peer in range; uplink up only when the serving LEO link clears the engine's
+ * --minDirectSnr threshold). The relay engine is the single source of the route
+ * decision, not a printed side-channel.
+ *
  * Delivered BSM rate / latency / jitter / loss are MEASURED end-to-end by
  * NtnOranSink from the in-band NtnOranPayloadHeader (WS1 application suite).
+ * The real-PHY V2X baseline (measured mmwave SINR) is ntn-v2x-rural-highway.
  *
- * NOTE (simplified link gates): this example deliberately uses binary
- * geometry gates with an FSPL-equivalent fade margin (--fadeMarginDb shrinks
- * the V2V contact range) and elevation hysteresis (--gateHysteresisDeg stops
- * uplink flapping); the real-PHY V2X baseline is ntn-v2x-rural-highway.
- * Vehicles follow the same SUMO-format FCD trace source as the other v2x
- * examples (synthetic east-bound highway when no SUMO trace is supplied).
+ * Vehicles follow a REAL SUMO-format FCD trace supplied via --fcdTrace; there
+ * is no synthetic fallback (use SUMO `fcd-export`).
  *
- * Quick test:  --simSeconds=60 --bsmHz=10
+ * Quick test:  --simSeconds=60 --bsmHz=10 --fcdTrace=<path/to/fcd.csv>
  */
 #include "ns3/applications-module.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
@@ -56,10 +60,8 @@ Ptr<NtnOranSink> g_sink;
 Ptr<ntnv2x::SumoTraciBridge> g_bridge;
 uint64_t g_lastRx = 0;
 double g_maxV2vRangeM = 1500.0;
-double g_minElev = 10.0;
+double g_minDirectSnrDb = 6.0;
 double g_simTime = 60.0;
-double g_fadeMarginDb = 3.0;
-double g_gateHystDeg = 2.0;
 bool g_uplinkUp = false;
 
 double
@@ -91,19 +93,16 @@ Tick()
     const double dUp = Dist(g_veh1->GetPosition(), g_sat->GetPosition());
     const double elevUp = ElevDeg(g_veh1->GetPosition(), g_sat->GetPosition());
 
-    // Geometry contact gates (NOT a fabricated SINR): real range delays + a
-    // binary in-contact/out-of-contact gate on each hop. The V2V gate keeps
-    // an FSPL-equivalent fade margin (range x 10^(-margin/20)); the uplink
-    // gate has elevation hysteresis (up at minElev, down at minElev - hyst).
-    const double effV2vRange = g_maxV2vRangeM * std::pow(10.0, -g_fadeMarginDb / 20.0);
+    // Genuine slant-range propagation delays on each hop (geometry, not a
+    // fabricated SINR). These are real range/c and stay regardless of gating.
     g_chV2v->SetAttribute("Delay", TimeValue(Seconds(dV2v / kC)));
     g_chUplink->SetAttribute("Delay", TimeValue(Seconds(dUp / kC)));
-    g_emV2v->SetRate(dV2v <= effV2vRange ? 0.0 : 1.0);
-    g_uplinkUp = g_uplinkUp ? (elevUp >= g_minElev - g_gateHystDeg)
-                            : (elevUp >= g_minElev);
-    g_emUplink->SetRate(g_uplinkUp ? 0.0 : 1.0);
 
-    // V2xLeoRelay decision (which path veh0 should use) — logged.
+    // The packet-routing decision is owned by the V2xLeoRelay engine, NOT by an
+    // inline geometry test: EvaluateAll() returns, per vehicle, whether veh0
+    // should go direct or relay through a peer, the chosen peer, the peer's
+    // V2V range, and the measured direct/via-relay SNRs. We drive the V2V and
+    // uplink error-model gates straight off that RelayDecision.
     auto decisions = g_relay->EvaluateAll();
     const ntnv2x::RelayDecision* d0 = nullptr;
     for (const auto& d : decisions)
@@ -113,6 +112,25 @@ Tick()
             d0 = &d;
         }
     }
+
+    // V2V hop carries traffic only when the relay engine actually selects a
+    // relay path: veh0 is NOT direct, a peer was chosen, and that peer is in
+    // V2V range. SetRate(0)=link up (no induced loss); SetRate(1)=link down.
+    const bool relaySelected = d0 && !d0->directToLeo && !d0->relayPeerId.empty() &&
+                               d0->v2vRangeM <= g_maxV2vRangeM;
+    g_emV2v->SetRate(relaySelected ? 0.0 : 1.0);
+
+    // Uplink hop carries traffic when the relay engine's chosen LEO link (the
+    // relay peer's link when relaying, or veh0's own link when direct) clears
+    // the minimum direct-SNR threshold the engine was configured with.
+    double servingSnr = 0.0;
+    if (d0)
+    {
+        servingSnr = d0->directToLeo ? d0->directSnrDb : d0->viaRelaySnrDb;
+    }
+    const bool uplinkUp = d0 && (servingSnr >= g_minDirectSnrDb);
+    g_uplinkUp = uplinkUp;
+    g_emUplink->SetRate(uplinkUp ? 0.0 : 1.0);
 
     const uint64_t tot = g_sink ? g_sink->GetTotalRx() : 0;
     const double bsmRx = double(tot - g_lastRx);
@@ -136,7 +154,9 @@ main(int argc, char* argv[])
     double relayDriftMps = 25.0;
     double maxV2vRangeM = 1500.0;
     double minDirectSnrDb = 6.0;
+    double veh0BlockageDb = 14.0; // veh0 is the shadowed (NLOS) vehicle that relays
     double linkCapacityMbps = 20.0;
+    std::string fcdTrace = "";
     std::string outputDir = "ntn-v2x-leo-relay-output";
 
     CommandLine cmd(__FILE__);
@@ -148,36 +168,40 @@ main(int argc, char* argv[])
     cmd.AddValue("relayDriftMps", "Relay vehicle relative speed (m/s)", relayDriftMps);
     cmd.AddValue("maxV2vRange", "Max V2V range for relay (m)", maxV2vRangeM);
     cmd.AddValue("minDirectSnr", "Min direct SNR before relaying (dB)", minDirectSnrDb);
+    cmd.AddValue("veh0BlockageDb",
+                 "NLOS blockage (dB) on veh0's direct LEO link (3GPP-style shadowing) so "
+                 "the relay engine selects the V2V->peer->LEO path",
+                 veh0BlockageDb);
     cmd.AddValue("linkCapacityMbps", "Per-hop P2P capacity (Mbps)", linkCapacityMbps);
-    cmd.AddValue("fadeMarginDb",
-                 "FSPL-equivalent fade margin applied to the V2V contact range (dB)",
-                 g_fadeMarginDb);
-    cmd.AddValue("gateHysteresisDeg",
-                 "Uplink elevation gate hysteresis (deg): up at minElev, down at minElev - hyst",
-                 g_gateHystDeg);
+    cmd.AddValue("fcdTrace",
+                 "Path to a real SUMO FCD CSV export (time,vehid,x,y,z,speed) with rows "
+                 "for veh0 and veh1. REQUIRED — no synthetic fallback.",
+                 fcdTrace);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
     g_maxV2vRangeM = maxV2vRangeM;
+    g_minDirectSnrDb = minDirectSnrDb;
     g_simTime = simSeconds;
 
     NodeContainer nodes;
     nodes.Create(4); // 0=veh0 1=veh1 2=sat 3=server
 
-    // Vehicles ride the module's common SUMO-format FCD source (trace-replay
-    // mode; synthetic east-bound highway generated when no SUMO trace
-    // exists), exactly like ntn-v2x-rural-highway — one mobility source for
-    // all four v2x examples instead of a hand-rolled constant-velocity line.
-    const std::string tracePath = "/tmp/ntn-v2x-leo-relay-fcd.csv";
-    // Short road segment: the generator spaces vehicles roadLength/nVehicles
-    // apart, so 800 m keeps the platoon pair inside V2V range (~1.06 km
-    // effective at the 3 dB fade margin) while their speed difference makes
-    // the V2V contact genuinely come and go during the run.
-    ntnv2x::NtnV2xHelper::WriteSyntheticFcdCsv(tracePath, 2, 800.0, simSeconds, 1.0,
-                                               relayDriftMps - 5.0, relayDriftMps + 5.0);
-    g_bridge = CreateObject<ntnv2x::SumoTraciBridge>();
-    if (!g_bridge->LoadFcdTrace(tracePath))
+    // Vehicles ride a REAL SUMO-format FCD trace supplied via --fcdTrace
+    // (trace-replay mode), exactly like ntn-v2x-rural-highway — one mobility
+    // source for all four v2x examples. No synthetic fallback: a real road
+    // trace must be provided (e.g. SUMO `fcd-export` converted to the CSV
+    // `time,vehid,x,y,z,speed` dialect with rows for veh0 and veh1).
+    if (fcdTrace.empty())
     {
-        NS_FATAL_ERROR("could not load synthetic FCD trace " << tracePath);
+        NS_FATAL_ERROR("--fcdTrace is required: supply a real SUMO FCD CSV export "
+                       "(time,vehid,x,y,z,speed) with rows for veh0 and veh1. "
+                       "Generate it with SUMO `fcd-export`; this example does not "
+                       "fabricate vehicle motion.");
+    }
+    g_bridge = CreateObject<ntnv2x::SumoTraciBridge>();
+    if (!g_bridge->LoadFcdTrace(fcdTrace))
+    {
+        NS_FATAL_ERROR("could not load FCD trace " << fcdTrace);
     }
     Ptr<ConstantPositionMobilityModel> veh0 = CreateObject<ConstantPositionMobilityModel>();
     veh0->SetPosition(Vector(0, 0, 1.5));
@@ -216,6 +240,12 @@ main(int argc, char* argv[])
     g_relay->SetMinDirectSnrDb(minDirectSnrDb);
     g_relay->RegisterVehicle("veh0", veh0);
     g_relay->RegisterVehicle("veh1", veh1);
+    // veh0 is the shadowed vehicle: a 3GPP-style NLOS blockage drops its direct
+    // LEO SNR below the threshold, so EvaluateAll() selects the relay path
+    // through veh1 (clear sky) — which is exactly the data-plane chain wired
+    // below. The route decision is therefore the engine's, not a hard-coded
+    // assumption.
+    g_relay->SetVehicleBlockageDb("veh0", veh0BlockageDb);
 
     InternetStackHelper internet;
     internet.Install(nodes);
