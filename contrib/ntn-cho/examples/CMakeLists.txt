@@ -36,7 +36,15 @@ build_lib_example(
   SOURCE_FILES ntn-realistic-mobility-demo.cc
   LIBRARIES_TO_LINK
     ${libntn-cho}
+    ${libntn-traffic}
+    ${libntn-constellation}
     ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
 )
 
 # Real UDP traffic to a ground UE on a real mmwave NR cell, handed over by the

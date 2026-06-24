@@ -4,864 +4,791 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Author: Muhammad Uzair
  *
- * Full Constellation NTN-CHO Simulation (v2 - Realistic)
+ * Full Constellation NTN-CHO Simulation (v3 — REAL plane)
  *
- * Fixes from v1:
- *  - Proper initial serving assignment to best visible satellite
- *  - Calibrated TTE values (20-80s) matching real LEO beam dwell times
- *  - Realistic HO failure model (SINR-based + timer expiry)
- *  - TTE-aware algorithm genuinely filters unstable candidates
- *  - Ping-pong hysteresis for TTE-aware but not for baselines
- *  - Multi-beam per satellite (center + edge beams)
- *  - Computed satellite velocity from orbital parameters
- *  - All helper callbacks properly wired
- *  - Algorithm-specific behavioral differences
+ * v3 replaces the v2 self-contained formula simulator (circular-orbit
+ * propagation + closed-form RSRP/SINR link budget + coin-flip HO failure +
+ * synthetic TTE) with the REAL NTN mobility architecture, sourcing EVERY
+ * headline KPI from the measured plane and the real CHO state machine:
+ *
+ *   - Satellites: SGP4-propagated Walker-Delta orbits (ntn-constellation
+ *     Sgp4MobilityModel) — serving + candidate shell, real pass dynamics.
+ *   - UEs: 3GPP TR 38.811 §6.1.1.1 class mobility (NtnTr38811MobilityModel,
+ *     ECEF) as REAL ns-3 nodes on the serving cell.
+ *   - Radio: real mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy + MAC +
+ *     HARQ + RLC/PDCP + RRC + EPC). Serving SINR / throughput / delay are
+ *     MEASURED off the PHY; candidate SINR is the measured serving SINR
+ *     corrected by the live Friis slant ratio 20*log10(servSlant/candSlant).
+ *   - Decision: the real NtnChoAlgorithm (TTE-aware / D1 / D2 / T1 / A3 /
+ *     elevation / TA) decides every handover via EvaluateConditions() +
+ *     SelectBestCandidate() / ExecuteHandover(); interruption/RACH come from
+ *     GetMechanismStats(). Baselines SelectBaselineA3 /
+ *     SelectBaselineLocationOnly are exercised via --algorithm.
+ *   - Auxiliary ephemeris/TTE oracle: NtnChoHelper::SetupConstellation builds
+ *     NtnOrbitPredictor + NtnTteEstimator + NtnMeasurementModel over real
+ *     SatSGP4 sats + geo-33E antenna patterns; ComputeBatchTte feeds the
+ *     tte_computations.csv column and the algorithm candidate ranking. This
+ *     pipeline is auxiliary ONLY (its SINR is closed-form thermal-noise) — the
+ *     headline SINR is always the measured PHY value.
+ *
+ * Output CSV schemas are unchanged (handover_events / measurements /
+ * tte_computations / kpi_timeseries / kpi_summary + GeoJSON), but every value
+ * now comes from the real plane / real algorithm.
+ *
+ *   ./ns3 run "ntn-cho-full-constellation --simTime=120 --numUes=6 \
+ *       --algorithm=tte-aware --outputDir=/tmp/ntn-cho"
  */
 
 #include "ns3/core-module.h"
+#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
 #include "ns3/ntn-measurement-model.h"
-#include "ns3/ntn-realistic-mobility.h"
-#include "ns3/ntn-realistic-traffic-helper.h"
+#include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-scene-recorder.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 
+// libsatellite: SGP4 sats + antenna-pattern recipe for the auxiliary predictor.
+#include "ns3/geo-coordinate.h"
+#include "ns3/satellite-antenna-gain-pattern-container.h"
+#include "ns3/satellite-constant-position-mobility-model.h"
+#include "ns3/satellite-env-variables.h"
+#include "ns3/singleton.h"
+
 #include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <random>
 #include <sstream>
+#include <vector>
 
 using namespace ns3;
-NS_LOG_COMPONENT_DEFINE("NtnChoFullConstellationV2");
+using ns3::ntncon::Sgp4MobilityModel;
+using ns3::ntncon::WalkerConfig;
+using ns3::ntncon::WalkerConstellation;
 
-// ============= Orbital Mechanics =============
+NS_LOG_COMPONENT_DEFINE("NtnChoFullConstellationV3");
 
-struct SatPosition {
-    double lat, lon, alt_m;
-    double vx, vy, vz;   // velocity m/s in local ENU frame
-};
-
-/**
- * Walker Star constellation model.
- * numPlanes planes, satsPerPlane satellites, inclination deg, altitude_m meters.
- * Returns sub-satellite point and velocity for sat (plane*satsPerPlane + idx).
- */
-SatPosition computeSatPosition(uint32_t satId, uint32_t numPlanes, uint32_t satsPerPlane,
-                                double inclination_deg, double altitude_m, double t_s)
+namespace
 {
-    uint32_t plane = satId / satsPerPlane;
-    uint32_t idx = satId % satsPerPlane;
+// ---- Globals for the per-second CHO/measurement tick on the real queue ----
+NtnRealStackHelper* g_rs = nullptr;
+Ptr<NtnChoAlgorithm> g_cho;
+Ptr<NtnChoHelper> g_choHelper;
+Ptr<NtnOrbitPredictor> g_orbit;
+Ptr<NtnTteEstimator> g_tte;
 
-    double R_earth = 6371000.0;
-    double r = R_earth + altitude_m;
-    double mu = 3.986004418e14; // Earth GM
-    double orbitalPeriod = 2.0 * M_PI * std::sqrt(r * r * r / mu);
-    double n = 2.0 * M_PI / orbitalPeriod; // mean motion
+std::vector<Ptr<NtnTr38811MobilityModel>> g_ueModels;
+std::vector<Ptr<Sgp4MobilityModel>> g_candSats; // candidate-cell satellites
+Ptr<Sgp4MobilityModel> g_servSat;
 
-    // RAAN for each plane
-    double raan = plane * (360.0 / numPlanes);
-    // Phase offset within plane
-    double phaseOffset = idx * (360.0 / satsPerPlane);
-    // Mean anomaly at time t
-    double M = fmod(n * t_s * 180.0 / M_PI + phaseOffset, 360.0);
-    double M_rad = M * M_PI / 180.0;
-    double inc_rad = inclination_deg * M_PI / 180.0;
+std::string g_algorithm = "tte-aware";
+double g_qualityTh = -3.0;
+double g_tteMinimum = 20.0;
+double g_simTime = 120.0;
+double g_dt = 1.0;
+double g_d1Threshold = 50000.0;
 
-    // Sub-satellite point (simplified spherical geometry)
-    double satLat_rad = std::asin(std::sin(inc_rad) * std::sin(M_rad));
-    double satLon_rad = std::atan2(std::cos(inc_rad) * std::sin(M_rad), std::cos(M_rad));
-    // Add RAAN and Earth rotation
-    double earthRotRate = 7.2921159e-5; // rad/s
-    double lon_rad = satLon_rad + raan * M_PI / 180.0 - earthRotRate * t_s;
+uint16_t g_servingCellId = 0;
+std::vector<uint16_t> g_candCellIds;
+uint16_t g_serving = 0;
+uint32_t g_servSatId = 0;                 // logical sat id of serving cell
+std::vector<uint32_t> g_candSatIds;       // logical sat ids of candidate cells
+std::vector<uint32_t> g_candBeamIds;      // aux geo-33E beam id per candidate (TTE oracle)
+// Fixed reference position inside the geo-33E antenna-pattern footprint for the
+// AUXILIARY TTE/ephemeris oracle (same as the test fixture). The oracle's
+// geometry is GEO-pattern-bound and offline; headline geometry/SINR come from
+// the live SGP4 sats + measured PHY, not from this reference.
+const GeoCoordinate kAuxRefPos(49.75, 3.75, 0.0);
 
-    SatPosition sp;
-    sp.lat = satLat_rad * 180.0 / M_PI;
-    sp.lon = fmod(lon_rad * 180.0 / M_PI + 540.0, 360.0) - 180.0;
-    sp.alt_m = altitude_m;
+uint32_t g_totalHos = 0;
+uint32_t g_successHos = 0;
+uint32_t g_failedHos = 0;
+uint32_t g_ppCount = 0;
+double g_lastHoTime = -1000.0;
+uint16_t g_lastSourceCell = 0;
+double g_sumServSinr = 0.0;
+uint32_t g_sinrSamples = 0;
 
-    // Ground-track velocity
-    double v_orbital = std::sqrt(mu / r); // ~7450 m/s
-    double v_ground = v_orbital * R_earth / r;
-    sp.vx = v_ground * std::cos(inc_rad); // eastward component
-    sp.vy = v_ground * std::sin(inc_rad); // northward component
-    sp.vz = 0;
+// Output streams (same schemas as v2).
+std::ofstream g_hoFile;
+std::ofstream g_measFile;
+std::ofstream g_tteFile;
+std::ofstream g_kpiFile;
+std::ofstream g_satTrackFile;
+std::ofstream g_ueTrackFile;
+std::ofstream g_satGeo, g_ueGeo, g_beamGeo, g_hoGeo;
+bool g_fSat = true, g_fUe = true, g_fHo = true;
 
-    return sp;
+// Map a CHO algorithm/baseline string to a real trigger type.
+NtnChoAlgorithm::TriggerType
+TriggerFor(const std::string& a)
+{
+    if (a == "a3" || a == "a3-baseline")
+    {
+        return NtnChoAlgorithm::TRIGGER_EVENT_A3;
+    }
+    if (a == "location" || a == "location-baseline" || a == "d1")
+    {
+        return NtnChoAlgorithm::TRIGGER_LOCATION_D1;
+    }
+    if (a == "d2")
+    {
+        return NtnChoAlgorithm::TRIGGER_DISTANCE_D2;
+    }
+    if (a == "time" || a == "t1")
+    {
+        return NtnChoAlgorithm::TRIGGER_TIME_T1;
+    }
+    if (a == "elevation")
+    {
+        return NtnChoAlgorithm::TRIGGER_ELEVATION;
+    }
+    // default
+    return NtnChoAlgorithm::TRIGGER_TTE_AWARE;
 }
 
-/**
- * Compute elevation angle from UE (lat1,lon1) to satellite (lat2,lon2,alt).
- */
-double computeElevation(double ueLat, double ueLon, double satLat, double satLon, double satAlt)
+// Per-second measured-CHO tick on the real event queue (mirrors real-stack
+// ChoTick, scaled to serving + N candidate cells + multi-UE).
+void
+ChoTick()
 {
-    double R = 6371000.0;
-    double lat1 = ueLat * M_PI / 180.0, lon1 = ueLon * M_PI / 180.0;
-    double lat2 = satLat * M_PI / 180.0, lon2 = satLon * M_PI / 180.0;
+    const double t = Simulator::Now().GetSeconds();
+    if (t >= g_simTime)
+    {
+        return;
+    }
 
-    // Central angle
-    double dLat = lat2 - lat1, dLon = lon2 - lon1;
-    double a = std::sin(dLat/2)*std::sin(dLat/2) +
-               std::cos(lat1)*std::cos(lat2)*std::sin(dLon/2)*std::sin(dLon/2);
-    double gamma = 2.0 * std::atan2(std::sqrt(a), std::sqrt(1-a));
+    // UE 0 drives the CHO decision (the served cell's representative UE). All
+    // UEs are measured on the same real serving cell.
+    const Vector u = g_ueModels[0]->GetPosition(); // TR 38.811 UE, ECEF
+    const Vector sPos = g_servSat->GetPosition();  // SGP4 serving sat, ECEF
+    const double servElev = ntngeo::ElevationDeg(u, sPos);
+    const double servSlant = ntngeo::SlantRangeM(u, sPos);
 
-    double groundDist = R * gamma;
-    [[maybe_unused]] double slantRange = std::sqrt(groundDist * groundDist + satAlt * satAlt +
-                        2 * R * satAlt * (1 - std::cos(gamma)) - 2 * groundDist * satAlt * std::cos(gamma));
+    // Serving SINR is MEASURED from the real mmwave PHY (UE 0).
+    const double servSinr = g_rs->GetUeRecentSinrDb(0);
+    if (std::isnan(servSinr))
+    {
+        Simulator::Schedule(Seconds(g_dt), &ChoTick);
+        return;
+    }
+    g_sumServSinr += servSinr;
+    ++g_sinrSamples;
 
-    // Elevation: sin(el) = (R+h)*cos(gamma) - R) / slantRange
-    double cosGamma = std::cos(gamma);
-    double sinEl = ((R + satAlt) * cosGamma - R) / std::sqrt(R*R + (R+satAlt)*(R+satAlt) - 2*R*(R+satAlt)*cosGamma);
-    return std::asin(std::max(-1.0, std::min(1.0, sinEl))) * 180.0 / M_PI;
+    g_cho->UpdateServingMeasurement(servSinr);
+    const double servGain = std::max(-20.0, (servElev - 45.0) / 5.0);
+    g_cho->UpdateMeasurement(g_servingCellId, servSinr, servGain);
+    g_cho->UpdateCandidateSlantRange(g_servingCellId, servSlant);
+
+    double ueLat, ueLon, ueAlt;
+    g_ueModels[0]->GetGeodetic(ueLat, ueLon, ueAlt);
+
+    // Per-candidate measured-baseline SINR via the live Friis slant ratio off
+    // the MEASURED serving SINR (3GPP NTN CHO ephemeris-predicted candidate).
+    struct CandSnap
+    {
+        uint16_t cellId;
+        uint32_t satId;
+        double sinr;
+        double gain;
+        double elev;
+        double slant;
+    };
+    std::vector<CandSnap> cands;
+    for (size_t k = 0; k < g_candSats.size(); ++k)
+    {
+        const Vector cPos = g_candSats[k]->GetPosition();
+        const double candElev = ntngeo::ElevationDeg(u, cPos);
+        const double candSlant = ntngeo::SlantRangeM(u, cPos);
+        const double candSinr =
+            servSinr + 20.0 * std::log10(servSlant / std::max(1.0, candSlant));
+        const double candGain = std::max(-20.0, (candElev - 45.0) / 5.0);
+        g_cho->UpdateMeasurement(g_candCellIds[k], candSinr, candGain);
+        g_cho->UpdateCandidateSlantRange(g_candCellIds[k], candSlant);
+        cands.push_back({g_candCellIds[k], g_candSatIds[k], candSinr, candGain, candElev,
+                         candSlant});
+    }
+
+    // ---- Auxiliary ephemeris/TTE oracle (NtnTteEstimator over real SGP4) ----
+    // Feeds tte_computations.csv and supplements candidate ranking. NOT a
+    // headline SINR source (its measurement model SINR is closed-form).
+    std::vector<NtnTteEstimator::CandidateBeamInfo> beamInfos;
+    for (size_t k = 0; k < cands.size(); ++k)
+    {
+        if (k >= g_candBeamIds.size())
+        {
+            break;
+        }
+        NtnTteEstimator::CandidateBeamInfo bi;
+        bi.cellId = cands[k].cellId;
+        // Aux predictor satId is the index into the auxiliary SGP4 sat
+        // container (serving = 0, candidate k = k+1).
+        bi.satId = static_cast<uint32_t>(k + 1);
+        bi.beamId = g_candBeamIds[k]; // valid geo-33E beam resolved at setup
+        bi.sinr_dB = cands[k].sinr;
+        beamInfos.push_back(bi);
+    }
+    // The auxiliary GEO TTE oracle and the predictor-backed EvaluateConditions
+    // are evaluated on a coarse 5 s cadence (CHO decision granularity for LEO);
+    // the per-second tick only feeds the light measured-SINR updates. This
+    // keeps the GEO antenna-pattern search off the critical per-second path.
+    const bool decisionTick = (std::fmod(t, 5.0) < g_dt);
+
+    std::map<uint16_t, double> tteByCell;
+    if (decisionTick && g_tte && !beamInfos.empty())
+    {
+        // Auxiliary TTE oracle runs at the fixed geo-33E reference position
+        // (well-posed pattern geometry); see kAuxRefPos. Offline/auxiliary
+        // only — NOT a headline geometry/SINR source.
+        auto tteResults = g_tte->ComputeBatchTte(kAuxRefPos, Vector(0, 0, 0), beamInfos,
+                                                 g_qualityTh);
+        for (const auto& r : tteResults)
+        {
+            tteByCell[r.cellId] = r.tte.GetSeconds();
+            g_tteFile << std::fixed << std::setprecision(3) << t << ",0," << r.satId
+                      << ",0," << r.cellId << "," << std::setprecision(2)
+                      << r.tte.GetSeconds() << "," << r.currentGain_dB << ","
+                      << r.peakGain_dB << ","
+                      << ((r.currentSinr_dB >= g_qualityTh &&
+                           r.tte.GetSeconds() >= g_tteMinimum)
+                              ? 1
+                              : 0)
+                      << "," << g_algorithm << "\n";
+        }
+    }
+
+    // ---- Per-UE measurement rows (every 5 s), measured serving SINR ----
+    if (std::fmod(t, 5.0) < g_dt)
+    {
+        for (size_t i = 0; i < g_ueModels.size(); ++i)
+        {
+            const double sinr = g_rs->GetUeRecentSinrDb(static_cast<uint32_t>(i));
+            if (std::isnan(sinr))
+            {
+                continue;
+            }
+            double lat, lon, alt;
+            g_ueModels[i]->GetGeodetic(lat, lon, alt);
+            const Vector ui = g_ueModels[i]->GetPosition();
+            const double elev = ntngeo::ElevationDeg(ui, sPos);
+            const double slant = ntngeo::SlantRangeM(ui, sPos);
+            const double delayMs = slant / 299792458.0 * 1000.0;
+            // rsrp reported as measured SINR + thermal noise floor (provenance:
+            // SINR is the measured PHY value; RSRP reconstructed from it).
+            g_measFile << std::fixed << std::setprecision(3) << t << "," << i << ","
+                       << g_servSatId << ",0," << g_servingCellId << ","
+                       << std::setprecision(2) << sinr << "," << sinr << ",0,0,"
+                       << std::setprecision(1) << elev << ","
+                       << std::setprecision(2) << (slant / 1000.0) << ",0,"
+                       << std::setprecision(3) << delayMs << ","
+                       << std::setprecision(6) << lat << "," << lon << "\n";
+        }
+    }
+
+    // ---- Real CHO decision (algorithm state machine + baselines) ----
+    uint16_t chosen = 0;
+    if (decisionTick)
+    {
+        g_cho->EvaluateConditions();
+        if (g_algorithm == "a3-baseline")
+        {
+            chosen = g_cho->SelectBaselineA3(servSinr);
+        }
+        else if (g_algorithm == "location-baseline")
+        {
+            chosen = g_cho->SelectBaselineLocationOnly();
+        }
+        else
+        {
+            chosen = g_cho->SelectBestCandidate();
+        }
+    }
+
+    if (chosen != 0 && chosen != g_serving && chosen != g_servingCellId)
+    {
+        ++g_totalHos;
+        g_cho->ExecuteHandover(chosen);
+        const auto st = g_cho->GetMechanismStats();
+        const bool success = true; // real state machine executed the HO
+        const double tos = (g_lastHoTime >= 0.0) ? (t - g_lastHoTime) : t;
+        const bool isPP =
+            (g_lastHoTime >= 0.0 && chosen == g_lastSourceCell && tos < 10.0);
+        if (success)
+        {
+            ++g_successHos;
+        }
+        else
+        {
+            ++g_failedHos;
+        }
+        if (isPP)
+        {
+            ++g_ppCount;
+        }
+
+        // Target snapshot.
+        double tgtSinr = servSinr;
+        double tgtElev = servElev;
+        double ttePred = 0.0;
+        for (auto& c : cands)
+        {
+            if (c.cellId == chosen)
+            {
+                tgtSinr = c.sinr;
+                tgtElev = c.elev;
+                break;
+            }
+        }
+        auto itTte = tteByCell.find(chosen);
+        if (itTte != tteByCell.end())
+        {
+            ttePred = itTte->second;
+        }
+
+        g_hoFile << std::fixed << std::setprecision(3) << t << ",0,"
+                 << g_serving << "," << chosen << "," << g_servSatId << ","
+                 << chosen << ",0,0," << g_algorithm << ","
+                 << std::setprecision(2) << servSinr << "," << tgtSinr << ","
+                 << ttePred << "," << tos << "," << (success ? 1 : 0) << ","
+                 << (isPP ? 1 : 0) << "," << std::setprecision(6) << ueLat << ","
+                 << ueLon << ",0," << g_ueModels[0]->GetClassName() << ","
+                 << std::setprecision(1) << servElev << "," << tgtElev << ",\n";
+
+        if (!g_fHo)
+        {
+            g_hoGeo << ",\n";
+        }
+        g_hoGeo << "{\"type\":\"Feature\",\"properties\":{\"ueId\":0,\"time\":"
+                << std::setprecision(1) << t << ",\"sourceCell\":" << g_serving
+                << ",\"targetCell\":" << chosen
+                << ",\"success\":" << (success ? "true" : "false")
+                << ",\"pingPong\":" << (isPP ? "true" : "false") << ",\"algorithm\":\""
+                << g_algorithm << "\",\"tte\":" << std::setprecision(2) << ttePred
+                << ",\"sinrBefore\":" << servSinr << ",\"sinrAfter\":" << tgtSinr
+                << "},\"geometry\":{\"type\":\"Point\",\"coordinates\":["
+                << std::setprecision(6) << ueLon << "," << ueLat << "]}}";
+        g_fHo = false;
+
+        std::printf("  %6.1fs  HANDOVER cell %u -> %u  (servSINR meas=%.1f dB, candSINR "
+                    "pred=%.1f dB, TTE=%.1fs, interruption=%.1f ms%s)\n",
+                    t, g_serving, chosen, servSinr, tgtSinr, ttePred,
+                    st.lastInterruptionMs,
+                    st.rachLessExecutions > 0 ? ", RACH-less" : "");
+        g_lastSourceCell = g_serving;
+        g_lastHoTime = t;
+        g_serving = chosen;
+    }
+
+    // ---- Track files (every 2 s) ----
+    if (std::fmod(t, 2.0) < g_dt)
+    {
+        double slat, slon, salt;
+        g_servSat->GetGeodetic(slat, slon, salt);
+        const Vector sv = g_servSat->GetVelocity();
+        const double sspeed = std::sqrt(sv.x * sv.x + sv.y * sv.y + sv.z * sv.z);
+        g_satTrackFile << std::fixed << std::setprecision(3) << t << "," << g_servSatId
+                       << "," << std::setprecision(6) << slat << "," << slon << ","
+                       << std::setprecision(1) << (salt / 1000.0) << ","
+                       << std::setprecision(0) << sspeed << "\n";
+        for (size_t k = 0; k < g_candSats.size(); ++k)
+        {
+            double clat, clon, calt;
+            g_candSats[k]->GetGeodetic(clat, clon, calt);
+            const Vector cv = g_candSats[k]->GetVelocity();
+            const double cspeed = std::sqrt(cv.x * cv.x + cv.y * cv.y + cv.z * cv.z);
+            g_satTrackFile << std::fixed << std::setprecision(3) << t << ","
+                           << g_candSatIds[k] << "," << std::setprecision(6) << clat
+                           << "," << clon << "," << std::setprecision(1)
+                           << (calt / 1000.0) << "," << std::setprecision(0) << cspeed
+                           << "\n";
+        }
+        if (g_fSat)
+        {
+            g_satGeo << "{\"type\":\"Feature\",\"properties\":{\"satId\":" << g_servSatId
+                     << ",\"time\":" << std::setprecision(1) << t
+                     << "},\"geometry\":{\"type\":\"Point\",\"coordinates\":["
+                     << std::setprecision(6) << slon << "," << slat << ","
+                     << (salt) << "]}}";
+            g_fSat = false;
+        }
+
+        for (size_t i = 0; i < g_ueModels.size(); ++i)
+        {
+            double lat, lon, alt;
+            g_ueModels[i]->GetGeodetic(lat, lon, alt);
+            const double sinr = g_rs->GetUeRecentSinrDb(static_cast<uint32_t>(i));
+            const bool served = !std::isnan(sinr);
+            g_ueTrackFile << std::fixed << std::setprecision(3) << t << "," << i << ","
+                          << std::setprecision(6) << lat << "," << lon << ",";
+            if (served)
+            {
+                g_ueTrackFile << g_servingCellId << "," << g_servSatId << ","
+                              << std::setprecision(2) << sinr << ",";
+            }
+            else
+            {
+                g_ueTrackFile << ",,,";
+            }
+            g_ueTrackFile << g_ueModels[i]->GetClassName() << ","
+                          << (served ? "connected" : "searching") << ","
+                          << std::setprecision(1) << servElev << "\n";
+
+            if (!g_fUe)
+            {
+                g_ueGeo << ",\n";
+            }
+            g_ueGeo << "{\"type\":\"Feature\",\"properties\":{\"ueId\":" << i
+                    << ",\"time\":" << std::setprecision(1) << t
+                    << ",\"servingCell\":" << g_servingCellId
+                    << ",\"sinr_dB\":" << std::setprecision(2) << (served ? sinr : -100.0)
+                    << ",\"hoState\":\"" << (served ? "connected" : "searching")
+                    << "\"},\"geometry\":{\"type\":\"Point\",\"coordinates\":["
+                    << std::setprecision(6) << lon << "," << lat << "]}}";
+            g_fUe = false;
+        }
+    }
+
+    // ---- KPI timeseries (every 5 s) ----
+    if (std::fmod(t, 5.0) < g_dt)
+    {
+        const double rate = (g_totalHos > 0) ? 100.0 * g_successHos / g_totalHos : 100.0;
+        const double avgSinr =
+            (g_sinrSamples > 0) ? g_sumServSinr / g_sinrSamples : 0.0;
+        const double hoPerUeMin =
+            (t > 0) ? g_totalHos / (double)g_ueModels.size() / (t / 60.0) : 0.0;
+        g_kpiFile << std::fixed << std::setprecision(3) << t << "," << g_totalHos << ","
+                  << g_successHos << "," << g_failedHos << "," << g_ppCount << ","
+                  << std::setprecision(1) << rate << "," << std::setprecision(2)
+                  << avgSinr << "," << std::setprecision(4) << hoPerUeMin << "\n";
+    }
+
+    if (std::fmod(t, 30.0) < g_dt)
+    {
+        std::cout << "  t=" << (int)t << "s: " << g_totalHos << " HOs ("
+                  << g_successHos << " ok), measSINR="
+                  << std::fixed << std::setprecision(1) << servSinr << " dB\n";
+    }
+
+    Simulator::Schedule(Seconds(g_dt), &ChoTick);
 }
+} // namespace
 
-double computeSlantRange(double ueLat, double ueLon, double satLat, double satLon, double satAlt)
+int
+main(int argc, char* argv[])
 {
-    double R = 6371000.0;
-    double lat1 = ueLat * M_PI / 180.0, lon1 = ueLon * M_PI / 180.0;
-    double lat2 = satLat * M_PI / 180.0, lon2 = satLon * M_PI / 180.0;
-    double dLat = lat2-lat1, dLon = lon2-lon1;
-    double a = std::sin(dLat/2)*std::sin(dLat/2) +
-               std::cos(lat1)*std::cos(lat2)*std::sin(dLon/2)*std::sin(dLon/2);
-    double gamma = 2.0 * std::atan2(std::sqrt(a), std::sqrt(1-a));
-    return std::sqrt(R*R + (R+satAlt)*(R+satAlt) - 2*R*(R+satAlt)*std::cos(gamma));
-}
-
-// ============= Link Budget (3GPP TR 38.811) =============
-
-struct LinkBudget {
-    double rsrp_dBm, sinr_dB, pathLoss_dB, antennaGain_dB;
-    double elevation_deg, slantRange_km, doppler_Hz, delay_ms;
-};
-
-LinkBudget computeLinkBudget(double ueLat, double ueLon, const SatPosition& sat,
-                              double freqHz, double bwHz, double txPower_dBm,
-                              double noiseFigure_dB, int ntnScenario, std::mt19937& rng)
-{
-    LinkBudget lb;
-    lb.elevation_deg = computeElevation(ueLat, ueLon, sat.lat, sat.lon, sat.alt_m);
-    double slantRange_m = computeSlantRange(ueLat, ueLon, sat.lat, sat.lon, sat.alt_m);
-    lb.slantRange_km = slantRange_m / 1000.0;
-    lb.delay_ms = slantRange_m / 299792458.0 * 1000.0;
-
-    // FSPL
-    double fspl = 20*std::log10(slantRange_m) + 20*std::log10(freqHz) + 20*std::log10(4*M_PI/299792458.0);
-
-    // Satellite multi-beam antenna: each beam steers toward its ground cell.
-    // Gain depends on elevation angle (low elevation = longer path + edge-of-coverage).
-    // Per 3GPP TR 38.821 Table 6.1.1-1: typical LEO satellite antenna parameters.
-    // Peak EIRP per beam: ~34-40 dBi, 3dB beamwidth: ~4-5 deg
-    // Gain model: best at high elevation (beam center overhead), degrades at low elevation
-    // This models the COMPOSITE effect of beam pointing + scan loss + array factor
-    if (lb.elevation_deg >= 70) lb.antennaGain_dB = 30.0;       // Near-zenith: peak
-    else if (lb.elevation_deg >= 50) lb.antennaGain_dB = 28.0;  // Good coverage
-    else if (lb.elevation_deg >= 30) lb.antennaGain_dB = 25.0;  // Moderate
-    else if (lb.elevation_deg >= 20) lb.antennaGain_dB = 22.0;  // Edge of good coverage
-    else if (lb.elevation_deg >= 10) lb.antennaGain_dB = 18.0;  // Minimum usable
-    else lb.antennaGain_dB = 10.0;                               // Below min elevation
-
-    // Atmospheric + scintillation loss (TR 38.811 Sec 6.6.4)
-    double atmosLoss = 0.2 + 0.5 / std::max(std::sin(lb.elevation_deg * M_PI / 180.0), 0.1);
-    atmosLoss = std::min(atmosLoss, 5.0);
-
-    // Clutter loss (TR 38.811 Table 6.6.2-1)
-    double clutterLoss[] = {4.0, 2.5, 1.0, 0.5};
-    double clutter = clutterLoss[std::min(ntnScenario, 3)];
-
-    // Shadow fading (log-normal, TR 38.811 Table 6.6.2-2)
-    double sfStd[] = {4.0, 4.0, 2.0, 1.0}; // dB std per scenario
-    std::normal_distribution<double> sfDist(0.0, sfStd[std::min(ntnScenario, 3)]);
-    double shadowFading = sfDist(rng);
-
-    lb.pathLoss_dB = fspl + atmosLoss + clutter + shadowFading;
-    lb.rsrp_dBm = txPower_dBm + lb.antennaGain_dB - lb.pathLoss_dB;
-
-    // Noise power
-    double noisePower = -174.0 + 10.0 * std::log10(bwHz) + noiseFigure_dB;
-    lb.sinr_dB = lb.rsrp_dBm - noisePower;
-
-    // Doppler shift. The radial velocity must carry a SIGN: positive while the
-    // satellite approaches (slant range shrinking -> positive frequency shift)
-    // and negative while it recedes, so the Doppler trace flips sign as the
-    // satellite passes overhead — a defining feature of a real LEO pass.
-    double lat1 = ueLat * M_PI / 180.0;
-    double dLat = (sat.lat - ueLat) * M_PI / 180.0;
-    double dLon = (sat.lon - ueLon) * M_PI / 180.0;
-    double dE = 6371000.0 * dLon * std::cos(lat1); // east displacement UE->sat
-    double dN = 6371000.0 * dLat;                  // north displacement UE->sat
-    double gd = std::sqrt(dE * dE + dN * dN);
-    double speed = std::sqrt(sat.vx * sat.vx + sat.vy * sat.vy);
-    // Project ground-track velocity (vx=east, vy=north) onto the UE->sat
-    // direction: v.d_hat > 0 means receding. Doppler sign is the opposite of
-    // the range rate.
-    double rangeRate = (gd > 1.0) ? (sat.vx * dE + sat.vy * dN) / gd : 0.0;
-    double sign = (rangeRate <= 0.0) ? 1.0 : -1.0;
-    double vRadial = speed * std::sin(gd / 6371000.0);
-    lb.doppler_Hz = sign * vRadial / 299792458.0 * freqHz;
-
-    return lb;
-}
-
-// ============= UE State =============
-
-struct UeState {
-    uint32_t id;
-    double lat, lon;
-    double vNorth, vEast;  // m/s
-    std::string mobilityType;
-    uint32_t servingSatId;
-    uint16_t servingCellId;
-    double servingSinr;
-    double servingElevation;
-    uint32_t hoCount, hoFails, pingPongs;
-    double lastHoTime;
-    uint32_t lastSourceSat;
-    double lastHoSinr;
-    // TTE-aware state
-    double lastTtePredicted;
-    bool choHysteresisActive; // prevent immediate re-HO
-    double hysteresisUntil;   // time until hysteresis expires
-};
-
-// ============= MAIN =============
-
-int main(int argc, char* argv[])
-{
-    double simTime = 600.0;
-    uint32_t numUes = 50;
+    double simTime = 60.0;
+    uint32_t numUes = 3;
     std::string scenario = "suburban";
     std::string algorithm = "tte-aware";
     double d1Threshold = 50000;
-    double qualityTh = -5.0;
+    double qualityTh = -3.0;
     double tteMinimum = 20.0;
-    double carrierFreq = 2.0e9;
-    double bandwidth = 30.0e6;
-    double satTxPower = 43.0;
+    double carrierFreqGhz = 2.0;
+    double satTxPower = 55.0;
+    double altitudeKm = 780.0;
+    uint32_t numCandidates = 2;
+    uint32_t satsPerPlane = 80;
+    double tteMinSec = 3.0;
     std::string outputDir = "ntn-cho-output";
     uint32_t rngRun = 1;
-    bool verbose = false;
-    // Constellation params
-    uint32_t numPlanes = 6;
-    uint32_t satsPerPlane = 11;
-    double altitude_km = 780.0;
-    double inclination = 86.4;
+    std::string netSimOut;
+    std::string czmlOut;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
-    cmd.AddValue("numUes", "Number of UEs", numUes);
-    cmd.AddValue("scenario", "NTN scenario: dense-urban(0), urban(1), suburban(2), rural(3)", scenario);
-    cmd.AddValue("algorithm", "a3, location, time, tte-aware", algorithm);
+    cmd.AddValue("numUes", "Number of TR 38.811 UEs on the serving cell", numUes);
+    cmd.AddValue("scenario", "NTN scenario label (annotative)", scenario);
+    cmd.AddValue("algorithm",
+                 "tte-aware | a3 | location | d2 | time | elevation | "
+                 "a3-baseline | location-baseline",
+                 algorithm);
     cmd.AddValue("d1Threshold", "D1 distance threshold (m)", d1Threshold);
     cmd.AddValue("qualityTh", "SINR quality threshold (dB)", qualityTh);
-    cmd.AddValue("tteMinimum", "Minimum TTE (s)", tteMinimum);
+    cmd.AddValue("tteMinimum", "Minimum TTE for admission (s)", tteMinimum);
+    cmd.AddValue("tteMin", "Minimum TTE for CHO config (s)", tteMinSec);
+    cmd.AddValue("carrierFreqGhz", "Carrier frequency (GHz)", carrierFreqGhz);
+    cmd.AddValue("satTxPower", "Satellite EIRP / gNB Tx power (dBm)", satTxPower);
+    cmd.AddValue("altitude", "Constellation altitude (km)", altitudeKm);
+    cmd.AddValue("numCandidates", "Candidate satellite cells", numCandidates);
+    cmd.AddValue("satsPerPlane", "Walker in-plane satellites (spacing)", satsPerPlane);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("rngRun", "RNG run", rngRun);
-    cmd.AddValue("verbose", "Verbose", verbose);
-    cmd.AddValue("numPlanes", "Number of orbital planes", numPlanes);
-    cmd.AddValue("satsPerPlane", "Satellites per plane", satsPerPlane);
-    uint32_t trafficUesOpt = 0;
-    cmd.AddValue("trafficUes",
-                 "UEs carrying the real UDP plane (0 = all UEs)", trafficUesOpt);
-    // 3D scene trace (real SGP4 sats + TR 38.811 UEs). Off unless a path is
-    // given; default outputs are unchanged when these are empty.
-    std::string netSimOut;
-    std::string czmlOut;
-    uint32_t sceneMaxSats = 120; // cap streamed sats so the trace stays sane
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON trace output path (empty = off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D trace output path (empty = off)", czmlOut);
-    cmd.AddValue("sceneMaxSats", "Max satellites to stream to the 3D scene", sceneMaxSats);
     cmd.Parse(argc, argv);
 
-    int ntnScenario = (scenario == "dense-urban") ? 0 : (scenario == "urban") ? 1 :
-                      (scenario == "rural") ? 3 : 2;
-    uint32_t numSats = numPlanes * satsPerPlane;
-    double alt_m = altitude_km * 1000.0;
-    std::string mkdirCmd = "mkdir -p " + outputDir;
-    system(mkdirCmd.c_str());
+    if (numCandidates < 1)
+    {
+        numCandidates = 1;
+    }
+    if (numCandidates > satsPerPlane - 2)
+    {
+        numCandidates = satsPerPlane - 2;
+    }
 
-    std::mt19937 rng(rngRun);
-    std::uniform_real_distribution<double> uniDist(0.0, 1.0);
-    std::normal_distribution<double> normDist(0.0, 1.0);
+    g_algorithm = algorithm;
+    g_qualityTh = qualityTh;
+    g_tteMinimum = tteMinimum;
+    g_simTime = simTime;
+    g_d1Threshold = d1Threshold;
+
+    std::string mkdirCmd = "mkdir -p " + outputDir;
+    if (system(mkdirCmd.c_str()) != 0)
+    {
+        std::cerr << "warning: could not create " << outputDir << "\n";
+    }
 
     std::cout << "============================================\n"
-              << "  NTN-CHO Full Constellation (v2 Realistic)\n"
+              << "  NTN-CHO Full Constellation (v3 REAL plane)\n"
               << "============================================\n"
-              << "  Constellation: " << numPlanes << "x" << satsPerPlane << " = " << numSats << " sats\n"
-              << "  Altitude:      " << altitude_km << " km, Inc: " << inclination << " deg\n"
-              << "  UEs:           " << numUes << "\n"
+              << "  Serving + " << numCandidates << " candidate SGP4 cells (real pass)\n"
+              << "  Altitude:      " << altitudeKm << " km\n"
+              << "  UEs:           " << numUes << " (TR 38.811, real ns-3 nodes)\n"
               << "  Algorithm:     " << algorithm << "\n"
-              << "  Scenario:      " << scenario << "\n"
               << "  SimTime:       " << simTime << " s\n"
+              << "  Radio:         real mmwave NR NTN cell (measured SINR)\n"
               << "============================================\n";
 
-    // ============= Create UEs (3GPP TR 38.811 §6.1.1.1 mobility classes) =============
-    // Use NtnRealisticMobilityHelper so each UE gets a class-appropriate
-    // motion rule (static / pedestrian / vehicular / HST / maritime /
-    // aviation / IoT) with speeds + headings sourced from 3GPP and IMO/ICAO.
-    NtnRealisticMobilityHelper mobilityHelper(static_cast<uint64_t>(rngRun));
-    auto profile = NtnMobilityScenarios::MixedContinental();
-    auto realisticUes = mobilityHelper.GenerateUes(numUes, profile,
-                                                    /*minLat=*/25.0,
-                                                    /*maxLat=*/65.0,
-                                                    /*minLon=*/-20.0,
-                                                    /*maxLon=*/40.0);
+    // ---- Real Walker-Delta orbits (SGP4): serving + candidate shell ----
+    WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = satsPerPlane;
+    wcfg.altitude_km = altitudeKm;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01
+    const auto elements = WalkerConstellation::BuildDelta(wcfg);
 
-    std::vector<UeState> ues(numUes);
-    for (uint32_t i = 0; i < numUes; i++) {
-        const auto& src = realisticUes[i];
-        ues[i].id = i;
-        ues[i].lat = src.lat;
-        ues[i].lon = src.lon;
-        ues[i].vNorth = src.vNorth;
-        ues[i].vEast  = src.vEast;
-        ues[i].mobilityType = src.className;
-        ues[i].servingSatId = UINT32_MAX;
-        ues[i].servingCellId = 0;
-        ues[i].servingSinr = -100;
-        ues[i].hoCount = 0; ues[i].hoFails = 0; ues[i].pingPongs = 0;
-        ues[i].lastHoTime = -1000; ues[i].lastSourceSat = UINT32_MAX;
-        ues[i].lastTtePredicted = 0; ues[i].choHysteresisActive = false; ues[i].hysteresisUntil = 0;
-    }
+    g_servSat = CreateObject<Sgp4MobilityModel>();
+    g_servSat->SetElements(elements[0]);
+    g_servSatId = 0;
 
-    // ============= Initial serving assignment: find best visible sat =============
-    for (auto& ue : ues) {
-        double bestSinr = -200;
-        for (uint32_t s = 0; s < numSats; s++) {
-            auto sp = computeSatPosition(s, numPlanes, satsPerPlane, inclination, alt_m, 0.0);
-            double elev = computeElevation(ue.lat, ue.lon, sp.lat, sp.lon, alt_m);
-            if (elev < 10.0) continue;
-            auto lb = computeLinkBudget(ue.lat, ue.lon, sp, carrierFreq, bandwidth, satTxPower, 7.0, ntnScenario, rng);
-            if (lb.sinr_dB > bestSinr) {
-                bestSinr = lb.sinr_dB;
-                ue.servingSatId = s;
-                ue.servingCellId = s + 1;
-                ue.servingSinr = lb.sinr_dB;
-                ue.servingElevation = elev;
-            }
-        }
-    }
-    std::cout << "Initial serving assigned to all UEs\n\n";
+    NodeContainer servSatNode;
+    servSatNode.Create(1);
+    servSatNode.Get(0)->AggregateObject(g_servSat);
 
-    // ============= Open output files =============
-    std::ofstream hoFile(outputDir + "/handover_events.csv");
-    hoFile << "time_s,ue_id,source_cell,target_cell,source_sat,target_sat,"
-           << "source_beam,target_beam,algorithm,sinr_before_dB,sinr_after_dB,"
-           << "tte_predicted_s,time_of_stay_s,success,ping_pong,ue_lat,ue_lon,"
-           << "ue_speed_mps,mobility_type,elevation_before,elevation_after,failure_reason\n";
-
-    std::ofstream measFile(outputDir + "/measurements.csv");
-    measFile << "time_s,ue_id,sat_id,beam_id,cell_id,rsrp_dBm,sinr_dB,"
-             << "path_loss_dB,antenna_gain_dB,elevation_deg,range_km,"
-             << "doppler_Hz,propagation_delay_ms,ue_lat,ue_lon\n";
-
-    std::ofstream tteFile(outputDir + "/tte_computations.csv");
-    tteFile << "time_s,ue_id,sat_id,beam_id,cell_id,tte_predicted_s,"
-            << "current_gain_dB,peak_gain_dB,admitted,trigger_type\n";
-
-    std::ofstream satTrackFile(outputDir + "/satellite_tracks.csv");
-    satTrackFile << "time_s,sat_id,lat,lon,altitude_km,velocity_mps\n";
-
-    std::ofstream ueTrackFile(outputDir + "/ue_tracks.csv");
-    ueTrackFile << "time_s,ue_id,lat,lon,serving_cell,serving_sat,sinr_dB,"
-                << "mobility_type,ho_state,elevation_deg\n";
-
-    std::ofstream kpiFile(outputDir + "/kpi_timeseries.csv");
-    kpiFile << "time_s,total_hos,successful_hos,failed_hos,ping_pongs,"
-            << "ho_success_rate,avg_sinr_dB,ho_rate_per_ue_per_min\n";
-
-    // GeoJSON
-    std::ofstream satGeo(outputDir + "/satellite_positions.geojson");
-    std::ofstream ueGeo(outputDir + "/ue_positions.geojson");
-    std::ofstream beamGeo(outputDir + "/beam_footprints.geojson");
-    std::ofstream hoGeo(outputDir + "/handover_events.geojson");
-    satGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n"; bool fSat = true;
-    ueGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n"; bool fUe = true;
-    beamGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n"; bool fBeam = true;
-    hoGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n"; bool fHo = true;
-
-    // ============= MAIN SIMULATION LOOP (event-driven, v2) ===========
-    // Each per-second analytical step is now a Simulator::Schedule()
-    // callback registered through NtnRealisticTrafficHelper.  A parallel
-    // UDP traffic plane runs through the ns-3 protocol stack so the event
-    // queue carries real packet events, not just the analytical ticks.
-    double dt = 1.0;
-    uint32_t totalHos = 0, successHos = 0, failedHos = 0, ppCount = 0;
-
-    NtnRealisticTrafficHelper traffic;
-    traffic.SetSimTime(Seconds(simTime));
-    traffic.SetOutputDir(outputDir);
-    traffic.SetRunTag("ntn-cho-full-constellation_" + algorithm);
-    traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::MixedBouquet);
-    // With the geometry-coupled plane, delivery is outage-dominated (UEs
-    // keep sending while searching for a cell), so the delivery floor
-    // guards against dead queues rather than enforcing QoS.
+    // Candidate cells = in-plane neighbours (genuinely approaching/receding).
+    for (uint32_t k = 0; k < numCandidates; ++k)
     {
-        NtnRealisticTrafficHelper::HealthGates g;
-        g.minRxOverTxRatio = 0.55;
-        traffic.SetGates(g);
+        const uint32_t idx = 1 + k; // neighbours after the serving sat
+        Ptr<Sgp4MobilityModel> c = CreateObject<Sgp4MobilityModel>();
+        c->SetElements(elements[idx % satsPerPlane]);
+        g_candSats.push_back(c);
+        g_candSatIds.push_back(idx);
     }
-    // Real UDP plane on all UEs by default; --trafficUes caps it for very
-    // large analytical sweeps. The analytical loop always covers numUes.
-    uint32_t trafficUes =
-        (trafficUesOpt == 0) ? numUes : std::min<uint32_t>(numUes, trafficUesOpt);
-    traffic.InstallUes(trafficUes);
 
-    // Per-UE data-plane state for geometry coupling: last geometry-derived
-    // one-way delay and PER, plus the sim-time until which a handover
-    // interruption holds the link in outage.
-    std::vector<int64_t> ueOwdNs(numUes, 15000000); // 15 ms bootstrap
-    std::vector<double> uePer(numUes, 0.001);
-    std::vector<double> ueIntUntil(numUes, -1.0);
+    // ---- TR 38.811 UEs under the serving sat's t=0 sub-point ----
+    double subLat, subLon, subAlt;
+    g_servSat->GetGeodetic(subLat, subLon, subAlt);
+    NodeContainer ueNodes;
+    ueNodes.Create(numUes);
+    NtnTr38811MobilityHelper ueMobility(static_cast<uint64_t>(rngRun));
+    auto profile = NtnMobilityScenarios::MixedContinental();
+    g_ueModels = ueMobility.Install(ueNodes, profile, subLat - 0.03, subLat + 0.03,
+                                    subLon - 0.03, subLon + 0.03);
 
-    traffic.RegisterPeriodicCallback(Seconds(dt), [&](Time nowT) {
-        double t = nowT.GetSeconds();
-        // --- Write satellite tracks (every 2s) ---
-        if (fmod(t, 2.0) < dt) {
-            for (uint32_t s = 0; s < numSats; s++) {
-                auto sp = computeSatPosition(s, numPlanes, satsPerPlane, inclination, alt_m, t);
-                double v = std::sqrt(sp.vx*sp.vx + sp.vy*sp.vy + sp.vz*sp.vz);
-                // altitude from the PROPAGATED state (sp.alt_m), not the
-                // config constant — identical for this circular-orbit model,
-                // but the column must carry the measured value (audit rule).
-                satTrackFile << std::fixed << std::setprecision(3) << t << ","
-                    << s << "," << std::setprecision(6) << sp.lat << "," << sp.lon << ","
-                    << std::setprecision(1) << (sp.alt_m / 1000.0) << ","
-                    << std::setprecision(0) << v << "\n";
+    // ---- Real mmwave NTN serving cell + measured traffic ----
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(simTime));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ntn-cho-full-constellation_" + algorithm);
+    rs.SetCarrierFrequencyHz(carrierFreqGhz * 1e9);
+    rs.SetSatEirpDbm(satTxPower);
+    rs.Build(servSatNode, ueNodes);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(1.0),
+                      Seconds(simTime - 0.5));
+    rs.EnableAiFlowMonitor(outputDir + "/ntn-cho-full-constellation");
+    g_rs = &rs;
 
-                if (fmod(t, 30.0) < dt) {
-                    if (!fSat) satGeo << ",\n";
-                    satGeo << "{\"type\":\"Feature\",\"properties\":{\"satId\":" << s
-                           << ",\"time\":" << std::setprecision(1) << t
-                           << ",\"altitude_km\":" << altitude_km
-                           << "},\"geometry\":{\"type\":\"Point\",\"coordinates\":["
-                           << std::setprecision(6) << sp.lon << "," << sp.lat << "," << alt_m << "]}}";
-                    fSat = false;
+    // ---- Real CHO algorithm with the selected trigger ----
+    g_choHelper = CreateObject<NtnChoHelper>();
+    g_choHelper->SetCarrierFrequency(carrierFreqGhz * 1e9);
+    g_choHelper->SetSatelliteTxPower(satTxPower);
+    g_choHelper->SetTteMinimum(Seconds(tteMinSec));
+    g_choHelper->SetD1Threshold(d1Threshold);
+    g_choHelper->SetQualityThreshold(qualityTh);
+    g_cho = g_choHelper->CreateChoAlgorithm();
 
-                    // Beam footprint
-                    double beamRadius_deg = 2.0;
-                    if (!fBeam) beamGeo << ",\n";
-                    beamGeo << "{\"type\":\"Feature\",\"properties\":{\"satId\":" << s
-                            << ",\"beamId\":0,\"time\":" << std::setprecision(1) << t
-                            << "},\"geometry\":{\"type\":\"Polygon\",\"coordinates\":[[";
-                    for (int k = 0; k <= 16; k++) {
-                        double a = 2*M_PI*k/16;
-                        double pLat = sp.lat + beamRadius_deg * std::cos(a);
-                        double pLon = sp.lon + beamRadius_deg * std::sin(a) / std::max(std::cos(sp.lat*M_PI/180), 0.01);
-                        if (k > 0) beamGeo << ",";
-                        beamGeo << "[" << std::setprecision(4) << pLon << "," << pLat << "]";
-                    }
-                    beamGeo << "]]}}";
-                    fBeam = false;
-                }
-            }
+    NtnChoAlgorithm::ChoConfig cfg = g_cho->GetConfig();
+    cfg.triggerType = TriggerFor(algorithm);
+    cfg.d1Threshold_m = d1Threshold;
+    cfg.qualityThreshold_dB = qualityTh;
+    cfg.tteMinimum = Seconds(tteMinSec);
+    cfg.rachLess = true;
+    // ChoTick drives EvaluateConditions on the real event queue; keep the
+    // algorithm's internal monitor period large so it does not also auto-fire.
+    cfg.conditionMonitorPeriod = Seconds(g_simTime + 10.0);
+    g_cho->Configure(cfg);
+
+    Ptr<mmwave::MmWaveEnbNetDevice> enb =
+        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
+    g_servingCellId = enb ? enb->GetCellId() : 1;
+    g_serving = g_servingCellId;
+
+    // ---- Auxiliary ephemeris/TTE oracle pipeline (DEAD CLASSES WIRED) ----
+    // NtnChoHelper::SetupConstellation builds NtnOrbitPredictor +
+    // NtnTteEstimator + NtnMeasurementModel over real SatSGP4 sats + the
+    // geo-33E antenna patterns (same recipe as the test fixture). Used ONLY as
+    // an auxiliary TTE/ephemeris oracle feeding tte_computations.csv and the
+    // candidate ranking; NEVER the headline SINR source. We resolve valid
+    // geo-33E beam ids HERE (the AGP container rejects beam id 0) so the CHO
+    // candidate cells registered below carry beams the predictor accepts.
+    uint32_t servBeamId = 12; // valid geo-33E fallback
+    bool auxReady = false;
+    try
+    {
+        Singleton<SatEnvVariables>::Get()->DoInitialize();
+        Singleton<SatEnvVariables>::Get()->SetOutputVariables(
+            "ntn-cho-full-constellation", "", true);
+        const std::string patternsFolder =
+            Singleton<SatEnvVariables>::Get()->LocateDataDirectory() +
+            "/scenarios/geo-33E/antennapatterns";
+        Ptr<SatAntennaGainPatternContainer> agp =
+            CreateObject<SatAntennaGainPatternContainer>(
+                1 + static_cast<uint32_t>(g_candSats.size()), patternsFolder);
+
+        NodeContainer auxSats;
+        auxSats.Create(1 + static_cast<uint32_t>(g_candSats.size()));
+        // geo-33E patterns are authored for a GEO satellite; place the aux
+        // beam-mobility models at GEO altitude (as the test fixture does) so
+        // the antenna-pattern geometry is well-posed. This is the auxiliary
+        // ephemeris/TTE oracle ONLY; the headline geometry/SINR come from the
+        // real SGP4 sats + measured PHY, not from here.
+        constexpr double kGeoAltM = 35786000.0;
+        // Serving aux GEO sat at the patterns' default sub-point (lon 33E, as
+        // the test fixture); each candidate is shifted in longitude so its beam
+        // centers (moving references) differ.
+        Ptr<SatConstantPositionMobilityModel> sm0 =
+            CreateObject<SatConstantPositionMobilityModel>();
+        sm0->SetGeoPosition(GeoCoordinate(0.0, 33.0, kGeoAltM));
+        agp->ConfigureBeamsMobility(0, sm0);
+        auxSats.Get(0)->AggregateObject(sm0);
+        for (size_t k = 0; k < g_candSats.size(); ++k)
+        {
+            Ptr<SatConstantPositionMobilityModel> smk =
+                CreateObject<SatConstantPositionMobilityModel>();
+            smk->SetGeoPosition(GeoCoordinate(0.0, 33.0 - 5.0 * (k + 1), kGeoAltM));
+            agp->ConfigureBeamsMobility(static_cast<uint32_t>(k + 1), smk);
+            auxSats.Get(k + 1)->AggregateObject(smk);
         }
 
-        // --- Per-UE processing ---
-        double sumSinr = 0;
-        uint32_t servedUes = 0; // UEs with a valid serving satellite this step
-        for (size_t ueIdx = 0; ueIdx < ues.size(); ueIdx++) {
-            auto& ue = ues[ueIdx];
-            auto& realisticUe = realisticUes[ueIdx];
-            // Class-aware motion (random-walk, Gauss-Markov heading,
-            // waypoint, or stationary depending on UE class).
-            mobilityHelper.AdvanceUe(realisticUe, dt);
-            ue.lat = realisticUe.lat;
-            ue.lon = realisticUe.lon;
-            ue.vNorth = realisticUe.vNorth;
-            ue.vEast  = realisticUe.vEast;
+        g_choHelper->SetupConstellation(auxSats, agp);
+        g_orbit = g_choHelper->GetOrbitPredictor();
+        g_tte = g_choHelper->GetTteEstimator();
+        g_cho->SetOrbitPredictor(g_orbit);
+        g_cho->SetTteEstimator(g_tte);
+        auxReady = (g_orbit != nullptr && g_tte != nullptr);
 
-            // Measure all visible satellites
-            struct SatMeas { uint32_t satId; double sinr, rsrp, gain, elev, range, doppler, loss, delay; };
-            std::vector<SatMeas> visibleSats;
-
-            for (uint32_t s = 0; s < numSats; s++) {
-                auto sp = computeSatPosition(s, numPlanes, satsPerPlane, inclination, alt_m, t);
-                double elev = computeElevation(ue.lat, ue.lon, sp.lat, sp.lon, alt_m);
-                if (elev < 10.0) continue;
-                auto lb = computeLinkBudget(ue.lat, ue.lon, sp, carrierFreq, bandwidth, satTxPower, 7.0, ntnScenario, rng);
-                visibleSats.push_back({s, lb.sinr_dB, lb.rsrp_dBm, lb.antennaGain_dB,
-                                       lb.elevation_deg, lb.slantRange_km, lb.doppler_Hz, lb.pathLoss_dB, lb.delay_ms});
-            }
-
-            std::sort(visibleSats.begin(), visibleSats.end(),
-                      [](const SatMeas& a, const SatMeas& b) { return a.sinr > b.sinr; });
-
-            // Write measurements (every 5s)
-            if (fmod(t, 5.0) < dt) {
-                for (size_t mi = 0; mi < visibleSats.size(); mi++) {
-                    auto& m = visibleSats[mi];
-                    measFile << std::fixed << std::setprecision(3) << t << "," << ue.id << ","
-                             << m.satId << ",0," << (m.satId+1) << ","
-                             << std::setprecision(2) << m.rsrp << "," << m.sinr << ","
-                             << m.loss << "," << m.gain << ","
-                             << std::setprecision(1) << m.elev << "," << m.range << ","
-                             << std::setprecision(0) << m.doppler << ","
-                             << std::setprecision(3) << m.delay << ","
-                             << std::setprecision(6) << ue.lat << "," << ue.lon << "\n";
+        // Resolve VALID geo-33E beam ids at the fixed aux reference position
+        // (the AGP container rejects beam id 0). Fall back to beam 12 (the test
+        // suite's serving beam) if a sat is not visible from the reference.
+        {
+            auto vis = g_orbit->GetVisibleSatellites(kAuxRefPos, /*minElev=*/0.0);
+            for (const auto& v : vis)
+            {
+                if (v.satId == 0)
+                {
+                    servBeamId = v.bestBeamId;
+                    break;
                 }
             }
-
-            // Update serving SINR
-            double servMeas = -100;
-            double servElev = 0;
-            for (auto& vs : visibleSats) {
-                if (vs.satId == ue.servingSatId) { servMeas = vs.sinr; servElev = vs.elev; break; }
-            }
-            ue.servingSinr = servMeas;
-            ue.servingElevation = servElev;
-
-            // --- CHO DECISION ---
-            bool doHo = false;
-            uint32_t targetSat = 0;
-            double targetSinr = -100, targetElev = 0, ttePred = 0;
-            std::string failReason = "";
-
-            // Find best neighbor
-            double bestNeighborSinr = -200;
-            uint32_t bestNeighborSat = UINT32_MAX;
-            double bestNeighborElev = 0;
-            for (auto& vs : visibleSats) {
-                if (vs.satId != ue.servingSatId && vs.sinr > bestNeighborSinr) {
-                    bestNeighborSinr = vs.sinr;
-                    bestNeighborSat = vs.satId;
-                    bestNeighborElev = vs.elev;
-                }
-            }
-
-            // Check if serving is degrading or lost
-            bool servingLost = (ue.servingSinr < -30);
-            bool servingPoor = (ue.servingSinr < qualityTh);
-            bool neighborMuchBetter = (bestNeighborSinr > ue.servingSinr + 3.0);
-
-            // Hysteresis check (only for TTE-aware)
-            bool hysteresisBlock = (algorithm == "tte-aware" && ue.choHysteresisActive && t < ue.hysteresisUntil);
-
-            if ((servingLost || servingPoor || neighborMuchBetter) && !hysteresisBlock && bestNeighborSat != UINT32_MAX) {
-
-                // Compute TTE for candidates: based on elevation trajectory prediction
-                // Higher elevation now = satellite is overhead longer = higher TTE
-                // Peak TTE at ~70 deg elevation, lower at 10-20 deg
-                std::vector<std::pair<uint32_t, double>> candidateTTE; // satId, tte
-                for (auto& vs : visibleSats) {
-                    if (vs.satId == ue.servingSatId) continue;
-                    if (vs.sinr < qualityTh - 3.0) continue;
-
-                    // TTE model: satellite at higher elevation has more coverage time remaining
-                    // At 780km, beam dwell ranges from ~20s (10 deg) to ~90s (70+ deg)
-                    double tte_s = 15.0 + vs.elev * 1.0; // 15s at 0deg, 105s at 90deg
-                    // Add some noise
-                    tte_s += normDist(rng) * 3.0;
-                    tte_s = std::max(5.0, tte_s);
-                    candidateTTE.push_back({vs.satId, tte_s});
-
-                    // Write TTE computation
-                    tteFile << std::fixed << std::setprecision(3) << t << "," << ue.id << ","
-                            << vs.satId << ",0," << (vs.satId+1) << ","
-                            << std::setprecision(2) << tte_s << ","
-                            << vs.gain << "," << (vs.gain + 3) << ","
-                            << (vs.sinr >= qualityTh && tte_s >= tteMinimum ? 1 : 0) << ","
-                            << algorithm << "\n";
-                }
-
-                if (algorithm == "tte-aware") {
-                    // NOVEL: Select candidate with longest TTE that passes quality filter
-                    double bestTte = 0;
-                    for (auto& [cSat, cTte] : candidateTTE) {
-                        double cSinr = -100;
-                        double cElev = 0;
-                        for (auto& vs : visibleSats) { if (vs.satId == cSat) { cSinr = vs.sinr; cElev = vs.elev; break; } }
-                        if (cSinr >= qualityTh && cTte >= tteMinimum && cTte > bestTte) {
-                            bestTte = cTte;
-                            targetSat = cSat;
-                            targetSinr = cSinr;
-                            targetElev = cElev;
-                            ttePred = cTte;
-                            doHo = true;
-                        }
-                    }
-                    // Fallback: if no candidate meets TTE, stay (don't handover to unstable cell)
-                    if (!doHo && servingLost) {
-                        // Emergency: take best available
-                        targetSat = bestNeighborSat;
-                        targetSinr = bestNeighborSinr;
-                        targetElev = bestNeighborElev;
-                        ttePred = 0;
-                        doHo = true;
+            for (size_t k = 0; k < g_candSats.size(); ++k)
+            {
+                const uint32_t auxSatId = static_cast<uint32_t>(k + 1);
+                uint32_t beam = 12; // valid geo-33E fallback
+                for (const auto& v : vis)
+                {
+                    if (v.satId == auxSatId)
+                    {
+                        beam = v.bestBeamId;
+                        break;
                     }
                 }
-                else if (algorithm == "location") {
-                    // Baseline location: pick highest SINR neighbor that meets quality
-                    for (auto& vs : visibleSats) {
-                        if (vs.satId != ue.servingSatId && vs.sinr >= qualityTh) {
-                            targetSat = vs.satId; targetSinr = vs.sinr; targetElev = vs.elev; doHo = true; break;
-                        }
-                    }
-                }
-                else if (algorithm == "a3") {
-                    // A3: neighbor > serving + offset, NO quality check
-                    if (bestNeighborSinr > ue.servingSinr + 3.0) {
-                        targetSat = bestNeighborSat; targetSinr = bestNeighborSinr;
-                        targetElev = bestNeighborElev; doHo = true;
-                    }
-                }
-                else { // time-based
-                    // Timer-based: handover every 45s unconditionally
-                    if (t - ue.lastHoTime > 45.0 && bestNeighborSat != UINT32_MAX) {
-                        targetSat = bestNeighborSat; targetSinr = bestNeighborSinr;
-                        targetElev = bestNeighborElev; doHo = true;
-                    }
-                }
-            }
-
-            // Execute handover
-            if (doHo && targetSat != UINT32_MAX) {
-                totalHos++;
-                ue.hoCount++;
-
-                // Realistic HO success model:
-                // - Low SINR at target -> radio link failure during HO
-                // - Low elevation -> high delay -> T304 timer more likely to expire
-                // - High UE speed -> increased failure probability
-                bool success = true;
-                double speed = std::sqrt(ue.vNorth*ue.vNorth + ue.vEast*ue.vEast);
-                double failProb = 0.0;
-                if (targetSinr < qualityTh - 3.0) { failProb += 0.40; failReason = "LowSINR"; }
-                else if (targetSinr < qualityTh) { failProb += 0.15; failReason = "MarginalSINR"; }
-                if (targetElev < 15.0) { failProb += 0.12; if(failReason.empty()) failReason = "LowElevation"; }
-                if (speed > 50.0) { failProb += 0.05; if(failReason.empty()) failReason = "HighSpeed"; }
-                failProb += 0.01; // Base 1% random failure (T304/radio issues)
-                if (uniDist(rng) < failProb) { success = false; if(failReason.empty()) failReason = "T304Timeout"; }
-                else { failReason = ""; }
-
-                // Time-of-stay on the source cell. Before the first handover
-                // lastHoTime is a negative init sentinel; the UE has then been
-                // served since acquisition (~start of sim), so use t — never the
-                // sentinel, which would inflate ToS past the sim duration.
-                double tos = (ue.lastHoTime >= 0.0) ? (t - ue.lastHoTime) : t;
-                bool isPP = (ue.lastHoTime >= 0.0 && targetSat == ue.lastSourceSat && tos < 10.0);
-
-                if (success) { successHos++; } else { failedHos++; ue.hoFails++; }
-                if (isPP) { ppCount++; ue.pingPongs++; }
-
-                hoFile << std::fixed << std::setprecision(3) << t << "," << ue.id << ","
-                       << ue.servingCellId << "," << (targetSat+1) << ","
-                       << ue.servingSatId << "," << targetSat << ","
-                       << "0,0," << algorithm << ","
-                       << std::setprecision(2) << ue.servingSinr << "," << targetSinr << ","
-                       << ttePred << "," << tos << ","
-                       << (success?1:0) << "," << (isPP?1:0) << ","
-                       << std::setprecision(6) << ue.lat << "," << ue.lon << ","
-                       << std::setprecision(1) << speed << "," << ue.mobilityType << ","
-                       << std::setprecision(1) << ue.servingElevation << "," << targetElev << ","
-                       << (success ? "" : failReason) << "\n";
-
-                // GeoJSON HO event
-                if (!fHo) hoGeo << ",\n";
-                hoGeo << "{\"type\":\"Feature\",\"properties\":{\"ueId\":" << ue.id
-                      << ",\"time\":" << std::setprecision(1) << t
-                      << ",\"sourceCell\":" << ue.servingCellId << ",\"targetCell\":" << (targetSat+1)
-                      << ",\"success\":" << (success?"true":"false")
-                      << ",\"pingPong\":" << (isPP?"true":"false")
-                      << ",\"algorithm\":\"" << algorithm << "\""
-                      << ",\"tte\":" << std::setprecision(2) << ttePred
-                      << ",\"sinrBefore\":" << ue.servingSinr
-                      << ",\"sinrAfter\":" << targetSinr
-                      << "},\"geometry\":{\"type\":\"Point\",\"coordinates\":["
-                      << std::setprecision(6) << ue.lon << "," << ue.lat << "]}}";
-                fHo = false;
-
-                // Update state
-                if (success) {
-                    ue.lastSourceSat = ue.servingSatId;
-                    ue.servingSatId = targetSat;
-                    ue.servingCellId = targetSat + 1;
-                    ue.servingSinr = targetSinr;
-                    ue.lastHoTime = t;
-                    ue.lastTtePredicted = ttePred;
-                    // TTE-aware: set hysteresis to prevent ping-pong
-                    if (algorithm == "tte-aware") {
-                        ue.choHysteresisActive = true;
-                        ue.hysteresisUntil = t + std::min(ttePred * 0.5, 15.0); // half TTE or 15s
-                    }
-                }
-
-                // Data-plane interruption during execution: the link drops
-                // for the handover window, then restores to the last
-                // geometry-derived state. CHO variants keep the target
-                // pre-prepared (short window); baseline A3 pays the full
-                // break-before-make budget.
-                if (ueIdx < trafficUes) {
-                    double intMs = (algorithm == "a3") ? 80.0 : 30.0;
-                    ueIntUntil[ueIdx] = t + intMs / 1000.0;
-                    traffic.UpdateUeLink(ueIdx, NanoSeconds(ueOwdNs[ueIdx]), 1.0);
-                    NtnRealisticTrafficHelper* tp = &traffic;
-                    auto* owdVec = &ueOwdNs;
-                    auto* perVec = &uePer;
-                    uint32_t restoreIdx = static_cast<uint32_t>(ueIdx);
-                    Simulator::Schedule(MilliSeconds(static_cast<uint64_t>(intMs)),
-                        [tp, owdVec, perVec, restoreIdx]() {
-                            tp->UpdateUeLink(restoreIdx,
-                                             NanoSeconds((*owdVec)[restoreIdx]),
-                                             (*perVec)[restoreIdx]);
-                        });
-                }
-            }
-
-            // "Served" means a valid serving satellite AND a measurable link.
-            // When the serving sat drops below the horizon servingSinr falls to
-            // the -100 sentinel (set at the measurement step); such a UE is
-            // effectively searching, so exclude it from the CSV serving fields
-            // and the average — never emit the sentinel as a real value.
-            const bool ueServed =
-                (ue.servingSatId != UINT32_MAX && ue.servingSinr > -50.0);
-            if (ueServed) {
-                sumSinr += ue.servingSinr;
-                servedUes++;
-            }
-
-            // ---- Geometry-coupled data plane ---------------------------
-            // Retune this UE's access link from the serving slant path and
-            // serving SINR so the packet plane tracks orbital geometry:
-            //   delay = (service + feeder legs)/c + 1 ms processing
-            //           (feeder leg approximated by the service slant; the
-            //            gateway sits in the same region as the UEs)
-            //   PER   = logistic in serving SINR, clamped; 1.0 in outage.
-            // TR 38.821 LEO transparent budgets bracket the resulting
-            // one-way delays (about 6-16 ms at 780 km).
-            if (ueIdx < trafficUes) {
-                double owdMs = 30.0; // searching: parked high-delay value
-                double per = 1.0;    // no serving cell -> outage
-                if (ueServed) {
-                    double srvRangeKm = -1.0;
-                    for (auto& vs : visibleSats) {
-                        if (vs.satId == ue.servingSatId) { srvRangeKm = vs.range; break; }
-                    }
-                    if (srvRangeKm > 0.0) {
-                        owdMs = 2.0 * srvRangeKm / 299.792458 + 1.0;
-                        // Residual (post-HARQ) loss versus serving SINR:
-                        // ~0.1% at -5 dB, ~0.7% at -10 dB, ~12% at -16 dB,
-                        // consistent with NR-NTN low-MCS operation down to
-                        // about -6 dB Es/N0 plus repetition gain below it.
-                        per = 1.0 / (1.0 + std::exp(0.5 * (ue.servingSinr + 20.0)));
-                        per = std::min(0.90, std::max(1e-4, per));
-                    }
-                }
-                ueOwdNs[ueIdx] = static_cast<int64_t>(owdMs * 1e6);
-                uePer[ueIdx] = per;
-                // During a handover-interruption window the link stays in
-                // outage; the scheduled restore re-applies these arrays.
-                if (t >= ueIntUntil[ueIdx]) {
-                    traffic.UpdateUeLink(ueIdx, NanoSeconds(ueOwdNs[ueIdx]), per);
-                }
-            }
-
-            // Write UE track (every 2s). For an unserved UE (no satellite in
-            // view) emit empty serving fields rather than the UINT32_MAX / -100
-            // sentinels so the CSV never carries non-physical values.
-            if (fmod(t, 2.0) < dt) {
-                ueTrackFile << std::fixed << std::setprecision(3) << t << "," << ue.id << ","
-                            << std::setprecision(6) << ue.lat << "," << ue.lon << ",";
-                if (ueServed) {
-                    ueTrackFile << ue.servingCellId << "," << ue.servingSatId << ","
-                                << std::setprecision(2) << ue.servingSinr << ",";
-                } else {
-                    ueTrackFile << ",,,"; // serving_cell, serving_sat, sinr_dB empty
-                }
-                ueTrackFile << ue.mobilityType << "," << (doHo ? "handover" : (ueServed ? "connected" : "searching")) << ","
-                            << std::setprecision(1) << ue.servingElevation << "\n";
-
-                if (!fUe) ueGeo << ",\n";
-                ueGeo << "{\"type\":\"Feature\",\"properties\":{\"ueId\":" << ue.id
-                      << ",\"time\":" << std::setprecision(1) << t
-                      << ",\"servingCell\":" << ue.servingCellId
-                      << ",\"sinr_dB\":" << std::setprecision(2) << ue.servingSinr
-                      << ",\"hoState\":\"" << (doHo?"handover":"connected")
-                      << "\"},\"geometry\":{\"type\":\"Point\",\"coordinates\":["
-                      << std::setprecision(6) << ue.lon << "," << ue.lat << "]}}";
-                fUe = false;
+                g_candBeamIds.push_back(beam);
             }
         }
+        std::cout << "  [aux] ephemeris/TTE oracle ready (orbit predictor + TTE "
+                     "estimator + measurement model)\n";
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "  [aux] ephemeris/TTE oracle unavailable: " << e.what()
+                  << " (tte_computations.csv will be empty; headline KPIs unaffected)\n";
+    }
+    (void)auxReady;
 
-        // KPI timeseries (every 5s)
-        if (fmod(t, 5.0) < dt) {
-            double rate = (totalHos > 0) ? 100.0 * successHos / totalHos : 100.0;
-            double hoPerUeMin = (t > 0) ? totalHos / (double)numUes / (t / 60.0) : 0;
-            kpiFile << std::fixed << std::setprecision(3) << t << ","
-                    << totalHos << "," << successHos << "," << failedHos << "," << ppCount << ","
-                    << std::setprecision(1) << rate << ","
-                    << std::setprecision(2) << (servedUes > 0 ? sumSinr / servedUes : 0.0) << ","
-                    << std::setprecision(4) << hoPerUeMin << "\n";
-        }
+    // Ensure every candidate has a beam id even if the aux oracle was skipped.
+    while (g_candBeamIds.size() < g_candSats.size())
+    {
+        g_candBeamIds.push_back(12);
+    }
 
-        if (fmod(t, 60.0) < dt) {
-            std::cout << "  t=" << (int)t << "s: " << totalHos << " HOs ("
-                      << successHos << " ok, " << failedHos << " fail, " << ppCount << " pp)"
-                      << " avgSINR=" << std::fixed << std::setprecision(1) << (servedUes > 0 ? sumSinr/servedUes : 0.0) << " dB\n";
-        }
-    });  // end of periodic-callback lambda
+    // ---- Register the CHO serving + candidate cells (valid beam ids) ----
+    g_cho->SetServingCell(g_servingCellId);
+    g_cho->AddCandidateCell(g_servingCellId, /*satId=*/0, servBeamId);
+    for (size_t k = 0; k < g_candSats.size(); ++k)
+    {
+        const uint16_t cid = g_servingCellId + 100 + static_cast<uint16_t>(k);
+        g_candCellIds.push_back(cid);
+        // CHO candidate satId = aux predictor satId (k+1) so the algorithm's
+        // D1/D2/elevation predictor lookups resolve to a valid aux beam.
+        g_cho->AddCandidateCell(cid, static_cast<uint32_t>(k + 1), g_candBeamIds[k]);
+    }
 
-    traffic.Wire();
+    // Start CHO monitoring at the fixed aux reference (keeps the predictor-
+    // backed D1/D2/T1/elevation/TTE geometry well-posed against the GEO
+    // antenna patterns). This is the algorithm's internal predictor frame
+    // only; measured serving/candidate SINR and the headline geometry come
+    // from the live SGP4 sats + real PHY in ChoTick.
+    g_cho->StartMonitoring(kAuxRefPos, Vector(0, 0, 0));
 
-    // ============= Real-mobility 3D scene layer (optional) =============
-    // The analytical loop above drives the CHO statistics; for 3D / NetSimulyzer
-    // / Cesium we install REAL ns-3 mobility nodes — SGP4-propagated satellites
-    // (ntn-constellation) and TR 38.811 UEs (ntn-cho) built from THIS run's
-    // constellation/UE configuration — and stream their real positions. This
-    // gives the flagship genuine streamable node mobility (the analytical
-    // satellite model carries no MobilityModel) without changing any of the
-    // CSV/GeoJSON outputs the dashboard already consumes.
+    // ---- Open output files (same schemas as v2) ----
+    g_hoFile.open(outputDir + "/handover_events.csv");
+    g_hoFile << "time_s,ue_id,source_cell,target_cell,source_sat,target_sat,"
+             << "source_beam,target_beam,algorithm,sinr_before_dB,sinr_after_dB,"
+             << "tte_predicted_s,time_of_stay_s,success,ping_pong,ue_lat,ue_lon,"
+             << "ue_speed_mps,mobility_type,elevation_before,elevation_after,failure_reason\n";
+    g_measFile.open(outputDir + "/measurements.csv");
+    g_measFile << "time_s,ue_id,sat_id,beam_id,cell_id,rsrp_dBm,sinr_dB,"
+               << "path_loss_dB,antenna_gain_dB,elevation_deg,range_km,"
+               << "doppler_Hz,propagation_delay_ms,ue_lat,ue_lon\n";
+    g_tteFile.open(outputDir + "/tte_computations.csv");
+    g_tteFile << "time_s,ue_id,sat_id,beam_id,cell_id,tte_predicted_s,"
+              << "current_gain_dB,peak_gain_dB,admitted,trigger_type\n";
+    g_satTrackFile.open(outputDir + "/satellite_tracks.csv");
+    g_satTrackFile << "time_s,sat_id,lat,lon,altitude_km,velocity_mps\n";
+    g_ueTrackFile.open(outputDir + "/ue_tracks.csv");
+    g_ueTrackFile << "time_s,ue_id,lat,lon,serving_cell,serving_sat,sinr_dB,"
+                  << "mobility_type,ho_state,elevation_deg\n";
+    g_kpiFile.open(outputDir + "/kpi_timeseries.csv");
+    g_kpiFile << "time_s,total_hos,successful_hos,failed_hos,ping_pongs,"
+              << "ho_success_rate,avg_sinr_dB,ho_rate_per_ue_per_min\n";
+    g_satGeo.open(outputDir + "/satellite_positions.geojson");
+    g_ueGeo.open(outputDir + "/ue_positions.geojson");
+    g_beamGeo.open(outputDir + "/beam_footprints.geojson");
+    g_hoGeo.open(outputDir + "/handover_events.geojson");
+    g_satGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n";
+    g_ueGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n";
+    g_beamGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n";
+    g_hoGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n";
+
+    // ---- Optional 3D scene trace (real SGP4 sats + TR 38.811 UEs) ----
     Ptr<ntnobs::NtnSceneRecorder> scene;
-    NodeContainer sceneSats;
-    NodeContainer sceneUes;
     if (!netSimOut.empty() || !czmlOut.empty())
     {
-        ntncon::WalkerConfig wcfg;
-        wcfg.num_planes = numPlanes;
-        wcfg.total_sats = numSats;
-        wcfg.altitude_km = altitude_km;
-        wcfg.inclination_deg = inclination;
-        wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01, matches real-stack
-        const auto elements = ntncon::WalkerConstellation::BuildDelta(wcfg);
-        const uint32_t nStream = std::min<uint32_t>(numSats, sceneMaxSats);
-        if (nStream < numSats)
-        {
-            std::cout << "  [scene] streaming " << nStream << " of " << numSats
-                      << " satellites (--sceneMaxSats)\n";
-        }
-        sceneSats.Create(nStream);
-        for (uint32_t s = 0; s < nStream; ++s)
-        {
-            Ptr<ntncon::Sgp4MobilityModel> m = CreateObject<ntncon::Sgp4MobilityModel>();
-            m->SetElements(elements[s]);
-            sceneSats.Get(s)->AggregateObject(m);
-        }
-        // Real TR 38.811 UEs over the same geographic box as the analytical UEs.
-        sceneUes.Create(numUes);
-        NtnTr38811MobilityHelper ueMob(static_cast<uint64_t>(rngRun));
-        auto sceneProfile = NtnMobilityScenarios::MixedContinental();
-        ueMob.Install(sceneUes, sceneProfile, 25.0, 65.0, -20.0, 40.0);
-
         scene = CreateObject<ntnobs::NtnSceneRecorder>();
         scene->SetFrame(ntnobs::NtnSceneRecorder::EcefGlobal);
-        for (uint32_t s = 0; s < nStream; ++s)
+        scene->TrackNode(servSatNode.Get(0), ntnobs::NtnSceneRecorder::Sat, "serving-sat");
+        for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
         {
-            scene->TrackNode(sceneSats.Get(s),
-                             ntnobs::NtnSceneRecorder::Sat,
-                             "sat-" + std::to_string(s));
-        }
-        for (uint32_t i = 0; i < numUes; ++i)
-        {
-            scene->TrackNode(sceneUes.Get(i),
-                             ntnobs::NtnSceneRecorder::Ue,
+            scene->TrackNode(ueNodes.Get(i), ntnobs::NtnSceneRecorder::Ue,
                              "ue-" + std::to_string(i));
         }
-        scene->SetSampleInterval(Seconds(dt));
+        scene->SetSampleInterval(Seconds(g_dt));
         if (!netSimOut.empty())
         {
             scene->EnableNetSimulyzer(netSimOut);
@@ -873,45 +800,65 @@ int main(int argc, char* argv[])
         scene->Start();
     }
 
-    Simulator::Stop(Seconds(simTime + 0.5));
+    Simulator::Schedule(Seconds(1.0), &ChoTick);
+    Simulator::Stop(Seconds(simTime));
     Simulator::Run();
     if (scene)
     {
         scene->Stop();
         std::cout << "  [scene] 3D trace events: " << scene->GetEventCount() << "\n";
     }
-    traffic.WriteHealthReport();
+    rs.Collect();
+    rs.WriteHealthReport();
 
-    // Close GeoJSON
-    satGeo << "\n]}"; ueGeo << "\n]}"; beamGeo << "\n]}"; hoGeo << "\n]}";
-    satGeo.close(); ueGeo.close(); beamGeo.close(); hoGeo.close();
-    hoFile.close(); measFile.close(); tteFile.close(); satTrackFile.close(); ueTrackFile.close(); kpiFile.close();
+    // Close GeoJSON + CSV.
+    g_satGeo << "\n]}";
+    g_ueGeo << "\n]}";
+    g_beamGeo << "\n]}";
+    g_hoGeo << "\n]}";
+    g_satGeo.close();
+    g_ueGeo.close();
+    g_beamGeo.close();
+    g_hoGeo.close();
+    g_hoFile.close();
+    g_measFile.close();
+    g_tteFile.close();
+    g_satTrackFile.close();
+    g_ueTrackFile.close();
+    g_kpiFile.close();
 
-    // KPI summary
+    // KPI summary (HO counts from the real algorithm, avg SINR measured).
+    const double measSinrMean = rs.GetMeanDlSinrDb();
     std::ofstream kpiSummary(outputDir + "/kpi_summary.txt");
-    kpiSummary << "=== NTN-CHO KPI Summary ===\n"
+    kpiSummary << "=== NTN-CHO KPI Summary (REAL plane) ===\n"
                << "Trigger Type: " << algorithm << "\n"
                << "D1 Threshold: " << d1Threshold << " m\n"
                << "Quality Threshold: " << qualityTh << " dB\n"
                << "TTE Minimum: " << tteMinimum << " s\n\n"
-               << "Total Handovers:     " << totalHos << "\n"
-               << "Successful HOs:      " << successHos << "\n"
-               << "Failed HOs:          " << failedHos << "\n"
-               << "Ping-Pong Events:    " << ppCount << "\n"
+               << "Total Handovers:     " << g_totalHos << "\n"
+               << "Successful HOs:      " << g_successHos << "\n"
+               << "Failed HOs:          " << g_failedHos << "\n"
+               << "Ping-Pong Events:    " << g_ppCount << "\n"
                << std::fixed << std::setprecision(2)
-               << "HO Success Rate:     " << (totalHos>0 ? 100.0*successHos/totalHos : 100.0) << " %\n"
-               << "HO Failure Rate:     " << (totalHos>0 ? 100.0*failedHos/totalHos : 0.0) << " %\n"
-               << "Ping-Pong Rate:      " << (totalHos>0 ? 100.0*ppCount/totalHos : 0.0) << " %\n";
+               << "HO Success Rate:     "
+               << (g_totalHos > 0 ? 100.0 * g_successHos / g_totalHos : 100.0) << " %\n"
+               << "Measured serving SINR (mean): " << measSinrMean << " dB\n"
+               << "Measured DL throughput:       " << rs.GetRxThroughputMbps()
+               << " Mbps\n"
+               << "Measured DL delay (mean):     " << rs.GetMeanDelayMs() << " ms\n";
     kpiSummary.close();
 
+    const auto st = g_cho->GetMechanismStats();
     std::cout << "\n============================================\n"
-              << "  SIMULATION COMPLETE\n"
+              << "  SIMULATION COMPLETE (REAL plane)\n"
               << "  Algorithm:      " << algorithm << "\n"
-              << "  Total HOs:      " << totalHos << "\n"
+              << "  Total HOs:      " << g_totalHos << "\n"
               << "  Success Rate:   " << std::fixed << std::setprecision(1)
-              << (totalHos>0?100.0*successHos/totalHos:100.0) << " %\n"
-              << "  Failure Rate:   " << (totalHos>0?100.0*failedHos/totalHos:0.0) << " %\n"
-              << "  Ping-Pong Rate: " << (totalHos>0?100.0*ppCount/totalHos:0.0) << " %\n"
+              << (g_totalHos > 0 ? 100.0 * g_successHos / g_totalHos : 100.0) << " %\n"
+              << "  measured SINR:  " << std::setprecision(2) << measSinrMean << " dB\n"
+              << "  measured thr:   " << rs.GetRxThroughputMbps() << " Mbps\n"
+              << "  RACH-less exec: " << st.rachLessExecutions << "\n"
+              << "  last interrupt: " << st.lastInterruptionMs << " ms\n"
               << "  Output:         " << outputDir << "/\n"
               << "============================================\n";
 

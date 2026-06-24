@@ -183,7 +183,16 @@ NtnMeasurementModel::ComputeMeasurement(GeoCoordinate uePosition,
     // RSRP = TxPower + AntennaGain - PathLoss
     meas.rsrp_dBm = m_satTxPower_dBm + meas.antennaGain_dB - meas.pathLoss_dB;
 
-    // SINR = RSRP - NoisePower (simplified: single-link, no interference)
+    // PROVENANCE (research/auxiliary model, NOT a headline KPI source):
+    // this SINR is a THERMAL-NOISE-ONLY analytical estimate (SINR = RSRP -
+    // thermal noise floor, single serving link, NO co-channel/adjacent-beam
+    // interference and NO measured PHY). It is honest only as an offline
+    // ephemeris/RSRP oracle for candidate ranking. Examples MUST take headline
+    // serving/candidate SINR from the REAL mmwave plane
+    // (NtnRealStackHelper::GetUeRecentSinrDb / GetCellMeanSinrDb), never from
+    // this formula. Promoting interference modelling here would be net-new
+    // functionality and is out of scope. See STANDARDS_CONFORMANCE_AUDIT
+    // finding #11.
     double noisePower_dBm = ComputeNoisePower();
     meas.sinr_dB = meas.rsrp_dBm - noisePower_dBm;
 
