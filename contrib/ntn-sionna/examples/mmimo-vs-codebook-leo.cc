@@ -97,10 +97,14 @@ PrintAggregate(const char* label, const std::vector<double>& v)
 int
 main(int argc, char* argv[])
 {
-    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
-                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
-                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
-                "module's *-traffic / *-real-stack examples.\n\n");
+    std::printf("[analytic-tool] SISO-vs-MIMO LINK-BUDGET PROBE — intrinsically a full-PL\n"
+                "Sionna delta. The array gain is EMBEDDED in the RT path_loss_db (the only\n"
+                "difference between the two queries is the tx_array/rx_array descriptor), so\n"
+                "it cannot be carried onto the real Friis plane without re-introducing a\n"
+                "double-counted ~169 dB FSPL. It therefore stays an analytic comparison and\n"
+                "does NOT simulate a packet data plane. For the MEASURED-radio MIMO example\n"
+                "(SISO vs NxN array gain on ONE real mmwave NR cell), see\n"
+                "ntn-sionna-mimo-traffic.cc.\n\n");
     std::string host = "127.0.0.1";
     uint16_t port = 8765;
     double freqHz = 12.0e9;     // Ku band

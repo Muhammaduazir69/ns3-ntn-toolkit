@@ -2,40 +2,51 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit, Roadmap §4.2.12)
  *
- * ris-assisted-leo-link — demonstrates Roadmap §4.2.3 RIS support.
+ * ris-assisted-leo-link — a RIS-assisted LEO ground link whose headline KPIs
+ * (DL SINR / TBLER / goodput) are MEASURED on a real mmwave NR packet plane
+ * (NtnRealStackHelper) with the ITU-R atmospheric excess in the packet path.
  *
- * Geometry: a UE on the ground at the origin, an LEO satellite passing
- * overhead at 550 km, and a Reconfigurable Intelligent Surface mounted on
- * a building 700 m away at 50 m altitude. The RIS focal point is steered
- * at the UE. We compare the link budget with and without the RIS by
- * running TWO Sionna queries per geometry sample on the same UDP server:
+ * History (2026-06-24 fidelity fix): the previous version was a probe-only
+ * pair of NtnSionnaCascadeChannel CalcRxPower() queries (no-RIS vs RIS) under
+ * a Simulator::Schedule loop — the RIS gain was a printed Rx-power scalar that
+ * never reached a measured KPI. It now drives a REAL packet plane:
  *
- *   1. baseline: no `ris` field → Sionna only computes the direct path
- *   2. RIS:      `ris` field with 32×32 elements, focus phase profile
+ *   - real SGP4 satellite (ENU-projected) + fixed ground UE;
+ *   - a real mmwave NR cell carries EmbbStreaming traffic; DL SINR / TBLER /
+ *     goodput are MEASURED (GetMeanDlSinrDb / GetRxThroughputMbps, etc.);
+ *   - the ITU-R atmospheric cascade rides the packet path as the established
+ *     no-double-count excess adapter (NtnAtmosphericPropagationLossModel
+ *     wrapping NtnAtmosphericLossChain — the exact adapter used in
+ *     ntn-sionna-ris-relay-traffic.cc).
  *
- * The before/after Rx-power difference is the RIS gain. Without a live
- * Sionna server the mock-style FSPL fall-back applies and the gain
- * collapses to ~0 dB; with a live server you'll see the focused
- * reflection contribute several dB of additional received power.
+ * The RIS reflection gain remains an analytic probe column. AddExtraPropagation-
+ * Loss chains AFTER the built-in Friis FSPL via SetNext and can only SUBTRACT
+ * loss; a RIS reflection is a POSITIVE power delta, and there is no existing
+ * "negative-loss" / gain adapter that injects power onto the real plane without
+ * net-new functionality. Rather than fabricate one, the RIS gain is computed
+ * from the SAME two-channel Sionna cascade probe (rx_RIS - rx_noRIS) and printed
+ * as a per-tick gain column beside the MEASURED SINR/goodput. The measured-radio
+ * RIS counterpart (blockage recovery as a LIVE channel reconfiguration) is
+ * ntn-sionna-ris-relay-traffic.cc.
  *
  * Run:
- *   python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 &
  *   ./ns3 run "ris-assisted-leo-link --freqHz=28e9 --rows=32 --cols=32"
  */
 #include "ns3/command-line.h"
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/core-module.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
-#include "ns3/walker-constellation.h"
-#include "ns3/constant-position-mobility-model.h"
-#include "ns3/constant-velocity-mobility-model.h"
-#include "ns3/core-module.h"
 #include "ns3/simulator.h"
+#include "ns3/walker-constellation.h"
 
 #include "ns3/ns3-sionna-channel.h"
 #include "ns3/ntn-atmospheric-loss-chain.h"
+#include "ns3/ntn-atmospheric-propagation-loss-model.h"
 #include "ns3/ntn-sionna-cascade-channel.h"
-#include "ns3/sionna-transport.h"
-#include "ns3/sionna-udp-transport.h"
 
 #include <algorithm>
 #include <cmath>
@@ -49,84 +60,154 @@ NS_LOG_COMPONENT_DEFINE("RisAssistedLeoLink");
 
 namespace
 {
-
-struct Sample
-{
-    double t_s;
-    double elev_deg;
-    double rx_noris_dbm;
-    double rx_ris_dbm;
-};
+NtnRealStackHelper* g_rs = nullptr;
+Ptr<NtnSionnaCascadeChannel> g_chNoRis;
+Ptr<NtnSionnaCascadeChannel> g_chRis;
+Ptr<NtnEnuProjectionMobilityModel> g_satEnu;
+Ptr<MobilityModel> g_ueMob;
+double g_simTime = 30.0;
+uint64_t g_lastRx = 0;
+std::vector<double> g_gains;
 
 void
-Tick(double t,
-      Ptr<NtnSionnaCascadeChannel> chNoRis,
-      Ptr<NtnSionnaCascadeChannel> chRis,
-      Ptr<MobilityModel> sat,
-      Ptr<MobilityModel> ue,
-      std::vector<Sample>* out)
+Tick(Time now)
 {
+    const double t = now.GetSeconds();
+    if (t >= g_simTime)
+    {
+        return;
+    }
+    // Analytic RIS-reflection probe (POSITIVE power delta — no real-plane
+    // gain-adapter exists, so it stays an analytic column).
     const double txDbm = 30.0;
-    const double rxNo = chNoRis->CalcRxPower(txDbm, sat, ue);
-    const double rxYes = chRis->CalcRxPower(txDbm, sat, ue);
-    out->push_back({t, chRis->GetLastComponents().elevationDeg, rxNo, rxYes});
-}
+    const double rxNo = g_chNoRis->CalcRxPower(txDbm, g_satEnu, g_ueMob);
+    const double rxYes = g_chRis->CalcRxPower(txDbm, g_satEnu, g_ueMob);
+    const double risGainDb = rxYes - rxNo;
+    g_gains.push_back(risGainDb);
+    const double elevDeg = g_chRis->GetLastComponents().elevationDeg;
 
+    // MEASURED radio KPIs from the real packet plane.
+    const double sinr = g_rs->GetUeRecentSinrDb(0);
+    const double tbler = g_rs->GetUeRecentTbler(0);
+    const uint64_t rx = g_rs->GetUeRxBytes(0);
+    const double mbps = (rx - g_lastRx) * 8.0 / 1e6;
+    g_lastRx = rx;
+
+    std::printf("  %6.2f  %7.2f  %9.3f  %9.2f  %8.3f  %9.3f\n",
+                t, elevDeg, risGainDb, sinr, tbler, mbps);
+}
 } // namespace
 
 int
 main(int argc, char* argv[])
 {
-    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
-                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
-                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
-                "module's *-traffic / *-real-stack examples.\n\n");
+    double duration = 30.0;
     std::string host = "127.0.0.1";
     uint16_t port = 8765;
     double freqHz = 28.0e9;
     double altKm = 550.0;
     double rainMmH = 0.0;
-    uint32_t steps = 30;
+    double satEirpDbm = 75.0;
     uint32_t risRows = 32;
     uint32_t risCols = 32;
     double risPosX = 706.5; // halfway between UE and sub-sat ground point
     double risPosZ = 50.0;
     std::string phaseProfile = "focus";
     uint32_t timeoutMs = 200;
+    std::string outputDir = "ris-assisted-leo-link-output";
 
     CommandLine cmd(__FILE__);
+    cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("host", "Sionna server host", host);
     cmd.AddValue("port", "Sionna server UDP port", port);
     cmd.AddValue("freqHz", "Carrier frequency (Hz)", freqHz);
     cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
     cmd.AddValue("rainMmH", "Rain rate (mm/h)", rainMmH);
-    cmd.AddValue("steps", "Geometry steps", steps);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("rows", "RIS rows", risRows);
     cmd.AddValue("cols", "RIS cols", risCols);
     cmd.AddValue("risPosX", "RIS x (m)", risPosX);
     cmd.AddValue("risPosZ", "RIS altitude (m)", risPosZ);
-    cmd.AddValue("phaseProfile", "RIS phase profile (focus/flat/random)",
-                  phaseProfile);
+    cmd.AddValue("phaseProfile", "RIS phase profile (focus/flat/random)", phaseProfile);
     cmd.AddValue("timeoutMs", "Per-query timeout (ms)", timeoutMs);
+    cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+    g_simTime = duration;
 
-    // --- No-RIS channel ---
+    std::printf("\n=== ris-assisted-leo-link (MEASURED real radio + RIS analytic probe) ===\n"
+                "  serving cell: real mmwave NR link, 1 UE, real SGP4 pass\n"
+                "  ITU-R atmospheric excess chained on the packet path (no double-count)\n"
+                "  RIS reflection gain remains an analytic probe (no real-plane gain-adapter)\n"
+                "  freq=%.3f GHz alt=%.0f km RIS=%ux%u phase=%s\n\n",
+                freqHz / 1e9, altKm, risRows, risCols, phaseProfile.c_str());
+
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
+
+    // Real SGP4 orbit projected into the scenario's local ENU frame.
+    ns3::ntncon::WalkerConfig wcfgSat;
+    wcfgSat.num_planes = 1;
+    wcfgSat.total_sats = 80;
+    wcfgSat.altitude_km = altKm;
+    wcfgSat.inclination_deg = 53.0;
+    wcfgSat.epoch_unix_s = 1735689600.0;
+    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElements(satElements[0]);
+    double satSubLat, satSubLon, satSubAlt;
+    satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
+    Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
+    satEnu->SetSource(satSgp4);
+    satEnu->SetReference(satSubLat, satSubLon, 0.0);
+    satNodes.Get(0)->AggregateObject(satEnu);
+    g_satEnu = satEnu;
+
+    MobilityHelper mob;
+    mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
+    uePos->Add(Vector(0.0, 0.0, 1.5));
+    mob.SetPositionAllocator(uePos);
+    mob.Install(ueNodes);
+    g_ueMob = ueNodes.Get(0)->GetObject<MobilityModel>();
+
+    NtnRealStackHelper rs;
+    rs.SetSimTime(Seconds(duration));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ris-assisted-leo-link");
+    rs.SetCarrierFrequencyHz(freqHz);
+    rs.SetSatEirpDbm(satEirpDbm);
+    rs.Build(satNodes, ueNodes);
+
+    // ITU-R atmospheric excess stays in the packet path the whole run (the
+    // established no-double-count adapter used in ntn-sionna-ris-relay-traffic).
+    Ptr<NtnAtmosphericLossChain> chainPkt = CreateObject<NtnAtmosphericLossChain>();
+    chainPkt->SetFrequencyHz(freqHz);
+    chainPkt->SetRainRateMmH(rainMmH);
+    Ptr<NtnAtmosphericPropagationLossModel> atmo =
+        CreateObject<NtnAtmosphericPropagationLossModel>();
+    atmo->SetChain(chainPkt);
+    rs.AddExtraPropagationLoss(atmo);
+
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(duration - 0.5));
+    rs.EnableAiFlowMonitor("ris-assisted-leo-link"); // WS2 KPM series (TS 28.552 names)
+    g_rs = &rs;
+
+    // --- Analytic RIS probe: two Sionna cascade channels (no-RIS vs RIS) ---
     Ptr<NtnSionnaChannel> baseNoRis = CreateObject<NtnSionnaChannel>();
     baseNoRis->SetServer(host, port);
     baseNoRis->SetFrequencyHz(freqHz);
     baseNoRis->SetTimeoutMs(timeoutMs);
-
-    Ptr<NtnAtmosphericLossChain> chainNoRis =
-        CreateObject<NtnAtmosphericLossChain>();
+    Ptr<NtnAtmosphericLossChain> chainNoRis = CreateObject<NtnAtmosphericLossChain>();
     chainNoRis->SetFrequencyHz(freqHz);
     chainNoRis->SetRainRateMmH(rainMmH);
+    g_chNoRis = CreateObject<NtnSionnaCascadeChannel>();
+    g_chNoRis->SetSionnaChannel(baseNoRis);
+    g_chNoRis->SetAtmosphericChain(chainNoRis);
 
-    Ptr<NtnSionnaCascadeChannel> chNoRis =
-        CreateObject<NtnSionnaCascadeChannel>();
-    chNoRis->SetSionnaChannel(baseNoRis);
-    chNoRis->SetAtmosphericChain(chainNoRis);
-
-    // --- RIS-assisted channel ---
     Ptr<NtnSionnaChannel> baseRis = CreateObject<NtnSionnaChannel>();
     baseRis->SetServer(host, port);
     baseRis->SetFrequencyHz(freqHz);
@@ -146,81 +227,41 @@ main(int argc, char* argv[])
     ris.focal_y = 0.0;
     ris.focal_z = 0.0;
     baseRis->SetRis(ris);
-
-    Ptr<NtnAtmosphericLossChain> chainRis =
-        CreateObject<NtnAtmosphericLossChain>();
+    Ptr<NtnAtmosphericLossChain> chainRis = CreateObject<NtnAtmosphericLossChain>();
     chainRis->SetFrequencyHz(freqHz);
     chainRis->SetRainRateMmH(rainMmH);
+    g_chRis = CreateObject<NtnSionnaCascadeChannel>();
+    g_chRis->SetSionnaChannel(baseRis);
+    g_chRis->SetAtmosphericChain(chainRis);
 
-    Ptr<NtnSionnaCascadeChannel> chRis =
-        CreateObject<NtnSionnaCascadeChannel>();
-    chRis->SetSionnaChannel(baseRis);
-    chRis->SetAtmosphericChain(chainRis);
+    std::printf("# %6s  %7s  %9s  %9s  %8s  %9s\n",
+                "t_s", "elev", "ris_gain", "sinr_dB", "tbler", "goodput");
+    rs.RegisterPeriodicCallback(Seconds(1.0), &Tick);
 
-    // --- Mobility ---
-    Ptr<ConstantPositionMobilityModel> ue =
-        CreateObject<ConstantPositionMobilityModel>();
-    ue->SetPosition(Vector(0, 0, 0));
-    // Real SGP4 orbit projected into the scenario's local ENU frame (genuine
-    // pass dynamics; replaces the straight-line placeholder satellite).
-    ns3::ntncon::WalkerConfig wcfgSat;
-    wcfgSat.num_planes = 1;
-    wcfgSat.total_sats = 80;
-    wcfgSat.altitude_km = 550.0;
-    wcfgSat.inclination_deg = 53.0;
-    wcfgSat.epoch_unix_s = 1735689600.0;
-    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
-    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
-        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
-    double satSubLat, satSubLon, satSubAlt;
-    satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
-    Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
-    sat->SetSource(satSgp4);
-    sat->SetReference(satSubLat, satSubLon, 0.0);
-    std::vector<Sample> samples;
-    const Time totalSpan = Seconds(30);
-    const Time dt = totalSpan / steps;
-    for (uint32_t i = 1; i <= steps; ++i)
-    {
-        const Time when = dt * i;
-        Simulator::Schedule(when,
-                            &Tick,
-                            when.GetSeconds(),
-                            chNoRis,
-                            chRis,
-                            Ptr<MobilityModel>(sat),
-                            Ptr<MobilityModel>(ue),
-                            &samples);
-    }
-    Simulator::Stop(totalSpan + Seconds(1));
+    Simulator::Stop(Seconds(duration));
     Simulator::Run();
-    Simulator::Destroy();
+    rs.Collect();
+    rs.WriteHealthReport();
 
-    std::printf("# ris-assisted-leo-link: freq=%.3f GHz alt=%.0f km RIS=%ux%u "
-                "phase=%s focal_xyz=(%.1f,%.1f,%.1f)\n",
-                freqHz / 1e9, altKm, risRows, risCols,
-                phaseProfile.c_str(), ris.focal_x, ris.focal_y, ris.focal_z);
-    std::printf("# %-3s %-7s %-8s %-12s %-12s %-9s\n",
-                "i", "t_s", "elev", "rx_noRIS", "rx_RIS", "gain_dB");
-    std::vector<double> gains;
-    for (size_t i = 0; i < samples.size(); ++i)
+    double gMin = 0.0, gMax = 0.0, gMean = 0.0;
+    if (!g_gains.empty())
     {
-        const auto& s = samples[i];
-        const double gain = s.rx_ris_dbm - s.rx_noris_dbm;
-        gains.push_back(gain);
-        std::printf("  %-3zu %-7.2f %-8.2f %-12.3f %-12.3f %-9.3f\n",
-                    i + 1, s.t_s, s.elev_deg,
-                    s.rx_noris_dbm, s.rx_ris_dbm, gain);
+        gMin = *std::min_element(g_gains.begin(), g_gains.end());
+        gMax = *std::max_element(g_gains.begin(), g_gains.end());
+        gMean = std::accumulate(g_gains.begin(), g_gains.end(), 0.0) / g_gains.size();
     }
-    if (!gains.empty())
-    {
-        const double mn = *std::min_element(gains.begin(), gains.end());
-        const double mx = *std::max_element(gains.begin(), gains.end());
-        const double mean =
-            std::accumulate(gains.begin(), gains.end(), 0.0) / gains.size();
-        std::printf("# RIS gain (n=%zu)  min=%.3f  max=%.3f  mean=%.3f dB\n",
-                    gains.size(), mn, mx, mean);
-    }
+
+    std::printf("\n--- ris-assisted-leo-link Summary (MEASURED real radio) ---\n"
+                "  MEASURED DL SINR mean:        %.2f dB\n"
+                "  measured DL TBLER (mean):     %.4f\n"
+                "  measured DL throughput:       %.3f Mbps\n"
+                "  analytic RIS gain (n=%zu):     min=%.3f max=%.3f mean=%.3f dB\n"
+                "  -> headline SINR/TBLER/goodput are MEASURED; RIS reflection delta is an\n"
+                "     analytic probe (no real-plane gain-adapter exists). Measured-radio RIS\n"
+                "     counterpart: ntn-sionna-ris-relay-traffic.cc.\n",
+                rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps(),
+                g_gains.size(), gMin, gMax, gMean);
+
+    Simulator::Destroy();
     return 0;
 }

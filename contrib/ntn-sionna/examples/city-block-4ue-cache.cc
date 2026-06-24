@@ -82,10 +82,12 @@ Tick(double t,
 int
 main(int argc, char* argv[])
 {
-    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
-                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
-                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
-                "module's *-traffic / *-real-stack examples.\n\n");
+    std::printf("[analytic-tool] TRANSPORT CACHING BENCHMARK — the headline KPI is the\n"
+                "SionnaCachingTransport cache-HIT RATIO under 4 co-located UE queries sharing\n"
+                "one cache, NOT a radio KPI. Converting to a packet plane would obscure the\n"
+                "cache-hit deliverable (its actual point). It therefore does NOT simulate a\n"
+                "packet data plane. For the MEASURED-radio multi-UE counterpart (numUes=4 on\n"
+                "a real mmwave NR cell), see ntn-sionna-cir-real-stack.cc.\n\n");
     std::string host = "127.0.0.1";
     uint16_t port = 8765;
     double freqHz = 2.0e9;

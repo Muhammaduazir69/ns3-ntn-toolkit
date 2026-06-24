@@ -81,10 +81,14 @@ NS_OBJECT_ENSURE_REGISTERED(FsplFreqModel);
 int
 main(int argc, char* argv[])
 {
-    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
-                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
-                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
-                "module's *-traffic / *-real-stack examples.\n\n");
+    std::printf("[analytic-tool] CALIBRATION GATE — a packet data plane is genuinely\n"
+                "inappropriate here. The deliverable is a propagation-model PL RESIDUAL\n"
+                "(model_PL_dB - sionna_PL_dB) measured against the Sionna RT server BEFORE\n"
+                "any radio exists; it has no data-plane analogue (there is nothing to\n"
+                "decode — the artifact is the dB residual itself, gated at <=1 dB LOS-only).\n"
+                "For the MEASURED-KPI counterparts that fade real packets with this same\n"
+                "physics, see ntn-sionna-cir-real-stack.cc and ntn-sionna-leo-downlink-\n"
+                "traffic.cc.\n\n");
     std::string host = "127.0.0.1";
     uint16_t port = 8765;
     bool losOnly = true;

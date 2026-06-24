@@ -1,3 +1,6 @@
+# MEASURED real-plane LEO pass: Sionna multipath+Doppler EXCESS fades real
+# packets on a real mmwave NR link (NtnRealStackHelper); TR 38.811 free space
+# is the reference column. Also exercises the §4.2.6 offline replay backend.
 build_lib_example(
   NAME leo-pass-sionna-vs-tr38811
   SOURCE_FILES leo-pass-sionna-vs-tr38811.cc
@@ -5,9 +8,16 @@ build_lib_example(
     ${libntn-sionna}
     ${libntn-cho}
     ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
+    ${libnetwork}
     ${libmobility}
+    ${libspectrum}
     ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
 )
 
 # Phase-2 real-stack (channel-plugin recipe): the FULL Sionna RT CIR (multipath +
@@ -44,7 +54,9 @@ build_lib_example(
     ${libpropagation}
 )
 
-# Roadmap §4.2.12 — RIS-assisted LEO ground link before/after.
+# Roadmap §4.2.12 — RIS-assisted LEO ground link: MEASURED DL SINR/goodput on
+# a real mmwave NR cell (NtnRealStackHelper) with ITU-R atmospheric excess in
+# the packet path; RIS reflection gain is an analytic Sionna-cascade probe.
 build_lib_example(
   NAME ris-assisted-leo-link
   SOURCE_FILES ris-assisted-leo-link.cc
@@ -52,9 +64,16 @@ build_lib_example(
     ${libntn-sionna}
     ${libntn-cho}
     ${libntn-constellation}
+    ${libntn-traffic}
     ${libcore}
+    ${libnetwork}
     ${libmobility}
+    ${libspectrum}
     ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
 )
 
 # Roadmap §4.2.12 — AODT-style 4-UE city-block with caching transport.
