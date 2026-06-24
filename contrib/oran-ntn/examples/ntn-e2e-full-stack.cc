@@ -39,6 +39,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 
 using namespace ns3;
 using namespace ns3::ntnslice;
@@ -126,6 +127,8 @@ main(int argc, char* argv[])
 
     // One periodic loop drives ALL consumers from the SAME measured SINR; the
     // O-RAN enrichment (elevation/Doppler) is computed from the REAL ephemeris.
+    std::map<uint32_t, uint64_t> lastRxBytes; // ue -> last measured DL bytes
+    const double kpmIntervalS = 0.1; // matches RegisterPeriodicCallback below
     auto tick = [&](Time now) {
         double t = now.GetSeconds();
         const Vector sp = servSat->GetPosition();
@@ -137,12 +140,28 @@ main(int argc, char* argv[])
             {
                 continue;
             }
-            // (a) RIC: measured KPM + real-ephemeris enrichment.
+            // (a) RIC: measured KPM + real-ephemeris enrichment. The measured
+            // bytes/TBLER are threaded in so the RIC's xApps act on measured
+            // goodput, not a synthetic SINR formula (Global invariant 2 + 4).
             const Vector up = ueModels[u]->GetPosition();
             const Vector uv = ueModels[u]->GetVelocity();
             const double elev = ntngeo::ElevationDeg(up, sp);
             const double doppler = ntngeo::DopplerHz(up, uv, sp, sv, 2.0e9);
-            helper->InjectKpmReport(1, u, sinr, sinr - 95.0, 60.0, elev, doppler);
+            const uint64_t rxBytes = rs.GetUeRxBytes(u);
+            double measTbler = rs.GetUeRecentTbler(u);
+            if (std::isnan(measTbler))
+            {
+                measTbler = -1.0;
+            }
+            double measThp = -1.0;
+            if (auto bit = lastRxBytes.find(u);
+                bit != lastRxBytes.end() && rxBytes >= bit->second)
+            {
+                measThp = (rxBytes - bit->second) * 8.0 / (kpmIntervalS * 1e6);
+            }
+            lastRxBytes[u] = rxBytes;
+            helper->InjectKpmReport(1, u, sinr, sinr - 95.0, 60.0, elev, doppler,
+                                    measThp, rxBytes, measTbler);
             // (c) observability: log the measured value.
             kpiLog << std::fixed << std::setprecision(2) << t << "," << u << "," << sinr
                    << ",phy-trace\n";

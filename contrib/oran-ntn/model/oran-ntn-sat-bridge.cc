@@ -480,6 +480,14 @@ OranNtnSatBridge::ComputeFullLinkBudget(uint32_t ueId,
                                           uint32_t beamId) const
 {
     NS_LOG_FUNCTION(this << ueId << satId << beamId);
+    // RESEARCH / OFFLINE estimator: the throughput_Mbps below is a closed-form
+    // Shannon figure derived from an analytic link-budget SINR, NOT a decoded
+    // PHY measurement. Not used by any shipped example (the measured KPM path
+    // runs through NtnRealStackHelper + OranNtnHelper::InjectKpmReport). See the
+    // header \warning. Global invariant 5: tag standard vs research model.
+    NS_LOG_WARN("OranNtnSatBridge::ComputeFullLinkBudget: offline link-budget "
+                "estimator (research model) — throughput is closed-form Shannon, "
+                "not a measured KPI. Not a measured-plane KPM source.");
 
     E2KpmReport report;
     report.timestamp = Simulator::Now().GetSeconds();
@@ -513,7 +521,9 @@ OranNtnSatBridge::ComputeFullLinkBudget(uint32_t ueId,
     // TTE
     report.tte_s = ComputeTte(ueId, satId, beamId);
 
-    // Throughput estimate from SINR (Shannon-based, simplified)
+    // Throughput estimate from SINR (Shannon-based, simplified). RESEARCH
+    // MODEL ONLY — closed-form, not a decoded-PHY measurement (see header
+    // \warning + the NS_LOG_WARN above). Global invariant 5.
     double spectralEff = std::log2(1.0 + std::pow(10.0, report.sinr_dB / 10.0));
     report.throughput_Mbps = spectralEff * m_bandwidth_Hz / 1e6;
     report.latency_ms = report.propagationDelay_ms * 2.0; // RTT

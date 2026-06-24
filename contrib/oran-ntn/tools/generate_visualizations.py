@@ -7,6 +7,8 @@ Author: Muhammad Uzair
 """
 
 import os
+import sys
+import csv
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -19,6 +21,60 @@ import matplotlib.colors as mcolors
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'visualization')
 os.makedirs(OUT_DIR, exist_ok=True)
+
+# --- Measured-data plumbing -------------------------------------------------
+# Headline KPM figures are plotted from the simulator's exported
+# kpm_dataset.csv (written by OranNtnHelper::WriteKpmDataset), NOT synthesized
+# with np.random. Pass the run's output dir as argv[1] (or set
+# ORAN_NTN_DATA_DIR); --demo forces the labelled synthetic-illustration path
+# used only when no CSV is present (Global invariant 2 / audit item 9).
+DEMO_MODE = '--demo' in sys.argv
+_POS_ARGS = [a for a in sys.argv[1:] if not a.startswith('-')]
+DATA_DIR = (_POS_ARGS[0] if _POS_ARGS
+            else os.environ.get('ORAN_NTN_DATA_DIR', OUT_DIR))
+
+
+def _find_csv(name):
+    """Locate an exported CSV by name under DATA_DIR or common run dirs."""
+    cands = [os.path.join(DATA_DIR, name),
+             os.path.join(OUT_DIR, name),
+             name]
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def load_kpm_dataset():
+    """Read kpm_dataset.csv into a dict of float/str columns, or None."""
+    if DEMO_MODE:
+        return None
+    path = _find_csv('kpm_dataset.csv')
+    if path is None:
+        return None
+    cols = {}
+    with open(path, newline='') as fh:
+        rd = csv.DictReader(fh)
+        for k in rd.fieldnames or []:
+            cols[k] = []
+        for row in rd:
+            for k, v in row.items():
+                cols.setdefault(k, []).append(v)
+    if not cols or not any(cols.values()):
+        return None
+    print(f"    [data] plotting measured KPM from {path} "
+          f"({len(next(iter(cols.values())))} rows)")
+    return cols
+
+
+def _fcol(cols, name):
+    out = []
+    for v in cols.get(name, []):
+        try:
+            out.append(float(v))
+        except (TypeError, ValueError):
+            out.append(np.nan)
+    return np.array(out, dtype=float)
 
 # Color schemes
 DARK_BG = '#0d1117'
@@ -414,12 +470,105 @@ def generate_architecture_png():
 # =============================================================================
 #  Static PNG 2: KPM Metrics
 # =============================================================================
+def _generate_kpm_metrics_png_measured(cols):
+    """KPM figure plotted from the simulator's exported kpm_dataset.csv."""
+    sinr = _fcol(cols, 'sinr_dB')
+    thp = _fcol(cols, 'throughput_Mbps')
+    prb = _fcol(cols, 'prb_utilization')
+    elev = _fcol(cols, 'elevation_deg')
+    dopp = _fcol(cols, 'doppler_Hz')
+    tte = _fcol(cols, 'tte_s')
+    is_ntn = _fcol(cols, 'is_ntn')
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 9), facecolor='white')
+    fig.suptitle('O-RAN NTN: Measured KPM Metrics (from kpm_dataset.csv)',
+                 fontsize=13, fontweight='bold', color='#24292f', y=0.98)
+    plt.subplots_adjust(hspace=0.35, wspace=0.3)
+
+    # SINR histogram grouped by is_ntn (measured).
+    ax = axes[0, 0]
+    sv = sinr[np.isfinite(sinr)]
+    nmask = (is_ntn >= 0.5) & np.isfinite(sinr)
+    tmask = (is_ntn < 0.5) & np.isfinite(sinr)
+    if nmask.any():
+        ax.hist(sinr[nmask], bins=40, alpha=0.6, color='#1f6feb',
+                label='NTN', density=True)
+    if tmask.any():
+        ax.hist(sinr[tmask], bins=40, alpha=0.6, color='#2ea043',
+                label='TN', density=True)
+    if not nmask.any() and not tmask.any() and sv.size:
+        ax.hist(sv, bins=40, alpha=0.7, color='#1f6feb', density=True)
+    ax.set_xlabel('Measured SINR (dB)', fontsize=10)
+    ax.set_ylabel('Density', fontsize=10)
+    ax.set_title('Measured SINR Distribution', fontsize=11, fontweight='bold')
+    if nmask.any() or tmask.any():
+        ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    # Elevation vs Doppler scatter colored by measured SINR.
+    ax = axes[0, 1]
+    m = np.isfinite(elev) & np.isfinite(dopp)
+    if m.any():
+        c = sinr[m] if np.isfinite(sinr[m]).any() else None
+        sc = ax.scatter(elev[m], dopp[m] / 1000.0, c=c, cmap='RdYlGn',
+                        s=4, alpha=0.5)
+        if c is not None:
+            plt.colorbar(sc, ax=ax, label='SINR (dB)', shrink=0.8)
+    ax.set_xlabel('Elevation Angle (deg)', fontsize=10)
+    ax.set_ylabel('Doppler Shift (kHz)', fontsize=10)
+    ax.set_title('Elevation vs Doppler (measured geometry)',
+                 fontsize=11, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+
+    # TTE histogram (measured/estimated from real ephemeris).
+    ax = axes[1, 0]
+    tv = tte[np.isfinite(tte)]
+    if tv.size:
+        ax.hist(tv, bins=50, color='#1f6feb', alpha=0.75, density=True)
+    ax.set_xlabel('Time-to-Exit (s)', fontsize=10)
+    ax.set_ylabel('Density', fontsize=10)
+    ax.set_title('TTE Distribution', fontsize=11, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+
+    # Throughput CDF (measured DL goodput).
+    ax = axes[1, 1]
+    th = thp[np.isfinite(thp)]
+    if th.size:
+        sd = np.sort(th)
+        cdf = np.arange(1, len(sd) + 1) / len(sd)
+        ax.plot(sd, cdf, color='#1f6feb', linewidth=2.5, label='DRB.UEThpDl')
+    pv = prb[np.isfinite(prb)]
+    if pv.size:
+        sp = np.sort(pv)
+        cdfp = np.arange(1, len(sp) + 1) / len(sp)
+        ax2 = ax.twiny()
+        ax2.plot(sp, cdfp, color='#bf8700', linewidth=1.8, linestyle='--',
+                 label='RRU.PrbUsedDl')
+        ax2.set_xlabel('PRB utilisation', fontsize=9, color='#bf8700')
+    ax.set_xlabel('Throughput (Mbps)', fontsize=10)
+    ax.set_ylabel('CDF', fontsize=10)
+    ax.set_title('Measured DL Throughput CDF', fontsize=11, fontweight='bold')
+    ax.legend(fontsize=8, loc='lower right')
+    ax.grid(True, alpha=0.3)
+
+    path = os.path.join(OUT_DIR, 'oran_ntn_kpm_metrics.png')
+    fig.savefig(path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f"    -> {path} ({os.path.getsize(path)/1024:.0f} KB)")
+
+
 def generate_kpm_metrics_png():
     print("  Generating KPM metrics diagram...")
+    cols = load_kpm_dataset()
+    if cols is not None:
+        _generate_kpm_metrics_png_measured(cols)
+        return
+    print("    [SYNTHETIC DEMO DATA] no kpm_dataset.csv found "
+          "(pass run output dir as argv[1] or --demo); figure is illustrative.")
     np.random.seed(99)
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 9), facecolor='white')
-    fig.suptitle('O-RAN NTN: Realistic KPM Metrics from Satellite Bridge',
+    fig.suptitle('O-RAN NTN KPM Metrics  [SYNTHETIC DEMO — illustrative only]',
                  fontsize=13, fontweight='bold', color='#24292f', y=0.98)
     plt.subplots_adjust(hspace=0.35, wspace=0.3)
 

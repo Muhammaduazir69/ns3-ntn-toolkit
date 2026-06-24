@@ -167,6 +167,8 @@ main(int argc, char* argv[])
     // real elevation rate. Candidates report real elevation + a Friis-ratio
     // SINR prediction off the measured baseline (flagged prediction by design).
     std::map<uint32_t, double> lastElev; // satIdx -> last elevation (for d/dt)
+    std::map<uint32_t, uint64_t> lastRxBytes; // ue -> last measured DL bytes
+    const double kpmIntervalS = 0.1; // matches RegisterPeriodicCallback below
     auto kpmTick = [&, minElevDeg](Time) {
         for (uint32_t ue = 0; ue < numUes; ++ue)
         {
@@ -193,7 +195,23 @@ main(int argc, char* argv[])
             const double tte = (elevRate < -1e-3)
                                    ? std::max(1.0, (elev - minElevDeg) / -elevRate)
                                    : 600.0; // rising/flat: bounded "long" TTE
-            helper->InjectKpmReport(1, ue, sinr, sinr - 95.0, tte, elev, doppler);
+            // Serving cell rides the REAL radio: thread measured
+            // bytes/TBLER/goodput into the KPM report (Global invariant 2).
+            const uint64_t rxBytes = rs.GetUeRxBytes(ue);
+            double measTbler = rs.GetUeRecentTbler(ue);
+            if (std::isnan(measTbler))
+            {
+                measTbler = -1.0;
+            }
+            double measThp = -1.0;
+            if (auto bit = lastRxBytes.find(ue);
+                bit != lastRxBytes.end() && rxBytes >= bit->second)
+            {
+                measThp = (rxBytes - bit->second) * 8.0 / (kpmIntervalS * 1e6);
+            }
+            lastRxBytes[ue] = rxBytes;
+            helper->InjectKpmReport(1, ue, sinr, sinr - 95.0, tte, elev, doppler,
+                                    measThp, rxBytes, measTbler);
 
             // One ephemeris-predicted candidate per UE (round-robin).
             const uint32_t candIdx = 1 + (ue % std::max(1u, numSats - 1));

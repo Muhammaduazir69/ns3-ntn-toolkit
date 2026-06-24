@@ -59,7 +59,16 @@ class OranNtnPhyKpmExtractor : public Object
     ~OranNtnPhyKpmExtractor() override;
 
     /**
-     * \brief Connect to eNB PHY trace sources
+     * \brief Associate this extractor with an eNB device's satellite id.
+     *
+     * \note This does NOT auto-connect the mmwave PHY traces: the
+     *       RxPacketTraceUe source emits RxPacketTraceParams, which does not
+     *       match this extractor's per-RNTI update signature across mmwave
+     *       versions. In the shipped toolkit the extractor's per-UE
+     *       SINR/throughput/HARQ state is fed by NtnRealStackHelper (which
+     *       owns the RxPacketTraceUe connection) and the scenario script, or
+     *       via AttachToUePhy. (Audit item 8: the auto-attach is documented as
+     *       scenario/NtnRealStackHelper-fed rather than silently a no-op.)
      */
     void AttachToEnbPhy(Ptr<mmwave::MmWaveEnbNetDevice> enbDev, uint32_t satId);
 

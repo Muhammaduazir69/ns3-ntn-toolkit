@@ -102,17 +102,23 @@ OranNtnPhyKpmExtractor::AttachToEnbPhy(Ptr<mmwave::MmWaveEnbNetDevice> enbDev, u
         return;
     }
 
-    NS_LOG_INFO("PHY KPM Extractor: attached to eNB device on satId=" << satId
+    NS_LOG_INFO("PHY KPM Extractor: associated with eNB device on satId=" << satId
                 << " (node " << enbDev->GetNode()->GetId() << ")");
 
     /*
-     * In the simplified integration mode we store the satId so that
-     * UePhyState entries created via AttachToUePhy can be associated
-     * with the correct satellite.  Direct PHY trace connection would
-     * require access to MmWaveEnbPhy internals which differ across
-     * mmWave module versions; the callbacks are instead driven by
-     * the E2 interface layer or external wiring in the scenario script.
+     * This does NOT auto-connect the mmwave RxPacketTraceUe source: that
+     * source emits RxPacketTraceParams, which does not match the extractor's
+     * per-RNTI DlPhyReceptionCallback signature, and MmWaveEnbPhy internals
+     * differ across mmWave module versions. In the shipped toolkit the
+     * extractor's per-UE SINR/throughput/HARQ state is fed by
+     * NtnRealStackHelper (which owns the RxPacketTraceUe connection) and the
+     * scenario script, or via AttachToUePhy. The auto-attach is intentionally
+     * documented as scenario/NtnRealStackHelper-fed (audit item 8) rather than
+     * silently no-op; emit a WARN so a caller relying on auto-wiring notices.
      */
+    NS_LOG_WARN("AttachToEnbPhy: no auto PHY-trace wiring (RxPacketTraceParams "
+                "signature mismatch). Feed the extractor via NtnRealStackHelper "
+                "accessors / AttachToUePhy / scenario wiring instead.");
 }
 
 void

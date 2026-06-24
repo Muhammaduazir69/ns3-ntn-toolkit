@@ -242,7 +242,19 @@ class OranNtnSatBridge : public Object
     double ComputeNtnSinr(uint32_t ueId, uint32_t satId, uint32_t beamId) const;
 
     /**
-     * \brief Compute full link budget and return KPM report
+     * \brief Compute full link budget and return KPM report.
+     *
+     * \warning RESEARCH / OFFLINE LINK-BUDGET ESTIMATOR — NOT a measured KPI
+     *          source. The throughput_Mbps it returns is a closed-form
+     *          Shannon estimate (log2(1+SINR_lin)*BW) and the SINR comes from
+     *          ComputeNtnSinr(), an analytic link budget, not from a decoded
+     *          PHY. OranNtnSatBridge is NOT instantiated by any shipped
+     *          example; the measured KPM path used by the toolkit's examples
+     *          runs through NtnRealStackHelper (RxPacketTraceUe / FlowMonitor)
+     *          and OranNtnHelper::InjectKpmReport. Use this only for offline
+     *          link-budget studies, mirroring the rc-style3 'unit-tests only'
+     *          provenance note. (Global invariant 5: standard vs research
+     *          model must be tagged.)
      */
     E2KpmReport ComputeFullLinkBudget(uint32_t ueId, uint32_t satId,
                                         uint32_t beamId) const;

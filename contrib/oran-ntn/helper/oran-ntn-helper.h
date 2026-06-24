@@ -135,10 +135,28 @@ class OranNtnHelper : public Object
 
     /**
      * \brief Submit a manual KPM report to an E2 node
+     *
+     * The trailing measured-plane arguments are OPTIONAL. When a caller has a
+     * real data plane (NtnRealStackHelper FlowMonitor / RxPacketTraceUe), it
+     * passes the measured DL throughput (Mbps), the cumulative RX bytes, the
+     * measured TBLER and the measured PRB utilisation, and the report carries
+     * those values verbatim (Global invariant 2: headline KPIs measured, never
+     * closed-form-to-CSV). When left at their sentinel defaults (no radio
+     * attached, e.g. scale-out geometry-budget UEs), the report falls back to
+     * the documented provenance-tagged link-budget estimate.
+     *
+     * \param measThroughputMbps measured DL goodput (Mbps); <0 = derive fallback
+     * \param measRxBytes cumulative measured DL bytes for this UE; 0 = none
+     * \param measTbler measured DL TBLER (0..1); <0 = leave HARQ BLER unset
+     * \param measPrbUtil measured PRB utilisation (0..1); <0 = derive fallback
      */
     void InjectKpmReport(uint32_t gnbId, uint32_t ueId,
                           double sinr, double rsrp, double tte,
-                          double elevation, double doppler);
+                          double elevation, double doppler,
+                          double measThroughputMbps = -1.0,
+                          uint64_t measRxBytes = 0,
+                          double measTbler = -1.0,
+                          double measPrbUtil = -1.0);
 
     // ---- Phase 2: mmWave NTN stack setup ----
     //

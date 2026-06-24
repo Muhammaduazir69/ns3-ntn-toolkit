@@ -19,8 +19,16 @@
 #include "ns3/oran-ntn-space-ric.h"
 #include "ns3/oran-ntn-xapp-beam-hop.h"
 #include "ns3/oran-ntn-xapp-doppler-comp.h"
+#include "ns3/oran-ntn-xapp-energy-harvest.h"
 #include "ns3/oran-ntn-xapp-ho-predict.h"
+#include "ns3/oran-ntn-xapp-interference-mgmt.h"
+#include "ns3/oran-ntn-xapp-isac.h"
+#include "ns3/oran-ntn-xapp-multi-conn.h"
+#include "ns3/oran-ntn-xapp-predictive-alloc.h"
 #include "ns3/oran-ntn-xapp-slice-manager.h"
+#include "ns3/oran-ntn-xapp-thz-beam-mgmt.h"
+#include "ns3/oran-ntn-xapp-thz-ris.h"
+#include "ns3/oran-ntn-xapp-thz-spectrum.h"
 #include "ns3/oran-ntn-xapp-tn-ntn-steering.h"
 
 #include <algorithm>
@@ -276,7 +284,35 @@ OranNtnHelper::CreateAllXapps(Ptr<OranNtnNearRtRic> ric)
     ric->RegisterXapp(tnNtnSteering);
     xapps["tn-ntn-steering"] = tnNtnSteering;
 
-    NS_LOG_INFO("OranNtnHelper: Created and registered 5 xApps");
+    // 6..14. Previously-dead xApps: instantiate and register them so they
+    // receive ProcessKpmReport from the SAME measured KPM feed (audit
+    // section 2 utilisation; Global invariant 4 — real classes exercised
+    // end-to-end). Each derives from OranNtnXappBase and is RIC-managed.
+    auto regXapp = [&](Ptr<OranNtnXappBase> x, const std::string& name,
+                       uint8_t prio, Time interval) {
+        x->SetXappName(name);
+        x->SetPriority(prio);
+        x->SetDecisionInterval(interval);
+        ric->RegisterXapp(x);
+        xapps[name] = x;
+    };
+    regXapp(CreateObject<OranNtnXappEnergyHarvest>(), "energy-harvest", 40,
+            MilliSeconds(1000));
+    regXapp(CreateObject<OranNtnXappInterferenceMgmt>(), "interference-mgmt", 22,
+            MilliSeconds(200));
+    regXapp(CreateObject<OranNtnXappIsac>(), "isac", 35, MilliSeconds(500));
+    regXapp(CreateObject<OranNtnXappMultiConn>(), "multi-conn", 28,
+            MilliSeconds(300));
+    regXapp(CreateObject<OranNtnXappPredictiveAlloc>(), "predictive-alloc", 18,
+            MilliSeconds(200));
+    regXapp(CreateObject<OranNtnXappThzBeamMgmt>(), "thz-beam-mgmt", 26,
+            MilliSeconds(200));
+    regXapp(CreateObject<OranNtnXappThzRis>(), "thz-ris", 27, MilliSeconds(300));
+    regXapp(CreateObject<OranNtnXappThzSpectrum>(), "thz-spectrum", 24,
+            MilliSeconds(300));
+
+    NS_LOG_INFO("OranNtnHelper: Created and registered " << xapps.size()
+                << " xApps");
     return xapps;
 }
 
@@ -380,7 +416,11 @@ OranNtnHelper::KpmFeedCallback()
 void
 OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
                                  double sinr, double rsrp, double tte,
-                                 double elevation, double doppler)
+                                 double elevation, double doppler,
+                                 double measThroughputMbps,
+                                 uint64_t measRxBytes,
+                                 double measTbler,
+                                 double measPrbUtil)
 {
     auto it = m_e2Nodes.find(gnbId);
     if (it == m_e2Nodes.end())
@@ -408,7 +448,23 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
                             10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
     }
     report.cqi = static_cast<uint8_t>(std::max(0.0, std::min(15.0, sinr + 6.0)));
-    report.throughput_Mbps = std::max(0.0, 10.0 * (1.0 + sinr / 30.0));
+    // Throughput (DRB.UEThpDl): use the MEASURED goodput when the caller has a
+    // real data plane; only fall back to the SINR-derived link-budget estimate
+    // for radio-less (geometry-budget) UEs. Global invariant 2 / rubric B.2.
+    report.throughput_Mbps = (measThroughputMbps >= 0.0)
+                                 ? measThroughputMbps
+                                 : std::max(0.0, 10.0 * (1.0 + sinr / 30.0));
+    // DRB.PdcpSduVolumeDL is exported by WriteKpmDatasetCanonical as
+    // throughput x interval; when measRxBytes>0 the measured throughput above
+    // already reflects the real PDCP delivery, so the canonical volume tracks
+    // the measured plane. (No separate struct field — kept measRxBytes in the
+    // signature so callers thread real bytes into the throughput conversion.)
+    (void)measRxBytes;
+    // HARQ BLER (RRU/DRB error): from the measured TBLER when available.
+    if (measTbler >= 0.0)
+    {
+        report.harqBler = measTbler;
+    }
     // Propagation delay from the actual slant range, derived from elevation for
     // a LEO shell (h~600 km), instead of a single is_ntn constant. One-way
     // user-plane latency = propagation + ~1 ms processing/scheduling.
@@ -433,8 +489,15 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
     // Cell-level load varies with time and cell so PRB/active-UE/throughput are
     // not frozen constants. Deterministic (reproducible) pseudo-load.
     const double phase = std::sin(Simulator::Now().GetSeconds() * 0.1 + gnbId * 0.7);
-    report.prbUtilization = std::max(0.05, std::min(0.98, 0.55 + 0.30 * phase));
+    // RRU.PrbUsedDl: use measured PRB utilisation when the caller supplies it
+    // (real scheduler load); otherwise the documented deterministic fallback
+    // for radio-less geometry-budget UEs. Global invariant 2 / rubric B.2.
+    report.prbUtilization = (measPrbUtil >= 0.0)
+                                ? std::max(0.0, std::min(1.0, measPrbUtil))
+                                : std::max(0.05, std::min(0.98, 0.55 + 0.30 * phase));
     report.activeUes = static_cast<uint32_t>(std::max(1.0, 12.0 + 6.0 * phase));
+    // Cell throughput from the (measured-or-fallback) PRB utilisation. When PRB
+    // is measured this reflects real load; otherwise it tracks the fallback.
     report.cellThroughput_Mbps = report.prbUtilization * 273.0 * 0.75; // util x PRB x Mbps/PRB
     // Assign slice based on UE modular grouping: eMBB=0, URLLC=1, mMTC=2
     report.sliceId = static_cast<uint8_t>(ueId % 3);

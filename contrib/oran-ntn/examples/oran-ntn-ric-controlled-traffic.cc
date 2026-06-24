@@ -49,6 +49,10 @@
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/oran-ntn-e2-interface.h"
 #include "ns3/oran-ntn-mmimo-codebook.h"
+#include "ns3/oran-ntn-rc-style3.h"
+#include "ns3/oran-ntn-service-model-ccc.h"
+#include "ns3/oran-ntn-service-model-ntn-ephemeris.h"
+#include "ns3/oran-ntn-service-model-rc.h"
 #include "ns3/oran-ntn-types.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
@@ -351,6 +355,54 @@ main(int argc, char* argv[])
                         now.GetSeconds(), elev, measured, intrinsic,
                         st.on ? "ON" : "off", g_rs->GetUeRecentTbler(0), mbps);
         });
+
+    // ---- Service-model coverage: exercise the three previously-dead E2SM
+    // plugins on LIVE data (audit section 2 / Global invariant 4; B.1/B.3
+    // RAN-function + Style coverage). All use existing public encoders only.
+    // (1) E2SM-NTN-Ephemeris (RIC fn 1001): SIB19 from the SGP4 state vector.
+    // (2) E2SM-RC (RIC fn 3): Style 3 Action 2 (CHO) control on the cell.
+    // (3) E2SM-CCC (RIC fn 1000): a cell-config-change indication snapshot.
+    {
+        using namespace oranntn;
+        Ptr<OranNtnServiceModelNtnEphemeris> smEph =
+            CreateObject<OranNtnServiceModelNtnEphemeris>();
+        const Vector p = satSgp4->GetEcefPosition();
+        const Vector v = satSgp4->GetEcefVelocity();
+        ephemeris::Sib19NtnConfig sib{};
+        sib.epoch = ephemeris::EpochTimeIe{0, 0};
+        sib.ephemeris = ephemeris::PositionVelocityIe{p.x, p.y, p.z,
+                                                      v.x, v.y, v.z};
+        sib.ta = ephemeris::TimingAdvanceIe{0.0, 0.0, 0.0};
+        sib.cell_specific_koffset_slots = 0;
+        auto ephBytes = smEph->EncodeIndication(&sib);
+
+        Ptr<OranNtnServiceModelRc> smRc = CreateObject<OranNtnServiceModelRc>();
+        rc_v103::style3::ConditionalHandoverControl cho{};
+        cho.conditional_reconfiguration_id = 1;
+        rc_v103::style3::ConditionalHandoverControl::CandidateCell cand{};
+        cand.target_primary_cell_id = rc_v103::style3::NrCellGlobalId{
+            "00101", static_cast<uint64_t>(kCellId)};
+        cho.candidate_cell_list.push_back(cand);
+        rc_v103::style3::ControlMessage rcMsg{};
+        rcMsg.action = cho;
+        auto rcBytes = smRc->EncodeControl(rcMsg);
+
+        Ptr<OranNtnServiceModelCcc> smCcc = CreateObject<OranNtnServiceModelCcc>();
+        ccc::CccIndMsgFormat1 cccInd{};
+        ccc::CellConfigRecord rec{};
+        rec.nr_cell_global_id = kCellId;
+        rec.output_power_dbm = static_cast<int16_t>(satEirpDbm);
+        cccInd.cells.push_back(rec);
+        cccInd.snapshot_seq = 1;
+        auto cccBytes = smCcc->EncodeIndication(&cccInd);
+
+        std::printf("# service-models exercised on live data: "
+                    "NTN-Ephemeris(fn=%u) %zuB | RC Style3 Action%u(CHO) %zuB | "
+                    "CCC(fn=%u) %zuB\n",
+                    smEph->RicFunctionId(), ephBytes.size(),
+                    rc_v103::style3::ActionId(rcMsg.action), rcBytes.size(),
+                    smCcc->RicFunctionId(), cccBytes.size());
+    }
 
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();

@@ -325,7 +325,34 @@ class RealGeometryKpmFeed
                                                      satVel[servingSat], m_p.freqGhz * 1e9);
             const double tte =
                 (chosenTte >= 0.0) ? chosenTte : EstimateTteS(ue, servingSat, elev);
-            m_helper->InjectKpmReport(servingSat + 1, ue, sinr, rsrp, tte, elev, doppler);
+            // Anchored UEs ride the REAL mmwave cell: thread the measured
+            // throughput/bytes/TBLER from the live data plane into the KPM
+            // report so the RIC acts on measured goodput (Global invariant 2).
+            // Geometry-budget UEs have no radio -> keep the honest fallback.
+            double measThp = -1.0;
+            uint64_t measBytes = 0;
+            double measTbler = -1.0;
+            if (ue < m_anchoredUes && m_rs && std::string(provenance) == "phy-trace")
+            {
+                measBytes = m_rs->GetUeRxBytes(ue);
+                measTbler = m_rs->GetUeRecentTbler(ue);
+                if (std::isnan(measTbler))
+                {
+                    measTbler = -1.0;
+                }
+                // Per-UE goodput from the measured byte delta over the KPM
+                // interval, using the same (bytes*8)/(interval*1e6) the
+                // extractor uses. First tick has no prior -> fall back.
+                auto pit = m_lastRxBytes.find(ue);
+                if (pit != m_lastRxBytes.end() && measBytes >= pit->second)
+                {
+                    measThp = (measBytes - pit->second) * 8.0 /
+                              (m_p.kpmInterval * 1e6);
+                }
+                m_lastRxBytes[ue] = measBytes;
+            }
+            m_helper->InjectKpmReport(servingSat + 1, ue, sinr, rsrp, tte, elev, doppler,
+                                      measThp, measBytes, measTbler);
             LogRow(t, ue, servingSat + 1, "serving", sinr, rsrp, elev, doppler, tte,
                    provenance);
 
@@ -508,6 +535,7 @@ class RealGeometryKpmFeed
     std::vector<Ptr<OranNtnSpaceRic>>* m_spaceRics{nullptr};
     std::map<uint64_t, double> m_lastElev; // (ue,sat) -> last elevation
     std::map<uint32_t, uint32_t> m_serving; // ue -> serving sat (sticky mobility)
+    std::map<uint32_t, uint64_t> m_lastRxBytes; // ue -> last measured DL bytes
     std::ofstream m_csv;
     uint32_t m_coverageGaps{0};
 };
