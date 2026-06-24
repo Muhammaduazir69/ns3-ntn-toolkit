@@ -1,0 +1,30 @@
+# -*- Mode: python; py-indent-offset: 4; indent-tabs-mode: nil; coding: utf-8; -*-
+
+
+def build(bld):
+    obj = bld.create_ns3_program('application-state-trace-example-netsimulyzer',
+                                 ['netsimulyzer', 'core', 'applications'])
+    obj.source = 'application-state-trace-example.cc'
+
+    obj = bld.create_ns3_program('ecdf-sink-example-netsimulyzer',
+                                 ['netsimulyzer', 'applications', 'core', 'internet', 'mobility',
+                                  'network', 'point-to-point'])
+    obj.source = 'ecdf-sink-example-netsimulyzer.cc'
+
+    obj = bld.create_ns3_program('mobility-buildings-example-netsimulyzer',
+                                 ['netsimulyzer', 'core', 'mobility', 'network', 'buildings'])
+    obj.source = 'mobility-buildings-example.cc'
+
+    obj = bld.create_ns3_program('lena-radio-link-failure-netsimulyzer',
+                                 ['netsimulyzer', 'core', 'mobility', 'network', 'lte'])
+    obj.source = 'lena-radio-link-failure-netsimulyzer.cc'
+
+    obj = bld.create_ns3_program('outdoor-random-walk-example-netsimulyzer',
+                                 ['netsimulyzer', 'core', 'mobility', 'network', 'buildings'])
+    obj.source = 'outdoor-random-walk-example-netsimulyzer.cc'
+
+    obj = bld.create_ns3_program('throughput-sink-example-netsimulyzer',
+                                 ['netsimulyzer', 'core', 'mobility', 'network', 'internet', 'applications',
+                                  'point-to-point'])
+    obj.source = 'throughput-sink-example-netsimulyzer.cc'
+
