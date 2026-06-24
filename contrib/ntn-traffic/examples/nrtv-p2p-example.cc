@@ -45,9 +45,71 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/ntn-traffic-module.h"
 
+#include <fstream>
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("NrtvP2pExample");
+
+// ---- Application-layer QoE sinks for the NrtvTcpClient trace sources. ----
+// These connect the previously-unconnected RxDelay/RxJitter/RxSlice/RxFrame
+// traces to a CSV file and to run-level accumulators. All values are MEASURED
+// by the live TCP NRTV session; no formulas are involved.
+namespace
+{
+std::ofstream g_qoeCsv;
+uint64_t g_sliceCount = 0;
+uint64_t g_frameCount = 0;
+uint64_t g_delaySamples = 0;
+double g_delaySumMs = 0.0;
+uint64_t g_jitterSamples = 0;
+double g_jitterSumMs = 0.0;
+
+void
+QoeRxDelay(const Time& delay, const Address&)
+{
+    g_delaySumMs += delay.GetSeconds() * 1000.0;
+    ++g_delaySamples;
+    if (g_qoeCsv.is_open())
+    {
+        g_qoeCsv << Simulator::Now().GetSeconds() << ",delay," << delay.GetSeconds() * 1000.0
+                 << std::endl;
+    }
+}
+
+void
+QoeRxJitter(const Time& jitter, const Address&)
+{
+    g_jitterSumMs += jitter.GetSeconds() * 1000.0;
+    ++g_jitterSamples;
+    if (g_qoeCsv.is_open())
+    {
+        g_qoeCsv << Simulator::Now().GetSeconds() << ",jitter," << jitter.GetSeconds() * 1000.0
+                 << std::endl;
+    }
+}
+
+void
+QoeRxSlice(Ptr<const Packet> slice)
+{
+    ++g_sliceCount;
+    if (g_qoeCsv.is_open())
+    {
+        g_qoeCsv << Simulator::Now().GetSeconds() << ",slice," << slice->GetSize() << std::endl;
+    }
+}
+
+void
+QoeRxFrame(uint32_t frameNumber, uint32_t numOfFrames)
+{
+    ++g_frameCount;
+    if (g_qoeCsv.is_open())
+    {
+        g_qoeCsv << Simulator::Now().GetSeconds() << ",frame," << frameNumber << ","
+                 << numOfFrames << std::endl;
+    }
+}
+} // anonymous namespace
 
 int
 main(int argc, char* argv[])
@@ -169,8 +231,43 @@ main(int argc, char* argv[])
 
     /// End of plot configurations ///
 
+    /// Connect the NrtvTcpClient QoE trace sources (TCP path only). For UDP the
+    /// client is a PacketSink, not an NrtvTcpClient, so the DynamicCast returns
+    /// nullptr and these traces never fire -> guard on a non-null cast. ///
+    Ptr<NrtvTcpClient> tcpClient = DynamicCast<NrtvTcpClient>(clientApp);
+    if (tcpClient)
+    {
+        g_qoeCsv.open("nrtv-qoe.csv", std::ios::out | std::ios::trunc);
+        if (g_qoeCsv.is_open())
+        {
+            g_qoeCsv << "time_s,kind,value,extra" << std::endl;
+        }
+        tcpClient->TraceConnectWithoutContext("RxDelay", MakeCallback(&QoeRxDelay));
+        tcpClient->TraceConnectWithoutContext("RxJitter", MakeCallback(&QoeRxJitter));
+        tcpClient->TraceConnectWithoutContext("RxSlice", MakeCallback(&QoeRxSlice));
+        tcpClient->TraceConnectWithoutContext("RxFrame", MakeCallback(&QoeRxFrame));
+    }
+
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
+
+    if (tcpClient)
+    {
+        if (g_qoeCsv.is_open())
+        {
+            g_qoeCsv.close();
+        }
+        double meanDelayMs = (g_delaySamples > 0) ? g_delaySumMs / g_delaySamples : 0.0;
+        double meanJitterMs = (g_jitterSamples > 0) ? g_jitterSumMs / g_jitterSamples : 0.0;
+        std::cout << "==== nrtv-p2p-example MEASURED QoE (TCP) ====" << std::endl;
+        std::cout << "nrtv_qoe_slice_count   = " << g_sliceCount << std::endl;
+        std::cout << "nrtv_qoe_frame_count   = " << g_frameCount << std::endl;
+        std::cout << "nrtv_qoe_mean_delay_ms = " << meanDelayMs << std::endl;
+        std::cout << "nrtv_qoe_mean_jitter_ms= " << meanJitterMs << std::endl;
+        std::cout << "QoE trace written to nrtv-qoe.csv" << std::endl;
+        std::cout << "=============================================" << std::endl;
+    }
+
     Simulator::Destroy();
 
     return 0;

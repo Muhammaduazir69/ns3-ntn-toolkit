@@ -22,6 +22,19 @@ foreach(
 endforeach()
 
 build_lib_example(
+  NAME ntn-cbr-leo-link
+  SOURCE_FILES ntn-cbr-leo-link.cc
+  LIBRARIES_TO_LINK
+    ${libntn-traffic}
+    ${libapplications}
+    ${libpoint-to-point}
+    ${libinternet}
+    ${libnetwork}
+    ${libflow-monitor}
+    ${libcore}
+)
+
+build_lib_example(
   NAME ntn-real-stack-smoke
   SOURCE_FILES ntn-real-stack-smoke.cc
   LIBRARIES_TO_LINK
