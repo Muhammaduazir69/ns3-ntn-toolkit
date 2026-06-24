@@ -51,6 +51,8 @@ Ptr<NtnSib19Broadcaster> g_sib19;
 Ptr<NtnDrxStateMachine> g_drx;
 bool g_drxEnabled = true;
 double g_simTime = 20.0;
+uint64_t g_lastRxBytes = 0;
+double g_drxPollMs = 320.0; // activity-poll cadence (one DRX long cycle)
 
 const char*
 StateName(DrxState s)
@@ -66,6 +68,27 @@ StateName(DrxState s)
     return "?";
 }
 
+// Fast activity poll (one DRX long cycle): drive the DRX state machine from the
+// REAL DL plane. GetUeRxBytes(0) is the authoritative NtnOranSink byte counter;
+// whenever it grows, genuine traffic arrived, so kick NotifyDataActivity() to
+// restart the inactivity timer / force Active. This is what makes
+// IsAwake()/transitions react to real packets instead of free-running.
+void
+DrxPoll()
+{
+    if (Simulator::Now().GetSeconds() >= g_simTime)
+    {
+        return;
+    }
+    const uint64_t rx = g_rs->GetUeRxBytes(0);
+    if (g_drxEnabled && rx > g_lastRxBytes)
+    {
+        g_drx->NotifyDataActivity();
+    }
+    g_lastRxBytes = rx;
+    Simulator::Schedule(MilliSeconds(g_drxPollMs), &DrxPoll);
+}
+
 void
 GeoTick()
 {
@@ -75,6 +98,7 @@ GeoTick()
         return;
     }
     g_sib19->RefreshNow();
+
     const Time ta = g_ta->ComputeTotalTa();
     const double slantKm = g_ta->GetSlantRangeMetres() / 1000.0;
     const double sinr = g_rs->GetUeRecentSinrDb(0);
@@ -191,18 +215,33 @@ main(int argc, char* argv[])
                 drxLongCycleMs, drxOnDurationMs);
 
     Simulator::Schedule(Seconds(2.0), &GeoTick);
+    // Poll the real DL byte counter once per DRX long cycle so genuine traffic
+    // drives the DRX state transitions (>= one long cycle avoids over-driving).
+    g_drxPollMs = drxLongCycleMs;
+    Simulator::Schedule(Seconds(1.0), &DrxPoll);
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
 
-    const double dutyPct = drxEnabled ? 100.0 * drxOnDurationMs / drxLongCycleMs : 100.0;
+    // MEASURED awake fraction straight from the DRX state machine: the time the
+    // SM actually spent awake (Active + OnDuration), driven by real DL traffic
+    // via NotifyDataActivity(), divided by the simulated time. This replaces the
+    // old static drxOnDuration/drxLongCycle multiplier.
+    double awakeFrac = 1.0;
+    if (drxEnabled)
+    {
+        const double awakeS = g_drx->GetTimeInState(DrxState::Active).GetSeconds() +
+                              g_drx->GetTimeInState(DrxState::OnDuration).GetSeconds();
+        awakeFrac = (simSeconds > 0.0) ? awakeS / simSeconds : 0.0;
+    }
     const double measGoodput = rs.GetRxThroughputMbps();
-    std::printf("# === summary ===  DRX=%s (on-duty=%.0f%%)  measured SINR=%.2f dB  "
-                "measured TBLER=%.4f  measured goodput=%.3f Mbps  "
-                "DRX effective goodput=%.3f Mbps (power-saving trade-off)\n",
-                drxEnabled ? "on" : "off", dutyPct, rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(),
-                measGoodput, measGoodput * dutyPct / 100.0);
+    std::printf("# === summary ===  DRX=%s  measured awake fraction=%.1f%% (from DRX SM, "
+                "real-traffic driven)  measured SINR=%.2f dB  measured TBLER=%.4f  "
+                "measured goodput=%.3f Mbps  DRX effective goodput=%.3f Mbps "
+                "(power-saving trade-off)\n",
+                drxEnabled ? "on" : "off", 100.0 * awakeFrac, rs.GetMeanDlSinrDb(),
+                rs.GetMeanDlTbler(), measGoodput, measGoodput * awakeFrac);
     Simulator::Destroy();
     return 0;
 }

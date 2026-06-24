@@ -31,6 +31,10 @@
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
 
+#include "ns3/ipv4.h"
+#include "ns3/socket.h"
+#include "ns3/udp-socket-factory.h"
+
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -56,6 +60,31 @@ uint32_t g_measReports = 0;
 uint32_t g_sib19Refresh = 0;
 bool g_belowThresh = false;
 
+// Real downlink delivery of the serialized SIB19 wire image across the radio.
+Ptr<Socket> g_sib19TxSock;     // on the remote host (EPC PGW side)
+InetSocketAddress g_sib19Dst = InetSocketAddress(Ipv4Address::GetAny(), 0);
+uint32_t g_sib19Delivered = 0; // count of SIB19 packets parsed on the UE side
+
+void
+Sib19UeRecv(Ptr<Socket> sock)
+{
+    Ptr<Packet> pkt;
+    Address from;
+    while ((pkt = sock->RecvFrom(from)))
+    {
+        const uint32_t n = pkt->GetSize();
+        std::vector<uint8_t> buf(n);
+        pkt->CopyData(buf.data(), n);
+        Sib19Content parsed;
+        if (Sib19Codec::Parse(buf.data(), n, parsed))
+        {
+            NS_ASSERT_MSG(parsed.cellId == g_sib->GetLatest().cellId,
+                          "SIB19 cellId mismatch across the radio link");
+            ++g_sib19Delivered;
+        }
+    }
+}
+
 void
 Sample()
 {
@@ -72,6 +101,20 @@ Sample()
 
     g_sib->RefreshNow();
     ++g_sib19Refresh;
+
+    // Transmit the freshly built 124-byte SIB19 wire image over the REAL radio
+    // path (UDP -> GTP/EPC -> mmwave DL) so it actually crosses the link and is
+    // parsed on the UE side (Sib19Codec::Parse) rather than only round-tripping
+    // in an in-memory unit test.
+    if (g_sib19TxSock)
+    {
+        const std::vector<uint8_t>& wire = g_sib->GetLatestSerialised();
+        if (!wire.empty())
+        {
+            Ptr<Packet> pkt = Create<Packet>(wire.data(), wire.size());
+            g_sib19TxSock->SendTo(pkt, 0, g_sib19Dst);
+        }
+    }
 
     const double sinr = g_rs->GetUeRecentSinrDb(0);
     if (!std::isnan(sinr))
@@ -184,6 +227,19 @@ main(int argc, char* argv[])
     g_sib = rrc.InstallSib19Broadcaster(satMob, cellId, g_ta, MilliSeconds(160));
     g_sib->Start();
 
+    // ---- real downlink delivery of the serialized SIB19 over the EPC+mmwave DL ----
+    // UE-0 IP (interface 1 = the mmwave UE NetDevice assigned by the EPC).
+    const uint16_t sib19Port = 9876; // outside the helper's DL (1234+) / UL (2000+) ranges
+    Ipv4Address ueAddr = rs.GetUeDevices().Get(0)->GetNode()->GetObject<Ipv4>()
+                             ->GetAddress(1, 0).GetLocal();
+    g_sib19Dst = InetSocketAddress(ueAddr, sib19Port);
+    g_sib19TxSock = Socket::CreateSocket(rs.GetRemoteHost(), UdpSocketFactory::GetTypeId());
+    g_sib19TxSock->Bind();
+    Ptr<Socket> sib19RxSock =
+        Socket::CreateSocket(rs.GetUeDevices().Get(0)->GetNode(), UdpSocketFactory::GetTypeId());
+    sib19RxSock->Bind(InetSocketAddress(Ipv4Address::GetAny(), sib19Port));
+    sib19RxSock->SetRecvCallback(MakeCallback(&Sib19UeRecv));
+
     std::filesystem::create_directories(outputDir);
     g_csv.open(outputDir + "/ntn-rrc-real-stack-ta.csv");
     g_csv << "time_s,slant_km,ta_total_us,ta_common_us,ta_ue_us,ta_drift_us_per_s,"
@@ -214,6 +270,8 @@ main(int argc, char* argv[])
               << " km\n"
               << "  final total TA:               " << finalTa.GetMicroSeconds() << " us\n"
               << "  SIB19 ephemeris refreshes:    " << g_sib19Refresh << "\n"
+              << "  SIB19 wire pkts delivered+parsed: " << g_sib19Delivered
+              << "  (124-byte image crossed EPC+mmwave DL, Sib19Codec::Parse OK)\n"
               << "  RRC measurement reports:      " << g_measReports
               << "  (triggered on MEASURED SINR < " << g_measThreshDb << " dB)\n"
               << "  TA/SINR trace:                " << outputDir << "/ntn-rrc-real-stack-ta.csv\n";

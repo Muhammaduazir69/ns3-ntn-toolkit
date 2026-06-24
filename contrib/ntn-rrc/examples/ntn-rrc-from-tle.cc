@@ -18,6 +18,7 @@
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-timing-advance.h"
+#include "ns3/ntn-ue-location-report.h"
 #include "ns3/satellite-sgp4-mobility-model.h"
 
 #include <cmath>
@@ -65,22 +66,6 @@ ReadTle(const std::string& path, TleFile& out)
     out.line1 = lines[1];
     out.line2 = lines[2];
     return true;
-}
-
-// WGS84 geodetic -> ECEF (m).
-Vector
-GeodeticToEcef(double latDeg, double lonDeg, double altM)
-{
-    constexpr double kA = 6378137.0;
-    constexpr double kF = 1.0 / 298.257223563;
-    constexpr double kE2 = kF * (2.0 - kF);
-    const double latR = latDeg * M_PI / 180.0;
-    const double lonR = lonDeg * M_PI / 180.0;
-    const double s = std::sin(latR), c = std::cos(latR);
-    const double N = kA / std::sqrt(1.0 - kE2 * s * s);
-    return Vector((N + altM) * c * std::cos(lonR),
-                  (N + altM) * c * std::sin(lonR),
-                  (N * (1.0 - kE2) + altM) * s);
 }
 
 void
@@ -175,10 +160,11 @@ main(int argc, char* argv[])
     // Auto-place the UE at the satellite's t=0 sub-point so the mmwave cell is in
     // view (a real overhead pass), then build nodes/mobility around it.
     const Vector sat0 = satMob->GetPosition();
-    const double subLat = std::asin(std::max(-1.0, std::min(1.0, sat0.z / sat0.GetLength()))) *
-                          180.0 / M_PI;
-    const double subLon = std::atan2(sat0.y, sat0.x) * 180.0 / M_PI;
-    const Vector ueEcef = GeodeticToEcef(subLat, subLon, 540.0);
+    // Sub-point on the WGS84 ellipsoid (the module's own authoritative
+    // conversion), not a spherical asin(z/|r|) approximation.
+    double subLat, subLon, subAlt;
+    ns3::ntnrrc::EcefToGeodeticWgs84(sat0, subLat, subLon, subAlt);
+    const Vector ueEcef = ns3::ntnrrc::GeodeticWgs84ToEcef(subLat, subLon, 540.0);
 
     NodeContainer satNodes;
     satNodes.Create(1);
