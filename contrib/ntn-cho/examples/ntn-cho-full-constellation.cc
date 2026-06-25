@@ -33,7 +33,13 @@
  *
  * Output CSV schemas are unchanged (handover_events / measurements /
  * tte_computations / kpi_timeseries / kpi_summary + GeoJSON), but every value
- * now comes from the real plane / real algorithm.
+ * now comes from the real plane / real algorithm. In measurements.csv,
+ * sinr_dB is the measured mmwave PHY value; the decomposition columns are the
+ * physical link budget from real geometry + configured beam EIRP:
+ * path_loss_dB = free-space loss FSPL(slant,fc), antenna_gain_dB = beam EIRP
+ * (Tx power+gain), rsrp_dBm = EIRP - FSPL, doppler_Hz = real SGP4 relative
+ * radial velocity. (The measured SINR additionally reflects the channel's
+ * beamforming/array gains, so it need not equal eirp - FSPL - noise.)
  *
  *   ./ns3 run "ntn-cho-full-constellation --simTime=120 --numUes=6 \
  *       --algorithm=tte-aware --outputDir=/tmp/ntn-cho"
@@ -278,13 +284,34 @@ ChoTick()
             const double elev = ntngeo::ElevationDeg(ui, sPos);
             const double slant = ntngeo::SlantRangeM(ui, sPos);
             const double delayMs = slant / 299792458.0 * 1000.0;
-            // rsrp reported as measured SINR + thermal noise floor (provenance:
-            // SINR is the measured PHY value; RSRP reconstructed from it).
+            // Link-budget decomposition from REAL geometry + configured beam
+            // EIRP. sinr is the measured PHY value (kept); rsrp/path_loss/
+            // antenna_gain are the free-space budget (rsrp = eirp - FSPL) and
+            // doppler is the real SGP4 relative radial velocity.
+            const double fcHz = g_rs->GetCarrierFrequencyHz();
+            const double eirpDbm = g_rs->GetSatEirpDbm();
+            const double dPl = (slant > 1.0 ? slant : 1.0);
+            const double fsplDb = 20.0 * std::log10(dPl) +
+                                  20.0 * std::log10(fcHz) - 147.55221;
+            const double rsrpDbm = eirpDbm - fsplDb;
+            const Vector vSat = g_servSat->GetVelocity();
+            const Vector vUe = g_ueModels[i]->GetVelocity();
+            const Vector rVec(ui.x - sPos.x, ui.y - sPos.y, ui.z - sPos.z);
+            const double rNorm0 = std::sqrt(rVec.x * rVec.x + rVec.y * rVec.y +
+                                            rVec.z * rVec.z);
+            const double rNorm = (rNorm0 > 1.0 ? rNorm0 : 1.0);
+            const double rangeRate =
+                ((vUe.x - vSat.x) * rVec.x + (vUe.y - vSat.y) * rVec.y +
+                 (vUe.z - vSat.z) * rVec.z) /
+                rNorm;
+            const double dopplerHz = -(fcHz / 299792458.0) * rangeRate;
             g_measFile << std::fixed << std::setprecision(3) << t << "," << i << ","
                        << g_servSatId << ",0," << g_servingCellId << ","
-                       << std::setprecision(2) << sinr << "," << sinr << ",0,0,"
+                       << std::setprecision(2) << rsrpDbm << "," << sinr << ","
+                       << fsplDb << "," << eirpDbm << ","
                        << std::setprecision(1) << elev << ","
-                       << std::setprecision(2) << (slant / 1000.0) << ",0,"
+                       << std::setprecision(2) << (slant / 1000.0) << ","
+                       << std::setprecision(1) << dopplerHz << ","
                        << std::setprecision(3) << delayMs << ","
                        << std::setprecision(6) << lat << "," << lon << "\n";
         }
