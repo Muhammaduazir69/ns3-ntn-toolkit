@@ -2,7 +2,8 @@
 
 `ntn-cho` is an ns-3.43 contributed module. The recommended way to run it is
 inside the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
-tree, where every dependency below is already present. It also builds on a
+tree (branch `ntn-integration-v2`), where every dependency below is already
+present. It also builds on a
 vanilla ns-3.43 tree, provided you add the sibling toolkit modules listed in
 section 2 (the library itself needs `satellite`; the examples additionally
 need `ntn-traffic`, `ntn-constellation`, and `mmwave`).
@@ -79,8 +80,21 @@ then compiles the bridge (CMake defines `NTN_CHO_HAS_NS3AI`).
 
 ```bash
 cd contrib/
-git clone https://github.com/Muhammaduazir69/ntn-cho-framework.git ntn-cho
+git clone -b main https://github.com/Muhammaduazir69/ntn-cho-framework.git ntn-cho
 cd ..
+```
+
+> GitLab mirror: `git clone -b main https://gitlab.com/ns3-ntn-toolkit/ntn-cho-framework.git ntn-cho`
+> (the umbrella toolkit also mirrors to
+> [gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit](https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit)).
+
+### Or use the Docker image (all deps preinstalled)
+
+The toolkit image already contains `ntn-cho` and every dependency below:
+
+```bash
+docker pull uzairdocker69/ns3-ntn-toolkit:2.2.1   # or :latest
+docker run -it uzairdocker69/ns3-ntn-toolkit:2.2.1
 ```
 
 ---
