@@ -34,9 +34,14 @@ pip install "numpy>=2.0" "gymnasium>=1.0" "torch>=2.0"
 ### 2a. ns-3.43
 
 ```bash
-git clone https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
+git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 cd ns3-ntn-toolkit
 ```
+
+> GitLab mirror: `git clone -b ntn-integration-v2 https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit.git`
+> Or skip the build entirely with the Docker image (this fork preinstalled):
+> `docker pull uzairdocker69/ns3-ntn-toolkit:2.2.1` (or `:latest`), then
+> `docker run -it uzairdocker69/ns3-ntn-toolkit:2.2.1`.
 
 ### 2b. (Optional) other contrib modules
 
@@ -45,7 +50,7 @@ If you want to drive a satellite scenario from RL:
 ```bash
 cd contrib/
 git clone https://github.com/sns3/sns3-satellite.git satellite
-git clone https://github.com/Muhammaduazir69/ntn-cho-framework.git ntn-cho
+git clone -b main https://github.com/Muhammaduazir69/ntn-cho-framework.git ntn-cho
 cd ..
 ```
 
@@ -53,10 +58,13 @@ cd ..
 
 ## 3. Install the fork
 
+The module's CMake `LIBNAME` is `ns3-ai-ntn`, so it must be cloned into
+`contrib/ns3-ai-ntn`:
+
 ```bash
 cd contrib/
 git clone -b fix/ns3-43-compatibility-and-critical-bugs \
-  https://github.com/Muhammaduazir69/ns3-ai.git ai
+  https://github.com/Muhammaduazir69/ns3-ai.git ns3-ai-ntn
 cd ..
 ```
 
@@ -68,69 +76,108 @@ The fork's CMake helper handles the per-target LTO disable that ns-3.43 needs:
 
 ```bash
 ./ns3 configure --enable-examples --enable-tests
-./ns3 build ai
+./ns3 build ns3-ai-ntn
 ```
 
 Verify the bridge module is built:
 
 ```bash
-./ns3 show profile | grep ai
-ls build/contrib/ns3-ai-ntn/python/  # should show ns3ai_*.so files
+./ns3 show profile | grep ns3-ai-ntn
+ls build/contrib/ns3-ai-ntn/  # build artefacts + the per-example ns3ai_*.so modules
 ```
 
 ---
 
 ## 5. Run examples
 
-Each example pairs a C++ ns-3 binary with a Python driver.
+Each example pairs a C++ ns-3 binary with a Python driver; the Python script
+spawns the matching ns-3 binary itself. Build the example's CMake target first
+(target names are listed in each example's `README.md`).
 
 ### 5a. Hello-world (`a-plus-b`)
 
 ```bash
+./ns3 build ns3ai_apb_gym
 cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/
-python3 a-plus-b.py     # Python launches the ns-3 binary internally
+python3 apb.py     # Python launches the ns-3 binary internally
 ```
 
-Expected output: a stream of `(a, b, c=a+b)` triples.
+Expected output: a stream of `(a, b, c=a+b)` triples. The message-interface
+variants live in `use-msg-stru/` and `use-msg-vec/` (also `apb.py`).
 
-### 5b. LTE CQI prediction
+### 5b. LTE CQI prediction (online LSTM)
 
 ```bash
-cd contrib/ns3-ai-ntn/examples/lte-cqi/
-python3 run_baseline.py
-python3 run_dqn.py --episodes=100
+./ns3 build ns3ai_ltecqi_msg
+cd contrib/ns3-ai-ntn/examples/lte-cqi/use-msg/
+python3 run_online_lstm.py
 ```
 
 ### 5c. Multi-BSS Wi-Fi RL
 
 ```bash
+./ns3 build ns3ai_multibss
 cd contrib/ns3-ai-ntn/examples/multi-bss/
-python3 multi_bss.py --episodes=200
+python3 run_multi_bss.py
 ```
 
 ### 5d. RL-TCP
 
 ```bash
-cd contrib/ns3-ai-ntn/examples/rl-tcp/
+./ns3 build ns3ai_rltcp_gym
+cd contrib/ns3-ai-ntn/examples/rl-tcp/use-gym/
 python3 run_rl_tcp.py
 ```
 
----
-
-## 6. Drive a satellite RL workflow
-
-Once `ntn-cho` and `oran-ntn` are also installed:
+### 5e. Rate control (Wi-Fi, message interface)
 
 ```bash
-cd contrib/oran-ntn/python/
-python3 train_ho_xapp.py --algo=dqn --episodes=200
+./ns3 build ns3ai_ratecontrol_ts
+cd contrib/ns3-ai-ntn/examples/rate-control/thompson-sampling/
+python3 ai_thompson_sampling.py
 ```
-
-This trains the HO-prediction xApp using the 68-feature observation vector that `ntn-cho` exposes via the ns3-ai shared-memory bridge.
 
 ---
 
-## 7. Common issues
+## 6. NTN RL environments (synthetic — NOT ns-3-backed)
+
+The `ns3_ai_ntn` Python package ships four Gymnasium environments
+(`HandoverEnv`, `BeamMgmtEnv`, `SliceEnv`, `PowerCtrlEnv`) for fast policy
+search. **These are synthetic placeholders: their RSRP/SINR are closed-form
+proxies, they do NOT boot `contrib/ntn-cho` or read any ns-3 PHY trace, and they
+must not be reported as measured results.** The source files carry that warning
+in their docstrings and raise `RuntimeError` honesty guards rather than
+silently fabricating measured KPIs. There is no real ns-3 C++ environment
+binary behind them.
+
+```bash
+cd contrib/ns3-ai-ntn/python_utils
+pip install -e .[test]
+python3 -c "from ns3_ai_ntn.envs import HandoverEnv; e=HandoverEnv(); e.reset(); print(e.step(0))"
+```
+
+For a *measured* satellite RL/inference loop, drive the ns-3 data plane through
+the AI-RAN inference contract (`grpc/`) or the shared-memory bridge against a
+real scenario in `contrib/ntn-cho` / `contrib/oran-ntn`.
+
+---
+
+## 7. Run the tests
+
+```bash
+# C++ AI-RAN inference contract (suite name: oran-ntn-airan-inference, 9 cases —
+# codec round-trips, in-proc/TCP channels, Triton config parsing, failure
+# modes, in-simulator workload)
+./test.py -s oran-ntn-airan-inference
+
+# Python NTN RL extensions
+cd contrib/ns3-ai-ntn/python_utils
+pip install -e .[test] && pytest tests/ -v
+```
+
+---
+
+## 8. Common issues
 
 **`ImportError: dynamic module does not define module export function (PyInit_ns3ai_X)`**
 You're hitting the LTO bug. Make sure you're on this fork — upstream ns3-ai still has it. The fix is `ns3ai_add_pybind_module()` in `cmake/`.
@@ -149,6 +196,6 @@ Verify `ns3ai_add_pybind_module()` was applied to the offending target — grep 
 
 ---
 
-## 8. Citing
+## 9. Citing
 
 See [README](README.md#cite-this-work) — please cite both the original ns3-ai paper and this fork.
