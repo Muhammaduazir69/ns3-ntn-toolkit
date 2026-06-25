@@ -132,6 +132,7 @@ class NtnRealStackHelper
     double GetBandwidthHz() const { return m_bwHz; }
     double GetCarrierFrequencyHz() const { return m_freqHz; }
     void SetSatEirpDbm(double p) { m_satEirpDbm = p; }   ///< gNB (satellite) Tx power / EIRP
+    double GetSatEirpDbm() const { return m_satEirpDbm; } ///< configured beam EIRP (Tx power + Tx antenna gain)
     void SetUeTxPowerDbm(double p) { m_ueTxDbm = p; }
     void SetBackhaulDelay(Time t) { m_backhaulDelay = t; } ///< feeder+core one-way delay
     void SetPayloadOption(PayloadOption p) { m_payload = p; }
