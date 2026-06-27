@@ -52,16 +52,24 @@ main(int argc, char* argv[])
     double duration = 15.0;
     uint32_t numUes = 9;
     double altitudeKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "ntn-e2e-full-stack-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("numUes", "Number of UEs on the shared cell", numUes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
 
     std::cout << "\n=== ntn-e2e-full-stack (COMPOSITION on one shared data plane) ===\n"
               << "  ONE real mmwave cell -> measured SINR feeds RIC + slice + observability\n"
@@ -94,6 +102,12 @@ main(int argc, char* argv[])
 
     // ---- THE shared data plane: one real mmwave NR NTN cell ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-e2e-full-stack");

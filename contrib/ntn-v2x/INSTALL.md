@@ -114,7 +114,7 @@ Five example programs ship under `examples/`:
 ./ns3 run "ntn-v2x-real-stack --duration=20 --numVehicles=8"
 
 # Real 2-hop relay veh0 → veh1 → LEO → server; NtnOran measured KPIs.
-# --fcdTrace is REQUIRED (no synthetic fallback); use the shipped trace.
+# --fcdTrace is REQUIRED; use the shipped synthetic constant-speed CSV fixture.
 ./ns3 run "ntn-v2x-leo-relay-traffic --simSeconds=60 --bsmHz=10 \
   --fcdTrace=contrib/ntn-v2x/traces/leo-relay-fcd.csv"
 
@@ -158,9 +158,11 @@ replay that must complete inside the test budget.
 `ntn-v2x-maritime-ais` also needs `ntn-sagin`. The library builds without any
 of them; those examples do not.
 
-**`ntn-v2x-leo-relay-traffic` aborts immediately** — it requires `--fcdTrace`
-(there is no synthetic fallback). Pass the shipped
-`contrib/ntn-v2x/traces/leo-relay-fcd.csv` or a real SUMO FCD export.
+**`ntn-v2x-leo-relay-traffic` aborts immediately** — it requires `--fcdTrace`.
+Pass the shipped `contrib/ntn-v2x/traces/leo-relay-fcd.csv` (a synthetic
+constant-speed FCD-format CSV fixture — not a SUMO microsimulation; the loader
+reads a CSV dialect, not SUMO's native fcd-output XML) or your own CSV
+converted from a SUMO fcd-export.
 
 ---
 

@@ -1,6 +1,11 @@
 <h1 align="center">flexric-bridge</h1>
 
-<p align="center"><strong>FlexRIC E2 Real-Wire Integration: NTN E2 Agent, Three xApps, and a Reproducible Docker Stack</strong></p>
+<p align="center"><strong>NTN E2 Agent + Three xApps over a JSON/TCP loopback stub — with a roadmapped (not-yet-built) FlexRIC live-wire path</strong></p>
+
+<p align="center"><em>Status: the working, tested path is a JSON-over-TCP loopback to this
+package's own stub RIC. The live SCTP/E2AP/FlexRIC path described below is a
+design + Docker recipe; no asn1c/cffi codec or live association ships or has
+been demonstrated in this repo.</em></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
@@ -19,7 +24,7 @@
 
 ## Why this module
 
-In-process xApp stubs are a fine way to *prototype* a Near-RT RIC integration; they do not let you publish results that survive review against a real O-RAN deployment. The reviewer's question is always: "does the same xApp logic work over the actual wire?" `flexric-bridge` answers that question by replacing the in-memory E2 stubs in `oran-ntn` with a real Near-RT RIC stack based on EURECOM's [FlexRIC](https://gitlab.eurecom.fr/mosaic5g/flexric). Three NTN-aware xApps (Conditional Handover, multi-beam selection, slice orchestration) run as separate processes and exchange real E2AP messages with an ns-3 E2 agent. Two operating modes — **same code, different wire**: a stub TCP/JSON mode for CI and a live SCTP/E2AP mode driven by FlexRIC under Docker.
+In-process xApp stubs are a fine way to *prototype* a Near-RT RIC integration; they do not let you publish results that survive review against a real O-RAN deployment. The reviewer's question is always: "does the same xApp logic work over the actual wire?" `flexric-bridge` is the scaffold for that path — but read what is and is not built. **Today** it ships a stub Near-RT RIC and three NTN-aware xApps (Conditional Handover, multi-beam selection, slice orchestration) that run as separate processes and exchange **JSON frames over a TCP loopback** (the frames carry the same procedure-code / RIC-request-id / RAN-function-id structure as E2AP, but the wire is JSON, not ASN.1-PER, and the RIC is this package's own stub — not FlexRIC). The **live SCTP/E2AP mode driven by EURECOM's [FlexRIC](https://gitlab.eurecom.fr/mosaic5g/flexric) under Docker is a roadmapped design**: no asn1c/cffi codec, no SCTP association, and no FlexRIC interop ship or have been demonstrated in this repo. So treat the two "modes" as *one working stub* plus *one planned wire*, not "same code, different wire".
 
 > **Status (2026-06):** the transport stub in this directory
 > (`e2-transport.{h,cc}`, `e2-listener.{h,cc}`) is **not yet connected to
@@ -46,7 +51,7 @@ In-process xApp stubs are a fine way to *prototype* a Near-RT RIC integration; t
 └────────────────────────────────────────────────────────────────┘
 ```
 
-Stub mode uses JSON-on-the-wire framed by 4-byte big-endian length, with **exactly the same procedure-code / RIC-request-id / RAN-function-id structure as real E2AP**. Switching to live mode is a one-line change (use FlexRIC's asn1c-generated codec via the supplied Docker image).
+Stub mode uses JSON-on-the-wire framed by 4-byte big-endian length, with the **same procedure-code / RIC-request-id / RAN-function-id structure as real E2AP** (but JSON values, not ASN.1-PER bits). Reaching live mode is **not** a drop-in flip: it requires building FlexRIC's asn1c-generated codec, wiring a cffi shim, and opening a real SCTP association — none of which exists in this repo yet. The Docker recipe below is the intended bring-up, not a verified result.
 
 | Metric | Value |
 |---|---:|
@@ -103,6 +108,10 @@ agent.submit_kpm_measurement(
 ```
 
 ### Live mode (Docker)
+
+> **Not yet functional / unverified.** The commands below are the intended
+> bring-up recipe for the roadmapped FlexRIC live path; this association has
+> not been built or run, and the in-sim E2 nodes are not connected to it.
 
 ```bash
 docker compose -f docker/docker-compose.yml -p ntn-flexric up -d

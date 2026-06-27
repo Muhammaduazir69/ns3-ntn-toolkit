@@ -18,13 +18,24 @@
 //   CHOICE (alternative index byte, then chosen alternative)
 //   OPTIONAL (presence bit in the preamble)
 //
+// HONESTY NOTE (codec conformance): this codec is internally self-consistent
+// (its own encode↔decode round-trips, exercised in the unit tests and in the
+// inlined beam example) but it is NOT bit-conformant Aligned-PER. It takes
+// deliberate full-byte / octet-aligned shortcuts — a full-byte CHOICE
+// alternative index (not the minimal constrained-index bits), octet-aligned
+// SEQUENCE preambles, length-prefixed INTEGERs rather than constrained-INTEGER
+// bit-packing, and no extension-marker handling. Bytes produced here would
+// therefore NOT decode on a spec-conformant asn1c peer (e.g. FlexRIC). It is
+// a test-only / in-sim codec, never on a live external control path.
+//
 // The Q4-end T2 follow-on swaps this implementation for asn1c-generated
 // encoders sourced from O-RAN-SC ASN.1 files without changing the
 // public ASN.1-PER API surface here. Reviewers can therefore audit the
 // C++ side once and let the on-the-wire bytes evolve.
 //
-// Reference: ITU-T X.691 (Aligned PER), O-RAN.WG3.E2SM-KPM-v3.00,
-//            O-RAN.WG3.E2SM-RC-v1.03 ASN.1 modules.
+// Reference: ITU-T X.691 (Aligned PER),
+//            O-RAN.WG3.E2SM-KPM R004 v06.00 (ETSI TS 104 040 v4.0.0, 2025),
+//            O-RAN.WG3.E2SM-RC R004 v07.00 (2025) ASN.1 modules.
 
 #include <cstdint>
 #include <stdexcept>

@@ -55,7 +55,7 @@ See the [CHANGELOG](CHANGELOG.md) for the full history.
 | `model/v2x-leo-direct.h` | `V2xLeoDirect` — closed-form vehicle ↔ LEO uplink budget (free-space PL + SNR + elevation); `ComputeStatic` callable inside hot loops without `Object` allocation overhead. Kept as a reference baseline — the examples decide on measured SINR. |
 | `model/v2x-leo-relay.h` | `V2xLeoRelay` — V2V-via-LEO relay assignment; each vehicle uplinks direct or relays through the best peer within `m_maxV2vRangeM`; `m_minDirectSnrDb` sets the prefer-relay threshold; `EvaluateAll()` returns the per-vehicle decision. |
 | `model/maritime-scenario.h` | `MaritimeMobilityModel` — DEPRECATED / offline-test-only synthetic box-bounce vessel motion. The real maritime path reuses ntn-sagin `AisMobilityModel` (recorded AIS replay) via the `ntn-v2x-maritime-ais` example. |
-| `helper/ntn-v2x-helper.h` | Deterministic CI fixture writer `WriteDeterministicTestFcdCsv` — a disclosed, RNG-free FCD trace for the test suite only (fixed per-vehicle speed ramp). NOT a substitute for a real SUMO FCD export; examples require a real `--fcdTrace`/`--trace` file (see `traces/`). |
+| `helper/ntn-v2x-helper.h` | Deterministic CI fixture writer `WriteDeterministicTestFcdCsv` — a disclosed, RNG-free FCD-format CSV trace for the test suite only (fixed per-vehicle speed ramp). The shipped example traces are likewise synthetic constant-speed FCD-format CSV fixtures (not SUMO microsimulations; the loader reads a CSV dialect, not SUMO's native fcd-output XML). Examples require an `--fcdTrace`/`--trace` CSV file (see `traces/`); a CSV converted from a SUMO fcd-export also works. |
 
 ## Examples
 

@@ -7,9 +7,16 @@
  * Federated Learning Coordinator for O-RAN NTN
  *
  * Coordinates federated learning between Space RICs and ground RIC.
- * Supports multiple aggregation strategies optimized for NTN constraints:
  *
- * Novel features:
+ * Aggregation-strategy honesty (see B5 and the warnings in the .cc): only
+ * **FedAvg** is exact. "FedProx" is a server-side approximation (the proximal
+ * term is not applied during any local training). "FedNova" is numerically
+ * identical to FedAvg under the tau=numSamples proxy used here. "SCAFFOLD" is
+ * NOT implemented (no control variates / drift correction) and falls back to
+ * FedAvg. The exchanged "gradients" are model weight vectors — there is no
+ * real local trainer behind them.
+ *
+ * Intended (scaffold) features:
  *   - Orbit-aware participant selection (select satellites with good feeder links)
  *   - ISL-relay gradient forwarding for satellites without direct ground contact
  *   - Asynchronous FL with staleness-weighted aggregation
@@ -78,9 +85,14 @@ class OranNtnFederatedLearning : public Object
                                 double localLoss, uint32_t localSamples);
 
     /**
-     * \brief Aggregate collected gradients
+     * \brief Aggregate collected gradients.
      *
-     * Supports: FedAvg, FedProx, FedNova, SCAFFOLD
+     * Strategies (gap B5 — honest scope): **FedAvg** is exact (sample-weighted
+     * averaging). **FedProx** is a server-side approximation (no local proximal
+     * trainer). **FedNova** is numerically identical to FedAvg under the current
+     * tau=numSamples proxy. **SCAFFOLD is NOT implemented** (falls back to
+     * FedAvg with a warning). The "gradients" exchanged are model weights, not
+     * gradients from a real local learner.
      */
     void AggregateGradients();
 

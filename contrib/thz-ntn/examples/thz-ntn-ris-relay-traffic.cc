@@ -29,6 +29,7 @@
 #include "ns3/ntn-static-extra-loss-model.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
+#include "ns3/thz-ntn-pointing-loss-model.h"
 #include "ns3/thz-ntn-propagation-loss-model.h"
 #include "ns3/thz-ntn-ris.h"
 #include "ns3/walker-constellation.h"
@@ -55,11 +56,13 @@ main(int argc, char* argv[])
     double blockFraction = 0.25; // canyon blocks the direct path here
     double risOnFraction = 0.55; // RIS engages here
     std::string outputDir = "thz-ntn-ris-relay-output";
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz), capped at 100", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("blockageDb", "NLOS blockage on the direct path (dB)", blockageDb);
     cmd.AddValue("risX", "RIS elements along X", risX);
     cmd.AddValue("risY", "RIS elements along Y", risY);
@@ -127,6 +130,12 @@ main(int argc, char* argv[])
     mob.Install(gndNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("thz-ntn-ris-relay-traffic");
@@ -138,6 +147,10 @@ main(int argc, char* argv[])
     Ptr<ThzNtnPropagationLossModel> thz = CreateObject<ThzNtnPropagationLossModel>();
     thz->SetFrequency(freqGHz * 1e9);
     rs.AddExtraPropagationLoss(thz);
+
+    // gap A2 — THz beam pointing impairment now in the measured packet path.
+    Ptr<ThzNtnPointingLossModel> ptg = CreateObject<ThzNtnPointingLossModel>();
+    rs.AddExtraPropagationLoss(ptg);
 
     // Blockage / RIS as a LIVE channel reconfiguration in the real path.
     Ptr<NtnStaticExtraLossModel> nlos = CreateObject<NtnStaticExtraLossModel>();

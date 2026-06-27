@@ -920,8 +920,8 @@ class ThzNtnHitranBundledLutTest : public TestCase
         }
         NS_TEST_ASSERT_MSG_EQ(loaded, true, "bundled LUT not found");
         NS_TEST_EXPECT_MSG_EQ(lut.ReleaseTag(),
-                              "HITRAN-2024",
-                              "bundled tag");
+                              "continuum-approximation (NOT line-by-line; smooth fit, no 183/325/380 GHz peaks)",
+                              "bundled tag (corrected G18: the LUT is a continuum fit, not HITRAN line-by-line)");
         NS_TEST_EXPECT_MSG_EQ(lut.FrequencyGridGhz().size(),
                               41u,
                               "41 freqs");

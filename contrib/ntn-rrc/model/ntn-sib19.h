@@ -44,11 +44,17 @@ struct EphemerisInfo
 /**
  * SIB19 NTN assistance information (TS 38.331 §6.3.2 SystemInformationBlockType19).
  *
- * The receiver-side decisions a UE makes from this block:
+ * The receiver-side decisions a UE makes from this block PER THE SPEC:
  *  - Pre-compensate uplink with `taCommon` (+ derivative drift over time).
  *  - Predict satellite position over `ulSyncValidity` to maintain TA.
  *  - Apply `cellSpecificKoffset` and `kMac` to NR scheduling.
  *  - Decide regenerative-vs-transparent expectations from `payloadMode`.
+ *
+ * NOTE (honest scope): in this toolkit no UE actually decodes this block, so the
+ * above are the *intended* receiver actions, not modelled behaviour. The fields
+ * are stored metadata: `cellSpecificKoffset` / `kMac` are NOT applied to any
+ * ns-3 scheduling decision (the mmwave MAC never reads them), and `taCommon` is
+ * consumed only by the offline TA accounting, not by a UL timing loop.
  */
 struct Sib19Content
 {
@@ -86,12 +92,17 @@ class Sib19Codec
 /**
  * \ingroup ntn-rrc
  *
- * Periodically broadcasts SIB19 from a satellite cell. Re-derives the content
- * from the attached MobilityModel + NtnTimingAdvance every `period`. UEs in
- * the cell read `GetLatest()` to consume the most recent broadcast.
+ * Periodically snapshots SIB19 content for a satellite cell and emits it on a
+ * `TracedCallback` (and into a private byte buffer via `Sib19Codec`). Re-derives
+ * the content from the attached MobilityModel + NtnTimingAdvance every `period`.
  *
- * Default broadcast period 160 ms matches the `si-Periodicity-r17` 16-frame
- * value used in the Rel-17 NTN reference scenarios.
+ * NOTE (honest scope): this is NOT a real over-the-air broadcast. The content is
+ * never carried on BCCH/PDSCH and no UE decodes it; consumers (loggers / external
+ * emulators) read `GetLatest()` or the `Broadcast` trace to observe the most
+ * recent snapshot. The cadence is the only "broadcast" semantics modelled.
+ *
+ * Default period 160 ms matches the `si-Periodicity-r17` 16-frame value used in
+ * the Rel-17 NTN reference scenarios.
  */
 class NtnSib19Broadcaster : public Object
 {

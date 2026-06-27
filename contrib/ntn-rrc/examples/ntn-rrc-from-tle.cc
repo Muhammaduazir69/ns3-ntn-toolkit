@@ -11,7 +11,6 @@
 // trace. Output CSV: time_s, sat_x/y/z, slant_km, ta_total_us, drift, meas_sinr.
 
 #include "ns3/core-module.h"
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-real-stack-helper.h"
@@ -100,7 +99,8 @@ main(int argc, char* argv[])
     std::string startUtc;
     double simTimeSec = 20.0;
     uint32_t numUes = 4;
-    double satEirpDbm = 58.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     double stepSec = 1.0;
     bool transparent = true;
     std::string outputDir = "ntn-rrc-from-tle-output";
@@ -110,11 +110,20 @@ main(int argc, char* argv[])
     cmd.AddValue("start", "Scenario start UTC, ISO format YYYY-MM-DDTHH:MM:SS", startUtc);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
     cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("step", "Sample period (s)", stepSec);
     cmd.AddValue("transparent", "Transparent (true) vs regenerative (false)", transparent);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
+    // mmwave, so honour the historical 58 dBm for mmwave but give nr 70 dBm.
+    const bool useNr = (radio == "nr");
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 58.0;
+    }
 
     if (tlePath.empty())
     {
@@ -180,6 +189,12 @@ main(int argc, char* argv[])
 
     // ---- real mmwave NR cell + measured traffic ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS (nr backend only)
+    }
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-rrc-from-tle");

@@ -6,8 +6,9 @@
  * ntn-cho-real-stack — real-stack flagship for ntn-cho, on the REAL NTN
  * mobility architecture:
  *
- *   - Satellites: SGP4-propagated Walker-Delta orbits (ntn-constellation
- *     Sgp4MobilityModel). The serving satellite starts at zenith over the UE
+ *   - Satellites: Kepler+J2-secular propagated Walker-Delta orbits
+ *     (ntn-constellation Sgp4MobilityModel; full Vallado SGP4 available via
+ *     SetUseVallado). The serving satellite starts at zenith over the UE
  *     field and recedes; the in-plane neighbour genuinely approaches. The
  *     handover emerges from REAL orbital dynamics — no teleports.
  *   - UEs: 3GPP TR 38.811 §6.1.1.1 class mobility (NtnTr38811MobilityModel,
@@ -25,7 +26,7 @@
  *
  * Candidate link prediction is ephemeris-based (3GPP NTN CHO design): the
  * candidate SINR is the MEASURED serving SINR corrected by the real Friis
- * range ratio 20*log10(servSlant/candSlant) from the live SGP4 slant ranges.
+ * range ratio 20*log10(servSlant/candSlant) from the live Kepler+J2 slant ranges.
  *
  * Usage:
  *   ./ns3 run "ntn-cho-real-stack --duration=60 --trigger=pcho --rachLess=1"
@@ -71,7 +72,7 @@ uint32_t g_evals = 0;
 double g_simTime = 60.0;
 
 // Optional 3D scene trace (NetSimulyzer + Cesium CZML). Off unless --netSim or
-// --czml is given; when on, the recorder streams the REAL SGP4 sat + TR 38.811
+// --czml is given; when on, the recorder streams the Kepler+J2 sat + TR 38.811
 // UE positions and the MEASURED serving SINR, and logs each handover.
 Ptr<ntnobs::NtnSceneRecorder> g_scene;
 uint32_t g_sinrSeries = 0;
@@ -88,8 +89,8 @@ ChoTick()
     }
     ++g_evals;
     const Vector u = g_ueMob->GetPosition();        // TR 38.811 UE, ECEF
-    const Vector sPos = g_servMob->GetPosition();   // SGP4 serving sat, ECEF
-    const Vector cPos = g_candMob->GetPosition();   // SGP4 candidate sat, ECEF
+    const Vector sPos = g_servMob->GetPosition();   // Kepler+J2 serving sat, ECEF
+    const Vector cPos = g_candMob->GetPosition();   // Kepler+J2 candidate sat, ECEF
     const double servElev = ntngeo::ElevationDeg(u, sPos);
     const double candElev = ntngeo::ElevationDeg(u, cPos);
     const double servSlant = ntngeo::SlantRangeM(u, sPos);
@@ -154,9 +155,10 @@ main(int argc, char* argv[])
     double duration = 60.0;
     uint32_t numUes = 2;
     double altitudeKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double freqGhz = 2.0;
     double tteMinSec = 3.0;
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string trigger = "pcho";
     bool rachLess = true;
     uint32_t satsPerPlane = 80; // 4.5 deg in-plane spacing -> ~500 km along-track
@@ -168,8 +170,9 @@ main(int argc, char* argv[])
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("numUes", "Number of TR 38.811 UEs on the serving cell", numUes);
     cmd.AddValue("altitude", "Constellation altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
+    cmd.AddValue("radio", "Radio spine: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("tteMin", "Minimum TTE for CHO admission (s)", tteMinSec);
     cmd.AddValue("trigger",
                  "Handover trigger: a3|d1|t1|ta|elevation|d2|tte-aware|ltm|pcho",
@@ -184,13 +187,25 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     g_simTime = duration;
 
-    std::cout << "\n=== ntn-cho REAL-STACK (real SGP4 orbits + TR 38.811 UEs) ===\n"
-              << "  serving + candidate: SGP4 Walker neighbours (real pass dynamics)\n"
+    const bool useNr = (radio == "nr");
+    // Backend-appropriate EIRP default (honoured only if the user did not set it):
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps its
+    // historical 55 dBm (zero regression to the default backend).
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 55.0;
+    }
+    const double scsKhz = 15.0 * (1u << 1); // FR1 numerology 1 -> 30 kHz (nr only)
+
+    std::cout << "\n=== ntn-cho REAL-STACK (Kepler+J2 orbits + TR 38.811 UEs) ===\n"
+              << "  radio spine: " << (useNr ? "5G-LENA nr FR1 (30 kHz SCS) [A5(i)]" : "mmwave FR2")
+              << " at " << freqGhz << " GHz, EIRP " << satEirpDbm << " dBm\n"
+              << "  serving + candidate: Kepler+J2 Walker neighbours (real pass dynamics)\n"
               << "  UEs: TR 38.811 class mobility (real ns-3 MobilityModel, ECEF)\n"
               << "  mechanism: " << trigger << (rachLess ? " + RACH-less (RCHO)" : "")
               << ", duration " << duration << " s\n\n";
 
-    // ---- Real Walker-Delta orbits (SGP4) ----
+    // ---- Real Walker-Delta orbits (Kepler+J2-secular; Vallado SGP4 via SetUseVallado) ----
     WalkerConfig wcfg;
     wcfg.num_planes = 1;
     wcfg.total_sats = satsPerPlane;
@@ -236,8 +251,14 @@ main(int argc, char* argv[])
     g_servMob = serv;
     g_candMob = cand;
 
-    // ---- Real mmwave NTN serving cell + measured traffic ----
+    // ---- Real NR NTN serving cell + measured traffic (mmwave FR2 or nr FR1) ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(useNr ? NtnRealStackHelper::RadioBackend::Nr
+                             : NtnRealStackHelper::RadioBackend::Mmwave);
+    if (useNr)
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-real-stack");
@@ -305,9 +326,9 @@ main(int argc, char* argv[])
     cfg.minPredictedTos = Seconds(3.0);
     g_cho->Configure(cfg);
 
-    Ptr<mmwave::MmWaveEnbNetDevice> enb =
-        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
-    g_servingCellId = enb ? enb->GetCellId() : 1;
+    // Radio-agnostic serving cell id (mmwave::MmWaveEnbNetDevice or
+    // ns3::NrGnbNetDevice under the hood, depending on the backend).
+    g_servingCellId = rs.GetServingCellId();
     g_candCellId = g_servingCellId + 100;
     g_serving = g_servingCellId;
     g_cho->SetServingCell(g_servingCellId);
@@ -315,7 +336,7 @@ main(int argc, char* argv[])
     g_cho->AddCandidateCell(g_candCellId, 1, 0);
 
     // ---- Optional 3D scene trace (NetSimulyzer + Cesium CZML) ----
-    // One recorder taps the REAL SGP4 sats + TR 38.811 UEs (all ECEF) and the
+    // One recorder taps the Kepler+J2 sats + TR 38.811 UEs (all ECEF) and the
     // MEASURED serving SINR; fans out to both viewers. Off unless a path is set.
     if (!netSimOut.empty() || !czmlOut.empty() || liveScene)
     {

@@ -423,11 +423,30 @@ OranNtnFederatedLearning::AggregateGradients()
     else if (m_aggregationStrategy == "FedProx")
     {
         double mu = 0.01; // proximal term coefficient
+        // gap B5: this applies the proximal term SERVER-SIDE as an approximation.
+        // True FedProx (Li 2020) regularizes the LOCAL objective during client
+        // SGD, which needs a local trainer the toolkit does not run; without one
+        // this is FedAvg plus a server-side regularizer toward the prior model.
+        NS_LOG_WARN("FL: FedProx is a server-side approximation (no local proximal "
+                    "trainer); reduces toward weighted averaging. See gap B5.");
         globalWeights = FedProxAggregate(gradientPairs, mu);
     }
     else if (m_aggregationStrategy == "FedNova")
     {
+        // gap B5: FedNova (Wang 2020) normalizes by the number of local steps
+        // tau_i. With the current tau_i = numSamples proxy it is numerically
+        // identical to FedAvg.
+        NS_LOG_WARN("FL: FedNova with the tau=numSamples proxy is numerically "
+                    "identical to FedAvg. See gap B5.");
         globalWeights = FedNovaAggregate(gradientPairs);
+    }
+    else if (m_aggregationStrategy == "SCAFFOLD")
+    {
+        // gap B5: SCAFFOLD (Karimireddy 2020) needs server+client control
+        // variates and local drift correction — NOT implemented. Do not claim it.
+        NS_LOG_WARN("FL: SCAFFOLD is NOT implemented (no control variates / local "
+                    "drift correction); falling back to FedAvg. See gap B5.");
+        globalWeights = FedAvgAggregate(gradientPairs);
     }
     else
     {

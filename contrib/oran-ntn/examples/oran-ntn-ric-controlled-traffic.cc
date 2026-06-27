@@ -209,6 +209,7 @@ main(int argc, char* argv[])
     uint32_t numTx = 64;
     double sinrThreshDb = 12.0;
     bool xappEnabled = true;
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "oran-ntn-ric-controlled-output";
 
     CommandLine cmd(__FILE__);
@@ -216,6 +217,7 @@ main(int argc, char* argv[])
     cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
     cmd.AddValue("satEirpDbm", "Baseline EIRP without beamforming (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("numTx", "mMIMO Tx antennas (beam gain = 10log10(numTx))", numTx);
     cmd.AddValue("sinrThreshDb", "Intrinsic SINR threshold for the xApp", sinrThreshDb);
     cmd.AddValue("xapp", "Enable the mMIMO precoder xApp control loop", xappEnabled);
@@ -266,6 +268,12 @@ main(int argc, char* argv[])
     mob.Install(ueNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("oran-ntn-ric-controlled-traffic");
@@ -295,8 +303,8 @@ main(int argc, char* argv[])
     g_e2->SetIsNtn(true);
     g_e2->SetAttribute("FeederLinkDelay", TimeValue(MilliSeconds(4))); // ~1200 km
     g_e2->SetAttribute("AlignToControlLoop", BooleanValue(true));
-    g_e2->RegisterRanFunction(2, "E2SM-KPM v03.00");
-    g_e2->RegisterRanFunction(3, "E2SM-RC v01.03");
+    g_e2->RegisterRanFunction(2, "E2SM-KPM R004 v06.00");
+    g_e2->RegisterRanFunction(3, "E2SM-RC R004 v07.00");
     E2Subscription sub{};
     sub.subscriptionId = 1;
     sub.ranFunctionId = 2;

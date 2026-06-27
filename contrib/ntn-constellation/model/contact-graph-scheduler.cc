@@ -131,9 +131,14 @@ ContactGraphScheduler::Tick()
                 const double lat = gsIt.second.lat_deg * M_PI / 180.0;
                 const double lon = gsIt.second.lon_deg * M_PI / 180.0;
                 const double cosLat = std::cos(lat);
-                const Vector gs(kEarthRadiusM * cosLat * std::cos(lon),
-                                 kEarthRadiusM * cosLat * std::sin(lon),
-                                 kEarthRadiusM * std::sin(lat));
+                const double sinLat = std::sin(lat);
+                // WGS-84 ellipsoid surface (gap B2: was a sphere at the
+                // equatorial radius). N = a / sqrt(1 - e^2 sin^2 lat).
+                const double Ngs =
+                    kEarthRadiusM / std::sqrt(1.0 - kWgs84E2 * sinLat * sinLat);
+                const Vector gs(Ngs * cosLat * std::cos(lon),
+                                 Ngs * cosLat * std::sin(lon),
+                                 Ngs * (1.0 - kWgs84E2) * sinLat);
                 const double dx = p.x - gs.x;
                 const double dy = p.y - gs.y;
                 const double dz = p.z - gs.z;
@@ -169,7 +174,35 @@ ContactGraphScheduler::Tick()
                 const double dy = pa.y - pb.y;
                 const double dz = pa.z - pb.z;
                 const double range = std::sqrt(dx * dx + dy * dy + dz * dz);
-                const bool inRange = range <= m_maxIslRangeM;
+                // Earth-occultation (limb) test (gap B1): an ISL is blocked if
+                // the segment between the two satellites passes within one
+                // Earth radius of geocentre — previously a pure range gate
+                // declared a link THROUGH the planet. Closest-approach of the
+                // segment to the origin; endpoints are satellites (above the
+                // surface), so a blocked link only occurs when the closest
+                // point lies strictly between them.
+                bool losClear = true;
+                {
+                    const double seg2 = dx * dx + dy * dy + dz * dz;
+                    if (seg2 > 0.0)
+                    {
+                        // param of closest approach to origin along pa->pb
+                        const double tt =
+                            -((pa.x) * (pb.x - pa.x) + (pa.y) * (pb.y - pa.y) +
+                              (pa.z) * (pb.z - pa.z)) /
+                            seg2;
+                        if (tt > 0.0 && tt < 1.0)
+                        {
+                            const double cx = pa.x + tt * (pb.x - pa.x);
+                            const double cy = pa.y + tt * (pb.y - pa.y);
+                            const double cz = pa.z + tt * (pb.z - pa.z);
+                            const double cr =
+                                std::sqrt(cx * cx + cy * cy + cz * cz);
+                            losClear = (cr >= kEarthRadiusM);
+                        }
+                    }
+                }
+                const bool inRange = (range <= m_maxIslRangeM) && losClear;
                 const std::pair<uint32_t, uint32_t> key{a->first, b->first};
                 auto stateIt = m_islState.find(key);
                 const bool prev =

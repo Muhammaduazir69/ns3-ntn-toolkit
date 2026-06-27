@@ -8,7 +8,12 @@
 // AMC + RLC/PDCP + RRC + EPC — between caller-supplied satellite (gNB) and
 // ground (UE) nodes that already carry their own ns-3 MobilityModel (SGP4,
 // HAPS, OpenSky, ...). The link is NTN-ized: free-space (Friis) path loss valid
-// at LEO range, S-band carrier (3GPP NR-NTN FR1), satellite EIRP via Tx power,
+// at LEO range, a mmWave-NR PHY at an S-band carrier (FR2 numerology, 60 kHz
+// SCS — NOT a 3GPP NR-NTN FR1 band/numerology: 2.0 GHz has no assigned 3GPP
+// band number, it sits in the n256 uplink, and the 50 MHz default BW exceeds
+// the 20/30 MHz NTN-FR1 max). The "satellite EIRP" is a conducted Tx-power
+// scalar on a terrestrial 8x8 UniformPlanarArray gNB with SVD beamforming
+// (array gain added separately, not a reflector beam / 3 dB footprint).
 // HARQ off by default (terrestrial HARQ timers break over the slant), and the
 // 3GPP terrestrial spatial-fading channel disabled (invalid at LEO geometry).
 //
@@ -63,6 +68,11 @@ class Address;
 class MobilityModel;
 class PropagationLossModel;
 class NtnOranAiFlowMonitor;
+// nr (5G-LENA) backend types — see SetRadioBackend / RadioBackend::Nr.
+class NrHelper;
+class NrPointToPointEpcHelper;
+class IdealBeamformingHelper;
+struct RxPacketTraceParams; // ns3::RxPacketTraceParams (nr); != mmwave::RxPacketTraceParams
 
 namespace mmwave
 {
@@ -89,6 +99,21 @@ class NtnRealStackHelper
         UrllcPings,          ///< 256 B / 10 ms (5QI 82)
         ConversationalVoice, ///< vocoder 20 ms cadence (5QI 1)
         MixedBouquet,        ///< NB-IoT / eMBB / URLLC, 1/3 each across UEs
+    };
+
+    /// Which in-tree NR PHY/MAC stack carries the air interface.
+    ///   Mmwave (DEFAULT, zero-regression): the vendored NYU `mmwave` module,
+    ///           FR2 numerology (60 kHz SCS). This is what all existing examples
+    ///           get unless they opt in to Nr.
+    ///   Nr:     5G-LENA `nr`, FR1 numerology (15/30 kHz SCS via SetNumerology),
+    ///           the S-band NTN-FR1 regime mmwave cannot reach (closes A5(i)).
+    /// Both backends feed the SAME measured-KPI accumulators (per-UE/cell SINR,
+    /// TBLER, throughput, health gates, ORAN/AI flow monitor), so all downstream
+    /// logic is backend-agnostic.
+    enum class RadioBackend : uint8_t
+    {
+        Mmwave,
+        Nr,
     };
 
     /// Satellite payload architecture (Deng 2026 Sec. II-B2; WS4). Selects
@@ -127,12 +152,40 @@ class NtnRealStackHelper
     void SetSimTime(Time t) { m_simTime = t; }
     void SetOutputDir(std::string d) { m_outputDir = std::move(d); }
     void SetRunTag(std::string t) { m_runTag = std::move(t); }
+    /// Select the radio backend (default Mmwave). Call before Build().
+    void SetRadioBackend(RadioBackend b) { m_backend = b; }
+    RadioBackend GetRadioBackend() const { return m_backend; }
+    /// FR1 numerology for the Nr backend only: 0 = 15 kHz, 1 = 30 kHz (default).
+    /// Ignored by the Mmwave backend. Call before Build().
+    void SetNumerology(uint16_t n) { m_numerology = n; }
+    uint16_t GetNumerology() const { return m_numerology; }
     void SetCarrierFrequencyHz(double f) { m_freqHz = f; }
     void SetBandwidthHz(double b) { m_bwHz = b; }
     double GetBandwidthHz() const { return m_bwHz; }
     double GetCarrierFrequencyHz() const { return m_freqHz; }
     void SetSatEirpDbm(double p) { m_satEirpDbm = p; }   ///< gNB (satellite) Tx power / EIRP
-    double GetSatEirpDbm() const { return m_satEirpDbm; } ///< configured beam EIRP (Tx power + Tx antenna gain)
+    /// Configured value written verbatim into MmWaveEnbPhy::TxPower. NOTE
+    /// (gap G16): mmwave adds the antenna-array gain SEPARATELY in the spectrum
+    /// model, so the effective radiated EIRP = this value + array gain; treat
+    /// this as the conducted Tx power budget, not the final EIRP, when comparing
+    /// against a TR 38.821 EIRP-density link budget.
+    double GetSatEirpDbm() const { return m_satEirpDbm; }
+
+    /// Enable/disable the TR 38.811 large-scale EXCESS-loss terms (atmospheric
+    /// gas P.676 + scintillation P.618 + clutter + elevation-dependent shadow
+    /// fading) on the MEASURED radio channel, chained after Friis (gap G1).
+    /// Default ON. Call before Build().
+    void SetTr38811ExcessLoss(bool e) { m_tr38811 = e; }
+    /// TR 38.811 scenario for the excess-loss model: 0=DenseUrban, 1=Urban,
+    /// 2=Suburban (default), 3=Rural. Call before Build().
+    void SetNtnScenario(uint8_t s) { m_ntnScenario = s; }
+    /// Enable the TR 38.811 §6.4.1 satellite beam pattern (off-boresight
+    /// roll-off only; the radio array supplies the peak gain) — gap A5(ii).
+    /// \p beamwidthDeg = 3 dB beamwidth (default 4.4127, TR 38.821 Set-1 LEO-600
+    /// S-band). \p beamCenter = the fixed cell beam-centre mobility; if null the
+    /// beam tracks each UE (roll-off 0). Call before Build().
+    void SetSatelliteBeam(double beamwidthDeg = 4.4127,
+                          Ptr<MobilityModel> beamCenter = nullptr);
     void SetUeTxPowerDbm(double p) { m_ueTxDbm = p; }
     void SetBackhaulDelay(Time t) { m_backhaulDelay = t; } ///< feeder+core one-way delay
     void SetPayloadOption(PayloadOption p) { m_payload = p; }
@@ -278,11 +331,17 @@ class NtnRealStackHelper
     /// Number of UEs.
     uint32_t GetNumUes() const { return m_ue.GetN(); }
 
+    /// Radio-agnostic serving cell id of the first gNB device: casts to
+    /// mmwave::MmWaveEnbNetDevice (Mmwave backend) or ns3::NrGnbNetDevice (Nr
+    /// backend) and returns GetCellId() (1 if unavailable). Defined out-of-line.
+    uint16_t GetServingCellId() const;
+
     // ---- Handles for module-specific wiring ------------------------------
     // (defined out-of-line so callers need not pull in the mmwave headers)
     Ptr<mmwave::MmWaveHelper> GetMmWaveHelper() const;
     Ptr<mmwave::MmWavePointToPointEpcHelper> GetEpcHelper() const;
     NetDeviceContainer GetUeDevices() const { return m_ueDevs; }
+    /// gNB device container for the active backend (mmwave or nr gNB devices).
     NetDeviceContainer GetEnbDevices() const { return m_enbDevs; }
     Ptr<Node> GetRemoteHost() const { return m_remoteHost; }
 
@@ -295,8 +354,33 @@ class NtnRealStackHelper
     void ExportAiFlowMonitor();
     // Stretch mmwave HARQ knobs to the slant geometry (NTN HARQ profile).
     void ConfigureNtnHarqProfile();
-    // PHY measured-KPI sink (connected to RxPacketTraceUe).
-    void DlRxTrace(mmwave::RxPacketTraceParams params);
+    // Relax RLC-AM / RRC timers to the slant RTT so terrestrial defaults do not
+    // fire spuriously over the NTN propagation delay (gap G4). Self-gating:
+    // only ever extends a timer upward, so it is a no-op at terrestrial range.
+    void ConfigureNtnRlcRrcTimers();
+    // Worst-case (max) gNB<->UE slant range over the built geometry, in metres;
+    // returns 600 km if no usable geometry is present.
+    double WorstCaseSlantM() const;
+    // Backend-specific radio install (helper + EPC + remote host + devices +
+    // attach + RxPacketTraceUe wiring). Build() dispatches to one of these.
+    void BuildMmwaveRadio();
+    void BuildNrRadio();
+    // Shared post-radio NTN channel extras (TR 38.811 excess loss + sat beam),
+    // chained onto whichever backend's base loss model.
+    void ApplyNtnChannelExtras();
+    // PHY measured-KPI sink (connected to RxPacketTraceUe). One per backend
+    // because the trace struct type differs; both feed AccumulateDl().
+    void DlRxTrace(mmwave::RxPacketTraceParams params);   // mmwave backend
+    void DlRxTraceNr(RxPacketTraceParams params);          // nr backend (ns3::RxPacketTraceParams)
+    // Single accumulation path shared by both backends, so per-UE/cell SINR,
+    // TBLER, corrupt-fraction, health gates and the AI flow monitor are
+    // identical regardless of which radio produced the sample.
+    void AccumulateDl(double sinrLinear,
+                      double tbler,
+                      bool corrupt,
+                      uint16_t cellId,
+                      uint16_t rnti,
+                      uint32_t tbSize);
     // App-layer measured counters (connected to OnOff "Tx" / PacketSink "Rx").
     void DlClientTx(Ptr<const Packet> p);
     void DlSinkRx(Ptr<const Packet> p, const Address& from);
@@ -314,10 +398,15 @@ class NtnRealStackHelper
     Time m_simTime{Seconds(30.0)};
     std::string m_outputDir{"."};
     std::string m_runTag{"run"};
-    double m_freqHz{2.0e9};       // S-band (3GPP NR-NTN FR1)
-    double m_bwHz{50.0e6};
-    double m_satEirpDbm{55.0};    // LEO beam EIRP (Friis budget -> ~15-20 dB SINR)
+    double m_freqHz{2.0e9};       // S-band carrier; mmWave-NR FR2 numerology (60 kHz SCS), not a 3GPP NR-NTN FR1 band/numerology
+    double m_bwHz{50.0e6};        // default exceeds the 20/30 MHz NTN-FR1 max
+    double m_satEirpDbm{55.0};    // gNB conducted Tx power (UPA array gain added separately), Friis budget -> ~15-20 dB SINR
     double m_ueTxDbm{33.0};
+    bool m_tr38811{true};         // chain TR 38.811 excess loss on the measured plane (G1)
+    uint8_t m_ntnScenario{2};     // 0 DenseUrban,1 Urban,2 Suburban,3 Rural
+    bool m_satBeam{false};        // chain the TR 38.811 §6.4.1 beam pattern (A5(ii))
+    double m_beamwidthDeg{4.4127};
+    Ptr<MobilityModel> m_beamCenter;
     Time m_backhaulDelay{MilliSeconds(5)};
     PayloadOption m_payload{PayloadOption::FullGnb};
     Ptr<MobilityModel> m_feederSat;
@@ -328,10 +417,17 @@ class NtnRealStackHelper
     bool m_uplink{false};
     HealthGates m_gates{};
     bool m_strictGates{false};
+    RadioBackend m_backend{RadioBackend::Mmwave}; // default: zero-regression mmwave
+    uint16_t m_numerology{1};                     // nr backend FR1 numerology (30 kHz)
 
-    // ns-3 objects
+    // ns-3 objects (mmwave backend)
     Ptr<mmwave::MmWaveHelper> m_mmwave;
     Ptr<mmwave::MmWavePointToPointEpcHelper> m_epc;
+    // ns-3 objects (nr backend)
+    Ptr<NrHelper> m_nr;
+    Ptr<NrPointToPointEpcHelper> m_nrEpc;
+    Ptr<IdealBeamformingHelper> m_nrBeamforming;
+    Ptr<PropagationLossModel> m_nrBaseLoss; // Friis head for AddExtraPropagationLoss chaining
     NodeContainer m_gnb;
     NodeContainer m_ue;
     NetDeviceContainer m_enbDevs;

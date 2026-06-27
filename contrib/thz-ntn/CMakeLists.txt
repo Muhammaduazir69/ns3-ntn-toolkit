@@ -9,6 +9,8 @@ set(source_files
     model/thz-ntn-weather-attenuation.cc
     model/thz-ntn-scintillation.cc
     model/thz-ntn-pointing-error.cc
+    # A2 — pointing impairment re-homed onto the measured packet plane
+    model/thz-ntn-pointing-loss-model.cc
     model/thz-ntn-hardware-impairments.cc
     model/thz-ntn-spectrum.cc
     model/thz-ntn-link-budget.cc
@@ -56,6 +58,8 @@ set(header_files
     model/thz-ntn-weather-attenuation.h
     model/thz-ntn-scintillation.h
     model/thz-ntn-pointing-error.h
+    # A2 — pointing impairment re-homed onto the measured packet plane
+    model/thz-ntn-pointing-loss-model.h
     model/thz-ntn-hardware-impairments.h
     model/thz-ntn-spectrum.h
     model/thz-ntn-link-budget.h

@@ -167,7 +167,8 @@ main(int argc, char* argv[])
     double duration = 12.0;
     double freqHz = 2.0e9;
     double altKm = 600.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = 70.0; // healthy nr (FR1 Friis) LEO downlink
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "leo-pass-sionna-vs-tr38811-output";
     std::string replayFile = "leo-pass-sionna-vs-tr38811-replay.bin";
 
@@ -176,6 +177,7 @@ main(int argc, char* argv[])
     cmd.AddValue("freqHz", "Carrier frequency (Hz)", freqHz);
     cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("replayFile", "Offline replay file path (§4.2.6 demo)", replayFile);
     cmd.Parse(argc, argv);
@@ -183,7 +185,7 @@ main(int argc, char* argv[])
     g_simTime = duration;
 
     std::cout << "\n=== leo-pass-sionna-vs-tr38811 (MEASURED real-plane LEO pass) ===\n"
-              << "  serving cell: real mmwave NR link, 1 UE, real SGP4 pass\n"
+              << "  serving cell: real NR (" << radio << ") link, 1 UE, real SGP4 pass\n"
               << "  Sionna multipath+Doppler chained as EXCESS fading (no FSPL double-count)\n"
               << "  TR 38.811 §6.6 free-space reference printed per tick for comparison\n"
               << "  freq=" << freqHz / 1e9 << " GHz alt=" << altKm << " km duration=" << duration
@@ -224,6 +226,12 @@ main(int argc, char* argv[])
     g_ueMob = ueNodes.Get(0)->GetObject<MobilityModel>();
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("leo-pass-sionna-vs-tr38811");

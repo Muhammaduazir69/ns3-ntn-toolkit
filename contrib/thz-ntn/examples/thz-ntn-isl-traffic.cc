@@ -53,11 +53,13 @@ main(int argc, char* argv[])
     uint32_t numPlanes = 72;
     uint32_t satsPerPlane = 22;
     std::string outputDir = "thz-ntn-isl-traffic-output";
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "ISL carrier frequency (GHz), capped at 100", freqGHz);
     cmd.AddValue("islEirpDbm", "ISL EIRP / gNB Tx power (dBm)", islEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("numPlanes", "Walker shell planes", numPlanes);
     cmd.AddValue("satsPerPlane", "Satellites per plane", satsPerPlane);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -113,6 +115,12 @@ main(int argc, char* argv[])
     satB.Get(0)->AggregateObject(enuB);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("thz-ntn-isl-traffic");

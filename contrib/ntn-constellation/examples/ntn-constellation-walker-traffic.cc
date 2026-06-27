@@ -15,7 +15,6 @@
 
 #include "ns3/command-line.h"
 #include "ns3/core-module.h"
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-real-stack-helper.h"
@@ -65,7 +64,8 @@ main(int argc, char* argv[])
     double inclinationDeg = 53.0;
     double islRangeCapKm = 5000.0;
     uint32_t numUes = 4;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     std::string outputDir = "ntn-constellation-walker-output";
 
     CommandLine cmd(__FILE__);
@@ -76,13 +76,22 @@ main(int argc, char* argv[])
     cmd.AddValue("inclinationDeg", "Orbital inclination (deg)", inclinationDeg);
     cmd.AddValue("islRangeCapKm", "Max ISL range for contact graph (km)", islRangeCapKm);
     cmd.AddValue("numUes", "Number of ground UEs on the serving cell", numUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     std::string netSimOut;
     std::string czmlOut;
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
+
+    const bool useNr = (radio != "mmwave");
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
+    // healthy SINR; mmwave keeps its historical 55 dBm (zero regression).
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 55.0;
+    }
 
     // ---- Build the Walker constellation (ephemeris context) ----
     WalkerConfig wcfg;
@@ -130,8 +139,14 @@ main(int argc, char* argv[])
     ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
                        subLon - 0.03, subLon + 0.03);
 
-    // ---- real mmwave NR serving cell + measured traffic ----
+    // ---- real NR serving cell + measured traffic (mmwave FR2 or nr FR1) ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(useNr ? NtnRealStackHelper::RadioBackend::Nr
+                             : NtnRealStackHelper::RadioBackend::Mmwave);
+    if (useNr)
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-constellation-walker-traffic");

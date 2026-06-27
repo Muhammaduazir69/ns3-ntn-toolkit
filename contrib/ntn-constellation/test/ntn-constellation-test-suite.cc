@@ -113,7 +113,7 @@ class Sgp4PeriodicReturnTest : public TestCase
 {
   public:
     Sgp4PeriodicReturnTest()
-        : TestCase("SGP4 propagation returns to start within 100 km after one period")
+        : TestCase("Kepler+J2 propagation returns to start within 100 km after one period")
     {
     }
 

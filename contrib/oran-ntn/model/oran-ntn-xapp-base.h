@@ -11,7 +11,8 @@
  * resolution interface, and NTN-specific timing abstractions.
  *
  * Concrete xApps:
- *   - HO Prediction xApp (LSTM/DQN-based proactive handover)
+ *   - HO Prediction xApp (proactive handover; "LSTM"=EWMA+linear slope,
+ *     "DQN"=linear dot-product — see its header, not a deep net)
  *   - Beam Hopping xApp (dynamic beam scheduling)
  *   - Slice Manager xApp (eMBB/URLLC/mMTC resource allocation)
  *   - Doppler Compensation xApp (per-beam frequency correction)

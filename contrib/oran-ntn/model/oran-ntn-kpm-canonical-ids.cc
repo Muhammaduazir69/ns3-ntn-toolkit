@@ -26,6 +26,8 @@ CanonicalMetricIds()
         kRruPrbUsedUl,
         kCarrAvgSinr,
         kL1mRsSinrMean,
+        kTbTotNbrDl,
+        kTbErrTotNbrDl,
     };
     return ids;
 }
@@ -63,7 +65,7 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
                               const std::map<std::string, std::string>& base)
 {
     std::vector<KpmMeasurement> out;
-    out.reserve(10);
+    out.reserve(12);
 
     // DRB.UEThpDl — DL throughput, kbps (WG3 unit).
     const double thpDlKbps = r.throughput_Mbps * 1e3;
@@ -111,19 +113,39 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
                                   /*present=*/false,
                                   base));
 
-    // CARR.AverageSINR — cell-level mean SINR in dB. Until per-cell averaging
-    // is wired the per-UE sinr is forwarded; reviewers should treat the
-    // FIVE_QI label as the disambiguator.
+    // CARR.AverageSINR — cell-level mean SINR in dB. This is a PHY SINR
+    // quantity per 3GPP TS 38.215 (RS-SINR), NOT a TS 28.552 PM counter; it
+    // is a legitimate vendor L1 metric (srsRAN / OAI L1). Until per-cell
+    // averaging is wired the per-UE sinr is forwarded; reviewers should treat
+    // the FIVE_QI label as the disambiguator.
     out.push_back(
         MakeMeasurement(kpm::kCarrAvgSinr, r.sinr_dB, /*present=*/true, base));
 
-    // L1M.RS-SINR.Mean — L1-measured RS-SINR mean. The mmwave PHY emits the
-    // same source today; once srsRAN-style per-symbol L1 SINR averaging is in
-    // place the two metrics will diverge.
+    // L1M.RS-SINR.Mean — L1-measured RS-SINR mean (dB), per 3GPP TS 38.215
+    // (RS-SINR PHY quantity), NOT a TS 28.552 PM counter. The mmwave PHY emits
+    // the same source today; once srsRAN-style per-symbol L1 SINR averaging is
+    // in place the two metrics will diverge.
     out.push_back(MakeMeasurement(kpm::kL1mRsSinrMean,
                                   r.sinr_dB,
                                   /*present=*/true,
                                   base));
+
+    // TB.TotNbrDl / TB.ErrTotNbrDl — canonical TS 28.552 DL transport-block
+    // counters; the DL TB error rate is TB.ErrTotNbrDl / TB.TotNbrDl. That
+    // error fraction is ALREADY measured upstream as E2KpmReport::harqBler
+    // (HARQ NACK ratio from OranNtnPhyKpmExtractor::GetHarqBler()). No
+    // integrating absolute-TB counter is plumbed into E2KpmReport at the v2.1
+    // baseline, so both counters are emitted as shape-stable present=false
+    // placeholders (mirroring DRB.UEThpUl). To avoid discarding the measured
+    // information, TB.ErrTotNbrDl carries the already-measured DL HARQ BLER
+    // fraction (0..1) so it is greppable; once the integrating counter lands
+    // (OranNtnDataRepository §4.1.4) the canonical relation
+    // TB.ErrTotNbrDl / TB.TotNbrDl == harqBler holds with absolute counts.
+    // NO new physics is introduced here — the BLER is reused as measured.
+    out.push_back(
+        MakeMeasurement(kpm::kTbTotNbrDl, 0.0, /*present=*/false, base));
+    out.push_back(
+        MakeMeasurement(kpm::kTbErrTotNbrDl, r.harqBler, /*present=*/false, base));
 
     return out;
 }

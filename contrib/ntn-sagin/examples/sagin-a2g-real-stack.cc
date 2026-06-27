@@ -65,6 +65,7 @@ main(int argc, char* argv[])
     std::string linkStr = "NLOS";
     std::string scenarioStr = "UMa_AV";
     std::string outputDir = "sagin-a2g-real-stack-output";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
@@ -75,6 +76,7 @@ main(int argc, char* argv[])
     cmd.AddValue("link", "TR 36.777 link branch: LOS | NLOS", linkStr);
     cmd.AddValue("scenario", "TR 36.777 scenario: UMa_AV | RMa_AV | UMi_AV", scenarioStr);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.Parse(argc, argv);
 
     const A2gLink link = (linkStr == "LOS") ? A2gLink::LOS : A2gLink::NLOS;
@@ -113,7 +115,13 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-a2g-real-stack");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
-    rs.SetSatEirpDbm(gnbTxDbm);
+    rs.SetSatEirpDbm(gnbTxDbm); // short-range A2G gNB Tx (not a LEO link) — kept as-is
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.Build(gnbNodes, ueNodes);
 
     // ---- Channel plug-in: TR 36.777 A2G loss attenuates real packets ----

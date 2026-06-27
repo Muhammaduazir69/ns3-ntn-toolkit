@@ -11,8 +11,11 @@
  * the Doppler-driven small-scale fading — so the "ray-traced" link behaved like
  * a static free-space attenuator and the channel KPIs were effectively a number.
  *
- * Here the FULL CIR is kept: a Sionna-RT-style multipath snapshot (one LOS tap +
- * several reflected taps, each with its own delay and direction) is installed on
+ * Here a multipath CIR is applied to the packets. NOTE: the Sionna RT server
+ * returns only a scalar path_loss_db (the wire Response carries no taps), so the
+ * snapshot used here is NOT ray-traced — it is a hand-authored synthetic Rician
+ * profile (one LOS tap + several reflected taps, each with its own delay and
+ * direction) installed on
  * SionnaCirPropagationLossModel, which coherently combines the taps after
  * rotating each by its per-tap Doppler (CirDopplerSynthesizer = the C++
  * paths.apply_doppler()) and charges the resulting time-varying fading onto a
@@ -80,8 +83,9 @@ SampleSinr()
     Simulator::Schedule(MilliSeconds(20), &SampleSinr);
 }
 
-// Build a Sionna-RT-style multipath CIR snapshot: a dominant LOS tap plus three
-// reflected taps with distinct arrival directions (so they Doppler-rotate at
+// Build a hand-authored synthetic Rician multipath CIR snapshot (NOT ray-traced;
+// the Sionna RT server returns only a scalar path loss): a dominant LOS tap plus
+// three reflected taps with distinct arrival directions (so they Doppler-rotate at
 // different rates -> real constructive/destructive fading) and short delays.
 CirSnapshot
 MakeSnapshot(double freqHz)
@@ -110,9 +114,10 @@ main(int argc, char* argv[])
     double duration = 12.0;
     uint32_t numUes = 4;
     double altitudeKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = 70.0; // healthy nr (FR1 Friis) LEO downlink
     double freqGhz = 2.0;
     double platformSpeed = 0.0; // 0 = use the REAL SGP4 ephemeris velocity
+    std::string radio = "nr";   // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-sionna-cir-real-stack-output";
 
     CommandLine cmd(__FILE__);
@@ -120,6 +125,7 @@ main(int argc, char* argv[])
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
     cmd.AddValue("platformSpeed",
                  "Tx platform speed override (m/s); 0 = real ephemeris velocity",
@@ -128,9 +134,10 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     g_simTime = duration;
 
-    std::cout << "\n=== ntn-sionna CIR REAL-STACK (FULL multipath CIR, not scalar PL) ===\n"
-              << "  serving cell: real mmwave NR link, " << numUes << " UEs\n"
-              << "  channel: 4-tap Sionna-RT CIR + Doppler chained on the real link\n"
+    std::cout << "\n=== ntn-sionna CIR REAL-STACK (multipath CIR, not scalar PL) ===\n"
+              << "  serving cell: real NR (" << radio << ") link, " << numUes << " UEs\n"
+              << "  channel: 4-tap synthetic Rician CIR + Doppler (hand-authored, not "
+                 "ray-traced) chained on the real link\n"
               << "  measured SINR fades with multipath (variance the scalar PL discards)\n"
               << "  duration: " << duration << " s\n\n";
 
@@ -170,6 +177,12 @@ main(int argc, char* argv[])
     mob.Install(ueNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-sionna-cir-real-stack");
@@ -202,7 +215,7 @@ main(int argc, char* argv[])
     const double varSinr =
         g_nSinr ? std::max(0.0, g_sumSinr2 / g_nSinr - meanSinr * meanSinr) : 0.0;
 
-    std::cout << "\n--- Sionna CIR Summary (full CIR on MEASURED radio) ---\n"
+    std::cout << "\n--- Sionna CIR Summary (synthetic Rician CIR on MEASURED radio) ---\n"
               << "  CIR taps installed:           " << g_cir->GetTapCount()
               << " (>1 => real multipath, not scalar PL)\n"
               << "  CIR fading deviation range:   [" << g_minFadeDb << ", " << g_maxFadeDb

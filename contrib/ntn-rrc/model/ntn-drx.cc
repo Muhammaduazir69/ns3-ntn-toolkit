@@ -97,6 +97,27 @@ NtnDrxStateMachine::NotifyNextPass(Time start, Time duration)
 }
 
 void
+NtnDrxStateMachine::SetNtnRoundTripTime(Time rtt)
+{
+    NS_ASSERT_MSG(rtt >= Time(0), "NTN RTT must be non-negative");
+    m_cfg.ntnRtt = rtt;
+}
+
+Time
+NtnDrxStateMachine::GetHarqRttTimerDlNtn() const
+{
+    // TS 38.321 §5.7: HARQ-RTT-TimerDL-NTN = drx-HARQ-RTT-TimerDL + UE-gNB RTT.
+    return m_cfg.harqRttTimerDl + m_cfg.ntnRtt;
+}
+
+Time
+NtnDrxStateMachine::GetHarqRttTimerUlNtn() const
+{
+    // TS 38.321 §5.7: HARQ-RTT-TimerUL-NTN = drx-HARQ-RTT-TimerUL + UE-gNB RTT.
+    return m_cfg.harqRttTimerUl + m_cfg.ntnRtt;
+}
+
+void
 NtnDrxStateMachine::Start()
 {
     if (m_running)

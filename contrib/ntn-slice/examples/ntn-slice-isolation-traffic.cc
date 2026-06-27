@@ -37,22 +37,31 @@ main(int argc, char* argv[])
 {
     double simSeconds = 15.0;
     uint32_t numUes = 9; // %3 -> eMBB / URLLC / mMTC
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double backhaulMs = 5.0;
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-slice-isolation-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("numUes", "UEs on the shared cell (slice = ue%3)", numUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("backhaulMs", "Feeder+core one-way delay (ms)", backhaulMs);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    std::printf("# ntn-slice-isolation-traffic (3 slices CONTEND on ONE real mmwave cell)\n"
+    // Backend-appropriate EIRP default (honoured only if the user did not set it):
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
+
+    std::printf("# ntn-slice-isolation-traffic (3 slices CONTEND on ONE real %s cell)\n"
                 "#   eMBB saturates the shared cell; URLLC/mMTC isolation is MEASURED\n"
                 "#   sim=%.0fs UEs=%u EIRP=%.1fdBm\n",
-                simSeconds, numUes, satEirpDbm);
+                radio.c_str(), simSeconds, numUes, satEirpDbm);
 
     // ---- Real NTN mobility: SGP4 Walker sat + TR 38.811 UEs at sub-point ----
     ns3::ntncon::WalkerConfig wcfg;
@@ -81,6 +90,12 @@ main(int argc, char* argv[])
     // ---- ONE shared real cell; MixedBouquet = per-UE slice traffic profiles
     //      (eMBB saturating stream, URLLC pings, mMTC periodic) ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-slice-isolation-traffic");

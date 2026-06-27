@@ -344,25 +344,39 @@ Sgp4MobilityModel::GetGeodetic(double& lat_deg, double& lon_deg,
     const double y = r.y;
     const double z = r.z;
     const double rho = std::sqrt(x * x + y * y);
-    // Spherical approximation — adequate for the v2.1 baseline; ellipsoidal
-    // refinement is a 4.4.X follow-on.
-    const double r_norm = std::sqrt(rho * rho + z * z);
-    lat_deg = std::atan2(z, rho) * kRadToDeg;
+    // WGS-84 ellipsoidal geodetic (Bowring's method) — consistent with the
+    // UE/SAGIN side and the GS placement below (gap B2: previously a sphere at
+    // the equatorial radius, ~21 km off at the poles).
     lon_deg = std::atan2(y, x) * kRadToDeg;
-    alt_m = r_norm - kEarthRadiusM;
+    const double ep2 = kWgs84E2 / (1.0 - kWgs84E2);
+    const double th = std::atan2(z * kEarthRadiusM, rho * kWgs84B);
+    const double sTh = std::sin(th);
+    const double cTh = std::cos(th);
+    const double latRad =
+        std::atan2(z + ep2 * kWgs84B * sTh * sTh * sTh,
+                   rho - kWgs84E2 * kEarthRadiusM * cTh * cTh * cTh);
+    const double sLat = std::sin(latRad);
+    const double N = kEarthRadiusM / std::sqrt(1.0 - kWgs84E2 * sLat * sLat);
+    lat_deg = latRad * kRadToDeg;
+    alt_m = (std::abs(std::cos(latRad)) > 1e-9)
+                ? (rho / std::cos(latRad) - N)
+                : (std::abs(z) - kWgs84B);
 }
 
 double
 Sgp4MobilityModel::GetElevationDeg(double gs_lat_deg, double gs_lon_deg) const
 {
     Vector r_sat = GetEcefPosition();
-    // GS position in ECEF (sea level).
+    // GS position in ECEF (sea level) on the WGS-84 ellipsoid (gap B2: was a
+    // sphere at the equatorial radius). N = a / sqrt(1 - e^2 sin^2(lat)).
     const double lat = gs_lat_deg * kDegToRad;
     const double lon = gs_lon_deg * kDegToRad;
     const double cosLat = std::cos(lat);
-    Vector r_gs(kEarthRadiusM * cosLat * std::cos(lon),
-                 kEarthRadiusM * cosLat * std::sin(lon),
-                 kEarthRadiusM * std::sin(lat));
+    const double sinLat = std::sin(lat);
+    const double Ngs = kEarthRadiusM / std::sqrt(1.0 - kWgs84E2 * sinLat * sinLat);
+    Vector r_gs(Ngs * cosLat * std::cos(lon),
+                 Ngs * cosLat * std::sin(lon),
+                 Ngs * (1.0 - kWgs84E2) * sinLat);
     // Vector GS -> Sat.
     Vector d(r_sat.x - r_gs.x, r_sat.y - r_gs.y, r_sat.z - r_gs.z);
     // Local up direction at GS.

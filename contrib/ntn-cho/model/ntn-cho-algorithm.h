@@ -178,14 +178,19 @@ class NtnChoAlgorithm : public Object
         double d2HysteresisLocation_m = 10000.0; //!< hysteresisLocation (TS 38.331)
 
         /**
-         * Rel-17 combination semantics: TS 38.331 configures the T1/D1 (and
-         * Rel-18 D2) CondEvents TOGETHER WITH a measurement event (A4), not
-         * standalone. The quality precondition (sinr >= qualityThreshold_dB)
-         * already implements the A4 entering condition with Thresh =
-         * qualityThreshold_dB; setting combineWithA4 = true additionally
-         * enforces the A4 time-to-trigger (a3TimeToTrigger): the candidate
-         * must satisfy the quality threshold CONTINUOUSLY for the TTT before
-         * a T1/D1/D2 admission may fire.
+         * Rel-17 combination semantics (per TS 38.331 §5.5.4): a CHO execution
+         * condition may use ONE or TWO conditional events. D1/T1/D2 are valid
+         * STANDALONE conditional triggers (CondEventD1/T1/D2). The quality
+         * precondition (sinr >= qualityThreshold_dB) already implements the A4
+         * entering condition with Thresh = qualityThreshold_dB; combineWithA4 =
+         * true additionally enforces the A4 time-to-trigger (a3TimeToTrigger) as
+         * a SECOND execution condition: the candidate must satisfy the quality
+         * threshold CONTINUOUSLY for the TTT before a T1/D1/D2 admission fires.
+         *
+         * Default FALSE: a single-event CHO trigger is standards-valid, so the
+         * D-event fires on its own geometry semantics; set true to require the
+         * A4 quality-TTT as an optional second execution condition for added
+         * robustness (a valid two-event config, but not mandatory).
          */
         bool combineWithA4 = false;
 

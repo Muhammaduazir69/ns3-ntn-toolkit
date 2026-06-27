@@ -50,6 +50,7 @@ main(int argc, char* argv[])
     uint32_t ues = 4;
     double duration = 30.0;
     double altitudeKm = 550.0;
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string out = "ntn-official.json";
 
     CommandLine cmd(__FILE__);
@@ -57,6 +58,7 @@ main(int argc, char* argv[])
     cmd.AddValue("ues", "UEs to render", ues);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("altitude", "Constellation altitude (km)", altitudeKm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("out", "Official NetSimulyzer JSON output path", out);
     cmd.Parse(argc, argv);
 
@@ -87,15 +89,22 @@ main(int argc, char* argv[])
     auto profile = NtnMobilityScenarios::MixedContinental();
     ueMob.Install(ueNodes, profile, subLat - 0.05, subLat + 0.05, subLon - 0.05, subLon + 0.05);
 
-    // ---- REAL radio (mmwave NR-NTN) so the scene spine is fed MEASURED KPIs ----
+    // ---- REAL radio (NR-NTN) so the scene spine is fed MEASURED KPIs ----
     // Same proven backbone as ntn-observability-traffic.cc: SpectrumPhy + MAC +
     // RLC/PDCP + RRC + EPC. Headline KPIs (SINR/TBLER/goodput) come from the PHY
     // RxPacketTraceUe + PacketSink, never closed-form. Build() needs >=1 of each.
     NS_ABORT_MSG_IF(sats < 1 || ues < 1, "real stack needs at least one sat and one UE");
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetRunTag("ntn-netsimulyzer-official-demo");
-    rs.SetSatEirpDbm(55.0);
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    rs.SetSatEirpDbm(radio == "mmwave" ? 55.0 : 70.0);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0),

@@ -17,6 +17,21 @@
  * change, so the END-TO-END delivered goodput (the product of per-hop
  * successes) tracks the live geometry — nothing hardcoded.
  *
+ * MODELLING SCOPE / CAVEATS (read before interpreting PDR numbers):
+ *   1. Per-hop link error is a BINARY in-contact gate (snr >= 3 dB ⇒ PER 0,
+ *      else PER 1), NOT a soft SNR→BLER decode curve. A hop either closes its
+ *      budget or drops every packet; there is no graceful degradation region.
+ *   2. The dramatic end-to-end PDR collapse from 2 GHz to 20 GHz (≈67.6% →
+ *      ≈0.28%) is driven SOLELY by the +20 dB/decade free-space-path-loss
+ *      frequency term (TR 38.811 Eq. 6.6-2) evaluated with FIXED EIRP
+ *      (70 dBm) and FIXED noise (-95 dBm). There is NO rain, atmospheric, or
+ *      gaseous-absorption fade model in this SAGIN data plane — the drop is
+ *      pure free-space FSPL, not a rain-fade result.
+ *   3. Real Ka-band NTN links recover much of that +20 dB through high-gain
+ *      (electrically small, high-directivity) antennas, so this example is a
+ *      WORST-CASE free-space illustration of the frequency penalty, not a
+ *      realistic Ka-band link-budget or weather-impairment study.
+ *
  * Quick test:  --simSeconds=120 --dataRateMbps=5
  */
 #include "ns3/applications-module.h"
@@ -101,9 +116,14 @@ UpdateHopPer(Hop& h, double plDb, bool gated, double elev)
     const double rng = Dist(h.a->GetPosition(), h.b->GetPosition());
     const double rx = g_eirpDbm - plDb;
     const double snr = rx - g_noiseDbm;
-    // Honest link-budget gate: the hop forwards only while the REAL path-loss
-    // budget closes (rx SNR above the decode floor) — a binary in-contact gate
-    // driven by the real A2G/FSPL physics, NOT a fabricated sigmoid PER.
+    // Binary in-contact gate (NOT a soft SNR→BLER curve): the hop forwards
+    // every packet while the REAL path-loss budget closes (rx SNR >= 3 dB) and
+    // drops every packet otherwise. The 3 dB floor is a hard decode threshold,
+    // so there is no graceful-degradation region. Because plDb here carries the
+    // +20 dB/decade FSPL frequency term (TR 38.811 Eq. 6.6-2) with fixed EIRP
+    // (70 dBm) and noise (-95 dBm) and NO rain/atmospheric fade, raising the
+    // carrier from 2→20 GHz simply pushes more hops below this gate — the
+    // resulting end-to-end PDR collapse is pure free-space FSPL, not rain fade.
     double per = (snr >= 3.0) ? 0.0 : 1.0;
     if (gated && elev < g_minElev)
     {

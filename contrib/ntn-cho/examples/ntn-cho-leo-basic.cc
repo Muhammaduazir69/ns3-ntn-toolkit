@@ -9,7 +9,6 @@
 // honest sim_health.csv whose SINR/TBLER carry phy-trace provenance.
 
 #include "ns3/core-module.h"
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-cho-algorithm.h"
@@ -34,7 +33,8 @@ main(int argc, char* argv[])
     std::string triggerType = "tte-aware";
     double tteMinimum = 5.0;
     uint32_t numUes = 4;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     std::string outputDir = "ntn-cho-basic-out";
 
     CommandLine cmd(__FILE__);
@@ -42,9 +42,18 @@ main(int argc, char* argv[])
     cmd.AddValue("trigger", "CHO trigger: a3|location|tte-aware", triggerType);
     cmd.AddValue("tteMinimum", "Minimum TTE in seconds", tteMinimum);
     cmd.AddValue("numUes", "Number of UEs", numUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    const bool useNr = (radio != "mmwave");
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
+    // healthy SINR; mmwave keeps its historical 55 dBm (zero regression).
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 55.0;
+    }
 
     NtnChoAlgorithm::TriggerType trigger = NtnChoAlgorithm::TRIGGER_TTE_AWARE;
     if (triggerType == "a3")
@@ -53,11 +62,13 @@ main(int argc, char* argv[])
         trigger = NtnChoAlgorithm::TRIGGER_LOCATION_D1;
 
     std::cout << "========================================\n"
-              << "NTN-CHO LEO Basic (real mmwave NR cell)\n"
+              << "NTN-CHO LEO Basic (real "
+              << (useNr ? "5G-LENA nr FR1" : "mmwave FR2") << " cell)\n"
               << "========================================\n"
               << "  simTime: " << simTime << " s\n"
               << "  numUes:  " << numUes << "\n"
-              << "  trigger: " << triggerType << "\n";
+              << "  trigger: " << triggerType << "\n"
+              << "  EIRP:    " << satEirpDbm << " dBm\n";
 
     // ---- CHO algorithm (TTE-aware) via the helper ----
     Ptr<NtnChoHelper> ntnHelper = CreateObject<NtnChoHelper>();
@@ -68,7 +79,8 @@ main(int argc, char* argv[])
     ntnHelper->SetTteMinimum(Seconds(tteMinimum));
     Ptr<NtnChoAlgorithm> choAlgo = ntnHelper->CreateChoAlgorithm();
 
-    // ---- Nodes: one SGP4 serving satellite (real mmwave gNB) + TR 38.811 UEs ----
+    // ---- Nodes: one Kepler+J2-secular serving satellite (real mmwave gNB) +
+    //      TR 38.811 UEs (Vallado SGP4 available via Sgp4MobilityModel::SetUseVallado) ----
     ns3::ntncon::WalkerConfig wcfg;
     wcfg.num_planes = 1;
     wcfg.total_sats = 80;
@@ -94,8 +106,14 @@ main(int argc, char* argv[])
     ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03, subLon - 0.03,
                        subLon + 0.03);
 
-    // ---- Real mmwave NTN cell + traffic ----
+    // ---- Real NR NTN cell + traffic (mmwave FR2 or nr FR1) ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(useNr ? NtnRealStackHelper::RadioBackend::Nr
+                             : NtnRealStackHelper::RadioBackend::Mmwave);
+    if (useNr)
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simTime));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-leo-basic_" + triggerType);
@@ -105,9 +123,8 @@ main(int argc, char* argv[])
                       Seconds(1.0), Seconds(simTime - 0.5));
     rs.EnableAiFlowMonitor("ntn-cho-leo-basic"); // WS2 KPM series (TS 28.552 names)
 
-    Ptr<mmwave::MmWaveEnbNetDevice> enb =
-        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
-    const uint16_t servingCell = enb ? enb->GetCellId() : 1;
+    // Radio-agnostic serving cell id (mmwave or nr gNB under the hood).
+    const uint16_t servingCell = rs.GetServingCellId();
     const uint16_t candCell = servingCell + 100;
     choAlgo->AddCandidateCell(servingCell, 0, 0);
     choAlgo->AddCandidateCell(candCell, 1, 0);

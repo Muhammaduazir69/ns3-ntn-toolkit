@@ -42,13 +42,18 @@ main(int argc, char* argv[])
     double simSeconds = 30.0;
     double leoAltKm = 550.0;
     std::string payload = "fullgnb";
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "oran-ntn-payload-options-ab-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("payload", "Payload: transparent|ru|rudu|fullgnb", payload);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 60.
+    const double satEirpDbm = (radio == "mmwave") ? 60.0 : 70.0;
 
     using PO = NtnRealStackHelper::PayloadOption;
     PO opt = PO::FullGnb;
@@ -105,11 +110,17 @@ main(int argc, char* argv[])
     mob.Install(gwNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("oran-ntn-payload-options-ab-" + payload);
     rs.SetCarrierFrequencyHz(2.0e9);
-    rs.SetSatEirpDbm(60.0);
+    rs.SetSatEirpDbm(satEirpDbm);
     rs.SetPayloadOption(opt);
     rs.Build(satNodes, ueNodes);
     rs.SetFeederGeometry(satEnu, gwNodes.Get(0)->GetObject<MobilityModel>());

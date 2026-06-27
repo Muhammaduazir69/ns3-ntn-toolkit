@@ -88,8 +88,9 @@ Vector EnuToEcef(const Vector& enu, double lat0Deg, double lon0Deg, double alt0M
  *
  * Scenarios whose platform mobility lives in a local tangent plane (the SAGIN
  * OpenSky/AIS/HST traces, SUMO vehicle replays, city-scale layouts) cannot mix
- * frames with an ECEF satellite. This wrapper gives them REAL SGP4 orbital
- * dynamics: position/velocity of the wrapped model are rotated into the ENU
+ * frames with an ECEF satellite. This wrapper gives them the wrapped model's
+ * orbital dynamics (Kepler+J2-secular by default; Vallado SGP4 if the wrapped
+ * Sgp4MobilityModel has SetUseVallado enabled): position/velocity are rotated into the ENU
  * frame at the scenario origin, so the satellite rises, passes and sets with
  * genuine orbital geometry while the rest of the scenario stays in metres.
  */

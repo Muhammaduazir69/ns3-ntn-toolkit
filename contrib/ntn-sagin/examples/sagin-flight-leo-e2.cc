@@ -167,6 +167,7 @@ main(int argc, char* argv[])
     double satEirpDbm = 80.0; // Ka-band budget
     uint8_t sliceId = 0;
     std::string outputDir = "sagin-flight-leo-e2-output";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
@@ -177,6 +178,7 @@ main(int argc, char* argv[])
     cmd.AddValue("satAltM", "Satellite altitude (m)", satAltM);
     cmd.AddValue("satSpeed", "Satellite ground-track speed (m/s)", satSpeed);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
@@ -216,7 +218,13 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-flight-leo-e2");
     rs.SetCarrierFrequencyHz(kFreqHz);
-    rs.SetSatEirpDbm(satEirpDbm);
+    rs.SetSatEirpDbm(satEirpDbm); // 80 dBm Ka-band budget — healthy for the nr LEO link too
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));

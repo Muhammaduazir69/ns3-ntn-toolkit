@@ -44,7 +44,7 @@ constexpr std::array<PRow, 21> kP838Table = {{
     // Below 10 GHz the table is sparse; we use the published 1-10 GHz entries
     // verbatim. Toolkit consumers operate mostly above 10 GHz.
     {1.0,    0.0000259, 0.9691, 0.0000308, 0.8592},
-    {2.0,    0.000847,  1.0664, 0.000998,  0.9490},
+    {2.0,    0.0000847, 1.0664, 0.0000998, 0.9490},  // k_h/k_v: P.838-3 (were 10x too high)
     {4.0,    0.0001071, 1.6009, 0.0002461, 1.2476},
     {6.0,    0.00175,   1.3088, 0.00149,   1.1825},
     {7.0,    0.00301,   1.3320, 0.00228,   1.1825},

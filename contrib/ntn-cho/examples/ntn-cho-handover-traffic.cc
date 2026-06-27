@@ -5,7 +5,8 @@
  * ntn-cho-handover-traffic — REAL UDP downlink traffic to TR 38.811 UEs served
  * by a real mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy + MAC + HARQ +
  * RLC/PDCP + RRC + EPC), with the NtnChoAlgorithm deciding the handover on the
- * MEASURED serving SINR while the constellation flies REAL SGP4 Walker orbits:
+ * MEASURED serving SINR while the constellation flies Kepler+J2-secular Walker
+ * orbits (Vallado SGP4 available via SetUseVallado):
  * the serving satellite passes zenith and recedes, the in-plane neighbour
  * approaches, and the handover falls out of the genuine orbital crossover.
  * UEs move under 3GPP TR 38.811 §6.1.1.1 class mobility (real MobilityModel).
@@ -17,7 +18,6 @@
  * Quick test:  --simSeconds=60 --numUes=2 --trigger=tte-aware
  */
 #include "ns3/core-module.h"
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-cho-algorithm.h"
@@ -118,9 +118,10 @@ main(int argc, char* argv[])
     uint32_t numUes = 2;
     double leoAltKm = 550.0;
     double freqGHz = 2.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double tteMinSec = 3.0;
     std::string trigger = "tte-aware";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     bool rachLess = false;
     uint32_t satsPerPlane = 80;
     std::string outputDir = "ntn-cho-handover-traffic-output";
@@ -130,7 +131,8 @@ main(int argc, char* argv[])
     cmd.AddValue("numUes", "Number of TR 38.811 UEs on the serving cell", numUes);
     cmd.AddValue("leoAltKm", "Constellation altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("tteMinSec", "Minimum TTE for CHO admission (s)", tteMinSec);
     cmd.AddValue("trigger",
                  "Handover trigger: tte-aware|ltm|pcho|a3|d1|t1|d2|elevation|ta "
@@ -143,12 +145,21 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     g_simTime = simSeconds;
 
-    std::printf("# ntn-cho-handover-traffic (CHO on MEASURED SINR over REAL SGP4 orbits)\n"
-                "#   mechanism=%s%s  sim=%.0fs alt=%.0fkm freq=%.1fGHz EIRP=%.1fdBm\n",
-                trigger.c_str(), rachLess ? "+rachLess" : "", simSeconds, leoAltKm, freqGHz,
-                satEirpDbm);
+    const bool useNr = (radio != "mmwave");
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
+    // healthy SINR; mmwave keeps its historical 55 dBm (zero regression).
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 55.0;
+    }
 
-    // ---- Real Walker-Delta orbits (SGP4): serving + approaching neighbour ----
+    std::printf("# ntn-cho-handover-traffic (CHO on MEASURED SINR over Kepler+J2 orbits)\n"
+                "#   radio=%s mechanism=%s%s  sim=%.0fs alt=%.0fkm freq=%.1fGHz EIRP=%.1fdBm\n",
+                useNr ? "nr-FR1" : "mmwave-FR2", trigger.c_str(), rachLess ? "+rachLess" : "",
+                simSeconds, leoAltKm, freqGHz, satEirpDbm);
+
+    // ---- Real Walker-Delta orbits (Kepler+J2-secular; Vallado SGP4 via
+    //      SetUseVallado): serving + approaching neighbour ----
     WalkerConfig wcfg;
     wcfg.num_planes = 1;
     wcfg.total_sats = satsPerPlane;
@@ -193,8 +204,14 @@ main(int argc, char* argv[])
     g_servMob = serv;
     g_candMob = cand;
 
-    // ---- Real mmwave NTN serving link + measured traffic ----
+    // ---- Real NR NTN serving link + measured traffic (mmwave FR2 or nr FR1) ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(useNr ? NtnRealStackHelper::RadioBackend::Nr
+                             : NtnRealStackHelper::RadioBackend::Mmwave);
+    if (useNr)
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-handover-traffic");
@@ -264,9 +281,8 @@ main(int argc, char* argv[])
     cfg.minPredictedTos = Seconds(3.0);
     g_cho->Configure(cfg);
 
-    Ptr<mmwave::MmWaveEnbNetDevice> enb =
-        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
-    g_servingCellId = enb ? enb->GetCellId() : 1;
+    // Radio-agnostic serving cell id (mmwave or nr gNB under the hood).
+    g_servingCellId = rs.GetServingCellId();
     g_candCellId = g_servingCellId + 100;
     g_serving = g_servingCellId;
     g_cho->SetServingCell(g_servingCellId);

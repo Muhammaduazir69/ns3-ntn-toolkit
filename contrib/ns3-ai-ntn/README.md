@@ -40,15 +40,23 @@ Upstream [ns3-ai](https://github.com/hust-diangroup/ns3-ai) hasn't tracked the m
 - High-level [Gym interface](model/gym-interface) for Gymnasium 1.0 APIs
 - Low-level [message interface](model/msg-interface) for arbitrary fixed-layout structs
 - **AI-RAN inference contract** (`grpc/`): `AiranInferenceClient` / `AiranInferenceServer` exchange length-prefixed protobuf (`grpc/proto/airan_inference.proto`) over a pluggable `InferenceChannel` — an in-process FIFO and a length-prefixed TCP transport that mirrors the wire format a grpc++ server would expose from the same `.proto` (a native grpc++ transport is planned). Ships a Triton `config.pbtxt` parser plus two model-repository skeletons (`beam_index_classifier`, `precoder_csi_to_weights`) and deterministic mock runtimes (`AiranMockRuntime`) for testing
-- **NTN RL extensions** ([python_utils/](python_utils)): the `ns3_ai_ntn` Python package with 4 Gymnasium environments (`HandoverEnv`, `BeamMgmtEnv`, `SliceEnv`, `PowerCtrlEnv`), Stable-Baselines3 PPO training, PyTorch Geometric GAT models for constellation-graph learning, MAPPO / MASAC multi-agent baselines, and an `ns3gym` compatibility shim
+- **NTN RL extensions** ([python_utils/](python_utils)): the `ns3_ai_ntn` Python package with 4 Gymnasium environments (`HandoverEnv`, `BeamMgmtEnv`, `SliceEnv`, `PowerCtrlEnv`) — **synthetic placeholders that do not boot ns-3** (no measured KPI; see `ns3gym_compat.py`) — plus Stable-Baselines3 PPO training, PyTorch Geometric GAT models for constellation-graph learning, MAPPO / MASAC multi-agent baselines, and an `ns3gym` compatibility shim. These exercise the RL tooling; they are not yet driven by a live ns-3 NTN data plane
 - **Per-target LTO disable** via `ns3ai_add_pybind_module()` CMake helper — fixes the #1 reported import failure on ns-3.43
 - Proper RAII over `managed_shared_memory` (no more stale-segment data corruption)
 - `Simulator::Stop()` instead of `std::exit(0)` in library code (no more zombie processes / leaked SHM segments)
-- Drop-in compatibility with `contrib/ntn-cho`, `contrib/oran-ntn`, `contrib/thz-ntn` for satellite-RL workflows
+- Builds alongside `contrib/ntn-cho`, `contrib/oran-ntn`, `contrib/thz-ntn` and exposes the bridge API those modules can call — but no satellite-RL workflow is wired through it yet (integration is future work, not a shipped data path)
 
-## Live demos
+## Demos
 
-### Federated DQN training over an ns-3.43 satellite scenario
+> Scope note: the ns3-ai bridge below is the genuine upstream shared-memory
+> bridge, but it is **not currently wired to any NTN satellite scenario** in
+> this toolkit. The NTN Gymnasium environments shipped in
+> `python_utils/ns3_ai_ntn` are **synthetic placeholders** (they do not boot
+> ns-3 — see `ns3gym_compat.py`), and the "DQN" they train is the upstream
+> RL example, not a satellite RAN agent. The clip below shows the RL training
+> loop over the synthetic env, not a live federated DQN over an ns-3 LEO sim.
+
+### RL training loop (synthetic NTN env + upstream ns3-ai bridge)
 
 <p align="center">
   <img src="docs/rl_training.gif" alt="RL training" width="850"/>

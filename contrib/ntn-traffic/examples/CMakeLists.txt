@@ -50,6 +50,20 @@ build_lib_example(
 )
 
 build_lib_example(
+  NAME ntn-nr-fr1-demo
+  SOURCE_FILES ntn-nr-fr1-demo.cc
+  LIBRARIES_TO_LINK
+    ${libntn-traffic}
+    ${libnr}
+    ${liblte}
+    ${libmobility}
+    ${libinternet}
+    ${libflow-monitor}
+    ${libnetwork}
+    ${libcore}
+)
+
+build_lib_example(
   NAME ntn-oran-qos-flows
   SOURCE_FILES ntn-oran-qos-flows.cc
   LIBRARIES_TO_LINK

@@ -83,6 +83,29 @@ class Satellite:
             alt_km=wgs84.height_of(self._es.at(t)).km,
         )
 
+    def ecef_m(self, when: datetime) -> tuple[float, float, float]:
+        """True Earth-fixed (ECEF/ITRS) position in metres.
+
+        gap B3: the raw ``StateVector.r_eci_km`` is INERTIAL (TEME), not
+        Earth-fixed — using it as ECEF (for elevation or a globe overlay) is
+        wrong by the Earth-rotation angle. This derives ECEF from the WGS-84
+        subpoint (which Skyfield computes in the Earth-fixed frame).
+        """
+        g = self.geodetic(when)
+        lat = math.radians(g.lat_deg)
+        lon = math.radians(g.lon_deg)
+        h = g.alt_km * 1000.0
+        a = 6378137.0
+        e2 = (1.0 / 298.257223563) * (2.0 - 1.0 / 298.257223563)
+        sl = math.sin(lat)
+        cl = math.cos(lat)
+        n = a / math.sqrt(1.0 - e2 * sl * sl)
+        return (
+            (n + h) * cl * math.cos(lon),
+            (n + h) * cl * math.sin(lon),
+            (n * (1.0 - e2) + h) * sl,
+        )
+
     def trajectory(
         self, start: datetime, stop: datetime, step: timedelta
     ) -> Iterator[StateVector]:

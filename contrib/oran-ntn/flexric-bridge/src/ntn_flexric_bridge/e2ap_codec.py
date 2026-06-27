@@ -1,14 +1,16 @@
 """Minimal E2AP message codec.
 
-In **stub mode** the wire format is JSON framed by a 4-byte big-endian
-length prefix. Each message has the same structural fields as the
-asn1c-compiled E2AP messages (procedure code, criticality, value), so
-round-trip tests and state machines line up bit-for-bit with what FlexRIC
-sees in live mode.
+Only **stub mode** is implemented here: the wire format is JSON framed by a
+4-byte big-endian length prefix. Each message has the same *structural*
+fields as asn1c-compiled E2AP (procedure code, criticality, value), so
+round-trip tests and state machines line up at the field level — but the
+JSON values are NOT ASN.1-PER bits, so this does not interoperate with a
+real FlexRIC/asn1c peer.
 
-In **live mode** the codec hands bytes to the FlexRIC asn1c-generated
-encoder via a `cffi` shim — provided by the Docker image. This module
-keeps the import optional so CI without that toolchain still works.
+The **live mode** referenced throughout is roadmapped, not built: there is
+no asn1c-generated encoder and no `cffi` shim in this repo. The intent is
+for live mode to hand bytes to FlexRIC's asn1c codec (to be provided by the
+Docker image); until that exists, only the JSON loopback runs.
 """
 
 from __future__ import annotations

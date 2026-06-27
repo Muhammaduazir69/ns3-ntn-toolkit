@@ -119,8 +119,10 @@ class NtnSceneRecorder : public Object
                            Ptr<MobilityModel> mob,
                            NodeKind kind,
                            const std::string& label = "");
-    /// Declare a beam/serving link from one tracked node to another (rendered
-    /// as a beam cone / line in 3D).
+    /// Declare a beam/serving link from one tracked node to another.
+    /// NOTE: beams are only collected (`m_beams`); they are NOT currently emitted
+    /// to any sink — no 3D cone/line is rendered. Only node positions, KPI series,
+    /// and the handover log reach NetSimulyzer/CZML. (Beam rendering is a TODO.)
     void TrackBeam(uint32_t fromId, uint32_t toId);
     /// Declare a per-node KPI series; returns a series id used by RecordKpi().
     uint32_t TrackKpiSeries(uint32_t nodeId, KpiKind kind, const std::string& name = "");
@@ -221,7 +223,7 @@ class NtnSceneRecorder : public Object
     Vector m_enuUp{0, 0, 1};
 
     std::vector<TrackedNode> m_nodes;
-    std::vector<Beam> m_beams;
+    std::vector<Beam> m_beams; //!< collected only; not emitted to any sink (no 3D beam render yet)
     std::vector<KpiSeries> m_kpis;
     std::vector<HandoverArc> m_handovers;
     std::map<uint32_t, Track> m_tracks; //!< id -> accumulated position samples

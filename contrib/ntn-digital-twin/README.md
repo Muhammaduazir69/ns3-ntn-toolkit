@@ -1,6 +1,6 @@
 <h1 align="center">ntn-digital-twin</h1>
 
-<p align="center"><strong>Live Digital-Twin Loop, REST Prediction API and CesiumJS Live Mode for 6G NTN Constellations</strong></p>
+<p align="center"><strong>Live visualizer of the real-world CelesTrak constellation (SGP4 from fresh TLEs at wall-clock time) — refresh loop, REST prediction API and CesiumJS live mode for 6G NTN. A one-way mirror of the live sky; it does NOT ingest ns-3 simulation state and is not a twin of the simulator.</strong></p>
 
 <p align="center">Part of <strong>ns3-ntn-toolkit</strong> — <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">toolkit</a> / <a href="INSTALL.md">INSTALL</a>.</p>
 

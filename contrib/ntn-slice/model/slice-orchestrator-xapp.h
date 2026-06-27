@@ -18,6 +18,14 @@
  *   2. Distribute remaining PRBs proportionally to (priority · demand).
  *
  * RL policies override step 2 by calling @c StepWithShares(shares).
+ *
+ * NOTE (honest scope): this is an OPEN-LOOP *shadow* allocator. The PRB split it
+ * produces is logged/observed (via the `Tick` trace) but does NOT actuate any
+ * ns-3 scheduler — the toolkit runs one slice-agnostic mmwave cell whose MAC
+ * never reads the 5QI/S-NSSAI. It computes and reserves min-throughput PRBs in
+ * its own bookkeeping; it does not enforce a per-slice PRB partition on the
+ * radio. "Isolation" is therefore observed statistically on the measured plane,
+ * not guaranteed by this allocator.
  */
 #ifndef NTN_SLICE_ORCHESTRATOR_XAPP_H
 #define NTN_SLICE_ORCHESTRATOR_XAPP_H

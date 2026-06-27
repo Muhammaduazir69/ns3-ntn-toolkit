@@ -64,8 +64,9 @@ main(int argc, char* argv[])
     uint32_t numUes = 3;
     bool routeUrllcViaGeo = false;
     bool useRlShares = false;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double backhaulMs = 5.0;
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string csvPath = "ntn-three-slice.csv";
     uint32_t totalPrb = 273;
     std::string outputDir = "ntn-three-slice-output";
@@ -78,10 +79,18 @@ main(int argc, char* argv[])
                  "Drive the orchestrator with StepWithShares(priority shares) instead of Step()",
                  useRlShares);
     cmd.AddValue("totalPrb", "Total PRB budget", totalPrb);
-    cmd.AddValue("satEirpDbm", "LEO EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "LEO EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("csv", "Per-slice KPI CSV path", csvPath);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // Backend-appropriate EIRP default (honoured only if the user did not set it):
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
 
     // ---- Real LEO cell: SGP4 Walker sat + TR 38.811 UEs (measured radio) ----
     ns3::ntncon::WalkerConfig wcfg;
@@ -109,6 +118,12 @@ main(int argc, char* argv[])
     const Vector geoEcef = ntngeo::GeodeticToEcef(0.0, subLon, 35786000.0);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-three-slice-leo-geo");

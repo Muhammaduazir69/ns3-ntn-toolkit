@@ -6,7 +6,8 @@
  * Demonstrates the per-class realistic mobility generator on a REAL ns-3
  * plane. Each 3GPP TR 38.811 §6.1.1.1 UE class is installed as a genuine
  * ns-3 node carrying a NtnTr38811MobilityModel (ECEF), under a real
- * SGP4-propagated LEO serving satellite with a real mmwave NR NTN cell
+ * Kepler+J2-secular propagated LEO serving satellite (Vallado SGP4 available
+ * via SetUseVallado) with a real mmwave NR NTN cell
  * (NtnRealStackHelper: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) and
  * a measured UDP downlink. The UE trajectory written to mobility_trace.csv
  * is sampled from the REAL MobilityModel::GetPosition() on a Simulator tick
@@ -73,10 +74,12 @@ main(int argc, char** argv)
     std::string outputDir = "./mob_demo";
     double simTime = 20.0;
     double dt = 1.0;
-    uint32_t numUes = 4; // mixed TR 38.811 classes on the real mmwave PHY
+    uint32_t numUes = 4; // mixed TR 38.811 classes on the real radio PHY
     uint32_t rngRun = 1;
     double altitudeKm = 550.0;
     double freqGhz = 2.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     CommandLine cmd;
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("simTime", "Simulation duration (s)", simTime);
@@ -84,10 +87,20 @@ main(int argc, char** argv)
     cmd.AddValue("rngRun", "RNG seed", rngRun);
     cmd.AddValue("altitude", "Serving constellation altitude (km)", altitudeKm);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("numUes", "Number of real ns-3 UEs (one per TR 38.811 class)", numUes);
     cmd.Parse(argc, argv);
     g_simTime = simTime;
     g_dt = dt;
+
+    const bool useNr = (radio != "mmwave");
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
+    // healthy SINR; mmwave keeps its historical 55 dBm (zero regression).
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 55.0;
+    }
 
     std::string mkdir = "mkdir -p " + outputDir;
     if (system(mkdir.c_str()) != 0)
@@ -95,7 +108,8 @@ main(int argc, char** argv)
         std::cerr << "warning: could not create " << outputDir << "\n";
     }
 
-    // ---- Real SGP4 serving satellite (one Walker-Delta plane) ----
+    // ---- Real Kepler+J2-secular serving satellite (one Walker-Delta plane;
+    //      Vallado SGP4 via SetUseVallado) ----
     WalkerConfig wcfg;
     wcfg.num_planes = 1;
     wcfg.total_sats = 80;
@@ -140,12 +154,19 @@ main(int argc, char** argv)
                   << ") alt=" << std::setprecision(1) << alt << " m\n";
     }
 
-    // ---- Real mmwave NTN serving cell + measured UDP plane ----
+    // ---- Real NR NTN serving cell + measured UDP plane (mmwave FR2 or nr FR1) ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(useNr ? NtnRealStackHelper::RadioBackend::Nr
+                             : NtnRealStackHelper::RadioBackend::Mmwave);
+    if (useNr)
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simTime));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-realistic-mobility-demo");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
+    rs.SetSatEirpDbm(satEirpDbm);
     rs.Build(servSat, g_ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(1.0),
                       Seconds(simTime - 0.5));

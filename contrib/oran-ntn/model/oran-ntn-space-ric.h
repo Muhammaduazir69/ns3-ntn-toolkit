@@ -14,10 +14,14 @@
  *   - Model synchronization with ground Near-RT RIC
  *   - Federated learning aggregation across orbital plane
  *
- * Architecture:
- *   Space RIC runs on satellite on-board processor (OBP)
- *   with limited compute/memory. Uses lightweight ML models
- *   (quantized DQN, decision trees) vs. full models on ground.
+ * Architecture (intent vs. implementation):
+ *   Space RIC runs on satellite on-board processor (OBP) with limited
+ *   compute/memory — the design slot for lightweight on-board ML
+ *   (e.g. quantized DQN / decision trees) vs. full models on ground.
+ *   As implemented, `OranNtnSpaceRicInference` ships no such trained model:
+ *   its backends are an optional LibTorch engine (no model shipped) and a
+ *   default rule-based path. The ML descriptors here are the roadmap target,
+ *   not the running inference.
  */
 
 #ifndef ORAN_NTN_SPACE_RIC_H

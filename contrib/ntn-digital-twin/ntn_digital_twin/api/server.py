@@ -182,9 +182,10 @@ def predict_handover(req: PredictHandoverRequest) -> PredictHandoverResponse:
         # Track current's elevation for outgoing handover annotation
         current_el = -90.0
         for i, sv in enumerate(states):
-            sat_ecef = (sv.r_eci_km[0] * 1000.0,
-                        sv.r_eci_km[1] * 1000.0,
-                        sv.r_eci_km[2] * 1000.0)
+            # gap B3: sv.r_eci_km is inertial (TEME); convert to true ECEF
+            # before computing topocentric elevation (was off by the
+            # Earth-rotation angle, invalidating the predicted HO sequence).
+            sat_ecef = cons[i].ecef_m(when)
             el = _elevation_deg_ecef(obs_ecef, sat_ecef,
                                      req.ue_lat_deg, req.ue_lon_deg)
             if el > best_el:

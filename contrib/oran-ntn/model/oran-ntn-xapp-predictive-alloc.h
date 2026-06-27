@@ -6,9 +6,14 @@
  *
  * Predictive Resource Allocation xApp
  *
- * LSTM-based traffic prediction for proactive PRB reservation.
- * Uses historical KPM time series per beam to forecast demand
- * and pre-allocate resources before congestion occurs.
+ * Traffic prediction for proactive PRB reservation. Uses historical KPM
+ * time series per beam to forecast demand and pre-allocate resources before
+ * congestion occurs.
+ *
+ * NOTE on the "LSTM" label: no recurrent neural network is implemented. The
+ * predictor is a linear extrapolation over the history window (optionally
+ * routed to a Gym env when `UseAiPrediction` is set); the "LSTM" name marks
+ * the intended model slot, not the implemented method. No trained model ships.
  *
  * Novel features:
  *   - Multi-beam joint traffic prediction capturing spatial correlations

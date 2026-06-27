@@ -138,9 +138,10 @@ main(int argc, char* argv[])
     std::size_t nVehicles = 40;
     double simTimeSec = 30.0;
     uint32_t numCellUes = 4; // representative real-cell terminals for the baseline
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double blockageDb = 14.0;
     double dtSec = 1.0;
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string tracePath = "contrib/ntn-v2x/traces/rural-highway-fcd.csv";
     std::string outputDir = "ntn-v2x-rural-highway-output";
 
@@ -148,12 +149,15 @@ main(int argc, char* argv[])
     cmd.AddValue("vehicles", "Number of vehicles", nVehicles);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
     cmd.AddValue("numCellUes", "Representative real-cell terminals", numCellUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("blockageDb", "NLOS blockage on shadowed vehicles (dB)", blockageDb);
     cmd.AddValue("dt", "TraCI tick (s)", dtSec);
     cmd.AddValue("trace",
-                 "Real SUMO FCD CSV trace path (time,vehid,x,y,z,speed). Defaults to the "
-                 "shipped contrib/ntn-v2x/traces/rural-highway-fcd.csv; no synthetic fallback.",
+                 "FCD-format CSV trace path (time,vehid,x,y,z,speed). Defaults to the "
+                 "shipped contrib/ntn-v2x/traces/rural-highway-fcd.csv, a synthetic "
+                 "constant-speed FCD-format CSV fixture (not a SUMO microsimulation; "
+                 "loader reads a CSV dialect, not native fcd-output XML).",
                  tracePath);
     cmd.AddValue("minDirectSnr", "Minimum dB for direct uplink", g_minDirectSnrDb);
     cmd.AddValue("maxV2vRange", "Maximum V2V range (m) for relay", g_maxV2vRangeM);
@@ -162,15 +166,25 @@ main(int argc, char* argv[])
     g_simTime = simTimeSec;
     g_dt = dtSec;
 
-    // SUMO FCD vehicle mobility (real replay from a supplied trace file; the
-    // module ships a real-format default trace, and there is NO runtime
-    // fabrication of vehicle motion — pass --trace for your own SUMO export).
+    // Backend-appropriate EIRP default (honoured only if the user did not set it):
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
+
+    // FCD-format CSV vehicle mobility (trace replay from a supplied file; the
+    // module ships a synthetic constant-speed FCD-format CSV fixture as the
+    // default trace — not a SUMO microsimulation, and the loader reads a CSV
+    // dialect, not SUMO's native fcd-output XML. Pass --trace for your own CSV,
+    // e.g. one converted from a SUMO fcd-export).
     g_bridge = CreateObject<SumoTraciBridge>();
     if (!g_bridge->LoadFcdTrace(tracePath))
     {
         std::cerr << "failed to load FCD trace '" << tracePath
-                  << "'. Supply a real SUMO fcd-export CSV via --trace "
-                     "(time,vehid,x,y,z,speed).\n";
+                  << "'. Supply an FCD-format CSV via --trace "
+                     "(time,vehid,x,y,z,speed); a CSV converted from SUMO "
+                     "fcd-export also works.\n";
         return 1;
     }
     g_blockageDb.assign(nVehicles, 0.0);
@@ -218,6 +232,12 @@ main(int argc, char* argv[])
     mh.Install(ueNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-rural-highway");

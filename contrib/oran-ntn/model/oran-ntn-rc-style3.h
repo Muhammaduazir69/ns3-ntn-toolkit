@@ -5,7 +5,7 @@
 #ifndef ORAN_NTN_RC_STYLE3_H
 #define ORAN_NTN_RC_STYLE3_H
 
-// E2SM-RC v1.03 — Style 3 Connected-Mode Mobility ControlAction (Roadmap
+// E2SM-RC R004 v07.00 (2025) — Style 3 Connected-Mode Mobility ControlAction (Roadmap
 // §4.1.3). The WG3 spec maps mobility-related xApp commands to one of three
 // Style 3 actions:
 //
@@ -15,7 +15,7 @@
 //   Action 3: Dual Active Protocol Stack HO (DAPS-HO)
 //
 // References:
-//   O-RAN.WG3.E2SM-RC-v01.03 §8.2.3.3 (Connected-Mode Mobility action shapes)
+//   O-RAN.WG3.E2SM-RC R004 v07.00 (2025) §8.2.3.3 (Connected-Mode Mobility action shapes)
 //   3GPP TS 38.331 §5.3.5.13.2        (CHO configuration)
 //   3GPP TS 38.331 §5.3.5.13.4        (DAPS-HO)
 //   First 5G-Advanced NR-NTN CHO demo, ESA/Eutelsat/Airbus/MediaTek Nov 2025
@@ -48,7 +48,7 @@ struct NrCellGlobalId
     uint64_t nr_cell_identity;  //!< 36-bit; upper 28 bits = gNB-ID, lower 8 = cell-ID
 };
 
-/// WG3 E2SM-RC v1.03 §8.2.3.3 HandoverType.
+/// WG3 E2SM-RC R004 v07.00 (2025) §8.2.3.3 HandoverType.
 enum class HandoverType : uint8_t
 {
     intra5gs       = 0,

@@ -41,6 +41,19 @@ struct NtnDrxConfig
     bool passAware{false};
     Time passDuration{Seconds(600)};       //!< how long a pass typically is
 
+    // ---- NTN HARQ round-trip timers (TS 38.321 §5.7) ----
+    // Baseline NR drx-HARQ-RTT-TimerDL/UL: the minimum gap the UE waits, after
+    // a DL/UL transmission, before it need monitor PDCCH for the corresponding
+    // retransmission. In NTN this must be EXTENDED by the latest UE-gNB
+    // round-trip time (TS 38.321 §5.7 defines HARQ-RTT-TimerDL-NTN /
+    // HARQ-RTT-TimerUL-NTN = drx-HARQ-RTT-TimerDL/UL + UE-gNB RTT), because the
+    // retransmission cannot arrive sooner than one RTT after the (N)ACK. Feed
+    // `ntnRtt` from NtnTimingAdvance::ComputeTotalTa() (2*slant/c). The
+    // NTN-extended values are exposed via GetHarqRttTimerDl/UlNtn().
+    Time harqRttTimerDl{MilliSeconds(0)};  //!< drx-HARQ-RTT-TimerDL (baseline NR)
+    Time harqRttTimerUl{MilliSeconds(0)};  //!< drx-HARQ-RTT-TimerUL (baseline NR)
+    Time ntnRtt{MilliSeconds(0)};          //!< latest UE-gNB RTT (TS 38.321 §5.7)
+
     /// True when `longCycle >= shortCycle >= onDuration > 0`.
     bool IsValid() const;
 };
@@ -77,6 +90,20 @@ class NtnDrxStateMachine : public Object
     void NotifyDataActivity();
     /// (Pass-aware mode) Update the next satellite visibility window.
     void NotifyNextPass(Time start, Time duration);
+
+    /// Update the UE-gNB round-trip time used to offset the NTN HARQ-RTT
+    /// timers (TS 38.321 §5.7). Typically fed from
+    /// NtnTimingAdvance::ComputeTotalTa() each time the TA is refreshed.
+    void SetNtnRoundTripTime(Time rtt);
+
+    /// NTN-extended DL HARQ round-trip timer (TS 38.321 §5.7):
+    /// HARQ-RTT-TimerDL-NTN = drx-HARQ-RTT-TimerDL + UE-gNB RTT. The HARQ
+    /// entity uses this (not the bare drx-HARQ-RTT-TimerDL) to decide when a
+    /// DL retransmission grant may be monitored.
+    Time GetHarqRttTimerDlNtn() const;
+    /// NTN-extended UL HARQ round-trip timer (TS 38.321 §5.7):
+    /// HARQ-RTT-TimerUL-NTN = drx-HARQ-RTT-TimerUL + UE-gNB RTT.
+    Time GetHarqRttTimerUlNtn() const;
 
     /// Begin ticking the state machine. Initial state is `Active`.
     void Start();

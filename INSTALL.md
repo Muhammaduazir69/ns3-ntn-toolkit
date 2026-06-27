@@ -270,6 +270,7 @@ how to run its examples) and `README.md` (design + capabilities) in
 | Module | Role | Source |
 |---|---|---|
 | `mmwave` | 5G NR mmWave PHY/MAC (patched for NTN); the real radio under `NtnRealStackHelper` | nyuwireless-unipd/ns3-mmwave |
+| `nr` | 5G-LENA NR (CTTC) — FR1 numerology (15/30 kHz), BWP, TR 38.821-calibratable PHY; integrated for the FR1-NTN migration path (`git clone --branch 5g-lena-v3.3.y https://gitlab.com/cttc-lena/nr.git contrib/nr`). One ns-3.43 compat patch: `#undef MIN_NO_CC/MAX_NO_CC` guard in `nr-common.h`. | cttc-lena/nr |
 | `satellite` | SNS3 — SatSGP4 mobility, DVB-S2/RCS2, antenna patterns, TLE corpus | sns3/sns3-satellite (**clone separately**, see [§3](#3-pull-the-upstream-satellite-module-required)) |
 | `netsimulyzer` | NetSimulyzer v1.0.13 — 3D scene visualization sink (now bundled in-tree) | usnistgov/NetSimulyzer-ns3-module |
 | `magister-stats` | Statistics framework used by SNS3 and the observability exporters | Magister / SNS3 |

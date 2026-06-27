@@ -21,7 +21,6 @@
  */
 #include "ns3/command-line.h"
 #include "ns3/core-module.h"
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-drx.h"
@@ -117,7 +116,8 @@ main(int argc, char* argv[])
     uint32_t numUes = 4;
     double leoAltKm = 1200.0;
     double freqGHz = 2.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     bool drxEnabled = true;
     double drxLongCycleMs = 320.0;
     double drxOnDurationMs = 40.0;
@@ -128,7 +128,8 @@ main(int argc, char* argv[])
     cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
     cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("drxOn", "Enable connected-mode DRX gating", drxEnabled);
     cmd.AddValue("drxLongCycleMs", "DRX long cycle (ms)", drxLongCycleMs);
     cmd.AddValue("drxOnDurationMs", "DRX on-duration (ms)", drxOnDurationMs);
@@ -136,6 +137,14 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     g_drxEnabled = drxEnabled;
     g_simTime = simSeconds;
+
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
+    // mmwave, so honour the historical 55 dBm for mmwave but give nr 70 dBm.
+    const bool useNr = (radio == "nr");
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 55.0;
+    }
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -167,6 +176,12 @@ main(int argc, char* argv[])
 
     // ----- real mmwave NR cell + measured traffic -----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS (nr backend only)
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-rrc-drx-data-traffic");
@@ -184,9 +199,7 @@ main(int argc, char* argv[])
     g_ta->SetSatelliteMobility(satMob);
     g_ta->SetReferencePosition(ntngeo::GeodeticToEcef(subLat, subLon, 0.0));
 
-    Ptr<mmwave::MmWaveEnbNetDevice> enb =
-        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
-    const uint16_t cellId = enb ? enb->GetCellId() : 1;
+    const uint16_t cellId = rs.GetServingCellId(); // radio-agnostic (mmwave or nr gNB)
     g_sib19 = CreateObject<NtnSib19Broadcaster>();
     g_sib19->SetSatelliteMobility(satMob);
     g_sib19->SetTimingAdvance(g_ta);
@@ -208,9 +221,10 @@ main(int argc, char* argv[])
         g_drx->Start();
     }
 
-    std::printf("# ntn-rrc-drx-data-traffic (SIB19 + TA + DRX on a real mmwave NR cell)\n"
+    std::printf("# ntn-rrc-drx-data-traffic (SIB19 + TA + DRX on a real %s NR cell)\n"
                 "#   sim=%.0fs alt=%.0fkm freq=%.1fGHz EIRP=%.1fdBm DRX=%s "
                 "(long=%.0fms on=%.0fms)\n",
+                useNr ? "5G-LENA nr" : "mmwave",
                 simSeconds, leoAltKm, freqGHz, satEirpDbm, drxEnabled ? "on" : "off",
                 drxLongCycleMs, drxOnDurationMs);
 

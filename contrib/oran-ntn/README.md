@@ -68,6 +68,26 @@ stub is not yet connected to the in-sim E2 nodes.
 | `ControlLoopPeriod` | 100 ms | Near-RT RIC tick period used by `AlignToControlLoop` |
 | `UnixEpochOffset` | 0 | Offset (s) added to indication timestamps; set a Unix epoch to produce wall-clock-like stamps for external consumers (FlexRIC bridge) |
 
+### Control-loop realism (read before citing "closed-loop" results)
+
+The framework control loop is **open by default**: every xApp routed through
+the Near-RT RIC ends at a registered RC-action handler
+(`OranNtnE2Node::SetRcActionCallback`) whose default implementation **records
+the decision** (`action_log.csv`, traces, SDL `last_action_*`) and returns
+success — it does **not** itself actuate handover, scheduling, PRB allocation,
+or beam selection on the live mmwave stack. So the shipped multi-xApp
+scenarios (e.g. `oran-ntn-full-scenario`) are **measure → decide → log**, not
+measure → act → measure.
+
+The one example that truly **closes** a measured→act→measured loop is
+`oran-ntn-ric-controlled-traffic`: it wires the action callback so an
+E2SM-RC `BEAM_SWITCH` lands a real beam gain on the live channel, and the
+subsequently measured SINR/TBLER/goodput recover. Treat that example as the
+reference for actuation; the rest demonstrate the RIC decision logic, not
+RAN actuation. (The cross-domain SMO example manipulates offered-rate caps /
+routes / edge rates directly in example code, outside the xApp→E2 action
+path.)
+
 ## What's new — AI-native ORAN-NTN release (June 2026)
 
 See [`CHANGELOG.md`](CHANGELOG.md) and the toolkit
@@ -139,13 +159,16 @@ All in `model/oran-ntn-cross-domain.h`:
   CN/edge (compute allocation), driven by NWDAF analytics only.
 
 ### AI-native inference
-- `OranNtnOnnxXapp` (`model/oran-ntn-onnx-xapp.h`) — closes the
+- `OranNtnOnnxXapp` (`model/oran-ntn-onnx-xapp.h`) — wiring for a
   train → export → infer lifecycle: train offline on the toolkit gym
-  environments (`ns3-ai-ntn`), export to `.onnx`, load with ONNX Runtime,
-  and infer on live measured feature vectors. ONNX Runtime is optional and
-  auto-detected by CMake (`onnxruntime_cxx_api.h` + `libonnxruntime`);
-  absent, `Infer()` runs the registered heuristic policy.
-  `IsOnnxAvailable()` / `IsModelLoaded()` report which path is live.
+  environments (`ns3-ai-ntn`; note those envs are synthetic), export to
+  `.onnx`, load with ONNX Runtime, and infer on live measured feature
+  vectors. **No trained `.onnx` ships**, so the default run path is the
+  registered heuristic policy, not a learned model. ONNX Runtime itself is
+  a real, optional dependency auto-detected by CMake (`onnxruntime_cxx_api.h`
+  + `libonnxruntime`); when it (or a model) is absent, `Infer()` runs the
+  heuristic. `IsOnnxAvailable()` / `IsModelLoaded()` report which path is
+  live.
 - Gym environments (`model/oran-ntn-gym-*.h`) — handover, beam-hop, slice,
   steering, predictive; plus `OranNtnFederatedLearning` aggregators.
 
@@ -181,9 +204,14 @@ All in `model/oran-ntn-cross-domain.h`:
   (`model/oran-ntn-service-model*.h`, `OranNtnServiceModelRegistry`),
   including E2SM-RC Style 3 connected-mode mobility
   (`model/oran-ntn-rc-style3.h`).
-- ASN.1 Aligned-PER codec for E2AP / E2SM-KPM / E2SM-RC (`asn1/`) and an
-  SCTP/TCP E2 listener for external RIC bridging (`flexric-bridge/`,
-  FlexRIC-compatible field names in `model/oran-ntn-flexric-types.h`).
+- Hand-written ASN.1 PER codec for E2AP / E2SM-KPM / E2SM-RC (`asn1/`) — a
+  self-consistent, test-only encoder/decoder. It round-trips against itself
+  but is **not bit-conformant Aligned-PER** (full-byte CHOICE index,
+  octet-aligned preambles, no extension markers), so it would not decode on
+  an asn1c peer; see the header. The companion SCTP/TCP E2 listener
+  (`flexric-bridge/e2-listener.cc`) echoes frame **types** and does not decode
+  payloads. Neither is on the in-sim control path (see *Transport realism*).
+  FlexRIC-compatible field names live in `model/oran-ntn-flexric-types.h`.
 - `OranNtnDataRepository` (`model/oran-ntn-data-repository.h`) — NIST-style
   data repository (in-memory; SQLite-backed when ns-3 is configured with
   SQLite).
@@ -556,3 +584,7 @@ GPL-2.0-only — see [`LICENSE`](LICENSE).
 
 Muhammad Uzair, Independent Researcher (ORCID
 [0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)).
+
+## Scope & limitations (toolkit boundaries)
+
+**A4** — framework xApp E2SM-RC decisions are logged, not actuated; the only genuine measured->act->measured loop is the `oran-ntn-ric-controlled-traffic` beam example. See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.

@@ -18,9 +18,15 @@ namespace oranntn
 {
 
 /**
- * Canonical KPM metric IDs aligned to O-RAN WG3 E2SM-KPM v03.00 and the
- * srsRAN / OAI naming used by FlexRIC's KPM SM.
- * (2026 realism roadmap §3 T8.)
+ * Canonical KPM metric IDs aligned to O-RAN WG3 E2SM-KPM R004 v06.00
+ * (ETSI TS 104 040 v4.0.0, 2025) and the srsRAN / OAI naming used by
+ * FlexRIC's KPM SM. (2026 realism roadmap §3 T8.)
+ *
+ * Provenance note: the throughput/volume/PRB/TB IDs (DRB.*, RRU.*, TB.*)
+ * are 3GPP TS 28.552 PM counters. The two SINR IDs (CARR.AverageSINR and
+ * L1M.RS-SINR.Mean) are NOT TS 28.552 PM counters — RS-SINR is a PHY
+ * quantity defined in 3GPP TS 38.215. They are kept as legitimate vendor
+ * L1 metrics (as emitted by srsRAN / OAI L1) and reported in dB.
  *
  * Reviewers can grep these strings in the KPM CSV output and in any KPM
  * Indication-Message blob emitted on the wire. Adding a new ID is fine;
@@ -43,6 +49,14 @@ inline constexpr const char* kRruPrbAvailDl   = "RRU.PrbAvailDl";
 inline constexpr const char* kRruPrbAvailUl   = "RRU.PrbAvailUl";
 inline constexpr const char* kRruPrbUsedDl    = "RRU.PrbUsedDl";
 inline constexpr const char* kRruPrbUsedUl    = "RRU.PrbUsedUl";
+// TB.ErrTotNbrDl / TB.TotNbrDl — canonical 3GPP TS 28.552 DL transport-block
+// counters. The DL TB error rate is the ratio ErrTotNbrDl / TotNbrDl; it is
+// already measured upstream as the HARQ BLER (see BuildCanonicalKpmMeasurements).
+inline constexpr const char* kTbErrTotNbrDl   = "TB.ErrTotNbrDl";
+inline constexpr const char* kTbTotNbrDl      = "TB.TotNbrDl";
+// CARR.AverageSINR / L1M.RS-SINR.Mean — L1/PHY SINR quantities per 3GPP
+// TS 38.215 (RS-SINR), NOT TS 28.552 PM counters. Legitimate vendor L1
+// metrics (srsRAN / OAI L1), reported in dB.
 inline constexpr const char* kCarrAvgSinr     = "CARR.AverageSINR";
 inline constexpr const char* kL1mRsSinrMean   = "L1M.RS-SINR.Mean";
 
@@ -52,7 +66,8 @@ const std::vector<std::string>& CanonicalMetricIds();
 
 } // namespace kpm
 
-/// Canonical KPM label dimensions per O-RAN WG3 E2SM-KPM v03.00. Every
+/// Canonical KPM label dimensions per O-RAN WG3 E2SM-KPM R004 v06.00
+/// (ETSI TS 104 040 v4.0.0, 2025). Every
 /// canonical measurement must carry these label keys (value can be empty).
 namespace label
 {
@@ -69,7 +84,7 @@ inline constexpr const char* kPresent = "present";
 } // namespace label
 
 /// A single canonical KPM measurement. `value` is in WG3-canonical units
-/// (kbps for throughput, bytes for volume, integer PRB counts, dB for SINR).
+/// (kbps for throughput, bytes for volume, integer PRB/TB counts, dB for SINR).
 struct KpmMeasurement
 {
     std::string metricId;
@@ -77,7 +92,7 @@ struct KpmMeasurement
     std::map<std::string, std::string> labels;
 };
 
-/// Map an E2KpmReport to the full canonical 10-metric measurement vector,
+/// Map an E2KpmReport to the full canonical 12-metric measurement vector,
 /// applying `baseLabels` to every measurement. Where a metric's source
 /// field is not populated by the current report (e.g. UL throughput is not
 /// yet plumbed end-to-end), the measurement is still emitted with value 0
@@ -92,7 +107,7 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& report,
 ///   timestamp, gnb_id, is_ntn, ue_id, metric_id, value, present,
 ///   FIVE_QI, S-NSSAI, PLMN
 ///
-/// Each report produces 10 rows (one per canonical metric ID). Rows with
+/// Each report produces 12 rows (one per canonical metric ID). Rows with
 /// not-yet-plumbed source fields carry `present = 0`.
 /// `baseLabels` must contain entries for kFiveQi, kSnssai, kPlmn.
 void

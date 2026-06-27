@@ -20,7 +20,7 @@
 
 5G slicing is straightforward when every cell is a few kilometres away. In NTN the latency budget of a URLLC slice (5 ms p99) is hard-bounded by orbital geometry — a GEO leg adds ~120 ms of one-way slant propagation (~240 ms ground–satellite–ground), blowing the budget by more than an order of magnitude regardless of any radio-side allocator decision. `ntn-slice` is a 3GPP-compliant slicing layer that *understands the orbital floor*:
 
-- **Per-slice PRB orchestration** with min-throughput reservation (the classical isolation guarantee), then priority-weighted distribution of the remainder by unmet demand — or by externally supplied RL shares.
+- **Per-slice PRB orchestration** with min-throughput reservation, then priority-weighted distribution of the remainder by unmet demand — or by externally supplied RL shares. **This orchestrator is an open-loop *shadow* allocator**: its PRB decisions are computed and logged but do **not** actuate the mmwave scheduler. All slices share **one slice-agnostic cell**; the 5QI / S-NSSAI is a packet label the MAC never reads; and per-slice isolation is **observed statistically** on the measured plane, not *enforced* by the allocator. There is no per-slice isolation guarantee — the reservation is the allocator's own bookkeeping, not a scheduler-enforced PRB partition.
 - **TS 22.261 demand profiles** — default per-slice KPIs (latency budget, min/max throughput, reliability target, priority, `allowGeo`) seeded from TS 22.261 Table 7.1-1.
 - **Per-slice latency / reliability KPIs** — a rolling-window isolation monitor that emits a `BreachEvent` whenever a slice exceeds its p99-latency or loss-rate target.
 - **GEO mode-skip policy** — keeps URLLC traffic on LEO satellites whose round-trip time is compatible with the slice latency target; `ShouldSkipGeo(slice)` is true exactly for slices with `allowGeo == false`.
@@ -41,7 +41,7 @@ See the [CHANGELOG](CHANGELOG.md) for the full history.
 
 - **All three examples now run on a measured radio.** Every example builds a real mmwave NR NTN cell (`NtnRealStackHelper` from `ntn-traffic`: SpectrumPhy + MAC + RLC/PDCP + RRC + EPC) on a real SGP4 Walker satellite pass with TR 38.811 UE placement — no point-to-point stand-ins, no closed-form SNR curves.
 - **Traffic is `NtnOranApplication` QoS flows** (`ntn-traffic`), not `OnOffApplication`: each packet carries a real 24-byte in-band payload header (5QI / S-NSSAI / QFI / sequence number / TX timestamp), and per-UE delivered bytes are measured at the `NtnOranSink`. The `MixedBouquet` profile spreads UEs across eMBB (CBR-saturating, 5QI 2), URLLC (periodic pings, 5QI 82) and mMTC (periodic NB-IoT-style, 5QI 9) flows.
-- New **`ntn-slice-real-stack`** example: all slices contend for **one** shared mmwave cell, so PRB-level isolation is genuinely contested rather than trivially guaranteed by separate links.
+- New **`ntn-slice-real-stack`** example: all slices contend for **one** shared mmwave cell, so per-slice service is genuinely contested rather than trivially separated by distinct links — but isolation here is *measured* on the shared cell, not *enforced* by a per-slice PRB scheduler (the orchestrator's PRB split does not drive the mmwave MAC).
 - **`ntn-slice-isolation-traffic`** was rebuilt on the same shared-cell recipe: the eMBB slice saturates the cell while URLLC and mMTC must hold their SLAs; per-slice SINR / throughput are measured and fed to the real `SliceIsolationMonitor`.
 - The **three-slice LEO/GEO example** validates URLLC GEO mode-skip against real geometry — LEO slant/c for LEO-served slices, the real ~36 000 km GEO slant/c (~120 ms one-way) for GEO-served ones — with delivery gated by the cell's measured TBLER.
 - `served_mbps` is clamped so it **never exceeds the per-slice demand** (no over-reporting of served load).
@@ -145,3 +145,7 @@ Muhammad Uzair, Independent Researcher.
   url    = {https://github.com/Muhammaduazir69/ntn-slice}
 }
 ```
+
+## Scope & limitations (toolkit boundaries)
+
+**A4** — the per-slice PRB orchestration is computed and logged but does **not** actuate the (slice-agnostic) mmwave scheduler; isolation is observed statistically, not enforced. See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.

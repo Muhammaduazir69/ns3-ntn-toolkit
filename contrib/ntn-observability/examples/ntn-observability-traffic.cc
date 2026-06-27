@@ -64,7 +64,8 @@ main(int argc, char* argv[])
     double simSeconds = 40.0;
     double leoAltKm = 550.0;
     double freqGHz = 12.0; // Ku-band
-    double satEirpDbm = 75.0;
+    double satEirpDbm = 75.0; // already healthy for the nr Friis LEO link
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outPath = "ntn-observability-traffic.lp";
     std::string influxHost = ""; // empty = file transport
     uint16_t influxPort = 8089;
@@ -75,6 +76,7 @@ main(int argc, char* argv[])
     cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("out", "InfluxDB line-protocol output file", outPath);
     cmd.AddValue("influxHost", "InfluxDB/Telegraf UDP host (empty=file)", influxHost);
     cmd.AddValue("influxPort", "InfluxDB/Telegraf UDP port", influxPort);
@@ -118,6 +120,12 @@ main(int argc, char* argv[])
     mob.Install(ueNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-observability-traffic");

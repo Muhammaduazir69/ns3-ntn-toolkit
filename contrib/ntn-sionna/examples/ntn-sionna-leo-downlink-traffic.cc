@@ -75,12 +75,14 @@ main(int argc, char* argv[])
     double satEirpDbm = 75.0; // Ku feeder beam (closes ~169 dB FSPL with margin)
     double rainMmH = 0.0;
     bool lms = false;
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-sionna-leo-downlink-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("rainMmH", "Static rain rate over the run (mm/h)", rainMmH);
     cmd.AddValue("lms", "Enable P.681 LMS Markov shadowing (0/1)", lms);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -129,6 +131,12 @@ main(int argc, char* argv[])
     mob.Install(gndNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-sionna-leo-downlink-traffic");

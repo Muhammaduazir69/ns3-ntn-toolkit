@@ -16,7 +16,6 @@
 //   <prefix>-drx.csv     — DRX state at each second + cumulative awake time
 
 #include "ns3/core-module.h"
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-drx.h"
@@ -110,7 +109,8 @@ main(int argc, char* argv[])
     double simTimeSec = 20.0;
     uint32_t numUes = 4;
     double altitudeKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     bool transparent = true;
     bool passAwareDrx = true;
     std::string prefix = "ntn-rrc-full";
@@ -120,12 +120,21 @@ main(int argc, char* argv[])
     cmd.AddValue("simTime", "Pass duration (s)", simTimeSec);
     cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("transparent", "Transparent payload (true) vs regenerative (false)", transparent);
     cmd.AddValue("passAwareDrx", "Enable NTN pass-aware DRX deep sleep", passAwareDrx);
     cmd.AddValue("prefix", "CSV file prefix", prefix);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
+    // mmwave, so honour the historical 55 dBm for mmwave but give nr 70 dBm.
+    const bool useNr = (radio == "nr");
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 55.0;
+    }
 
     // ----- nodes + LEO-pass mobility (real geometry, guaranteed in view) -----
     NodeContainer satNodes;
@@ -158,6 +167,12 @@ main(int argc, char* argv[])
 
     // ----- real mmwave NR cell + traffic -----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS (nr backend only)
+    }
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-rrc-full-stack");
@@ -167,9 +182,7 @@ main(int argc, char* argv[])
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
     rs.EnableAiFlowMonitor("ntn-rrc-full-stack"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
-    Ptr<mmwave::MmWaveEnbNetDevice> enb =
-        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
-    const uint16_t cellId = enb ? enb->GetCellId() : 0xC0DE;
+    const uint16_t cellId = rs.GetServingCellId(); // radio-agnostic (mmwave or nr gNB)
 
     // ----- the four RRC NTN components, bound to the same geometry -----
     NtnRrcHelper helper;
@@ -222,7 +235,8 @@ main(int argc, char* argv[])
     rep->Stop();
     drx->Stop();
 
-    std::cout << "ntn-rrc full-stack run complete (real mmwave NR cell).\n"
+    std::cout << "ntn-rrc full-stack run complete (real " << (useNr ? "5G-LENA nr" : "mmwave")
+              << " NR cell).\n"
               << "  pass: " << simTimeSec << " s, "
               << (transparent ? "transparent" : "regenerative") << " payload\n"
               << "  measured mean SINR : " << rs.GetMeanDlSinrDb() << " dB\n"

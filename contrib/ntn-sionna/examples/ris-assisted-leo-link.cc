@@ -114,6 +114,7 @@ main(int argc, char* argv[])
     double risPosZ = 50.0;
     std::string phaseProfile = "focus";
     uint32_t timeoutMs = 200;
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ris-assisted-leo-link-output";
 
     CommandLine cmd(__FILE__);
@@ -124,6 +125,7 @@ main(int argc, char* argv[])
     cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
     cmd.AddValue("rainMmH", "Rain rate (mm/h)", rainMmH);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("rows", "RIS rows", risRows);
     cmd.AddValue("cols", "RIS cols", risCols);
     cmd.AddValue("risPosX", "RIS x (m)", risPosX);
@@ -135,11 +137,11 @@ main(int argc, char* argv[])
     g_simTime = duration;
 
     std::printf("\n=== ris-assisted-leo-link (MEASURED real radio + RIS analytic probe) ===\n"
-                "  serving cell: real mmwave NR link, 1 UE, real SGP4 pass\n"
+                "  serving cell: real NR (%s) link, 1 UE, real SGP4 pass\n"
                 "  ITU-R atmospheric excess chained on the packet path (no double-count)\n"
                 "  RIS reflection gain remains an analytic probe (no real-plane gain-adapter)\n"
                 "  freq=%.3f GHz alt=%.0f km RIS=%ux%u phase=%s\n\n",
-                freqHz / 1e9, altKm, risRows, risCols, phaseProfile.c_str());
+                radio.c_str(), freqHz / 1e9, altKm, risRows, risCols, phaseProfile.c_str());
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -174,6 +176,12 @@ main(int argc, char* argv[])
     g_ueMob = ueNodes.Get(0)->GetObject<MobilityModel>();
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ris-assisted-leo-link");

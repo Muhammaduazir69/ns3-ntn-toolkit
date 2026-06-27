@@ -1613,8 +1613,8 @@ class OranNtnKpmCanonicalIdsListTestCase : public TestCase
     {
         const auto& ids = oranntn::kpm::CanonicalMetricIds();
         NS_TEST_ASSERT_MSG_EQ(ids.size(),
-                              10u,
-                              "canonical KPM set must have 10 entries");
+                              12u,
+                              "canonical KPM set must have 12 entries");
         NS_TEST_EXPECT_MSG_EQ(ids[0], "DRB.UEThpDl", "ids[0]");
         NS_TEST_EXPECT_MSG_EQ(ids[1], "DRB.UEThpUl", "ids[1]");
         NS_TEST_EXPECT_MSG_EQ(ids[2], "DRB.PdcpSduVolumeDL", "ids[2]");
@@ -1625,6 +1625,8 @@ class OranNtnKpmCanonicalIdsListTestCase : public TestCase
         NS_TEST_EXPECT_MSG_EQ(ids[7], "RRU.PrbUsedUl", "ids[7]");
         NS_TEST_EXPECT_MSG_EQ(ids[8], "CARR.AverageSINR", "ids[8]");
         NS_TEST_EXPECT_MSG_EQ(ids[9], "L1M.RS-SINR.Mean", "ids[9]");
+        NS_TEST_EXPECT_MSG_EQ(ids[10], "TB.TotNbrDl", "ids[10]");
+        NS_TEST_EXPECT_MSG_EQ(ids[11], "TB.ErrTotNbrDl", "ids[11]");
 
         NS_TEST_EXPECT_MSG_EQ(std::string(oranntn::label::kFiveQi),
                               "FIVE_QI",
@@ -1642,7 +1644,7 @@ class OranNtnKpmCanonicalBuildTestCase : public TestCase
 {
   public:
     OranNtnKpmCanonicalBuildTestCase()
-        : TestCase("BuildCanonicalKpmMeasurements emits all 10 IDs with correct values")
+        : TestCase("BuildCanonicalKpmMeasurements emits all 12 IDs with correct values")
     {
     }
 
@@ -1654,6 +1656,7 @@ class OranNtnKpmCanonicalBuildTestCase : public TestCase
         r.sinr_dB = 12.5;
         r.throughput_Mbps = 50.0; // 50 000 kbps
         r.prbUtilization = 0.5;   // 50% of 273 PRBs => 136.5
+        r.harqBler = 0.02;        // measured DL HARQ BLER fraction
 
         const std::map<std::string, std::string> base = {
             {oranntn::label::kFiveQi, "9"},
@@ -1661,7 +1664,7 @@ class OranNtnKpmCanonicalBuildTestCase : public TestCase
             {oranntn::label::kPlmn, "00101"},
         };
         const auto v = oranntn::BuildCanonicalKpmMeasurements(r, base);
-        NS_TEST_ASSERT_MSG_EQ(v.size(), 10u, "vector size");
+        NS_TEST_ASSERT_MSG_EQ(v.size(), 12u, "vector size");
 
         // Build a name->index map so the test is robust to ordering.
         std::map<std::string, size_t> idx;
@@ -1707,6 +1710,27 @@ class OranNtnKpmCanonicalBuildTestCase : public TestCase
             v[idx[oranntn::kpm::kDrbUeThpDl]].labels.count(oranntn::label::kPresent),
             0u,
             "DL throughput has no override label");
+
+        // TB.TotNbrDl / TB.ErrTotNbrDl — canonical TS 28.552 DL TB counters.
+        // No integrating absolute-TB counter is plumbed yet, so both are
+        // present=false; TB.ErrTotNbrDl carries the measured HARQ BLER fraction.
+        NS_TEST_ASSERT_MSG_EQ(idx.count(oranntn::kpm::kTbTotNbrDl),
+                              1u,
+                              "TB.TotNbrDl present");
+        NS_TEST_ASSERT_MSG_EQ(idx.count(oranntn::kpm::kTbErrTotNbrDl),
+                              1u,
+                              "TB.ErrTotNbrDl present");
+        NS_TEST_EXPECT_MSG_EQ(
+            v[idx[oranntn::kpm::kTbTotNbrDl]].labels.at(oranntn::label::kPresent),
+            "false",
+            "TB.TotNbrDl marked not-present");
+        NS_TEST_EXPECT_MSG_EQ(
+            v[idx[oranntn::kpm::kTbErrTotNbrDl]].labels.at(oranntn::label::kPresent),
+            "false",
+            "TB.ErrTotNbrDl marked not-present");
+        NS_TEST_EXPECT_MSG_EQ(v[idx[oranntn::kpm::kTbErrTotNbrDl]].value,
+                              0.02,
+                              "TB.ErrTotNbrDl carries measured HARQ BLER");
     }
 };
 
@@ -1732,7 +1756,7 @@ class OranNtnKpmCanonicalLabelsTestCase : public TestCase
             {oranntn::label::kPlmn, "00102"},
         };
         const auto v = oranntn::BuildCanonicalKpmMeasurements(r, base);
-        NS_TEST_ASSERT_MSG_EQ(v.size(), 10u, "vector size");
+        NS_TEST_ASSERT_MSG_EQ(v.size(), 12u, "vector size");
         for (const auto& m : v)
         {
             NS_TEST_EXPECT_MSG_EQ(m.labels.at(oranntn::label::kFiveQi),
@@ -2100,7 +2124,7 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
 {
   public:
     OranNtnKpmCanonicalCsvTestCase()
-        : TestCase("Canonical kpm_canonical.csv is long-format with 10 rows per E2KpmReport")
+        : TestCase("Canonical kpm_canonical.csv is long-format with 12 rows per E2KpmReport")
     {
     }
 
@@ -2153,6 +2177,7 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
             oranntn::kpm::kRruPrbAvailDl,   oranntn::kpm::kRruPrbAvailUl,
             oranntn::kpm::kRruPrbUsedDl,    oranntn::kpm::kRruPrbUsedUl,
             oranntn::kpm::kCarrAvgSinr,     oranntn::kpm::kL1mRsSinrMean,
+            oranntn::kpm::kTbErrTotNbrDl,   oranntn::kpm::kTbTotNbrDl,
         };
         size_t rowCount = 0;
         size_t notPresentCount = 0;
@@ -2192,17 +2217,18 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
                 ++notPresentCount;
             }
         }
-        // 3 reports x 10 canonical metrics = 30 rows.
-        NS_TEST_EXPECT_MSG_EQ(rowCount, 30u, "row count");
+        // 3 reports x 12 canonical metrics = 36 rows.
+        NS_TEST_EXPECT_MSG_EQ(rowCount, 36u, "row count");
         NS_TEST_EXPECT_MSG_EQ(seenIds.size(),
-                              10u,
-                              "all 10 canonical IDs emitted at least once");
-        // Three UL-side IDs are not-present per report -> 3 * 3 = 9 rows
-        // should carry present=0 (the v2.1 baseline; will drop to 0 once
-        // 4.1.9 CU/DU/RU split plumbs UL counters).
+                              12u,
+                              "all 12 canonical IDs emitted at least once");
+        // Five IDs are not-present per report (3 UL-side: DRB.UEThpUl,
+        // DRB.PdcpSduVolumeUL, RRU.PrbUsedUl; plus the two TB counters
+        // TB.TotNbrDl / TB.ErrTotNbrDl which lack an integrating absolute-TB
+        // counter at the v2.1 baseline) -> 5 * 3 = 15 rows carry present=0.
         NS_TEST_EXPECT_MSG_EQ(notPresentCount,
-                              9u,
-                              "3 UL metrics x 3 reports = 9 not-present rows");
+                              15u,
+                              "5 not-present metrics x 3 reports = 15 rows");
     }
 };
 

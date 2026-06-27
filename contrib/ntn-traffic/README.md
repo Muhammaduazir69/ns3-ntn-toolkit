@@ -7,7 +7,7 @@
 
 `ntn-traffic` is the module every other toolkit module composes for a real data plane. It now ships three layers:
 
-1. **`NtnRealStackHelper`** — builds a genuine NR-style air interface from the in-tree `mmwave` module (SpectrumPhy, MAC scheduler, HARQ, AMC, RLC/PDCP, RRC, EPC) between caller-supplied satellite (gNB) and ground (UE) nodes that carry their own mobility models (SGP4, TR 38.811, HAPS). The link is NTN-ized: free-space path loss valid at LEO range, S-band NR-NTN FR1 carrier, satellite EIRP via Tx power, HARQ off by default. Every headline KPI is **measured**, not computed: SINR/TBLER from the PHY `RxPacketTraceUe` trace, throughput/delay/jitter/loss from in-band header bytes at the application sinks.
+1. **`NtnRealStackHelper`** — builds a genuine NR-style air interface from the in-tree `mmwave` module (SpectrumPhy, MAC scheduler, HARQ, AMC, RLC/PDCP, RRC, EPC) between caller-supplied satellite (gNB) and ground (UE) nodes that carry their own mobility models (SGP4, TR 38.811, HAPS). The link is NTN-ized: free-space path loss valid at LEO range, a mmWave-NR PHY at an S-band carrier (FR2 numerology — 60 kHz SCS — **not** a 3GPP NR-NTN FR1 band/numerology; the 2.0 GHz carrier has no assigned 3GPP band number, sitting in the n256 uplink, and the 50 MHz default bandwidth exceeds the 20/30 MHz NTN-FR1 max), the "satellite EIRP" applied as a conducted Tx-power scalar to a terrestrial 8×8 `UniformPlanarArray` gNB with SVD beamforming (array gain added separately by the spectrum model — **not** a reflector beam with a 3 dB footprint or a TR 38.821-derived link budget), HARQ off by default. Every headline KPI is **measured**, not computed: SINR/TBLER from the PHY `RxPacketTraceUe` trace, throughput/delay/jitter/loss from in-band header bytes at the application sinks.
 2. **The ORAN application suite** (`NtnOranApplication`, `NtnOranSink`, `NtnOranPayloadHeader`, `NtnCommandAndControlApp`) — QoS-flow-aware traffic sources whose every packet carries its 5QI / S-NSSAI / QFI identity and measurement primitives (sequence number, TX timestamp) as **real serialized bytes**, so per-flow KPIs survive GTP re-encapsulation through the EPC. This suite replaces bare `OnOffApplication` as the standard traffic source across the toolkit's modules and examples.
 3. **`NtnOranAiFlowMonitor`** — an AI-native measurement layer over the ORAN flows, built on the real ns-3 FlowMonitor infrastructure: per-flow KPM time series under official 3GPP TS 28.552 / O-RAN E2SM-KPM metric names, sliding-window AI feature vectors, EWMA z-score anomaly events, and XML/CSV/InfluxDB/E2 exporters.
 
@@ -37,7 +37,7 @@ See the toolkit [CHANGELOG](../../CHANGELOG.md).
 
 - **`NtnOranFlowClassifier`** (`: FlowClassifier`) — flows keyed by the ORAN QoS identity in real packet bytes (srcId + dstId + 5QI + S-NSSAI), the way a DRB/QoS flow is keyed in TS 38.415, instead of the IP 5-tuple.
 - **`NtnOranFlowProbe`** (`: FlowProbe`) — one probe per measurement point (traffic source, each sink); reports every packet into a real `ns3::FlowMonitor` with the in-band sequence number as packet id.
-- **`NtnOranAiFlowMonitor`** — the KPM/AI layer: per-flow KPI time series at a configurable granularity period (default 1 s) under official names — `DRB.UEThpDl`, `DRB.RlcSduDelayDl`, `DRB.PacketLossRateDl`, `DRB.PdcpSduVolumeDl`, plus `L1M.RS-SINR` / `TB.TotNbrDl` / `TB.ErrTotalNbrDl` from the PHY trace when attached to `NtnRealStackHelper`; sliding-window AI feature vectors (`GetFeatures`: mean/slope of throughput, delay, loss, SINR, plus jitter) for xApps / `ns3-ai-ntn`; an EWMA z-score anomaly detector per flow per metric (`RegisterAnomalyCallback`); exporters: FlowMonitor XML (`SerializeToXmlFile`), wide CSV (`WriteCsv`), InfluxDB line protocol (`WriteInfluxLp`), and E2SM-KPM-shaped indication callbacks (`RegisterE2Consumer`) for the `oran-ntn` E2 node.
+- **`NtnOranAiFlowMonitor`** — the KPM/AI layer: per-flow KPI time series at a configurable granularity period (default 1 s) under official names — `DRB.UEThpDl`, `DRB.RlcSduDelayDl`, `DRB.PacketLossRateDl`, `DRB.PdcpSduVolumeDl`, plus `L1M.RS-SINR` / `TB.TotNbrDl` / `TB.ErrTotNbrDl` from the PHY trace when attached to `NtnRealStackHelper`; sliding-window AI feature vectors (`GetFeatures`: mean/slope of throughput, delay, loss, SINR, plus jitter) for xApps / `ns3-ai-ntn`; an EWMA z-score anomaly detector per flow per metric (`RegisterAnomalyCallback`); exporters: FlowMonitor XML (`SerializeToXmlFile`), wide CSV (`WriteCsv`), InfluxDB line protocol (`WriteInfluxLp`), and E2SM-KPM-shaped indication callbacks (`RegisterE2Consumer`) for the `oran-ntn` E2 node.
 
 ### Real-radio helper (`helper/ntn-real-stack-helper.h`)
 
@@ -71,7 +71,7 @@ The flagship ORAN-NTN example. One real LEO cell (`NtnRealStackHelper`: mmwave S
 ```
 
 - **Outputs:** a live per-flow delay table and anomaly events on stdout; end-of-run per-flow measured KPIs (rx packets, one-way delay, jitter, loss, throughput per 5QI/S-NSSAI), last C&C telemetry, and a measured cell summary (SINR, TBLER, throughput); files `ntn-oran-qos-flows_kpm_series.csv` / `.lp` (InfluxDB line protocol; auto-exported by `EnableAiFlowMonitor`) in the working directory, plus `oran_flow_monitor.xml` and `sim_health.csv` in `--outputDir` (default `ntn-oran-qos-flows-output`).
-- **Key args:** `--simSeconds`, `--leoAltKm` (default 550), `--freqGHz` (default 2, S-band NR-NTN FR1), `--satEirpDbm`, `--outputDir`.
+- **Key args:** `--simSeconds`, `--leoAltKm` (default 550), `--freqGHz` (default 2, S-band carrier — mmWave-NR FR2 numerology, not a 3GPP NR-NTN FR1 band/numerology), `--satEirpDbm`, `--outputDir`.
 
 ### ntn-tr38821-calibration
 
@@ -135,3 +135,7 @@ The module ships four test suites: `ntn-oran-application` (unit — payload-head
 ## License & author
 
 GPL-2.0-only. Muhammad Uzair, Independent Researcher.
+
+## Scope & limitations (toolkit boundaries)
+
+**A1** — the measured channel carries the TR 38.811 *large-scale* terms only (no NTN-TDL/Rician fast fading). **A5** — the vendored mmwave PHY runs FR2 numerology (60 kHz SCS) at an S-band carrier and models the gNB as a terrestrial array, not an FR1-NTN waveform or a satellite reflector beam; the link-level AMC/MCS/LDPC-BLER chain on top is real. See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.

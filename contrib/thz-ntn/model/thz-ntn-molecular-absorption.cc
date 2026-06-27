@@ -200,6 +200,12 @@ ThzNtnMolecularAbsorption::InitAbsorptionLines()
     m_lines.push_back({1716.770e9, 3.87e-19, 2.54e9, true});   // 1717 GHz
 
     // Additional H2O lines for improved spectral coverage
+    // Strong sub-THz rotational lines (0.1-0.5 THz). Intensities are scaled
+    // to the 448 GHz entry using the relative line strengths of HITRAN-2020 /
+    // ITU-R P.676-13 Annex 1 Table 1; air-broadened HWHM ~0.096/0.093 cm^-1/atm
+    // (1 cm^-1 = 29.979 GHz) -> ~2.87/2.78 GHz.
+    m_lines.push_back({183.310e9,  5.92e-19, 2.87e9, true});   // 183 GHz — strong H2O line (HITRAN-2020 / ITU-R P.676-13)
+    m_lines.push_back({325.153e9,  3.94e-19, 2.78e9, true});   // 325 GHz — strong H2O line (HITRAN-2020 / ITU-R P.676-13)
     m_lines.push_back({380.197e9,  1.27e-19, 2.80e9, true});   // 380 GHz
     m_lines.push_back({448.001e9,  2.56e-19, 2.75e9, true});   // 448 GHz
     m_lines.push_back({620.701e9,  1.44e-19, 2.70e9, true});   // 621 GHz

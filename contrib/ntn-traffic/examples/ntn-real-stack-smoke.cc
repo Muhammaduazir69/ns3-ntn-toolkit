@@ -29,20 +29,28 @@ main(int argc, char* argv[])
     double simTime = 10.0;
     uint32_t numUes = 4;
     double altKm = 600.0;
-    double satEirpDbm = 55.0; // LEO beam EIRP -> ~15 dB SINR with active error model
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double freqGhz = 2.0;
     double bwMhz = 50.0;
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "ntn-real-stack-smoke-out";
 
     CommandLine cmd;
     cmd.AddValue("simTime", "Simulation time [s]", simTime);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altKm", "Satellite altitude [km]", altKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power [dBm]", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power [dBm]; -1 = backend default", satEirpDbm);
     cmd.AddValue("freqGhz", "Carrier frequency [GHz]", freqGhz);
     cmd.AddValue("bwMhz", "Bandwidth [MHz]", bwMhz);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
 
     // gNB = one LEO satellite directly overhead; UEs spread on the ground.
     NodeContainer satNodes;
@@ -71,6 +79,12 @@ main(int argc, char* argv[])
                        subLon - 0.03, subLon + 0.03);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simTime));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("smoke");

@@ -64,6 +64,7 @@ main(int argc, char* argv[])
     double cruiseAltM = 11000.0;
     double cruiseSpeedMps = 250.0;
     std::string outputDir = "sagin-adsb-flight-leo-output";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
@@ -74,6 +75,7 @@ main(int argc, char* argv[])
     cmd.AddValue("cruiseAltM", "Aircraft cruise altitude (m)", cruiseAltM);
     cmd.AddValue("cruiseSpeedMps", "Aircraft cruise speed (m/s)", cruiseSpeedMps);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.Parse(argc, argv);
     g_simTime = simSeconds;
 
@@ -130,7 +132,13 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-adsb-flight-leo-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    rs.SetSatEirpDbm(satEirpDbm); // 70 dBm Ku-band budget — healthy for the nr LEO link too
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));

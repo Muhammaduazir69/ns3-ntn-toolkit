@@ -68,7 +68,8 @@ main(int argc, char* argv[])
     double simSeconds = 30.0;
     double leoAltKm = 550.0;
     double freqGHz = 2.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string aisTrace = "contrib/ntn-sagin/data/ais-sample-trace.csv";
     std::string outputDir = "ntn-v2x-maritime-ais-output";
 
@@ -76,7 +77,8 @@ main(int argc, char* argv[])
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("aisTrace",
                  "Real Danish Maritime AIS CSV export (no synthetic fallback). "
                  "Defaults to the shipped ntn-sagin sample trace.",
@@ -84,6 +86,13 @@ main(int argc, char* argv[])
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
     g_simTime = simSeconds;
+
+    // Backend-appropriate EIRP default (honoured only if the user did not set it):
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
 
     // Parse a REAL Danish Maritime AIS export and take the first vessel's track.
     sagin::AisDanishImporter importer;
@@ -144,8 +153,14 @@ main(int argc, char* argv[])
     sat->SetReference(satSubLat, satSubLon, 0.0);
     satNodes.Get(0)->AggregateObject(sat);
 
-    // Real mmwave NR NTN cell -> MEASURED SINR/TBLER/throughput.
+    // Real NR NTN cell -> MEASURED SINR/TBLER/throughput.
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-maritime-ais");
@@ -157,9 +172,9 @@ main(int argc, char* argv[])
     rs.EnableAiFlowMonitor("ntn-v2x-maritime-ais"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 
-    std::printf("# ntn-v2x-maritime-ais (AIS-replayed vessel UE on a real mmwave NR cell)\n"
+    std::printf("# ntn-v2x-maritime-ais (AIS-replayed vessel UE on a real %s NTN cell)\n"
                 "#   sim=%.0fs leoAlt=%.0fkm freq=%.1fGHz EIRP=%.1fdBm refLatLon=(%.4f,%.4f)\n",
-                simSeconds, leoAltKm, freqGHz, satEirpDbm, refLat, refLon);
+                radio.c_str(), simSeconds, leoAltKm, freqGHz, satEirpDbm, refLat, refLon);
 
     Simulator::Schedule(Seconds(2.0), &LinkProbe);
     Simulator::Stop(Seconds(simSeconds));

@@ -132,9 +132,12 @@ struct SimParams
                                    // a UE over (sticky/hysteretic mobility); a
                                    // stranded UE rides past this to the Space
                                    // RIC's autonomous TTE<5 s trigger
-    double satEirpDbm = 55.0;      // shared by measured cells and the budget
+    double satEirpDbm = -1.0;      // sentinel: backend default chosen after parse
+                                   // (mmwave 55 / nr 70); shared by measured
+                                   // cells and the budget
     double freqGhz = 2.0;          // S-band (3GPP NR-NTN FR1)
     double bwMhz = 50.0;
+    std::string radio = "nr";      // radio backend: nr (FR1) or mmwave
     std::string outputDir = "oran-ntn-output";
     std::string conflictStrategy = "priority";
     bool enableSpaceRic = true;
@@ -626,8 +629,9 @@ main(int argc, char* argv[])
                  "(sticky mobility; a stranded UE rides past it to the Space "
                  "RIC's autonomous TTE<5 s trigger)",
                  params.groundHoTteS);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP (measured cells AND budget)",
+    cmd.AddValue("satEirpDbm", "Satellite EIRP (measured cells AND budget); -1 = backend default",
                  params.satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", params.radio);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", params.freqGhz);
     cmd.AddValue("bwMhz", "Bandwidth (MHz)", params.bwMhz);
     cmd.AddValue("outputDir", "Output directory", params.outputDir);
@@ -638,6 +642,13 @@ main(int argc, char* argv[])
     cmd.AddValue("enableSpaceRic", "Enable Space RICs", params.enableSpaceRic);
     cmd.AddValue("enableFL", "Enable federated learning", params.enableFederatedLearning);
     cmd.Parse(argc, argv);
+
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55.
+    // This value is shared by the measured cell(s) and the geometry budget.
+    if (params.satEirpDbm < 0.0)
+    {
+        params.satEirpDbm = (params.radio == "mmwave") ? 55.0 : 70.0;
+    }
 
     const uint32_t totalSats = params.numPlanes * params.satsPerPlane;
     params.numRealCells = std::min(params.numRealCells, totalSats);
@@ -894,6 +905,12 @@ main(int argc, char* argv[])
         for (uint32_t u = 0; u < anchoredUes; ++u)
         {
             realUes.Add(ueNodes.Get(u));
+        }
+        rs.SetRadioBackend(params.radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                                    : NtnRealStackHelper::RadioBackend::Nr);
+        if (params.radio != "mmwave")
+        {
+            rs.SetNumerology(1); // FR1 30 kHz SCS
         }
         rs.SetSimTime(Seconds(params.duration));
         rs.SetOutputDir(params.outputDir);

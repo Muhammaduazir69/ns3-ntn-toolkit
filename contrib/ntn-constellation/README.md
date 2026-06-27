@@ -38,10 +38,13 @@ events that the rest of the data plane consumes. Everything lives in the
 - **Contact-graph scheduling** — `ContactGraphScheduler` evaluates GSL (ground↔sat)
   and ISL (sat↔sat) visibility over the simulation timeline and raises
   `ContactEvent`s as links come up and go down.
-- **Contact-graph routing** — `ContactGraphRouter` turns the contact graph into
-  forwarding decisions across the time-varying topology: direct contacts, BFS
-  shortest path, edge-weighted Dijkstra, and a regenerative-vs-bent-pipe mode
-  (`SetRegenMode`) that routes around bent-pipe transit nodes.
+- **Contact-graph path computation** — `ContactGraphRouter` is a path-computation
+  helper (inherits `Object`): it computes paths across the time-varying topology
+  and returns node-ID sequences — direct contacts, BFS shortest path,
+  edge-weighted Dijkstra, and a regenerative-vs-bent-pipe mode (`SetRegenMode`)
+  that steers the computed path around bent-pipe transit nodes. It installs **no
+  ns-3 forwarding table**; the routed examples feed the computed path to ns-3
+  static/global routing themselves.
 - **Calibration corpus** — `tr38821-corpus` (`Tr38821CorpusReader`,
   `CalibrationHarness`) ships 3GPP TR 38.821 reference scenarios/link budgets plus
   a Starlink-EU latency/station corpus to validate toolkit predictions against
@@ -92,7 +95,7 @@ Derived from `model/*.h`:
 | `sgp4-mobility-model.h` | `Sgp4MobilityModel` | ns-3 `MobilityModel` that propagates a satellite during the simulation via an analytic Kepler + secular-J2 propagator with an SGP4-compatible TLE interface (full Vallado SGP4 with drag/B* planned Q4 2026; B* parsed but unused). ECEF/ECI/geodetic accessors and `GetElevationDeg()`. |
 | `orbital-elements.h` | `TleRecord`, `KeplerianElements` | TLE / Keplerian element records consumed by the mobility model. |
 | `contact-graph-scheduler.h` | `ContactGraphScheduler`, `ContactEvent` | Computes GSL/ISL visibility and emits link up/down events over time; up/down event counters per link class. |
-| `contact-graph-router.h` | `ContactGraphRouter` | Routes over the time-varying contact graph: BFS shortest path, weighted Dijkstra, regenerative-vs-bent-pipe constrained routing. |
+| `contact-graph-router.h` | `ContactGraphRouter` | Path-computation helper over the time-varying contact graph (returns node-ID vectors; installs no forwarding table): BFS shortest path, weighted Dijkstra, regenerative-vs-bent-pipe constrained path selection. |
 | `tr38821-corpus.h` | `Tr38821CorpusReader`, `Tr38821Scenario`, `Tr38821LinkBudget`, `StarlinkLatencySample`, `StarlinkStation`, `CalibrationResidual` | TR 38.821 + Starlink calibration corpus and harness. |
 
 ## Examples
@@ -187,7 +190,8 @@ Routing-pattern flagship: the geometry-driven routing decision actually INSTALLS
 Ipv4 static routes, so real UDP packets are forwarded through the satellite nodes
 and adaptively REROUTE as the constellation moves — `gs1 -> satA -> gs2` while
 satA is in contact, then `gs1 -> satB -> gs2` once satA sets and satB rises (the
-two satellites are real SGP4 Walker neighbours projected into a local ENU frame).
+two satellites are real Kepler+J2-secular Walker neighbours — Vallado SGP4
+available via `SetUseVallado` — projected into a local ENU frame).
 Per-link delay is the real slant range over c; KPIs are measured at the
 `NtnOranSink`.
 

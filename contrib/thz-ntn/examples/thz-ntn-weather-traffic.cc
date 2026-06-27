@@ -28,6 +28,7 @@
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
+#include "ns3/thz-ntn-pointing-loss-model.h"
 #include "ns3/thz-ntn-propagation-loss-model.h"
 #include "ns3/walker-constellation.h"
 
@@ -102,11 +103,13 @@ main(int argc, char* argv[])
     double fogLwc = 0.5;
     double snowMmH = 10.0;
     std::string outputDir = "thz-ntn-weather-traffic-output";
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("rainMmH", "Rain rate during the rain phase (mm/h)", rainMmH);
     cmd.AddValue("fogLwc", "Fog liquid water content (g/m^3)", fogLwc);
     cmd.AddValue("snowMmH", "Snow rate during the snow phase (mm/h)", snowMmH);
@@ -160,6 +163,12 @@ main(int argc, char* argv[])
     mob.Install(gndNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("thz-ntn-weather-traffic");
@@ -174,6 +183,10 @@ main(int argc, char* argv[])
     Ptr<ThzNtnPropagationLossModel> wx = CreateObject<ThzNtnPropagationLossModel>();
     wx->SetFrequency(freqGHz * 1e9);
     rs.AddExtraPropagationLoss(wx);
+
+    // gap A2 — THz beam pointing impairment now in the measured packet path.
+    Ptr<ThzNtnPointingLossModel> ptg = CreateObject<ThzNtnPointingLossModel>();
+    rs.AddExtraPropagationLoss(ptg);
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));

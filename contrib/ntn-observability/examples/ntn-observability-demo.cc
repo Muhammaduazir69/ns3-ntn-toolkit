@@ -98,7 +98,7 @@ SampleEverySecond(Wiring* w)
              w->drx->GetTimeInState(DrxState::OnDuration)).GetMilliSeconds();
         w->sink->Push(p);
     }
-    // MEASURED radio KPIs from the real mmwave NR cell (phy-trace provenance):
+    // MEASURED radio KPIs from the real NR cell (phy-trace provenance):
     // the dashboard now shows the genuine link, not a synthetic curve. The
     // radio point is only exported when a measured SINR sample exists — no
     // heuristic fallback values masquerade as measurements. RSRP is derived
@@ -107,11 +107,11 @@ SampleEverySecond(Wiring* w)
     //   RSRP [dBm] = SINR [dB] + noise floor [dBm]
     //   noise floor = -174 dBm/Hz + NF + 10 log10(BW)
     // with BW read from the helper's configured carrier bandwidth and NF the
-    // mmwave UE PHY default (5 dB; the helper leaves it untouched).
+    // UE PHY default (5 dB for both backends; the helper leaves it untouched).
     const double measSinr = w->rs ? w->rs->GetUeRecentSinrDb(0) : std::nan("");
     if (!std::isnan(measSinr))
     {
-        constexpr double kUeNoiseFigureDb = 5.0; // ns3::MmWaveUePhy::NoiseFigure default
+        constexpr double kUeNoiseFigureDb = 5.0; // UE PHY NoiseFigure default
         const double bwHz = w->rs->GetBandwidthHz();
         const double noiseFloorDbm = -174.0 + kUeNoiseFigureDb + 10.0 * std::log10(bwHz);
         const double measRsrp = measSinr + noiseFloorDbm;
@@ -174,6 +174,7 @@ main(int argc, char* argv[])
     double simTimeSec = 20.0;
     std::string outputDir = ".";
     std::string runId = "demo-1";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string influxFile = "/tmp/ntn-observability-demo.lp";
     std::string udpHost;
     uint16_t udpPort = 8089;
@@ -182,6 +183,7 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
     cmd.AddValue("runId", "Tag value attached to every point", runId);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("influxFile", "Influx line-protocol output file", influxFile);
     cmd.AddValue("udpHost",
                  "If set, push to InfluxDB UDP at host:port instead of file",
@@ -220,12 +222,19 @@ main(int argc, char* argv[])
     w.ueMob = ueMob;
     w.satMob = satMob;
 
-    // ---- real mmwave NR cell: the MEASURED radio the dashboard observes ----
+    // ---- real NR cell: the MEASURED radio the dashboard observes ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-observability-demo");
-    rs.SetSatEirpDbm(55.0);
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    rs.SetSatEirpDbm(radio == "mmwave" ? 55.0 : 70.0);
     rs.Build(satNodes, ueNodes);
     // One UE -> a saturating eMBB stream so the dashboard observes a live
     // data plane (MixedBouquet would give the single UE the 1 kbps NB-IoT mix).

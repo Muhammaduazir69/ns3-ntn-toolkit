@@ -5,10 +5,11 @@ loopback in stub mode), performs E2 Setup, accepts RIC Subscriptions,
 and forwards RIC Indications. Receives RIC Control Requests from xApps
 and emits NTN-specific actions (CHO trigger / beam select / slice PRB).
 
-In **stub mode** the agent listens on a TCP socket; xApps connect and
-the wire is JSON-framed (see `e2ap_codec`). In **live mode** the agent
-opens an SCTP association to FlexRIC port 36421 and uses the asn1c
-codec (require the Docker image — see `docs/BUILD_FLEXRIC.md`).
+Only **stub mode** is implemented: the agent listens on a TCP socket; xApps
+connect and the wire is JSON-framed (see `e2ap_codec`). **Live mode**
+(an SCTP association to FlexRIC port 36421 using the asn1c codec) is
+roadmapped only — that path is not built in this repo; the
+`docs/BUILD_FLEXRIC.md` recipe has not been run/verified end-to-end.
 
 The agent exposes a small "data plane" that callers (e.g. ns-3 example
 scripts) push KPM measurements into via `submit_kpm_measurement()`.

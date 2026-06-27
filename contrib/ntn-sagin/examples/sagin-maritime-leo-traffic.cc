@@ -59,19 +59,29 @@ main(int argc, char* argv[])
     double leoAltKm = 550.0;
     double satSpeed = 7500.0;
     double freqGHz = 2.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double vesselSpeedKn = 20.0;
     std::string outputDir = "sagin-maritime-leo-output";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
     cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default",
+                 satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("vesselSpeedKn", "Vessel speed over ground (knots)", vesselSpeedKn);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // Backend-appropriate EIRP default (honoured only if the user did not set it):
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
     g_simTime = simSeconds;
 
     // Build an AIS trace inline: a vessel sailing due east (course 090).
@@ -128,6 +138,12 @@ main(int argc, char* argv[])
     rs.SetRunTag("sagin-maritime-leo-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
     rs.SetSatEirpDbm(satEirpDbm);
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));

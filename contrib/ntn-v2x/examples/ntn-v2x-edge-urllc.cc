@@ -46,15 +46,17 @@ main(int argc, char* argv[])
 {
     double simSeconds = 40.0;
     std::string edge = "sat";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-v2x-edge-urllc-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("edge", "Inference placement: sat|ground", edge);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    std::printf("# ntn-v2x-edge-urllc (REAL cell, edge=%s)\n", edge.c_str());
+    std::printf("# ntn-v2x-edge-urllc (REAL %s cell, edge=%s)\n", radio.c_str(), edge.c_str());
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -89,11 +91,18 @@ main(int argc, char* argv[])
     }
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-edge-urllc-" + edge);
     rs.SetCarrierFrequencyHz(2.0e9);
-    rs.SetSatEirpDbm(60.0);
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 60 dBm.
+    rs.SetSatEirpDbm(radio == "mmwave" ? 60.0 : 70.0);
     rs.Build(satNodes, vehNodes);
 
     const Time start = Seconds(1.0);

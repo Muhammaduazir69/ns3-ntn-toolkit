@@ -29,6 +29,7 @@
 #include "ns3/thz-ntn-isac-scheduler.h"
 #include "ns3/thz-ntn-isac.h"
 #include "ns3/thz-ntn-mac-scheduler.h"
+#include "ns3/thz-ntn-pointing-loss-model.h"
 #include "ns3/walker-constellation.h"
 
 #include <algorithm>
@@ -110,11 +111,13 @@ main(int argc, char* argv[])
     uint32_t numSubBands = 20;
     uint32_t numUes = 4;
     std::string outputDir = "thz-ntn-isac-coexist-output";
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz), capped at 100", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("numSubBands", "Number of THz sub-bands in the grid", numSubBands);
     cmd.AddValue("numUes", "Number of comm UE contexts for the scheduler", numUes);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -188,6 +191,12 @@ main(int argc, char* argv[])
     mob.Install(ueNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("thz-ntn-isac-coexist-traffic");
@@ -198,6 +207,10 @@ main(int argc, char* argv[])
     g_gate = CreateObject<NtnStaticExtraLossModel>();
     g_gate->SetLossDb(0.0);
     rs.AddExtraPropagationLoss(g_gate);
+
+    // gap A2 — THz beam pointing impairment now in the measured packet path.
+    Ptr<ThzNtnPointingLossModel> ptg = CreateObject<ThzNtnPointingLossModel>();
+    rs.AddExtraPropagationLoss(ptg);
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));

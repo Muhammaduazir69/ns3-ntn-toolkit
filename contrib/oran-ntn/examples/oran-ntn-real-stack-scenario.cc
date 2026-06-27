@@ -31,7 +31,6 @@
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/oran-ntn-a1-interface.h"
@@ -65,10 +64,11 @@ main(int argc, char* argv[])
     uint32_t numUes = 6;
     uint32_t numSats = 6;        // 1 serving + candidates, all on real SGP4 orbits
     double altitudeKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double freqGhz = 2.0;
     double bwMhz = 50.0;
     double minElevDeg = 10.0;
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "oran-ntn-real-stack-output";
     std::string conflictStrategy = "priority";
 
@@ -77,7 +77,8 @@ main(int argc, char* argv[])
     cmd.AddValue("numUes", "Number of TR 38.811 UEs on the serving cell", numUes);
     cmd.AddValue("numSats", "Number of satellites (1 serving + candidates)", numSats);
     cmd.AddValue("altitude", "Constellation altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
     cmd.AddValue("bwMhz", "Bandwidth (MHz)", bwMhz);
     cmd.AddValue("minElev", "Min service elevation (deg)", minElevDeg);
@@ -88,6 +89,12 @@ main(int argc, char* argv[])
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
+
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
 
     std::cout << "\n=== O-RAN NTN REAL-STACK scenario (real SGP4 orbits + TR 38.811 UEs) ===\n"
               << "  serving cell: real mmwave NR link, " << numUes << " UEs\n"
@@ -130,6 +137,12 @@ main(int argc, char* argv[])
     // ---- Real mmwave NTN access link on the serving satellite ----
     NodeContainer servingGnb(satNodes.Get(0));
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("oran-ntn-real-stack");

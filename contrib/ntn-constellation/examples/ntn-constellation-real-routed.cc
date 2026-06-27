@@ -6,7 +6,8 @@
  * ntn-constellation-real-routed — real-stack flagship for ntn-constellation
  * (routing pattern).
  *
- * A live ContactGraphScheduler samples the SGP4 geometry and feeds GSL
+ * A live ContactGraphScheduler samples the Kepler+J2-secular geometry (Vallado
+ * SGP4 available via SetUseVallado) and feeds GSL
  * contact-up / contact-down events into a ContactGraphRouter; the router's
  * ShortestPath(GS1, GS2) decision actually INSTALLS the Ipv4 routes, so real
  * UDP packets are forwarded THROUGH the satellite nodes and adaptively REROUTE
@@ -159,7 +160,7 @@ Tick()
 
     // Route decision is now driven by the live ContactGraphRouter: query the
     // hop-count shortest path GS1 -> GS2 over the contact graph the scheduler
-    // is maintaining from the SGP4 geometry, and pick the transit satellite it
+    // is maintaining from the Kepler+J2 geometry, and pick the transit satellite it
     // returns. The path includes both endpoints, so a 3-hop {GS1, SAT, GS2}
     // result names the satellite as the middle element.
     uint32_t chosen = 0;
@@ -172,7 +173,7 @@ Tick()
             ++g_routerPathHits;
         }
     }
-    // Fall back to the SGP4 elevation comparison when the live contact graph
+    // Fall back to the Kepler+J2 elevation comparison when the live contact graph
     // yields no GS1-SAT-GS2 transit (preserves the original behaviour).
     if (chosen == 0)
     {
@@ -261,7 +262,8 @@ main(int argc, char* argv[])
     g2->SetPosition(Vector(500000.0, 0, 0));
     nodes.Get(GS2)->AggregateObject(g2);
 
-    // Real SGP4 Walker neighbours projected into the local ENU frame: satA is
+    // Real Kepler+J2-secular Walker neighbours (Vallado SGP4 via SetUseVallado)
+    // projected into the local ENU frame: satA is
     // at zenith over GS1 at t=0 and recedes; satB genuinely approaches, so the
     // reroute emerges from real orbital dynamics.
     ns3::ntncon::WalkerConfig wcfgSat;

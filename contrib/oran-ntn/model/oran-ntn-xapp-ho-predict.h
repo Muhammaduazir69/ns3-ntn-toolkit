@@ -4,18 +4,27 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Author: Muhammad Uzair
  *
- * HO Prediction xApp - Proactive handover using LSTM/DQN inference
+ * HO Prediction xApp - Proactive handover with lightweight on-board predictors
  *
  * Monitors RSRP/SINR trends and TTE predictions from all NTN gNBs,
  * detects imminent handover needs, and triggers proactive handovers
- * before quality degradation. Uses AI model (LSTM for trend prediction,
- * DQN for action selection) via ns3-ai shared memory interface.
+ * before quality degradation.
+ *
+ * NOTE on the "DQN"/"LSTM" labels: these are NOT deep neural networks. The
+ * "DQN" action selector (`DqnSelectAction`) is a single linear dot-product of
+ * a 10-element normalized feature vector against externally-supplied weights
+ * (argmax over actions) — no hidden layers, no nonlinearity, no Q-learning at
+ * runtime. The "LSTM" predictor (`LstmPredictSinr`) is an exponentially-
+ * weighted moving average of the SINR history plus a linear-slope
+ * extrapolation — no recurrent cell. No trained model ships; the weight
+ * vectors are caller-set (default empty → fixed heuristic). The names mark
+ * the *intended* model slot, not the implemented depth.
  *
  * Key features:
  *   - SINR trend analysis (linear regression over sliding window)
  *   - TTE-aware candidate ranking (reuses NTN-CHO algorithm)
  *   - Proactive HO triggering (acts before quality drops below threshold)
- *   - AI-assisted decision (DQN/LSTM via Python agent)
+ *   - Optional weighted-linear scoring (the "DQN"/"LSTM" paths above)
  *   - Ping-pong avoidance (hysteresis + recent-HO tracking)
  */
 

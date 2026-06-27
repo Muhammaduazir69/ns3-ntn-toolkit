@@ -57,12 +57,14 @@ main(int argc, char* argv[])
     uint32_t risCols = 32;
     double blockFraction = 0.25;
     double risOnFraction = 0.55;
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-sionna-ris-relay-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("blockageDb", "NLOS blockage on the direct path (dB)", blockageDb);
     cmd.AddValue("risRows", "RIS element rows", risRows);
     cmd.AddValue("risCols", "RIS element cols", risCols);
@@ -113,6 +115,12 @@ main(int argc, char* argv[])
     mob.Install(gndNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-sionna-ris-relay-traffic");

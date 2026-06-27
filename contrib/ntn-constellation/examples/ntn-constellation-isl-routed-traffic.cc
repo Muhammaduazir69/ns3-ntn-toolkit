@@ -134,7 +134,8 @@ main(int argc, char* argv[])
 
     // satA over GS1, satB over GS2, both drifting east on the same shell so the
     // ISL range stays within cap while each GSL rises and sets across the pass.
-    // Real SGP4 Walker neighbours projected into the local ENU frame: satA is
+    // Real Kepler+J2-secular Walker neighbours (Vallado SGP4 via SetUseVallado)
+    // projected into the local ENU frame: satA is
     // at zenith over GS1 at t=0 and recedes; satB genuinely approaches, so the
     // reroute emerges from real orbital dynamics.
     ns3::ntncon::WalkerConfig wcfgSat;

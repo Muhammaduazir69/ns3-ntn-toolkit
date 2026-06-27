@@ -46,15 +46,17 @@ main(int argc, char* argv[])
     double duration = 15.0;
     uint32_t numUes = 9;
     double altitudeKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double backhaulMs = 5.0;
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-slice-real-stack-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("numUes", "Number of UEs sharing the cell", numUes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     std::string netSimOut;
     std::string czmlOut;
@@ -62,7 +64,14 @@ main(int argc, char* argv[])
     cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
 
-    std::cout << "\n=== ntn-slice REAL-STACK (slices share ONE real mmwave cell) ===\n"
+    // Backend-appropriate EIRP default (honoured only if the user did not set it):
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
+
+    std::cout << "\n=== ntn-slice REAL-STACK (slices share ONE real " << radio << " cell) ===\n"
               << "  per-slice SINR + throughput MEASURED from the shared cell\n"
               << "  SLA breaches: measured delivery + real geometric NTN latency\n"
               << "  duration: " << duration << " s, UEs: " << numUes << "\n\n";
@@ -93,6 +102,12 @@ main(int argc, char* argv[])
                        subLon - 0.03, subLon + 0.03);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-slice-real-stack");

@@ -156,6 +156,7 @@ main(int argc, char* argv[])
     double fadePeriodS = 8.0;
     double fadeDurS = 4.0;
     std::string placement = "gateway";
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "oran-ntn-ric-placement-ab-output";
 
     CommandLine cmd(__FILE__);
@@ -164,6 +165,7 @@ main(int argc, char* argv[])
     cmd.AddValue("fadePeriodS", "Fade event period (s)", fadePeriodS);
     cmd.AddValue("fadeDurS", "Fade event duration (s)", fadeDurS);
     cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
@@ -217,6 +219,12 @@ main(int argc, char* argv[])
 
     NtnRealStackHelper rs;
     g_rs = &rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("oran-ntn-ric-placement-ab-" + placement);

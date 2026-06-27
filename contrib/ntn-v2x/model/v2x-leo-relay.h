@@ -10,8 +10,12 @@
  * SNR within `MaxV2vRangeM` metres.
  *
  * The model is deliberately simple — relay assignment is recomputed per
- * tick — but the API matches what a real L2/L3 mode-3 sidelink scheduler
- * would expose. Slot-level sidelink scheduling is not in scope for W7.
+ * tick — but the API matches what a real L2/L3 NR sidelink Mode 1
+ * (gNB-scheduled) / Mode 2 (autonomous) scheduler (3GPP TS 38.300 Cl.16,
+ * Rel-16/17) would expose. Slot-level sidelink scheduling is not in scope
+ * for W7. This is an abstracted system-level relay; it does NOT model
+ * PSCCH/PSSCH/PSFCH or sidelink HARQ (TS 38.211/212/213/214) and is
+ * therefore non-PHY-conformant.
  */
 #ifndef NTN_V2X_LEO_RELAY_H
 #define NTN_V2X_LEO_RELAY_H

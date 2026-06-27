@@ -12,7 +12,6 @@
 // trace CSV and an honest sim_health.csv (phy-trace provenance).
 
 #include "ns3/core-module.h"
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-real-stack-helper.h"
@@ -97,7 +96,8 @@ main(int argc, char* argv[])
     double simTime = 20.0;
     uint32_t numUes = 4;
     double altitudeKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     double freqGhz = 2.0;
     bool transparent = true;
     std::string outputDir = "ntn-rrc-leo-pass-output";
@@ -106,15 +106,25 @@ main(int argc, char* argv[])
     cmd.AddValue("simTime", "Simulation duration (s)", simTime);
     cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
     cmd.AddValue("transparent", "Transparent (true) vs regenerative (false) payload", transparent);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
     g_simTime = simTime;
 
-    std::cout << "\n=== ntn-rrc-leo-pass (SIB19 + TA on a real mmwave NR NTN cell) ===\n"
-              << "  serving cell: real mmwave NR link, " << numUes << " UEs\n"
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
+    // mmwave, so honour the historical 55 dBm for mmwave but give nr 70 dBm.
+    const bool useNr = (radio == "nr");
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 55.0;
+    }
+    const char* radioName = useNr ? "5G-LENA nr FR1" : "mmwave FR2";
+
+    std::cout << "\n=== ntn-rrc-leo-pass (SIB19 + TA on a real " << radioName << " NTN cell) ===\n"
+              << "  serving cell: real " << radioName << " link, " << numUes << " UEs\n"
               << "  TA + SIB19 ephemeris: live LEO-pass geometry (TS 38.331 NTN-Config)\n"
               << "  RRC measurement trigger: MEASURED DL SINR (not a formula)\n"
               << "  duration: " << simTime << " s\n\n";
@@ -148,6 +158,12 @@ main(int argc, char* argv[])
     Ptr<MobilityModel> ueMob = ueModels[0];
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS (nr backend only)
+    }
     rs.SetSimTime(Seconds(simTime));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-rrc-leo-pass");
@@ -164,9 +180,7 @@ main(int argc, char* argv[])
     rrc.SetReferencePosition(ntngeo::GeodeticToEcef(subLat, subLon, 0.0));
     g_ta = rrc.InstallTimingAdvance(ueMob, satMob);
 
-    Ptr<mmwave::MmWaveEnbNetDevice> enb =
-        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
-    const uint16_t cellId = enb ? enb->GetCellId() : 1;
+    const uint16_t cellId = rs.GetServingCellId(); // radio-agnostic (mmwave or nr gNB)
     g_sib = rrc.InstallSib19Broadcaster(satMob, cellId, g_ta, MilliSeconds(160));
     g_sib->Start();
 

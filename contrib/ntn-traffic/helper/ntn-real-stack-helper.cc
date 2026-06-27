@@ -12,6 +12,7 @@
 #include "ns3/internet-stack-helper.h"
 #include "ns3/ipv4-address-helper.h"
 #include "ns3/lte-ue-rrc.h"
+#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mmwave-ue-net-device.h"
 #include "ns3/ipv4-static-routing-helper.h"
 #include "ns3/ipv4.h"
@@ -20,9 +21,18 @@
 #include "ns3/mobility-model.h"
 #include "ns3/mmwave-phy-mac-common.h"
 #include "ns3/mmwave-point-to-point-epc-helper.h"
+// nr (5G-LENA) backend
+#include "ns3/antenna-module.h"
+#include "ns3/nr-module.h"
+#include "ns3/nr-gnb-net-device.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-spectrum-phy.h"
+#include "ns3/nr-phy-mac-common.h"
 #include "ns3/ntn-oran-ai-flow-monitor.h"
 #include "ns3/ntn-oran-application.h"
 #include "ns3/ntn-oran-sink.h"
+#include "ns3/ntn-sat-beam-gain-model.h"
+#include "ns3/ntn-tr38811-excess-loss-model.h"
 #include "ns3/packet-sink-helper.h"
 #include "ns3/propagation-loss-model.h"
 #include "ns3/packet-sink.h"
@@ -63,6 +73,67 @@ NtnRealStackHelper::SetNtnHarqProfile(bool enable)
 }
 
 void
+NtnRealStackHelper::SetSatelliteBeam(double beamwidthDeg, Ptr<MobilityModel> beamCenter)
+{
+    m_satBeam = true;
+    m_beamwidthDeg = beamwidthDeg;
+    m_beamCenter = beamCenter;
+}
+
+double
+NtnRealStackHelper::WorstCaseSlantM() const
+{
+    double slantM = 0.0;
+    for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
+    {
+        Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
+        for (uint32_t u = 0; u < m_ue.GetN(); ++u)
+        {
+            Ptr<MobilityModel> um = m_ue.Get(u)->GetObject<MobilityModel>();
+            if (gm && um)
+            {
+                slantM = std::max(slantM, gm->GetDistanceFrom(um));
+            }
+        }
+    }
+    if (slantM <= 0.0)
+    {
+        slantM = 600e3; // no usable geometry: assume LEO-600 zenith
+    }
+    return slantM;
+}
+
+void
+NtnRealStackHelper::ConfigureNtnRlcRrcTimers()
+{
+    // G4: terrestrial RLC-AM / RRC timer defaults (t-PollRetransmit 20 ms,
+    // t-Reordering 10 ms, t-StatusProhibit 10 ms, T300 100 ms) are shorter than
+    // a LEO feedback RTT (8-26 ms) and would fire spuriously over the slant when
+    // RLC AM is in use, triggering needless retransmissions / RLF. Relax each to
+    // a margin over the slant RTT, but NEVER below the terrestrial default
+    // (max()), so this is a strict no-op at terrestrial range and only extends
+    // timers for genuine NTN geometry. Must run before InstallUeDevice() so the
+    // Config defaults are read when the RLC/RRC objects are created.
+    constexpr double kC = 299792458.0;
+    const double rttMs = 2.0 * WorstCaseSlantM() / kC * 1e3;
+    // t-PollRetransmit must exceed one feedback RTT + a poll/status budget.
+    const double pollMs = std::max(20.0, 2.0 * rttMs + 10.0);
+    // t-Reordering must cover the retransmission round trip.
+    const double reorderMs = std::max(10.0, 2.0 * rttMs + 10.0);
+    // t-StatusProhibit must exceed one RTT so status PDUs are not over-sent.
+    const double statusMs = std::max(10.0, rttMs + 5.0);
+    // RRC connection (T300) must survive the setup round trip over the slant.
+    const double t300Ms = std::max(100.0, 8.0 * rttMs);
+    Config::SetDefault("ns3::LteRlcAm::PollRetransmitTimer", TimeValue(MilliSeconds(pollMs)));
+    Config::SetDefault("ns3::LteRlcAm::ReorderingTimer", TimeValue(MilliSeconds(reorderMs)));
+    Config::SetDefault("ns3::LteRlcAm::StatusProhibitTimer", TimeValue(MilliSeconds(statusMs)));
+    Config::SetDefault("ns3::LteUeRrc::T300", TimeValue(MilliSeconds(t300Ms)));
+    NS_LOG_INFO("NTN RLC/RRC timers: rtt=" << rttMs << " ms -> poll=" << pollMs
+                                           << " reorder=" << reorderMs << " status=" << statusMs
+                                           << " T300=" << t300Ms << " ms");
+}
+
+void
 NtnRealStackHelper::ConfigureNtnHarqProfile()
 {
     // NTN-stretched HARQ (audit issue 13, Rel-17 K_offset domain). The in-tree
@@ -94,36 +165,33 @@ NtnRealStackHelper::ConfigureNtnHarqProfile()
     constexpr double kProcS = 1e-3;     // per-round processing budget
     constexpr double kHarqRounds = 4.0; // initial TX + 3 retx
 
-    double slantM = 0.0;
-    for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
-    {
-        Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
-        for (uint32_t u = 0; u < m_ue.GetN(); ++u)
-        {
-            Ptr<MobilityModel> um = m_ue.Get(u)->GetObject<MobilityModel>();
-            if (gm && um)
-            {
-                slantM = std::max(slantM, gm->GetDistanceFrom(um));
-            }
-        }
-    }
-    if (slantM <= 0.0)
-    {
-        slantM = 600e3; // no usable geometry: assume LEO-600 zenith
-    }
+    const double slantM = WorstCaseSlantM();
     const double rttS = 2.0 * slantM / kC;
     const double roundS = rttS + kProcS;
     const double timeoutSlotsExact = kHarqRounds * roundS / kSlotS;
     const auto timeoutSlots = static_cast<uint64_t>(
         std::min(255.0, std::ceil(timeoutSlotsExact)));
-    const auto numProc = static_cast<uint64_t>(std::min(
-        255.0, std::max(20.0, std::ceil(rttS / kSlotS) + kHarqRounds)));
+    // Rel-17 NTN caps the DL HARQ process pool at n32
+    // (nrofHARQ-ProcessesForPDSCH-v1700, TS 38.214 §5.1); beyond that the
+    // standard switches to feedback-disabled HARQ (-> RLC ARQ), which the
+    // vendored mmwave PHY cannot model. Clamp the pool at 32 (gap B6: was 255).
+    const double numProcNeeded =
+        std::max(20.0, std::ceil(rttS / kSlotS) + kHarqRounds);
+    const auto numProc = static_cast<uint64_t>(std::min(32.0, numProcNeeded));
     if (timeoutSlotsExact > 255.0)
     {
         NS_LOG_WARN("NTN HARQ profile: slant " << slantM / 1e3
                                                << " km needs more than 255 slots for "
                                                << kHarqRounds
                                                << " HARQ rounds; clamping HarqDlTimeout to 255");
+    }
+    if (numProcNeeded > 32.0)
+    {
+        NS_LOG_WARN("NTN HARQ profile: slant "
+                    << slantM / 1e3 << " km needs " << numProcNeeded
+                    << " HARQ processes to keep the stop-and-wait pipe full, but "
+                       "Rel-17 caps DL processes at n32; clamping to 32 (a real NTN "
+                       "link would disable HARQ feedback -> RLC ARQ here)");
     }
     Config::SetDefault("ns3::MmWavePhyMacCommon::HarqDlTimeout", UintegerValue(timeoutSlots));
     Config::SetDefault("ns3::MmWavePhyMacCommon::NumHarqProcess", UintegerValue(numProc));
@@ -149,6 +217,26 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
                         std::chrono::steady_clock::now().time_since_epoch())
                         .count();
 
+    if (m_backend == RadioBackend::Nr)
+    {
+        BuildNrRadio();
+    }
+    else
+    {
+        BuildMmwaveRadio();
+    }
+
+    m_built = true;
+
+    // ---- Shared NTN channel extras: chain the TR 38.811 large-scale EXCESS-loss
+    //      terms (and optional sat beam) onto whichever backend's base loss, so
+    //      the MEASURED SINR carries the elevation-dependent physics on both. ----
+    ApplyNtnChannelExtras();
+}
+
+void
+NtnRealStackHelper::BuildMmwaveRadio()
+{
     // ---- NTN-ize the NR air interface via Config defaults (read at CreateObject
     //      time inside MmWaveHelper::DoInitialize) -------------------------------
     // NB: mmwave registers its TypeIds WITHOUT the mmwave:: namespace.
@@ -163,6 +251,9 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
     {
         ConfigureNtnHarqProfile();
     }
+    // G4: relax RLC-AM/RRC timers to the slant RTT (no-op at terrestrial range).
+    // Must precede InstallUeDevice so the RLC/RRC objects read the new defaults.
+    ConfigureNtnRlcRrcTimers();
 
     m_mmwave = CreateObject<MmWaveHelper>();
     m_mmwave->SetSchedulerType("ns3::MmWaveFlexTtiMacScheduler");
@@ -174,9 +265,27 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
     // NTN LOS link: free-space (Friis) path loss is valid at LEO range, unlike the
     // terrestrial 3GPP UMa default. The 3GPP spectrum model is kept (mmwave hard-
     // requires it for antenna/beamforming array gain), with an always-LOS condition
-    // model — the satellite link is line-of-sight by construction.
+    // model — the satellite link is line-of-sight by construction. The TR 38.811
+    // large-scale EXCESS-loss terms (atmospheric gas, scintillation, clutter,
+    // elevation-dependent shadow fading) are chained on top of Friis at the end of
+    // Build() via the Ntn38811ExcessLossModel (gap G1), so the MEASURED SINR is
+    // elevation- and scenario-dependent rather than free-space-flat.
     m_mmwave->SetPathlossModelType("ns3::FriisPropagationLossModel");
     m_mmwave->SetChannelConditionModelType("ns3::AlwaysLosChannelConditionModel");
+    // G2 (propagation delay) — KNOWN, DOCUMENTED CONSTRAINT: the NTN one-way
+    // slant delay (LEO ~2-13 ms, GEO ~120 ms) is applied on the FEEDER/BACKHAUL
+    // P2P leg (see m_backhaulDelay / SetFeederGeometry), NOT on the mmwave air
+    // interface. The vendored NYU mmwave MAC/PHY assumes near-zero radio
+    // propagation and has no Rel-17 K_offset scheduling-offset machinery, so a
+    // ms-scale ConstantSpeedPropagationDelayModel on the radio SpectrumChannel
+    // de-syncs DCI/UCI slot timing and destabilises the stack. Consequently the
+    // END-TO-END user-plane one-way delay IS correct (the slant is carried on the
+    // feeder leg, which a P2P channel tolerates), while the air-interface HARQ /
+    // scheduling do NOT experience the slant — which is exactly why HARQ is off by
+    // default and why the NTN HARQ profile (SetNtnHarqProfile) only stretches the
+    // two timing knobs mmwave exposes. A fully air-interface-accurate slant delay
+    // would require implementing K_offset in mmwave (net-new functionality, out of
+    // scope). Callers needing correct end-to-end latency MUST wire SetFeederGeometry().
 
     m_epc = CreateObject<MmWavePointToPointEpcHelper>();
     m_mmwave->SetEpcHelper(m_epc);
@@ -227,7 +336,182 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
         "/NodeList/*/DeviceList/*/ComponentCarrierMap/*/MmWaveUePhy/DlSpectrumPhy/RxPacketTraceUe",
         MakeCallback(&NtnRealStackHelper::DlRxTrace, this));
 
-    m_built = true;
+    // The Friis loss is the head of the chain on CC 0 (used by AddExtraPropagationLoss).
+    m_nrBaseLoss = m_mmwave->GetPathLossModel(0);
+}
+
+void
+NtnRealStackHelper::ApplyNtnChannelExtras()
+{
+    // ---- G1: chain the TR 38.811 large-scale EXCESS-loss terms onto the
+    //      measured channel (after Friis FSPL), so the measured SINR carries the
+    //      elevation-dependent atmospheric/clutter/shadow/scintillation physics
+    //      that previously lived only in the ntn-measurement-model oracle. ----
+    if (m_tr38811)
+    {
+        Ptr<Ntn38811ExcessLossModel> excess = CreateObject<Ntn38811ExcessLossModel>();
+        excess->SetCarrierFrequencyHz(m_freqHz);
+        excess->SetScenario(
+            static_cast<Ntn38811ExcessLossModel::NtnScenario>(m_ntnScenario));
+        AddExtraPropagationLoss(excess);
+    }
+
+    // A5(ii): TR 38.811 §6.4.1 satellite beam pattern (off-boresight roll-off
+    // only; the radio array supplies the peak gain) — opt-in via SetSatelliteBeam.
+    if (m_satBeam)
+    {
+        Ptr<NtnSatBeamGainModel> beam = CreateObject<NtnSatBeamGainModel>();
+        beam->SetBeamwidth3dBDeg(m_beamwidthDeg);
+        if (m_beamCenter)
+        {
+            beam->SetBeamCenter(m_beamCenter);
+        }
+        AddExtraPropagationLoss(beam);
+    }
+}
+
+void
+NtnRealStackHelper::BuildNrRadio()
+{
+    // ===== 5G-LENA (nr) FR1 NTN backend (closes A5(i)) =====
+    // Mirrors the validated NtnNrStackHelper recipe: a single operational band ->
+    // 1 CC -> 1 FR1 BWP at m_freqHz/m_bwHz, FR1 numerology m_numerology, ideal
+    // beamforming, and — crucially for the real NTN mobility models (SGP4/TR
+    // 38.811, which feed ECEF positions) — a Friis large-scale loss instead of
+    // the 3GPP terrestrial pathloss (whose ENU height/2D split is meaningless in
+    // ECEF and collapses the loss). The 3GPP spatial model is kept for the UPA
+    // array gain / DirectPath beamforming.
+
+    // Big RLC buffers so a saturating DL flow is not buffer-limited (nr RLC UM).
+    Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
+
+    m_nrEpc = CreateObject<NrPointToPointEpcHelper>();
+    m_nrBeamforming = CreateObject<IdealBeamformingHelper>();
+    m_nr = CreateObject<NrHelper>();
+    m_nr->SetBeamformingHelper(m_nrBeamforming);
+    m_nr->SetEpcHelper(m_nrEpc);
+
+    // Single operational band -> 1 CC -> 1 FR1 BWP.
+    CcBwpCreator ccBwpCreator;
+    const uint8_t numCcPerBand = 1;
+    CcBwpCreator::SimpleOperationBandConf bandConf(m_freqHz,
+                                                   m_bwHz,
+                                                   numCcPerBand,
+                                                   BandwidthPartInfo::UMi_StreetCanyon);
+    OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+
+    // Quasi-static channel, no shadowing -> clean link over the slant.
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
+    m_nr->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    m_nr->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
+
+    // Override the BWP large-scale loss with Friis (frame-independent, valid at
+    // LEO range); InitializeOperationBand keeps the 3GPP spatial model for array
+    // gain. Store the Friis head so AddExtraPropagationLoss can chain onto it.
+    {
+        BandwidthPartInfoPtr& bwp0 = band.GetBwpAt(0, 0);
+        Ptr<FriisPropagationLossModel> friis = CreateObject<FriisPropagationLossModel>();
+        friis->SetAttribute("Frequency", DoubleValue(m_freqHz));
+        bwp0->m_propagation = friis;
+        m_nrBaseLoss = friis;
+    }
+
+    m_nr->InitializeOperationBand(&band);
+    BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
+
+    m_nrBeamforming->SetAttribute("BeamformingMethod",
+                                  TypeIdValue(DirectPathBeamforming::GetTypeId()));
+    // Zero the S1-U latency; the NTN one-way delay rides the backhaul P2P leg.
+    m_nrEpc->SetAttribute("S1uLinkDelay", TimeValue(MilliSeconds(0)));
+
+    // Antennas: gNB 4x8 UPA, UE 1x2 UPA (isotropic elements).
+    m_nr->SetUeAntennaAttribute("NumRows", UintegerValue(1));
+    m_nr->SetUeAntennaAttribute("NumColumns", UintegerValue(2));
+    m_nr->SetUeAntennaAttribute("AntennaElement",
+                                PointerValue(CreateObject<IsotropicAntennaModel>()));
+    // 8x8 gNB array (64 elements) to match the mmwave backend's array gain, so
+    // examples get a comparable link budget on nr at the same configured EIRP
+    // (the nr backend otherwise needed ~+15 dB EIRP for a healthy LEO link).
+    m_nr->SetGnbAntennaAttribute("NumRows", UintegerValue(8));
+    m_nr->SetGnbAntennaAttribute("NumColumns", UintegerValue(8));
+    m_nr->SetGnbAntennaAttribute("AntennaElement",
+                                 PointerValue(CreateObject<IsotropicAntennaModel>()));
+
+    // Install devices on the caller's mobility-carrying nodes.
+    m_enbDevs = m_nr->InstallGnbDevice(m_gnb, allBwps);
+    m_ueDevs = m_nr->InstallUeDevice(m_ue, allBwps);
+    int64_t stream = 1;
+    stream += m_nr->AssignStreams(m_enbDevs, stream);
+    stream += m_nr->AssignStreams(m_ueDevs, stream);
+
+    // FR1 numerology + powers per device.
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        m_nr->GetGnbPhy(m_enbDevs.Get(i), 0)
+            ->SetAttribute("Numerology", UintegerValue(m_numerology));
+        m_nr->GetGnbPhy(m_enbDevs.Get(i), 0)->SetAttribute("TxPower", DoubleValue(m_satEirpDbm));
+    }
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        m_nr->GetUePhy(m_ueDevs.Get(i), 0)->SetAttribute("TxPower", DoubleValue(m_ueTxDbm));
+    }
+    m_nr->UpdateDeviceConfigs(m_enbDevs);
+    m_nr->UpdateDeviceConfigs(m_ueDevs);
+
+    // NOTE: the mmwave NTN HARQ profile / RLC-RRC slant-timer relaxation
+    // (ConfigureNtnHarqProfile / ConfigureNtnRlcRrcTimers) are mmwave-attribute
+    // specific and are honest no-ops on the nr backend; nr runs RLC UM with a
+    // large buffer here. NTN HARQ/K_offset timing for nr is a follow-on.
+
+    // ---- Remote host behind the core (carries the LEO feeder+core latency) ----
+    Ptr<Node> pgw = m_nrEpc->GetPgwNode();
+    NodeContainer remoteHostContainer;
+    remoteHostContainer.Create(1);
+    m_remoteHost = remoteHostContainer.Get(0);
+    InternetStackHelper internet;
+    internet.Install(remoteHostContainer);
+
+    PointToPointHelper p2ph;
+    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
+    p2ph.SetDeviceAttribute("Mtu", UintegerValue(1500));
+    p2ph.SetChannelAttribute("Delay", TimeValue(m_backhaulDelay));
+    NetDeviceContainer internetDevices = p2ph.Install(pgw, m_remoteHost);
+    m_backhaulCh = internetDevices.Get(0)->GetChannel();
+    Ipv4AddressHelper ipv4h;
+    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
+    Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
+    m_remoteHostAddr = internetIpIfaces.GetAddress(1);
+
+    Ipv4StaticRoutingHelper ipv4RoutingHelper;
+    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
+        ipv4RoutingHelper.GetStaticRouting(m_remoteHost->GetObject<Ipv4>());
+    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+
+    internet.Install(m_ue);
+    Ipv4InterfaceContainer ueIpIface = m_nrEpc->AssignUeIpv4Address(NetDeviceContainer(m_ueDevs));
+    for (uint32_t u = 0; u < m_ue.GetN(); ++u)
+    {
+        Ptr<Ipv4StaticRouting> ueStaticRouting =
+            ipv4RoutingHelper.GetStaticRouting(m_ue.Get(u)->GetObject<Ipv4>());
+        ueStaticRouting->SetDefaultRoute(m_nrEpc->GetUeDefaultGatewayAddress(), 1);
+        m_ueAddrs.push_back(ueIpIface.GetAddress(u));
+    }
+
+    m_nr->AttachToClosestGnb(m_ueDevs, m_enbDevs);
+
+    // ---- Measured-KPI PHY sink: DL SINR/TBLER from the UE NrSpectrumPhy ----
+    // Feeds the SAME accumulators as the mmwave path via AccumulateDl().
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        Ptr<NrSpectrumPhy> sp = m_nr->GetUePhy(m_ueDevs.Get(i), 0)->GetSpectrumPhy();
+        sp->TraceConnectWithoutContext("RxPacketTraceUe",
+                                       MakeCallback(&NtnRealStackHelper::DlRxTraceNr, this));
+    }
+
+    NS_LOG_INFO("NtnRealStackHelper nr backend: " << m_enbDevs.GetN() << " gNB, " << m_ueDevs.GetN()
+                                                  << " UE, fc=" << m_freqHz / 1e9 << " GHz, BW="
+                                                  << m_bwHz / 1e6 << " MHz, numerology="
+                                                  << m_numerology);
 }
 
 void
@@ -238,9 +522,11 @@ NtnRealStackHelper::AddExtraPropagationLoss(Ptr<PropagationLossModel> loss)
     {
         return;
     }
-    // Chain after the built-in Friis loss on the (single) component-carrier channel.
-    Ptr<PropagationLossModel> friis = m_mmwave->GetPathLossModel(0);
-    NS_ABORT_MSG_IF(!friis, "no base propagation loss model on the mmwave channel");
+    // Chain after the built-in Friis loss head. m_nrBaseLoss is set by both
+    // backends (mmwave: m_mmwave->GetPathLossModel(0); nr: the Friis we placed
+    // on the BWP channel), so this is radio-agnostic.
+    Ptr<PropagationLossModel> friis = m_nrBaseLoss;
+    NS_ABORT_MSG_IF(!friis, "no base propagation loss model on the radio channel");
     // Walk to the end of the chain, then append.
     Ptr<PropagationLossModel> tail = friis;
     while (tail->GetNext())
@@ -571,42 +857,73 @@ NtnRealStackHelper::RunPeriodic(uint32_t idx)
 }
 
 void
-NtnRealStackHelper::DlRxTrace(RxPacketTraceParams params)
+NtnRealStackHelper::AccumulateDl(double sinrLinear,
+                                 double tbler,
+                                 bool corrupt,
+                                 uint16_t cellId,
+                                 uint16_t rnti,
+                                 uint32_t tbSize)
 {
     // Only count data TBs that actually carry a transport block.
-    if (params.m_tbSize == 0)
+    if (tbSize == 0)
     {
         return;
     }
-    m_dlGlobal.sumSinrDb += 10.0 * std::log10(std::max(params.m_sinr, 1e-12));
-    m_dlGlobal.sumTbler += params.m_tbler;
+    const double sinrDb = 10.0 * std::log10(std::max(sinrLinear, 1e-12));
+
+    m_dlGlobal.sumSinrDb += sinrDb;
+    m_dlGlobal.sumTbler += tbler;
     m_dlGlobal.n += 1;
-    if (params.m_corrupt)
+    if (corrupt)
     {
         m_dlGlobal.corrupt += 1;
     }
 
-    double sinrDb = 10.0 * std::log10(std::max(params.m_sinr, 1e-12));
-
-    SinrAccum& cell = m_dlPerCell[params.m_cellId];
+    SinrAccum& cell = m_dlPerCell[cellId];
     cell.sumSinrDb += sinrDb;
-    cell.sumTbler += params.m_tbler;
+    cell.sumTbler += tbler;
     cell.n += 1;
-    if (params.m_corrupt)
+    if (corrupt)
     {
         cell.corrupt += 1;
     }
 
-    SinrAccum& ue = m_dlPerRnti[params.m_rnti];
+    SinrAccum& ue = m_dlPerRnti[rnti];
     ue.sumSinrDb += sinrDb;
-    ue.sumTbler += params.m_tbler;
+    ue.sumTbler += tbler;
     ue.n += 1;
-    if (params.m_corrupt)
+    if (corrupt)
     {
         ue.corrupt += 1;
     }
-    m_lastSinrDbPerRnti[params.m_rnti] = sinrDb;
-    m_lastTblerPerRnti[params.m_rnti] = params.m_tbler;
+    m_lastSinrDbPerRnti[rnti] = sinrDb;
+    m_lastTblerPerRnti[rnti] = tbler;
+}
+
+void
+NtnRealStackHelper::DlRxTrace(mmwave::RxPacketTraceParams params)
+{
+    AccumulateDl(params.m_sinr,
+                 params.m_tbler,
+                 params.m_corrupt,
+                 static_cast<uint16_t>(params.m_cellId),
+                 params.m_rnti,
+                 params.m_tbSize);
+}
+
+void
+NtnRealStackHelper::DlRxTraceNr(::ns3::RxPacketTraceParams params)
+{
+    // ns3::RxPacketTraceParams (nr): same field family as mmwave; m_sinr is the
+    // linear average SINR. Feeds the identical accumulators as the mmwave path.
+    // Fully qualified (::ns3::) to disambiguate from mmwave::RxPacketTraceParams,
+    // which is in scope here via `using namespace mmwave`.
+    AccumulateDl(params.m_sinr,
+                 params.m_tbler,
+                 params.m_corrupt,
+                 static_cast<uint16_t>(params.m_cellId),
+                 params.m_rnti,
+                 params.m_tbSize);
 }
 
 uint16_t
@@ -616,12 +933,38 @@ NtnRealStackHelper::GetUeRnti(uint32_t ueIndex) const
     {
         return 0;
     }
+    if (m_backend == RadioBackend::Nr)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(ueIndex));
+        if (!dev || !dev->GetPhy(0))
+        {
+            return 0;
+        }
+        return dev->GetPhy(0)->GetRnti();
+    }
     Ptr<MmWaveUeNetDevice> dev = DynamicCast<MmWaveUeNetDevice>(m_ueDevs.Get(ueIndex));
     if (!dev || !dev->GetRrc())
     {
         return 0;
     }
     return dev->GetRrc()->GetRnti();
+}
+
+uint16_t
+NtnRealStackHelper::GetServingCellId() const
+{
+    if (m_enbDevs.GetN() == 0)
+    {
+        return 1;
+    }
+    if (m_backend == RadioBackend::Nr)
+    {
+        Ptr<NrGnbNetDevice> gnb = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(0));
+        return gnb ? gnb->GetCellId() : 1;
+    }
+    Ptr<mmwave::MmWaveEnbNetDevice> enb =
+        DynamicCast<mmwave::MmWaveEnbNetDevice>(m_enbDevs.Get(0));
+    return enb ? enb->GetCellId() : 1;
 }
 
 double
@@ -784,6 +1127,8 @@ NtnRealStackHelper::WriteHealthReport()
     bool allOk =
         gateStackDepth && gateThroughput && gateProvenance && gateErrorModel && channelInPath;
 
+    const char* airTag = (m_backend == RadioBackend::Nr) ? "nr-fr1-ntn" : "mmwave-ntn";
+
     std::error_code ec;
     std::filesystem::create_directories(m_outputDir, ec);
     std::ofstream out(m_outputDir + "/sim_health.csv");
@@ -791,7 +1136,7 @@ NtnRealStackHelper::WriteHealthReport()
     out << "sim_time_s," << m_simTime.GetSeconds() << "," << m_simTime.GetSeconds()
         << ",1,config\n";
     out << "wall_clock_s," << wallSec << ",-,1,measured\n";
-    out << "air_interface,mmwave-ntn,-,1,config\n";
+    out << "air_interface," << airTag << ",-,1,config\n";
     out << "carrier_hz," << m_freqHz << ",-,1,config\n";
     out << "channel_in_path," << (channelInPath ? 1 : 0) << ",1,"
         << (channelInPath ? 1 : 0) << ",topology\n";
@@ -818,7 +1163,7 @@ NtnRealStackHelper::WriteHealthReport()
     out << "run_tag," << m_runTag << ",-,1,config\n";
     out.close();
 
-    std::cout << "[sim_health/honest] air=mmwave-ntn fc=" << (m_freqHz / 1e9) << "GHz | phy_rx_tb="
+    std::cout << "[sim_health/honest] air=" << airTag << " fc=" << (m_freqHz / 1e9) << "GHz | phy_rx_tb="
               << m_phyRxTb << " (floor " << m_gates.minPhyRxTb << ") | dl_sinr="
               << (std::isnan(m_dlSinrDbMean) ? 0.0 : m_dlSinrDbMean) << "dB | tbler="
               << m_dlTblerMean << " | corrupt=" << GetDlCorruptFraction() << " | thr="

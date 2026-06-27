@@ -404,3 +404,7 @@ ORCID: [0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
 
 ns-3 core team · SNS3 maintainers · HITRAN team (Gordon et al. 2022, CFA Harvard) ·
 S. Paine's *am* atmospheric model (SAO) · ITU-R P.676 / P.618 / P.835 / P.838 / P.840.
+
+## Scope & limitations (toolkit boundaries)
+
+**A2** — the THz array/beamforming/pointing physics is computed in the offline link-budget calculator; the *measured* `*-traffic` examples carry FSPL + atmosphere only (no pointing/beam-squint loss in the measured KPIs). See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.

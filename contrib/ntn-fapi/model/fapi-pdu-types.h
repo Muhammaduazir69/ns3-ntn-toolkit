@@ -72,6 +72,7 @@ struct PdschPdu
         uint32_t tbSize;          //!< bytes
     };
     std::array<Codeword, 2> codewords;
+    uint8_t harqProcessId;        //!< HARQ process ID (0..15), SCF 222.10.02 §3.4.2.7
     uint16_t dataScramblingId;
     uint8_t nrOfLayers;
     uint8_t transmissionScheme;

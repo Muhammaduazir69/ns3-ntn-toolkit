@@ -66,9 +66,16 @@ main(int argc, char* argv[])
 {
     double simSeconds = 120.0;
     std::string outputDir = "ntn-tr38821-calibration-output";
+    // Calibration is defined against the mmwave (FR2) spectrum model: the
+    // measured-minus-TR offset is interpreted as that model's beamforming array
+    // gain, and the handheld NF is set via MmWaveUePhy::NoiseFigure. The nr
+    // backend uses a different array/beamforming model, so the offset gate is
+    // NOT validated for nr — this harness defaults to mmwave on purpose.
+    std::string radio = "mmwave";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
+    cmd.AddValue("radio", "Radio backend: mmwave (calibrated) or nr (experimental)", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
@@ -106,10 +113,19 @@ main(int argc, char* argv[])
     mob.Install(ueNodes);
     Ptr<MobilityModel> ueMob = ueNodes.Get(0)->GetObject<MobilityModel>();
 
-    // Handheld UE noise figure per the TR study case.
-    Config::SetDefault("ns3::MmWaveUePhy::NoiseFigure", DoubleValue(7.0));
+    // Handheld UE noise figure per the TR study case (mmwave-specific attribute).
+    if (radio == "mmwave")
+    {
+        Config::SetDefault("ns3::MmWaveUePhy::NoiseFigure", DoubleValue(7.0));
+    }
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-tr38821-calibration");

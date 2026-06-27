@@ -28,10 +28,13 @@ namespace ntncon
 {
 
 /// Earth constants — WGS-84.
-inline constexpr double kEarthRadiusM = 6378137.0;
+inline constexpr double kEarthRadiusM = 6378137.0;     //!< semi-major axis a
 inline constexpr double kEarthMuM3S2 = 3.986004418e14; //!< GM (m^3/s^2)
 inline constexpr double kEarthJ2 = 1.08262668e-3;
-inline constexpr double kEarthRotationRadS = 7.2921159e-5; //!< rad/s
+inline constexpr double kEarthRotationRadS = 7.2921159e-5;   //!< rad/s
+inline constexpr double kWgs84F = 1.0 / 298.257223563;       //!< flattening
+inline constexpr double kWgs84E2 = kWgs84F * (2.0 - kWgs84F); //!< first eccentricity^2
+inline constexpr double kWgs84B = kEarthRadiusM * (1.0 - kWgs84F); //!< semi-minor axis b
 
 /// Classical orbital elements.
 struct KeplerianElements

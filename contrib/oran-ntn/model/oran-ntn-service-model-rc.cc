@@ -25,7 +25,7 @@ OranNtnServiceModelRc::GetTypeId()
     return tid;
 }
 
-// Aligned-PER encoding for E2SM-RC v1.03 Style 3 ControlMessage (Roadmap §3 T2).
+// Aligned-PER encoding for E2SM-RC R004 v07.00 (2025) Style 3 ControlMessage (Roadmap §3 T2).
 // Layout in PER terms:
 //   ControlMessage ::= SEQUENCE {
 //     style_id    INTEGER (3),

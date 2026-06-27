@@ -37,8 +37,10 @@ ground UE  ──►  UAV-relay  ──►  HAPS (20 km)  ──►  LEO (550 km
   UMa-AV / RMa-AV / UMi-AV reference scenarios — available both as the `A2gChannelTr36777`
   calculator and as a real `PropagationLossModel` (`SaginA2gPropagationLossModel`) that
   attenuates actual packets on a real mmwave NR spectrum channel.
-- **Routing.** A greedy max-elevation `MultiLayerRouter` (Ground → UAV → HAPS → LEO) and a
-  QFI → S-NSSAI slice-aware `SaginSliceRouter` that biases the layer choice by latency budget.
+- **Path / layer selection.** A greedy max-elevation `MultiLayerRouter` (Ground → UAV → HAPS → LEO)
+  and a QFI → S-NSSAI slice-aware `SaginSliceRouter` that biases the layer choice by latency budget.
+  Both are path-computation helpers (inherit `Object`, return `SaginHop` vectors); they install **no
+  ns-3 forwarding table** — examples carry the chosen path over static/global routing or per-leg delay.
 - **Measured KPIs.** Radio examples ride a real mmwave NR NTN cell (`NtnRealStackHelper`:
   SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC), so SINR / TBLER / throughput are measured
   off the PHY trace. Data-plane examples carry `NtnOranApplication` traffic whose in-band
@@ -87,8 +89,8 @@ Derived from `model/*.h` and `helper/*.h`.
 | *(trace)* | `hst-trace.h` | HST position/speed trace feed |
 | `A2gChannelTr36777` | `a2g-channel-tr36777.h` | TR 36.777 v15.0.0 path loss (LOS + NLOS floor) and LOS probability for UMa-AV / RMa-AV / UMi-AV |
 | `SaginA2gPropagationLossModel` | `sagin-a2g-propagation-loss-model.h` | The TR 36.777 A2G model as a real ns-3 `PropagationLossModel`; chained onto a real mmwave NR spectrum channel it attenuates actual packets (returns the excess over free space to avoid double-counting) |
-| `MultiLayerRouter` | `multi-layer-router.h` | Greedy max-elevation Ground→UAV→HAPS→LEO routing; pluggable `SaginScoreCallback` for RL/external scoring |
-| `SaginSliceRouter` | `sagin-slice-router.h` | 5G QFI → S-NSSAI → `SliceProfile` mapping; biases layer choice by latency budget + GEO allowance |
+| `MultiLayerRouter` | `multi-layer-router.h` | Greedy max-elevation Ground→UAV→HAPS→LEO **path computation** (returns a `SaginHop` vector; installs no forwarding table); pluggable `SaginScoreCallback` for RL/external scoring |
+| `SaginSliceRouter` | `sagin-slice-router.h` | 5G QFI → S-NSSAI → `SliceProfile` mapping; computes a layer/hop choice (returns a `SaginHop` vector; installs no forwarding table) biased by latency budget + GEO allowance |
 | `SaginHelper` | `sagin-helper.h` | Factory façade: builds a ready-to-route 4-layer scene in one call |
 
 ## Examples

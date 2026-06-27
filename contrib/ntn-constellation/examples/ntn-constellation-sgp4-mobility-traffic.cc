@@ -2,10 +2,12 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// ntn-constellation-sgp4-mobility-traffic — a single LEO satellite from a TLE
-// drives a REAL mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy + MAC +
-// HARQ + RLC/PDCP + RRC + EPC) toward a ground terminal, while the
-// ContactGraphScheduler tracks GSL up/down events from the live SGP4 geometry.
+// ntn-constellation-sgp4-mobility-traffic — a single LEO satellite from a TLE,
+// propagated with the full Vallado SGP4 backend (drag/B* included, enabled via
+// SetUseVallado), drives a REAL mmwave NR NTN cell (NtnRealStackHelper:
+// SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) toward a ground terminal,
+// while the ContactGraphScheduler tracks GSL up/down events from the live
+// Vallado SGP4 geometry.
 // The ground station is auto-placed at the satellite's t=0 sub-point so a real
 // rise->zenith->set pass occurs, and the radio KPIs (SINR/TBLER/throughput) are
 // MEASURED off the mmwave PHY trace — no closed-form SINR, no P2P star.
@@ -14,7 +16,6 @@
 
 #include "ns3/command-line.h"
 #include "ns3/core-module.h"
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-real-stack-helper.h"
@@ -71,7 +72,8 @@ main(int argc, char* argv[])
 {
     double simSeconds = 20.0;
     uint32_t numUes = 4;
-    double satEirpDbm = 58.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     std::string tlePath;
     double gsLatDeg = std::nan("");
     double gsLonDeg = std::nan("");
@@ -81,13 +83,22 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("tle", "Path to 3-line TLE (default: contrib/ntn-rrc/data/iss-zarya.tle)", tlePath);
     cmd.AddValue("gsLat", "Ground-station latitude (deg; default = sat sub-point)", gsLatDeg);
     cmd.AddValue("gsLon", "Ground-station longitude (deg; default = sat sub-point)", gsLonDeg);
     cmd.AddValue("minElev", "Min elevation for in-contact (deg)", minElevDeg);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    const bool useNr = (radio != "mmwave");
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
+    // healthy SINR; mmwave keeps a comparable 58 dBm (zero regression).
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 58.0;
+    }
 
     if (tlePath.empty())
     {
@@ -118,6 +129,11 @@ main(int argc, char* argv[])
         std::fprintf(stderr, "error: TLE parse failed\n");
         return 2;
     }
+    // This example propagates a raw two-line element set, so select the full
+    // Vallado SGP4 backend (atmospheric drag / B* included) — the accurate
+    // propagator for a low-drag ISS-class TLE. If the Vallado init fails the
+    // model falls back to the Kepler+J2-secular path automatically.
+    sat->SetUseVallado(true);
     double subLat, subLon, subAlt;
     sat->GetGeodetic(subLat, subLon, subAlt);
     if (std::isnan(gsLatDeg) || std::isnan(gsLonDeg))
@@ -127,7 +143,7 @@ main(int argc, char* argv[])
     }
     const Vector gsEcef = GeodeticToEcef(gsLatDeg, gsLonDeg, 540.0);
 
-    // ---- nodes: the SGP4 satellite (real mmwave gNB) + ground UEs ----
+    // ---- nodes: the Vallado SGP4 satellite (real mmwave gNB) + ground UEs ----
     NodeContainer satNodes;
     satNodes.Create(1);
     satNodes.Get(0)->AggregateObject(sat);
@@ -146,8 +162,14 @@ main(int argc, char* argv[])
     scheduler->RegisterSatellite(100, sat);
     scheduler->Start();
 
-    // ---- real mmwave NR cell + measured traffic ----
+    // ---- real NR cell + measured traffic (mmwave FR2 or nr FR1) ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(useNr ? NtnRealStackHelper::RadioBackend::Nr
+                             : NtnRealStackHelper::RadioBackend::Mmwave);
+    if (useNr)
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-constellation-sgp4-mobility-traffic");

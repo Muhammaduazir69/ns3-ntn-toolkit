@@ -114,11 +114,13 @@ main(int argc, char* argv[])
     uint32_t risN = 64; // 64x64 RIS panel
     std::string humidityProfile = "mid_latitude_summer";
     std::string outputDir = "thz-ntn-ric-controlled-output";
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "THz carrier frequency (GHz), capped at 100", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("blockageDb", "Urban-canyon blockage applied mid-run (dB)", blockageDb);
     cmd.AddValue("sinrThreshDb",
                  "Intrinsic SINR threshold below which the xApp engages the RIS",
@@ -178,6 +180,12 @@ main(int argc, char* argv[])
 
     // --- REAL radio + THz physics in the packet path ---
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("thz-ntn-ric-controlled-traffic");

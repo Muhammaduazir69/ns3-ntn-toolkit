@@ -40,11 +40,13 @@ main(int argc, char* argv[])
     double simSeconds = 40.0;
     bool sharing = true;
     std::string outputDir = "ntn-sagin-remote-coverage-output";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("sharing", "Multi-MNO infrastructure sharing on/off", sharing);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.Parse(argc, argv);
 
     std::printf("# ntn-sagin-remote-coverage (REAL cell, sharing=%d)\n", sharing ? 1 : 0);
@@ -87,7 +89,14 @@ main(int argc, char* argv[])
     rs.SetRunTag(std::string("ntn-sagin-remote-coverage-") +
                  (sharing ? "shared" : "unshared"));
     rs.SetCarrierFrequencyHz(2.0e9);
-    rs.SetSatEirpDbm(60.0);
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 60 dBm.
+    rs.SetSatEirpDbm(radio == "mmwave" ? 60.0 : 70.0);
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.Build(satNodes, ueNodes);
 
     const Time start = Seconds(1.0);

@@ -44,6 +44,7 @@ main(int argc, char* argv[])
     double satEirpDbm = 92.0;    // high-gain THz beam EIRP (closes the long slant)
     double rainMmH = 4.0;        // light rain: degrades but keeps the link alive
     std::string outputDir = "thz-ntn-real-stack-output";
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
@@ -51,6 +52,7 @@ main(int argc, char* argv[])
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("rainMmH", "Rain rate applied in the 2nd half (mm/h)", rainMmH);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     std::string netSimOut; // NetSimulyzer JSON (empty = off)
@@ -101,6 +103,12 @@ main(int argc, char* argv[])
     mob.Install(ueNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("thz-ntn-real-stack");

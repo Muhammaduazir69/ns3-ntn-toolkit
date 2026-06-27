@@ -40,6 +40,7 @@ main(int argc, char* argv[])
     double gnbTxDbm = -7.0; // short A2G range -> low Tx for a realistic SINR band
     std::string outputDir = "sagin-haps-leo-relay-output";
     std::string csvPath = "sagin-haps-leo-relay.csv";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
@@ -48,6 +49,7 @@ main(int argc, char* argv[])
     cmd.AddValue("gnbTxDbm", "UAV relay Tx power (dBm)", gnbTxDbm);
     cmd.AddValue("csv", "Output CSV path (router geometry)", csvPath);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.Parse(argc, argv);
 
     // Ground UE(s) = mmwave UE; UAV relay = mmwave gNB at uavAltM AGL.
@@ -127,7 +129,13 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-haps-leo-relay");
     rs.SetCarrierFrequencyHz(2.0e9);
-    rs.SetSatEirpDbm(gnbTxDbm);
+    rs.SetSatEirpDbm(gnbTxDbm); // short-range A2G access gNB Tx (not a LEO link) — kept as-is
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.Build(satNodes, ueNodes);
     Ptr<SaginA2gPropagationLossModel> a2g = CreateObject<SaginA2gPropagationLossModel>();
     a2g->SetFrequencyGHz(2.0);

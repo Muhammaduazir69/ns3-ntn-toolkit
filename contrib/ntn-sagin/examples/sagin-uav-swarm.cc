@@ -56,12 +56,14 @@ main(int argc, char* argv[])
     double fcGHz = 2.0;
     double gnbTxDbm = 0.0; // ground mast to UAVs at short range -> low Tx
     std::string outputDir = "sagin-uav-swarm-output";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
     cmd.AddValue("fcGHz", "Carrier frequency (GHz)", fcGHz);
     cmd.AddValue("gnbTxDbm", "Ground gNB Tx power (dBm)", gnbTxDbm);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.Parse(argc, argv);
     g_simTime = simTimeSec;
 
@@ -102,7 +104,13 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-uav-swarm");
     rs.SetCarrierFrequencyHz(fcGHz * 1e9);
-    rs.SetSatEirpDbm(gnbTxDbm);
+    rs.SetSatEirpDbm(gnbTxDbm); // short-range A2G gNB Tx (not a LEO link) — kept as-is
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.Build(gnbNodes, ueNodes);
     Ptr<SaginA2gPropagationLossModel> a2g = CreateObject<SaginA2gPropagationLossModel>();
     a2g->SetFrequencyGHz(fcGHz);

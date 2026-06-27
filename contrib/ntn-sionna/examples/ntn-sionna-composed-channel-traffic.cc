@@ -56,14 +56,16 @@ main(int argc, char* argv[])
 {
     double simSeconds = 40.0;
     double freqGHz = 2.0; // S-band (so the oran-ntn TR 38.811 band matches)
-    double satEirpDbm = 55.0;
+    double satEirpDbm = 70.0; // healthy nr (FR1 Friis) LEO downlink
     double rainRateMmH = 0.0;
+    std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-sionna-composed-channel-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("rainRateMmH", "Rain rate on the ITU-R chain (mm/h)", rainRateMmH);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
@@ -103,6 +105,12 @@ main(int argc, char* argv[])
     mob.Install(gndNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-sionna-composed-channel-traffic");

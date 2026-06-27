@@ -8,7 +8,7 @@
  *
  * Implements E2AP protocol between E2 Nodes (NTN gNBs / satellites)
  * and the Near-RT RIC. Supports E2SM-KPM (monitoring) and E2SM-RC
- * (control) service models per O-RAN.WG3.E2AP-v03.01.
+ * (control) service models per O-RAN.WG3.E2AP R004 v07.00 (ETSI TS 104 038 v4.1.0, 2025).
  *
  * Adaptations for NTN:
  *   - Feeder-link-aware E2 message scheduling (batch during visibility)

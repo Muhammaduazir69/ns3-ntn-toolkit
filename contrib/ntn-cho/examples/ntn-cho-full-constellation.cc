@@ -11,8 +11,9 @@
  * synthetic TTE) with the REAL NTN mobility architecture, sourcing EVERY
  * headline KPI from the measured plane and the real CHO state machine:
  *
- *   - Satellites: SGP4-propagated Walker-Delta orbits (ntn-constellation
- *     Sgp4MobilityModel) — serving + candidate shell, real pass dynamics.
+ *   - Satellites: Kepler+J2-secular propagated Walker-Delta orbits
+ *     (ntn-constellation Sgp4MobilityModel; full Vallado SGP4 available via
+ *     SetUseVallado) — serving + candidate shell, real pass dynamics.
  *   - UEs: 3GPP TR 38.811 §6.1.1.1 class mobility (NtnTr38811MobilityModel,
  *     ECEF) as REAL ns-3 nodes on the serving cell.
  *   - Radio: real mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy + MAC +
@@ -37,7 +38,7 @@
  * sinr_dB is the measured mmwave PHY value; the decomposition columns are the
  * physical link budget from real geometry + configured beam EIRP:
  * path_loss_dB = free-space loss FSPL(slant,fc), antenna_gain_dB = beam EIRP
- * (Tx power+gain), rsrp_dBm = EIRP - FSPL, doppler_Hz = real SGP4 relative
+ * (Tx power+gain), rsrp_dBm = EIRP - FSPL, doppler_Hz = Kepler+J2 relative
  * radial velocity. (The measured SINR additionally reflects the channel's
  * beamforming/array gains, so it need not equal eirp - FSPL - noise.)
  *
@@ -46,7 +47,6 @@
  */
 
 #include "ns3/core-module.h"
-#include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-cho-algorithm.h"
@@ -108,7 +108,7 @@ std::vector<uint32_t> g_candBeamIds;      // aux geo-33E beam id per candidate (
 // Fixed reference position inside the geo-33E antenna-pattern footprint for the
 // AUXILIARY TTE/ephemeris oracle (same as the test fixture). The oracle's
 // geometry is GEO-pattern-bound and offline; headline geometry/SINR come from
-// the live SGP4 sats + measured PHY, not from this reference.
+// the live Kepler+J2 sats + measured PHY, not from this reference.
 const GeoCoordinate kAuxRefPos(49.75, 3.75, 0.0);
 
 uint32_t g_totalHos = 0;
@@ -172,7 +172,7 @@ ChoTick()
     // UE 0 drives the CHO decision (the served cell's representative UE). All
     // UEs are measured on the same real serving cell.
     const Vector u = g_ueModels[0]->GetPosition(); // TR 38.811 UE, ECEF
-    const Vector sPos = g_servSat->GetPosition();  // SGP4 serving sat, ECEF
+    const Vector sPos = g_servSat->GetPosition();  // Kepler+J2 serving sat, ECEF
     const double servElev = ntngeo::ElevationDeg(u, sPos);
     const double servSlant = ntngeo::SlantRangeM(u, sPos);
 
@@ -287,7 +287,7 @@ ChoTick()
             // Link-budget decomposition from REAL geometry + configured beam
             // EIRP. sinr is the measured PHY value (kept); rsrp/path_loss/
             // antenna_gain are the free-space budget (rsrp = eirp - FSPL) and
-            // doppler is the real SGP4 relative radial velocity.
+            // doppler is the Kepler+J2 relative radial velocity.
             const double fcHz = g_rs->GetCarrierFrequencyHz();
             const double eirpDbm = g_rs->GetSatEirpDbm();
             const double dPl = (slant > 1.0 ? slant : 1.0);
@@ -516,8 +516,9 @@ main(int argc, char* argv[])
     double qualityTh = -3.0;
     double tteMinimum = 20.0;
     double carrierFreqGhz = 2.0;
-    double satTxPower = 55.0;
+    double satTxPower = -1.0; // sentinel: backend-appropriate default chosen below
     double altitudeKm = 780.0;
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     uint32_t numCandidates = 2;
     uint32_t satsPerPlane = 80;
     double tteMinSec = 3.0;
@@ -539,8 +540,9 @@ main(int argc, char* argv[])
     cmd.AddValue("tteMinimum", "Minimum TTE for admission (s)", tteMinimum);
     cmd.AddValue("tteMin", "Minimum TTE for CHO config (s)", tteMinSec);
     cmd.AddValue("carrierFreqGhz", "Carrier frequency (GHz)", carrierFreqGhz);
-    cmd.AddValue("satTxPower", "Satellite EIRP / gNB Tx power (dBm)", satTxPower);
+    cmd.AddValue("satTxPower", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satTxPower);
     cmd.AddValue("altitude", "Constellation altitude (km)", altitudeKm);
+    cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("numCandidates", "Candidate satellite cells", numCandidates);
     cmd.AddValue("satsPerPlane", "Walker in-plane satellites (spacing)", satsPerPlane);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -548,6 +550,14 @@ main(int argc, char* argv[])
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON trace output path (empty = off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D trace output path (empty = off)", czmlOut);
     cmd.Parse(argc, argv);
+
+    const bool useNr = (radio != "mmwave");
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
+    // healthy SINR; mmwave keeps its historical 55 dBm (zero regression).
+    if (satTxPower < 0.0)
+    {
+        satTxPower = useNr ? 70.0 : 55.0;
+    }
 
     if (numCandidates < 1)
     {
@@ -573,15 +583,17 @@ main(int argc, char* argv[])
     std::cout << "============================================\n"
               << "  NTN-CHO Full Constellation (v3 REAL plane)\n"
               << "============================================\n"
-              << "  Serving + " << numCandidates << " candidate SGP4 cells (real pass)\n"
+              << "  Serving + " << numCandidates << " candidate Kepler+J2 cells (real pass)\n"
               << "  Altitude:      " << altitudeKm << " km\n"
               << "  UEs:           " << numUes << " (TR 38.811, real ns-3 nodes)\n"
               << "  Algorithm:     " << algorithm << "\n"
               << "  SimTime:       " << simTime << " s\n"
-              << "  Radio:         real mmwave NR NTN cell (measured SINR)\n"
+              << "  Radio:         " << (useNr ? "5G-LENA nr FR1 (30 kHz SCS)" : "mmwave FR2")
+              << " NTN cell (measured SINR), EIRP " << satTxPower << " dBm\n"
               << "============================================\n";
 
-    // ---- Real Walker-Delta orbits (SGP4): serving + candidate shell ----
+    // ---- Real Walker-Delta orbits (Kepler+J2-secular; Vallado SGP4 via
+    //      SetUseVallado): serving + candidate shell ----
     WalkerConfig wcfg;
     wcfg.num_planes = 1;
     wcfg.total_sats = satsPerPlane;
@@ -618,8 +630,14 @@ main(int argc, char* argv[])
     g_ueModels = ueMobility.Install(ueNodes, profile, subLat - 0.03, subLat + 0.03,
                                     subLon - 0.03, subLon + 0.03);
 
-    // ---- Real mmwave NTN serving cell + measured traffic ----
+    // ---- Real NR NTN serving cell + measured traffic (mmwave FR2 or nr FR1) ----
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(useNr ? NtnRealStackHelper::RadioBackend::Nr
+                             : NtnRealStackHelper::RadioBackend::Mmwave);
+    if (useNr)
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simTime));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-full-constellation_" + algorithm);
@@ -651,9 +669,8 @@ main(int argc, char* argv[])
     cfg.conditionMonitorPeriod = Seconds(g_simTime + 10.0);
     g_cho->Configure(cfg);
 
-    Ptr<mmwave::MmWaveEnbNetDevice> enb =
-        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
-    g_servingCellId = enb ? enb->GetCellId() : 1;
+    // Radio-agnostic serving cell id (mmwave or nr gNB under the hood).
+    g_servingCellId = rs.GetServingCellId();
     g_serving = g_servingCellId;
 
     // ---- Auxiliary ephemeris/TTE oracle pipeline (DEAD CLASSES WIRED) ----
@@ -684,7 +701,7 @@ main(int argc, char* argv[])
         // beam-mobility models at GEO altitude (as the test fixture does) so
         // the antenna-pattern geometry is well-posed. This is the auxiliary
         // ephemeris/TTE oracle ONLY; the headline geometry/SINR come from the
-        // real SGP4 sats + measured PHY, not from here.
+        // live Kepler+J2 sats + measured PHY, not from here.
         constexpr double kGeoAltM = 35786000.0;
         // Serving aux GEO sat at the patterns' default sub-point (lon 33E, as
         // the test fixture); each candidate is shifted in longitude so its beam
@@ -770,7 +787,7 @@ main(int argc, char* argv[])
     // backed D1/D2/T1/elevation/TTE geometry well-posed against the GEO
     // antenna patterns). This is the algorithm's internal predictor frame
     // only; measured serving/candidate SINR and the headline geometry come
-    // from the live SGP4 sats + real PHY in ChoTick.
+    // from the live Kepler+J2 sats + real PHY in ChoTick.
     g_cho->StartMonitoring(kAuxRefPos, Vector(0, 0, 0));
 
     // ---- Open output files (same schemas as v2) ----
@@ -803,7 +820,7 @@ main(int argc, char* argv[])
     g_beamGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n";
     g_hoGeo << "{\"type\":\"FeatureCollection\",\"features\":[\n";
 
-    // ---- Optional 3D scene trace (real SGP4 sats + TR 38.811 UEs) ----
+    // ---- Optional 3D scene trace (Kepler+J2 sats + TR 38.811 UEs) ----
     Ptr<ntnobs::NtnSceneRecorder> scene;
     if (!netSimOut.empty() || !czmlOut.empty())
     {

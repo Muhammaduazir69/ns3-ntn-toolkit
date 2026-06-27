@@ -36,9 +36,10 @@ main(int argc, char* argv[])
     double cruiseAltM = 11000.0;
     double speedMps = 250.0;
     double leoAltKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     std::string outputDir = "sagin-aeronautical-output";
     std::string csvPath = "sagin-aeronautical.csv";
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
@@ -46,10 +47,19 @@ main(int argc, char* argv[])
     cmd.AddValue("cruise", "Cruise altitude (m)", cruiseAltM);
     cmd.AddValue("speed", "Cruise speed (m/s)", speedMps);
     cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default",
+                 satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("csv", "Output CSV path (router geometry)", csvPath);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // Backend-appropriate EIRP default (honoured only if the user did not set it):
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
 
     // Aircraft terminal = UE (great-circle cruise); LEO satellite = mmwave gNB.
     NodeContainer ueNodes;
@@ -124,6 +134,12 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-aeronautical");
     rs.SetSatEirpDbm(satEirpDbm);
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));

@@ -145,15 +145,17 @@ main(int argc, char* argv[])
     double duration = 20.0;
     uint32_t numVehicles = 8;
     double altitudeKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double blockageDb = 14.0; // NLOS blockage applied to shadowed vehicles
+    std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-v2x-real-stack-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("numVehicles", "Number of vehicle-UEs", numVehicles);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("blockageDb", "NLOS blockage loss on shadowed vehicles (dB)", blockageDb);
     cmd.AddValue("minDirectSnr", "Minimum direct LEO SINR (dB)", g_minDirectSnrDb);
     cmd.AddValue("maxV2vRange", "Max V2V relay range (m)", g_maxV2vRangeM);
@@ -161,8 +163,15 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     g_simTime = duration;
 
+    // Backend-appropriate EIRP default (honoured only if the user did not set it):
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+    }
+
     std::cout << "\n=== ntn-v2x REAL-STACK (relay decision on MEASURED LEO SINR) ===\n"
-              << "  " << numVehicles << " vehicle-UEs on a real mmwave NR NTN cell\n"
+              << "  " << numVehicles << " vehicle-UEs on a real " << radio << " NR NTN cell\n"
               << "  direct uplink quality: MEASURED per-UE DL SINR (not V2xLeoDirect formula)\n"
               << "  NLOS blockage: " << blockageDb << " dB on shadowed vehicles (3GPP-style)\n"
               << "  duration: " << duration << " s\n\n";
@@ -207,6 +216,12 @@ main(int argc, char* argv[])
     Ptr<MobilityModel> satMob = satNodes.Get(0)->GetObject<MobilityModel>();
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-real-stack");

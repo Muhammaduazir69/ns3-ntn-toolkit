@@ -19,7 +19,7 @@ LEO non-terrestrial networks introduce one-way delays and Doppler trajectories t
 
 `ntn-rrc` adds the NTN-specific RRC procedures as a clean, optional contrib module:
 
-- **SIB19 ephemeris broadcast** — periodic broadcaster (default 160 ms) snapshots fresh satellite ephemeris (ECEF state vector), the common timing advance, and its drift rate into a fixed-layout 124-byte codec frame (TS 38.331 §6.3.2).
+- **SIB19 ephemeris broadcast** — periodic broadcaster (default 160 ms) snapshots fresh satellite ephemeris (ECEF state vector), the common timing advance, and its drift rate into a fixed-layout 124-byte codec frame (TS 38.331 §6.3.2). *Honest scope:* the frame is serialized to a `TracedCallback` / private buffer for observers — it is **not** carried on BCCH/PDSCH and **no UE decodes it**; the `K-offset`/`kMac` values it carries are stored metadata applied to **no** scheduling decision (the mmwave MAC never reads them).
 - **Timing advance** — ephemeris-driven TA pre-compensation decomposed into a SIB19-broadcast **common** term plus a per-UE **UE-specific** residual; `2·d/c` for transparent payload, `d/c` for regenerative (TS 38.213 §4.2.2, TR 38.821 §6.3.3).
 - **Pass-aware DRX** — NR connected-mode DRX state machine (`Active / OnDuration / ShortSleep / LongSleep`) extended with an NTN `AwaitingPass` deep-sleep state between visibility windows (TS 38.321 + TR 38.821 §6.3.4).
 - **UE location report** — GNSS-assisted reporting in periodic / event-triggered / on-demand modes, with closed-form ECEF↔WGS-84 conversion (TS 38.331 §5.7.4).
@@ -28,7 +28,7 @@ LEO non-terrestrial networks introduce one-way delays and Doppler trajectories t
 
 See [CHANGELOG.md](CHANGELOG.md) for this module's history.
 
-- **All examples now run on a real mmwave NR NTN cell.** Every example builds the radio through `NtnRealStackHelper` (from the sibling `ntn-traffic` module): SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC, with real UDP traffic over the radio and the DL SINR/TBLER/throughput **measured off the mmwave PHY trace** — no closed-form SINR, no synthetic link models. Each example also writes a `sim_health.csv` with phy-trace provenance.
+- **All examples now run on a real mmwave NR NTN cell.** Every example builds the radio through `NtnRealStackHelper` (from the sibling `ntn-traffic` module): SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC, with real UDP traffic over the radio and the DL SINR/TBLER/throughput **measured off the mmwave PHY trace** — no closed-form SINR, no synthetic link models. Each example also writes a `sim_health.csv` with phy-trace provenance. (The "RRC" here is the mmwave **ideal RRC**, `UseIdealRrc=true` — bearers are set up synchronously at attach with no over-the-air RRC PDU exchange; the SIB19 / TA / measurement-report machinery in this module runs alongside it as assistance/accounting, not wired into that MAC/RRC. The core is the LTE **EPC** — MME/SGW/PGW, S1-AP, real GTP-U — not a 5GC.)
 - **Real mobility everywhere.** Serving satellites fly genuine SGP4 orbits — a Walker-Delta element from `ntn-constellation` (`Sgp4MobilityModel`) in `ntn-rrc-leo-pass`, `ntn-rrc-full-stack`, `ntn-rrc-drx-data-traffic`, and `ntn-rrc-real-stack`, or a real TLE through the SNS3 `SatSGP4MobilityModel` in `ntn-rrc-from-tle`. UEs move under 3GPP TR 38.811 §6.1.1.1 class mobility (`NtnTr38811MobilityModel` from `ntn-cho`), placed under the satellite's t=0 sub-point so a real overhead pass occurs.
 - **RRC measurement reports on measured radio** — `ntn-rrc-leo-pass` and `ntn-rrc-real-stack` fire a connection-quality measurement report when the **measured** DL SINR crosses a threshold, alongside the live TA/SIB19 machinery.
 - **`ntn-rrc-from-tle` ships a default ISS TLE** (`data/iss-zarya.tle`) and runs with zero arguments — it auto-discovers the bundled TLE relative to the working directory and defaults the scenario start.
@@ -156,3 +156,7 @@ For full setup notes (SNS3 / satellite-module dependency, the `ntn-traffic` / `n
 GPL-2.0-only — see [LICENSE](LICENSE).
 
 **Muhammad Uzair**, Independent Researcher.
+
+## Scope & limitations (toolkit boundaries)
+
+**A3** — the NTN DRX, Timing-Advance and SIB19 models are spec-faithful *oracles* not bound to the mmwave MAC/RRC: DRX does not gate PDCCH, TA does not set UL timing, SIB19 is a TracedCallback (not a BCCH broadcast), and K_offset is unapplied metadata. See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.

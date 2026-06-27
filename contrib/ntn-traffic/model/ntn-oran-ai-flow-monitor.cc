@@ -211,7 +211,7 @@ NtnOranAiFlowMonitor::GranularityTick()
                 }
                 if (!std::isnan(tbler))
                 {
-                    s.metrics["TB.ErrTotalNbrDl.Rate"] = tbler;
+                    s.metrics["TB.ErrTotNbrDl"] = tbler;
                 }
             }
             m_series[id].push_back(s);
@@ -339,7 +339,7 @@ NtnOranAiFlowMonitor::WriteCsv(const std::string& path) const
     std::ofstream os(path);
     os << "time_s,flow_id,src_id,dst_id,five_qi,sst,sd,DRB.UEThpDl,"
           "DRB.PdcpSduVolumeDl,DRB.RlcSduDelayDl,DRB.PacketLossRateDl,"
-          "L1M.RS-SINR,TB.ErrTotalNbrDl.Rate\n";
+          "L1M.RS-SINR,TB.ErrTotNbrDl\n";
     auto get = [](const KpmSample& s, const char* name) {
         auto it = s.metrics.find(name);
         return (it != s.metrics.end()) ? it->second : std::nan("");
@@ -355,7 +355,7 @@ NtnOranAiFlowMonitor::WriteCsv(const std::string& path) const
                << "," << get(s, "DRB.UEThpDl") << "," << get(s, "DRB.PdcpSduVolumeDl")
                << "," << get(s, "DRB.RlcSduDelayDl") << ","
                << get(s, "DRB.PacketLossRateDl") << "," << get(s, "L1M.RS-SINR") << ","
-               << get(s, "TB.ErrTotalNbrDl.Rate") << "\n";
+               << get(s, "TB.ErrTotNbrDl") << "\n";
         }
     }
 }

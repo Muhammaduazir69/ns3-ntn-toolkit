@@ -21,8 +21,11 @@
  * NtnOranSink from the in-band NtnOranPayloadHeader (WS1 application suite).
  * The real-PHY V2X baseline (measured mmwave SINR) is ntn-v2x-rural-highway.
  *
- * Vehicles follow a REAL SUMO-format FCD trace supplied via --fcdTrace; there
- * is no synthetic fallback (use SUMO `fcd-export`).
+ * Vehicles follow an FCD-format CSV trace supplied via --fcdTrace. The shipped
+ * trace is a synthetic constant-speed FCD-format CSV fixture (not a SUMO
+ * microsimulation; the loader reads a CSV dialect, not SUMO's native
+ * fcd-output XML). You may instead supply your own CSV converted from a SUMO
+ * fcd-export.
  *
  * Quick test:  --simSeconds=60 --bsmHz=10 --fcdTrace=<path/to/fcd.csv>
  */
@@ -174,8 +177,10 @@ main(int argc, char* argv[])
                  veh0BlockageDb);
     cmd.AddValue("linkCapacityMbps", "Per-hop P2P capacity (Mbps)", linkCapacityMbps);
     cmd.AddValue("fcdTrace",
-                 "Path to a real SUMO FCD CSV export (time,vehid,x,y,z,speed) with rows "
-                 "for veh0 and veh1. REQUIRED — no synthetic fallback.",
+                 "Path to an FCD-format CSV trace (time,vehid,x,y,z,speed) with rows "
+                 "for veh0 and veh1. REQUIRED. The shipped trace is a synthetic "
+                 "constant-speed CSV fixture; a CSV converted from SUMO fcd-export "
+                 "also works (loader reads a CSV dialect, not native fcd-output XML).",
                  fcdTrace);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
@@ -186,17 +191,19 @@ main(int argc, char* argv[])
     NodeContainer nodes;
     nodes.Create(4); // 0=veh0 1=veh1 2=sat 3=server
 
-    // Vehicles ride a REAL SUMO-format FCD trace supplied via --fcdTrace
+    // Vehicles ride an FCD-format CSV trace supplied via --fcdTrace
     // (trace-replay mode), exactly like ntn-v2x-rural-highway — one mobility
-    // source for all four v2x examples. No synthetic fallback: a real road
-    // trace must be provided (e.g. SUMO `fcd-export` converted to the CSV
-    // `time,vehid,x,y,z,speed` dialect with rows for veh0 and veh1).
+    // source for all four v2x examples. The shipped trace is a synthetic
+    // constant-speed FCD-format CSV fixture (not a SUMO microsimulation; the
+    // loader reads a CSV dialect, not SUMO's native fcd-output XML). A CSV
+    // converted from a SUMO fcd-export (`time,vehid,x,y,z,speed` with rows for
+    // veh0 and veh1) may be supplied instead.
     if (fcdTrace.empty())
     {
-        NS_FATAL_ERROR("--fcdTrace is required: supply a real SUMO FCD CSV export "
+        NS_FATAL_ERROR("--fcdTrace is required: supply an FCD-format CSV trace "
                        "(time,vehid,x,y,z,speed) with rows for veh0 and veh1. "
-                       "Generate it with SUMO `fcd-export`; this example does not "
-                       "fabricate vehicle motion.");
+                       "The shipped trace is a synthetic constant-speed CSV fixture; "
+                       "a CSV converted from SUMO fcd-export also works.");
     }
     g_bridge = CreateObject<ntnv2x::SumoTraciBridge>();
     if (!g_bridge->LoadFcdTrace(fcdTrace))

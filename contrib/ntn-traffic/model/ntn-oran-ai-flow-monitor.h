@@ -19,7 +19,7 @@
 //         published under the OFFICIAL names (3GPP TS 28.552 / O-RAN E2SM-KPM):
 //         DRB.UEThpDl, DRB.RlcSduDelayDl, DRB.PacketLossRateDl,
 //         DRB.PdcpSduVolumeDl, and (when attached to NtnRealStackHelper)
-//         L1M.RS-SINR, TB.TotNbrDl, TB.ErrTotalNbrDl from the PHY trace;
+//         L1M.RS-SINR, TB.TotNbrDl, TB.ErrTotNbrDl from the PHY trace;
 //       - sliding-window AI feature vectors per flow (mean/slope of
 //         throughput, delay, loss, SINR) for xApps / ns3-ai-ntn / ONNX;
 //       - EWMA z-score anomaly detector per flow per metric raising events

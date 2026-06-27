@@ -83,14 +83,13 @@ def emit_czml(cons: Constellation, when: dt.datetime, path: Path) -> None:
 
 def emit_influx_lp(cons: Constellation, when: dt.datetime, cfg: LoopConfig) -> int:
     """Append `ntn_sat_pos` line-protocol points; return number written."""
-    states = cons.state_vectors(when)
     ts_ns = int(when.replace(tzinfo=dt.timezone.utc).timestamp() * 1e9)
     lines: list[str] = []
-    for sat, sv in zip(cons, states):
+    for sat in cons:
         norad = sat.norad_id
-        x_m = sv.r_eci_km[0] * 1000.0
-        y_m = sv.r_eci_km[1] * 1000.0
-        z_m = sv.r_eci_km[2] * 1000.0
+        # gap B3: emit true ECEF (Earth-fixed), not the inertial TEME r_eci_km,
+        # so the points overlay correctly on a fixed-frame globe.
+        x_m, y_m, z_m = sat.ecef_m(when)
         # Schema lifted from contrib/ntn-observability/model/ntn-metric-schema.h
         line = (
             f"ntn_sat_pos,sat_norad={norad},run_id={cfg.run_id} "

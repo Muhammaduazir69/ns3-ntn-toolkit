@@ -77,6 +77,7 @@ main(int argc, char* argv[])
     uint32_t arraySize = 32;
     double measNoiseDeg = 0.05;
     std::string outputDir = "thz-beam-track-out";
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("trackingMode", "Tracking mode: EKF or POSITION_BASED", trackingMode);
@@ -84,6 +85,7 @@ main(int argc, char* argv[])
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz), capped at 100", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("arraySize", "UM-MIMO array side (NxN)", arraySize);
     cmd.AddValue("measNoiseDeg", "Beam measurement noise RMS (deg)", measNoiseDeg);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -142,6 +144,12 @@ main(int argc, char* argv[])
 
     // --- REAL radio with the pointing loss in the packet path ---
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("thz-ntn-beam-tracking");

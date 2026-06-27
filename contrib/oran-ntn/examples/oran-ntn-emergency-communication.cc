@@ -45,13 +45,18 @@ main(int argc, char* argv[])
 {
     double simSeconds = 60.0;
     double disasterAt = 20.0;
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "oran-ntn-emergency-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("disasterAt", "Disaster time (s)", disasterAt);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 60.
+    const double satEirpDbm = (radio == "mmwave") ? 60.0 : 70.0;
 
     std::printf("# oran-ntn-emergency-communication (REAL cell, disaster at t=%.0fs)\n",
                 disasterAt);
@@ -96,11 +101,17 @@ main(int argc, char* argv[])
     mob.Install(gwNodes);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("oran-ntn-emergency");
     rs.SetCarrierFrequencyHz(2.0e9);
-    rs.SetSatEirpDbm(60.0);
+    rs.SetSatEirpDbm(satEirpDbm);
     rs.SetPayloadOption(NtnRealStackHelper::PayloadOption::RegenerativeRu);
     rs.Build(satNodes, ueNodes);
 

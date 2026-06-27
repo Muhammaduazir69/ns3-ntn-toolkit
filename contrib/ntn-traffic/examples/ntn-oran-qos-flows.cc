@@ -44,17 +44,25 @@ main(int argc, char* argv[])
 {
     double simSeconds = 40.0;
     double leoAltKm = 550.0;
-    double freqGHz = 2.0; // S-band NR-NTN FR1
-    double satEirpDbm = 60.0;
+    double freqGHz = 2.0; // S-band carrier (mmWave-NR FR2 numerology, not a 3GPP NR-NTN FR1 band/numerology)
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "ntn-oran-qos-flows-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+
+    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 60.
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = (radio == "mmwave") ? 60.0 : 70.0;
+    }
 
     std::printf("# ntn-oran-qos-flows (REAL radio, per-5QI ORAN-NTN flows)\n");
     std::printf("#   sim=%.0fs alt=%.0fkm fc=%.1fGHz EIRP=%.1fdBm\n",
@@ -88,6 +96,12 @@ main(int argc, char* argv[])
                        subLon - 0.03, subLon + 0.03);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-oran-qos-flows");

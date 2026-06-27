@@ -188,7 +188,13 @@ main(int argc, char* argv[])
     uint32_t scsKhz = 30;
     uint32_t tbBytes = 1500;
     double altitudeKm = 550.0;
-    double satEirpDbm = 55.0;
+    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    // Default mmwave: this example builds FAPI CRC.indication per TB off the mmwave
+    // RxPacketTraceUe trace (mmwave::RxPacketTraceParams), which the nr backend's
+    // PHY trace cannot feed; --radio=nr still selects the nr air interface (the
+    // helper's measured SINR/TBLER/throughput stay valid) but the per-TB FAPI loop
+    // only populates on mmwave.
+    std::string radio = "mmwave";
     std::string outputDir = "ntn-fapi-dl-data-slotloop-output";
 
     CommandLine cmd(__FILE__);
@@ -197,12 +203,21 @@ main(int argc, char* argv[])
     cmd.AddValue("scsKhz", "Sub-carrier spacing (kHz): 15/30/60/120", scsKhz);
     cmd.AddValue("tbBytes", "FAPI transport-block size (bytes)", tbBytes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("radio", "Radio backend: mmwave (FR2, per-TB FAPI loop) or nr (FR1)", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
     g_simTime = simSeconds;
     g_tbBytes = tbBytes;
     g_slotsPerSubframe = std::max<uint32_t>(1, scsKhz / 15);
+
+    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
+    // mmwave, so honour the historical 55 dBm for mmwave but give nr 70 dBm.
+    const bool useNr = (radio == "nr");
+    if (satEirpDbm < 0.0)
+    {
+        satEirpDbm = useNr ? 70.0 : 55.0;
+    }
 
     std::cout << "\n=== ntn-fapi-dl-data-slotloop (SCF-222 ABI on a real mmwave NR cell) ===\n"
               << "  FAPI L1 CRC.indication: decided by MEASURED PHY SINR/TBLER (not a sigmoid)\n"
@@ -235,6 +250,12 @@ main(int argc, char* argv[])
                        subLon - 0.03, subLon + 0.03);
 
     NtnRealStackHelper rs;
+    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
+                                         : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio != "mmwave")
+    {
+        rs.SetNumerology(1); // FR1 30 kHz SCS (nr backend only)
+    }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-fapi-dl-data-slotloop");
@@ -247,7 +268,8 @@ main(int argc, char* argv[])
     g_ueRnti = rs.GetUeRnti(0); // 0 until RRC connects; refreshed in FapiPhyRxTrace
 
     // Drive FAPI CRC.indication off the SAME real per-TB decode trace the helper
-    // connects (RxPacketTraceUe), filtered to UE-0. Connect after Build().
+    // connects (RxPacketTraceUe), filtered to UE-0. Connect after Build(). This
+    // mmwave-specific path only matches on the mmwave backend (no-op under nr).
     Config::ConnectWithoutContextFailSafe(
         "/NodeList/*/DeviceList/*/ComponentCarrierMap/*/MmWaveUePhy/DlSpectrumPhy/RxPacketTraceUe",
         MakeCallback(&FapiPhyRxTrace));
