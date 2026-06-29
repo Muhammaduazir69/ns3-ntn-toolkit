@@ -65,6 +65,15 @@ RUN ./ns3 configure \
         --build-profile=optimized \
     && ./ns3 build -j"$(nproc)"
 
+# Post-build housekeeping for a lean, fast-to-push image:
+#  1) drop runtime-irrelevant cruft (ns-3 docs, leaked sim outputs);
+#  2) move the large, INVARIANT SNS3 satellite TLE corpus out of the tree so the
+#     runtime stage can COPY it as its own layer (pushed once, cached forever),
+#     keeping the volatile toolkit+build layer small. See SCOPE/Docker notes.
+RUN rm -f *.pcap *_kpm_series.* 2>/dev/null || true \
+    && rm -rf doc docs Roadmap visualization ntn-cho-figures 2>/dev/null || true \
+    && mv /home/ntn/ns-3-dev/contrib/satellite /home/ntn/satellite-stable
+
 # -----------------------------------------------------------------------------
 # Stage 2: runtime — slim image with the built ns-3 + Python utilities
 # -----------------------------------------------------------------------------
@@ -73,13 +82,13 @@ FROM ubuntu:${UBUNTU_VERSION} AS runtime
 ARG DEBIAN_FRONTEND=noninteractive
 
 LABEL org.opencontainers.image.title="ns3-ntn-toolkit"
-LABEL org.opencontainers.image.description="Open-source ns-3.43 distribution for 6G non-terrestrial network research: 15 integrated modules covering SGP4 LEO constellations, 3GPP NR-NTN, O-RAN + FlexRIC, measured in-band QoS-flow KPIs, multi-tier RIC, sub-THz physics, NVIDIA Sionna, SAGIN, V2X, slicing, AI/ML, digital twin."
+LABEL org.opencontainers.image.description="Open-source ns-3.43 distribution for 6G non-terrestrial network research: 15 integrated modules + vendored 5G-LENA nr (dual mmwave/FR1 radio backend), covering SGP4 LEO constellations, 3GPP NR-NTN (FR1 15/30 kHz + TR 38.811 channel/beam), O-RAN + FlexRIC, measured in-band QoS-flow KPIs, multi-tier RIC, sub-THz physics, NVIDIA Sionna, SAGIN, V2X, slicing, AI/ML, digital twin."
 LABEL org.opencontainers.image.url="https://ns3-ntn-toolkit.dev/"
 LABEL org.opencontainers.image.source="https://github.com/Muhammaduazir69/ns3-ntn-toolkit"
 LABEL org.opencontainers.image.documentation="https://ns3-ntn-toolkit.dev/"
 LABEL org.opencontainers.image.authors="Muhammad Uzair <muhammaduzairr69@gmail.com>"
 LABEL org.opencontainers.image.licenses="GPL-2.0-only"
-LABEL org.opencontainers.image.version="2.1.1"
+LABEL org.opencontainers.image.version="2.3.0"
 
 # Runtime deps — note this is intentionally NOT a slim "runtime-only" set.
 # ns-3's `./ns3 run` wrapper unconditionally invokes the CMake build system
@@ -119,7 +128,15 @@ RUN groupadd --gid 1000 ntn \
 USER ntn
 WORKDIR /home/ntn
 
-# Copy the built ns-3 tree (built at the same /home/ntn/ns-3-dev path).
+# Copy the built ns-3 tree in TWO layers so `docker push` is fast:
+#  - Layer 1 (stable): the ~5 GB SNS3 satellite TLE corpus. It never changes, so
+#    after the first upload the registry serves it from cache ("Layer already
+#    exists") and it is NEVER re-pushed on a code change.
+#  - Layer 2 (volatile, ~1.3 GB): the rest of the built tree (toolkit modules +
+#    build output). Only this layer re-uploads when source changes.
+# (Previously the whole tree was a single ~6.3 GB layer, so any edit re-pushed
+#  all of it. Splitting drops incremental pushes from ~6.3 GB to ~1.3 GB.)
+COPY --from=builder --chown=ntn:ntn /home/ntn/satellite-stable /home/ntn/ns-3-dev/contrib/satellite
 COPY --from=builder --chown=ntn:ntn /home/ntn/ns-3-dev /home/ntn/ns-3-dev
 
 # Install Python utilities (in-tree, editable).
