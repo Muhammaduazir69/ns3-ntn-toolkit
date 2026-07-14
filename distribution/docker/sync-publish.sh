@@ -126,8 +126,20 @@ rsync -a --delete --info=stats1 \
   --exclude '*_pb2.py' \
   "${SRC}/" "${CONTAINER}:/home/ntn/ns-3-dev/"
 
-# rsync ran as root; hand the tree back to the runtime user (uid 1000).
-docker exec -u root "${CONTAINER}" chown -R 1000:1000 /home/ntn/ns-3-dev
+# rsync ran as root; hand the SYNCED SOURCE back to the runtime user (uid 1000).
+#
+# CRITICAL: do NOT `chown -R` the whole tree. overlayfs copies up a file on ANY
+# chown syscall — even a no-op one to the same owner — so a blanket recursive
+# chown over build/ (already 1000:1000, ~6 GB) would copy up the entire build
+# tree into the commit layer, making every push a full-image (~6 GB) upload
+# instead of the intended thin delta. Prune build/ and cmake-cache/ (never
+# rsync'd, already 1000-owned) and only touch files that are genuinely not
+# owned by uid/gid 1000 — i.e. just the freshly rsync'd source.
+docker exec -u root "${CONTAINER}" bash -lc \
+  'find /home/ntn/ns-3-dev \
+      -path /home/ntn/ns-3-dev/build -prune -o \
+      -path /home/ntn/ns-3-dev/cmake-cache -prune -o \
+      \( -not -uid 1000 -o -not -gid 1000 \) -exec chown 1000:1000 {} +'
 
 # ---------------------------------------------------------------------------
 # 3. Build inside the container. A reconfigure is needed the first time a brand
