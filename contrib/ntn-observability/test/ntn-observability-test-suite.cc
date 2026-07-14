@@ -552,11 +552,14 @@ class SceneRecorderEndToEndTest : public TestCase
 
         const std::string js = ReadFile(nsPath);
         NS_TEST_ASSERT_MSG_NE(js, "", "NetSimulyzer JSON should be written");
-        const bool hasSchema = js.find("\"schema\":\"netsimulyzer-1.0\"") != std::string::npos;
+        // Native (toolkit) scene schema, NOT the official usnistgov
+        // NetSimulyzer schema — the label is deliberately distinct so the file
+        // is not mistaken for one the NetSimulyzer app can open.
+        const bool hasSchema = js.find("\"schema\":\"ntn-observability-native-1.0\"") != std::string::npos;
         const bool hasNodeMove = js.find("\"NodeMove\"") != std::string::npos;
         const bool hasEarth = js.find("\"earth\"") != std::string::npos;
         const bool hasHandover = js.find("handover") != std::string::npos;
-        NS_TEST_ASSERT_MSG_EQ(hasSchema, true, "NetSimulyzer schema tag present");
+        NS_TEST_ASSERT_MSG_EQ(hasSchema, true, "native scene schema tag present");
         NS_TEST_ASSERT_MSG_EQ(hasNodeMove, true, "NodeMove events present");
         NS_TEST_ASSERT_MSG_EQ(hasEarth, true, "Earth sphere node present");
         NS_TEST_ASSERT_MSG_EQ(hasHandover, true, "handover log event present");
