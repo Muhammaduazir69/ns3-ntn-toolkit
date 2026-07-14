@@ -95,6 +95,42 @@ Minimal validation of `NtnRealStackHelper`: a single LEO gNB (SGP4 Walker servin
 - **Outputs:** a one-line measured summary and `sim_health.csv` in `--outputDir` (default `ntn-real-stack-smoke-out`).
 - **Key args:** `--simTime`, `--numUes`, `--altKm`, `--satEirpDbm`, `--freqGhz`, `--bwMhz`, `--outputDir`.
 
+### ntn-nr-fr1-demo
+
+Proves the **5G-LENA (`nr`) FR1 NTN radio spine** on the `NtnRealStackHelper` NR backend: a real NR data plane at FR1 numerology (30 kHz SCS) on an S-band (2.0 GHz) carrier with 20 MHz bandwidth — the FR1 regime the FR2-locked `mmwave` path cannot reach. Topology: one LEO gNB at ~600 km with a few ground UEs directly below.
+
+```sh
+./ns3 run "ntn-nr-fr1-demo --simTime=2 --numerology=1"
+```
+
+- **Outputs:** measured NR summary on stdout (mean DL SINR / TBLER, PHY transport blocks, throughput).
+- **Key args:** `--simTime` (s, def 2), `--numUes` (def 3), `--altitudeKm` (def 600), `--numerology` (0 = 15 kHz, 1 = 30 kHz; def 1), `--satEirpDbm` (def 70), `--freqGhz` (def 2), `--bwMhz` (def 20, the NTN-FR1 max), `--outputDir` (def `./`).
+
+### ntn-nr-deep-integration-demo
+
+Exercises the four **NR deep-integration enablers** the toolkit adds to `NtnRealStackHelper` (nr backend), each turning a piece of 5G-LENA machinery into a *measured* quantity: **D** native NR stats + measured MCS / MIMO rank / PRB utilisation + NTN-stretched HARQ pool; **C** QoS slices (three 5QIs → three BWPs + the OfdmaQos scheduler + per-5QI dedicated bearers); **B** real MIMO via `SetupMimoPmi` (measured rank); **A** the armed A3-RSRP + X2 handover. Two satellites (gNBs) plus ground UEs.
+
+```sh
+./ns3 run "ntn-nr-deep-integration-demo"          # all four enablers
+./ns3 run "ntn-nr-deep-integration-demo --slices=0" # isolate single-BWP
+```
+
+- **Outputs:** a measured four-enabler summary on stdout (mean DL SINR / TBLER / MCS / MIMO rank / PRB, per-slice per-BWP SINR / TB counts, handover count) and the native NR PDCP/RLC/MAC/PHY stat files (`NrDlMacStats.txt`, `NrDl*RlcStats*`, `NrDl*PdcpStats*`, `RxPacketTrace.txt`) in the working directory.
+- **Key args:** `--slices` (per-slice BWPs / Enabler C, def true), `--simTime` (s, def 10), `--numUes` (def 6), `--altitudeKm` (def 600), `--satEirpDbm` (def 70), `--bwMhz` (def 30 → 3 × 10 MHz BWPs), `--outputDir` (def `./nr-deep-demo/`).
+- **Note:** the handover count is **0** here by design — the neighbour satellite sits only 20 km to the side over a short sim, so both slant ranges hug 600 km and the RSRP hysteresis is never crossed. For a *firing* handover on a realistic pass, see **ntn-nr-handover-pass** below.
+
+### ntn-nr-handover-pass
+
+The dedicated proof of **Enabler A**: a real NR inter-satellite **A3-RSRP + X2 handover** on a realistic 600 km LEO pass. The serving satellite starts overhead the UE and flies off toward the horizon at true LEO ground-track speed (~7.5 km/s) while the neighbour rises to overhead; the UE's *measured* neighbour RSRP (sensed on each cell's PSS) crosses the serving cell by the hysteresis, the A3 event fires, and the serving gNB triggers an X2 handover. `GetHandoverCount()` counts the completions.
+
+```sh
+./ns3 run "ntn-nr-handover-pass"
+```
+
+- **Outputs:** the A3 trigger and a measured summary on stdout — sat altitude/speed, A3 hysteresis/TTT, mean DL SINR, PHY transport blocks, and **`[A] Handovers done: N`** (N = 1 at the shipped defaults). Add `NS_LOG=NrA3RsrpHandoverAlgorithm=level_logic` to watch the neighbour-vs-serving RSRP decision.
+- **Key args:** `--simTime` (s, def 90), `--numUes` (def 1 — see note), `--altitudeKm` (def 600), `--hystDb` (A3 hysteresis, dB, def 2), `--tttMs` (A3 time-to-trigger, ms, def 512), `--neighbourBehindKm` (neighbour start offset behind serving, km, def 600).
+- **Note:** keep `--numUes=1` for a clean run. `numUes>1` drives several UEs through the handover at once and hits a separate, structural limitation of the vendored 5G-LENA v3.3 X2 handover data-forwarding path (it pushes a PDCP control PDU through a build that only supports DATA PDUs); the A3/X2 decision itself fires correctly regardless.
+
 ### nrtv-p2p-example
 
 Two nodes over a point-to-point link: an NRTV video server streams to a client; a `ClientRxTracePlot` records the Rx traffic.
@@ -116,6 +152,25 @@ Draws samples from the NRTV traffic-model random-variable distributions and plot
 
 - **Outputs:** gnuplot `.plt` files in the working directory — `nrtv-num-of-frames.plt`, `nrtv-slice-size.plt`, `nrtv-slice-encoding-delay.plt`, `nrtv-idle-time.plt` (render with `gnuplot *.plt`).
 - **Key args:** `--numOfSamples` (number of samples drawn per distribution; default 100000).
+
+### ntn-cbr-leo-link
+
+A minimal CBR data plane over a single point-to-point LEO link — the lightweight, radio-physics-free path for latency / loss studies. The link carries a TR 38.821-derived one-way propagation delay and a receive-side error model, and `FlowMonitor` reports the measured throughput / delay / jitter end to end.
+
+```sh
+./ns3 run "ntn-cbr-leo-link --simTime=10 --intervalMs=5"
+```
+
+- **Outputs:** a measured `FlowMonitor` summary on stdout (throughput, mean delay, jitter).
+- **Key args:** `--simTime` (s, def 10), `--intervalMs` (CBR inter-packet interval, ms, def 5), `--pktSize` (payload bytes, def 1024), `--errorRate` (per-packet loss on the rx device, def 0.01), `--delayMs` (one-way prop delay, ms, def 12.885 ≈ LEO-600 RTD 25.77 ms), `--dataRateMbps` (link rate, def 50).
+
+### three-gpp-http-example
+
+The 3GPP HTTP traffic model (browsing sessions of a main object plus embedded objects with reading-time gaps), retained for NTN web-browsing studies over a satellite bent-pipe / regenerative link. **Source-only:** `examples/three-gpp-http-example.cc` (arg `--SimulationTime`, default 300 s) is shipped as a reference program but is **not** registered as an `ns3 run` target in `examples/CMakeLists.txt`; the HTTP model is exercised instead by the `three-gpp-http-client-server-test` system suite:
+
+```sh
+./test.py -s three-gpp-http-client-server-test
+```
 
 ## Build, run & test
 

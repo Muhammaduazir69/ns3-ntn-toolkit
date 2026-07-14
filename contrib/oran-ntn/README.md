@@ -533,6 +533,29 @@ real radio.
 
 **Key args:** `--simSeconds`, `--disasterAt`, `--outputDir`.
 
+### oran-ntn-e2-termination
+
+A standalone, **two-process** E2 end-to-end driver over a **real SCTP association** (the
+transport the O-RAN E2 interface mandates). Run it twice as separate OS processes — one as
+the RIC (listener), one as the agent that opens the E2AP association and sends RIC
+indications — to exercise the actual on-the-wire E2 setup + indication handshake rather than
+an in-process stub.
+
+```sh
+# terminal 1 — RIC (listener)
+./ns3 run "oran-ntn-e2-termination --role=ric --port=36421"
+# terminal 2 — agent (connects + sends indications)
+./ns3 run "oran-ntn-e2-termination --role=agent --port=36421 --indications=5"
+```
+
+**Outputs:** console — the RIC prints setup-requests handled and indications forwarded; the
+process exits non-zero if the E2 setup / indication handshake did not complete, so it doubles
+as a CI check.
+**Key args:** `--role` (`ric` | `agent`; default `ric`), `--proto` (`sctp` | `tcp`; default
+`sctp`), `--host` (bind/connect host; default `127.0.0.1`), `--port` (E2 port; default
+`36421`), `--duration` (RIC listen seconds; default 8), `--indications` (agent: number of RIC
+indications to send; default 5).
+
 ## Build, run & test
 
 The module builds with the parent toolkit from the ns-3 root:

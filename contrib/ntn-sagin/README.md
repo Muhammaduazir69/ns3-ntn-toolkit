@@ -304,6 +304,23 @@ transitions, delivered packets, in-band one-way delay / jitter / loss) on the co
 **Key args:** `--simSeconds`, `--altKm`, `--inclDeg`, `--leadSeconds`, `--minElevDeg`,
 `--dataRateMbps`, `--packetBytes`, `--spaceCapMbps`, `--eirpDbm`, `--minSnrDb`.
 
+### ntn-sagin-orphan-mobility-showcase
+
+Gives the toolkit's finished-but-unused SAGIN classes a real home: a HAPS flying a
+programmatic loiter racetrack (`sagin::HapsTrajectoryMobilityModel`, interpolated to
+`Simulator::Now()`), a real ground → HAPS → LEO packet plane, and a 3D scene. Doppler and
+relay geometry are computed from the live positions over the run.
+
+```bash
+./ns3 run "ntn-sagin-orphan-mobility-showcase --duration=120"
+```
+
+**Outputs:** per-step relay-geometry / Doppler trace and a measured summary on the console;
+the HAPS trajectory is written to `orphan-haps-trajectory.csv`; optional 3D scene files when
+enabled — NetSimulyzer JSON (`--netSim`) and Cesium CZML (`--czml`).
+**Key args:** `--duration` (sim duration, s; default 120), `--netSim` (NetSimulyzer 3D JSON
+output path; empty = off), `--czml` (Cesium CZML 3D output path; empty = off).
+
 ## Build, run & test
 
 ```bash

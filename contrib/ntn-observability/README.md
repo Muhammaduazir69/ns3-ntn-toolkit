@@ -100,6 +100,18 @@ Outputs: InfluxDB line-protocol file at `--out` (default `ntn-observability-traf
 
 Key args: `--simSeconds` (sim duration, s; default 40) · `--leoAltKm` (satellite altitude, km; default 550) · `--freqGHz` (carrier frequency, GHz; default 12, Ku-band) · `--satEirpDbm` (satellite EIRP / gNB Tx power, dBm) · `--out` (line-protocol output file) · `--influxHost` (InfluxDB/Telegraf UDP host; empty = file) · `--influxPort` (InfluxDB/Telegraf UDP port) · `--outputDir` (output directory for `sim_health.csv`).
 
+### ntn-netsimulyzer-official-demo
+
+Path B of the toolkit's 3D-visualization plan: drives the **official usnistgov NetSimulyzer** ns-3 module (schema-exact NetSimulyzer-1.0 JSON) from a live NR / mmwave NTN cell, so satellites and UEs render with per-UE, SINR-driven state. This is the standards-module path alongside the home-grown `NtnSceneRecorder`.
+
+```sh
+./ns3 run "ntn-netsimulyzer-official-demo --sats=6 --ues=4 --duration=30 --radio=nr"
+```
+
+Outputs: an official NetSimulyzer JSON scene at `--out` (default `ntn-official.json`) — open it in the NetSimulyzer desktop application.
+
+Key args: `--sats` (satellites to render; default 6) · `--ues` (UEs to render; default 4) · `--duration` (sim duration, s; default 30) · `--altitude` (constellation altitude, km; default 550) · `--radio` (radio backend: `nr` = 5G-LENA FR1 or `mmwave` = FR2; default `nr`) · `--out` (NetSimulyzer JSON output path; default `ntn-official.json`).
+
 ## Build, run & test
 
 ```bash

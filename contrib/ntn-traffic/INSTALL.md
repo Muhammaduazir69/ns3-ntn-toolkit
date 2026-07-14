@@ -175,6 +175,49 @@ Draws samples from the NRTV traffic-model distributions and writes gnuplot
 `nrtv-slice-encoding-delay.plt`, `nrtv-idle-time.plt`; render with `gnuplot *.plt`).
 Args: `numOfSamples` (default 100000).
 
+The next three run on the **5G-LENA (`nr`) FR1 backend** of `NtnRealStackHelper`
+(they additionally link `contrib/nr`, see [§2](#2-dependencies)).
+
+### 5g. ntn-nr-fr1-demo — FR1 NR NTN radio spine
+
+```bash
+./ns3 run "ntn-nr-fr1-demo --simTime=2 --numerology=1"
+```
+A real NR data plane at FR1 numerology (30 kHz SCS) on an S-band 2.0 GHz carrier
+with 20 MHz bandwidth — the FR1 regime the FR2-locked `mmwave` path cannot reach.
+One LEO gNB at ~600 km over a few ground UEs; prints a measured NR summary.
+Args: `simTime` (s, def 2), `numUes` (def 3), `altitudeKm` (def 600),
+`numerology` (0 = 15 kHz, 1 = 30 kHz; def 1), `satEirpDbm` (def 70),
+`freqGhz` (def 2), `bwMhz` (def 20), `outputDir` (def `./`).
+
+### 5h. ntn-nr-deep-integration-demo — the four NR deep-integration enablers
+
+```bash
+./ns3 run "ntn-nr-deep-integration-demo"
+```
+Exercises D (native NR stats + measured MCS/rank/PRB + NTN HARQ), C (QoS slices →
+BWPs + OfdmaQos + per-5QI bearers), B (real MIMO), and the armed A (A3/X2
+handover). Two gNBs + ground UEs; prints a measured four-enabler summary and the
+native NR PDCP/RLC/MAC/PHY stat files. (Handover count is 0 here by design — see
+5i for a firing handover.)
+Args: `slices` (def true), `simTime` (s, def 10), `numUes` (def 6),
+`altitudeKm` (def 600), `satEirpDbm` (def 70), `bwMhz` (def 30), `outputDir`
+(def `./nr-deep-demo/`).
+
+### 5i. ntn-nr-handover-pass — a firing NR A3/X2 inter-satellite handover
+
+```bash
+./ns3 run "ntn-nr-handover-pass"
+```
+The dedicated Enabler-A proof: on a realistic 600 km LEO pass the serving
+satellite flies off while the neighbour rises overhead, the UE's measured
+neighbour RSRP crosses the serving cell by the hysteresis, and an X2 handover
+fires (`[A] Handovers done: 1` at the defaults). Keep `numUes=1` (see the module
+README note on the vendored multi-UE X2-forwarding limit).
+Args: `simTime` (s, def 90), `numUes` (def 1), `altitudeKm` (def 600),
+`hystDb` (A3 hysteresis, def 2), `tttMs` (A3 time-to-trigger, def 512),
+`neighbourBehindKm` (def 600).
+
 > `examples/three-gpp-http-example.cc` (arg `--SimulationTime`) is shipped as a
 > source file but is **not** registered as an `ns3 run` target in
 > `examples/CMakeLists.txt`; the HTTP model is instead exercised by the
