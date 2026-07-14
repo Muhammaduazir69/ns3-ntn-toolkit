@@ -24,6 +24,9 @@
 // nr (5G-LENA) backend
 #include "ns3/antenna-module.h"
 #include "ns3/nr-module.h"
+#include "ns3/spectrum-channel.h"
+#include "ns3/spectrum-propagation-loss-model.h"
+#include "ns3/uinteger.h"
 #include "ns3/nr-gnb-net-device.h"
 #include "ns3/nr-ue-net-device.h"
 #include "ns3/nr-spectrum-phy.h"
@@ -55,6 +58,28 @@ namespace ns3
 using namespace mmwave;
 
 NS_LOG_COMPONENT_DEFINE("NtnRealStackHelper");
+
+namespace
+{
+// Map a 5QI to the BwpManagerAlgorithmStatic attribute that routes that QCI to a
+// BWP index (Enabler C). The NrEpsBearer::Qci enum value IS the 5QI number, and
+// each Qci has a same-named "route to BWP" attribute on the static BWP manager.
+// Returns "" for a 5QI without a dedicated routing attribute (falls back to BWP 0).
+std::string
+QciAttrName(uint8_t fiveQi)
+{
+    switch (fiveQi)
+    {
+    case 1:  return "GBR_CONV_VOICE";          // conversational voice
+    case 2:  return "GBR_CONV_VIDEO";          // conversational / live video (eMBB)
+    case 9:  return "NGBR_VIDEO_TCP_DEFAULT";  // default non-GBR (mMTC / background)
+    case 79: return "NGBR_V2X";                // non-GBR V2X
+    case 80: return "NGBR_LOW_LAT_EMBB";       // low-latency eMBB
+    case 82: return "DGBR_DISCRETE_AUT_SMALL"; // delay-critical GBR (URLLC)
+    default: return "";
+    }
+}
+} // namespace
 
 NtnRealStackHelper::NtnRealStackHelper() = default;
 NtnRealStackHelper::~NtnRealStackHelper() = default;
@@ -391,12 +416,51 @@ NtnRealStackHelper::BuildNrRadio()
     m_nr->SetBeamformingHelper(m_nrBeamforming);
     m_nr->SetEpcHelper(m_nrEpc);
 
-    // Single operational band -> 1 CC -> 1 FR1 BWP.
+    // ---- Enabler C: MAC scheduler ---------------------------------------
+    // Multi-slice runs REQUIRE the QoS scheduler to differentiate 5QI; a
+    // caller SetScheduler() overrides. Default (single slice, no override) is
+    // NR's own default TdmaRR -> historical behaviour.
+    Scheduler sched = m_scheduler;
+    if (m_slices.size() >= 2 && sched == Scheduler::TdmaRR)
+    {
+        sched = Scheduler::OfdmaQos;
+    }
+    switch (sched)
+    {
+    case Scheduler::OfdmaRR:
+        m_nr->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerOfdmaRR"));
+        break;
+    case Scheduler::OfdmaPF:
+        m_nr->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerOfdmaPF"));
+        break;
+    case Scheduler::OfdmaQos:
+        m_nr->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerOfdmaQos"));
+        break;
+    case Scheduler::TdmaRR:
+    default:
+        break; // NR default
+    }
+
+    // ---- Enabler A: NR inter-cell handover algorithm --------------------
+    // NOTE: the vendored 5G-LENA v3.3 NrHelper keeps a handover-algorithm
+    // factory (SetHandoverAlgorithmType) but never instantiates it or wires it
+    // to the gNB RRC -- the x2-handover tests are commented out of that module's
+    // build, i.e. helper-driven handover is unfinished upstream. Calling
+    // SetHandoverAlgorithmType here would therefore be a no-op. We instead build
+    // and cross-wire the A3-RSRP algorithm per gNB ourselves, after the devices
+    // exist (the RRC then knows its carrier count) and before the UEs attach
+    // (so the EVENT_A3 measurement config is in place when they connect). See
+    // the wiring block after InstallGnbDevice below.
+
+    // ---- Enabler D: NTN-stretched NR HARQ process pool (before install) --
+    ConfigureNtnHarqProfileNr();
+
+    // ---- Enabler C: one BWP per slice (default 1 BWP) --------------------
+    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
     CcBwpCreator ccBwpCreator;
-    const uint8_t numCcPerBand = 1;
     CcBwpCreator::SimpleOperationBandConf bandConf(m_freqHz,
                                                    m_bwHz,
-                                                   numCcPerBand,
+                                                   nBwp,
                                                    BandwidthPartInfo::UMi_StreetCanyon);
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
 
@@ -405,37 +469,79 @@ NtnRealStackHelper::BuildNrRadio()
     m_nr->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
     m_nr->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
-    // Override the BWP large-scale loss with Friis (frame-independent, valid at
-    // LEO range); InitializeOperationBand keeps the 3GPP spatial model for array
-    // gain. Store the Friis head so AddExtraPropagationLoss can chain onto it.
+    // Friis large-scale loss on EVERY BWP (frame-independent, valid at LEO
+    // range); InitializeOperationBand keeps the 3GPP spatial model for array
+    // gain. Store the first Friis head so AddExtraPropagationLoss can chain.
+    for (uint8_t cc = 0; cc < nBwp; ++cc)
     {
-        BandwidthPartInfoPtr& bwp0 = band.GetBwpAt(0, 0);
+        BandwidthPartInfoPtr& bwp = band.GetBwpAt(cc, 0);
         Ptr<FriisPropagationLossModel> friis = CreateObject<FriisPropagationLossModel>();
         friis->SetAttribute("Frequency", DoubleValue(m_freqHz));
-        bwp0->m_propagation = friis;
-        m_nrBaseLoss = friis;
+        bwp->m_propagation = friis;
+        if (cc == 0)
+        {
+            m_nrBaseLoss = friis;
+        }
     }
 
     m_nr->InitializeOperationBand(&band);
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
+
+    // Enabler B seam: keep each BWP's spectrum channel so a caller can install
+    // a frequency-selective / spatial SpectrumPropagationLossModel later.
+    m_nrBwpChannels.clear();
+    for (const auto& bwp : allBwps)
+    {
+        m_nrBwpChannels.push_back(bwp.get()->m_channel);
+    }
+    // Per-BWP RB count (for the measured PRB-utilisation fraction). SCS grows
+    // with numerology; each BWP carries m_bwHz/nBwp of the band.
+    const double scsHz = 15.0e3 * std::pow(2.0, m_numerology);
+    m_nrBandRb = std::max<uint32_t>(
+        1, static_cast<uint32_t>((m_bwHz / nBwp) / (12.0 * scsHz)));
+
+    // ---- Enabler C: route each slice's 5QI to its BWP (gNB + UE mgr) ------
+    for (uint8_t i = 0; i < m_slices.size(); ++i)
+    {
+        const std::string attr = QciAttrName(m_slices[i].fiveQi);
+        if (!attr.empty())
+        {
+            m_nr->SetGnbBwpManagerAlgorithmAttribute(attr, UintegerValue(i));
+            m_nr->SetUeBwpManagerAlgorithmAttribute(attr, UintegerValue(i));
+        }
+    }
 
     m_nrBeamforming->SetAttribute("BeamformingMethod",
                                   TypeIdValue(DirectPathBeamforming::GetTypeId()));
     // Zero the S1-U latency; the NTN one-way delay rides the backhaul P2P leg.
     m_nrEpc->SetAttribute("S1uLinkDelay", TimeValue(MilliSeconds(0)));
 
-    // Antennas: gNB 4x8 UPA, UE 1x2 UPA (isotropic elements).
-    m_nr->SetUeAntennaAttribute("NumRows", UintegerValue(1));
-    m_nr->SetUeAntennaAttribute("NumColumns", UintegerValue(2));
+    // Antennas: gNB and UE UniformPlanarArray. Defaults gNB 8x8 (64 elem) to
+    // match the mmwave backend's array gain, UE 1x2. Enabler B (SetMimo) grows
+    // these to enable real spatial multiplexing.
+    m_nr->SetUeAntennaAttribute("NumRows", UintegerValue(m_ueRows));
+    m_nr->SetUeAntennaAttribute("NumColumns", UintegerValue(m_ueCols));
     m_nr->SetUeAntennaAttribute("AntennaElement",
                                 PointerValue(CreateObject<IsotropicAntennaModel>()));
-    // 8x8 gNB array (64 elements) to match the mmwave backend's array gain, so
-    // examples get a comparable link budget on nr at the same configured EIRP
-    // (the nr backend otherwise needed ~+15 dB EIRP for a healthy LEO link).
-    m_nr->SetGnbAntennaAttribute("NumRows", UintegerValue(8));
-    m_nr->SetGnbAntennaAttribute("NumColumns", UintegerValue(8));
+    m_nr->SetGnbAntennaAttribute("NumRows", UintegerValue(m_gnbRows));
+    m_nr->SetGnbAntennaAttribute("NumColumns", UintegerValue(m_gnbCols));
     m_nr->SetGnbAntennaAttribute("AntennaElement",
                                  PointerValue(CreateObject<IsotropicAntennaModel>()));
+
+    // Enabler B: real NR MIMO — NrPmSearchFull rank/PMI adaptation over the
+    // (larger) arrays above. The precoding-matrix search picks the DL rank per
+    // subband from the channel matrix, so UM-MIMO capacity becomes measured.
+    if (m_mimo)
+    {
+        NrHelper::MimoPmiParams mp;
+        mp.pmSearchMethod = "ns3::NrPmSearchFull";
+        mp.rankLimit = m_mimoRank;
+        // NR requires subbandSize 4 or 8 for BWPs of 24..72 PRBs; use 8 (valid
+        // across the NTN-FR1 BWP sizes we build). subbandSize=1 (the struct
+        // default) asserts on those bands.
+        mp.subbandSize = 8;
+        m_nr->SetupMimoPmi(mp);
+    }
 
     // Install devices on the caller's mobility-carrying nodes.
     m_enbDevs = m_nr->InstallGnbDevice(m_gnb, allBwps);
@@ -444,24 +550,73 @@ NtnRealStackHelper::BuildNrRadio()
     stream += m_nr->AssignStreams(m_enbDevs, stream);
     stream += m_nr->AssignStreams(m_ueDevs, stream);
 
-    // FR1 numerology + powers per device.
+    // FR1 numerology + powers per device, on EVERY BWP (else BWPs 1..N-1 keep
+    // the default low TxPower and their slices see a collapsed SINR). The
+    // configured power is the per-BWP conducted power; splitting the EIRP across
+    // BWPs is a caller concern (each slice BWP carries m_satEirpDbm here).
     for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
     {
-        m_nr->GetGnbPhy(m_enbDevs.Get(i), 0)
-            ->SetAttribute("Numerology", UintegerValue(m_numerology));
-        m_nr->GetGnbPhy(m_enbDevs.Get(i), 0)->SetAttribute("TxPower", DoubleValue(m_satEirpDbm));
+        for (uint8_t b = 0; b < nBwp; ++b)
+        {
+            m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
+                ->SetAttribute("Numerology", UintegerValue(m_numerology));
+            m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
+                ->SetAttribute("TxPower", DoubleValue(m_satEirpDbm));
+        }
     }
     for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
     {
-        m_nr->GetUePhy(m_ueDevs.Get(i), 0)->SetAttribute("TxPower", DoubleValue(m_ueTxDbm));
+        for (uint8_t b = 0; b < nBwp; ++b)
+        {
+            m_nr->GetUePhy(m_ueDevs.Get(i), b)->SetAttribute("TxPower", DoubleValue(m_ueTxDbm));
+        }
     }
     m_nr->UpdateDeviceConfigs(m_enbDevs);
     m_nr->UpdateDeviceConfigs(m_ueDevs);
 
-    // NOTE: the mmwave NTN HARQ profile / RLC-RRC slant-timer relaxation
-    // (ConfigureNtnHarqProfile / ConfigureNtnRlcRrcTimers) are mmwave-attribute
-    // specific and are honest no-ops on the nr backend; nr runs RLC UM with a
-    // large buffer here. NTN HARQ/K_offset timing for nr is a follow-on.
+    // ---- Enabler A: instantiate + cross-wire the A3-RSRP handover algorithm.
+    // This is the wiring the vendored NrHelper omits (see the note above). It
+    // must run AFTER InstallGnbDevice -- the RRC now knows its component-carrier
+    // count, which AddUeMeasReportConfig needs -- and BEFORE AttachToClosestGnb,
+    // so the EVENT_A3 report config that the algorithm's DoInitialize() registers
+    // on the gNB RRC is delivered to the UE in its connection reconfiguration.
+    // Without this, SetHandoverAlgorithmType alone leaves the RRC on the no-op
+    // SAP and the UE never emits neighbour measurement reports (handover count
+    // stays 0 regardless of geometry).
+    if (m_handover && m_gnb.GetN() >= 2)
+    {
+        for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+        {
+            Ptr<NrGnbNetDevice> gnbDev = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
+            Ptr<NrGnbRrc> rrc = gnbDev->GetRrc();
+            Ptr<NrA3RsrpHandoverAlgorithm> algo = CreateObject<NrA3RsrpHandoverAlgorithm>();
+            algo->SetAttribute("Hysteresis", DoubleValue(m_hoHystDb));
+            algo->SetAttribute("TimeToTrigger", TimeValue(m_hoTtt));
+            // Cross-wire the handover-management SAP (RRC <-> algorithm), exactly
+            // as LteHelper::InstallSingleEnbDevice does for the LTE stack.
+            rrc->SetNrHandoverManagementSapProvider(algo->GetNrHandoverManagementSapProvider());
+            algo->SetNrHandoverManagementSapUser(rrc->GetNrHandoverManagementSapUser());
+            // Initialize() -> DoInitialize() registers the EVENT_A3 RSRP report
+            // config on this gNB's RRC now (before any UE connects).
+            algo->Initialize();
+            m_hoAlgos.push_back(algo);
+        }
+    }
+
+    // Enabler D: native 5G-LENA stat calculators (per-DRB PDCP/RLC
+    // throughput+delay, per-slot MAC MCS/PRB, PHY RxPacketTrace) written under
+    // the output dir. The measured MCS/rank/PRB the helper exposes are captured
+    // separately in DlRxTraceNr(); EnableTraces() adds the authoritative file
+    // dump an O-RAN KPM / observability sink can also read.
+    if (m_nrNativeTraces)
+    {
+        m_nr->EnableTraces();
+    }
+
+    // NOTE: the mmwave NTN RLC-RRC slant-timer relaxation is mmwave-attribute
+    // specific; nr runs RLC UM with a large buffer here. The NR HARQ process
+    // pool IS now stretched to the slant (ConfigureNtnHarqProfileNr, above)
+    // when SetNtnHarqProfile(true). NR K_offset timing remains a follow-on.
 
     // ---- Remote host behind the core (carries the LEO feeder+core latency) ----
     Ptr<Node> pgw = m_nrEpc->GetPgwNode();
@@ -499,13 +654,29 @@ NtnRealStackHelper::BuildNrRadio()
 
     m_nr->AttachToClosestGnb(m_ueDevs, m_enbDevs);
 
+    // ---- Enabler A: X2 interfaces + handover-completion trace ------------
+    // With >=2 gNBs (e.g. several satellites in view) the A3-RSRP algorithm set
+    // above now moves a UE to a real neighbour cell on measured RSRP, over the
+    // X2 the following call stands up. GetHandoverCount() reports completions.
+    if (m_handover && m_gnb.GetN() >= 2)
+    {
+        m_nr->AddX2Interface(m_gnb);
+        Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/HandoverEndOk",
+                        MakeCallback(&NtnRealStackHelper::NrHandoverEndOk, this));
+    }
+
     // ---- Measured-KPI PHY sink: DL SINR/TBLER from the UE NrSpectrumPhy ----
-    // Feeds the SAME accumulators as the mmwave path via AccumulateDl().
+    // Feeds the SAME accumulators as the mmwave path via AccumulateDl(). Connect
+    // the trace on EVERY BWP the UE carries (nBwp) so per-slice (per-BWP) TBs on
+    // BWPs 1..N-1 are measured too — not only the primary BWP 0.
     for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
     {
-        Ptr<NrSpectrumPhy> sp = m_nr->GetUePhy(m_ueDevs.Get(i), 0)->GetSpectrumPhy();
-        sp->TraceConnectWithoutContext("RxPacketTraceUe",
-                                       MakeCallback(&NtnRealStackHelper::DlRxTraceNr, this));
+        for (uint8_t b = 0; b < nBwp; ++b)
+        {
+            Ptr<NrSpectrumPhy> sp = m_nr->GetUePhy(m_ueDevs.Get(i), b)->GetSpectrumPhy();
+            sp->TraceConnectWithoutContext("RxPacketTraceUe",
+                                           MakeCallback(&NtnRealStackHelper::DlRxTraceNr, this));
+        }
     }
 
     NS_LOG_INFO("NtnRealStackHelper nr backend: " << m_enbDevs.GetN() << " gNB, " << m_ueDevs.GetN()
@@ -534,6 +705,137 @@ NtnRealStackHelper::AddExtraPropagationLoss(Ptr<PropagationLossModel> loss)
         tail = tail->GetNext();
     }
     tail->SetNext(loss);
+}
+
+// ---- Enabler A: handover config -----------------------------------------
+void
+NtnRealStackHelper::SetHandover(bool enable, double hysteresisDb, Time ttt)
+{
+    NS_ABORT_MSG_IF(m_built, "SetHandover must be called before Build()");
+    m_handover = enable;
+    m_hoHystDb = hysteresisDb;
+    m_hoTtt = ttt;
+}
+
+void
+NtnRealStackHelper::NrHandoverEndOk(std::string /*ctx*/,
+                                    uint64_t /*imsi*/,
+                                    uint16_t /*cellId*/,
+                                    uint16_t /*rnti*/)
+{
+    ++m_hoCount;
+}
+
+// ---- Enabler B: MIMO + spectrum-level channel plugin --------------------
+void
+NtnRealStackHelper::SetMimo(uint8_t gnbRows,
+                            uint8_t gnbCols,
+                            uint8_t ueRows,
+                            uint8_t ueCols,
+                            uint8_t rankLimit)
+{
+    NS_ABORT_MSG_IF(m_built, "SetMimo must be called before Build()");
+    m_mimo = true;
+    m_gnbRows = gnbRows;
+    m_gnbCols = gnbCols;
+    m_ueRows = ueRows;
+    m_ueCols = ueCols;
+    m_mimoRank = rankLimit;
+}
+
+void
+NtnRealStackHelper::AddSpectrumChannelLoss(Ptr<SpectrumPropagationLossModel> loss)
+{
+    NS_ABORT_MSG_IF(!m_built, "AddSpectrumChannelLoss before Build()");
+    if (!loss)
+    {
+        return;
+    }
+    NS_ABORT_MSG_IF(m_backend != RadioBackend::Nr,
+                    "AddSpectrumChannelLoss is nr-backend only (SetRadioBackend(Nr))");
+    NS_ABORT_MSG_IF(m_nrBwpChannels.empty(), "no NR BWP spectrum channels to plug into");
+    // Install onto every BWP's spectrum channel, so the caller's per-RB /
+    // per-antenna transfer function drives NR AMC/BLER/rank on all slices.
+    for (const auto& ch : m_nrBwpChannels)
+    {
+        if (ch)
+        {
+            ch->AddSpectrumPropagationLossModel(loss);
+        }
+    }
+}
+
+// ---- Enabler D: NR HARQ process pool stretched to the slant RTT ----------
+void
+NtnRealStackHelper::ConfigureNtnHarqProfileNr()
+{
+    // Only when the caller opted into the NTN HARQ profile. NR runs HARQ by
+    // default; the NTN hazard is recycling a stop-and-wait process before its
+    // feedback returns over the LEO slant. Size the pool to cover the RTT.
+    if (!m_ntnHarqProfile)
+    {
+        return;
+    }
+    constexpr double kC = 299792458.0;
+    const double slantM = WorstCaseSlantM();       // metres (>=600 km fallback)
+    const double rttS = 2.0 * slantM / kC;         // round trip
+    const double slotS = 1.0e-3 / std::pow(2.0, m_numerology); // NR slot duration
+    constexpr double kRounds = 4.0;                // initial TX + 3 retx in flight
+    double n = std::ceil(rttS / slotS) + kRounds;
+    n = std::max(20.0, std::min(255.0, n));        // NumHarqProcess is uint8_t
+    m_nr->SetGnbMacAttribute("NumHarqProcess",
+                             UintegerValue(static_cast<uint32_t>(n)));
+    NS_LOG_INFO("NtnRealStackHelper nr HARQ profile: slant=" << slantM / 1e3 << " km, RTT="
+                                                             << rttS * 1e3 << " ms -> NumHarqProcess="
+                                                             << static_cast<uint32_t>(n));
+}
+
+// ---- Enabler D/C: measured MCS / rank / PRB / per-slice accessors --------
+double
+NtnRealStackHelper::GetMeanDlMcs() const
+{
+    return (m_dlGlobal.n > 0) ? m_dlGlobal.sumMcs / m_dlGlobal.n : NAN;
+}
+
+double
+NtnRealStackHelper::GetMeanDlRank() const
+{
+    return (m_dlGlobal.n > 0) ? m_dlGlobal.sumRank / m_dlGlobal.n : NAN;
+}
+
+double
+NtnRealStackHelper::GetMeanPrbUtil() const
+{
+    return (m_dlGlobal.n > 0) ? m_dlGlobal.sumRbFrac / m_dlGlobal.n : NAN;
+}
+
+double
+NtnRealStackHelper::GetCellMeanMcs(uint16_t cellId) const
+{
+    auto it = m_dlPerCell.find(cellId);
+    if (it == m_dlPerCell.end() || it->second.n == 0)
+    {
+        return NAN;
+    }
+    return it->second.sumMcs / it->second.n;
+}
+
+double
+NtnRealStackHelper::GetBwpMeanSinrDb(uint8_t bwpId) const
+{
+    auto it = m_dlPerBwp.find(bwpId);
+    if (it == m_dlPerBwp.end() || it->second.n == 0)
+    {
+        return NAN;
+    }
+    return it->second.sumSinrDb / it->second.n;
+}
+
+uint64_t
+NtnRealStackHelper::GetBwpRxTb(uint8_t bwpId) const
+{
+    auto it = m_dlPerBwp.find(bwpId);
+    return (it == m_dlPerBwp.end()) ? 0 : it->second.n;
 }
 
 void
@@ -684,6 +986,25 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
     m_clientApps.Add(client);
     client->TraceConnectWithoutContext("Tx",
                                        MakeCallback(&NtnRealStackHelper::DlClientTx, this));
+
+    // Enabler C: activate a dedicated per-5QI EPS bearer so the QoS scheduler /
+    // BWP manager actually differentiate this flow (instead of everything
+    // riding one default bearer). Only on the nr backend when slices or the
+    // QoS scheduler are configured — otherwise the historical default bearer
+    // is kept for zero regression.
+    const bool perQosBearers =
+        (m_backend == RadioBackend::Nr) &&
+        (!m_slices.empty() || m_scheduler == Scheduler::OfdmaQos);
+    if (perQosBearers && !QciAttrName(fiveQi).empty())
+    {
+        NrEpsBearer bearer(static_cast<NrEpsBearer::Qci>(fiveQi));
+        Ptr<NrEpcTft> tft = Create<NrEpcTft>();
+        NrEpcTft::PacketFilter pf;
+        pf.localPortStart = dlPort;
+        pf.localPortEnd = dlPort;
+        tft->Add(pf);
+        m_nr->ActivateDedicatedEpsBearer(m_ueDevs.Get(ueIdx), bearer, tft);
+    }
 
     sink->SetStartTime(Seconds(0.0));
     sink->SetStopTime(m_simTime);
@@ -862,7 +1183,11 @@ NtnRealStackHelper::AccumulateDl(double sinrLinear,
                                  bool corrupt,
                                  uint16_t cellId,
                                  uint16_t rnti,
-                                 uint32_t tbSize)
+                                 uint32_t tbSize,
+                                 double mcs,
+                                 double rank,
+                                 double rbFrac,
+                                 uint8_t bwpId)
 {
     // Only count data TBs that actually carry a transport block.
     if (tbSize == 0)
@@ -871,30 +1196,35 @@ NtnRealStackHelper::AccumulateDl(double sinrLinear,
     }
     const double sinrDb = 10.0 * std::log10(std::max(sinrLinear, 1e-12));
 
-    m_dlGlobal.sumSinrDb += sinrDb;
-    m_dlGlobal.sumTbler += tbler;
-    m_dlGlobal.n += 1;
-    if (corrupt)
-    {
-        m_dlGlobal.corrupt += 1;
-    }
+    // Fold one measured sample into an accumulator (Enabler D adds MCS/rank/PRB).
+    auto fold = [&](SinrAccum& a) {
+        a.sumSinrDb += sinrDb;
+        a.sumTbler += tbler;
+        a.n += 1;
+        if (corrupt)
+        {
+            a.corrupt += 1;
+        }
+        if (mcs >= 0.0)
+        {
+            a.sumMcs += mcs;
+        }
+        if (rank >= 0.0)
+        {
+            a.sumRank += rank;
+        }
+        if (rbFrac >= 0.0)
+        {
+            a.sumRbFrac += rbFrac;
+        }
+    };
 
-    SinrAccum& cell = m_dlPerCell[cellId];
-    cell.sumSinrDb += sinrDb;
-    cell.sumTbler += tbler;
-    cell.n += 1;
-    if (corrupt)
+    fold(m_dlGlobal);
+    fold(m_dlPerCell[cellId]);
+    fold(m_dlPerRnti[rnti]);
+    if (mcs >= 0.0 || rank >= 0.0 || rbFrac >= 0.0)
     {
-        cell.corrupt += 1;
-    }
-
-    SinrAccum& ue = m_dlPerRnti[rnti];
-    ue.sumSinrDb += sinrDb;
-    ue.sumTbler += tbler;
-    ue.n += 1;
-    if (corrupt)
-    {
-        ue.corrupt += 1;
+        fold(m_dlPerBwp[bwpId]); // Enabler C: per-slice (per-BWP) breakdown
     }
     m_lastSinrDbPerRnti[rnti] = sinrDb;
     m_lastTblerPerRnti[rnti] = tbler;
@@ -915,15 +1245,22 @@ void
 NtnRealStackHelper::DlRxTraceNr(::ns3::RxPacketTraceParams params)
 {
     // ns3::RxPacketTraceParams (nr): same field family as mmwave; m_sinr is the
-    // linear average SINR. Feeds the identical accumulators as the mmwave path.
-    // Fully qualified (::ns3::) to disambiguate from mmwave::RxPacketTraceParams,
-    // which is in scope here via `using namespace mmwave`.
+    // linear average SINR. Feeds the identical accumulators as the mmwave path,
+    // and additionally the measured MCS / MIMO rank / PRB-utilisation / per-BWP
+    // (per-slice) breakdown (Enablers C/D). Fully qualified (::ns3::) to
+    // disambiguate from mmwave::RxPacketTraceParams (in scope via using).
+    const double rbFrac =
+        static_cast<double>(params.m_rbAssignedNum) / static_cast<double>(m_nrBandRb);
     AccumulateDl(params.m_sinr,
                  params.m_tbler,
                  params.m_corrupt,
                  static_cast<uint16_t>(params.m_cellId),
                  params.m_rnti,
-                 params.m_tbSize);
+                 params.m_tbSize,
+                 static_cast<double>(params.m_mcs),
+                 static_cast<double>(params.m_rank),
+                 rbFrac,
+                 params.m_bwpId);
 }
 
 uint16_t

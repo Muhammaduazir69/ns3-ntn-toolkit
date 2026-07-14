@@ -890,8 +890,20 @@ NrMacSchedulerNs3::DoSchedDlCqiInfoReq(
 
     for (const auto& cqi : params.m_cqiList)
     {
-        NS_ASSERT(m_ueMap.find(cqi.m_rnti) != m_ueMap.end());
-        const std::shared_ptr<NrMacSchedulerUeInfo>& ue = m_ueMap.find(cqi.m_rnti)->second;
+        // A DL CQI report for an RNTI no longer in the UE map can arrive in the
+        // slots straddling an inter-cell handover: the UE has just been released
+        // from this (source) cell, but a report it sent earlier is still in
+        // flight. Drop such stale feedback rather than assert, so handover does
+        // not abort the simulation (matches the tolerant behaviour of the LTE
+        // FF schedulers).
+        auto itCqiUe = m_ueMap.find(cqi.m_rnti);
+        if (itCqiUe == m_ueMap.end())
+        {
+            NS_LOG_INFO("Ignoring DL CQI for unknown RNTI "
+                        << cqi.m_rnti << " (UE likely released by handover)");
+            continue;
+        }
+        const std::shared_ptr<NrMacSchedulerUeInfo>& ue = itCqiUe->second;
 
         if (cqi.m_cqiType == DlCqiInfo::WB)
         {

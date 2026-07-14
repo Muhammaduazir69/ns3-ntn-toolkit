@@ -64,6 +64,34 @@ build_lib_example(
 )
 
 build_lib_example(
+  NAME ntn-nr-deep-integration-demo
+  SOURCE_FILES ntn-nr-deep-integration-demo.cc
+  LIBRARIES_TO_LINK
+    ${libntn-traffic}
+    ${libnr}
+    ${liblte}
+    ${libmobility}
+    ${libinternet}
+    ${libflow-monitor}
+    ${libnetwork}
+    ${libcore}
+)
+
+build_lib_example(
+  NAME ntn-nr-handover-pass
+  SOURCE_FILES ntn-nr-handover-pass.cc
+  LIBRARIES_TO_LINK
+    ${libntn-traffic}
+    ${libnr}
+    ${liblte}
+    ${libmobility}
+    ${libinternet}
+    ${libflow-monitor}
+    ${libnetwork}
+    ${libcore}
+)
+
+build_lib_example(
   NAME ntn-oran-qos-flows
   SOURCE_FILES ntn-oran-qos-flows.cc
   LIBRARIES_TO_LINK

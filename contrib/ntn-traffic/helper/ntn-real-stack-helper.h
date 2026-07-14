@@ -67,10 +67,13 @@ class Packet;
 class Address;
 class MobilityModel;
 class PropagationLossModel;
+class SpectrumPropagationLossModel;
+class SpectrumChannel;
 class NtnOranAiFlowMonitor;
 // nr (5G-LENA) backend types — see SetRadioBackend / RadioBackend::Nr.
 class NrHelper;
 class NrPointToPointEpcHelper;
+class NrHandoverAlgorithm;
 class IdealBeamformingHelper;
 struct RxPacketTraceParams; // ns3::RxPacketTraceParams (nr); != mmwave::RxPacketTraceParams
 
@@ -227,6 +230,90 @@ class NtnRealStackHelper
     void SetGates(HealthGates g) { m_gates = g; }
     void SetStrictGates(bool s) { m_strictGates = s; }
 
+    // =====================================================================
+    // NR deep-integration infrastructure (2026-07). All OFF by default, so
+    // the mmwave backend and the existing nr examples are unaffected unless
+    // a setter below is called. Every knob is nr-backend only.
+    // =====================================================================
+
+    // ---- Enabler D: native NR PHY/MAC/RLC/PDCP stats --------------------
+    /// Turn on 5G-LENA's native stat calculators (NrHelper::EnableTraces):
+    /// per-DRB PDCP/RLC throughput+delay, per-slot MAC MCS/PRB, and the PHY
+    /// RxPacketTrace, written as text files under the output dir. In addition
+    /// the helper always captures measured MCS / MIMO rank / PRB usage from the
+    /// NR RxPacketTrace into GetMeanDlMcs()/GetMeanDlRank()/GetMeanPrbUtil()
+    /// (nr backend only). Call before Build().
+    void SetNrNativeTraces(bool e) { m_nrNativeTraces = e; }
+    /// Measured mean DL MCS index from the NR error model (NaN if no samples).
+    double GetMeanDlMcs() const;
+    /// Measured mean DL MIMO rank (streams) from the NR PHY (NaN if none).
+    double GetMeanDlRank() const;
+    /// Measured mean DL PRB-utilisation fraction (assigned RBs / band RBs).
+    double GetMeanPrbUtil() const;
+    /// Per-cell measured mean DL MCS (NaN if no samples for that cell).
+    double GetCellMeanMcs(uint16_t cellId) const;
+
+    // ---- Enabler C: scheduler selection + per-slice BWP isolation --------
+    /// NR MAC scheduler. Default TdmaRR reproduces the historical behaviour.
+    /// OfdmaQos is the only scheduler that differentiates 5QI/QCI priorities.
+    enum class Scheduler : uint8_t
+    {
+        TdmaRR,   ///< TDMA round-robin (NR default, historical)
+        OfdmaRR,  ///< OFDMA round-robin
+        OfdmaPF,  ///< OFDMA proportional-fair
+        OfdmaQos, ///< OFDMA QoS-aware (differentiates 5QI)
+    };
+    /// Select the NR MAC scheduler (nr backend only). Call before Build().
+    void SetScheduler(Scheduler s) { m_scheduler = s; }
+    Scheduler GetScheduler() const { return m_scheduler; }
+
+    /// One network slice = a dedicated NR bandwidth part carrying one 5QI.
+    struct SliceSpec
+    {
+        std::string label; ///< human name (eMBB / URLLC / mMTC)
+        uint8_t fiveQi;    ///< 5QI carried by this slice (1,2,9,82,...)
+    };
+    /// Configure per-slice BWP isolation (nr backend only). Passing N>=2 slices:
+    ///  (1) splits the NR band into N equal contiguous BWPs (one per slice);
+    ///  (2) auto-selects the OfdmaQos scheduler unless SetScheduler() overrode it;
+    ///  (3) routes each slice's 5QI to its BWP via the gNB BWP manager;
+    ///  (4) activates a dedicated per-5QI EPS bearer for every matching flow.
+    /// Slice isolation then EMERGES from the real MAC under contention instead
+    /// of being asserted. Call before Build().
+    void SetSlices(std::vector<SliceSpec> slices) { m_slices = std::move(slices); }
+    /// Per-BWP (per-slice) measured mean DL SINR (dB), NaN if no samples.
+    double GetBwpMeanSinrDb(uint8_t bwpId) const;
+    /// Per-BWP (per-slice) transport blocks decoded at the UE PHY.
+    uint64_t GetBwpRxTb(uint8_t bwpId) const;
+
+    // ---- Enabler A: multi-gNB inter-satellite handover ------------------
+    /// Enable real NR inter-cell handover across the gNBs passed to Build()
+    /// (nr backend, >=2 gNBs). Installs the A3-RSRP handover algorithm + X2
+    /// interfaces so a UE re-selects a real neighbour cell on measured RSRP,
+    /// replacing free-space-scaled candidate SINR. Call before Build().
+    void SetHandover(bool enable, double hysteresisDb = 3.0, Time ttt = MilliSeconds(256));
+    /// Number of successfully completed NR handovers observed this run.
+    uint32_t GetHandoverCount() const { return m_hoCount; }
+
+    // ---- Enabler B: spectrum-level channel plugin + real MIMO ------------
+    /// Install a caller-supplied SpectrumPropagationLossModel onto the NR BWP
+    /// spectrum channel(s). Unlike AddExtraPropagationLoss() (a scalar dB
+    /// offset applied flat across the band), this is the FREQUENCY-SELECTIVE /
+    /// spatial seam: a module supplies a per-RB (and, with MIMO, per-antenna)
+    /// transfer function — THz per-line molecular absorption, a Sionna
+    /// ray-traced CIR, a RIS response — that drives NR AMC/BLER/rank per RB.
+    /// Call after Build() (the BWP channel exists once the band is initialised).
+    void AddSpectrumChannelLoss(Ptr<SpectrumPropagationLossModel> loss);
+    /// Enable real NR spatial multiplexing: size the gNB/UE UniformPlanarArray
+    /// and turn on NrPmSearchFull rank/PMI adaptation (nr backend only), so
+    /// UM-MIMO capacity and ray-traced rank become measured PHY quantities
+    /// instead of a scalar array-gain offset. Call before Build().
+    void SetMimo(uint8_t gnbRows,
+                 uint8_t gnbCols,
+                 uint8_t ueRows,
+                 uint8_t ueCols,
+                 uint8_t rankLimit = 2);
+
     // ---- Build the real radio stack -------------------------------------
     /**
      * \brief Wire mmwave gNB devices on \p gnbNodes and UE devices on
@@ -380,11 +467,21 @@ class NtnRealStackHelper
                       bool corrupt,
                       uint16_t cellId,
                       uint16_t rnti,
-                      uint32_t tbSize);
+                      uint32_t tbSize,
+                      double mcs = -1.0,     // nr: measured MCS index (<0 = n/a)
+                      double rank = -1.0,    // nr: measured MIMO rank (<0 = n/a)
+                      double rbFrac = -1.0,  // nr: assigned RBs / band RBs (<0 = n/a)
+                      uint8_t bwpId = 0);    // nr: BWP id (slice)
     // App-layer measured counters (connected to OnOff "Tx" / PacketSink "Rx").
     void DlClientTx(Ptr<const Packet> p);
     void DlSinkRx(Ptr<const Packet> p, const Address& from);
     void RunPeriodic(uint32_t idx);
+    // Enabler A: NrGnbRrc "HandoverEndOk" trace sink (counts completed HOs).
+    void NrHandoverEndOk(std::string ctx, uint64_t imsi, uint16_t cellId, uint16_t rnti);
+    // Enabler D: stretch the NR HARQ process pool to the slant RTT so a
+    // process is not recycled before its ACK returns (NR analogue of the
+    // mmwave ConfigureNtnHarqProfile). No-op unless SetNtnHarqProfile(true).
+    void ConfigureNtnHarqProfileNr();
 
     struct SinrAccum
     {
@@ -392,6 +489,9 @@ class NtnRealStackHelper
         double sumTbler = 0.0;
         uint64_t n = 0;
         uint64_t corrupt = 0;
+        double sumMcs = 0.0;    // measured MCS index (nr RxPacketTrace m_mcs)
+        double sumRank = 0.0;   // measured MIMO rank (nr m_rank)
+        double sumRbFrac = 0.0; // measured PRB fraction (m_rbAssignedNum / bandRb)
     };
 
     // Config
@@ -420,6 +520,18 @@ class NtnRealStackHelper
     RadioBackend m_backend{RadioBackend::Mmwave}; // default: zero-regression mmwave
     uint16_t m_numerology{1};                     // nr backend FR1 numerology (30 kHz)
 
+    // NR deep-integration config (all default-off / historical)
+    bool m_nrNativeTraces{false};                 // D: EnableTraces() native stat files
+    Scheduler m_scheduler{Scheduler::TdmaRR};     // C: NR MAC scheduler
+    std::vector<SliceSpec> m_slices;              // C: per-slice BWPs (empty = 1 BWP)
+    bool m_handover{false};                       // A: NR inter-cell handover
+    double m_hoHystDb{3.0};
+    Time m_hoTtt{MilliSeconds(256)};
+    bool m_mimo{false};                           // B: real NR MIMO
+    uint8_t m_gnbRows{8}, m_gnbCols{8}, m_ueRows{1}, m_ueCols{2}, m_mimoRank{1};
+    std::vector<Ptr<SpectrumChannel>> m_nrBwpChannels; // B: BWP spectrum channels (seam)
+    uint32_t m_nrBandRb{1};                       // total RBs (for PRB-util fraction)
+
     // ns-3 objects (mmwave backend)
     Ptr<mmwave::MmWaveHelper> m_mmwave;
     Ptr<mmwave::MmWavePointToPointEpcHelper> m_epc;
@@ -445,8 +557,11 @@ class NtnRealStackHelper
     SinrAccum m_dlGlobal;
     std::map<uint16_t, SinrAccum> m_dlPerCell;
     std::map<uint16_t, SinrAccum> m_dlPerRnti; // keyed by UE RNTI
+    std::map<uint8_t, SinrAccum> m_dlPerBwp;   // keyed by NR BWP id (per-slice)
     std::map<uint16_t, double> m_lastSinrDbPerRnti;
     std::map<uint16_t, double> m_lastTblerPerRnti;
+    uint32_t m_hoCount{0};                      // A: completed NR handovers
+    std::vector<Ptr<NrHandoverAlgorithm>> m_hoAlgos; // A: per-gNB A3 algos (kept alive)
 
     // Collected results
     double m_dlSinrDbMean{0.0};
