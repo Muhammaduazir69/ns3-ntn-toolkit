@@ -83,7 +83,8 @@ class Sib19Codec
   public:
     static constexpr std::size_t kSerialisedBytes = 124;
 
-    /// Returns the number of bytes written. Throws on under-size buffer.
+    /// Returns the number of bytes written, or 0 if `out` is null or the buffer
+    /// is smaller than `kSerialisedBytes` (no bytes are written in that case).
     static std::size_t Serialise(const Sib19Content& sib, uint8_t* out, std::size_t len);
     /// Parse `len` bytes starting at `in` into `sib`. Returns true on success.
     static bool Parse(const uint8_t* in, std::size_t len, Sib19Content& sib);

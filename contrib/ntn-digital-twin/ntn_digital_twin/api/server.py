@@ -137,7 +137,10 @@ def health() -> HealthResponse:
 @app.get("/constellation/state", response_model=ConstellationStateResponse)
 def constellation_state(at: str | None = None) -> ConstellationStateResponse:
     cons = _state.ensure_loaded()
-    when = dt.datetime.fromisoformat(at) if at else dt.datetime.now(tz=dt.timezone.utc)
+    try:
+        when = dt.datetime.fromisoformat(at) if at else dt.datetime.now(tz=dt.timezone.utc)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid 'at' timestamp: {exc}") from exc
     if when.tzinfo is None:
         when = when.replace(tzinfo=dt.timezone.utc)
     sats: list[SatState] = []
@@ -172,7 +175,10 @@ def predict_handover(req: PredictHandoverRequest) -> PredictHandoverResponse:
     current_serving: int | None = None
     current_serving_name: str | None = None
 
-    n_steps = int(horizon_sec / step) + 1
+    # Hard cap on the loop length (defense in depth on top of the schema
+    # bounds): keeps a large horizon / fine step from pinning a CPU.
+    MAX_STEPS = 20000
+    n_steps = min(int(horizon_sec / step) + 1, MAX_STEPS)
     for k in range(n_steps):
         when = now + dt.timedelta(seconds=k * step)
         states = cons.state_vectors(when)
@@ -223,7 +229,10 @@ def predict_handover(req: PredictHandoverRequest) -> PredictHandoverResponse:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0")
+    # Default to loopback: the service is unauthenticated, so it must not bind
+    # all interfaces unless the operator explicitly opts in (--host 0.0.0.0
+    # behind an authenticating reverse proxy).
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8090)
     args = parser.parse_args(argv)
     import uvicorn

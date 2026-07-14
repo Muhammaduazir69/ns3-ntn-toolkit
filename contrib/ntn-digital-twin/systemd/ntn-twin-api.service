@@ -4,7 +4,9 @@ After=network-online.target ntn-twin.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env ntn-twin-api --host 0.0.0.0 --port 8090
+# Binds loopback: the API is unauthenticated. To expose it, front it with an
+# authenticating reverse proxy and set --host 0.0.0.0 deliberately.
+ExecStart=/usr/bin/env ntn-twin-api --host 127.0.0.1 --port 8090
 Environment=NTN_TWIN_GROUP=starlink
 Environment=NTN_TWIN_MAX_SATS=50
 Environment=NTN_TWIN_CACHE_DIR=/var/lib/ntn-twin/cache

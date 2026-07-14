@@ -139,13 +139,21 @@ SumoTraciBridge::ParseFcdCsv(const std::string& path)
         if (tokens.size() < 5)
             continue;
         VehicleSample s;
-        s.simulationTimeSec = std::stod(tokens[0]);
-        s.vehId = tokens[1];
-        s.x = std::stod(tokens[2]);
-        s.y = std::stod(tokens[3]);
-        s.z = std::stod(tokens[4]);
-        if (tokens.size() >= 6)
-            s.speedMps = std::stod(tokens[5]);
+        try
+        {
+            s.simulationTimeSec = std::stod(tokens[0]);
+            s.vehId = tokens[1];
+            s.x = std::stod(tokens[2]);
+            s.y = std::stod(tokens[3]);
+            s.z = std::stod(tokens[4]);
+            if (tokens.size() >= 6)
+                s.speedMps = std::stod(tokens[5]);
+        }
+        catch (const std::exception&)
+        {
+            // Malformed row (non-numeric field): skip it rather than abort the run.
+            continue;
+        }
         m_samples.push_back(s);
     }
     return !m_samples.empty();

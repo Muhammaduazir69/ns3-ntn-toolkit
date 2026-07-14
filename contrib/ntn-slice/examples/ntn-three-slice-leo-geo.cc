@@ -154,8 +154,10 @@ main(int argc, char* argv[])
     // ---- Slice assignment via the (previously dead) NtnSliceSelector ----
     // Each UE carries a representative 5-tuple per its provisioned traffic
     // class; Match() resolves the S-NSSAI from the DSCP/port/app rules that
-    // ThreeSliceDefault() populated. UE 3k -> eMBB (app-label), 3k+1 -> URLLC
-    // (DSCP EF 46, RFC 4594), 3k+2 -> mMTC (CoAP port 5683).
+    // ThreeSliceDefault() populated. The marking MUST match the actual
+    // MixedBouquet per-UE traffic (u%3 -> 0:mMTC/NB-IoT, 1:eMBB, 2:URLLC), so:
+    // UE 3k -> mMTC (CoAP port 5683), 3k+1 -> eMBB (app-label), 3k+2 -> URLLC
+    // (DSCP EF 46, RFC 4594).
     std::vector<Snssai> ueSnssai(numUes);
     for (uint32_t ue = 0; ue < numUes; ++ue)
     {
@@ -163,13 +165,13 @@ main(int argc, char* argv[])
         switch (ue % 3)
         {
         case 0:
-            fd.appLabel = "embb";
+            fd.dstPort = 5683; // CoAP -> mMTC
             break;
         case 1:
-            fd.dscp = 46; // DSCP EF -> URLLC
+            fd.appLabel = "embb"; // -> eMBB
             break;
         default:
-            fd.dstPort = 5683; // CoAP -> mMTC
+            fd.dscp = 46; // DSCP EF -> URLLC
             break;
         }
         ueSnssai[ue] = stack.selector->Match(fd);

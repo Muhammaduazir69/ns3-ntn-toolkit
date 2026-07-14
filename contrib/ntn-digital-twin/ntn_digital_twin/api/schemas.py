@@ -40,12 +40,15 @@ class HandoverEvent(BaseModel):
 
 
 class PredictHandoverRequest(BaseModel):
-    ue_lat_deg: float
-    ue_lon_deg: float
-    ue_alt_m: float = 0.0
-    horizon_min: float = 10.0
-    step_sec: float = 5.0
-    min_elevation_deg: float = 10.0
+    # Bounds are load-bearing: step_sec > 0 removes the ZeroDivisionError, and
+    # bounding horizon/step keeps the O(n_steps x n_sats) prediction loop from
+    # being driven into an unbounded CPU hang by a hostile request.
+    ue_lat_deg: float = Field(ge=-90.0, le=90.0)
+    ue_lon_deg: float = Field(ge=-180.0, le=180.0)
+    ue_alt_m: float = Field(default=0.0, ge=-500.0, le=100_000.0)
+    horizon_min: float = Field(default=10.0, gt=0.0, le=1440.0)  # up to 24 h
+    step_sec: float = Field(default=5.0, ge=0.1, le=3600.0)      # [0.1 s, 1 h]
+    min_elevation_deg: float = Field(default=10.0, ge=0.0, le=90.0)
 
 
 class PredictHandoverResponse(BaseModel):

@@ -71,12 +71,15 @@ class NtnTimingAdvanceClosedFormTest : public TestCase
     }
 };
 
-/// Regenerative payload halves the TA (single-leg).
+/// Regenerative TA is the round-trip service-link delay (2 d / c). Timing
+/// Advance always compensates the round trip; the gNB simply sits on the
+/// satellite, so the UE<->gNB round trip is the service link 2 d / c (the
+/// earlier "single-leg" value under-compensated the uplink by 2x).
 class NtnTimingAdvanceRegenerativeTest : public TestCase
 {
   public:
     NtnTimingAdvanceRegenerativeTest()
-        : TestCase("Regenerative payload halves the TA vs transparent")
+        : TestCase("Regenerative TA is the round-trip service-link 2 d / c")
     {
     }
 
@@ -88,9 +91,9 @@ class NtnTimingAdvanceRegenerativeTest : public TestCase
         Ptr<NtnTimingAdvance> ta =
             helper.InstallTimingAdvance(MakeStaticMob(Vector{0, 0, 0}),
                                         MakeStaticMob(Vector{0, 0, 550e3}));
-        const double expectedSeconds = 550e3 / kC; // single leg
+        const double expectedSeconds = 2.0 * 550e3 / kC; // round trip
         NS_TEST_ASSERT_MSG_EQ_TOL(ta->ComputeTotalTa().GetSeconds(), expectedSeconds, 1e-8,
-                                  "Regenerative TA != d / c");
+                                  "Regenerative TA != 2 d / c");
     }
 };
 

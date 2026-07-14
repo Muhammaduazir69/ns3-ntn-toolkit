@@ -152,7 +152,7 @@ In stub mode, every E2 procedure is exercised end-to-end with the same message t
 ## Documentation
 
 - [docs/BUILD_FLEXRIC.md](docs/BUILD_FLEXRIC.md) — full live-mode bring-up recipe (asn1c, SWIG, GCC 12, FlexRIC tag).
-- [INSTALL.md](INSTALL.md) — pip install + dev environment notes.
+- `pyproject.toml` — `pip install -e .` for the Python bridge + dev environment.
 - O-RAN.WG3.E2AP-v02.03 — E2 Application Protocol.
 - O-RAN.WG3.E2SM-KPM-v03.00 — E2 Service Model: Key Performance Measurement.
 - O-RAN.WG3.E2SM-RC-v01.03 — E2 Service Model: RAN Control.

@@ -75,24 +75,28 @@ NtnTimingAdvance::GetReferenceRangeMetres() const
     return CalculateDistance(m_referencePos, m_sat->GetPosition());
 }
 
+// Timing Advance compensates the ROUND-TRIP propagation delay so the UE's
+// uplink arrives time-aligned at the receiver. The service link (UE<->satellite)
+// round trip is 2*d/c, and this holds for BOTH payload modes — the earlier
+// one-way value for the regenerative case under-compensated the uplink by 2x.
+//
+// NOTE (documented omission, not a bug): in Transparent (bent-pipe) mode the gNB
+// sits on the ground, so the full uplink additionally traverses the
+// satellite<->gateway feeder link; that feeder round-trip term (2*d_feeder/c) is
+// not added here because this class is not given the gateway geometry. Callers
+// that need the transparent-mode feeder delay must add it from the feeder pair.
 Time
 NtnTimingAdvance::ComputeTotalTa() const
 {
     const double d = GetSlantRangeMetres();
-    const double oneWaySec = d / kSpeedOfLight;
-    const double seconds =
-        (m_payloadMode == PayloadMode::Transparent) ? 2.0 * oneWaySec : oneWaySec;
-    return Seconds(seconds);
+    return Seconds(2.0 * d / kSpeedOfLight);
 }
 
 Time
 NtnTimingAdvance::ComputeCommonTa() const
 {
     const double d = GetReferenceRangeMetres();
-    const double oneWaySec = d / kSpeedOfLight;
-    const double seconds =
-        (m_payloadMode == PayloadMode::Transparent) ? 2.0 * oneWaySec : oneWaySec;
-    return Seconds(seconds);
+    return Seconds(2.0 * d / kSpeedOfLight);
 }
 
 Time

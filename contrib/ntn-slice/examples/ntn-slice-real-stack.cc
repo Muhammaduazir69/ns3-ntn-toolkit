@@ -134,7 +134,9 @@ main(int argc, char* argv[])
     SliceProfile embb = DefaultEmbb(1);
     SliceProfile urllc = DefaultUrllc(2);
     SliceProfile mmtc = DefaultMmtc(3);
-    SliceProfile profiles[3] = {embb, urllc, mmtc};
+    // Index order MUST match NtnRealStackHelper MixedBouquet (u%3 -> 0:mMTC,
+    // 1:eMBB, 2:URLLC), else per-slice KPIs land under the wrong slice label.
+    SliceProfile profiles[3] = {mmtc, embb, urllc};
 
     SliceIsolationMonitor monitor;
     monitor.RegisterSlice(embb);
@@ -148,7 +150,7 @@ main(int argc, char* argv[])
     Vector sp = satNodes.Get(0)->GetObject<MobilityModel>()->GetPosition();
     for (uint32_t u = 0; u < numUes; ++u)
     {
-        uint32_t slice = u % 3; // 0=eMBB, 1=URLLC, 2=mMTC
+        uint32_t slice = u % 3; // 0=mMTC, 1=eMBB, 2=URLLC (MixedBouquet order)
         uint64_t rxBytes = rs.GetUeRxBytes(u);
         double sinr = rs.GetUeMeanSinrDb(u);
         double thr = rxBytes * 8.0 / std::max(1.0, duration) / 1e6;
@@ -176,7 +178,7 @@ main(int argc, char* argv[])
     auto breaches = monitor.EvaluateAll();
 
     std::cout << "\n--- Per-slice isolation on the SHARED real cell (MEASURED) ---\n";
-    const char* names[3] = {"eMBB ", "URLLC", "mMTC "};
+    const char* names[3] = {"mMTC ", "eMBB ", "URLLC"};
     for (uint32_t s = 0; s < 3; ++s)
     {
         double meanSinr = (sliceUes[s] > 0) ? sliceSinrSum[s] / sliceUes[s] : 0.0;

@@ -171,7 +171,19 @@ SionnaReplayReader::Load(const std::string& path)
         std::fclose(fp);
         return false;
     }
-    m_records.reserve(count);
+    // 'count' comes straight from the (untrusted) file header; reserving it
+    // verbatim lets a malformed .bin request a huge allocation -> bad_alloc /
+    // terminate (DoS). Bound the reserve hint by the bytes actually left in the
+    // file (each record is >= 7 doubles of fixed data); the loop below still
+    // validates every record via fread and bails on truncation.
+    const long here = std::ftell(fp);
+    std::fseek(fp, 0, SEEK_END);
+    const long fileEnd = std::ftell(fp);
+    std::fseek(fp, here, SEEK_SET);
+    const uint64_t bytesLeft =
+        (fileEnd > here && here >= 0) ? static_cast<uint64_t>(fileEnd - here) : 0;
+    const uint64_t maxRecords = bytesLeft / (sizeof(double) * 7);
+    m_records.reserve(static_cast<size_t>(std::min(count, maxRecords)));
     for (uint64_t i = 0; i < count; ++i)
     {
         ReplayRecord r;

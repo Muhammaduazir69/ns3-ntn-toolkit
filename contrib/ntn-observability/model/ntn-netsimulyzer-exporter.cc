@@ -183,8 +183,14 @@ NtnNetSimulyzerExporter::SampleSeries(uint32_t seriesIdx, double timeSec, double
 void
 NtnNetSimulyzerExporter::WriteHeader()
 {
+    // NOTE: this is the toolkit's own lightweight scene JSON, NOT the official
+    // usnistgov NetSimulyzer schema (which uses kebab-case node-position /
+    // xy-series-append events). For a schema-exact file that opens directly in
+    // the NetSimulyzer app, use the ntn-netsimulyzer-official-demo (real
+    // Orchestrator). Labeled as a native format so it is not mistaken for the
+    // official one.
     m_out << R"({"configuration":{"name":"ns3-ntn-toolkit","ms_per_frame":33,)"
-             R"("module":"ntn-observability","schema":"netsimulyzer-1.0"})";
+             R"("module":"ntn-observability","schema":"ntn-observability-native-1.0"})";
 
     m_out << R"(,"nodes":[)";
     for (size_t i = 0; i < m_nodes.size(); ++i)

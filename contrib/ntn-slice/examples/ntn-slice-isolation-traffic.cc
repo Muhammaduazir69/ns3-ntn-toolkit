@@ -36,7 +36,7 @@ int
 main(int argc, char* argv[])
 {
     double simSeconds = 15.0;
-    uint32_t numUes = 9; // %3 -> eMBB / URLLC / mMTC
+    uint32_t numUes = 9; // %3 -> mMTC / eMBB / URLLC (MixedBouquet order)
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double backhaulMs = 5.0;
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
@@ -88,7 +88,7 @@ main(int argc, char* argv[])
                                        subLon - 0.03, subLon + 0.03);
 
     // ---- ONE shared real cell; MixedBouquet = per-UE slice traffic profiles
-    //      (eMBB saturating stream, URLLC pings, mMTC periodic) ----
+    //      (u%3 -> mMTC periodic, eMBB saturating stream, URLLC pings) ----
     NtnRealStackHelper rs;
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
                                          : NtnRealStackHelper::RadioBackend::Nr);
@@ -112,13 +112,16 @@ main(int argc, char* argv[])
     rs.WriteHealthReport();
 
     // ---- Per-slice MEASURED isolation analysis on the contended cell ----
-    SliceProfile profiles[3] = {DefaultEmbb(1), DefaultUrllc(2), DefaultMmtc(3)};
+    // Index order MUST match NtnRealStackHelper's MixedBouquet per-UE assignment
+    // (u%3 -> 0:mMTC/NB-IoT 5QI9, 1:eMBB 5QI2, 2:URLLC 5QI82), else the per-slice
+    // KPIs below are reported under the wrong slice labels.
+    SliceProfile profiles[3] = {DefaultMmtc(3), DefaultEmbb(1), DefaultUrllc(2)};
     SliceIsolationMonitor monitor;
     for (auto& p : profiles)
     {
         monitor.RegisterSlice(p);
     }
-    const char* names[3] = {"eMBB ", "URLLC", "mMTC "};
+    const char* names[3] = {"mMTC ", "eMBB ", "URLLC"};
     double sliceMbps[3] = {0, 0, 0};
     double sliceSinr[3] = {0, 0, 0};
     uint32_t sliceN[3] = {0, 0, 0};
@@ -127,8 +130,8 @@ main(int argc, char* argv[])
     {
         // Deployment assumption (declared, not discovered): terminals are
         // provisioned round-robin across the three slice profiles — UE 3k is
-        // a broadband terminal (eMBB), 3k+1 a control unit (URLLC), 3k+2 a
-        // sensor (mMTC) — matching the MixedBouquet per-UE traffic profiles.
+        // a sensor (mMTC), 3k+1 a broadband terminal (eMBB), 3k+2 a control
+        // unit (URLLC) — matching the MixedBouquet per-UE traffic profiles.
         // In a real network the S-NSSAI comes from subscription data; a
         // DSCP/QFI classifier (NtnSliceSelector) is exercised in
         // ntn-slice-real-stack.

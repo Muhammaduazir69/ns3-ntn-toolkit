@@ -120,6 +120,7 @@ main(int argc, char* argv[])
     double freqGHz = 2.0;
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double tteMinSec = 3.0;
+    double hoHystDb = 2.0; // A3 hysteresis for the actuated NR X2 handover
     std::string trigger = "tte-aware";
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     bool rachLess = false;
@@ -134,6 +135,7 @@ main(int argc, char* argv[])
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("tteMinSec", "Minimum TTE for CHO admission (s)", tteMinSec);
+    cmd.AddValue("hoHystDb", "A3 hysteresis (dB) for the actuated NR X2 handover", hoHystDb);
     cmd.AddValue("trigger",
                  "Handover trigger: tte-aware|ltm|pcho|a3|d1|t1|d2|elevation|ta "
                  "(a3/d1/t1 = Rel-17 CondEvents, d2 = Rel-18 CondEventD2, "
@@ -217,7 +219,15 @@ main(int argc, char* argv[])
     rs.SetRunTag("ntn-cho-handover-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
     rs.SetSatEirpDbm(satEirpDbm);
-    rs.Build(servSat, ueNodes);
+    // ACTUATED handover: hand BOTH satellites to the radio helper as gNBs and
+    // arm the real NR A3-RSRP + X2 handover, so a UE physically moves to the
+    // neighbour cell on measured RSRP (not just a decision-model counter). The
+    // candidate sat was previously created but never given to the radio.
+    NodeContainer gnbSats;
+    gnbSats.Add(servSat.Get(0));
+    gnbSats.Add(candSat.Get(0));
+    rs.SetHandover(true, hoHystDb, MilliSeconds(256));
+    rs.Build(gnbSats, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("ntn-cho-handover-traffic"); // WS2 KPM series (TS 28.552 names)
@@ -297,11 +307,20 @@ main(int argc, char* argv[])
     rs.WriteHealthReport();
 
     const auto st = g_cho->GetMechanismStats();
-    std::printf("# === summary ===  handovers=%u (%s on measured SINR, real orbits)  "
-                "serving-cell measured goodput=%.3f Mbps  mean SINR=%.2f dB  "
-                "SINR@handover=%.2f dB  interruption(last)=%.1f ms  rachless=%u  final cell=%u\n",
-                g_handovers, trigger.c_str(), rs.GetRxThroughputMbps(), rs.GetMeanDlSinrDb(),
-                g_sinrAtHo, st.lastInterruptionMs, st.rachLessExecutions, g_serving);
+    const uint32_t actuatedHo = rs.GetHandoverCount();
+    std::printf("# === summary ===  CHO decisions=%u (%s on measured SINR, real orbits)  "
+                "ACTUATED X2 handovers=%u  serving-cell measured goodput=%.3f Mbps  "
+                "mean SINR=%.2f dB  SINR@handover=%.2f dB  interruption(last)=%.1f ms  "
+                "rachless=%u  final cell=%u\n",
+                g_handovers, trigger.c_str(), actuatedHo, rs.GetRxThroughputMbps(),
+                rs.GetMeanDlSinrDb(), g_sinrAtHo, st.lastInterruptionMs, st.rachLessExecutions,
+                g_serving);
+    // NOTE: "CHO decisions" is the ntn-cho algorithm's trigger count; "ACTUATED
+    // X2 handovers" is how many times a UE was physically moved to the neighbour
+    // gNB by the real NR A3-RSRP + X2 machinery. On a real LEO pass the RSRP
+    // crossover between two co-altitude sats is slow, so the actuated count can
+    // be small over a short window — exactly why ntn-cho adds elevation/TTE/D2
+    // triggers. Lengthen --simSeconds or lower --hoHystDb to force a crossover.
 
     Simulator::Destroy();
     return 0;

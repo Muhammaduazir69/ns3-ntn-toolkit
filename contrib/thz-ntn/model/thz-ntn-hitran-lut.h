@@ -35,9 +35,12 @@ namespace ns3
 namespace thzntn
 {
 
-/// HITRAN release this build tracks. Reviewers pin this in citations + the
-/// reproducibility manifest.
-inline constexpr const char* kHitranRelease = "HITRAN-2024";
+/// What this build's LUT actually is. The shipped table is a smooth
+/// CONTINUUM APPROXIMATION calibrated to the HITRAN-2020 baseline / ITU-R
+/// P.676-13, NOT a HITRAN-2024 line-by-line product (the generator can ingest a
+/// real .par file as future work, §4.3.1). Labeled honestly so reviewers and
+/// the reproducibility manifest do not cite line-by-line accuracy it lacks.
+inline constexpr const char* kHitranRelease = "continuum-approximation (HITRAN-2020 baseline)";
 
 /// Canonical sub-THz windows the v2.1 LUT covers, in GHz. Each window's
 /// neighbourhood ±20 GHz is sampled in the bundled LUT so the bilinear

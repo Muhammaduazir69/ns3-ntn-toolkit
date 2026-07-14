@@ -18,10 +18,13 @@
  * deltas <2 percent on the 7 strongest H2O lines), so the band-integrated
  * absorption is insensitive to the HITRAN version within model tolerance.
  *
- * The continuum coefficient (CONTINUUM_K_REF) is tuned to reproduce ITU-R
- * P.676-13 zenith opacity for the midlatitude-summer reference atmosphere
- * to within +/- 1 dB over 100 - 600 GHz.  See `thz-ntn-absorption-calibration`
- * test for the cross-check against P.676-13.
+ * The continuum coefficient (CONTINUUM_K_REF) is tuned by hand to reproduce
+ * ITU-R P.676-13 zenith opacity for the midlatitude-summer reference atmosphere
+ * over 100 - 600 GHz. NOTE: this is a design-time calibration, not an automated
+ * assertion — the test suite currently checks only positivity / monotonicity /
+ * bounds, not the numeric zenith-opacity targets, so treat the +/- 1 dB figure
+ * as a tuning goal rather than a CI-verified guarantee (adding the numeric
+ * P.676-13 zenith assertion is tracked follow-up work).
  */
 
 #include "thz-ntn-molecular-absorption.h"

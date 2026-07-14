@@ -1,15 +1,15 @@
 # ntn-fapi
 
-> SCF-222 FAPI L1↔L2 message ABI (DL_TTI / TX_DATA / RX_DATA / CRC.indication) for NR-NTN.
+> SCF-222 FAPI L1↔L2 message **model** — C++ structs mirroring the DL_TTI / TX_DATA / RX_DATA / CRC.indication field names for NR-NTN.
 > Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
 
 ## Overview
 
-`ntn-fapi` provides the **SCF-222 functional API between the MAC (L2) and the PHY (L1)** as a clean, header-only C++ ABI for NR-NTN simulation. It mirrors the message and PDU layout of the Small Cell Forum FAPI specification (SCF FAPI 222.10.02 + the 222.10.04 addendum) so that scheduler-side code in ns-3 (mmwave, oran-ntn), NVIDIA Aerial cuPHY, and OAI's nfapi can all link against the same struct shapes without touching scheduler logic.
+`ntn-fapi` provides the **SCF-222 functional API between the MAC (L2) and the PHY (L1)** as a clean, header-only **C++ struct model** for NR-NTN simulation. It mirrors the message and PDU **field names** of the Small Cell Forum FAPI specification (SCF FAPI 222.10.02 + the 222.10.04 addendum), giving scheduler-side code in ns-3 (mmwave, oran-ntn) a common, spec-named vocabulary. **This is a source-level C++ model, not a binary/wire ABI:** the structs use `std::vector`/`std::variant` and have no fixed byte layout, so they are not a drop-in link target for NVIDIA Aerial cuPHY or OAI's nfapi and are not serialized over a wire — they are a reference shape a translator could target.
 
 The message and PDU types carry **real transport-block bytes slot-by-slot over NR-NTN timing**: the MAC builds a `DL_TTI.request` plus a `TX_DATA.request` carrying the actual TB byte buffer each scheduled slot, the PHY returns an `RX_DATA.indication` (received bytes) plus a `CRC.indication` (pass/fail + UL CQI), and the MAC drives **HARQ retransmission** on a CRC NACK. In the shipped examples the L1 outcome that fills the `CRC.indication` is **measured** off a real mmwave NR NTN cell (the recent DL SINR/TBLER from the PHY trace), so genuine data crosses the FAPI with real CRC and HARQ feedback and goodput tracks the measured radio.
 
-The structs are intentionally free of algorithmic logic — the role of this module is to provide a stable ABI shape, plus a couple of conversion helpers, against which other modules and external PHYs can interoperate.
+The structs are intentionally free of algorithmic logic — the role of this module is to provide a stable, SCF-222-named C++ struct shape, plus a couple of conversion helpers, that other ns-3 modules can share (a wire/binary ABI for external PHYs would require adding real serialization, which this module does not yet do).
 
 ## What's new in v2
 

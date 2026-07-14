@@ -77,9 +77,12 @@ Sib19UeRecv(Ptr<Socket> sock)
         Sib19Content parsed;
         if (Sib19Codec::Parse(buf.data(), n, parsed))
         {
-            NS_ASSERT_MSG(parsed.cellId == g_sib->GetLatest().cellId,
-                          "SIB19 cellId mismatch across the radio link");
-            ++g_sib19Delivered;
+            // A parsed-but-mismatched cellId (corrupt / reordered / foreign SIB)
+            // must not abort the run — count only well-matched deliveries.
+            if (parsed.cellId == g_sib->GetLatest().cellId)
+            {
+                ++g_sib19Delivered;
+            }
         }
     }
 }

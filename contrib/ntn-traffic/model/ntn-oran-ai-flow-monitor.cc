@@ -93,6 +93,14 @@ NtnOranFlowProbe::NtnOranFlowProbe(Ptr<FlowMonitor> monitor,
 void
 NtnOranFlowProbe::ReportTx(Ptr<const Packet> packet)
 {
+    // Guard BEFORE PeekHeader: Deserialize reads SERIALIZED_SIZE bytes
+    // unconditionally (the `== 0` check is dead code), so a foreign shorter
+    // packet on this port would over-read. Skip anything too small to carry the
+    // header.
+    if (packet->GetSize() < NtnOranPayloadHeader::SERIALIZED_SIZE)
+    {
+        return;
+    }
     NtnOranPayloadHeader hdr;
     if (packet->PeekHeader(hdr) == 0 ||
         hdr.GetVersion() != NtnOranPayloadHeader::NTN_ORAN_PAYLOAD_VERSION)
@@ -106,6 +114,12 @@ NtnOranFlowProbe::ReportTx(Ptr<const Packet> packet)
 void
 NtnOranFlowProbe::ReportRx(Ptr<const Packet> packet)
 {
+    // Same size guard as ReportTx: a foreign sub-header-length packet on this
+    // port must not reach PeekHeader's unconditional 24-byte deserialize.
+    if (packet->GetSize() < NtnOranPayloadHeader::SERIALIZED_SIZE)
+    {
+        return;
+    }
     NtnOranPayloadHeader hdr;
     if (packet->PeekHeader(hdr) == 0 ||
         hdr.GetVersion() != NtnOranPayloadHeader::NTN_ORAN_PAYLOAD_VERSION)

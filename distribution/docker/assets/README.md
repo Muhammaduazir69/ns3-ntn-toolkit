@@ -25,5 +25,6 @@ upload them manually once, then they persist.
 | `dockerhub_avatar.png`     | 256 × 256 — what the Hub displays in search/listings |
 | `dockerhub_avatar_512.png` | 512 × 512 — upload this; Hub down-samples internally with better resampling than the 256 source |
 
-Source SVG: [`../../../branding/logo_icon.svg`](../../../branding/logo_icon.svg).
-Regenerate any size with `cairosvg` — see [`../../../branding/README.md`](../../../branding/README.md).
+The PNGs above are the rendered Docker Hub assets committed here. The source SVG
+and its `cairosvg` regeneration notes live in the separate (unpublished) branding
+workspace, not in this repository.

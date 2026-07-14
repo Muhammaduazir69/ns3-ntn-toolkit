@@ -120,7 +120,12 @@ GetF64(const uint8_t*& p)
 std::size_t
 Sib19Codec::Serialise(const Sib19Content& sib, uint8_t* out, std::size_t len)
 {
-    NS_ASSERT_MSG(len >= kSerialisedBytes, "Sib19 buffer too small");
+    // Real runtime guard (NOT NS_ASSERT, which is compiled out in optimized
+    // builds and would leave an OOB write). Refuse an under-size buffer.
+    if (out == nullptr || len < kSerialisedBytes)
+    {
+        return 0;
+    }
     uint8_t* p = out;
 
     PutU16(p, sib.cellId);
