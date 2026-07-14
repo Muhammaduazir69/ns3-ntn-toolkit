@@ -28,10 +28,16 @@
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-traffic-module.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 
 #include <iostream>
 
 using namespace ns3;
+using ns3::ntncon::Sgp4MobilityModel;
+using ns3::ntncon::WalkerConfig;
+using ns3::ntncon::WalkerConstellation;
 
 NS_LOG_COMPONENT_DEFINE("NtnNrDeepIntegrationDemo");
 
@@ -76,25 +82,30 @@ main(int argc, char* argv[])
     // CondEvents (carried by ntn-cho). The A3/X2 machinery firing end to end on
     // a realistic 600 km LEO pass is verified by the dedicated
     // ntn-nr-handover-pass example.
-    const double H = altitudeKm * 1000.0;
-    MobilityHelper gnbMobility;
-    gnbMobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
-    gnbMobility.Install(gnbNodes);
-    gnbNodes.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(0.0, 0.0, H));
-    gnbNodes.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetVelocity(
-        Vector(7500.0, 0.0, 0.0));
-    gnbNodes.Get(1)->GetObject<MobilityModel>()->SetPosition(Vector(20.0e3, 0.0, H));
-    gnbNodes.Get(1)->GetObject<ConstantVelocityMobilityModel>()->SetVelocity(
-        Vector(0.0, 0.0, 0.0));
+    // Two REAL LEO satellites from a Walker-Delta shell: adjacent members of the
+    // same plane, each SGP4-propagated on a genuine ~600 km / 53-deg orbit at
+    // ~7.5 km/s (TR 38.821 LEO regime) — not ConstantVelocity straight lines.
+    WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 6;
+    wcfg.altitude_km = altitudeKm;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01T00:00:00Z
+    const auto elements = WalkerConstellation::BuildDelta(wcfg);
+    Ptr<Sgp4MobilityModel> sat0 = CreateObject<Sgp4MobilityModel>();
+    sat0->SetElements(elements[0]);
+    Ptr<Sgp4MobilityModel> sat1 = CreateObject<Sgp4MobilityModel>();
+    sat1->SetElements(elements[1]);
+    gnbNodes.Get(0)->AggregateObject(sat0);
+    gnbNodes.Get(1)->AggregateObject(sat1);
 
-    MobilityHelper ueMobility;
-    ueMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    ueMobility.Install(ueNodes);
-    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-    {
-        double x = (static_cast<double>(i) - (numUes - 1) / 2.0) * 2000.0;
-        ueNodes.Get(i)->GetObject<MobilityModel>()->SetPosition(Vector(x, 0.0, 1.5));
-    }
+    // Ground UEs under the serving satellite's sub-point, TR 38.811 mobility.
+    double subLat, subLon, subAlt;
+    sat0->GetGeodetic(subLat, subLon, subAlt);
+    NtnTr38811MobilityHelper ueMobility(1);
+    auto ueProfile = NtnMobilityScenarios::MixedContinental();
+    ueMobility.Install(ueNodes, ueProfile, subLat - 0.03, subLat + 0.03,
+                       subLon - 0.03, subLon + 0.03);
 
     // ---- Build the NR radio with all four enablers ----------------------
     NtnRealStackHelper rs;

@@ -54,6 +54,8 @@ build_lib_example(
   SOURCE_FILES ntn-nr-fr1-demo.cc
   LIBRARIES_TO_LINK
     ${libntn-traffic}
+    ${libntn-constellation}
+    ${libntn-cho}
     ${libnr}
     ${liblte}
     ${libmobility}
@@ -68,6 +70,8 @@ build_lib_example(
   SOURCE_FILES ntn-nr-deep-integration-demo.cc
   LIBRARIES_TO_LINK
     ${libntn-traffic}
+    ${libntn-constellation}
+    ${libntn-cho}
     ${libnr}
     ${liblte}
     ${libmobility}
@@ -82,6 +86,8 @@ build_lib_example(
   SOURCE_FILES ntn-nr-handover-pass.cc
   LIBRARIES_TO_LINK
     ${libntn-traffic}
+    ${libntn-constellation}
+    ${libntn-cho}
     ${libnr}
     ${liblte}
     ${libmobility}

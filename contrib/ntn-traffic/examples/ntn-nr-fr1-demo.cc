@@ -15,8 +15,14 @@
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-traffic-module.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 
 using namespace ns3;
+using ns3::ntncon::Sgp4MobilityModel;
+using ns3::ntncon::WalkerConfig;
+using ns3::ntncon::WalkerConstellation;
 
 NS_LOG_COMPONENT_DEFINE("NtnNrFr1Demo");
 
@@ -49,22 +55,28 @@ main(int argc, char* argv[])
     NodeContainer ueNodes;
     ueNodes.Create(numUes);
 
-    // gNB (satellite) high above the origin.
-    MobilityHelper gnbMobility;
-    gnbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    gnbMobility.Install(gnbNodes);
-    gnbNodes.Get(0)->GetObject<MobilityModel>()->SetPosition(
-        Vector(0.0, 0.0, altitudeKm * 1000.0));
+    // ---- gNB = a REAL LEO satellite: SGP4-propagated Walker-Delta orbit,
+    //      not a static point. It rides a genuine ~600 km / 53-deg orbit at the
+    //      true ~7.5 km/s LEO ground-track speed (TR 38.821 LEO regime). ----
+    WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 6;
+    wcfg.altitude_km = altitudeKm;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01T00:00:00Z
+    const auto elements = WalkerConstellation::BuildDelta(wcfg);
+    Ptr<Sgp4MobilityModel> satMob = CreateObject<Sgp4MobilityModel>();
+    satMob->SetElements(elements[0]);
+    gnbNodes.Get(0)->AggregateObject(satMob);
 
-    // Ground UEs spread within a few km of the sub-satellite point.
-    MobilityHelper ueMobility;
-    ueMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    ueMobility.Install(ueNodes);
-    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-    {
-        double x = (static_cast<double>(i) - (numUes - 1) / 2.0) * 1000.0; // 1 km spacing
-        ueNodes.Get(i)->GetObject<MobilityModel>()->SetPosition(Vector(x, 0.0, 1.5));
-    }
+    // ---- Ground UEs: 3GPP TR 38.811 mobility classes, placed under the
+    //      serving satellite's t=0 sub-satellite point. ----
+    double subLat, subLon, subAlt;
+    satMob->GetGeodetic(subLat, subLon, subAlt);
+    NtnTr38811MobilityHelper ueMobility(1);
+    auto ueProfile = NtnMobilityScenarios::MixedContinental();
+    ueMobility.Install(ueNodes, ueProfile, subLat - 0.03, subLat + 0.03,
+                       subLon - 0.03, subLon + 0.03);
 
     // ---- Build the FR1 NR spine -----------------------------------------
     NtnNrStackHelper nr;
