@@ -20,6 +20,36 @@ def _euclid(a: tuple[float, float, float], b: tuple[float, float, float]) -> flo
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
 
 
+_EARTH_RADIUS_KM = 6371.0
+
+
+def line_of_sight(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+    *,
+    earth_radius_km: float = _EARTH_RADIUS_KM,
+    margin_km: float = 80.0,
+) -> bool:
+    """True iff the straight segment a->b does NOT pass through the Earth.
+
+    Both endpoints are satellites (outside the sphere); the link is blocked only
+    when its closest approach to Earth's centre falls inside the segment and
+    below the (radius + atmosphere-margin) shell. Without this, an ISL edge
+    chosen purely by range can be drawn straight through the planet.
+    """
+    r = earth_radius_km + margin_km
+    ax, ay, az = a
+    dx, dy, dz = b[0] - ax, b[1] - ay, b[2] - az
+    dd = dx * dx + dy * dy + dz * dz
+    if dd == 0.0:
+        return True
+    t = -(ax * dx + ay * dy + az * dz) / dd
+    if t <= 0.0 or t >= 1.0:
+        return True
+    cx, cy, cz = ax + t * dx, ay + t * dy, az + t * dz
+    return (cx * cx + cy * cy + cz * cz) >= r * r
+
+
 def build_isl_topology(
     constellation: Constellation,
     when: datetime,
@@ -46,6 +76,9 @@ def build_isl_topology(
                 continue
             d = _euclid(states[i].r_eci_km, states[j].r_eci_km)
             if max_range_km is not None and d > max_range_km:
+                continue
+            # Reject edges whose beam would pass through the Earth.
+            if not line_of_sight(states[i].r_eci_km, states[j].r_eci_km):
                 continue
             ranged.append((d, j))
         ranged.sort()

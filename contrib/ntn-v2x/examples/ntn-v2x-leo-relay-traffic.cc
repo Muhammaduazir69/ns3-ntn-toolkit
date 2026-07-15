@@ -159,7 +159,10 @@ main(int argc, char* argv[])
     double minDirectSnrDb = 6.0;
     double veh0BlockageDb = 14.0; // veh0 is the shadowed (NLOS) vehicle that relays
     double linkCapacityMbps = 20.0;
-    std::string fcdTrace = "";
+    // Default to the shipped synthetic FCD fixture so the example runs out of
+    // the box (resolves from the ns-3 root, which is the run cwd); override with
+    // --fcdTrace=<path> to replay a real SUMO-exported trace.
+    std::string fcdTrace = "contrib/ntn-v2x/traces/leo-relay-fcd.csv";
     std::string outputDir = "ntn-v2x-leo-relay-output";
 
     CommandLine cmd(__FILE__);

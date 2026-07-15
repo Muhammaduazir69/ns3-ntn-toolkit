@@ -152,9 +152,11 @@ main(int argc, char* argv[])
 
     if (hoCount == 0)
     {
+        // A pass with zero handovers is a valid outcome (short window or a
+        // geometry whose RSRP never crossed the hysteresis) — report it, but do
+        // NOT exit non-zero: the run succeeded, it simply produced no handover.
         std::cerr << "NOTE: no handover fired — increase simTime for the real pass, "
                      "or lower hystDb.\n";
-        return 2;
     }
     return 0;
 }

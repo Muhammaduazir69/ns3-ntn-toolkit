@@ -321,6 +321,28 @@ NtnSceneRecorder::Poll()
     {
         live << "]}";
         std::cout << live.str() << std::endl; // flush each frame for live consumers
+        // Emit the COMMUNICATION link layer alongside the node frame: the
+        // serving/beam/ISL edges declared via TrackBeam (previously collected but
+        // never surfaced). Downstream (live_scene.py) turns these into polylines
+        // that reference the two node positions, so the real network is shown
+        // instead of a client-side nearest-satellite guess.
+        if (!m_beams.empty())
+        {
+            std::ostringstream lk;
+            lk << R"(##NTNSCENE_LINK## {"t":)" << FmtD(t) << R"(,"edges":[)";
+            bool lf = true;
+            for (const auto& b : m_beams)
+            {
+                if (!lf)
+                {
+                    lk << ",";
+                }
+                lf = false;
+                lk << "[" << b.fromId << "," << b.toId << R"(,"serving"])";
+            }
+            lk << "]}";
+            std::cout << lk.str() << std::endl;
+        }
     }
     m_tLastSec = t;
     Simulator::Schedule(m_sampleDt, &NtnSceneRecorder::Poll, this);

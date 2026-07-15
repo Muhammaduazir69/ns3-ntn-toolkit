@@ -223,7 +223,7 @@ class NtnSceneRecorder : public Object
     Vector m_enuUp{0, 0, 1};
 
     std::vector<TrackedNode> m_nodes;
-    std::vector<Beam> m_beams; //!< collected only; not emitted to any sink (no 3D beam render yet)
+    std::vector<Beam> m_beams; //!< serving/beam edges; emitted per live frame as ##NTNSCENE_LINK##
     std::vector<KpiSeries> m_kpis;
     std::vector<HandoverArc> m_handovers;
     std::map<uint32_t, Track> m_tracks; //!< id -> accumulated position samples
