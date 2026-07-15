@@ -156,11 +156,31 @@ say "incremental ./ns3 build"
 docker exec -u ntn "${CONTAINER}" bash -lc 'cd /home/ntn/ns-3-dev && ./ns3 build -j"$(nproc)"'
 
 # ---------------------------------------------------------------------------
-# 4. Commit the filesystem diff back onto the SAME tag (no new version). The
-#    base image config (USER/WORKDIR/ENV/EXPOSE/CMD/LABELS) is inherited.
+# 4. Commit the filesystem diff back onto the SAME tag (no new version).
+#
+#    CRITICAL: `docker commit` snapshots the CONTAINER'S RUNTIME CONFIG, not the
+#    base image's. The builder above is deliberately started as `-u root ... sleep
+#    infinity` (root is needed for rsync/apt), so a plain commit bakes
+#    USER=root + CMD=["sleep","infinity"] into the published image — which makes
+#    `docker run -it <image>` hang forever instead of opening a shell, and drops
+#    the non-root runtime user. Restore both explicitly on every commit.
+#    ENV/EXPOSE/WORKDIR/LABELS do carry over from the base and need no --change.
 # ---------------------------------------------------------------------------
-say "commit diff -> ${TARGET}"
-docker commit "${CONTAINER}" "${TARGET}"
+say "commit diff -> ${TARGET} (restoring USER/CMD clobbered by the root builder)"
+docker commit \
+  --change 'USER ntn' \
+  --change 'WORKDIR /home/ntn/ns-3-dev' \
+  --change 'CMD ["/bin/bash"]' \
+  "${CONTAINER}" "${TARGET}"
+
+# Fail loudly rather than publish a broken image again.
+COMMITTED_USER="$(docker image inspect "${TARGET}" --format '{{.Config.User}}')"
+COMMITTED_CMD="$(docker image inspect "${TARGET}" --format '{{json .Config.Cmd}}')"
+if [ "${COMMITTED_USER}" != "ntn" ] || [ "${COMMITTED_CMD}" != '["/bin/bash"]' ]; then
+  echo "ABORT: committed image config is wrong (USER=${COMMITTED_USER} CMD=${COMMITTED_CMD})" >&2
+  exit 1
+fi
+say "config verified: USER=${COMMITTED_USER} CMD=${COMMITTED_CMD}"
 
 # ---------------------------------------------------------------------------
 # 5. Push. Base layers report "Layer already exists"; only the diff uploads.
