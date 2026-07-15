@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pybind11-dev \
         protobuf-compiler libprotobuf-dev \
         libabsl-dev \
+        libeigen3-dev \
         libsctp-dev \
         ca-certificates git \
         wget curl \
@@ -88,7 +89,7 @@ LABEL org.opencontainers.image.source="https://github.com/Muhammaduazir69/ns3-nt
 LABEL org.opencontainers.image.documentation="https://ns3-ntn-toolkit.dev/"
 LABEL org.opencontainers.image.authors="Muhammad Uzair <muhammaduzairr69@gmail.com>"
 LABEL org.opencontainers.image.licenses="GPL-2.0-only"
-LABEL org.opencontainers.image.version="2.3.0"
+LABEL org.opencontainers.image.version="2.4.0"
 
 # Runtime deps — note this is intentionally NOT a slim "runtime-only" set.
 # ns-3's `./ns3 run` wrapper unconditionally invokes the CMake build system
@@ -114,6 +115,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pybind11-dev \
         protobuf-compiler libprotobuf-dev \
         libabsl-dev \
+        libeigen3-dev \
         libsctp-dev \
         ca-certificates git \
         wget curl \
@@ -162,8 +164,17 @@ WORKDIR /home/ntn/ns-3-dev
 # We intentionally don't run a full scenario here — scenario failures should
 # surface in the user's `docker run`, not as an image-build failure (so users
 # can still pull the image, drop into a shell, and debug).
+#
+# The Eigen gate is deliberate: without libeigen3-dev, contrib/nr silently
+# compiles model/nr-mimo-matrices-no-eigen.cc, whose bodies are
+# NS_FATAL_ERROR("MIMO channel normalization requires Eigen matrix library.").
+# The image still builds and rank-1 scenarios still pass, so the breakage only
+# surfaces later as an environment-only crash for a user driving MIMO rank >= 2.
+# Fail the BUILD here instead of shipping that trap.
 RUN ./ns3 show version \
     && ./ns3 show profile \
+    && { ./ns3 show config | grep -q 'Eigen3 support.*ON' \
+         || { echo 'FATAL: Eigen3 support is OFF - nr would ship the no-eigen MIMO stub'; exit 1; }; } \
     && test -e build/lib/libns3.43-ntn-cho-optimized.so \
     && test -e build/lib/libns3.43-oran-ntn-optimized.so \
     && test -e build/lib/libns3.43-thz-ntn-optimized.so \
