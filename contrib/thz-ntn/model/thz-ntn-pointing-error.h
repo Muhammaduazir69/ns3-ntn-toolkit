@@ -157,6 +157,21 @@ class ThzNtnPointingError : public Object
      */
     int64_t AssignStreams(int64_t stream);
 
+    /**
+     * \brief Compute tracking-latency pointing error component.
+     *
+     * The beam-tracking lag equals the apparent angular rate of the
+     * satellite times the effective control latency. For a LEO pass the
+     * apparent angular rate is MAXIMUM at zenith (minimum slant range) and
+     * smallest at low elevation.
+     *
+     * \param elevationDeg     elevation angle in degrees
+     * \param satVelocity_km_s satellite orbital velocity in km/s
+     * \return tracking-latency pointing error in degrees
+     */
+    double ComputeTrackingError_deg(double elevationDeg,
+                                    double satVelocity_km_s) const;
+
   private:
     /**
      * \brief Compute vibration error component
@@ -177,15 +192,6 @@ class ThzNtnPointingError : public Object
      * \return refraction-induced pointing error in degrees
      */
     double ComputeRefractionError_deg(double elevationDeg) const;
-
-    /**
-     * \brief Compute tracking latency error component
-     * \param elevationDeg elevation angle in degrees
-     * \param satVelocity_km_s satellite velocity in km/s
-     * \return tracking latency pointing error in degrees
-     */
-    double ComputeTrackingError_deg(double elevationDeg,
-                                    double satVelocity_km_s) const;
 
     // --- Configurable attributes ---
 

@@ -122,6 +122,29 @@ ThzNtnMolecularAbsorptionTest::DoRun()
     );
     NS_TEST_ASSERT_MSG_GT(gsLoss340, gsLoss225,
         "Absorption at 340 GHz should exceed absorption at 225 GHz");
+
+    // ------------------------------------------------------------------
+    // Numeric conformance to ITU-R P.676-13 Annex 1.
+    // Sea-level specific attenuation (288.15 K, 1013.25 hPa, 7.5 g/m^3).
+    // Reference values from the ITU-R P.676-13 line-by-line model
+    // (cross-checked against the ITU-Rpy validation set to < 2%):
+    //   10 GHz -> 0.0140 dB/km   60 GHz -> 14.66 dB/km
+    //   183.31 GHz -> 28.26 dB/km   557 GHz -> ~1.7e4 dB/km (opaque)
+    // The test asserts the SPEC values (within 20%), not the model's own
+    // constants.
+    const double kNpToDb = 10.0 / std::log(10.0);
+    auto gammaDbKm = [&](double fHz) {
+        return model->ComputeAbsorptionCoefficient(fHz, 288.15, 1013.25, 7.5) *
+               kNpToDb;
+    };
+    NS_TEST_ASSERT_MSG_EQ_TOL(gammaDbKm(10e9), 0.01399, 0.0028,
+        "P.676-13 specific attenuation at 10 GHz (~0.014 dB/km)");
+    NS_TEST_ASSERT_MSG_EQ_TOL(gammaDbKm(60e9), 14.656, 2.93,
+        "P.676-13 oxygen complex at 60 GHz (~14.7 dB/km)");
+    NS_TEST_ASSERT_MSG_EQ_TOL(gammaDbKm(183.31e9), 28.26, 5.65,
+        "P.676-13 water line at 183.31 GHz (~28 dB/km)");
+    NS_TEST_ASSERT_MSG_GT(gammaDbKm(557e9), 1000.0,
+        "P.676-13: atmosphere is opaque at the 557 GHz water line");
 }
 
 // ============================================================================
@@ -255,6 +278,18 @@ ThzNtnPointingErrorTest::DoRun()
     double lossLarger = model->ComputePointingLoss_dB(error30 * 2.0, beamwidth);
     NS_TEST_ASSERT_MSG_GT(lossLarger, loss,
         "Doubling pointing error should increase pointing loss");
+
+    // Physical trend of the beam-tracking lag: the apparent angular rate of
+    // a LEO pass is MAXIMUM at zenith (minimum slant range) and smallest at
+    // low elevation, so the tracking-latency pointing error must INCREASE
+    // with elevation. (The previous v*cos(elev)/(R_E+h) model had this
+    // backwards — zero at zenith, max at the horizon.)
+    double teLow = model->ComputeTrackingError_deg(10.0, 7.5);
+    double teHigh = model->ComputeTrackingError_deg(85.0, 7.5);
+    NS_TEST_ASSERT_MSG_GT(teLow, 0.0, "tracking error positive at low elev");
+    NS_TEST_ASSERT_MSG_GT(teHigh, teLow,
+        "tracking-lag pointing error must be larger near zenith than near "
+        "the horizon (apparent angular rate peaks at zenith)");
 }
 
 // ============================================================================
@@ -896,7 +931,7 @@ class ThzNtnHitranBundledLutTest : public TestCase
 {
   public:
     ThzNtnHitranBundledLutTest()
-        : TestCase("Bundled HITRAN-2024 sub-THz LUT loads and covers 100-500 GHz, 0-30 km")
+        : TestCase("Bundled ITU-R P.676-13 sub-THz LUT loads and covers 100-500 GHz, 0-30 km")
     {
     }
 
@@ -920,8 +955,9 @@ class ThzNtnHitranBundledLutTest : public TestCase
         }
         NS_TEST_ASSERT_MSG_EQ(loaded, true, "bundled LUT not found");
         NS_TEST_EXPECT_MSG_EQ(lut.ReleaseTag(),
-                              "continuum-approximation (NOT line-by-line; smooth fit, no 183/325/380 GHz peaks)",
-                              "bundled tag (corrected G18: the LUT is a continuum fit, not HITRAN line-by-line)");
+                              "ITU-R-P.676-13",
+                              "bundled LUT is generated from the ITU-R P.676-13 "
+                              "line-by-line model (not HITRAN)");
         NS_TEST_EXPECT_MSG_EQ(lut.FrequencyGridGhz().size(),
                               41u,
                               "41 freqs");
@@ -1036,21 +1072,27 @@ class ThzNtnP838CoefficientsTest : public TestCase
         using itu::Itu838RainModel;
         using itu::Polarization;
 
+        // Assert the ITU-R P.838-3 Annex 1 log-Gaussian SPEC values
+        // (not the model's own former P.838-1 constants). Reference values
+        // computed from the P.838-3 coefficient formulas:
+        //   k_h(20)=0.09164, alpha_h(20)=1.0568
+        //   k_v(30)=0.22909, alpha_v(30)=0.9129
+        //   gamma_r(30 GHz V, 25 mm/h)=4.327 dB/km
         const auto [k_h_20, a_h_20] =
             Itu838RainModel::GetKAlpha(20e9, Polarization::horizontal);
-        NS_TEST_ASSERT_MSG_EQ_TOL(k_h_20, 0.0751, 0.001, "k_h(20)");
-        NS_TEST_ASSERT_MSG_EQ_TOL(a_h_20, 1.099, 0.005, "alpha_h(20)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(k_h_20, 0.09164, 0.0005, "P.838-3 k_h(20)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(a_h_20, 1.0568, 0.005, "P.838-3 alpha_h(20)");
 
         const auto [k_v_30, a_v_30] =
             Itu838RainModel::GetKAlpha(30e9, Polarization::vertical);
-        NS_TEST_ASSERT_MSG_EQ_TOL(k_v_30, 0.167, 0.001, "k_v(30)");
-        NS_TEST_ASSERT_MSG_EQ_TOL(a_v_30, 1.000, 0.005, "alpha_v(30)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(k_v_30, 0.22909, 0.0005, "P.838-3 k_v(30)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(a_v_30, 0.9129, 0.005, "P.838-3 alpha_v(30)");
 
         const double gamma =
             Itu838RainModel::SpecificAttenuationDbKm(25.0, 30e9,
                                                        Polarization::vertical);
-        NS_TEST_ASSERT_MSG_EQ_TOL(gamma, 4.175, 0.05,
-                                  "gamma_r(30 GHz V, 25 mm/h)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(gamma, 4.327, 0.05,
+                                  "P.838-3 gamma_r(30 GHz V, 25 mm/h)");
 
         const double zeroRain =
             Itu838RainModel::SpecificAttenuationDbKm(0.0, 30e9,
@@ -1151,18 +1193,49 @@ class ThzNtnP681LmsTest : public TestCase
         NS_TEST_ASSERT_MSG_GT(pBad, 0.0, "P(bad) > 0");
         NS_TEST_ASSERT_MSG_LT(pBad, 1.0, "P(bad) < 1");
 
-        size_t bad = 0;
-        const size_t N = 10000;
-        for (size_t i = 0; i < N; ++i)
+        // The Lutz transitions are per-DISTANCE, so the steady-state
+        // occupancy must emerge from distance travelled, and must be
+        // INVARIANT to the polling step size. Drive the chain over the same
+        // total distance (100 km) at two very different distance steps and
+        // check both converge to the steady-state P(bad). A per-call chain
+        // (the former defect) would give occupancy that depends on the step.
+        auto occupancyOverDistance = [&](double stepM) {
+            lms->SetEnvironment(itu::Itu681LmsModel::Environment::suburban);
+            const double totalM = 100000.0; // 100 km
+            const size_t N = static_cast<size_t>(totalM / stepM);
+            size_t bad = 0;
+            for (size_t i = 0; i < N; ++i)
+            {
+                lms->StepByDistance(stepM);
+                if (lms->IsShadowed())
+                    ++bad;
+            }
+            return static_cast<double>(bad) / N;
+        };
+        const double occFine = occupancyOverDistance(1.0);   // 1 m step
+        const double occCoarse = occupancyOverDistance(5.0);  // 5 m step
+        NS_TEST_ASSERT_MSG_LT(std::abs(occFine - pBad), 0.10,
+                              "distance-driven occupancy (1 m step)="
+                                  << occFine << " expected=" << pBad);
+        NS_TEST_ASSERT_MSG_LT(std::abs(occCoarse - pBad), 0.10,
+                              "distance-driven occupancy (5 m step)="
+                                  << occCoarse << " expected=" << pBad);
+        NS_TEST_ASSERT_MSG_LT(std::abs(occFine - occCoarse), 0.10,
+                              "occupancy must be invariant to step size: "
+                                  << occFine << " vs " << occCoarse);
+
+        // StepDb() polled over sim-TIME must track distance = speed * dt:
+        // at zero elapsed time no transition can occur.
+        lms->SetEnvironment(itu::Itu681LmsModel::Environment::urban);
+        lms->SetSpeedMps(20.0);
+        lms->AssignStreams(11);
+        const bool s0 = lms->IsShadowed();
+        for (int i = 0; i < 100; ++i)
         {
-            lms->StepDb();
-            if (lms->IsShadowed())
-                ++bad;
+            lms->StepDb(); // Simulator::Now() frozen at 0 -> dx = 0
         }
-        const double empirical = static_cast<double>(bad) / N;
-        NS_TEST_ASSERT_MSG_LT(std::abs(empirical - pBad), 0.10,
-                              "Markov steady-state mismatch: empirical="
-                                  << empirical << " expected=" << pBad);
+        NS_TEST_ASSERT_MSG_EQ(lms->IsShadowed(), s0,
+                              "no sim-time elapsed -> no state change");
 
         lms->SetEnvironment(itu::Itu681LmsModel::Environment::open);
         NS_TEST_ASSERT_MSG_LT(lms->GetBadStateProbability(), 0.05,

@@ -149,34 +149,37 @@ ThzNtnWeatherAttenuation::InitRainCoefficients()
 {
     NS_LOG_FUNCTION(this);
 
-    // ITU-R P.838-3 coefficients extended to THz frequencies.
-    // Each entry: {freqGHz, kH, kV, alphaH, alphaV}
-    // Below ~100 GHz: values from ITU-R P.838 Table 1/2.
-    // Above 100 GHz: extended using Mie scattering calculations for
-    // Marshall-Palmer raindrop size distribution at THz frequencies.
-    // At THz, raindrop diameter (~1 mm) is comparable to wavelength (0.3--3 mm),
-    // so Mie scattering dominates and k increases while alpha decreases.
+    // Rain specific-attenuation coefficients {freqGHz, kH, kV, alphaH, alphaV}.
+    // 1-100 GHz: computed from the ITU-R P.838-3 Annex 1 log-Gaussian
+    //   coefficient formulas (the recommendation defines k and alpha as
+    //   closed-form functions of log10 f — it has NO lookup table). These
+    //   replace the earlier P.838-1 (1999) values, which under-predicted
+    //   Ku/Ka rain attenuation by 20-25% (e.g. k_h(20) was 0.0751 vs the
+    //   P.838-3 value 0.09164).
+    // >100 GHz: extended using Mie scattering for a Marshall-Palmer raindrop
+    //   size distribution; at THz the drop diameter (~1 mm) is comparable to
+    //   the wavelength (0.3-3 mm), so Mie scattering dominates.
 
     m_rainCoeffTable = {
-        {1.0,    0.0000387, 0.0000352, 0.912,  0.880},
-        {2.0,    0.000154,  0.000138,  0.963,  0.923},
-        {4.0,    0.000650,  0.000591,  1.121,  1.075},
-        {6.0,    0.00175,   0.00155,   1.308,  1.265},
-        {8.0,    0.00454,   0.00395,   1.327,  1.310},
-        {10.0,   0.0101,    0.00887,   1.276,  1.264},
-        {15.0,   0.0367,    0.0335,    1.154,  1.128},
-        {20.0,   0.0751,    0.0691,    1.099,  1.065},
-        {25.0,   0.124,     0.113,     1.061,  1.030},
-        {30.0,   0.187,     0.167,     1.021,  1.000},
-        {35.0,   0.263,     0.233,     0.979,  0.963},
-        {40.0,   0.350,     0.310,     0.939,  0.929},
-        {50.0,   0.536,     0.479,     0.873,  0.868},
-        {60.0,   0.707,     0.642,     0.826,  0.824},
-        {70.0,   0.851,     0.784,     0.793,  0.793},
-        {80.0,   0.975,     0.906,     0.769,  0.769},
-        {90.0,   1.06,      0.999,     0.753,  0.754},
-        {100.0,  1.31,      1.24,      0.790,  0.790},  // ~100 GHz: k≈1.31, alpha≈0.79
-        {120.0,  1.58,      1.50,      0.760,  0.760},
+        {1.0,    0.0000259, 0.0000308, 0.9691, 0.8592},
+        {2.0,    0.0000847, 0.0000998, 1.0664, 0.9490},
+        {4.0,    0.0001071, 0.0002461, 1.6009, 1.2475},
+        {6.0,    0.0007056, 0.0004878, 1.5900, 1.5728},
+        {8.0,    0.0041154, 0.0034498, 1.3905, 1.3797},
+        {10.0,   0.0121670, 0.0112919, 1.2571, 1.2156},
+        {15.0,   0.0448146, 0.0500825, 1.1233, 1.0440},
+        {20.0,   0.0916427, 0.0961112, 1.0568, 0.9847},
+        {25.0,   0.1570902, 0.1532685, 0.9991, 0.9491},
+        {30.0,   0.2403082, 0.2290903, 0.9485, 0.9129},
+        {35.0,   0.3373870, 0.3223760, 0.9047, 0.8761},
+        {40.0,   0.4430572, 0.4273753, 0.8673, 0.8421},
+        {50.0,   0.6599578, 0.6472147, 0.8084, 0.7871},
+        {60.0,   0.8606130, 0.8515201, 0.7656, 0.7486},
+        {70.0,   1.0314779, 1.0253337, 0.7345, 0.7215},
+        {80.0,   1.1704450, 1.1668310, 0.7115, 0.7021},
+        {90.0,   1.2807147, 1.2794572, 0.6944, 0.6876},
+        {100.0,  1.3671083, 1.3680473, 0.6815, 0.6765},  // P.838-3 (valid to 1000 GHz)
+        {120.0,  1.58,      1.50,      0.760,  0.760},    // >100 GHz: Mie extension
         {150.0,  1.95,      1.86,      0.730,  0.730},
         {200.0,  2.35,      2.25,      0.700,  0.700},
         {250.0,  2.56,      2.46,      0.685,  0.685},

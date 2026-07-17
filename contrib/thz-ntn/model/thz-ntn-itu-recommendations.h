@@ -42,6 +42,7 @@
 //                    the land mobile-satellite service"
 //   inigodelportillo/ITU-Rpy 0.4.0  https://github.com/inigodelportillo/ITU-Rpy
 
+#include <ns3/nstime.h>
 #include <ns3/object.h>
 #include <ns3/random-variable-stream.h>
 
@@ -117,6 +118,11 @@ class Itu618LossModel : public Object
     void SetClimateRegion(ClimateRegion region) { m_region = region; }
     ClimateRegion GetClimateRegion() const { return m_region; }
 
+    /// Station latitude in degrees (used by the P.618-13 step-8 vertical
+    /// adjustment factor v_0.01). Default 45 deg (mid-latitude).
+    void SetStationLatitudeDeg(double latDeg) { m_latDeg = latDeg; }
+    double GetStationLatitudeDeg() const { return m_latDeg; }
+
     /// Rain height in km above MSL for the configured climate region.
     double GetRainHeightKm() const;
 
@@ -133,13 +139,24 @@ class Itu618LossModel : public Object
                                        double groundAlt_km,
                                        Polarization pol) const;
 
-    /// Effective path length factor `r` per P.618 §2.2.1.1.
-    static double EffectivePathLengthFactor(double pathLengthKm,
-                                              double rainRate_mm_h,
+    /// Horizontal path-reduction factor r_0.01 per ITU-R P.618-13
+    /// §2.2.1.1 step 6.
+    ///
+    /// NOTE: the reduction factor is a function of the SPECIFIC ATTENUATION
+    /// gamma_R (dB/km), not the rain rate. Passing the rain rate here (as an
+    /// earlier revision did) is dimensionally wrong and mis-scales the
+    /// factor. Compute gamma_R = k R^alpha (P.838-3) and pass it in.
+    ///
+    /// \param horizProjLenKm horizontal projection L_G of the slant path (km)
+    /// \param gammaR_dBkm    specific rain attenuation gamma_R (dB/km)
+    /// \param freqHz         carrier frequency (Hz)
+    static double EffectivePathLengthFactor(double horizProjLenKm,
+                                              double gammaR_dBkm,
                                               double freqHz);
 
   private:
     ClimateRegion m_region{ClimateRegion::midlat_summer};
+    double m_latDeg{45.0};   //!< station latitude (deg), for v_0.01
 };
 
 /**
@@ -203,8 +220,23 @@ class Itu681LmsModel : public Object
     void SetEnvironment(Environment env);
     Environment GetEnvironment() const { return m_env; }
 
-    /// One Markov step + per-symbol amplitude sample. Returns the
-    /// instantaneous fade depth in dB (positive = attenuation).
+    /// Set the mobile terminal ground speed in m/s. The P.681 Lutz state
+    /// transitions are governed by distance travelled, so the dwell time in
+    /// each state scales as (characteristic distance / speed), independent
+    /// of how often StepDb() is polled.
+    void SetSpeedMps(double speedMps) { m_speedMps = speedMps; }
+    double GetSpeedMps() const { return m_speedMps; }
+
+    /// Advance the Lutz Markov chain over an explicit travelled distance
+    /// (metres) and return a fade-depth sample (dB). Transition probability
+    /// over distance dx is 1 - exp(-dx / D_state), with D_good / D_bad the
+    /// mean state run-lengths (Lutz). This is the distance-parametrised core.
+    double StepByDistance(double distanceM);
+
+    /// One channel poll: advances the chain by speed * elapsed-sim-time
+    /// since the previous call (so transitions are per-distance, not
+    /// per-call), then returns the instantaneous fade depth in dB
+    /// (positive = attenuation).
     double StepDb();
 
     /// Steady-state shadowing probability (fraction of time in state B).
@@ -221,10 +253,18 @@ class Itu681LmsModel : public Object
 
     Environment m_env{Environment::suburban};
 
-    // Markov chain parameters for the current environment.
-    double m_pAtoB{0.0};
-    double m_pBtoA{0.0};
+    // Lutz Markov chain parameters for the current environment. Transitions
+    // are governed by distance travelled: the mean run-length in each state
+    // is a characteristic distance (metres), giving a steady-state bad-state
+    // probability m_pBadSteady = D_bad / (D_good + D_bad).
+    double m_dGood_m{30.0};   //!< mean good-state run length, metres
+    double m_dBad_m{10.0};    //!< mean bad-state run length, metres
     double m_pBadSteady{0.0};
+
+    // Mobility: ground speed (m/s) and the sim-time of the previous poll,
+    // used to convert elapsed time into travelled distance.
+    double m_speedMps{13.9};      //!< default ~50 km/h vehicular
+    Time m_lastPollTime{Seconds(0)};
 
     // State-A (good) parameters.
     double m_riceK_dB{10.0};

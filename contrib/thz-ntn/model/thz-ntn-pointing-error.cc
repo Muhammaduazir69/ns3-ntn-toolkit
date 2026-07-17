@@ -189,33 +189,53 @@ double
 ThzNtnPointingError::ComputeTrackingError_deg(double elevationDeg,
                                               double satVelocity_km_s) const
 {
-    // Tracking latency causes a pointing lag equal to angular velocity
-    // times the effective latency.
+    // Tracking latency causes a pointing lag equal to the apparent angular
+    // rate of the satellite times the effective control latency.
     //
     // The effective latency includes both the processing latency and the
     // inverse of the update rate (whichever is larger):
     //   t_eff = max(trackingLatency, 1/updateRate)
     //
-    // Angular velocity as seen from ground depends on elevation and
-    // orbital velocity.  For LEO at 550 km, ~1 deg/s at zenith,
-    // increasing to ~3 deg/s at low elevation.
-    //
-    // omega_apparent ~ v_sat * cos(elev) / (R_E + h)
+    // Apparent angular rate as seen from the ground station. Placing the
+    // Earth centre O, the observer G on the surface (radius R_E) and the
+    // satellite S at radius r = R_E + h, the LOS angular rate is the
+    // observer-frame angular momentum of S divided by the slant range
+    // squared:
+    //   omega_app = v * (r - R_E cos psi) / d^2
+    // where psi is the geocentric (central) angle and d the slant range.
+    // This is MAXIMUM at zenith (psi = 0, d = h -> omega = v/h ~ 0.8 deg/s
+    // at 550 km) and small at low elevation (large d) — the opposite of the
+    // previous v*cos(elev)/(R_E+h) form, which wrongly gave zero at zenith.
 
     double elevRad = std::max(elevationDeg, 5.0) * DEG_TO_RAD;
 
-    // Approximate angular velocity as seen from ground (deg/s)
-    // Using satellite velocity and slant geometry
-    constexpr double defaultAltitude_km = 550.0;
-    double orbitalRadius_km = R_EARTH_KM + defaultAltitude_km;
-
-    // Angular velocity (rad/s) = v_tangential / R
+    // Recover the orbit radius from the orbital speed (v = sqrt(mu/r)); fall
+    // back to a 550 km LEO if the speed is degenerate.
     double vSat_m_s = satVelocity_km_s * 1.0e3;
-    double angularVelocity_rad_s = vSat_m_s / (orbitalRadius_km * 1.0e3);
+    double orbitalRadius_km;
+    if (vSat_m_s > 1.0)
+    {
+        orbitalRadius_km = (MU_EARTH / (vSat_m_s * vSat_m_s)) / 1.0e3;
+    }
+    else
+    {
+        orbitalRadius_km = R_EARTH_KM + 550.0;
+    }
 
-    // Apparent angular velocity from ground increases at lower elevation
-    double apparentOmega_deg_s =
-        angularVelocity_rad_s * RAD_TO_DEG * std::cos(elevRad);
+    // Slant-path geometry from elevation (law of sines, triangle O-G-S).
+    const double r_km = orbitalRadius_km;
+    const double sinNadir = (R_EARTH_KM * std::cos(elevRad)) / r_km; // R_E cosE / r
+    const double nadirRad = std::asin(std::min(1.0, std::max(-1.0, sinNadir)));
+    const double psiRad = M_PI / 2.0 - elevRad - nadirRad;           // central angle
+    const double slantRange_km =
+        std::sqrt(R_EARTH_KM * R_EARTH_KM + r_km * r_km -
+                  2.0 * R_EARTH_KM * r_km * std::cos(psiRad));
+
+    // Apparent angular rate (rad/s), max at zenith.
+    double apparentOmega_rad_s =
+        vSat_m_s * (r_km - R_EARTH_KM * std::cos(psiRad)) /
+        (slantRange_km * slantRange_km * 1.0e3);
+    double apparentOmega_deg_s = apparentOmega_rad_s * RAD_TO_DEG;
 
     // Effective latency (seconds)
     double latencyFromUpdate_s = 1.0 / m_trackingUpdateRate_Hz;

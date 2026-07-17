@@ -9,6 +9,7 @@
 #include "ns3/double.h"
 #include "ns3/enum.h"
 #include "ns3/log.h"
+#include "ns3/simulator.h"
 
 #include <algorithm>
 #include <array>
@@ -28,57 +29,70 @@ NS_LOG_COMPONENT_DEFINE("ThzNtnItuRecommendations");
 namespace
 {
 
-/// ITU-R P.838-3 Annex 1 Tables 1 & 2 at canonical frequencies (GHz).
-/// Each row: (f_ghz, k_h, alpha_h, k_v, alpha_v). Values at frequencies
-/// between rows are log-log interpolated.
-struct PRow
+// ITU-R P.838-3 Annex 1 log-Gaussian coefficient model. P.838-3 does NOT
+// tabulate k and alpha; it defines them as closed-form functions of
+// log10(frequency):
+//
+//   log10 k     = sum_j a_j exp(-((log10 f - b_j)/c_j)^2) + m_k log10 f + c_k
+//   alpha       = sum_j a_j exp(-((log10 f - b_j)/c_j)^2) + m_a log10 f + c_a
+//
+// with a 4-term Gaussian sum for k and a 5-term sum for alpha, for each of
+// horizontal and vertical polarization. Coefficients are from ITU-R P.838-3
+// Tables 1-4 (verbatim). Valid 1-1000 GHz. These replace the module's former
+// P.838-1 (1999) lookup values, which under-predicted Ku/Ka rain attenuation
+// by 20-25% (e.g. k_h(20) was 0.0751 vs the P.838-3 value 0.09164).
+
+struct GaussTerm
 {
-    double f_ghz;
-    double k_h;
-    double alpha_h;
-    double k_v;
-    double alpha_v;
+    double a;
+    double b;
+    double c;
 };
 
-constexpr std::array<PRow, 21> kP838Table = {{
-    // Below 10 GHz the table is sparse; we use the published 1-10 GHz entries
-    // verbatim. Toolkit consumers operate mostly above 10 GHz.
-    {1.0,    0.0000259, 0.9691, 0.0000308, 0.8592},
-    {2.0,    0.0000847, 1.0664, 0.0000998, 0.9490},  // k_h/k_v: P.838-3 (were 10x too high)
-    {4.0,    0.0001071, 1.6009, 0.0002461, 1.2476},
-    {6.0,    0.00175,   1.3088, 0.00149,   1.1825},
-    {7.0,    0.00301,   1.3320, 0.00228,   1.1825},
-    {8.0,    0.00454,   1.3270, 0.00395,   1.1664},
-    {10.0,   0.0101,    1.2760, 0.00887,   1.1640},
-    {12.0,   0.0188,    1.2170, 0.0168,    1.1500},
-    {15.0,   0.0367,    1.1540, 0.0335,    1.1280},
-    {20.0,   0.0751,    1.0990, 0.0691,    1.0650},
-    {25.0,   0.1240,    1.0610, 0.1130,    1.0300},
-    {30.0,   0.1870,    1.0210, 0.1670,    1.0000},
-    {35.0,   0.2630,    0.9790, 0.2330,    0.9630},
-    {40.0,   0.3500,    0.9390, 0.3100,    0.9290},
-    {45.0,   0.4420,    0.9030, 0.3930,    0.8970},
-    {50.0,   0.5360,    0.8730, 0.4790,    0.8680},
-    {60.0,   0.7070,    0.8260, 0.6420,    0.8240},
-    {70.0,   0.8510,    0.7930, 0.7840,    0.7930},
-    {80.0,   0.9750,    0.7690, 0.9060,    0.7690},
-    {90.0,   1.0600,    0.7530, 0.9990,    0.7540},
-    {100.0,  1.1200,    0.7430, 1.0600,    0.7440},
-}};
+// k coefficients: 4 Gaussian terms + linear (m, c).
+constexpr std::array<GaussTerm, 4> kKh = {{{-5.33980, -0.10008, 1.13098},
+                                           {-0.35351, 1.26970, 0.45400},
+                                           {-0.23789, 0.86036, 0.15354},
+                                           {-0.94158, 0.64552, 0.16817}}};
+constexpr double kKhM = -0.18961;
+constexpr double kKhC = 0.71147;
 
+constexpr std::array<GaussTerm, 4> kKv = {{{-3.80595, 0.56934, 0.81061},
+                                           {-3.44965, -0.22911, 0.51059},
+                                           {-0.39902, 0.73042, 0.11899},
+                                           {0.50167, 1.07319, 0.27195}}};
+constexpr double kKvM = -0.16398;
+constexpr double kKvC = 0.63297;
+
+// alpha coefficients: 5 Gaussian terms + linear (m, c).
+constexpr std::array<GaussTerm, 5> kAh = {{{-0.14318, 1.82442, -0.55187},
+                                           {0.29591, 0.77564, 0.19822},
+                                           {0.32177, 0.63773, 0.13164},
+                                           {-5.37610, -0.96230, 1.47828},
+                                           {16.1721, -3.29980, 3.43990}}};
+constexpr double kAhM = 0.67849;
+constexpr double kAhC = -1.95537;
+
+constexpr std::array<GaussTerm, 5> kAv = {{{-0.07771, 2.33840, -0.76284},
+                                           {0.56727, 0.95545, 0.54039},
+                                           {-0.20238, 1.14520, 0.26809},
+                                           {-48.2991, 0.791669, 0.116226},
+                                           {48.5833, 0.791459, 0.116479}}};
+constexpr double kAvM = -0.053739;
+constexpr double kAvC = 0.83433;
+
+template <std::size_t N>
 double
-LogLogInterp(double x, double x0, double x1, double y0, double y1)
+LogGaussianSum(double logf, const std::array<GaussTerm, N>& terms, double m,
+               double c)
 {
-    if (x <= x0)
-        return y0;
-    if (x >= x1)
-        return y1;
-    const double lx0 = std::log(x0);
-    const double lx1 = std::log(x1);
-    const double ly0 = std::log(y0);
-    const double ly1 = std::log(y1);
-    const double t = (std::log(x) - lx0) / (lx1 - lx0);
-    return std::exp(ly0 + t * (ly1 - ly0));
+    double s = 0.0;
+    for (const auto& t : terms)
+    {
+        const double z = (logf - t.b) / t.c;
+        s += t.a * std::exp(-z * z);
+    }
+    return s + m * logf + c;
 }
 
 } // namespace
@@ -86,27 +100,14 @@ LogLogInterp(double x, double x0, double x1, double y0, double y1)
 std::pair<double, double>
 Itu838RainModel::GetKAlpha(double freqHz, Polarization pol)
 {
-    const double fGhz = std::max(1.0, std::min(freqHz / 1e9, 100.0));
-    auto it = std::upper_bound(kP838Table.begin(), kP838Table.end(), fGhz,
-                                [](double v, const PRow& r) {
-                                    return v < r.f_ghz;
-                                });
-    if (it == kP838Table.begin())
-    {
-        ++it;
-    }
-    if (it == kP838Table.end())
-    {
-        --it;
-    }
-    const PRow& hi = *it;
-    const PRow& lo = *(it - 1);
-    const double k_h = LogLogInterp(fGhz, lo.f_ghz, hi.f_ghz, lo.k_h, hi.k_h);
-    const double a_h =
-        LogLogInterp(fGhz, lo.f_ghz, hi.f_ghz, lo.alpha_h, hi.alpha_h);
-    const double k_v = LogLogInterp(fGhz, lo.f_ghz, hi.f_ghz, lo.k_v, hi.k_v);
-    const double a_v =
-        LogLogInterp(fGhz, lo.f_ghz, hi.f_ghz, lo.alpha_v, hi.alpha_v);
+    // P.838-3 is specified for 1-1000 GHz.
+    const double fGhz = std::max(1.0, std::min(freqHz / 1e9, 1000.0));
+    const double lf = std::log10(fGhz);
+
+    const double k_h = std::pow(10.0, LogGaussianSum(lf, kKh, kKhM, kKhC));
+    const double a_h = LogGaussianSum(lf, kAh, kAhM, kAhC);
+    const double k_v = std::pow(10.0, LogGaussianSum(lf, kKv, kKvM, kKvC));
+    const double a_v = LogGaussianSum(lf, kAv, kAvM, kAvC);
 
     switch (pol)
     {
@@ -116,6 +117,8 @@ Itu838RainModel::GetKAlpha(double freqHz, Polarization pol)
         return {k_v, a_v};
     case Polarization::circular:
     default:
+        // P.838-3 eq. for tau=45 deg (circular): the cos(2 tau) term
+        // vanishes, leaving the mean of the H and V coefficients.
         return {0.5 * (k_h + k_v), 0.5 * (a_h + a_v)};
     }
 }
@@ -151,6 +154,13 @@ Itu618LossModel::GetTypeId()
 double
 Itu618LossModel::GetRainHeightKm() const
 {
+    // Representative rain height h_R = h0 + 0.36 km (ITU-R P.618-13 §2.2.1.1
+    // step 1, with h0 the 0 deg-C isotherm height from ITU-R P.839). The
+    // four climate regions carry representative P.839 h0 values:
+    //   tropical      h0 ~ 4.6 km -> h_R ~ 5.0 km
+    //   midlat-summer h0 ~ 3.1 km -> h_R ~ 3.5 km
+    //   midlat-winter h0 ~ 1.6 km -> h_R ~ 2.0 km
+    //   subarctic     h0 ~ 1.1 km -> h_R ~ 1.5 km
     switch (m_region)
     {
     case ClimateRegion::tropical:
@@ -166,21 +176,23 @@ Itu618LossModel::GetRainHeightKm() const
 }
 
 double
-Itu618LossModel::EffectivePathLengthFactor(double pathLengthKm,
-                                             double rainRate_mm_h,
+Itu618LossModel::EffectivePathLengthFactor(double horizProjLenKm,
+                                             double gammaR_dBkm,
                                              double freqHz)
 {
-    // P.618-13 §2.2.1.1 path reduction factor. The closed form blends
-    // rain-rate, frequency, and physical slant length so that high rates
-    // over long paths get a sub-unity factor (multipath averaging).
-    if (rainRate_mm_h <= 0.0 || pathLengthKm <= 0.0)
+    // ITU-R P.618-13 §2.2.1.1 step 6: horizontal path-reduction factor
+    //   r_0.01 = 1 / (1 + 0.78 sqrt(L_G gamma_R / f) - 0.38 (1 - e^{-2 L_G}))
+    // The argument of the square root is the horizontal projection L_G (km)
+    // times the SPECIFIC ATTENUATION gamma_R (dB/km), divided by frequency
+    // (GHz) — not the rain rate.
+    if (gammaR_dBkm <= 0.0 || horizProjLenKm <= 0.0)
     {
         return 1.0;
     }
     const double fGhz = freqHz / 1e9;
     const double r =
-        1.0 / (1.0 + 0.78 * std::sqrt(pathLengthKm * rainRate_mm_h / fGhz) -
-               0.38 * (1.0 - std::exp(-2.0 * pathLengthKm)));
+        1.0 / (1.0 + 0.78 * std::sqrt(horizProjLenKm * gammaR_dBkm / fGhz) -
+               0.38 * (1.0 - std::exp(-2.0 * horizProjLenKm)));
     return std::max(0.05, std::min(1.0, r));
 }
 
@@ -191,28 +203,61 @@ Itu618LossModel::SlantPathRainAttenuationDb(double freqHz,
                                               double groundAlt_km,
                                               Polarization pol) const
 {
+    // Full ITU-R P.618-13 §2.2.1.1 slant-path rain attenuation (A_0.01).
     if (rainRate_mm_h <= 0.0)
     {
         return 0.0;
     }
 
-    const double hR = GetRainHeightKm();
+    const double hR = GetRainHeightKm();               // step 1: rain height
     if (hR <= groundAlt_km)
     {
         return 0.0;
     }
-    const double elevRad = elevationDeg * M_PI / 180.0;
-    const double sinElev = std::sin(std::max(elevRad, 5.0 * M_PI / 180.0));
-    const double Ls = (hR - groundAlt_km) / sinElev; // slant length in km
 
-    // P.530 horizontal projection — used in the reduction factor calc.
-    const double Lg = Ls * std::cos(elevRad);
-    const double r =
-        EffectivePathLengthFactor(Lg, rainRate_mm_h, freqHz);
+    const double elevDeg = std::max(elevationDeg, 5.0);
+    const double elevRad = elevDeg * M_PI / 180.0;
+    const double sinElev = std::sin(elevRad);
+    const double cosElev = std::cos(elevRad);
 
-    const double gamma =
+    // step 2: slant path length below the rain height.
+    const double Ls = (hR - groundAlt_km) / sinElev;   // km
+    // step 3: horizontal projection.
+    const double Lg = Ls * cosElev;                    // km
+
+    // step 5: specific attenuation gamma_R = k R^alpha (P.838-3).
+    const double gammaR =
         Itu838RainModel::SpecificAttenuationDbKm(rainRate_mm_h, freqHz, pol);
-    return gamma * Ls * r;
+
+    // step 6: horizontal reduction factor (function of gamma_R, not R).
+    const double r = EffectivePathLengthFactor(Lg, gammaR, freqHz);
+
+    // step 7: vertical adjustment factor v_0.01.
+    const double fGhz = freqHz / 1e9;
+    const double zetaDeg =
+        std::atan2(hR - groundAlt_km, Lg * r) * 180.0 / M_PI;
+    double Lr;
+    if (zetaDeg > elevDeg)
+    {
+        Lr = Lg * r / cosElev;                         // km
+    }
+    else
+    {
+        Lr = (hR - groundAlt_km) / sinElev;            // km
+    }
+    const double absLat = std::abs(m_latDeg);
+    const double chi = (absLat < 36.0) ? (36.0 - absLat) : 0.0;   // deg
+    const double vDenom =
+        1.0 + std::sqrt(sinElev) *
+                  (31.0 * (1.0 - std::exp(-elevDeg / (1.0 + chi))) *
+                       std::sqrt(Lr * gammaR) / (fGhz * fGhz) -
+                   0.45);
+    // Guard against a pathological non-positive denominator.
+    const double v = (vDenom > 1e-3) ? (1.0 / vDenom) : 1.0;
+
+    // step 8: effective path length, and step 9: attenuation.
+    const double Le = Lr * v;                          // km
+    return gammaR * Le;                                // dB
 }
 
 // ---------------------------------------------------------------------------
@@ -286,60 +331,92 @@ Itu681LmsModel::ApplyEnvironment()
 {
     // Per-environment parameters approximating P.681-11 Table 1 trends.
     // Urban -> high P_bad, large multipath fade; open -> P_bad ~ 0, only
-    // residual Rice. Mid-band values pick reasonable defaults; site-
+    // residual Rice. The Lutz state durations are characteristic DISTANCES
+    // (metres): the good/bad run-lengths set the steady-state occupancy
+    // P(bad) = D_bad / (D_good + D_bad), and the dwell TIME follows from the
+    // terminal speed. Mid-band values pick reasonable defaults; site-
     // specific calibration is the user's job at the example layer.
     switch (m_env)
     {
     case Environment::urban:
-        m_pAtoB = 0.30;
-        m_pBtoA = 0.20;
+        m_dGood_m = 16.0;   // P(bad) = 24/(16+24) = 0.60
+        m_dBad_m = 24.0;
         m_riceK_dB = 5.0;
         m_looMu_dB = -12.0;
         m_looSigma_dB = 4.0;
         m_looMultipathDb = 8.0;
         break;
     case Environment::suburban:
-        m_pAtoB = 0.10;
-        m_pBtoA = 0.30;
+        m_dGood_m = 30.0;   // P(bad) = 10/(30+10) = 0.25
+        m_dBad_m = 10.0;
         m_riceK_dB = 10.0;
         m_looMu_dB = -8.0;
         m_looSigma_dB = 3.0;
         m_looMultipathDb = 5.0;
         break;
     case Environment::rural:
-        m_pAtoB = 0.04;
-        m_pBtoA = 0.40;
+        m_dGood_m = 40.0;   // P(bad) = 4/(40+4) = 0.0909
+        m_dBad_m = 4.0;
         m_riceK_dB = 14.0;
         m_looMu_dB = -5.0;
         m_looSigma_dB = 2.5;
         m_looMultipathDb = 3.0;
         break;
     case Environment::open:
-        m_pAtoB = 0.005;
-        m_pBtoA = 0.50;
+        m_dGood_m = 40.0;   // P(bad) = 0.4/(40+0.4) = 0.0099
+        m_dBad_m = 0.4;
         m_riceK_dB = 18.0;
         m_looMu_dB = -3.0;
         m_looSigma_dB = 1.0;
         m_looMultipathDb = 1.5;
         break;
     }
-    // Steady-state P(B) = p_AB / (p_AB + p_BA)
-    const double denom = m_pAtoB + m_pBtoA;
-    m_pBadSteady = (denom > 0.0) ? (m_pAtoB / denom) : 0.0;
+    // Steady-state P(B) = D_bad / (D_good + D_bad)
+    const double denom = m_dGood_m + m_dBad_m;
+    m_pBadSteady = (denom > 0.0) ? (m_dBad_m / denom) : 0.0;
 }
 
 double
 Itu681LmsModel::StepDb()
 {
-    // Markov step.
-    const double u = m_uniform->GetValue();
-    if (!m_inBad && u < m_pAtoB)
+    // Convert elapsed sim-time since the previous poll into travelled
+    // distance, so the Lutz transitions are per-distance (independent of the
+    // packet/polling rate).
+    const Time now = Simulator::Now();
+    double dt = (now - m_lastPollTime).GetSeconds();
+    if (dt < 0.0)
     {
-        m_inBad = true;
+        dt = 0.0;
     }
-    else if (m_inBad && u < m_pBtoA)
+    m_lastPollTime = now;
+    return StepByDistance(m_speedMps * dt);
+}
+
+double
+Itu681LmsModel::StepByDistance(double distanceM)
+{
+    // Distance-parametrised Lutz transition. Over a travelled distance dx,
+    // the probability of leaving the current state is 1 - exp(-dx / D_state),
+    // with D_state the mean run length (metres). At dx = 0 no transition
+    // occurs — dwell is governed by distance, not by call count.
+    const double dx = std::max(0.0, distanceM);
+    if (!m_inBad)
     {
-        m_inBad = false;
+        const double pLeave =
+            (m_dGood_m > 0.0) ? (1.0 - std::exp(-dx / m_dGood_m)) : 0.0;
+        if (m_uniform->GetValue() < pLeave)
+        {
+            m_inBad = true;
+        }
+    }
+    else
+    {
+        const double pLeave =
+            (m_dBad_m > 0.0) ? (1.0 - std::exp(-dx / m_dBad_m)) : 0.0;
+        if (m_uniform->GetValue() < pLeave)
+        {
+            m_inBad = false;
+        }
     }
 
     // Sample fade depth in dB given the new state.
@@ -366,6 +443,9 @@ Itu681LmsModel::AssignStreams(int64_t stream)
     m_uniform->SetStream(stream);
     m_normal->SetStream(stream + 1);
     m_exp->SetStream(stream + 2);
+    // Anchor the mobility clock so the first poll measures elapsed time from
+    // here rather than from t=0.
+    m_lastPollTime = Simulator::Now();
     return 3;
 }
 

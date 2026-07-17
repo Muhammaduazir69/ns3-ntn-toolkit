@@ -180,9 +180,24 @@ HitranLut::Get(double freqHz, double altKm) const
     {
         return std::numeric_limits<double>::quiet_NaN();
     }
-    // Clamp the query coordinate into the grid range so out-of-bounds
-    // values use the edge cell instead of linearly extrapolating.
+    // Return NaN for queries outside the tabulated grid. The LUT covers a
+    // finite (frequency x altitude) domain (e.g. 100-500 GHz x 0-30 km);
+    // edge-clamping an out-of-domain query would misapply the boundary cell
+    // — e.g. reading the 500 GHz column for a 600 GHz link, or integrating
+    // the 30 km rate up to 100 km, both of which fabricate absorption where
+    // reality is ~0. Callers (ComputeSlantPathAbsorption / GetTransmittance)
+    // treat NaN as "not covered" and fall back to the in-process P.676-13
+    // kernel, which is valid over the full domain.
     const double freqGhzRaw = freqHz / 1e9;
+    constexpr double kEps = 1e-9;   // tolerance for exact-edge queries
+    if (freqGhzRaw < m_freqGhz.front() - kEps ||
+        freqGhzRaw > m_freqGhz.back() + kEps ||
+        altKm < m_altKm.front() - kEps ||
+        altKm > m_altKm.back() + kEps)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    // Clamp exact-edge / rounding queries into range (grid interior only).
     const double freqGhz =
         std::min(std::max(freqGhzRaw, m_freqGhz.front()), m_freqGhz.back());
     const double altKmCl =
