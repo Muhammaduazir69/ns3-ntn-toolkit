@@ -108,9 +108,18 @@ ChoTick()
     {
         g_scene->RecordKpi(g_sinrSeries, servSinr);
     }
-    // Candidate SINR: ephemeris-predicted from the REAL slant-range ratio
-    // (Friis correction off the measured serving baseline — 3GPP NTN CHO).
-    const double candSinr = servSinr + 20.0 * std::log10(servSlant / std::max(1.0, candSlant));
+    // Candidate SINR. The candidate satellite is now a REAL gNB (see Build), so
+    // prefer its MEASURED cell SINR from the PHY trace. Fall back to the
+    // ephemeris-predicted Friis correction off the measured serving baseline
+    // only while the neighbour has no samples yet (it carries no traffic until a
+    // UE is handed to it) — that fallback is what CHO candidate prediction
+    // legitimately is (3GPP NTN CHO predicts the target from ephemeris), but it
+    // must not masquerade as a measurement when a real one exists (gap C6).
+    const double candMeas = g_rs->GetCellMeanSinrDb(g_candCellId);
+    const bool candIsMeasured = !std::isnan(candMeas);
+    const double candSinr =
+        candIsMeasured ? candMeas
+                       : servSinr + 20.0 * std::log10(servSlant / std::max(1.0, candSlant));
     const double servGain = std::max(-20.0, (servElev - 45.0) / 5.0);
     const double candGain = std::max(-20.0, (candElev - 45.0) / 5.0);
 
@@ -122,9 +131,13 @@ ChoTick()
     g_cho->EvaluateConditions();
 
     uint16_t chosen = g_cho->SelectBestCandidate();
-    if (chosen != g_serving && chosen != 0 && chosen != g_servingCellId)
+    if (chosen != g_serving && chosen != 0 && chosen != g_cho->GetServingCellId())
     {
         ++g_handovers;
+        // ExecuteHandover now calls the registered callback, which issues a REAL
+        // X2 reconfiguration-with-sync via NtnRealStackHelper::TriggerHandover
+        // (see main()). The outcome arrives asynchronously from the RRC; T304
+        // runs until then, so a failed handover is now actually representable.
         g_cho->ExecuteHandover(chosen);
         if (g_scene)
         {
@@ -132,8 +145,9 @@ ChoTick()
         }
         const auto st = g_cho->GetMechanismStats();
         std::printf("  %6.1fs  HANDOVER cell %u -> %u  (servSINR meas=%.1f dB, candSINR "
-                    "pred=%.1f dB, interruption=%.1f ms%s)\n",
-                    Simulator::Now().GetSeconds(), g_serving, chosen, servSinr, candSinr,
+                    "%s=%.1f dB, interruption=%.1f ms%s)\n",
+                    Simulator::Now().GetSeconds(), g_serving, chosen, servSinr,
+                    candIsMeasured ? "meas" : "pred", candSinr,
                     st.lastInterruptionMs,
                     st.rachLessExecutions > 0 ? ", RACH-less" : "");
         g_serving = chosen;
@@ -251,7 +265,20 @@ main(int argc, char* argv[])
     g_servMob = serv;
     g_candMob = cand;
 
-    // ---- Real NR NTN serving cell + measured traffic (mmwave FR2 or nr FR1) ----
+    // ---- Real NR NTN cells + measured traffic (mmwave FR2 or nr FR1) ------
+    //
+    // GAP C6/H2 FIX: BOTH satellites are gNBs now.
+    //
+    // Previously only `servSat` was handed to Build(), so the "candidate cell"
+    // (servingCellId + 100) had no NetDevice, no PHY and no radio at all: its
+    // SINR was extrapolated closed-form from the serving cell's, and the CHO
+    // could never hand a UE to it because it did not exist as a cell. With both
+    // satellites built as real gNBs, the candidate is a genuine neighbour cell
+    // and a CHO decision can drive an actual X2 reconfiguration-with-sync.
+    NodeContainer gnbSats;
+    gnbSats.Add(servSat.Get(0));
+    gnbSats.Add(candSat.Get(0));
+
     NtnRealStackHelper rs;
     rs.SetRadioBackend(useNr ? NtnRealStackHelper::RadioBackend::Nr
                              : NtnRealStackHelper::RadioBackend::Mmwave);
@@ -264,7 +291,14 @@ main(int argc, char* argv[])
     rs.SetRunTag("ntn-cho-real-stack");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
     rs.SetSatEirpDbm(satEirpDbm);
-    rs.Build(servSat, ueNodes);
+    // Stand up the X2 between the two satellites so a handover can be executed.
+    // The A3 algorithm this also installs is the vendored *baseline*; the CHO
+    // decision below drives handovers explicitly via TriggerHandover, and
+    // GetHandoverRequestedCount() vs GetHandoverCount() proves the loop closed.
+    // A3 baseline config (the CHO drives handovers explicitly; these values
+    // damp the vendored algorithm so the two do not fight over the same UE).
+    rs.SetHandover(true, /*hysteresisDb=*/6.0, MilliSeconds(1024));
+    rs.Build(gnbSats, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));
     rs.EnableAiFlowMonitor("ntn-cho-real-stack"); // WS2 KPM series (TS 28.552 names)
@@ -326,14 +360,45 @@ main(int argc, char* argv[])
     cfg.minPredictedTos = Seconds(3.0);
     g_cho->Configure(cfg);
 
-    // Radio-agnostic serving cell id (mmwave::MmWaveEnbNetDevice or
-    // ns3::NrGnbNetDevice under the hood, depending on the backend).
-    g_servingCellId = rs.GetServingCellId();
-    g_candCellId = g_servingCellId + 100;
+    // GAP C6 FIX: use the REAL cell ids of the two gNBs.
+    //
+    // This used to be `g_candCellId = g_servingCellId + 100` — an id that named
+    // no gNB anywhere in the scenario. The CHO therefore "handed over" to a cell
+    // that did not exist, which is why nothing could ever actuate.
+    g_servingCellId = rs.GetGnbCellId(0);
+    g_candCellId = rs.GetGnbCellId(1);
+    NS_ABORT_MSG_IF(g_candCellId == 0 || g_candCellId == g_servingCellId,
+                    "expected two distinct gNB cells (serving + candidate)");
     g_serving = g_servingCellId;
     g_cho->SetServingCell(g_servingCellId);
     g_cho->AddCandidateCell(g_servingCellId, 0, 0);
     g_cho->AddCandidateCell(g_candCellId, 1, 0);
+
+    // ---- GAP H2 FIX: close the loop onto the real radio -------------------
+    // The CHO decision now issues a genuine X2 reconfiguration-with-sync, and
+    // the RRC's completion reports back into the algorithm so T304 can stop (or
+    // expire into a real failure). Before this, ExecuteHandover only incremented
+    // counters while the radio was moved — if at all — by the vendored A3
+    // algorithm, which never saw the CHO decision.
+    g_cho->SetHandoverExecutionCallback(
+        MakeCallback(+[](uint16_t /*from*/, uint16_t to) {
+            if (!g_rs->TriggerHandover(0, to))
+            {
+                // TriggerHandover already WARNed the reason; tell the algorithm
+                // the handover did not happen rather than let T304 mask it.
+                g_cho->NotifyHandoverComplete(to, false);
+            }
+        }));
+    // The RRC reports completion; feed it back so success is the RADIO's word,
+    // not the model's assumption.
+    Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/HandoverEndOk",
+                    MakeCallback(+[](std::string /*ctx*/, uint64_t /*imsi*/, uint16_t cellId,
+                                     uint16_t /*rnti*/) {
+                        if (g_cho)
+                        {
+                            g_cho->NotifyHandoverComplete(cellId, true);
+                        }
+                    }));
 
     // ---- Optional 3D scene trace (NetSimulyzer + Cesium CZML) ----
     // One recorder taps the Kepler+J2 sats + TR 38.811 UEs (all ECEF) and the

@@ -869,44 +869,83 @@ NtnChoAlgorithm::ExecuteHandover(uint16_t targetCellId)
     // Fire execution trace
     m_handoverExecutedTrace(sourceCell, targetCellId, tos);
 
-    // Start T304 timer
+    // ---- GAP H2 FIX: T304 must be able to EXPIRE -------------------------
+    // TS 38.331 §5.3.5.8.3: T304 starts when the UE applies the
+    // reconfiguration-with-sync and stops only when the handover COMPLETES; if
+    // it expires the UE declares handover failure and re-establishes. The old
+    // code scheduled T304 here and then unconditionally Simulator::Cancel()'d it
+    // ~20 lines below, in the SAME call — so expiry was unreachable and every
+    // handover "succeeded" by construction, regardless of what the radio did.
+    // The timer now survives this function and is stopped only by
+    // NotifyHandoverComplete() (driven by the radio's RRC completion trace).
     m_t304Event = Simulator::Schedule(m_config.t304Timer, [this, targetCellId]() {
-        // T304 expired - handover failure
-        NS_LOG_WARN("T304 expired for HO to cell " << targetCellId);
+        NS_LOG_WARN("T304 expired for HO to cell " << targetCellId
+                                                   << " — handover FAILURE (TS 38.331 5.3.5.8.3)");
+        ++m_mechStats.handoverFailures;
         m_handoverOutcomeTrace(targetCellId, false, "T304Expired");
+        // Failure: the UE did NOT arrive at the target; keep the serving cell as
+        // it was and go back to monitoring so a later attempt can be prepared.
         TransitionState(CHO_IDLE);
     });
 
-    // Execute via callback
+    m_lastSourceCell = sourceCell;
+    m_lastHoTime = Simulator::Now();
+    m_pendingTargetCell = targetCellId;
+    m_pendingPingPong = isPingPong;
+
+    // ---- Actuate ---------------------------------------------------------
+    // The callback is the bridge to the real radio (see
+    // NtnRealStackHelper::TriggerHandover): it issues a genuine X2/Xn
+    // reconfiguration-with-sync. The outcome then arrives asynchronously via
+    // NotifyHandoverComplete() from the RRC HandoverEndOk trace — it is NOT
+    // knowable here, which is the whole point of T304.
     if (!m_hoCallback.IsNull())
     {
         m_hoCallback(sourceCell, targetCellId);
+        // Serving cell is updated on CONFIRMED completion, not on request.
+        return;
     }
 
-    // Update state
-    m_lastSourceCell = sourceCell;
-    m_lastHoTime = Simulator::Now();
-    m_servingCellId = targetCellId;
+    // No radio wired: this instance is being used as a standalone decision model
+    // (analysis / unit tests / trace-only studies). Self-complete so those uses
+    // keep working, but be explicit that nothing was actuated — a decision
+    // module must never silently look like a control loop.
+    NS_LOG_INFO("no handover callback registered — completing the CHO decision in the model only "
+                "(no radio was actuated; wire NtnRealStackHelper::TriggerHandover to close the "
+                "loop)");
+    NotifyHandoverComplete(targetCellId, true);
+}
 
-    // Cancel T304 (successful execution)
+void
+NtnChoAlgorithm::NotifyHandoverComplete(uint16_t cellId, bool success)
+{
+    // Called by the radio bridge when the RRC reports the outcome
+    // (HandoverEndOk -> success). Stops T304 per TS 38.331 §5.3.5.8.3.
     if (m_t304Event.IsPending())
     {
         Simulator::Cancel(m_t304Event);
     }
-
-    if (isPingPong)
+    if (!success)
     {
-        m_handoverOutcomeTrace(targetCellId, true, "PingPong");
-    }
-    else
-    {
-        m_handoverOutcomeTrace(targetCellId, true, "Success");
+        ++m_mechStats.handoverFailures;
+        m_handoverOutcomeTrace(cellId, false, "HandoverFailure");
+        TransitionState(CHO_IDLE);
+        return;
     }
 
+    m_servingCellId = cellId;
+    m_handoverOutcomeTrace(cellId, true, m_pendingPingPong ? "PingPong" : "Success");
     TransitionState(CHO_COMPLETED);
 
-    // Reset to monitoring for next CHO cycle
-    m_candidates.clear();
+    // ---- GAP H3 FIX: re-arm instead of going permanently silent -----------
+    // The old code did m_candidates.clear() here and nothing ever re-prepared
+    // them, so SelectBestCandidate() returned 0 forever and every run was capped
+    // at exactly ONE handover — the advertised multi-handover KPIs (ToS
+    // distribution, ping-pong rate) could not structurally contain more than one
+    // event. Rel-17 CHO keeps prepared candidates across an execution
+    // (attemptCondReconfig), so drop only the cell we just moved TO (it is now
+    // the serving cell, not a candidate) and keep the rest armed.
+    m_candidates.erase(cellId);
     TransitionState(CHO_IDLE);
 }
 

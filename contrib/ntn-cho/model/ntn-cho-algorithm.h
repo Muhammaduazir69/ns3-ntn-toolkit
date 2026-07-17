@@ -220,6 +220,9 @@ class NtnChoAlgorithm : public Object
         double lastInterruptionMs = 0.0; //!< interruption of the last handover
         double totalInterruptionMs = 0.0;//!< cumulative interruption
         double lastPreCompTaUs = 0.0;    //!< last ephemeris-pre-computed TA (us)
+        uint32_t handoverFailures = 0;   //!< H2: real failures (T304 expiry / RRC failure).
+                                         //!< Was structurally impossible before: T304 was
+                                         //!< cancelled in the same call that armed it.
     };
 
     /**
@@ -314,6 +317,14 @@ class NtnChoAlgorithm : public Object
     void SetServingCell(uint16_t cellId);
 
     /**
+     * \brief Cell currently serving the UE according to the CHO state machine.
+     * H2: this is committed by NotifyHandoverComplete() on CONFIRMED radio
+     * completion, so it reflects where the UE actually is — not where a
+     * decision hoped to send it.
+     */
+    uint16_t GetServingCellId() const { return m_servingCellId; }
+
+    /**
      * \brief Feed the live ephemeris/GNSS slant range (m) for a candidate's
      *        satellite. Enables RACH-less execution: TA = 2*slant/c is
      *        pre-compensated (TS 38.821 §6.3.3) so the RACH is skipped.
@@ -384,6 +395,24 @@ class NtnChoAlgorithm : public Object
      * \brief Cancel ongoing CHO
      */
     void CancelHandover();
+
+    /**
+     * \brief Report the OUTCOME of a handover that ExecuteHandover() requested.
+     *
+     * H2: the outcome of a handover is not knowable at request time — it is
+     * decided by the radio, one X2 round trip later. Wire this to the stack's
+     * RRC completion trace (NrGnbRrc HandoverEndOk via
+     * NtnRealStackHelper::GetHandoverCount()/TriggerHandover) so that:
+     *   - success stops T304 (TS 38.331 5.3.5.8.3), commits the serving cell,
+     *     and RE-ARMS the remaining candidates (Rel-17 attemptCondReconfig);
+     *   - no report before T304 expires = a real handover failure.
+     * If no handover callback is registered the model self-completes and says
+     * so, for standalone decision-model / unit-test use.
+     *
+     * \param cellId  target cell the UE actually landed on
+     * \param success true if the RRC reported completion
+     */
+    void NotifyHandoverComplete(uint16_t cellId, bool success);
 
     /**
      * \brief Get current CHO state
@@ -466,6 +495,8 @@ class NtnChoAlgorithm : public Object
     EventId m_t304Event;                               //!< T304 timer event
     Time m_lastHoTime;                                 //!< Time of last handover (for ToS)
     uint16_t m_lastSourceCell;                         //!< Last source cell (for ping-pong)
+    uint16_t m_pendingTargetCell{0};                   //!< H2: target of the in-flight handover
+    bool m_pendingPingPong{false};                     //!< H2: was the in-flight HO a ping-pong
 
     HandoverExecutionCallback m_hoCallback;
     CandidateAdmittedCallback m_admitCallback;

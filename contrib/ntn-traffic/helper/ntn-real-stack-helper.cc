@@ -1243,6 +1243,112 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
     return apps;
 }
 
+uint16_t
+NtnRealStackHelper::GetGnbCellId(uint32_t gnbIndex) const
+{
+    if (gnbIndex >= m_enbDevs.GetN())
+    {
+        return 0;
+    }
+    if (m_backend == RadioBackend::Nr)
+    {
+        Ptr<NrGnbNetDevice> gnb = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(gnbIndex));
+        return gnb ? gnb->GetCellId() : 0;
+    }
+    Ptr<mmwave::MmWaveEnbNetDevice> enb =
+        DynamicCast<mmwave::MmWaveEnbNetDevice>(m_enbDevs.Get(gnbIndex));
+    return enb ? enb->GetCellId() : 0;
+}
+
+bool
+NtnRealStackHelper::TriggerHandover(uint32_t ueIndex, uint16_t targetCellId, Time when)
+{
+    // P1 / gap H2: the actuation bridge. Every failure path below WARNs with the
+    // reason — a decision module must never believe it actuated when it did not
+    // (that silent-success pattern is exactly what this fix exists to kill).
+    if (!m_built)
+    {
+        NS_LOG_WARN("TriggerHandover before Build() — ignored");
+        return false;
+    }
+    if (m_backend != RadioBackend::Nr)
+    {
+        NS_LOG_WARN("TriggerHandover requires the nr backend (SetRadioBackend(Nr)); the vendored "
+                    "mmwave path has no equivalent X2 handover request — not actuated");
+        return false;
+    }
+    if (!m_handover)
+    {
+        NS_LOG_WARN("TriggerHandover called but handover was never enabled (SetHandover(true) "
+                    "before Build() stands up the X2) — not actuated");
+        return false;
+    }
+    if (m_enbDevs.GetN() < 2)
+    {
+        NS_LOG_WARN("TriggerHandover needs >= 2 gNBs (have " << m_enbDevs.GetN()
+                                                             << ") — not actuated");
+        return false;
+    }
+    if (ueIndex >= m_ueDevs.GetN())
+    {
+        NS_LOG_WARN("TriggerHandover: UE index " << ueIndex << " out of range — not actuated");
+        return false;
+    }
+    const uint16_t servingCell = GetUeServingCellId(ueIndex);
+    if (servingCell == 0)
+    {
+        NS_LOG_WARN("TriggerHandover: UE " << ueIndex << " is not attached yet — not actuated");
+        return false;
+    }
+    if (servingCell == targetCellId)
+    {
+        NS_LOG_INFO("TriggerHandover: UE " << ueIndex << " already served by cell " << targetCellId
+                                           << " — nothing to do");
+        return false;
+    }
+    // Resolve the source gNB device from the UE's CURRENT serving cell, not from
+    // gNB[0]: after an earlier handover the source has moved.
+    Ptr<NetDevice> srcDev;
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        if (GetGnbCellId(i) == servingCell)
+        {
+            srcDev = m_enbDevs.Get(i);
+            break;
+        }
+    }
+    if (!srcDev)
+    {
+        NS_LOG_WARN("TriggerHandover: no gNB device for serving cell " << servingCell
+                                                                       << " — not actuated");
+        return false;
+    }
+    bool targetKnown = false;
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        if (GetGnbCellId(i) == targetCellId)
+        {
+            targetKnown = true;
+            break;
+        }
+    }
+    if (!targetKnown)
+    {
+        NS_LOG_WARN("TriggerHandover: target cell " << targetCellId
+                                                    << " is not a gNB in this scenario — not "
+                                                       "actuated");
+        return false;
+    }
+
+    NS_LOG_INFO("TriggerHandover: UE " << ueIndex << " cell " << servingCell << " -> "
+                                       << targetCellId << " in " << when.GetMilliSeconds()
+                                       << " ms (X2 one-way "
+                                       << ComputeX2LinkDelay().GetMilliSeconds() << " ms)");
+    m_nr->HandoverRequest(when, m_ueDevs.Get(ueIndex), srcDev, targetCellId);
+    ++m_hoRequested;
+    return true;
+}
+
 Time
 NtnRealStackHelper::ComputeServiceLinkDelay() const
 {

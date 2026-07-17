@@ -233,6 +233,35 @@ class NtnRealStackHelper
     /// handover preparation is not instantaneous between orbiting gNBs.
     Time ComputeX2LinkDelay() const;
 
+    // ---- P1: actuation bridge for decision modules (CHO / RIC / xApps) -----
+    /// Execute a REAL handover of UE \p ueIndex to \p targetCellId over X2/Xn.
+    ///
+    /// This is the bridge that turns a decision module into a control loop.
+    /// Before it existed, ntn-cho's ExecuteHandover() only incremented counters
+    /// and fired traces — no code path in that module ever called an RRC/X2 API,
+    /// so the "conditional handover" never moved a UE, while the only handover
+    /// the radio actually performed was the vendored A3 algorithm's, which
+    /// ignored the CHO decision entirely (gap H2).
+    ///
+    /// Drives NrHelper::HandoverRequest, i.e. a genuine TS 38.331 §5.3.5.4
+    /// reconfiguration-with-sync over the X2 (which now carries a real
+    /// inter-satellite delay, see ComputeX2LinkDelay). Completion is reported by
+    /// the NrGnbRrc HandoverEndOk trace, which GetHandoverCount() counts — so a
+    /// caller can assert that its decisions equal the radio's completions.
+    ///
+    /// \param ueIndex     index into the UE container passed to Build()
+    /// \param targetCellId cell id of the target gNB
+    /// \param when        delay before issuing the request (0 = now)
+    /// \return true if the request was issued (requires the nr backend, >=2
+    ///         gNBs, handover enabled via SetHandover, and a UE already
+    ///         attached to a DIFFERENT cell); false otherwise, with a WARN
+    ///         naming the reason — never a silent no-op.
+    bool TriggerHandover(uint32_t ueIndex, uint16_t targetCellId, Time when = Seconds(0));
+
+    /// Cell id of the gNB at \p gnbIndex (0 if unavailable). Lets a decision
+    /// module map its own candidate index onto a real target cell.
+    uint16_t GetGnbCellId(uint32_t gnbIndex) const;
+
     /// S2: one-way UE<->satellite (service link) propagation delay from the
     /// live geometry. On the mmwave backend (zero-delay air interface) this is
     /// folded into the backhaul so the user-plane OWD is physically right; the
@@ -376,6 +405,10 @@ class NtnRealStackHelper
     /// replacing free-space-scaled candidate SINR. Call before Build().
     void SetHandover(bool enable, double hysteresisDb = 3.0, Time ttt = MilliSeconds(256));
     /// Number of successfully completed NR handovers observed this run.
+    /// P1: handovers REQUESTED through TriggerHandover(). Compare with
+    /// GetHandoverCount() (completions reported by the RRC HandoverEndOk
+    /// trace) to prove a decision module actually drives the radio.
+    uint32_t GetHandoverRequestedCount() const { return m_hoRequested; }
     uint32_t GetHandoverCount() const { return m_hoCount; }
 
     // ---- Enabler B: spectrum-level channel plugin + real MIMO ------------
@@ -679,6 +712,7 @@ class NtnRealStackHelper
     /// not feel it. Safe to enable only for single-UE downlink-only studies.
     bool m_airIfaceDelayRequested{false};
     uint32_t m_hoCount{0};                      // A: completed NR handovers
+    uint32_t m_hoRequested{0};                  // P1: handovers REQUESTED via TriggerHandover
     std::vector<Ptr<NrHandoverAlgorithm>> m_hoAlgos; // A: per-gNB A3 algos (kept alive)
 
     // Collected results
