@@ -308,6 +308,37 @@ class RealStackNtnHarqProfileTest : public TestCase
     }
 };
 
+/// GAP S3 (CI gate 2): per-UE stats must be keyed by (cellId,RNTI), so two UEs
+/// on different cells sharing an RNTI do not blend. Before the fix the key was
+/// the bare RNTI and every multi-gNB run corrupted per-UE SINR/TBLER.
+class RealStackUeKeySeparationTest : public TestCase
+{
+  public:
+    RealStackUeKeySeparationTest()
+        : TestCase("Per-UE stats key separates same-RNTI UEs on different cells (S3/gate 2)")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // Same RNTI (5) on two different cells (1, 2) MUST give distinct keys.
+        const uint32_t k1 = NtnRealStackHelper::UeStatsKey(1, 5);
+        const uint32_t k2 = NtnRealStackHelper::UeStatsKey(2, 5);
+        NS_TEST_ASSERT_MSG_NE(k1, k2,
+                              "same RNTI on different cells must not collide (bare-RNTI bug)");
+        // Same (cell,RNTI) is the same key; different RNTI on the same cell differ.
+        NS_TEST_ASSERT_MSG_EQ(k1, NtnRealStackHelper::UeStatsKey(1, 5), "key must be stable");
+        NS_TEST_ASSERT_MSG_NE(NtnRealStackHelper::UeStatsKey(1, 5),
+                              NtnRealStackHelper::UeStatsKey(1, 6),
+                              "different RNTIs on the same cell must differ");
+        // No aliasing across the 16-bit boundary: (cell=0,rnti=0x10000&0xffff)
+        // cannot equal (cell=1,rnti=0). The shift guarantees it.
+        NS_TEST_ASSERT_MSG_NE(NtnRealStackHelper::UeStatsKey(1, 0),
+                              NtnRealStackHelper::UeStatsKey(0, 1), "no cross-field aliasing");
+    }
+};
+
 class NtnRealStackHelperTestSuite : public TestSuite
 {
   public:
@@ -317,6 +348,7 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new RealStackAiMonitorAutoExportTest, Duration::QUICK);
         AddTestCase(new RealStackAiMonitorAfterInstallTest, Duration::QUICK);
         AddTestCase(new RealStackNtnHarqProfileTest, Duration::QUICK);
+        AddTestCase(new RealStackUeKeySeparationTest, Duration::QUICK);
     }
 };
 

@@ -570,6 +570,15 @@ class NtnRealStackHelper
     /// backend) and returns GetCellId() (1 if unavailable). Defined out-of-line.
     uint16_t GetServingCellId() const;
 
+    /// S3 (gate 2): the per-UE statistics key = (cellId<<16)|rnti. Two UEs on
+    /// different cells that happen to share an RNTI must map to DISTINCT keys, or
+    /// their measured SINR/TBLER blend (the multi-gNB corruption S3 fixes).
+    /// Exposed so a unit test can pin that collision-freedom directly.
+    static uint32_t UeStatsKey(uint16_t cellId, uint16_t rnti)
+    {
+        return (static_cast<uint32_t>(cellId) << 16) | static_cast<uint32_t>(rnti);
+    }
+
     // ---- Handles for module-specific wiring ------------------------------
     // (defined out-of-line so callers need not pull in the mmwave headers)
     Ptr<mmwave::MmWaveHelper> GetMmWaveHelper() const;

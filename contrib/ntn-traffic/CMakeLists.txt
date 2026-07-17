@@ -70,6 +70,7 @@ set(test_sources
     test/ntn-oran-ai-flow-monitor-test.cc
     test/ntn-oran-application-test.cc
     test/ntn-real-stack-helper-test.cc
+    test/ntn-spectrum-seam-test.cc
 )
 
 build_lib(
