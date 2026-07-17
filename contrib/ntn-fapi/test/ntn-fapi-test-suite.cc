@@ -2,11 +2,22 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include "ns3/config.h"
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/fapi-helpers.h"
 #include "ns3/fapi-messages.h"
 #include "ns3/fapi-pdu-types.h"
+#include "ns3/mmwave-enb-net-device.h"
+#include "ns3/mmwave-phy-mac-common.h"
+#include "ns3/node-container.h"
+#include "ns3/ntn-fapi-sap-bridge.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/simulator.h"
 #include "ns3/test.h"
+#include "ns3/vector.h"
 
+#include <cmath>
 #include <variant>
 
 using namespace ns3;
@@ -219,6 +230,130 @@ class FapiUlIndicationShapesTest : public TestCase
     }
 };
 
+namespace
+{
+/// Global handle so a plain Config trace callback can feed the real per-TB
+/// decode into the bridge (mirrors the example wiring).
+Ptr<NtnFapiSapBridge> g_testBridge = nullptr;
+NtnRealStackHelper* g_testRs = nullptr;
+uint16_t g_testUeRnti = 0;
+
+void
+TestFapiRx(mmwave::RxPacketTraceParams p)
+{
+    if (g_testUeRnti == 0 && g_testRs)
+    {
+        g_testUeRnti = g_testRs->GetUeRnti(0);
+        if (g_testUeRnti != 0 && g_testBridge)
+        {
+            g_testBridge->SetUeRnti(g_testUeRnti);
+        }
+    }
+    if (g_testBridge)
+    {
+        g_testBridge->OnPhyRx(p);
+    }
+}
+} // namespace
+
+/// E2E: the FAPI SAP bridge decorates a LIVE mmwave enb MAC<->PHY SAP. Over a
+/// real Simulator::Run(): SLOT.indications fire at the real slot cadence, at
+/// least one DL_TTI.request is produced from a real DL allocation, and the
+/// request->indication latency is finite and SFN/slot aligned (CI gate 15).
+class FapiRealSapBridgeTest : public TestCase
+{
+  public:
+    FapiRealSapBridgeTest()
+        : TestCase("FAPI SAP bridge drives real mmwave slot timing; gate-15 latency finite")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const double simTime = 3.0;
+
+        // Minimal real geometry: one LEO gNB 600 km straight above a static
+        // ground UE (same rig the ntn-traffic real-stack test uses).
+        NodeContainer sat;
+        sat.Create(1);
+        Ptr<ConstantVelocityMobilityModel> satMob = CreateObject<ConstantVelocityMobilityModel>();
+        satMob->SetPosition(Vector(0.0, 0.0, 600e3));
+        satMob->SetVelocity(Vector(7560.0, 0.0, 0.0));
+        sat.Get(0)->AggregateObject(satMob);
+
+        NodeContainer ue;
+        ue.Create(1);
+        Ptr<ConstantPositionMobilityModel> ueMob = CreateObject<ConstantPositionMobilityModel>();
+        ueMob->SetPosition(Vector(0.0, 0.0, 0.0));
+        ue.Get(0)->AggregateObject(ueMob);
+
+        NtnRealStackHelper rs;
+        rs.SetSimTime(Seconds(simTime));
+        rs.Build(sat, ue); // mmwave backend (default): real SpectrumPhy+MAC+HARQ
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(0.5), Seconds(simTime - 0.2));
+        g_testRs = &rs;
+
+        // Install the real FAPI SAP bridge on the live mmwave enb cell.
+        Ptr<mmwave::MmWaveEnbNetDevice> enb =
+            DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
+        NS_TEST_ASSERT_MSG_NE((enb == nullptr), true, "mmwave enb device present");
+        g_testBridge = CreateObject<NtnFapiSapBridge>();
+        g_testBridge->InstallEnb(enb);
+
+        // P5: the CONFIG.request was consumed from the real PHY config.
+        NS_TEST_ASSERT_MSG_EQ(g_testBridge->IsConfigured(), true,
+                              "P5 CONFIG.request consumed at bring-up");
+        NS_TEST_ASSERT_MSG_GT(g_testBridge->GetCarrierConfig().dlFrequency, 0u,
+                              "CONFIG.request carries a real DL carrier frequency");
+
+        // Reverse FAPI path off the real per-TB decode trace.
+        Config::ConnectWithoutContextFailSafe(
+            "/NodeList/*/DeviceList/*/ComponentCarrierMap/*/MmWaveUePhy/DlSpectrumPhy/"
+            "RxPacketTraceUe",
+            MakeCallback(&TestFapiRx));
+
+        Simulator::Stop(Seconds(simTime));
+        Simulator::Run();
+
+        const uint64_t slotInds = g_testBridge->GetSlotIndicationCount();
+        const uint64_t dlTtiData = g_testBridge->GetDlTtiWithDataCount();
+        const uint64_t crcInds = g_testBridge->GetCrcIndicationCount();
+        const uint64_t matched = g_testBridge->GetMatchedLatencyCount();
+        const double meanLat = g_testBridge->GetMeanSapLatencySec();
+        const double lastLat = g_testBridge->GetLastSapLatencySec();
+
+        // 1. SLOT.indications fire at the real slot cadence (many times, not once).
+        NS_TEST_ASSERT_MSG_GT(slotInds, 100u,
+                              "FAPI SLOT.indication fired at the real mmwave slot cadence");
+
+        // 2. At least one DL_TTI.request produced from a real DL allocation.
+        NS_TEST_ASSERT_MSG_GT(dlTtiData, 0u,
+                              "at least one DL_TTI.request built from a real DL allocation");
+
+        // 3. Reverse path really emitted CRC.indications from the real decode.
+        NS_TEST_ASSERT_MSG_GT(crcInds, 0u, "CRC.indication emitted from real per-TB decode");
+
+        // 4. request->indication latency finite and SFN/slot aligned (gate 15).
+        NS_TEST_ASSERT_MSG_GT(matched, 0u,
+                              "at least one SFN/slot-aligned request->indication match");
+        NS_TEST_ASSERT_MSG_EQ(g_testBridge->HasSlotAlignedLatency(), true,
+                              "gate 15: a slot-aligned SAP latency exists");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(meanLat), true, "gate 15: mean SAP latency finite");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(lastLat), true, "gate 15: last SAP latency finite");
+        NS_TEST_ASSERT_MSG_GT(lastLat, 0.0,
+                              "gate 15: request->indication latency strictly positive");
+        // Physical sanity: a DL slot -> UE decode round trip is sub-second.
+        NS_TEST_ASSERT_MSG_LT(meanLat, 1.0, "SAP latency within a physical horizon (<1 s)");
+
+        Simulator::Destroy();
+        g_testBridge = nullptr;
+        g_testRs = nullptr;
+        g_testUeRnti = 0;
+    }
+};
+
 class NtnFapiTestSuite : public TestSuite
 {
   public:
@@ -230,6 +365,7 @@ class NtnFapiTestSuite : public TestSuite
         AddTestCase(new FapiDmrsRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new FapiDlTtiAssemblyTest, TestCase::Duration::QUICK);
         AddTestCase(new FapiUlIndicationShapesTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiRealSapBridgeTest, TestCase::Duration::QUICK);
     }
 };
 

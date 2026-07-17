@@ -56,6 +56,13 @@ MessageIdName(MessageId id)
     return "unknown";
 }
 
+/// Maximum number of DL/UL HARQ processes. SCF FAPI 222.10.02 sized the HARQ
+/// process id at 0..15 (4 bits); 3GPP Rel-17 (TS 38.214 §5.1) raised the cap to
+/// 32 processes (0..31) to cover the long NTN RTT. The harqProcessId fields in
+/// PdschPdu/PuschPdu are uint8_t and already hold the full Rel-17 range; use
+/// this constant when validating a scheduler-supplied HARQ id.
+inline constexpr uint8_t kMaxHarqProcessesRel17 = 32;
+
 /// Cyclic prefix per TS 38.211.
 enum class CyclicPrefix : uint8_t
 {

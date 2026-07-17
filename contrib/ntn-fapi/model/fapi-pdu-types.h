@@ -72,7 +72,7 @@ struct PdschPdu
         uint32_t tbSize;          //!< bytes
     };
     std::array<Codeword, 2> codewords;
-    uint8_t harqProcessId;        //!< HARQ process ID (0..15), SCF 222.10.02 §3.4.2.7
+    uint8_t harqProcessId;        //!< HARQ process ID (0..31, Rel-17 32-process cap; SCF 222.10.02 §3.4.2.7 sized 0..15). See kMaxHarqProcessesRel17.
     uint16_t dataScramblingId;
     uint8_t nrOfLayers;
     uint8_t transmissionScheme;
@@ -137,7 +137,7 @@ struct PuschPdu
     uint8_t nrOfSymbols;
     uint16_t puschIdentity;       //!< nID per TS 38.211 6.3.1.1
     uint8_t rvIndex;
-    uint8_t harqProcessId;
+    uint8_t harqProcessId;        //!< HARQ process ID (0..31, Rel-17 32-process cap). See kMaxHarqProcessesRel17.
     uint32_t tbSize;
     // UCI on PUSCH (FAPI 222.10.04 addendum):
     uint16_t harqAckBitLength;
