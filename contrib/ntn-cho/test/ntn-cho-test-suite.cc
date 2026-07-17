@@ -743,6 +743,83 @@ class NtnChoStandardizedTriggersTestCase : public TestCase
  * \ingroup ntn-cho-test
  * \brief NTN CHO Test Suite
  */
+/**
+ * \brief GAP C1 REGRESSION: the beam gain must follow the SATELLITE through time.
+ *
+ * The TTE estimator's forward search asked for the gain at a series of future
+ * instants, but the predictor evaluated the antenna pattern against the
+ * satellite's position at Simulator::Now() — simulation time does not advance
+ * inside a single event, and the "satellite position is automatically updated by
+ * the SGP4 model" comment was simply false. For a static UE the gain was
+ * therefore IDENTICAL at every step of the search, the beam exit was never
+ * found, and ComputeTte() returned the full prediction window (120 s) for every
+ * beam. That silently made the TTE-aware admission (tte >= tteMinimum) always
+ * true and condEventT1 (serving TTE <= window) unreachable — the module's
+ * headline mechanism was a constant.
+ *
+ * No test caught it because none propagated a satellite through a beam exit.
+ * This one pins the invariant directly: moving the satellite along its orbit
+ * must change the gain a fixed ground UE sees, and moving it far enough must
+ * take the UE out of the beam entirely.
+ */
+class NtnOrbitPredictorTimeOffsetGainTestCase : public TestCase
+{
+  public:
+    NtnOrbitPredictorTimeOffsetGainTestCase()
+        : TestCase("Beam gain is evaluated at the propagated satellite position (gap C1)")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        D2Fixture f = MakeD2Fixture();
+
+        // Gain at the satellite's current position (beam 12 of geo-33E covers
+        // the fixture UE).
+        const GeoCoordinate satNow(0.0, 33.0, 35786000.0);
+        const double gainHere = f.predictor->ComputeBeamGainAt(0, 12, f.uePos, satNow);
+        NS_TEST_ASSERT_MSG_GT(gainHere, -100.0, "UE should start inside beam 12");
+
+        // Same UE, same beam, satellite displaced along its track. A body-fixed
+        // pattern must now illuminate a different footprint, so the gain the UE
+        // sees MUST change. Before the C1 fix the gain could not depend on the
+        // satellite position at all.
+        const GeoCoordinate satShifted(0.0, 43.0, 35786000.0); // 10 deg along track
+        const double gainShifted = f.predictor->ComputeBeamGainAt(0, 12, f.uePos, satShifted);
+        NS_TEST_ASSERT_MSG_NE(gainHere,
+                              gainShifted,
+                              "beam gain must depend on the satellite position — a frozen "
+                              "satellite is exactly the C1 defect");
+
+        // Far enough away the UE must fall out of coverage entirely, which is
+        // the beam-exit event the TTE search exists to find.
+        const GeoCoordinate satFar(0.0, 120.0, 35786000.0);
+        const double gainFar = f.predictor->ComputeBeamGainAt(0, 12, f.uePos, satFar);
+        NS_TEST_ASSERT_MSG_LT(gainFar,
+                              gainHere,
+                              "moving the satellite away from the UE must reduce the gain");
+
+        // The snapshot API the TTE search actually calls must route the gain
+        // through the PROPAGATED position. This fixture pins its satellites with
+        // SatConstantPositionMobilityModel (velocity 0), so r + v*dt cannot move
+        // them and the snapshot is correctly time-invariant here — that is the
+        // fixture's nature, not a defect. What we CAN pin without a moving
+        // mobility is that the snapshot reports the gain of the position it
+        // claims to have propagated to, i.e. it agrees with a direct evaluation
+        // at snap.satellitePosition rather than silently reporting the
+        // "now" gain from some other geometry.
+        const auto snap = f.predictor->GetBeamSnapshotAtTime(0, 12, f.uePos, Seconds(120));
+        const double direct =
+            f.predictor->ComputeBeamGainAt(0, 12, f.uePos, snap.satellitePosition);
+        NS_TEST_ASSERT_MSG_EQ_TOL(snap.gainAtUe_dB,
+                                  direct,
+                                  1e-9,
+                                  "the snapshot's gain must be the gain at the satellite position "
+                                  "it propagated to");
+    }
+};
+
 class NtnChoTestSuite : public TestSuite
 {
   public:
@@ -758,6 +835,7 @@ class NtnChoTestSuite : public TestSuite
         AddTestCase(new NtnChoRachLessExecutionTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnGeodeticFixedMobilityTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnChoStandardizedTriggersTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new NtnOrbitPredictorTimeOffsetGainTestCase, TestCase::Duration::QUICK);
     }
 };
 

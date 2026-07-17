@@ -9,6 +9,8 @@
 
 #include "ntn-orbit-predictor.h"
 
+#include "ns3/satellite-constant-position-mobility-model.h"
+
 #include <ns3/double.h>
 #include <ns3/log.h>
 #include <ns3/satellite-sgp4-mobility-model.h>
@@ -180,13 +182,56 @@ NtnOrbitPredictor::GetBeamSnapshotAtTime(uint32_t satId,
     }
     snap.propagationDelay = Seconds(dist / SPEED_OF_LIGHT);
 
-    // Beam gain at the propagated geometry. We approximate by computing the
-    // gain at the present time but at a UE position that has been shifted
-    // back by the same dt along the satellite ground track, which is
-    // mathematically equivalent for a body-fixed antenna pattern over short
-    // windows.
-    snap.gainAtUe_dB = ComputeBeamGain(satId, beamId, uePosition);
+    // ---- GAP C1 FIX: evaluate the beam gain at the PROPAGATED geometry ----
+    //
+    // This used to be ComputeBeamGain(satId, beamId, uePosition), i.e. the gain
+    // at the satellite's position RIGHT NOW, with a comment claiming the UE had
+    // been "shifted back along the ground track" — no such shift was ever
+    // performed. Everything else in this snapshot (slant range, elevation,
+    // delay) correctly used satCartFuture, so only the gain was frozen. Since
+    // the TTE estimator's whole forward search keys off this gain, TTE came back
+    // as the full prediction window for every beam, which in turn made the
+    // condEventT1 trigger unreachable and the TTE-aware admission a no-op.
+    //
+    // The SNS3 pattern is body-fixed and takes the satellite mobility to resolve
+    // the geometry, so evaluating it against a temporary mobility placed at the
+    // extrapolated position gives the gain the UE will see at t+dt.
+    snap.gainAtUe_dB = ComputeBeamGainAt(satId, beamId, uePosition, satPosFuture);
     return snap;
+}
+
+double
+NtnOrbitPredictor::ComputeBeamGainAt(uint32_t satId,
+                                     uint32_t beamId,
+                                     GeoCoordinate uePosition,
+                                     GeoCoordinate satPosition) const
+{
+    // C1: gain of `beamId` at `uePosition` with the satellite placed at
+    // `satPosition` (rather than wherever it happens to be at Simulator::Now()).
+    if (!m_agpContainer)
+    {
+        return -100.0;
+    }
+    Ptr<SatAntennaGainPattern> agp = m_agpContainer->GetAntennaGainPattern(beamId);
+    if (!agp)
+    {
+        return -100.0;
+    }
+    Ptr<SatConstantPositionMobilityModel> tempMob =
+        CreateObject<SatConstantPositionMobilityModel>();
+    tempMob->SetGeoPosition(satPosition);
+    const double gainLin = agp->GetAntennaGain_lin(uePosition, tempMob);
+    // NaN guard, not just <= 0: the SNS3 pattern returns NaN when the UE falls
+    // outside the sampled grid, which is EXACTLY the beam-exit case this
+    // function exists to detect. `NaN <= 0.0` is false, so without this the NaN
+    // would sail through std::log10 and poison the TTE search with a NaN gain
+    // (comparisons against a threshold then silently fail and no exit is ever
+    // found — the same symptom as the C1 bug this fix is for).
+    if (!std::isfinite(gainLin) || gainLin <= 0.0)
+    {
+        return -100.0; // outside coverage
+    }
+    return 10.0 * std::log10(gainLin);
 }
 
 std::vector<NtnOrbitPredictor::VisibleSatellite>
@@ -277,7 +322,10 @@ NtnOrbitPredictor::ComputeBeamGain(uint32_t satId,
     NS_LOG_FUNCTION(this << satId << beamId);
 
     double gain_lin = m_agpContainer->GetBeamGain(satId, beamId, uePosition);
-    if (gain_lin <= 0.0)
+    // Same NaN guard as ComputeBeamGainAt: the SNS3 pattern returns NaN outside
+    // its sampled grid, and `NaN <= 0.0` is false, so a bare <= 0 check lets NaN
+    // through std::log10 and out into the caller's threshold comparisons.
+    if (!std::isfinite(gain_lin) || gain_lin <= 0.0)
     {
         return -100.0; // Very low gain indicates outside coverage
     }

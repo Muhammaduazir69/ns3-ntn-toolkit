@@ -129,9 +129,24 @@ NtnTteEstimator::ComputeTte(GeoCoordinate uePosition,
         // Project UE position (for mobile UEs)
         GeoCoordinate projectedUe = ProjectUePosition(uePosition, ueVelocity, t);
 
-        // Get beam gain at projected time/position
-        // The satellite position is automatically updated by SGP4 model
-        double gain = m_orbitPredictor->ComputeBeamGain(satId, beamId, projectedUe);
+        // ---- GAP C1 FIX: advance the SATELLITE too ------------------------
+        // This used to call ComputeBeamGain(satId, beamId, projectedUe), whose
+        // comment claimed "the satellite position is automatically updated by
+        // the SGP4 model". It is not: simulation time does not advance inside a
+        // single event, so every iteration of this loop evaluated the gain with
+        // the satellite frozen at Simulator::Now(). For a static UE the gain was
+        // therefore IDENTICAL at every step, the exit was never found, and this
+        // function returned TTE == m_maxPredictionWindow (120 s) for every beam
+        // — making the TTE-aware admission (tte >= tteMinimum) always true and
+        // condEventT1 (serving TTE <= window) unreachable. The headline
+        // mechanism was a constant.
+        //
+        // GetBeamSnapshotAtTime propagates the satellite to t+dt and (since the
+        // C1 fix in NtnOrbitPredictor) evaluates the body-fixed beam pattern at
+        // that propagated geometry.
+        const NtnOrbitPredictor::BeamSnapshot snap =
+            m_orbitPredictor->GetBeamSnapshotAtTime(satId, beamId, projectedUe, t);
+        double gain = snap.gainAtUe_dB;
 
         if (gain > result.peakGain_dB)
         {

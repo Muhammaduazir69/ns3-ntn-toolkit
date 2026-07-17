@@ -138,6 +138,20 @@ class NtnOrbitPredictor : public Object
      * \param uePosition Ground position to evaluate
      * \return Gain in dB (negative if outside coverage)
      */
+    /**
+     * \brief C1: beam gain at \p uePosition with the satellite placed at
+     *        \p satPosition, instead of wherever it is at Simulator::Now().
+     *
+     * Needed by any forward-looking search (e.g. the TTE estimator): sim time
+     * does not advance inside one event, so ComputeBeamGain() below always
+     * reports the gain for the CURRENT satellite position no matter what
+     * future UE position it is handed.
+     */
+    double ComputeBeamGainAt(uint32_t satId,
+                             uint32_t beamId,
+                             GeoCoordinate uePosition,
+                             GeoCoordinate satPosition) const;
+
     double ComputeBeamGain(uint32_t satId,
                            uint32_t beamId,
                            GeoCoordinate uePosition) const;
