@@ -287,15 +287,33 @@ class OranNtnE2Termination : public Object
 
     // ---- RC action routing ----
     /**
-     * \brief Route an RC action from an xApp to the target E2 Node
+     * \brief Route an RC action from an xApp to the target E2 Node.
+     *
+     * Delivery goes over the RETURN feeder path (OranNtnE2Node::ReceiveRcAction),
+     * so the action actuates one FeederLinkDelay after this call, not inline.
+     * A cell-wide action (targetGnbId == 0) fans out to every registered node.
+     *
+     * \return true if the action was ACCEPTED/SCHEDULED for delivery -- NOT that
+     *         it executed successfully, which cannot be known before the feeder
+     *         delay elapses. Subscribe to OranNtnE2Node's "RcActionExecuted"
+     *         trace for the actual execution outcome. Returns false only when
+     *         the action could not be routed at all (unknown target gNB, or no
+     *         E2 nodes registered for a cell-wide action).
      */
     bool RouteRcAction(const E2RcAction& action);
 
     // ---- Metrics ----
     uint32_t GetTotalIndicationsReceived() const;
+
+    /**
+     * \brief Number of RC actions accepted for delivery to E2 nodes.
+     * \return count of ROUTED (accepted/scheduled) actions, not executed ones.
+     */
     uint32_t GetTotalActionsRouted() const;
 
     TracedCallback<uint32_t, E2Indication> m_indicationReceived;
+    //! Fired when an RC action is accepted for delivery. bool = accepted/
+    //! scheduled, NOT executed (see RouteRcAction).
     TracedCallback<E2RcAction, bool> m_actionRouted;
 
   protected:

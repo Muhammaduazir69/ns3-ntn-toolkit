@@ -31,6 +31,8 @@
 #include "ns3/oran-ntn-xapp-thz-spectrum.h"
 #include "ns3/oran-ntn-xapp-tn-ntn-steering.h"
 
+#include "ns3/ntn-static-extra-loss-model.h"
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -72,7 +74,6 @@ OranNtnHelper::~OranNtnHelper()
 void
 OranNtnHelper::DoDispose()
 {
-    Simulator::Cancel(m_kpmFeed.feedEvent);
     m_e2Nodes.clear();
     m_spaceRics.clear();
     Object::DoDispose();
@@ -390,28 +391,7 @@ OranNtnHelper::GenerateConstellationPolicies(Ptr<OranNtnA1PolicyManager> nonRtRi
                 << altitudeKm << " km");
 }
 
-// ---- KPM feed ----
-
-void
-OranNtnHelper::StartKpmFeed(Ptr<OranNtnNearRtRic> ric, Time reportInterval)
-{
-    NS_LOG_FUNCTION(this << reportInterval.As(Time::MS));
-    m_kpmFeed.interval = reportInterval;
-    m_kpmFeed.feedEvent = Simulator::Schedule(reportInterval,
-                                               &OranNtnHelper::KpmFeedCallback,
-                                               this);
-}
-
-void
-OranNtnHelper::KpmFeedCallback()
-{
-    // This would be connected to actual PHY measurements in a full integration.
-    // For standalone oran-ntn testing, it generates synthetic KPM reports.
-
-    m_kpmFeed.feedEvent = Simulator::Schedule(m_kpmFeed.interval,
-                                               &OranNtnHelper::KpmFeedCallback,
-                                               this);
-}
+// ---- KPM injection ----
 
 void
 OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
@@ -447,11 +427,31 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
         report.rsrq_dB = std::max(-19.5, std::min(-3.0,
                             10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
     }
-    report.cqi = static_cast<uint8_t>(std::max(0.0, std::min(15.0, sinr + 6.0)));
+    // CQI derived from SINR via the 3GPP TS 38.214 Table 5.2.2.1-2 (CQI table 1)
+    // efficiency breakpoints, NOT the old "sinr + 6" clamp. Monotonic SINR->CQI
+    // using the ~ -6.7..+14 dB span of the 15 usable indices; provenance =
+    // derived (a real AMC would refine this from BLER/HARQ).
+    {
+        static const double kCqiSinrLb[16] = {
+            -1e9,   // 0: out of range
+            -6.7, -4.7, -2.3, 0.2, 2.4, 4.3, 5.9,  // 1..7 (QPSK/16QAM)
+            8.1, 10.3, 11.7, 14.1, 16.3, 18.7, 21.0, 22.7 // 8..15 (64/256QAM)
+        };
+        uint8_t cqi = 0;
+        for (uint8_t idx = 1; idx <= 15; ++idx)
+        {
+            if (sinr >= kCqiSinrLb[idx])
+            {
+                cqi = idx;
+            }
+        }
+        report.cqi = cqi;
+    }
     // Throughput (DRB.UEThpDl): use the MEASURED goodput when the caller has a
     // real data plane; only fall back to the SINR-derived link-budget estimate
     // for radio-less (geometry-budget) UEs. Global invariant 2 / rubric B.2.
-    report.throughput_Mbps = (measThroughputMbps >= 0.0)
+    report.throughputMeasured = (measThroughputMbps >= 0.0);
+    report.throughput_Mbps = report.throughputMeasured
                                  ? measThroughputMbps
                                  : std::max(0.0, 10.0 * (1.0 + sinr / 30.0));
     // DRB.PdcpSduVolumeDL is exported by WriteKpmDatasetCanonical as
@@ -461,9 +461,15 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
     // signature so callers thread real bytes into the throughput conversion.)
     (void)measRxBytes;
     // HARQ BLER (RRU/DRB error): from the measured TBLER when available.
-    if (measTbler >= 0.0)
+    report.blerMeasured = (measTbler >= 0.0);
+    if (report.blerMeasured)
     {
         report.harqBler = measTbler;
+    }
+    else
+    {
+        // Not measured: do NOT fabricate an error rate. NaN = "no measurement".
+        report.harqBler = std::nan("");
     }
     // Propagation delay from the actual slant range, derived from elevation for
     // a LEO shell (h~600 km), instead of a single is_ntn constant. One-way
@@ -485,57 +491,156 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
         report.latency_ms = 4.0;
     }
     report.beamId = 1;
-    report.beamGain_dB = elevation * 0.3; // Simplified
-    // Cell-level load varies with time and cell so PRB/active-UE/throughput are
-    // not frozen constants. Deterministic (reproducible) pseudo-load.
-    const double phase = std::sin(Simulator::Now().GetSeconds() * 0.1 + gnbId * 0.7);
+    // beamGain_dB is an antenna-pattern quantity that no measured source in this
+    // synthetic injector supplies. Do NOT fabricate it from elevation*0.3;
+    // emit NaN so consumers/exporters see "not measured" (real beam gain comes
+    // from the NtnRealStackHelper array path, not this injector).
+    report.beamGain_dB = std::nan("");
     // RRU.PrbUsedDl: use measured PRB utilisation when the caller supplies it
-    // (real scheduler load); otherwise the documented deterministic fallback
-    // for radio-less geometry-budget UEs. Global invariant 2 / rubric B.2.
-    report.prbUtilization = (measPrbUtil >= 0.0)
+    // (real scheduler load). Otherwise emit NaN instead of a sine-of-sim-time
+    // fabrication -- an unsupplied PRB load is UNKNOWN, not a wave. Global
+    // invariant 2 / rubric B.2 / TS 28.552 measured-plane mandate.
+    report.prbMeasured = (measPrbUtil >= 0.0);
+    report.prbUtilization = report.prbMeasured
                                 ? std::max(0.0, std::min(1.0, measPrbUtil))
-                                : std::max(0.05, std::min(0.98, 0.55 + 0.30 * phase));
-    report.activeUes = static_cast<uint32_t>(std::max(1.0, 12.0 + 6.0 * phase));
-    // Cell throughput from the (measured-or-fallback) PRB utilisation. When PRB
-    // is measured this reflects real load; otherwise it tracks the fallback.
+                                : std::nan("");
+    // activeUes: uint sentinel 0 = "not measured" (no active-UE count is plumbed
+    // into this injector; the old 12+6*sin fabrication is removed).
+    report.activeUes = 0;
+    // Cell throughput follows PRB utilisation; when PRB is unknown (NaN) this
+    // propagates NaN rather than fabricating a load-derived number.
     report.cellThroughput_Mbps = report.prbUtilization * 273.0 * 0.75; // util x PRB x Mbps/PRB
     // Assign slice based on UE modular grouping: eMBB=0, URLLC=1, mMTC=2
     report.sliceId = static_cast<uint8_t>(ueId % 3);
-    // Slice-aware throughput and latency
+    // Slice-aware throughput/latency are DERIVED from the (measured-or-derived)
+    // per-UE throughput/latency, so they are kept. sliceReliability, however,
+    // was a hardcoded SLA TARGET (0.999/0.9999/0.99) masquerading as a measured
+    // packet-delivery ratio -- no delivery ratio is measured here, so emit NaN.
     if (report.sliceId == 0) // eMBB
     {
         report.sliceThroughput_Mbps = report.throughput_Mbps;
         report.sliceLatency_ms = report.latency_ms;
-        report.sliceReliability = 0.999;
     }
     else if (report.sliceId == 1) // URLLC
     {
         report.sliceThroughput_Mbps = std::max(0.1, report.throughput_Mbps * 0.1);
         report.sliceLatency_ms = report.latency_ms; // NTN latency violates URLLC SLA
-        report.sliceReliability = 0.9999;
     }
     else // mMTC
     {
         report.sliceThroughput_Mbps = std::max(0.01, report.throughput_Mbps * 0.02);
         report.sliceLatency_ms = report.latency_ms * 2.0;
-        report.sliceReliability = 0.99;
     }
+    report.sliceReliability = std::nan("");
 
     it->second->SubmitKpmMeasurement(report);
     m_kpmDataset.push_back(report);
 }
 
+void
+OranNtnHelper::RegisterBeamLossModel(uint32_t gnbId, Ptr<NtnStaticExtraLossModel> model)
+{
+    NS_LOG_FUNCTION(this << gnbId << model);
+    BeamActuatorState st;
+    st.model = model;
+    m_beamActuators[gnbId] = st;
+}
+
+void
+OranNtnHelper::SetHandoverActuator(RcActuatorCallback cb)
+{
+    m_handoverActuator = cb;
+}
+
+bool
+OranNtnHelper::ApplyBeamAction(const E2RcAction& action)
+{
+    auto it = m_beamActuators.find(action.targetGnbId);
+    if (it == m_beamActuators.end())
+    {
+        NS_LOG_WARN("OranNtnHelper: BEAM action for gNB " << action.targetGnbId
+                    << " NOT actuated -- no beam loss model registered "
+                    "(call RegisterBeamLossModel to wire the measured radio)");
+        return false;
+    }
+
+    BeamActuatorState& st = it->second;
+    if (action.actionType == E2RcActionType::BEAM_SHUTDOWN || action.parameter1 <= 0.0)
+    {
+        // Disengage the beam: no commanded gain on the channel.
+        st.on = false;
+        st.gainDb = 0.0;
+    }
+    else
+    {
+        // parameter1 = commanded array gain (dB); a fresh engage counts once.
+        if (!st.on)
+        {
+            ++st.activations;
+        }
+        st.on = true;
+        st.gainDb = action.parameter1;
+    }
+
+    // Apply as a LIVE channel reconfiguration: negative loss = array gain, so
+    // the effect shows up in the MEASURED SINR/TBLER (same recipe as the
+    // oran-ntn-ric-controlled-traffic reference loop).
+    const double gain = st.on ? st.gainDb : 0.0;
+    st.model->SetFloorDb(-gain);
+    st.model->SetLossDb(-gain);
+    return true;
+}
+
 bool
 OranNtnHelper::DefaultRcActionHandler(E2RcAction action)
 {
-    NS_LOG_INFO("OranNtnHelper: RC action executed - type="
-                << static_cast<uint8_t>(action.actionType)
-                << " xApp=" << action.xappName
-                << " targetGnb=" << action.targetGnbId
-                << " targetUe=" << action.targetUeId
-                << " confidence=" << action.confidence);
+    NS_LOG_FUNCTION(this << static_cast<uint8_t>(action.actionType)
+                    << action.xappName << action.targetGnbId << action.targetUeId
+                    << action.confidence);
 
-    // Log the action
+    // Dispatch the RC action into a real actuator per action type. "RIC control"
+    // must not terminate in a log file: an action that cannot be actuated is
+    // reported as a failure (never a silent accept), and the logged success is
+    // exactly the value returned to the RIC (action_log <-> xapp_metrics agree).
+    bool actuated = false;
+    switch (action.actionType)
+    {
+    case E2RcActionType::BEAM_SWITCH:
+    case E2RcActionType::BEAM_SHUTDOWN:
+        actuated = ApplyBeamAction(action);
+        break;
+
+    case E2RcActionType::HANDOVER_TRIGGER:
+    case E2RcActionType::HANDOVER_CANCEL:
+        if (!m_handoverActuator.IsNull())
+        {
+            actuated = m_handoverActuator(action);
+        }
+        else
+        {
+            NS_LOG_WARN("OranNtnHelper: HANDOVER action from xApp "
+                        << action.xappName << " for gNB " << action.targetGnbId
+                        << " UE " << action.targetUeId << " NOT actuated -- no "
+                        "handover actuator wired (SetHandoverActuator, e.g. "
+                        "NtnRealStackHelper::SetHandover); action LOGGED ONLY");
+            actuated = false;
+        }
+        break;
+
+    default:
+        // No real-stack actuator is wired in this helper for the remaining RC
+        // action types. Be honest: log it, name what is not actuated, fail.
+        NS_LOG_WARN("OranNtnHelper: RC action type "
+                    << static_cast<uint32_t>(static_cast<uint8_t>(action.actionType))
+                    << " from xApp " << action.xappName << " (gNB "
+                    << action.targetGnbId << ") has no actuator in OranNtnHelper; "
+                    "action LOGGED ONLY, not actuated");
+        actuated = false;
+        break;
+    }
+
+    // Log the action -- entry.success is EXACTLY the returned value (truthful:
+    // action_log.csv success can no longer contradict xapp_metrics.csv).
     ActionLogEntry entry;
     entry.timestamp = action.timestamp;
     entry.xappId = action.xappId;
@@ -544,14 +649,10 @@ OranNtnHelper::DefaultRcActionHandler(E2RcAction action)
     entry.targetGnb = action.targetGnbId;
     entry.targetUe = action.targetUeId;
     entry.confidence = action.confidence;
-    // Model the action outcome: a low-confidence decision is more likely to be
-    // rejected/ineffective. Tie success to the xApp's own reported confidence
-    // (>=0.5 applied) instead of hardcoding true, so failed_actions/conflicts
-    // in xapp_metrics reflect a realistic mix.
-    entry.success = (action.confidence >= 0.5);
+    entry.success = actuated;
     m_actionLog.push_back(entry);
 
-    return true; // Accept all actions in simulation
+    return actuated;
 }
 
 // ---- Output ----

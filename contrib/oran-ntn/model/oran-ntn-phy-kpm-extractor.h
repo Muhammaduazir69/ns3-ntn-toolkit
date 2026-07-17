@@ -78,6 +78,38 @@ class OranNtnPhyKpmExtractor : public Object
     void AttachToUePhy(Ptr<mmwave::MmWaveUeNetDevice> ueDev, uint32_t ueId);
 
     /**
+     * \brief Map a PHY RNTI to a logical UE id and start tracking that UE.
+     *
+     * NOTHING in the mmwave/nr trace path auto-populates this map (the
+     * RxPacketTraceUe source emits RxPacketTraceParams, which does not match a
+     * per-RNTI update signature and differs across module versions), so without
+     * this call every measured sample fed to IngestMeasuredSample() would be
+     * dropped on an unknown-RNTI miss. A scenario built on NtnRealStackHelper
+     * registers each UE once via GetUeRnti(i)/GetUeServingCellId(i) (or on an
+     * RRC connection-established trace) and then feeds samples per KPM tick.
+     */
+    void RegisterRnti(uint16_t rnti, uint32_t ueId, uint32_t servingCellId = 0);
+
+    /**
+     * \brief Feed one MEASURED PHY sample for a UE keyed by its RNTI.
+     *
+     * This is the real feed path used in the shipped toolkit: the scenario
+     * reads NtnRealStackHelper's measured accessors
+     * (GetUeRecentSinrDb / GetUeRxBytes / GetUeRecentTbler) each KPM period and
+     * calls this. The RNTI is resolved through the RegisterRnti() map; an
+     * unregistered RNTI is dropped with a warning (no silent fabrication).
+     *
+     * \param rnti              PHY RNTI (from NtnRealStackHelper::GetUeRnti)
+     * \param sinrDb            measured DL RS-SINR (dB)
+     * \param cumulativeRxBytes measured cumulative DL RX bytes for the UE
+     * \param tbler             measured DL TBLER (0..1); NaN = not available
+     * \param cqi               measured/derived CQI (0..15); pass 0 if unknown
+     */
+    void IngestMeasuredSample(uint16_t rnti, double sinrDb,
+                              uint64_t cumulativeRxBytes, double tbler,
+                              uint8_t cqi = 0);
+
+    /**
      * \brief Set satellite bridge for NTN-specific metrics
      */
     void SetSatBridge(Ptr<OranNtnSatBridge> bridge);
@@ -138,16 +170,6 @@ class OranNtnPhyKpmExtractor : public Object
     void DoDispose() override;
 
   private:
-    // PHY trace callbacks
-    void DlPhyReceptionCallback(uint16_t rnti, uint8_t ccId, double sinr,
-                                 uint32_t tbSize, uint8_t mcs);
-    void UlPhyReceptionCallback(uint16_t rnti, uint8_t ccId, double sinr,
-                                 uint32_t tbSize, uint8_t mcs);
-    void SinrReportCallback(uint16_t rnti, uint8_t ccId, double sinr);
-    void CqiReportCallback(uint16_t rnti, uint8_t cqi);
-    void HarqFeedbackCallback(uint16_t rnti, uint8_t harqId, bool ack);
-    void MacThroughputCallback(uint16_t rnti, uint32_t bytes, double time);
-
     // Per-UE measurement state
     struct UePhyState
     {
@@ -163,14 +185,15 @@ class OranNtnPhyKpmExtractor : public Object
         uint8_t latestCqi;
         uint8_t latestMcs;
 
-        // Throughput tracking
+        // Throughput tracking (bytesHistory holds per-sample byte DELTAS)
         std::deque<std::pair<double, uint32_t>> bytesHistory; //!< (timestamp, bytes)
         double avgThroughput_Mbps;
+        uint64_t lastCumulativeRxBytes; //!< to convert cumulative -> per-sample delta
+        bool haveCumulativeBaseline;
 
-        // HARQ tracking
-        uint32_t harqAcks;
-        uint32_t harqNacks;
-        uint32_t harqRetransmissions;
+        // Error rate (measured DL TBLER)
+        double latestTbler;             //!< NaN until a measured value is fed
+        bool haveTbler;
 
         // Timing
         double lastUpdateTime;

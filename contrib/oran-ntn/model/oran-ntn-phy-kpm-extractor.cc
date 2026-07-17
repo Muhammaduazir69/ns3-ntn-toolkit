@@ -135,21 +135,123 @@ OranNtnPhyKpmExtractor::AttachToUePhy(Ptr<mmwave::MmWaveUeNetDevice> ueDev, uint
     // Create or reset the per-UE state
     UePhyState state{};
     state.ueId = ueId;
-    state.rnti = 0; // Will be populated when first PHY callback fires
+    state.rnti = 0; // set by RegisterRnti() when the RRC RNTI is known
     state.servingSatId = 0;
     state.latestSinr_dB = -20.0; // pessimistic initial
     state.latestCqi = 0;
     state.latestMcs = 0;
     state.avgThroughput_Mbps = 0.0;
-    state.harqAcks = 0;
-    state.harqNacks = 0;
-    state.harqRetransmissions = 0;
+    state.lastCumulativeRxBytes = 0;
+    state.haveCumulativeBaseline = false;
+    state.latestTbler = std::nan("");
+    state.haveTbler = false;
     state.lastUpdateTime = Simulator::Now().GetSeconds();
 
     m_ueStates[ueId] = state;
 
     NS_LOG_INFO("PHY KPM Extractor: tracking UE " << ueId
                 << " (node " << ueDev->GetNode()->GetId() << ")");
+}
+
+void
+OranNtnPhyKpmExtractor::RegisterRnti(uint16_t rnti, uint32_t ueId, uint32_t servingCellId)
+{
+    NS_LOG_FUNCTION(this << rnti << ueId << servingCellId);
+
+    m_rntiToUeId[rnti] = ueId;
+
+    // Ensure a UE state exists so measured samples land somewhere.
+    auto it = m_ueStates.find(ueId);
+    if (it == m_ueStates.end())
+    {
+        UePhyState state{};
+        state.ueId = ueId;
+        state.rnti = rnti;
+        state.servingSatId = servingCellId;
+        state.latestSinr_dB = -20.0;
+        state.latestCqi = 0;
+        state.latestMcs = 0;
+        state.avgThroughput_Mbps = 0.0;
+        state.lastCumulativeRxBytes = 0;
+        state.haveCumulativeBaseline = false;
+        state.latestTbler = std::nan("");
+        state.haveTbler = false;
+        state.lastUpdateTime = Simulator::Now().GetSeconds();
+        m_ueStates[ueId] = state;
+    }
+    else
+    {
+        it->second.rnti = rnti;
+        if (servingCellId != 0)
+        {
+            it->second.servingSatId = servingCellId;
+        }
+    }
+
+    NS_LOG_INFO("PHY KPM Extractor: registered RNTI " << rnti << " -> UE " << ueId
+                << " (cell " << servingCellId << ")");
+}
+
+void
+OranNtnPhyKpmExtractor::IngestMeasuredSample(uint16_t rnti, double sinrDb,
+                                             uint64_t cumulativeRxBytes, double tbler,
+                                             uint8_t cqi)
+{
+    NS_LOG_FUNCTION(this << rnti << sinrDb << cumulativeRxBytes << tbler
+                    << (uint32_t)cqi);
+
+    auto rntiIt = m_rntiToUeId.find(rnti);
+    if (rntiIt == m_rntiToUeId.end())
+    {
+        NS_LOG_WARN("IngestMeasuredSample: unknown RNTI " << rnti
+                    << " (call RegisterRnti first); sample dropped");
+        return;
+    }
+
+    const uint32_t ueId = rntiIt->second;
+    auto& state = m_ueStates[ueId];
+    const double now = Simulator::Now().GetSeconds();
+
+    // Measured SINR (dB) straight from the real PHY -- no closed-form estimate.
+    state.latestSinr_dB = sinrDb;
+    state.sinrHistory.push_back({now, sinrDb});
+    while (state.sinrHistory.size() > m_maxSinrHistory)
+    {
+        state.sinrHistory.pop_front();
+    }
+
+    // Convert cumulative RX bytes to a per-sample delta for the throughput
+    // window. The first sample only establishes the baseline.
+    if (state.haveCumulativeBaseline && cumulativeRxBytes >= state.lastCumulativeRxBytes)
+    {
+        const uint32_t delta =
+            static_cast<uint32_t>(cumulativeRxBytes - state.lastCumulativeRxBytes);
+        state.bytesHistory.push_back({now, delta});
+        while (state.bytesHistory.size() > m_maxBytesHistory)
+        {
+            state.bytesHistory.pop_front();
+        }
+    }
+    state.lastCumulativeRxBytes = cumulativeRxBytes;
+    state.haveCumulativeBaseline = true;
+
+    // Measured DL TBLER (block error rate).
+    if (!std::isnan(tbler))
+    {
+        state.latestTbler = tbler;
+        state.haveTbler = true;
+    }
+
+    if (cqi > 0)
+    {
+        state.latestCqi = cqi;
+    }
+
+    state.avgThroughput_Mbps = GetAvgThroughput(ueId, 1.0);
+    state.lastUpdateTime = now;
+
+    m_sinrMeasured(ueId, sinrDb);
+    m_throughputMeasured(ueId, state.avgThroughput_Mbps);
 }
 
 void
@@ -184,12 +286,14 @@ OranNtnPhyKpmExtractor::GetRealKpmReport(uint32_t ueId) const
         report.mcs = s.latestMcs;
         report.wbCqi = static_cast<double>(s.latestCqi);
 
-        // Throughput from bytes history
+        // Throughput from measured RX-byte history (fed via IngestMeasuredSample).
         report.throughput_Mbps = GetAvgThroughput(ueId, 1.0);
+        report.throughputMeasured = s.haveCumulativeBaseline;
 
-        // HARQ BLER
+        // HARQ/TB BLER (measured DL TBLER; NaN if none fed).
         report.harqBler = GetHarqBler(ueId);
-        report.harqRetx = s.harqRetransmissions;
+        report.blerMeasured = s.haveTbler;
+        report.harqRetx = 0;
 
         // Approximate RSRP from SINR (assumes noise-limited)
         // RSRP ~ SINR + thermal noise floor
@@ -333,224 +437,6 @@ OranNtnPhyKpmExtractor::GetRealKpmReport(uint32_t ueId) const
 }
 
 // ============================================================================
-//  PHY trace callbacks
-// ============================================================================
-
-void
-OranNtnPhyKpmExtractor::DlPhyReceptionCallback(uint16_t rnti,
-                                                 uint8_t ccId,
-                                                 double sinr,
-                                                 uint32_t tbSize,
-                                                 uint8_t mcs)
-{
-    NS_LOG_FUNCTION(this << rnti << (uint32_t)ccId << sinr << tbSize << (uint32_t)mcs);
-
-    auto rntiIt = m_rntiToUeId.find(rnti);
-    if (rntiIt == m_rntiToUeId.end())
-    {
-        NS_LOG_DEBUG("DlPhyReception: unknown RNTI " << rnti << ", ignoring");
-        return;
-    }
-
-    uint32_t ueId = rntiIt->second;
-    auto& state = m_ueStates[ueId];
-    double now = Simulator::Now().GetSeconds();
-
-    // Update SINR
-    double sinr_dB = 10.0 * std::log10(std::max(sinr, 1e-20));
-    state.sinrHistory.push_back({now, sinr_dB});
-    while (state.sinrHistory.size() > m_maxSinrHistory)
-    {
-        state.sinrHistory.pop_front();
-    }
-    state.latestSinr_dB = sinr_dB;
-
-    // Update MCS
-    state.latestMcs = mcs;
-
-    // Add to bytes history for throughput calculation
-    state.bytesHistory.push_back({now, tbSize});
-    while (state.bytesHistory.size() > m_maxBytesHistory)
-    {
-        state.bytesHistory.pop_front();
-    }
-
-    state.lastUpdateTime = now;
-
-    // Fire trace
-    m_sinrMeasured(ueId, sinr_dB);
-
-    NS_LOG_DEBUG("DL PHY RX: UE " << ueId << " SINR=" << sinr_dB
-                 << " dB, MCS=" << (uint32_t)mcs << ", TB=" << tbSize << " B");
-}
-
-void
-OranNtnPhyKpmExtractor::UlPhyReceptionCallback(uint16_t rnti,
-                                                 uint8_t ccId,
-                                                 double sinr,
-                                                 uint32_t tbSize,
-                                                 uint8_t mcs)
-{
-    NS_LOG_FUNCTION(this << rnti << (uint32_t)ccId << sinr << tbSize << (uint32_t)mcs);
-
-    auto rntiIt = m_rntiToUeId.find(rnti);
-    if (rntiIt == m_rntiToUeId.end())
-    {
-        NS_LOG_DEBUG("UlPhyReception: unknown RNTI " << rnti << ", ignoring");
-        return;
-    }
-
-    uint32_t ueId = rntiIt->second;
-    auto& state = m_ueStates[ueId];
-    double now = Simulator::Now().GetSeconds();
-
-    // Update SINR (UL measurement at eNB side)
-    double sinr_dB = 10.0 * std::log10(std::max(sinr, 1e-20));
-    state.sinrHistory.push_back({now, sinr_dB});
-    while (state.sinrHistory.size() > m_maxSinrHistory)
-    {
-        state.sinrHistory.pop_front();
-    }
-    state.latestSinr_dB = sinr_dB;
-
-    // Update MCS
-    state.latestMcs = mcs;
-
-    // Add to bytes history
-    state.bytesHistory.push_back({now, tbSize});
-    while (state.bytesHistory.size() > m_maxBytesHistory)
-    {
-        state.bytesHistory.pop_front();
-    }
-
-    state.lastUpdateTime = now;
-
-    m_sinrMeasured(ueId, sinr_dB);
-
-    NS_LOG_DEBUG("UL PHY RX: UE " << ueId << " SINR=" << sinr_dB
-                 << " dB, MCS=" << (uint32_t)mcs << ", TB=" << tbSize << " B");
-}
-
-void
-OranNtnPhyKpmExtractor::SinrReportCallback(uint16_t rnti, uint8_t ccId, double sinr)
-{
-    NS_LOG_FUNCTION(this << rnti << (uint32_t)ccId << sinr);
-
-    auto rntiIt = m_rntiToUeId.find(rnti);
-    if (rntiIt == m_rntiToUeId.end())
-    {
-        NS_LOG_DEBUG("SinrReport: unknown RNTI " << rnti << ", ignoring");
-        return;
-    }
-
-    uint32_t ueId = rntiIt->second;
-    auto& state = m_ueStates[ueId];
-    double now = Simulator::Now().GetSeconds();
-
-    double sinr_dB = 10.0 * std::log10(std::max(sinr, 1e-20));
-
-    state.latestSinr_dB = sinr_dB;
-    state.sinrHistory.push_back({now, sinr_dB});
-    while (state.sinrHistory.size() > m_maxSinrHistory)
-    {
-        state.sinrHistory.pop_front();
-    }
-
-    state.lastUpdateTime = now;
-
-    m_sinrMeasured(ueId, sinr_dB);
-
-    NS_LOG_DEBUG("SINR report: UE " << ueId << " SINR=" << sinr_dB << " dB");
-}
-
-void
-OranNtnPhyKpmExtractor::CqiReportCallback(uint16_t rnti, uint8_t cqi)
-{
-    NS_LOG_FUNCTION(this << rnti << (uint32_t)cqi);
-
-    auto rntiIt = m_rntiToUeId.find(rnti);
-    if (rntiIt == m_rntiToUeId.end())
-    {
-        NS_LOG_DEBUG("CqiReport: unknown RNTI " << rnti << ", ignoring");
-        return;
-    }
-
-    uint32_t ueId = rntiIt->second;
-    auto& state = m_ueStates[ueId];
-
-    state.latestCqi = cqi;
-    state.lastUpdateTime = Simulator::Now().GetSeconds();
-
-    m_cqiMeasured(ueId, cqi);
-
-    NS_LOG_DEBUG("CQI report: UE " << ueId << " CQI=" << (uint32_t)cqi);
-}
-
-void
-OranNtnPhyKpmExtractor::HarqFeedbackCallback(uint16_t rnti, uint8_t harqId, bool ack)
-{
-    NS_LOG_FUNCTION(this << rnti << (uint32_t)harqId << ack);
-
-    auto rntiIt = m_rntiToUeId.find(rnti);
-    if (rntiIt == m_rntiToUeId.end())
-    {
-        NS_LOG_DEBUG("HarqFeedback: unknown RNTI " << rnti << ", ignoring");
-        return;
-    }
-
-    uint32_t ueId = rntiIt->second;
-    auto& state = m_ueStates[ueId];
-
-    if (ack)
-    {
-        state.harqAcks++;
-    }
-    else
-    {
-        state.harqNacks++;
-        state.harqRetransmissions++;
-    }
-
-    state.lastUpdateTime = Simulator::Now().GetSeconds();
-
-    NS_LOG_DEBUG("HARQ feedback: UE " << ueId << " harqId=" << (uint32_t)harqId
-                 << " ack=" << ack
-                 << " (total ACK=" << state.harqAcks
-                 << ", NACK=" << state.harqNacks << ")");
-}
-
-void
-OranNtnPhyKpmExtractor::MacThroughputCallback(uint16_t rnti, uint32_t bytes, double time)
-{
-    NS_LOG_FUNCTION(this << rnti << bytes << time);
-
-    auto rntiIt = m_rntiToUeId.find(rnti);
-    if (rntiIt == m_rntiToUeId.end())
-    {
-        NS_LOG_DEBUG("MacThroughput: unknown RNTI " << rnti << ", ignoring");
-        return;
-    }
-
-    uint32_t ueId = rntiIt->second;
-    auto& state = m_ueStates[ueId];
-
-    state.bytesHistory.push_back({time, bytes});
-    while (state.bytesHistory.size() > m_maxBytesHistory)
-    {
-        state.bytesHistory.pop_front();
-    }
-
-    // Update cached average throughput
-    state.avgThroughput_Mbps = GetAvgThroughput(ueId, 1.0);
-    state.lastUpdateTime = time;
-
-    m_throughputMeasured(ueId, state.avgThroughput_Mbps);
-
-    NS_LOG_DEBUG("MAC throughput: UE " << ueId << " bytes=" << bytes
-                 << " avgTput=" << state.avgThroughput_Mbps << " Mbps");
-}
-
-// ============================================================================
 //  Metric computation helpers
 // ============================================================================
 
@@ -620,13 +506,13 @@ OranNtnPhyKpmExtractor::GetHarqBler(uint32_t ueId) const
     }
 
     const auto& state = it->second;
-    uint32_t total = state.harqAcks + state.harqNacks;
-    if (total == 0)
+    // Measured DL TBLER fed by IngestMeasuredSample (NtnRealStackHelper
+    // GetUeRecentTbler). NaN when no error-rate sample has been fed.
+    if (state.haveTbler)
     {
-        return 0.0;
+        return state.latestTbler;
     }
-
-    return static_cast<double>(state.harqNacks) / static_cast<double>(total);
+    return std::nan("");
 }
 
 std::vector<std::pair<double, double>>

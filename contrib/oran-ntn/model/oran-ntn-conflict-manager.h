@@ -160,8 +160,12 @@ class OranNtnConflictManager : public Object
     std::string GetResourceKey(const E2RcAction& action) const;
     void PruneOldActions();
 
+    // ns-3 attribute accessor for "ResolutionStrategy": maps the uint attribute
+    // directly onto m_strategy (the value the resolver actually switches on).
+    void SetStrategyValue(uint8_t v);
+    uint8_t GetStrategyValue() const;
+
     ConflictResolutionStrategy m_strategy;
-    uint8_t m_strategyVal;  //!< For ns3 attribute binding
     Time m_conflictWindow;
 
     // Recent actions indexed by resource key

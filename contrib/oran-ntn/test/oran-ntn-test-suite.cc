@@ -1551,6 +1551,33 @@ class OranNtnPhyKpmExtractorTestCase : public TestCase
         NS_TEST_ASSERT_MSG_EQ(trackedIds.size(), 0u,
                                "Should have no tracked UEs initially");
 
+        // Measured feed path (audit fix 3): RegisterRnti populates the RNTI->UE
+        // map that every ingest reads; without it the sample is dropped. Register
+        // RNTI 61 -> UE 5 on cell 2, then feed one MEASURED PHY sample.
+        const uint16_t kRnti = 61;
+        const uint32_t kUeId = 5;
+        extractor->RegisterRnti(kRnti, kUeId, /*servingCellId=*/2);
+
+        // First sample establishes the RX-byte baseline (SINR still recorded).
+        extractor->IngestMeasuredSample(kRnti, /*sinrDb=*/11.5,
+                                        /*cumulativeRxBytes=*/0, /*tbler=*/0.05);
+        NS_TEST_ASSERT_MSG_EQ(extractor->HasPhyData(kUeId), true,
+                               "UE should have PHY data after a measured sample");
+
+        // An UNREGISTERED RNTI must be dropped (no fabricated UE state).
+        extractor->IngestMeasuredSample(/*rnti=*/999, 20.0, 1000, 0.0);
+        NS_TEST_ASSERT_MSG_EQ(extractor->GetTrackedUeIds().size(), 1u,
+                               "Unknown RNTI must not create a UE");
+
+        // The report must carry the MEASURED SINR and be flagged measured.
+        E2KpmReport rep = extractor->GetRealKpmReport(kUeId);
+        NS_TEST_ASSERT_MSG_EQ_TOL(rep.sinr_dB, 11.5, 1e-6,
+                                  "GetRealKpmReport must return the measured SINR");
+        NS_TEST_ASSERT_MSG_EQ(rep.blerMeasured, true,
+                               "BLER must be flagged measured after a TBLER sample");
+        NS_TEST_ASSERT_MSG_EQ(rep.gnbId, 2u,
+                               "Serving cell id from RegisterRnti must propagate");
+
         extractor->Dispose();
         Simulator::Destroy();
     }
@@ -2168,7 +2195,7 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
         std::getline(is, header);
         NS_TEST_EXPECT_MSG_EQ(header,
                               "timestamp,gnb_id,is_ntn,ue_id,metric_id,"
-                              "value,present,FIVE_QI,S-NSSAI,PLMN",
+                              "value,present,provenance,FIVE_QI,S-NSSAI,PLMN",
                               "long-format header");
 
         const std::set<std::string> canonical = {
@@ -2202,16 +2229,27 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
                 }
             }
             f.push_back(cur);
-            NS_TEST_ASSERT_MSG_EQ(f.size(), 10u, "10 columns per row");
+            NS_TEST_ASSERT_MSG_EQ(f.size(), 11u, "11 columns per row (incl. provenance)");
             const std::string& metricId = f[4];
             NS_TEST_EXPECT_MSG_EQ(canonical.count(metricId),
                                   1u,
                                   std::string("metric_id '") + metricId +
                                       "' is canonical");
             seenIds.insert(metricId);
-            NS_TEST_EXPECT_MSG_EQ(f[7], "9", "FIVE_QI column");
-            NS_TEST_EXPECT_MSG_EQ(f[8], "1-000001", "S-NSSAI column");
-            NS_TEST_EXPECT_MSG_EQ(f[9], "00101", "PLMN column");
+            // f[7] = provenance (measured|derived|synthesized)
+            NS_TEST_EXPECT_MSG_EQ((f[7] == "measured" || f[7] == "derived" ||
+                                   f[7] == "synthesized"),
+                                  true,
+                                  std::string("provenance '") + f[7] + "' is valid");
+            // A not-present value must be tagged synthesized (no ground truth).
+            if (f[6] == "0")
+            {
+                NS_TEST_EXPECT_MSG_EQ(f[7], "synthesized",
+                                      "not-present rows are synthesized");
+            }
+            NS_TEST_EXPECT_MSG_EQ(f[8], "9", "FIVE_QI column");
+            NS_TEST_EXPECT_MSG_EQ(f[9], "1-000001", "S-NSSAI column");
+            NS_TEST_EXPECT_MSG_EQ(f[10], "00101", "PLMN column");
             if (f[6] == "0")
             {
                 ++notPresentCount;

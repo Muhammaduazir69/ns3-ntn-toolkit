@@ -48,6 +48,7 @@ namespace ns3
 class OranNtnNearRtRic;
 class OranNtnSpaceRicInference;
 class OranNtnSatBridge;
+class OranNtnE2Node;
 
 // ============================================================================
 //  dApp (Distributed App) - lightweight on-satellite xApp
@@ -106,6 +107,20 @@ class OranNtnSpaceRic : public Object
     void SetSatelliteId(uint32_t satId);
     void SetOrbitalPlaneId(uint32_t planeId);
     void SetGroundRic(Ptr<OranNtnNearRtRic> ric);
+
+    /**
+     * \brief Set the co-located (on-board) E2 node used to ACTUATE autonomous
+     *        decisions locally.
+     *
+     * An on-board Space RIC's whole purpose is to close the loop without a
+     * feeder-link round trip: its autonomous HO / beam decisions are actuated
+     * through this co-located E2 node (which models the on-board actuation path,
+     * i.e. near-zero feeder delay) instead of being buffered until the ground
+     * link returns. Without it, AutonomousHandoverDecision / AutonomousBeam
+     * Reallocation only buffer and NOTHING executes.
+     */
+    void SetLocalE2Node(Ptr<OranNtnE2Node> e2Node);
+
     void SetComputeBudget(double mflops);       //!< OBP compute limit
     void SetMemoryBudget(double megabytes);     //!< OBP memory limit
 
@@ -252,9 +267,16 @@ class OranNtnSpaceRic : public Object
     void AutonomousControlLoop();
     void SyncWithGroundRic();
 
+    /**
+     * \brief Actuate a buffered autonomous decision on the co-located E2 node.
+     * \return true if a local E2 node was available and the action was delivered.
+     */
+    bool ExecuteDecisionLocally(const DappDecision& decision);
+
     uint32_t m_satId;
     uint32_t m_planeId;
     Ptr<OranNtnNearRtRic> m_groundRic;
+    Ptr<OranNtnE2Node> m_localE2Node; //!< co-located on-board E2 actuation path
     bool m_autonomous;
 
     // Compute constraints

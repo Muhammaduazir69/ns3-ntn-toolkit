@@ -504,7 +504,10 @@ OranNtnE2Termination::GetTypeId()
                                 &OranNtnE2Termination::m_indicationReceived),
                             "ns3::OranNtnE2Termination::IndicationTracedCallback")
             .AddTraceSource("ActionRouted",
-                            "An RC action was routed to an E2 node",
+                            "An RC action was accepted for delivery to an E2 node "
+                            "(bool = accepted/scheduled, NOT executed: execution "
+                            "happens one FeederLinkDelay later and is reported by "
+                            "OranNtnE2Node's RcActionExecuted trace)",
                             MakeTraceSourceAccessor(
                                 &OranNtnE2Termination::m_actionRouted),
                             "ns3::OranNtnE2Termination::ActionTracedCallback");
@@ -657,12 +660,30 @@ OranNtnE2Termination::RouteRcAction(const E2RcAction& action)
 {
     NS_LOG_FUNCTION(this << action.targetGnbId);
 
-    // Cell-wide actions (targetGnbId=0) are broadcast-style; accept directly
+    // Cell-wide actions (targetGnbId=0) fan out to every registered E2 node.
+    // E2AP (O-RAN.WG3.E2AP §8.4) has no "accept and discard" outcome: an RC
+    // Control Request either reaches E2 nodes or it fails.
     if (action.targetGnbId == 0)
     {
+        if (m_e2Nodes.empty())
+        {
+            NS_LOG_WARN("E2 Termination: Cell-wide RC action cannot be routed, "
+                        "no E2 nodes registered");
+            m_actionRouted(action, false);
+            return false;
+        }
+
+        for (const auto& [gnbId, node] : m_e2Nodes)
+        {
+            // Delivery crosses the downlink feeder link; execution is deferred
+            // by FeederLinkDelay inside ReceiveRcAction().
+            node->ReceiveRcAction(action);
+        }
+
         m_totalActions++;
         m_actionRouted(action, true);
-        NS_LOG_DEBUG("E2 Termination: Cell-wide RC action accepted (type="
+        NS_LOG_DEBUG("E2 Termination: Cell-wide RC action fanned out to "
+                     << m_e2Nodes.size() << " E2 node(s) (type="
                      << static_cast<uint8_t>(action.actionType) << ")");
         return true;
     }
@@ -676,10 +697,18 @@ OranNtnE2Termination::RouteRcAction(const E2RcAction& action)
         return false;
     }
 
-    bool success = it->second->ExecuteRcAction(action);
+    // Route over the RETURN feeder path rather than calling ExecuteRcAction()
+    // inline: the RIC's command physically crosses the feeder link (2-15 ms for
+    // LEO), so it must not actuate at the instant it is decided.
+    it->second->ReceiveRcAction(action);
     m_totalActions++;
-    m_actionRouted(action, success);
-    return success;
+
+    // The outcome is unknowable here -- execution happens one FeederLinkDelay
+    // from now. `true` means ACCEPTED/SCHEDULED for delivery, not "executed".
+    // The executed/failed outcome is reported by the E2 node's
+    // OranNtnE2Node::m_rcActionExecuted trace once the delay elapses.
+    m_actionRouted(action, true);
+    return true;
 }
 
 void

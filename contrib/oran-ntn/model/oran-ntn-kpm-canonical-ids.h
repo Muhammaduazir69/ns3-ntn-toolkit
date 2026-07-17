@@ -83,6 +83,20 @@ inline constexpr const char* kPresent = "present";
 
 } // namespace label
 
+/// Provenance of a canonical KPM value, so a consumer never mistakes an
+/// estimate/fabrication for a ground-truth measurement (TS 28.552 mandate):
+///   - "measured"    : taken from the real data plane (FlowMonitor RX bytes,
+///                     measured HARQ NACKs, RS-SINR from the PHY).
+///   - "derived"     : computed from a measured quantity or a fixed cell-config
+///                     constant (e.g. link-budget throughput, PRB-avail = 273).
+///   - "synthesized" : no measurement basis; the value is NaN / present=false.
+namespace provenance
+{
+inline constexpr const char* kMeasured    = "measured";
+inline constexpr const char* kDerived     = "derived";
+inline constexpr const char* kSynthesized = "synthesized";
+} // namespace provenance
+
 /// A single canonical KPM measurement. `value` is in WG3-canonical units
 /// (kbps for throughput, bytes for volume, integer PRB/TB counts, dB for SINR).
 struct KpmMeasurement
@@ -90,6 +104,7 @@ struct KpmMeasurement
     std::string metricId;
     double value;
     std::map<std::string, std::string> labels;
+    std::string provenance; //!< measured | derived | synthesized (see above)
 };
 
 /// Map an E2KpmReport to the full canonical 12-metric measurement vector,
@@ -104,8 +119,10 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& report,
 
 /// Emit the WG3-canonical long-format KPM CSV for a vector of reports
 /// (Roadmap §4.1.2). Header columns:
-///   timestamp, gnb_id, is_ntn, ue_id, metric_id, value, present,
+///   timestamp, gnb_id, is_ntn, ue_id, metric_id, value, present, provenance,
 ///   FIVE_QI, S-NSSAI, PLMN
+/// The `provenance` column (measured|derived|synthesized) lets a consumer
+/// reject non-ground-truth values without guessing.
 ///
 /// Each report produces 12 rows (one per canonical metric ID). Rows with
 /// not-yet-plumbed source fields carry `present = 0`.

@@ -261,6 +261,12 @@ class OranNtnXappBase : public Object
     Time m_decisionInterval;
     EventId m_decisionEvent;
     std::vector<uint32_t> m_subscriptionIds;
+
+    // Timestamps of recent HANDOVER_TRIGGER actions this xApp passed the A1
+    // HO-rate policy check for. Used by CheckPolicyCompliance() to enforce
+    // A1NtnPolicy::maxHandoverRate (HO/min). Mutable: the compliance check is
+    // logically const but must record the accepted HO to rate-limit the next.
+    mutable std::deque<Time> m_recentHoTimes;
 };
 
 } // namespace ns3

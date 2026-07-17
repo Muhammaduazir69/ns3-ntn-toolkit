@@ -32,6 +32,7 @@
 #include <ns3/node-container.h>
 #include <ns3/nstime.h>
 #include <ns3/object.h>
+#include <ns3/random-variable-stream.h>
 #include <ns3/satellite-antenna-gain-pattern-container.h>
 #include <ns3/satellite-antenna-gain-pattern.h>
 #include <ns3/satellite-free-space-loss.h>
@@ -154,6 +155,15 @@ class OranNtnSatBridge : public Object
     static TypeId GetTypeId();
     OranNtnSatBridge();
     ~OranNtnSatBridge() override;
+
+    /**
+     * \brief Assign fixed RNG streams to the fading model's random variables.
+     *
+     * ns-3 coding rule: models must draw from RandomVariableStream (never
+     * std::rand) so RngRun reproducibility and per-stream independence hold.
+     * Returns the number of streams consumed (2).
+     */
+    int64_t AssignStreams(int64_t stream);
 
     // ---- Constellation setup ----
 
@@ -415,8 +425,27 @@ class OranNtnSatBridge : public Object
     // ISL topology: (satId1, satId2) -> link state
     std::map<std::pair<uint32_t, uint32_t>, IslLinkState> m_islLinks;
 
-    // Markov fading state per satellite
-    mutable std::map<uint32_t, uint8_t> m_markovFadingStates;
+    // Markov fading state per (satId,ueId) key. The chain is clocked on
+    // SIM-TIME so two calls within one coherence interval reuse the SAME state
+    // and fade (the old code advanced the chain once PER CALL, so calling the
+    // SINR getter twice in a timestep double-stepped the chain).
+    struct MarkovFadingCell
+    {
+        uint8_t state = 0;          //!< 0=clear, 1=shadow, 2=blocked
+        Time lastStep = Time::Min(); //!< sim-time of last chain advance
+        double fadingGainDb = 0.0;   //!< cached fade for this coherence interval
+        bool initialized = false;
+    };
+    mutable std::map<uint32_t, MarkovFadingCell> m_markovFadingStates;
+
+    // Fading random variables (ns-3 RngStream, not std::rand): reproducible and
+    // stream-independent once AssignStreams() is called.
+    Ptr<UniformRandomVariable> m_fadingUniformRv;
+    Ptr<NormalRandomVariable> m_fadingNormalRv;
+
+    // Channel coherence interval: the Markov chain advances at most once per
+    // this much sim-time per (sat,ue) link.
+    Time m_fadingCoherenceTime;
 
     // DVB-S2X ModCod SINR thresholds (ascending order)
     static const std::vector<std::pair<double, uint8_t>> s_modcodThresholds;

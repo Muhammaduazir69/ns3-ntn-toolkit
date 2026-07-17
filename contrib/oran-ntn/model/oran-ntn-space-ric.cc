@@ -7,6 +7,7 @@
 
 #include "oran-ntn-space-ric.h"
 
+#include "oran-ntn-e2-interface.h"
 #include "oran-ntn-near-rt-ric.h"
 #include "oran-ntn-sat-bridge.h"
 #include "oran-ntn-space-ric-inference.h"
@@ -124,6 +125,41 @@ void
 OranNtnSpaceRic::SetGroundRic(Ptr<OranNtnNearRtRic> ric)
 {
     m_groundRic = ric;
+}
+
+void
+OranNtnSpaceRic::SetLocalE2Node(Ptr<OranNtnE2Node> e2Node)
+{
+    m_localE2Node = e2Node;
+}
+
+bool
+OranNtnSpaceRic::ExecuteDecisionLocally(const DappDecision& decision)
+{
+    if (!m_localE2Node)
+    {
+        NS_LOG_WARN("Space RIC (sat " << m_satId << "): autonomous decision NOT "
+                    "actuated -- no co-located E2 node set (SetLocalE2Node). "
+                    "Decision buffered only.");
+        return false;
+    }
+
+    // Translate the on-board dApp decision into an E2SM-RC action and actuate it
+    // through the co-located E2 node. This is the on-board actuation path (the
+    // whole point of a Space RIC): no ground feeder round trip is incurred.
+    E2RcAction action{};
+    action.timestamp = decision.timestamp;
+    action.xappId = decision.dappId;
+    action.xappName = decision.dappName;
+    action.actionType = decision.actionType;
+    action.targetGnbId = m_satId; // co-located satellite gNB
+    action.targetUeId = decision.targetUeId;
+    action.targetBeamId = decision.targetBeamId;
+    action.confidence = decision.confidence;
+    action.executed = false;
+
+    m_localE2Node->ReceiveRcAction(action);
+    return true;
 }
 
 void
@@ -274,7 +310,9 @@ OranNtnSpaceRic::AutonomousHandoverDecision(uint32_t ueId,
     decision.confidence = bestConfidence;
     decision.rationale = "on-board TTE+SINR scoring, score=" + std::to_string(bestScore);
 
-    // Buffer decision
+    // Actuate locally on the co-located E2 node (on-board loop, no feeder round
+    // trip), then buffer for later ground-RIC sync/audit.
+    ExecuteDecisionLocally(decision);
     m_decisionBuffer.push_back(decision);
     m_metrics.totalAutonomousDecisions++;
     m_metrics.handoversInitiated++;
@@ -334,6 +372,8 @@ OranNtnSpaceRic::AutonomousBeamReallocation(
                           " underloaded, avgLoad=" + std::to_string(avgLoad);
     decision.targetBeamId = 0; // All beams
 
+    // Actuate locally on the co-located E2 node, then buffer for ground sync.
+    ExecuteDecisionLocally(decision);
     m_decisionBuffer.push_back(decision);
     m_metrics.totalAutonomousDecisions++;
     m_metrics.beamReallocations++;
@@ -572,12 +612,16 @@ OranNtnSpaceRic::SyncWithGroundRic()
         return;
     }
 
+    const size_t transferred = m_decisionBuffer.size();
     NS_LOG_INFO("Space RIC (sat " << m_satId << "): Syncing "
-                 << m_decisionBuffer.size() << " autonomous decisions to ground RIC");
+                 << transferred << " autonomous decisions to ground RIC");
 
-    // In a real implementation, this would send decisions via feeder link
-    // For simulation, we log the sync event
-    m_metrics.totalGroundAssistedDecisions += m_decisionBuffer.size();
+    // Transfer the buffered decisions to the ground RIC (feeder link) THEN clear
+    // the buffer. The old code added m_decisionBuffer.size() on EVERY sync
+    // without ever clearing, so the same decisions were re-counted on each
+    // autonomous-mode exit (unbounded double counting).
+    m_metrics.totalGroundAssistedDecisions += transferred;
+    m_decisionBuffer.clear();
 }
 
 // ============================================================================

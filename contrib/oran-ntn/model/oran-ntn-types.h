@@ -113,6 +113,15 @@ struct E2KpmReport
     double debrisDetectionRange_km;        //!< ISAC debris detection range
     double beamSquintLoss_dB;              //!< Wideband beam squint loss
     std::string activeWaveform;            //!< Current waveform (OFDM/OTFS/AFDM/etc)
+
+    // === Provenance flags (TS 28.552 / measured-plane mandate) ===
+    // Default false = the headline KPI was NOT taken from a real data plane, so
+    // the canonical exporter labels it "derived" (link-budget estimate) or
+    // "synthesized" (fabrication suppressed to NaN) rather than "measured".
+    // InjectKpmReport() sets these true only when a measured value was supplied.
+    bool throughputMeasured = false;   //!< throughput_Mbps came from FlowMonitor/RX bytes
+    bool prbMeasured = false;          //!< prbUtilization came from the real scheduler
+    bool blerMeasured = false;         //!< harqBler came from measured HARQ NACKs
 };
 
 // ============================================================================

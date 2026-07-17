@@ -396,11 +396,13 @@ OranNtnNearRtRic::ProcessXappAction(uint32_t xappId, const E2RcAction& action)
         return false;
     }
 
-    // Step 3: Route to E2 node
-    bool success = m_e2Term->RouteRcAction(action);
+    // Step 3: Route to E2 node. The action crosses the downlink feeder link and
+    // actuates one FeederLinkDelay from now, so `accepted` means the action was
+    // scheduled for delivery -- the execution outcome is not knowable here.
+    bool accepted = m_e2Term->RouteRcAction(action);
 
     m_totalActionsProcessed++;
-    m_actionProcessed(action, success);
+    m_actionProcessed(action, accepted);
 
     // Store in SDL for cross-xApp visibility
     m_sdl->Set("ric", "last_action_time", Simulator::Now().GetSeconds());
@@ -408,7 +410,7 @@ OranNtnNearRtRic::ProcessXappAction(uint32_t xappId, const E2RcAction& action)
                static_cast<double>(static_cast<uint8_t>(action.actionType)));
     m_sdl->Set("ric", "last_action_xapp", static_cast<double>(xappId));
 
-    return success;
+    return accepted;
 }
 
 // ---- Conflict manager ----

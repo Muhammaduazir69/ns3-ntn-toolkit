@@ -18,6 +18,7 @@
 #ifndef ORAN_NTN_HELPER_H
 #define ORAN_NTN_HELPER_H
 
+#include "ns3/callback.h"
 #include "ns3/node-container.h"
 #include "ns3/nstime.h"
 #include "ns3/object.h"
@@ -38,6 +39,7 @@ class OranNtnSpaceRic;
 class OranNtnE2Node;
 class OranNtnXappBase;
 class OranNtnSatBridge;
+class NtnStaticExtraLossModel;
 
 /**
  * \ingroup oran-ntn
@@ -122,16 +124,7 @@ class OranNtnHelper : public Object
                                         uint32_t numPlanes, uint32_t satsPerPlane,
                                         double inclinationDeg, double altitudeKm);
 
-    // ---- KPM feed simulation ----
-
-    /**
-     * \brief Start simulated KPM feed from E2 nodes
-     *
-     * Generates realistic KPM reports at the given interval from
-     * all connected E2 nodes. Uses satellite position + antenna
-     * patterns for link budget computation.
-     */
-    void StartKpmFeed(Ptr<OranNtnNearRtRic> ric, Time reportInterval);
+    // ---- KPM injection ----
 
     /**
      * \brief Submit a manual KPM report to an E2 node
@@ -225,6 +218,37 @@ class OranNtnHelper : public Object
      */
     Ptr<OranNtnSatBridge> GetSatBridge() const;
 
+    // ---- RC action actuation (default handler dispatch targets) ----
+
+    /**
+     * \brief Wire a cell's beam-forming loss knob into the default RC handler.
+     *
+     * Registers the live NtnStaticExtraLossModel that sits on cell \p gnbId's
+     * real spectrum channel (chained via NtnRealStackHelper::AddExtraPropagation
+     * Loss). Once registered, a BEAM_SWITCH / BEAM_SHUTDOWN RC action routed to
+     * that cell is ACTUATED as a channel reconfiguration (negative loss =
+     * commanded array gain), so the effect shows up in the MEASURED SINR/TBLER
+     * exactly like the oran-ntn-ric-controlled-traffic reference loop. Without a
+     * registered model the default handler cannot actuate a beam action and
+     * reports failure honestly (never a silent accept).
+     */
+    void RegisterBeamLossModel(uint32_t gnbId, Ptr<NtnStaticExtraLossModel> model);
+
+    /**
+     * \brief Callback that actually actuates a handover in the real stack.
+     * \return true if the handover was actuated, false otherwise.
+     */
+    typedef Callback<bool, E2RcAction> RcActuatorCallback;
+
+    /**
+     * \brief Wire a handover actuator (e.g. NtnRealStackHelper::SetHandover) so
+     *        HANDOVER_TRIGGER / HANDOVER_CANCEL RC actions actuate the RRC stack.
+     *
+     * If left unset, the default handler logs an explicit NS_LOG_WARN naming the
+     * unactuated action and reports failure -- it never silently accepts.
+     */
+    void SetHandoverActuator(RcActuatorCallback cb);
+
     // ---- Output ----
 
     /**
@@ -275,16 +299,24 @@ class OranNtnHelper : public Object
     std::map<uint32_t, Ptr<OranNtnE2Node>> m_e2Nodes;
     std::vector<Ptr<OranNtnSpaceRic>> m_spaceRics;
 
-    // KPM simulation state
-    struct KpmFeedState
-    {
-        EventId feedEvent;
-        Time interval;
-    };
-    KpmFeedState m_kpmFeed;
-
-    void KpmFeedCallback();
     bool DefaultRcActionHandler(E2RcAction action);
+
+    /**
+     * \brief Actuate a BEAM_SWITCH/BEAM_SHUTDOWN via a registered loss model.
+     * \return true if a beam loss model was registered and reconfigured.
+     */
+    bool ApplyBeamAction(const E2RcAction& action);
+
+    // Per-cell beam actuation state (live channel reconfiguration target).
+    struct BeamActuatorState
+    {
+        Ptr<NtnStaticExtraLossModel> model; //!< negative loss = commanded gain
+        double gainDb{0.0};                 //!< current commanded beam gain
+        bool on{false};
+        uint32_t activations{0};
+    };
+    std::map<uint32_t, BeamActuatorState> m_beamActuators;
+    RcActuatorCallback m_handoverActuator;
 
     // Action log
     struct ActionLogEntry

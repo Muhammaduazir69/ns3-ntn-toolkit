@@ -32,7 +32,13 @@ OranNtnConflictManager::GetTypeId()
                           "Conflict resolution strategy (0=priority, 1=temporal, "
                           "2=merge, 3=A1-guided, 4=ML)",
                           UintegerValue(0),
-                          MakeUintegerAccessor(&OranNtnConflictManager::m_strategyVal),
+                          // Setter/getter accessor so the attribute drives the
+                          // SAME m_strategy the resolver switches on. (The old
+                          // MakeUintegerAccessor(&m_strategyVal) wrote a member
+                          // nothing read, so any attribute-set silently ran
+                          // PRIORITY_BASED.)
+                          MakeUintegerAccessor(&OranNtnConflictManager::SetStrategyValue,
+                                               &OranNtnConflictManager::GetStrategyValue),
                           MakeUintegerChecker<uint8_t>(0, 4))
             .AddAttribute("ConflictWindow",
                           "Time window for conflict detection",
@@ -59,7 +65,6 @@ OranNtnConflictManager::GetTypeId()
 
 OranNtnConflictManager::OranNtnConflictManager()
     : m_strategy(ConflictResolutionStrategy::PRIORITY_BASED),
-      m_strategyVal(0),
       m_conflictWindow(MilliSeconds(500)),
       m_totalConflicts(0),
       m_maxLogSize(10000)
@@ -91,6 +96,18 @@ ConflictResolutionStrategy
 OranNtnConflictManager::GetResolutionStrategy() const
 {
     return m_strategy;
+}
+
+void
+OranNtnConflictManager::SetStrategyValue(uint8_t v)
+{
+    m_strategy = static_cast<ConflictResolutionStrategy>(v);
+}
+
+uint8_t
+OranNtnConflictManager::GetStrategyValue() const
+{
+    return static_cast<uint8_t>(m_strategy);
 }
 
 void

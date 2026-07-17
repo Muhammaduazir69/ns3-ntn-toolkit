@@ -94,9 +94,23 @@ OranNtnSatBridge::OranNtnSatBridge()
       m_temperature_K(TEMPERATURE_K),
       m_speedOfLight(SPEED_OF_LIGHT),
       m_kpmInterval(Seconds(1.0)),
-      m_kpmFeedActive(false)
+      m_kpmFeedActive(false),
+      m_fadingCoherenceTime(MilliSeconds(100))
 {
     NS_LOG_FUNCTION(this);
+    // ns-3 RngStream variables (not std::rand): reproducible under RngRun and
+    // independent once AssignStreams() is called.
+    m_fadingUniformRv = CreateObject<UniformRandomVariable>();
+    m_fadingNormalRv = CreateObject<NormalRandomVariable>();
+}
+
+int64_t
+OranNtnSatBridge::AssignStreams(int64_t stream)
+{
+    NS_LOG_FUNCTION(this << stream);
+    m_fadingUniformRv->SetStream(stream);
+    m_fadingNormalRv->SetStream(stream + 1);
+    return 2;
 }
 
 OranNtnSatBridge::~OranNtnSatBridge()
@@ -1051,72 +1065,87 @@ OranNtnSatBridge::ComputeNtnSinrWithFading(uint32_t ueId,
         pShadow = 0.35;
     }
 
-    // Update Markov state
-    uint8_t currentState = 0;
-    auto stateIt = m_markovFadingStates.find(satId * 10000 + ueId);
-    if (stateIt != m_markovFadingStates.end())
+    // Markov cell for this (sat,ue) link.
+    const uint32_t key = satId * 10000 + ueId;
+    MarkovFadingCell& cell = m_markovFadingStates[key];
+    const Time now = Simulator::Now();
+
+    // Clock the chain on SIM-TIME, not on call count: only advance if a full
+    // coherence interval has elapsed since the last step. Repeated calls within
+    // one interval (e.g. SelectModCod + a KPM read at the same instant) reuse
+    // the cached state and fade, so the chain is not double-stepped.
+    const bool advance =
+        !cell.initialized || (now - cell.lastStep) >= m_fadingCoherenceTime;
+
+    if (advance)
     {
-        currentState = stateIt->second;
+        const uint8_t currentState = cell.initialized ? cell.state : 0;
+
+        // State transition (ns-3 RngStream uniform draw).
+        const double r = m_fadingUniformRv->GetValue(0.0, 1.0);
+        uint8_t newState;
+        if (currentState == 0) // Clear
+        {
+            if (r < pClear)
+                newState = 0;
+            else if (r < pClear + pShadow * 0.3)
+                newState = 1;
+            else
+                newState = 2;
+        }
+        else if (currentState == 1) // Shadow
+        {
+            if (r < 0.3)
+                newState = 0;
+            else if (r < 0.3 + 0.5)
+                newState = 1;
+            else
+                newState = 2;
+        }
+        else // Blocked
+        {
+            if (r < 0.15)
+                newState = 0;
+            else if (r < 0.15 + 0.35)
+                newState = 1;
+            else
+                newState = 2;
+        }
+
+        // State-dependent fade (all draws from RngStream variables).
+        double fadingGain_dB = 0.0;
+        switch (newState)
+        {
+        case 0: // Clear sky - Rician fading with high K-factor
+        {
+            double kFactor_dB = 10.0 + 0.2 * (elevationDeg - 30.0);
+            kFactor_dB = std::max(2.0, std::min(20.0, kFactor_dB));
+            const double amp = 1.0 / (1.0 + std::pow(10.0, kFactor_dB / 10.0));
+            fadingGain_dB = m_fadingUniformRv->GetValue(-amp, amp);
+            break;
+        }
+        case 1: // Shadowed - lognormal (Gaussian-in-dB) shadowing
+        {
+            const double shadowStd = 3.0 + (90.0 - elevationDeg) * 0.1; // 3-12 dB
+            fadingGain_dB =
+                -std::abs(m_fadingNormalRv->GetValue(0.0, shadowStd * shadowStd));
+            break;
+        }
+        case 2: // Blocked - deep fade
+        {
+            fadingGain_dB = -15.0 - m_fadingUniformRv->GetValue(0.0, 20.0);
+            break;
+        }
+        }
+
+        cell.state = newState;
+        cell.fadingGainDb = fadingGain_dB;
+        cell.lastStep = now;
+        cell.initialized = true;
     }
 
-    // Simple state transition based on probabilities
-    double r = static_cast<double>(std::rand()) / RAND_MAX;
-    uint8_t newState;
-    if (currentState == 0) // Clear
-    {
-        if (r < pClear)
-            newState = 0;
-        else if (r < pClear + pShadow * 0.3)
-            newState = 1;
-        else
-            newState = 2;
-    }
-    else if (currentState == 1) // Shadow
-    {
-        if (r < 0.3)
-            newState = 0;
-        else if (r < 0.3 + 0.5)
-            newState = 1;
-        else
-            newState = 2;
-    }
-    else // Blocked
-    {
-        if (r < 0.15)
-            newState = 0;
-        else if (r < 0.15 + 0.35)
-            newState = 1;
-        else
-            newState = 2;
-    }
-    m_markovFadingStates[satId * 10000 + ueId] = newState;
-
-    // Apply state-dependent fading
-    double fadingGain_dB = 0.0;
-    switch (newState)
-    {
-    case 0: // Clear sky - Rician fading with high K-factor
-    {
-        double kFactor_dB = 10.0 + 0.2 * (elevationDeg - 30.0);
-        kFactor_dB = std::max(2.0, std::min(20.0, kFactor_dB));
-        // Approximate Rician fade: small fluctuation around 0 dB
-        fadingGain_dB = (static_cast<double>(std::rand()) / RAND_MAX - 0.5) *
-                        2.0 / (1.0 + std::pow(10.0, kFactor_dB / 10.0));
-        break;
-    }
-    case 1: // Shadowed - lognormal shadowing
-    {
-        double shadowStd = 3.0 + (90.0 - elevationDeg) * 0.1; // 3-12 dB std
-        fadingGain_dB = -std::abs((static_cast<double>(std::rand()) / RAND_MAX - 0.5) *
-                                   2.0 * shadowStd);
-        break;
-    }
-    case 2: // Blocked - deep fade
-    {
-        fadingGain_dB = -15.0 - (static_cast<double>(std::rand()) / RAND_MAX) * 20.0;
-        break;
-    }
-    }
+    const uint8_t newState = cell.state;
+    const double fadingGain_dB = cell.fadingGainDb;
 
     // Add inter-beam interference
     double interference_dBm = ComputeInterBeamInterference(ueId, satId, beamId);
@@ -1390,11 +1419,11 @@ OranNtnSatBridge::GetMarkovState(uint32_t satId) const
 {
     // Return average Markov state across UEs for this satellite
     uint32_t totalClear = 0, totalShadow = 0, totalBlocked = 0;
-    for (const auto& [key, state] : m_markovFadingStates)
+    for (const auto& [key, cell] : m_markovFadingStates)
     {
         if (key / 10000 == satId)
         {
-            switch (state)
+            switch (cell.state)
             {
             case 0: totalClear++; break;
             case 1: totalShadow++; break;
