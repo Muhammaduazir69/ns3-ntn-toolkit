@@ -56,6 +56,9 @@
 #include "ns3/oran-ntn-xapp-predictive-alloc.h"
 #include "ns3/oran-ntn-xapp-slice-manager.h"
 #include "ns3/oran-ntn-xapp-tn-ntn-steering.h"
+#include "ns3/oran-ntn-gym-handover.h"
+#include "ns3/container.h"
+#include "ns3/spaces.h"
 #include "ns3/test.h"
 
 #include <map>
@@ -4881,6 +4884,257 @@ class OranNtnMmimoXappFailureModesTest : public TestCase
 };
 
 // ============================================================================
+//  Gate 8: xApp decision reaches E2-node actuation (moves serving cell)
+//  Proves the O-RAN actuation closed loop is NOT a decision island: an xApp
+//  HANDOVER_TRIGGER travels xApp -> RIC -> E2 termination -> target E2 node,
+//  and the target node's RC-action callback actually fires (with the right
+//  target gnb/UE) one FeederLinkDelay after submission -- i.e. the command
+//  crossed the return feeder link and reached real actuation, not accept-and-
+//  discard.
+// ============================================================================
+
+class OranNtnXappMovesServingCellTest : public TestCase
+{
+  public:
+    OranNtnXappMovesServingCellTest()
+        : TestCase("Gate 8: xApp HANDOVER_TRIGGER reaches target E2-node "
+                   "actuation (moves serving cell, not a decision island)")
+    {
+    }
+
+  private:
+    uint32_t m_fireCount{0};
+    uint32_t m_actuatedGnb{0};
+    uint32_t m_actuatedUe{0};
+    Time m_fireTime{Seconds(0)};
+
+    bool CaptureActuation(E2RcAction action)
+    {
+        m_fireCount++;
+        m_actuatedGnb = action.targetGnbId;
+        m_actuatedUe = action.targetUeId;
+        m_fireTime = Simulator::Now();
+        return true;
+    }
+
+    void DoRun() override
+    {
+        const Time feederDelay = MilliSeconds(20);
+        const uint32_t servingGnb = 1;
+        const uint32_t targetGnb = 2;
+        const uint32_t ueRnti = 55;
+
+        auto ric = CreateObject<OranNtnNearRtRic>();
+        ric->Initialize();
+
+        // Serving E2 node (gnb 1): registered so the cell exists, no capture.
+        auto e2node1 = CreateObject<OranNtnE2Node>();
+        e2node1->SetNodeId(servingGnb);
+        e2node1->SetIsNtn(true);
+        e2node1->SetFeederLinkDelay(feederDelay);
+        e2node1->RegisterRanFunction(3, "RC");
+        ric->ConnectE2Node(e2node1);
+
+        // Target E2 node (gnb 2): the actuation endpoint we capture.
+        auto e2node2 = CreateObject<OranNtnE2Node>();
+        e2node2->SetNodeId(targetGnb);
+        e2node2->SetIsNtn(true);
+        e2node2->SetFeederLinkDelay(feederDelay);
+        e2node2->RegisterRanFunction(3, "RC");
+        e2node2->SetRcActionCallback(
+            MakeCallback(&OranNtnXappMovesServingCellTest::CaptureActuation, this));
+        ric->ConnectE2Node(e2node2);
+
+        // xApp registered with the RIC so SubmitAction() actually routes.
+        auto xapp = CreateObject<OranNtnXappHoPredict>();
+        xapp->SetXappName("gate8-mover");
+        xapp->SetPriority(10);
+        ric->RegisterXapp(xapp);
+
+        // Build and submit a HANDOVER_TRIGGER moving the UE onto gnb 2.
+        E2RcAction action{};
+        action.timestamp = Simulator::Now().GetSeconds();
+        action.xappId = xapp->GetXappId();
+        action.xappName = xapp->GetXappName();
+        action.actionType = E2RcActionType::HANDOVER_TRIGGER;
+        action.targetGnbId = targetGnb;
+        action.targetUeId = ueRnti;
+        action.targetBeamId = 0;
+        action.targetSliceId = 0;
+        action.confidence = 1.0;
+        action.parameter1 = 0.0;
+        action.parameter2 = 0.0;
+        action.executed = false;
+
+        bool accepted = xapp->SubmitAction(action);
+        NS_TEST_ASSERT_MSG_EQ(accepted, true,
+                              "RIC must accept and route the HANDOVER_TRIGGER "
+                              "to gnb 2 (action was not a decision island)");
+
+        // The action must NOT have fired inline at submission time.
+        NS_TEST_ASSERT_MSG_EQ(m_fireCount, 0u,
+                              "Actuation must be deferred across the feeder "
+                              "link, not executed inline at submission");
+
+        Simulator::Stop(Seconds(1));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(m_fireCount, 1u,
+                              "Target-node RC actuation callback must fire "
+                              "exactly once");
+        NS_TEST_ASSERT_MSG_EQ(m_actuatedGnb, targetGnb,
+                              "Actuated action must target gnb 2");
+        NS_TEST_ASSERT_MSG_EQ(m_actuatedUe, ueRnti,
+                              "Actuated action must carry the target UE rnti");
+        NS_TEST_ASSERT_MSG_EQ(m_fireTime, feederDelay,
+                              "Actuation must occur at t = FeederLinkDelay "
+                              "(command crossed the return feeder link), not "
+                              "inline at t = 0");
+
+        ric->Dispose();
+        Simulator::Destroy();
+    }
+};
+
+// ============================================================================
+//  Gate 10: RL action -> SINR improvement
+//  An OranNtnGymHandover bound to an xApp observes one UE with a low-SINR
+//  serving cell and a high-SINR candidate. A discrete RL action ("handover to
+//  first candidate") must (a) actuate a real HANDOVER_TRIGGER toward the
+//  high-SINR gnb (verified at the target E2 node's RC callback), and (b) move
+//  the UE toward higher SINR (candidate SINR > pre-action serving SINR).
+//
+//  Model note (discovered, NOT fixed): OranNtnGymHandover treats the report
+//  with the HIGHEST gnbId for the UE as the "serving" cell, because
+//  GetUeReportsInWindow() iterates the gnbId-keyed std::map and takes .back().
+//  So the low-SINR serving cell is deliberately given the HIGHER gnbId (3) and
+//  the high-SINR handover target the lower id (2) to match the gym's semantics.
+// ============================================================================
+
+class OranNtnRlActionImprovesSinrTest : public TestCase
+{
+  public:
+    OranNtnRlActionImprovesSinrTest()
+        : TestCase("Gate 10: RL discrete action drives the UE toward higher "
+                   "SINR and actuates the handover at the target E2 node")
+    {
+    }
+
+  private:
+    uint32_t m_fireCount{0};
+    uint32_t m_actuatedGnb{0};
+    uint32_t m_actuatedUe{0};
+
+    bool CaptureActuation(E2RcAction action)
+    {
+        m_fireCount++;
+        m_actuatedGnb = action.targetGnbId;
+        m_actuatedUe = action.targetUeId;
+        return true;
+    }
+
+    void DoRun() override
+    {
+        const Time feederDelay = MilliSeconds(10);
+        const uint32_t ueId = 7;
+        const uint32_t servingGnb = 3; // low SINR (serving = highest gnbId)
+        const uint32_t targetGnb = 2;  // high SINR (handover candidate/target)
+        const double servingSinr = 3.0;
+        const double candSinr = 15.0;
+
+        auto ric = CreateObject<OranNtnNearRtRic>();
+        ric->Initialize();
+
+        // Target E2 node (gnb 2) captures the actuated handover.
+        auto e2node2 = CreateObject<OranNtnE2Node>();
+        e2node2->SetNodeId(targetGnb);
+        e2node2->SetIsNtn(true);
+        e2node2->SetFeederLinkDelay(feederDelay);
+        e2node2->RegisterRanFunction(3, "RC");
+        e2node2->SetRcActionCallback(
+            MakeCallback(&OranNtnRlActionImprovesSinrTest::CaptureActuation, this));
+        ric->ConnectE2Node(e2node2);
+
+        auto xapp = CreateObject<OranNtnXappHoPredict>();
+        xapp->SetXappName("gate10-rl");
+        xapp->SetPriority(10);
+        ric->RegisterXapp(xapp);
+
+        auto gym = CreateObject<OranNtnGymHandover>();
+        gym->SetXapp(xapp);
+        gym->SetMaxCandidates(4);
+
+        // Inject one low-SINR serving report and one high-SINR candidate report
+        // for the same UE, stamped at the current sim time (t = 0).
+        auto feed = [&](uint32_t gnb, double sinr) {
+            E2KpmReport r{};
+            r.timestamp = Simulator::Now().GetSeconds();
+            r.gnbId = gnb;
+            r.isNtn = true;
+            r.ueId = ueId;
+            r.sinr_dB = sinr;
+            r.rsrp_dBm = -90.0;
+            r.tte_s = 120.0;
+            r.elevation_deg = 35.0;
+            r.doppler_Hz = 1000.0;
+            r.beamId = gnb;
+            xapp->HandleKpmIndication(1, r);
+        };
+        feed(targetGnb, candSinr);
+        feed(servingGnb, servingSinr);
+
+        gym->SetCurrentUe(ueId);
+
+        // GetObservation() latches m_preActionSinr and exposes serving/candidate
+        // SINR in the box (index 0 = servingSinr, index 5 = bestCandSinr).
+        auto obs = gym->GetObservation();
+        auto box = DynamicCast<OpenGymBoxContainer<float>>(obs);
+        NS_TEST_ASSERT_MSG_NE(box, nullptr,
+                              "Observation must be a float box container");
+        float obsServingSinr = box->GetValue(0);
+        float obsBestCandSinr = box->GetValue(5);
+
+        NS_TEST_ASSERT_MSG_EQ_TOL(obsServingSinr, static_cast<float>(servingSinr),
+                                  0.5f,
+                                  "Pre-action serving SINR must reflect the low "
+                                  "serving report (~3 dB)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(obsBestCandSinr, static_cast<float>(candSinr),
+                                  0.5f,
+                                  "Best-candidate SINR must reflect the high "
+                                  "candidate report (~15 dB)");
+        NS_TEST_ASSERT_MSG_GT(obsBestCandSinr, obsServingSinr,
+                              "RL observation exposes a candidate whose SINR "
+                              "exceeds the serving cell (positive delta)");
+
+        // Discrete action = 1 -> handover to first candidate (the high-SINR gnb).
+        auto act = CreateObject<OpenGymDiscreteContainer>(5);
+        act->SetValue(1);
+        bool ok = gym->ExecuteActions(act);
+        NS_TEST_ASSERT_MSG_EQ(ok, true,
+                              "ExecuteActions must accept the discrete RL action");
+
+        Simulator::Stop(Seconds(1));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(m_fireCount, 1u,
+                              "RL handover must actuate exactly once at the "
+                              "target E2 node");
+        NS_TEST_ASSERT_MSG_EQ(m_actuatedGnb, targetGnb,
+                              "RL action must actuate a handover toward the "
+                              "high-SINR gnb 2");
+        NS_TEST_ASSERT_MSG_EQ(m_actuatedUe, ueId,
+                              "Actuated handover must carry the current UE id");
+        NS_TEST_ASSERT_MSG_GT(candSinr, servingSinr,
+                              "Chosen candidate SINR must exceed the pre-action "
+                              "serving SINR (RL moves the UE to higher SINR)");
+
+        gym->Dispose();
+        ric->Dispose();
+        Simulator::Destroy();
+    }
+};
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
 
@@ -5021,6 +5275,11 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnMmimoXappSimulatorTimeTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnMmimoXappFailureModesTest,
+                    TestCase::Duration::QUICK);
+        // O-RAN actuation closed-loop gates (decision -> actuation).
+        AddTestCase(new OranNtnXappMovesServingCellTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnRlActionImprovesSinrTest,
                     TestCase::Duration::QUICK);
     }
 };
