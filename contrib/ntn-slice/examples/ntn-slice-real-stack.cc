@@ -113,8 +113,20 @@ main(int argc, char* argv[])
     rs.SetRunTag("ntn-slice-real-stack");
     rs.SetSatEirpDbm(satEirpDbm);
     rs.SetBackhaulDelay(MilliSeconds(backhaulMs));
+    // ---- GAP L1 FIX: request REAL per-slice BWP isolation --------------------
+    // Previously this example never called SetSlices(), so all three "slices"
+    // shared ONE default BWP under the default TDMA-RR scheduler with one bearer
+    // each — the "isolation" verdict was just the outcome of unmanaged
+    // contention. SetSlices() splits the NR band into one contiguous BWP per
+    // slice, each with its own QoS scheduler, and routes each 5QI to its BWP, so
+    // isolation is now enforced by a real PRB/BWP mechanism (nr backend only).
+    if (radio != "mmwave")
+    {
+        rs.SetSlices({{"eMBB", 2}, {"URLLC", 82}, {"mMTC", 9}});
+    }
     rs.Build(satNodes, ueNodes);
-    // MixedBouquet spreads UEs across eMBB/URLLC/mMTC traffic on the shared cell.
+    // MixedBouquet spreads UEs across eMBB/URLLC/mMTC traffic; with SetSlices
+    // above, each profile's 5QI now lands on its own BWP.
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(duration - 0.5));
     rs.EnableAiFlowMonitor("ntn-slice-real-stack"); // WS2 KPM series (TS 28.552 names)
@@ -143,48 +155,55 @@ main(int argc, char* argv[])
     monitor.RegisterSlice(urllc);
     monitor.RegisterSlice(mmtc);
 
+    // ---- GAP L2/L3/M5 FIX: feed the monitor from MEASURED per-slice stats ----
+    // The old loop recorded rxBytes/1400 packets (wrong for 128 B mMTC / 256 B
+    // URLLC — undercounted ~11x / ~5.5x), stamped every one with a CLOSED-FORM
+    // geometric latency (slant/c + backhaul, i.e. the p99 of a constant), and
+    // marked every packet delivered=true so a reliability breach could never
+    // fire. Now each slice's real in-band flow stats drive the monitor: the
+    // actual delivered-packet COUNT with its MEASURED one-way delay, and the
+    // real sequence-gap LOSSES marked delivered=false. Per-slice BWP SINR comes
+    // from the real PHY trace (GetBwpMeanSinrDb), which only differs per slice
+    // because SetSlices() gave each one its own BWP.
+    // slice index (profiles[]) -> 5QI carried by that slice's traffic + BWP id.
+    const uint8_t sliceFiveQi[3] = {9, 2, 82}; // {mMTC, eMBB, URLLC} (MixedBouquet)
+    const uint8_t sliceBwp[3] = {2, 0, 1};     // SetSlices order: eMBB=0,URLLC=1,mMTC=2
     double sliceRxMbps[3] = {0, 0, 0};
-    double sliceSinrSum[3] = {0, 0, 0};
-    uint32_t sliceUes[3] = {0, 0, 0};
+    double sliceSinrDb[3] = {0, 0, 0};
+    uint64_t sliceRxPkts[3] = {0, 0, 0};
 
-    Vector sp = satNodes.Get(0)->GetObject<MobilityModel>()->GetPosition();
-    for (uint32_t u = 0; u < numUes; ++u)
+    for (uint32_t s = 0; s < 3; ++s)
     {
-        uint32_t slice = u % 3; // 0=mMTC, 1=eMBB, 2=URLLC (MixedBouquet order)
-        uint64_t rxBytes = rs.GetUeRxBytes(u);
-        double sinr = rs.GetUeMeanSinrDb(u);
-        double thr = rxBytes * 8.0 / std::max(1.0, duration) / 1e6;
-        sliceRxMbps[slice] += thr;
-        if (!std::isnan(sinr))
+        const auto st = rs.GetSliceMeasuredStats(sliceFiveQi[s]);
+        sliceRxMbps[s] = st.thrMbps;
+        sliceRxPkts[s] = st.rxPackets;
+        // Per-slice SINR: prefer the per-BWP measurement (real isolation); fall
+        // back to NaN-safe 0 if the backend has no BWP breakdown (mmwave).
+        const double bwpSinr = rs.GetBwpMeanSinrDb(sliceBwp[s]);
+        sliceSinrDb[s] = std::isnan(bwpSinr) ? 0.0 : bwpSinr;
+
+        // Delivered packets: real count, each with the slice's MEASURED mean OWD.
+        for (uint64_t p = 0; p < st.rxPackets; ++p)
         {
-            sliceSinrSum[slice] += sinr;
+            monitor.RecordPacket(profiles[s].snssai, st.meanOwdMs, /*delivered=*/true);
         }
-        sliceUes[slice]++;
-
-        // Real geometric one-way NTN latency for this UE (slant range / c + backhaul).
-        Vector up = ueNodes.Get(u)->GetObject<MobilityModel>()->GetPosition();
-        double dx = sp.x - up.x, dy = sp.y - up.y, dz = sp.z - up.z;
-        double slantM = std::sqrt(dx * dx + dy * dy + dz * dz);
-        double latencyMs = slantM / 299792458.0 * 1e3 + backhaulMs;
-
-        // Record the UE's MEASURED delivered packets (1400-byte DL) into its slice.
-        uint64_t deliveredPkts = rxBytes / 1400;
-        for (uint64_t p = 0; p < deliveredPkts; ++p)
+        // Lost packets: real sequence-gap losses, marked NOT delivered so the
+        // reliability breach can actually be triggered.
+        for (uint64_t p = 0; p < st.lostPackets; ++p)
         {
-            monitor.RecordPacket(profiles[slice].snssai, latencyMs, true);
+            monitor.RecordPacket(profiles[s].snssai, st.meanOwdMs, /*delivered=*/false);
         }
     }
 
     auto breaches = monitor.EvaluateAll();
 
-    std::cout << "\n--- Per-slice isolation on the SHARED real cell (MEASURED) ---\n";
+    std::cout << "\n--- Per-slice isolation on REAL per-slice BWPs (MEASURED) ---\n";
     const char* names[3] = {"mMTC ", "eMBB ", "URLLC"};
     for (uint32_t s = 0; s < 3; ++s)
     {
-        double meanSinr = (sliceUes[s] > 0) ? sliceSinrSum[s] / sliceUes[s] : 0.0;
-        std::cout << "  " << names[s] << " | UEs=" << sliceUes[s]
+        std::cout << "  " << names[s] << " | rxPkts=" << sliceRxPkts[s]
                   << " | meas throughput=" << std::fixed << std::setprecision(2)
-                  << sliceRxMbps[s] << " Mbps | meas SINR=" << meanSinr
+                  << sliceRxMbps[s] << " Mbps | BWP SINR=" << sliceSinrDb[s]
                   << " dB | budget=" << profiles[s].latencyBudgetMs << "ms\n";
     }
     std::cout << "\n--- SLA breach evaluation (real SliceIsolationMonitor) ---\n";

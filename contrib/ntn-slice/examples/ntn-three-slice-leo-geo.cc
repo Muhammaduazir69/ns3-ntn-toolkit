@@ -263,22 +263,18 @@ main(int argc, char* argv[])
             ntngeo::SlantRangeM(uePos, geoEcef) / 299792458.0 * 1e3 + backhaulMs;
         const double latencyMs = servedByGeo ? geoLatMs : leoLatMs;
 
-        // MEASURED delivered packets (1400-byte DL TBs off the PacketSink).
-        const uint64_t rxBytes = rs.GetUeRxBytes(ue);
-        const uint64_t deliveredPkts = rxBytes / 1400;
+        // GAP M5 FIX: MEASURED delivered-packet COUNT off the in-band sink, not
+        // rxBytes/1400 (wrong for 128 B mMTC / 256 B URLLC).
+        const uint64_t deliveredPkts = rs.GetUeRxPackets(ue);
         for (uint64_t p = 0; p < deliveredPkts; ++p)
         {
             stack.monitor->RecordPacket(s, latencyMs, true);
         }
 
-        // MEASURED per-UE TBLER -> lost-packet count, so reliabilityBreach is
-        // measured, not a coin flip. lost = delivered * tbler/(1-tbler).
-        const double measTbler = rs.GetUeRecentTbler(ue);
-        const double tbler =
-            (std::isnan(measTbler) || measTbler < 0.0) ? 0.0 : std::min(measTbler, 0.5);
-        const double denom = std::max(1e-6, 1.0 - tbler);
-        const uint64_t lostPkts =
-            static_cast<uint64_t>(std::llround(static_cast<double>(deliveredPkts) * tbler / denom));
+        // GAP L3 FIX: MEASURED sequence-gap losses, so reliabilityBreach comes
+        // from real dropped packets — not delivered*TBLER/(1-TBLER) synthesized
+        // from a single last-TB sample.
+        const uint64_t lostPkts = rs.GetUeLostPackets(ue);
         for (uint64_t p = 0; p < lostPkts; ++p)
         {
             stack.monitor->RecordPacket(s, latencyMs, false);

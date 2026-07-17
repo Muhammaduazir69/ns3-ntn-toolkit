@@ -101,6 +101,13 @@ main(int argc, char* argv[])
     rs.SetRunTag("ntn-slice-isolation-traffic");
     rs.SetSatEirpDbm(satEirpDbm);
     rs.SetBackhaulDelay(MilliSeconds(backhaulMs));
+    // GAP L1 FIX: real per-slice BWP isolation (see ntn-slice-real-stack). The
+    // three 5QIs each get their own BWP + QoS scheduler instead of contending on
+    // one default BWP.
+    if (radio != "mmwave")
+    {
+        rs.SetSlices({{"eMBB", 2}, {"URLLC", 82}, {"mMTC", 9}});
+    }
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
@@ -122,34 +129,28 @@ main(int argc, char* argv[])
         monitor.RegisterSlice(p);
     }
     const char* names[3] = {"mMTC ", "eMBB ", "URLLC"};
+    // GAP L2/L3/M5 FIX: feed the monitor from MEASURED per-slice in-band stats
+    // (real delivered COUNT + measured OWD + sequence-gap losses), not
+    // rxBytes/1400 with a closed-form geometric latency stamped delivered=true.
+    const uint8_t sliceFiveQi[3] = {9, 2, 82}; // {mMTC, eMBB, URLLC}
+    const uint8_t sliceBwp[3] = {2, 0, 1};     // SetSlices order eMBB=0,URLLC=1,mMTC=2
     double sliceMbps[3] = {0, 0, 0};
     double sliceSinr[3] = {0, 0, 0};
-    uint32_t sliceN[3] = {0, 0, 0};
-    const Vector sp = servSat->GetPosition();
-    for (uint32_t u = 0; u < numUes; ++u)
+    uint64_t sliceRxPkts[3] = {0, 0, 0};
+    for (uint32_t s = 0; s < 3; ++s)
     {
-        // Deployment assumption (declared, not discovered): terminals are
-        // provisioned round-robin across the three slice profiles — UE 3k is
-        // a sensor (mMTC), 3k+1 a broadband terminal (eMBB), 3k+2 a control
-        // unit (URLLC) — matching the MixedBouquet per-UE traffic profiles.
-        // In a real network the S-NSSAI comes from subscription data; a
-        // DSCP/QFI classifier (NtnSliceSelector) is exercised in
-        // ntn-slice-real-stack.
-        const uint32_t s = u % 3;
-        const uint64_t rxBytes = rs.GetUeRxBytes(u);
-        const double sinr = rs.GetUeMeanSinrDb(u);
-        sliceMbps[s] += rxBytes * 8.0 / std::max(1.0, simSeconds) / 1e6;
-        if (!std::isnan(sinr))
+        const auto st = rs.GetSliceMeasuredStats(sliceFiveQi[s]);
+        sliceMbps[s] = st.thrMbps;
+        sliceRxPkts[s] = st.rxPackets;
+        const double bwpSinr = rs.GetBwpMeanSinrDb(sliceBwp[s]);
+        sliceSinr[s] = std::isnan(bwpSinr) ? 0.0 : bwpSinr;
+        for (uint64_t p = 0; p < st.rxPackets; ++p)
         {
-            sliceSinr[s] += sinr;
+            monitor.RecordPacket(profiles[s].snssai, st.meanOwdMs, /*delivered=*/true);
         }
-        sliceN[s]++;
-        // Real geometric one-way latency (slant/c + backhaul) for this UE.
-        const double slantM = ntngeo::SlantRangeM(ueModels[u]->GetPosition(), sp);
-        const double latencyMs = slantM / 299792458.0 * 1e3 + backhaulMs;
-        for (uint64_t p = 0; p < rxBytes / 1400; ++p)
+        for (uint64_t p = 0; p < st.lostPackets; ++p)
         {
-            monitor.RecordPacket(profiles[s].snssai, latencyMs, true);
+            monitor.RecordPacket(profiles[s].snssai, st.meanOwdMs, /*delivered=*/false);
         }
     }
     auto breaches = monitor.EvaluateAll();
@@ -159,8 +160,8 @@ main(int argc, char* argv[])
                 rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());
     for (int s = 0; s < 3; ++s)
     {
-        std::printf("#   %s  meas thr=%6.3f Mbps  meas SINR=%6.2f dB  (n=%u)\n", names[s],
-                    sliceMbps[s], sliceN[s] ? sliceSinr[s] / sliceN[s] : 0.0, sliceN[s]);
+        std::printf("#   %s  meas thr=%6.3f Mbps  BWP SINR=%6.2f dB  (rxPkts=%lu)\n", names[s],
+                    sliceMbps[s], sliceSinr[s], static_cast<unsigned long>(sliceRxPkts[s]));
     }
     uint32_t nBreach = 0;
     for (const auto& b : breaches)

@@ -1058,6 +1058,96 @@ NtnRealStackHelper::GetBwpRxTb(uint8_t bwpId) const
     return (it == m_dlPerBwp.end()) ? 0 : it->second.n;
 }
 
+uint64_t
+NtnRealStackHelper::GetUeRxPackets(uint32_t ueIndex) const
+{
+    // P3 (M5): measured delivered-packet COUNT for a UE, summed over its flows.
+    // Use this instead of GetUeRxBytes()/1400 — that estimate is wrong for any
+    // non-1400 B packet (128 B mMTC, 256 B URLLC).
+    uint64_t pkts = 0;
+    for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
+    {
+        if (i >= m_dlSinkUe.size() || m_dlSinkUe[i] != ueIndex)
+        {
+            continue;
+        }
+        Ptr<NtnOranSink> sink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
+        if (!sink)
+        {
+            continue;
+        }
+        for (const auto& [key, fs] : sink->GetFlowStats())
+        {
+            pkts += fs.rxPackets;
+        }
+    }
+    return pkts;
+}
+
+uint64_t
+NtnRealStackHelper::GetUeLostPackets(uint32_t ueIndex) const
+{
+    // P3 (L3): measured sequence-gap losses for a UE (expected-from-highest-seq
+    // minus received), summed over its flows. This is a real loss count, not
+    // delivered*TBLER/(1-TBLER) from a single last-TB sample.
+    uint64_t lost = 0;
+    for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
+    {
+        if (i >= m_dlSinkUe.size() || m_dlSinkUe[i] != ueIndex)
+        {
+            continue;
+        }
+        Ptr<NtnOranSink> sink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
+        if (!sink)
+        {
+            continue;
+        }
+        for (const auto& [key, fs] : sink->GetFlowStats())
+        {
+            lost += fs.LostPackets();
+        }
+    }
+    return lost;
+}
+
+NtnRealStackHelper::SliceMeasuredStats
+NtnRealStackHelper::GetSliceMeasuredStats(uint8_t fiveQi) const
+{
+    // P3 (L1-L3): aggregate the MEASURED in-band flow stats for this 5QI. Every
+    // number here is from the real data plane — per-packet TX timestamps and
+    // sequence numbers carried inside the GTP tunnel — so a slice example never
+    // needs to re-derive latency from geometry or losses from a TBLER sample.
+    SliceMeasuredStats out;
+    double sumDelayMs = 0.0;
+    double thrMbps = 0.0;
+    for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
+    {
+        Ptr<NtnOranSink> sink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
+        if (!sink)
+        {
+            continue;
+        }
+        for (const auto& [key, fs] : sink->GetFlowStats())
+        {
+            if (fs.fiveQi != fiveQi)
+            {
+                continue;
+            }
+            out.flows += 1;
+            out.rxPackets += fs.rxPackets;
+            out.lostPackets += fs.LostPackets();
+            sumDelayMs += fs.sumDelayMs;
+            out.maxOwdMs = std::max(out.maxOwdMs, fs.maxDelayMs);
+            thrMbps += fs.ThroughputMbps();
+        }
+    }
+    out.meanOwdMs = (out.rxPackets > 0) ? sumDelayMs / out.rxPackets : 0.0;
+    const uint64_t expected = out.rxPackets + out.lostPackets;
+    out.lossRatio = (expected > 0) ? static_cast<double>(out.lostPackets) / expected : 0.0;
+    out.thrMbps = thrMbps;
+    return out;
+}
+
 void
 NtnRealStackHelper::InstallTraffic(TrafficProfile profile, Time start, Time stop)
 {

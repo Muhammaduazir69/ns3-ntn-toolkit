@@ -398,6 +398,27 @@ class NtnRealStackHelper
     /// Per-BWP (per-slice) transport blocks decoded at the UE PHY.
     uint64_t GetBwpRxTb(uint8_t bwpId) const;
 
+    /// P3 (gaps L1-L3): MEASURED per-slice KPIs, aggregated over every in-band
+    /// NtnOranSink flow whose 5QI belongs to \p fiveQi. These come from the real
+    /// data plane — per-packet in-band timestamps and sequence numbers — not
+    /// from closed-form geometry or a single-TB TBLER sample:
+    ///   rxPackets  actual delivered packet COUNT (not rxBytes/1400, which is
+    ///              wrong for 128 B mMTC / 256 B URLLC packets)
+    ///   meanOwdMs  mean one-way delay from the in-band TX timestamp
+    ///   lossRatio  sequence-gap loss (expected-from-highest-seq minus received)
+    ///   thrMbps    goodput over the measured flow lifetime
+    struct SliceMeasuredStats
+    {
+        uint64_t rxPackets{0};
+        uint64_t lostPackets{0};
+        double meanOwdMs{0.0};
+        double maxOwdMs{0.0};
+        double lossRatio{0.0};
+        double thrMbps{0.0};
+        uint32_t flows{0};
+    };
+    SliceMeasuredStats GetSliceMeasuredStats(uint8_t fiveQi) const;
+
     // ---- Enabler A: multi-gNB inter-satellite handover ------------------
     /// Enable real NR inter-cell handover across the gNBs passed to Build()
     /// (nr backend, >=2 gNBs). Installs the A3-RSRP handover algorithm + X2
@@ -536,6 +557,11 @@ class NtnRealStackHelper
     double GetUeRecentTbler(uint32_t ueIndex) const;
     /// Total measured DL bytes delivered to the UE app (PacketSink).
     uint64_t GetUeRxBytes(uint32_t ueIndex) const;
+    /// P3: measured delivered-packet COUNT for the UE (summed over its flows).
+    /// Correct for any packet size, unlike GetUeRxBytes()/1400.
+    uint64_t GetUeRxPackets(uint32_t ueIndex) const;
+    /// P3: measured sequence-gap LOST packets for the UE (summed over flows).
+    uint64_t GetUeLostPackets(uint32_t ueIndex) const;
     /// Number of UEs.
     uint32_t GetNumUes() const { return m_ue.GetN(); }
 
@@ -620,7 +646,11 @@ class NtnRealStackHelper
     std::string m_outputDir{"."};
     std::string m_runTag{"run"};
     double m_freqHz{2.0e9};       // S-band carrier; mmWave-NR FR2 numerology (60 kHz SCS), not a 3GPP NR-NTN FR1 band/numerology
-    double m_bwHz{50.0e6};        // default exceeds the 20/30 MHz NTN-FR1 max
+    // GAP M10 FIX: 30 MHz is the TS 38.101-5 NTN-FR1 maximum channel bandwidth
+    // (n255/n256). The old 50 MHz default was not a legal NTN-FR1 channel and,
+    // at numerology 1, could not be tiled into 3 slice BWPs (the Cc/BWP band
+    // math asserts). 30 MHz -> 3 x 10 MHz BWPs, one per slice.
+    double m_bwHz{30.0e6};
     double m_satEirpDbm{55.0};    // gNB conducted Tx power (UPA array gain added separately), Friis budget -> ~15-20 dB SINR
     double m_eirpTotalDbm{std::numeric_limits<double>::quiet_NaN()}; // S7: intended total EIRP if set via SetSatEirpTotalDbm/Density
     double m_ueTxDbm{33.0};
