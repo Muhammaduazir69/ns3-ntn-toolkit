@@ -1,0 +1,27 @@
+# NTN/ns-3.43 adaptation patch — undef ns-3.43 lte MIN_NO_CC/MAX_NO_CC macros before constexpr redecl
+# base: upstream 5g-lena v3.3.1 (model/nr-common.h)
+# apply from contrib/nr/ with: patch -p1 < ntn-patches/01-nr-common-min-no-cc-macro-collision.patch
+#
+--- a/model/nr-common.h	2026-07-18 03:56:44.926742485 +0500
++++ b/model/nr-common.h	2026-07-18 04:30:01.961395074 +0500
+@@ -21,6 +21,20 @@
+ {
+ namespace nr
+ {
++// ns-3.43's lte module defines MIN_NO_CC / MAX_NO_CC as preprocessor MACROS
++// (src/lte/model/lte-ue-component-carrier-manager.h). When lte-module.h is
++// included before this header (nr's lena-lte-comparison / 3gpp-calibration
++// examples), those macros textually clobber the namespaced constexprs below
++// ("expected unqualified-id before numeric constant"). The lte headers have
++// already finished using their macros by this point, so undef them here and
++// use nr's own ns3::nr-scoped constants. (ns-3.43 compatibility; nr v3.3
++// targets ns-3.42.)
++#ifdef MIN_NO_CC
++#undef MIN_NO_CC
++#endif
++#ifdef MAX_NO_CC
++#undef MAX_NO_CC
++#endif
+ /// Minimum number of carrier components allowed by 3GPP up to R13
+ constexpr uint32_t MIN_NO_CC = 1;
+ 
