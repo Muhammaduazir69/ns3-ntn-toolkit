@@ -542,6 +542,12 @@ class SceneRecorderEndToEndTest : public TestCase
         }
         Simulator::Schedule(Seconds(3.0),
                             [rec, satId, gs]() { rec->OnHandover(gs->GetId(), satId, satId); });
+        // Toggle the tracked beam down at t=2 and back up at t=4 so the CZML
+        // polyline must carry two gated availability intervals (Fix 4).
+        Simulator::Schedule(Seconds(2.0),
+                            [rec, satId, gs]() { rec->OnLinkChange(satId, gs->GetId(), false); });
+        Simulator::Schedule(Seconds(4.0),
+                            [rec, satId, gs]() { rec->OnLinkChange(satId, gs->GetId(), true); });
 
         Simulator::Stop(Seconds(6.0));
         Simulator::Run();
@@ -577,6 +583,26 @@ class SceneRecorderEndToEndTest : public TestCase
             cz.find("\"ho-0\"") != std::string::npos && cz.find("polyline") != std::string::npos &&
             cz.find("availability") != std::string::npos;
         NS_TEST_ASSERT_MSG_EQ(hasArc, true, "CZML handover arc packet present");
+
+        // Fix 4: the tracked beam must be rendered as a CZML polyline whose
+        // endpoints REFERENCE the two node positions (so the link tracks the
+        // moving satellite), gated by the OnLinkChange transitions.
+        const std::string linkId = "\"link-" + std::to_string(satId) + "-" +
+                                   std::to_string(gs->GetId()) + "\"";
+        NS_TEST_ASSERT_MSG_NE(cz.find(linkId), std::string::npos, "CZML link polyline present");
+        const std::string refA = "node-" + std::to_string(satId) + "#position";
+        const std::string refB = "node-" + std::to_string(gs->GetId()) + "#position";
+        NS_TEST_ASSERT_MSG_NE(cz.find(refA), std::string::npos, "link references sat position");
+        NS_TEST_ASSERT_MSG_NE(cz.find(refB), std::string::npos, "link references ground position");
+        NS_TEST_ASSERT_MSG_NE(cz.find("\"references\""), std::string::npos,
+                              "link uses positions.references");
+
+        // Fix 4: the measured KPI series must be emitted as a CZML custom
+        // property on its node packet (previously accumulated but never written).
+        NS_TEST_ASSERT_MSG_NE(cz.find("\"properties\""), std::string::npos,
+                              "CZML node properties present");
+        NS_TEST_ASSERT_MSG_NE(cz.find("\"SINR-dl\""), std::string::npos,
+                              "CZML KPI property SINR-dl present");
 
         std::remove(nsPath.c_str());
         std::remove(czmlPath.c_str());

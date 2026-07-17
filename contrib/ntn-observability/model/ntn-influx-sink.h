@@ -32,10 +32,16 @@ struct Point
 /**
  * Encode `pts` to InfluxDB v1.x / v2.x line protocol text. Tag keys/values are
  * comma + space + equal-sign escaped per the spec; field strings are
- * double-quote escaped. Timestamps are nanoseconds since epoch (or
- * `useSimulationTime=true` to emit Simulator::Now() ns).
+ * double-quote escaped. Each Point's `timestamp` is emitted verbatim as
+ * nanoseconds since the Unix epoch — the caller (NtnInfluxSink::Push) is
+ * responsible for having already added any wall-clock base epoch, so by the
+ * time a Point reaches here its timestamp is final.
  *
- * Returns one '\\n'-terminated line per point.
+ * Non-finite float fields (NaN / +-Inf) are skipped — they are invalid line
+ * protocol and would cause InfluxDB to reject the WHOLE line. A Point left with
+ * no fields at all is skipped entirely (a fieldless line is also invalid).
+ *
+ * Returns one '\\n'-terminated line per surviving point.
  */
 std::string EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulationTime = false);
 
@@ -75,6 +81,16 @@ class NtnInfluxSink : public Object
     void SetFlushPeriod(Time period);
     void SetUseSimulationTime(bool yes);
 
+    /// Wall-clock (or scenario TLE) epoch added to each point's sim-time before
+    /// emission, so points carry an absolute Unix timestamp instead of the
+    /// epoch-1970 sim clock. Defaults to the wall-clock time at construction —
+    /// the same convention as ntn-digital-twin, so twin and sim points overlay
+    /// on a single Grafana axis and land inside a retention-bounded bucket.
+    /// Set to Time(0) to opt IN to pure sim-time (epoch 1970) points.
+    void SetBaseEpoch(Time epoch);
+    /// The base epoch currently applied (defaults to wall-clock at construction).
+    Time GetBaseEpoch() const;
+
     /// Append a fully-formed Point to the buffer. The implementation is
     /// reentrant-safe across simulation time but not across threads.
     void Push(const Point& p);
@@ -88,8 +104,9 @@ class NtnInfluxSink : public Object
     /// Number of points emitted since `Start()`. Useful for assertions.
     uint64_t GetEmittedCount() const;
 
-    /// Number of points dropped (oldest-first) because the buffer reached the
-    /// MaxBufferPoints attribute between flushes.
+    /// Number of points dropped, either because the buffer reached the
+    /// MaxBufferPoints attribute between flushes (oldest-first), or because a
+    /// point carried no valid (finite) field and could not form a legal line.
     uint64_t GetDroppedPoints() const;
 
   protected:
@@ -106,6 +123,7 @@ class NtnInfluxSink : public Object
     std::string m_filePath;
     Time m_flushPeriod{Seconds(1.0)};
     bool m_useSimulationTime{true};
+    Time m_baseEpoch{Seconds(0)}; ///< wall-clock/TLE epoch added to sim-time (set in ctor)
     uint32_t m_maxBufferPoints{1000000}; ///< MaxBufferPoints attribute
     std::vector<Point> m_buffer;
     uint64_t m_emitted{0};

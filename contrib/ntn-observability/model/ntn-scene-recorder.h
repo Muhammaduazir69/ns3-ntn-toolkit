@@ -119,10 +119,12 @@ class NtnSceneRecorder : public Object
                            Ptr<MobilityModel> mob,
                            NodeKind kind,
                            const std::string& label = "");
-    /// Declare a beam/serving link from one tracked node to another.
-    /// NOTE: beams are only collected (`m_beams`); they are NOT currently emitted
-    /// to any sink — no 3D cone/line is rendered. Only node positions, KPI series,
-    /// and the handover log reach NetSimulyzer/CZML. (Beam rendering is a TODO.)
+    /// Declare a beam/serving link from one tracked node to another. Each
+    /// declared edge is rendered as a CZML polyline whose endpoints REFERENCE
+    /// the two tracked node positions (so the link tracks the moving satellites),
+    /// and — on the live stdout stream — as a `##NTNSCENE_LINK##` edge. Its CZML
+    /// `availability` is gated by OnLinkChange up/down transitions; an edge with
+    /// no OnLinkChange events is shown for the whole run.
     void TrackBeam(uint32_t fromId, uint32_t toId);
     /// Declare a per-node KPI series; returns a series id used by RecordKpi().
     uint32_t TrackKpiSeries(uint32_t nodeId, KpiKind kind, const std::string& name = "");
@@ -139,6 +141,12 @@ class NtnSceneRecorder : public Object
     /// the globe live DURING the run instead of only after it. Positions are
     /// real ECEF metres. Handovers are emitted as "##NTNSCENE_HO##" lines.
     void EnableLiveStdout(bool on = true) { m_liveStdout = on; }
+
+    /// Set the scenario epoch (Unix seconds) used as t=0 for the CZML clock and
+    /// FIXED-frame position samples. Default is 2026-01-01T00:00:00Z. Pass the
+    /// scenario's TLE epoch (e.g. WalkerConfig::epoch_unix_s) so Cesium's sun /
+    /// lighting matches the orbital epoch instead of being a year off.
+    void SetSceneEpochUnix(double unixSeconds) { m_sceneEpochUnix = unixSeconds; }
 
     // ---- lifecycle -------------------------------------------------------
     /// Position sampling interval (default 1 s).
@@ -182,8 +190,18 @@ class NtnSceneRecorder : public Object
         uint32_t nodeId;
         KpiKind kind;
         std::string name;
-        // accumulated samples for CZML/secondary sinks
+        // accumulated (t, value) samples, emitted to CZML as a time-tagged
+        // custom property on the owning node packet.
         std::vector<std::pair<double, double>> samples;
+    };
+    // A link-state transition (from OnLinkChange), used to build CZML polyline
+    // availability intervals for the declared beams.
+    struct LinkEvent
+    {
+        double t;
+        uint32_t aId;
+        uint32_t bId;
+        bool up;
     };
     // Per-node accumulated position samples (sim seconds, ECEF metres).
     struct Track
@@ -223,10 +241,11 @@ class NtnSceneRecorder : public Object
     Vector m_enuUp{0, 0, 1};
 
     std::vector<TrackedNode> m_nodes;
-    std::vector<Beam> m_beams; //!< serving/beam edges; emitted per live frame as ##NTNSCENE_LINK##
+    std::vector<Beam> m_beams; //!< serving/beam edges; CZML polylines + live ##NTNSCENE_LINK##
     std::vector<KpiSeries> m_kpis;
     std::vector<HandoverArc> m_handovers;
-    std::map<uint32_t, Track> m_tracks; //!< id -> accumulated position samples
+    std::vector<LinkEvent> m_linkEvents; //!< OnLinkChange transitions -> CZML availability
+    std::map<uint32_t, Track> m_tracks;  //!< id -> accumulated position samples
 
     bool m_netSimEnabled{false};
     std::string m_netSimPath;
@@ -237,6 +256,7 @@ class NtnSceneRecorder : public Object
     std::string m_czmlPath;
     bool m_liveStdout{false};
 
+    double m_sceneEpochUnix{1767225600.0}; //!< CZML t=0 (default 2026-01-01T00:00:00Z)
     Time m_sampleDt{Seconds(1.0)};
     bool m_running{false};
     double m_t0Sec{0.0};

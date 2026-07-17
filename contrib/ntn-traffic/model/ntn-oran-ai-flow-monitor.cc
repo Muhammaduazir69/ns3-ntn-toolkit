@@ -209,22 +209,46 @@ NtnOranAiFlowMonitor::GranularityTick()
             KpmSample s;
             s.time = now;
             const double periodS = m_granularity.GetSeconds();
-            // TS 28.552 / E2SM-KPM measurement names.
-            s.metrics["DRB.UEThpDl"] = dBytes * 8.0 / periodS / 1e6; // Mbps
-            s.metrics["DRB.PdcpSduVolumeDl"] = dBytes * 8.0 / 1e3;   // kbit
-            s.metrics["DRB.RlcSduDelayDl"] = dPkts ? dDelaySum / dPkts : 0.0; // ms
-            s.metrics["DRB.PacketLossRateDl"] =
-                (dPkts + dLost) ? static_cast<double>(dLost) / (dPkts + dLost) : 0.0;
+            // Values are all MEASURED (FlowMonitor byte/packet/delay deltas +
+            // PHY trace). Each is emitted in its canonical 3GPP TS 28.552 UNIT so
+            // the official measurement NAME and its unit contract agree:
+            //   DRB.UEThpDl  §5.1.1.3 — kbit/s (NOT Mbps)
+            s.metrics["DRB.UEThpDl"] = dBytes * 8.0 / periodS / 1e3; // kbit/s
+            //   DRB.PdcpSduVolumeDl §5.1.1.6 — kbit
+            s.metrics["DRB.PdcpSduVolumeDl"] = dBytes * 8.0 / 1e3; // kbit
+            //   DRB.RlcSduDelayDl §5.1.1.2 — units of 0.1 ms (a value of 10 == 1 ms)
+            s.metrics["DRB.RlcSduDelayDl"] = (dPkts ? dDelaySum / dPkts : 0.0) * 10.0;
+            //   DRB.PacketLossRateDl §5.1.3.1 — integer in units of 1e-6 (a 0..1
+            //   fraction scaled by 1e6), NOT a raw 0..1 ratio.
+            {
+                const double lossFrac =
+                    (dPkts + dLost) ? static_cast<double>(dLost) / (dPkts + dLost) : 0.0;
+                s.metrics["DRB.PacketLossRateDl"] = lossFrac * 1e6;
+            }
             if (m_rs && ref.ueIndex >= 0)
             {
                 const double sinr = m_rs->GetUeRecentSinrDb(ref.ueIndex);
                 const double tbler = m_rs->GetUeRecentTbler(ref.ueIndex);
                 if (!std::isnan(sinr))
                 {
+                    // L1M.RS-SINR: DELIBERATE deviation. TS 38.133 §10.1.16
+                    // defines a 0..127 RS-SINR report mapping, but this series
+                    // carries the raw measured PHY SINR in dB (as the sibling
+                    // oran-ntn kpm-canonical-ids CARR.AverageSINR / L1M.RS-SINR.Mean
+                    // also do) so xApp/anomaly logic reads a physical dB value.
+                    // Unit here is dB, not the 38.133 index.
                     s.metrics["L1M.RS-SINR"] = sinr;
                 }
                 if (!std::isnan(tbler))
                 {
+                    // TB.ErrTotNbrDl is a TB COUNT in TS 28.552 §5.1.1.8, but no
+                    // integrating per-UE/per-period corrupt-TB counter is exposed
+                    // by NtnRealStackHelper (only the aggregate GetPhyRxTb() and a
+                    // per-UE BLER RATIO via GetUeRecentTbler()). Following the
+                    // reviewed oran-ntn precedent, this series carries the measured
+                    // DL HARQ BLER FRACTION (0..1); once an absolute TB counter is
+                    // plumbed the canonical relation TB.ErrTotNbrDl / TB.TotNbrDl
+                    // == BLER restores the count semantics. Value unit: fraction.
                     s.metrics["TB.ErrTotNbrDl"] = tbler;
                 }
             }
@@ -301,9 +325,14 @@ NtnOranAiFlowMonitor::GetFeatures(FlowId id) const
     {
         const auto& s = series[series.size() - n + i];
         const double t = static_cast<double>(i);
-        const double thp = metric(s, "DRB.UEThpDl");
-        const double d = metric(s, "DRB.RlcSduDelayDl");
-        const double l = metric(s, "DRB.PacketLossRateDl");
+        // The KPM series now store TS 28.552 canonical UNITS (kbit/s, 0.1 ms,
+        // per-1e6). The AiFeatures fields are documented in natural units
+        // (thpMeanMbps, delayMeanMs, lossMean fraction) and feed RL/xApp logic,
+        // so convert back here — export stays spec-correct, the model reads
+        // physical quantities.
+        const double thp = metric(s, "DRB.UEThpDl") / 1e3;      // kbit/s -> Mbps
+        const double d = metric(s, "DRB.RlcSduDelayDl") / 10.0; // 0.1 ms units -> ms
+        const double l = metric(s, "DRB.PacketLossRateDl") / 1e6; // per-1e6 -> fraction
         const double si = metric(s, "L1M.RS-SINR");
         sumT += t;
         sumT2 += t * t;

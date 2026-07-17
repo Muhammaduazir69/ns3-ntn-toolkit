@@ -160,9 +160,16 @@ def docker_pipeline_optional() -> None:
     subprocess.run(cmd, check=True, cwd=str(NS3_ROOT))
 
     # InfluxDB UDP listener takes ~1 s to flush. Poll up to 10 s.
+    #
+    # The sink stamps each point with an ABSOLUTE Unix timestamp (wall-clock
+    # base epoch + sim time; see NtnInfluxSink::SetBaseEpoch, default = wall
+    # clock at construction). So the points land in the demo run's wall-clock
+    # window and this is a REAL assertion — before the base-epoch fix they were
+    # stamped at epoch 1970 and could NEVER match a bounded range. We query a
+    # window generously bracketing the run's wall clock (points are ~now).
     import time
     flux = (
-        f'from(bucket: "ntn") |> range(start: -1h) '
+        f'from(bucket: "ntn") |> range(start: -1h, stop: 1h) '
         f'|> filter(fn: (r) => r.run_id == "{udp_run_id}") |> count()'
     )
     headers = {"Authorization": f"Token {token}", "Content-Type": "application/vnd.flux"}

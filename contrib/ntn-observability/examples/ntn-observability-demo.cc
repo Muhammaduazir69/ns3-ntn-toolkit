@@ -54,6 +54,7 @@ struct Wiring
     uint32_t ueNodeId{2};
     uint32_t taSeriesIdx{0};
     uint32_t rsrpSeriesIdx{0};
+    uint64_t sib19BroadcastCount{0}; //!< actual SIB19 broadcasts counted in OnSib19
 };
 
 void
@@ -120,6 +121,10 @@ SampleEverySecond(Wiring* w)
         p.tags[tag::kRunId] = w->runId;
         p.tags[tag::kCellId] = "C-1";
         p.tags[tag::kUeImsi] = "100001";
+        // sinr_db is MEASURED (PHY trace); rsrp_dbm is DERIVED closed-form from
+        // that SINR + noise floor (see above). Tag the derived provenance of the
+        // RSRP field so a dashboard/query never mistakes it for a measured RSRP.
+        p.tags["rsrp_provenance"] = "derived";
         p.fieldsFloat[field::kRsrpDbm] = measRsrp;
         p.fieldsFloat[field::kSinrDb] = measSinr;
         w->sink->Push(p);
@@ -134,11 +139,14 @@ SampleEverySecond(Wiring* w)
 void
 OnSib19(Wiring* w, const Sib19Content& sib)
 {
+    // Count ACTUAL SIB19 broadcasts so the ntn_sib19 series is a rising counter,
+    // not a constant (it was previously filled with sib.cellId).
+    ++w->sib19BroadcastCount;
     Point p;
     p.measurement = measurement::kSib;
     p.tags[tag::kRunId] = w->runId;
     p.tags[tag::kCellId] = std::to_string(sib.cellId);
-    p.fieldsInt[field::kBroadcastSeq] = static_cast<long long>(sib.cellId);
+    p.fieldsInt[field::kBroadcastSeq] = static_cast<long long>(w->sib19BroadcastCount);
     p.fieldsFloat[field::kTaCommonUs] = sib.taCommon.GetMicroSeconds();
     w->sink->Push(p);
 }

@@ -188,9 +188,13 @@ class OranMonitorKnownLossTest : public TestCase
                 ++nAfter;
             }
         }
-        NS_TEST_ASSERT_MSG_LT(lossBefore / nBefore, 0.01, "clean before the burst");
-        NS_TEST_ASSERT_MSG_EQ_TOL(lossAfter / nAfter, 0.4, 0.08,
-                                  "measured KPM loss tracks the real 40% drop rate");
+        // DRB.PacketLossRateDl is now exported in its TS 28.552 §5.1.3.1 unit:
+        // an integer in units of 1e-6 (the 0..1 fraction scaled by 1e6). This
+        // test asserts the KPM export directly, so it asserts the spec unit:
+        // "clean" is < 0.01 * 1e6 = 1e4, and the 40% burst is 0.4 * 1e6 = 4e5.
+        NS_TEST_ASSERT_MSG_LT(lossBefore / nBefore, 0.01e6, "clean before the burst");
+        NS_TEST_ASSERT_MSG_EQ_TOL(lossAfter / nAfter, 0.4e6, 0.08e6,
+                                  "measured KPM loss tracks the real 40% drop rate (per-1e6 units)");
 
         // The EWMA detector must have flagged the loss jump.
         bool lossAnomaly = false;

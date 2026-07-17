@@ -93,12 +93,6 @@ NtnNetSimulyzerExporter::SetOutputPath(const std::string& path)
 }
 
 void
-NtnNetSimulyzerExporter::SetUseSimulationTime(bool yes)
-{
-    m_useSimulationTime = yes;
-}
-
-void
 NtnNetSimulyzerExporter::AddNode(uint32_t id,
                                  const std::string& model,
                                  const Vector& initialPosition,

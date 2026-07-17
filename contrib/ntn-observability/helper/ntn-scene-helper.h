@@ -62,8 +62,10 @@ class NtnSceneHelper
     /// Stream live scene frames to stdout (for mid-run globe streaming).
     void SetLiveStdout(bool on) { m_live = on; }
 
-    /// True if at least one sink path is set.
-    bool Enabled() const { return !m_netSim.empty() || !m_czml.empty(); }
+    /// True if at least one sink is configured (a file path OR the live stdout
+    /// stream). Live stdout alone must count — otherwise Build() returns nullptr
+    /// and the `##NTNSCENE##` control-center feed never starts.
+    bool Enabled() const { return !m_netSim.empty() || !m_czml.empty() || m_live; }
 
     /**
      * \brief Track every node in the containers, enable the configured sinks and

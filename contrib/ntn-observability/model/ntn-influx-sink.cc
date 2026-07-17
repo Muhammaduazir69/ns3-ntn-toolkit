@@ -15,6 +15,8 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -97,14 +99,56 @@ std::string
 EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulationTime)
 {
     // The sim-time vs wall-time choice is applied earlier, in NtnInfluxSink::Push(),
-    // which stamps Simulator::Now() onto each Point when sim time is enabled. By the
-    // time a Point reaches here its timestamp is already final, so we always emit it
-    // as-is. The parameter is kept for source/ABI compatibility of this public helper.
+    // which adds the base epoch onto each Point's sim-time. By the time a Point
+    // reaches here its timestamp is already final, so we always emit it as-is.
+    // The parameter is kept for source/ABI compatibility of this public helper.
     (void)useSimulationTime;
     std::string out;
     out.reserve(pts.size() * 96);
     for (const auto& p : pts)
     {
+        // Line protocol requires at least one field, and forbids non-finite
+        // float values (an out-of-range float rejects the whole line). Build
+        // the field section first so a Point with no emittable field is skipped
+        // entirely rather than producing an invalid fieldless line.
+        std::string fields;
+        bool first = true;
+        for (const auto& [k, v] : p.fieldsFloat)
+        {
+            if (!std::isfinite(v))
+            {
+                continue; // NaN / +-Inf is invalid line protocol — skip the field
+            }
+            if (!first)
+                fields.push_back(',');
+            fields += EscapeKey(k);
+            fields.push_back('=');
+            fields += FormatFloat(v);
+            first = false;
+        }
+        for (const auto& [k, v] : p.fieldsInt)
+        {
+            if (!first)
+                fields.push_back(',');
+            fields += EscapeKey(k);
+            fields.push_back('=');
+            fields += std::to_string(v);
+            fields.push_back('i');
+            first = false;
+        }
+        for (const auto& [k, v] : p.fieldsString)
+        {
+            if (!first)
+                fields.push_back(',');
+            fields += EscapeKey(k);
+            fields.push_back('=');
+            fields += EscapeStringValue(v);
+            first = false;
+        }
+        if (fields.empty())
+        {
+            continue; // no valid field -> no legal line
+        }
         out += EscapeMeasurement(p.measurement);
         for (const auto& [k, v] : p.tags)
         {
@@ -114,35 +158,7 @@ EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulationTime)
             out += EscapeKey(v);
         }
         out.push_back(' ');
-        bool first = true;
-        for (const auto& [k, v] : p.fieldsFloat)
-        {
-            if (!first)
-                out.push_back(',');
-            out += EscapeKey(k);
-            out.push_back('=');
-            out += FormatFloat(v);
-            first = false;
-        }
-        for (const auto& [k, v] : p.fieldsInt)
-        {
-            if (!first)
-                out.push_back(',');
-            out += EscapeKey(k);
-            out.push_back('=');
-            out += std::to_string(v);
-            out.push_back('i');
-            first = false;
-        }
-        for (const auto& [k, v] : p.fieldsString)
-        {
-            if (!first)
-                out.push_back(',');
-            out += EscapeKey(k);
-            out.push_back('=');
-            out += EscapeStringValue(v);
-            first = false;
-        }
+        out += fields;
         long long ts_ns = p.timestamp.GetNanoSeconds();
         out.push_back(' ');
         out += std::to_string(ts_ns);
@@ -171,7 +187,17 @@ NtnInfluxSink::GetTypeId()
     return tid;
 }
 
-NtnInfluxSink::NtnInfluxSink() = default;
+NtnInfluxSink::NtnInfluxSink()
+{
+    // Default the base epoch to the wall-clock time at construction (nanoseconds
+    // since the Unix epoch), matching ntn-digital-twin's convention. This makes
+    // emitted points land inside a retention-bounded InfluxDB bucket and inside
+    // Grafana's `now()-1h` window, instead of at epoch 1970 (pure sim time).
+    const auto wall = std::chrono::system_clock::now().time_since_epoch();
+    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(wall).count();
+    m_baseEpoch = NanoSeconds(static_cast<int64_t>(ns));
+}
+
 NtnInfluxSink::~NtnInfluxSink() = default;
 
 void
@@ -219,13 +245,57 @@ NtnInfluxSink::SetUseSimulationTime(bool yes)
 }
 
 void
+NtnInfluxSink::SetBaseEpoch(Time epoch)
+{
+    m_baseEpoch = epoch;
+}
+
+Time
+NtnInfluxSink::GetBaseEpoch() const
+{
+    return m_baseEpoch;
+}
+
+void
 NtnInfluxSink::Push(const Point& p)
 {
     Point copy = p;
-    if (copy.timestamp == Time(0) && m_useSimulationTime)
+    // Interpret the incoming timestamp as SIM time (explicit `now`, or, when it
+    // is unset and auto-stamping is on, Simulator::Now()). Add the base epoch so
+    // the wire timestamp is an absolute Unix time (base + simTime).
+    Time simT = copy.timestamp;
+    if (simT == Time(0) && m_useSimulationTime)
     {
-        copy.timestamp = Simulator::Now();
+        simT = Simulator::Now();
     }
+    copy.timestamp = m_baseEpoch + simT;
+
+    // Drop non-finite float fields (invalid line protocol); if that leaves the
+    // point with no field at all, drop the whole point and count it — a
+    // fieldless line is also invalid and would be rejected by InfluxDB.
+    for (auto it = copy.fieldsFloat.begin(); it != copy.fieldsFloat.end();)
+    {
+        if (!std::isfinite(it->second))
+        {
+            it = copy.fieldsFloat.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+    if (copy.fieldsFloat.empty() && copy.fieldsInt.empty() && copy.fieldsString.empty())
+    {
+        m_droppedPoints++;
+        if (!m_dropWarned)
+        {
+            m_dropWarned = true;
+            NS_LOG_WARN("NtnInfluxSink dropping a Point with no valid (finite) field; "
+                        "see GetDroppedPoints()");
+        }
+        return;
+    }
+
     if (m_buffer.size() >= m_maxBufferPoints)
     {
         // Bounded buffer (audit issue 14): drop the oldest point so a long

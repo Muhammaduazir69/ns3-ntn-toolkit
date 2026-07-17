@@ -38,6 +38,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <map>
 
 using namespace ns3;
 
@@ -105,6 +106,16 @@ main(int argc, char* argv[])
     rs.SetRunTag("ntn-netsimulyzer-official-demo");
     // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
     rs.SetSatEirpDbm(radio == "mmwave" ? 55.0 : 70.0);
+    // Enable the REAL NR inter-cell handover path (A3-RSRP + X2) so the scene's
+    // handover events, if any, come from a genuine RRC serving-cell change
+    // (TS 38.300: reconfiguration-with-sync) — not a geometric guess. Requires
+    // the nr backend and >= 2 gNB satellites; with a single sat there is nothing
+    // to hand over TO, so we leave it off and no handover will (or should) show.
+    const bool realHandoverPossible = (radio != "mmwave") && (sats >= 2);
+    if (realHandoverPossible)
+    {
+        rs.SetHandover(true);
+    }
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0),
@@ -117,6 +128,9 @@ main(int argc, char* argv[])
     // raw SGP4 ECEF here, so the frame is EcefGlobal (no ENU wrapper).
     Ptr<ntnobs::NtnSceneRecorder> scene = CreateObject<ntnobs::NtnSceneRecorder>();
     scene->SetFrame(ntnobs::NtnSceneRecorder::EcefGlobal);
+    // Anchor the CZML clock/lighting to the constellation's TLE epoch (not the
+    // hardcoded 2026-01-01 default) so Cesium's sun position matches the orbit.
+    scene->SetSceneEpochUnix(wcfg.epoch_unix_s);
     std::vector<uint32_t> satSceneIds(sats);
     for (uint32_t s = 0; s < sats; ++s)
     {
@@ -140,18 +154,39 @@ main(int argc, char* argv[])
         scene->TrackKpiSeries(ueSceneId0, ntnobs::NtnSceneRecorder::Throughput, "goodput");
     const uint32_t tblerSeries =
         scene->TrackKpiSeries(ueSceneId0, ntnobs::NtnSceneRecorder::Tbler, "tbler");
+    // The Euclidean nearest-satellite argmin is a GEOMETRIC candidate only — it
+    // is NOT what the RRC layer serves. Record it as its own clearly-named
+    // series so it is never mistaken for an executed handover.
+    const uint32_t geoCandSeries =
+        scene->TrackKpiSeries(ueSceneId0, ntnobs::NtnSceneRecorder::Tbler, "best-geo-candidate-idx");
     scene->EnableNetSimulyzer(out + ".scene.json");
     scene->EnableCzml(out + ".czml");
     scene->Start();
 
-    // 1 Hz tick: push MEASURED values into the scene + drive a GENUINE handover
-    // (serving-satellite reselection by real SGP4 slant range, not np.random).
+    // Map each gNB's real cell id -> scene sat id, so a real serving-cell change
+    // can be rendered against the right satellites.
+    std::map<uint16_t, uint32_t> cellToScene;
+    for (uint32_t s = 0; s < sats; ++s)
+    {
+        const uint16_t cid = rs.GetGnbCellId(s);
+        if (cid != 0)
+        {
+            cellToScene[cid] = satSceneIds[s];
+        }
+    }
+
+    // 1 Hz tick: push MEASURED values into the scene. A handover is emitted ONLY
+    // when the UE's REAL RRC serving cell changes (GetUeServingCellId tracks the
+    // actual A3/X2 handover, unlike a geometric nearest-sat argmin). If the stack
+    // never hands over — the common case for a single short pass — no handover is
+    // shown, because none executed. The geometric nearest-sat is recorded
+    // separately as "best-geo-candidate-idx", never as a handover.
     uint64_t lastRx = 0;
-    int prevBest = -1;
+    uint16_t prevCell = 0;
     rs.RegisterPeriodicCallback(
         Seconds(1.0),
-        [&rs, scene, &satNodes, sats, ueNodes, sinrSeries, thrSeries, tblerSeries, ueSceneId0,
-         &satSceneIds, &lastRx, &prevBest](Time /*now*/) {
+        [&rs, scene, &satNodes, sats, ueNodes, sinrSeries, thrSeries, tblerSeries, geoCandSeries,
+         ueSceneId0, &cellToScene, &lastRx, &prevCell](Time /*now*/) {
             const double sinr = rs.GetUeRecentSinrDb(0);
             if (!std::isnan(sinr))
             {
@@ -166,8 +201,9 @@ main(int argc, char* argv[])
                 scene->RecordKpi(tblerSeries, tbler);
             }
 
-            // Best-satellite reselection by measured slant range. Each sat owns a
-            // real Sgp4MobilityModel; pick the argmin Euclidean distance to UE-0.
+            // GEOMETRIC candidate only: argmin Euclidean distance to UE-0. This
+            // is decision-support telemetry, NOT a handover — it is recorded as
+            // its own series and never triggers scene->OnHandover.
             const Vector u = ueNodes.Get(0)->GetObject<MobilityModel>()->GetPosition();
             int best = 0;
             double bestD = std::numeric_limits<double>::max();
@@ -182,13 +218,23 @@ main(int argc, char* argv[])
                     best = static_cast<int>(s);
                 }
             }
-            if (prevBest >= 0 && best != prevBest)
+            scene->RecordKpi(geoCandSeries, static_cast<double>(best));
+
+            // REAL handover: reflect an actual RRC serving-cell change only.
+            const uint16_t cell = rs.GetUeServingCellId(0);
+            if (cell != 0 && prevCell != 0 && cell != prevCell)
             {
-                scene->OnHandover(ueSceneId0,
-                                  satSceneIds[static_cast<uint32_t>(prevBest)],
-                                  satSceneIds[static_cast<uint32_t>(best)]);
+                auto itFrom = cellToScene.find(prevCell);
+                auto itTo = cellToScene.find(cell);
+                if (itFrom != cellToScene.end() && itTo != cellToScene.end())
+                {
+                    scene->OnHandover(ueSceneId0, itFrom->second, itTo->second);
+                }
             }
-            prevBest = best;
+            if (cell != 0)
+            {
+                prevCell = cell;
+            }
         });
 
     // ---- Earth reference sphere at the ECEF origin (NetSimulyzer has no globe) ----

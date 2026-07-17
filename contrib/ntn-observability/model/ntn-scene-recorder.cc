@@ -6,6 +6,7 @@
 
 #include "ntn-scene-recorder.h"
 
+#include <ns3/abort.h>
 #include <ns3/log.h>
 #include <ns3/mobility-model.h>
 #include <ns3/simulator.h>
@@ -72,20 +73,12 @@ CivilFromDays(long z, int& y, unsigned& m, unsigned& d)
     y = static_cast<int>(yy + (m <= 2));
 }
 
-// Days from 1970-01-01 to 2026-01-01.
-long
-BaseDays()
-{
-    // 2026-01-01 is day 20454 since the Unix epoch.
-    return 20454;
-}
-
-// ISO-8601 UTC string for (2026-01-01T00:00:00Z + offsetSec).
+// ISO-8601 UTC string for an absolute Unix time (seconds since 1970-01-01).
 std::string
-IsoFromOffset(double offsetSec)
+IsoFromUnix(double unixSec)
 {
-    long total = static_cast<long>(std::floor(offsetSec));
-    long days = BaseDays() + total / 86400;
+    long total = static_cast<long>(std::floor(unixSec));
+    long days = total / 86400;
     long rem = total % 86400;
     if (rem < 0)
     {
@@ -197,6 +190,9 @@ NtnSceneRecorder::TrackMobility(uint32_t id,
                                 const std::string& label)
 {
     NS_ASSERT_MSG(!m_running, "TrackMobility must be called before Start()");
+    NS_ABORT_MSG_IF(m_tracks.count(id) != 0,
+                    "TrackMobility: id " << id << " is already tracked; "
+                    "re-tracking would silently overwrite the existing track");
     const std::string lbl = label.empty() ? (ModelName(kind) + "-" + std::to_string(id)) : label;
     m_nodes.push_back({id, mob, kind, lbl});
     m_tracks[id] = Track{id, kind, lbl, {}};
@@ -419,6 +415,14 @@ NtnSceneRecorder::OnLinkChange(uint32_t aId, uint32_t bId, bool up)
     {
         m_exporter->LogMessage(aId, t, ss.str());
     }
+    // Record the transition so WriteCzml() can gate the corresponding polyline's
+    // `availability` interval(s).
+    m_linkEvents.push_back({t, aId, bId, up});
+    if (m_liveStdout)
+    {
+        std::cout << R"(##NTNSCENE_LINKCHG## {"t":)" << FmtD(t) << R"(,"a":)" << aId << R"(,"b":)"
+                  << bId << R"(,"up":)" << (up ? "true" : "false") << "}" << std::endl;
+    }
     ++m_eventCount;
 }
 
@@ -450,8 +454,8 @@ NtnSceneRecorder::WriteCzml()
         return;
     }
     const double span = std::max(1.0, m_tLastSec - m_t0Sec);
-    const std::string epoch = IsoFromOffset(0.0);
-    const std::string epochEnd = IsoFromOffset(span);
+    const std::string epoch = IsoFromUnix(m_sceneEpochUnix);
+    const std::string epochEnd = IsoFromUnix(m_sceneEpochUnix + span);
 
     out << "[";
     // Document packet with a looping clock.
@@ -479,6 +483,34 @@ NtnSceneRecorder::WriteCzml()
             out << R"(,"path":{"leadTime":0,"trailTime":600,"width":1,)"
                 << R"("material":{"solidColor":{"color":{"rgba":[255,210,80,120]}}}})";
         }
+        // Measured KPI series that belong to this node, emitted as time-tagged
+        // CZML custom `properties` (previously accumulated in KpiSeries::samples
+        // but never written out). Cesium exposes these for entity inspection /
+        // property-driven styling; consumers read node-<id>#properties.<name>.
+        bool wroteProps = false;
+        for (const auto& k : m_kpis)
+        {
+            if (k.nodeId != tr.id || k.samples.empty())
+            {
+                continue;
+            }
+            out << (wroteProps ? "," : R"(,"properties":{)");
+            wroteProps = true;
+            out << R"(")" << k.name << R"(":{"epoch":")" << epoch << R"(","number":[)";
+            for (size_t i = 0; i < k.samples.size(); ++i)
+            {
+                if (i > 0)
+                {
+                    out << ",";
+                }
+                out << FmtD(k.samples[i].first - m_t0Sec) << "," << FmtD(k.samples[i].second);
+            }
+            out << "]}";
+        }
+        if (wroteProps)
+        {
+            out << "}";
+        }
         out << R"(,"position":{"referenceFrame":"FIXED","epoch":")" << epoch
             << R"(","cartesian":[)";
         for (size_t i = 0; i < tr.samples.size(); ++i)
@@ -494,6 +526,73 @@ NtnSceneRecorder::WriteCzml()
         out << "]}}";
     }
 
+    // Communication links: one CZML polyline per declared beam/serving edge, its
+    // endpoints REFERENCING the two node position properties so the link tracks
+    // the moving satellites. `availability` is gated by OnLinkChange up/down
+    // transitions (an edge with no transitions is up for the whole run). This is
+    // what makes the offline globe show the network instead of bare nodes.
+    for (const auto& b : m_beams)
+    {
+        auto ita = m_tracks.find(b.fromId);
+        auto itb = m_tracks.find(b.toId);
+        if (ita == m_tracks.end() || itb == m_tracks.end() || ita->second.samples.empty() ||
+            itb->second.samples.empty())
+        {
+            continue; // cannot reference a node that has no position samples
+        }
+        // Build up-intervals (in sim seconds relative to t0) from the transitions
+        // that touch this edge. A declared beam starts UP.
+        std::vector<std::pair<double, double>> intervals;
+        double curStart = 0.0;
+        bool open = true;
+        for (const auto& ev : m_linkEvents)
+        {
+            const bool sameEdge = (ev.aId == b.fromId && ev.bId == b.toId) ||
+                                  (ev.aId == b.toId && ev.bId == b.fromId);
+            if (!sameEdge)
+            {
+                continue;
+            }
+            const double off = ev.t - m_t0Sec;
+            if (ev.up && !open)
+            {
+                curStart = off;
+                open = true;
+            }
+            else if (!ev.up && open)
+            {
+                intervals.emplace_back(curStart, off);
+                open = false;
+            }
+        }
+        if (open)
+        {
+            intervals.emplace_back(curStart, span);
+        }
+        if (intervals.empty())
+        {
+            continue; // link never up -> nothing to render
+        }
+        out << ",";
+        out << R"({"id":"link-)" << b.fromId << "-" << b.toId << R"(","name":"link )" << b.fromId
+            << "<->" << b.toId << R"(",)";
+        out << R"("availability":[)";
+        for (size_t i = 0; i < intervals.size(); ++i)
+        {
+            if (i > 0)
+            {
+                out << ",";
+            }
+            out << R"(")" << IsoFromUnix(m_sceneEpochUnix + intervals[i].first) << "/"
+                << IsoFromUnix(m_sceneEpochUnix + intervals[i].second) << R"(")";
+        }
+        out << "]";
+        out << R"(,"polyline":{"width":1,"followSurface":false,)"
+            << R"("material":{"solidColor":{"color":{"rgba":[80,255,120,180]}}},)"
+            << R"("positions":{"references":["node-)" << b.fromId << R"(#position","node-)"
+            << b.toId << R"(#position"]}}})";
+    }
+
     // Handover arcs: a brief red polyline flash from the UE to the target node
     // at the handover time. Rendered via CZML `availability` so it appears only
     // around the event on the shared clock.
@@ -507,8 +606,8 @@ NtnSceneRecorder::WriteCzml()
             continue;
         }
         const double off = h.t - m_t0Sec;
-        const std::string a0 = IsoFromOffset(std::max(0.0, off - 0.5));
-        const std::string a1 = IsoFromOffset(off + 2.0);
+        const std::string a0 = IsoFromUnix(m_sceneEpochUnix + std::max(0.0, off - 0.5));
+        const std::string a1 = IsoFromUnix(m_sceneEpochUnix + off + 2.0);
         out << ",";
         out << R"({"id":"ho-)" << k << R"(","name":"handover ue )" << h.ueId << " " << h.fromId
             << "->" << h.toId << R"(","availability":")" << a0 << "/" << a1 << R"(",)"

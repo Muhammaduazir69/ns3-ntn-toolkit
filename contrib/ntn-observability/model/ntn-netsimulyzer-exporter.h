@@ -21,22 +21,25 @@ namespace ntnobs
 /**
  * \ingroup ntn-observability
  *
- * Streams a NIST NetSimulyzer-compatible JSON trace.
+ * Streams the toolkit's OWN lightweight scene JSON (schema
+ * `ntn-observability-native-1.0`) — NOT the official usnistgov NetSimulyzer
+ * 1.0 schema. The NetSimulyzer desktop app cannot open this file: its reader
+ * expects kebab-case `node-position` / `xy-series-append` events and a
+ * different document layout. This exporter is a compact, self-describing trace
+ * for the toolkit's own tooling (control-center, tests, quick inspection).
  *
- * NetSimulyzer (https://github.com/usnistgov/NetSimulyzer) is a 3D viewer
- * that consumes a JSON trace produced by ns-3 modules. We produce the same
- * file format here without depending on NetSimulyzer's source — researchers
- * who clone NetSimulyzer can open the resulting trace directly.
+ * For a schema-exact file that opens directly in the NetSimulyzer app, drive
+ * the vendored contrib/netsimulyzer Orchestrator — see the
+ * ntn-netsimulyzer-official-demo example (Path B).
  *
- * Schema covered (subset of NetSimulyzer's 1.0 schema sufficient for NTN):
- *   - configuration (one document-level object)
+ * Schema emitted (native):
+ *   - configuration (one document-level object, carries the schema tag)
  *   - nodes[]              — id, model, default position
- *   - events[]             — node-move, log-message, decoration
  *   - series[]             — value-vs-time scalar streams (XY plot)
+ *   - events[]             — NodeMove, LogMessage, SeriesSample
  *
- * Output is incremental: opening Start() appends `{` and an opening events
- * array; every Move/Log/Sample writes one JSON object; Stop() closes the
- * file. The NetSimulyzer JSON reader accepts this streaming layout.
+ * Output is incremental: Start() opens `{` and the events array; every
+ * Move/Log/Sample writes one JSON object; Stop() closes the file.
  */
 class NtnNetSimulyzerExporter : public Object
 {
@@ -47,7 +50,6 @@ class NtnNetSimulyzerExporter : public Object
     ~NtnNetSimulyzerExporter() override;
 
     void SetOutputPath(const std::string& path);
-    void SetUseSimulationTime(bool yes);
 
     /// Register a node (must be done before Start()).
     void AddNode(uint32_t id,
@@ -103,7 +105,6 @@ class NtnNetSimulyzerExporter : public Object
 
     std::string m_path;
     std::ofstream m_out;
-    bool m_useSimulationTime{true};
     bool m_running{false};
     bool m_firstEvent{true};
     std::vector<NodeDecl> m_nodes;
