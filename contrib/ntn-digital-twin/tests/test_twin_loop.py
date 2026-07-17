@@ -149,3 +149,57 @@ def test_api_predict_handover_returns_events(synthetic_constellation):
         ev = body["events"][0]
         assert ev["sat_in_norad"] > 0
         assert -90 <= ev["elevation_in_deg"] <= 90
+
+
+def test_api_predict_handover_a3_hysteresis_reduces_pingpong(synthetic_constellation):
+    """W1: an A3-style hysteresis + minimum-service guard must produce no MORE
+    handovers than the bare argmax (hysteresis=0), and a large hysteresis + long
+    minimum-service must strictly damp the ping-pong the argmax exhibits."""
+    from fastapi.testclient import TestClient
+
+    api_server._state.cons = synthetic_constellation
+    client = TestClient(api_server.app)
+    base = {
+        "ue_lat_deg": 0.0, "ue_lon_deg": 0.0,
+        "horizon_min": 60.0, "step_sec": 5.0, "min_elevation_deg": 10.0,
+    }
+
+    # Bare argmax (no A3 guard): hysteresis 0, no TTT, no min-service.
+    raw = client.post("/predict/handover",
+                      json={**base, "hysteresis_deg": 0.0,
+                            "time_to_trigger_sec": 0.0, "min_service_sec": 0.0})
+    assert raw.status_code == 200
+    n_raw = raw.json()["n_handovers"]
+
+    # A3-guarded: real hysteresis + a minimum service time.
+    guarded = client.post("/predict/handover",
+                          json={**base, "hysteresis_deg": 5.0,
+                                "time_to_trigger_sec": 5.0, "min_service_sec": 60.0})
+    assert guarded.status_code == 200
+    n_guarded = guarded.json()["n_handovers"]
+
+    # The guard can never CREATE handovers, and on a multi-satellite shell it
+    # must remove at least the crossover ping-pong the argmax produces.
+    assert n_guarded <= n_raw, f"A3 guard increased handovers: {n_guarded} > {n_raw}"
+    if n_raw > 1:
+        assert n_guarded < n_raw, f"A3 guard failed to damp ping-pong: {n_guarded} == {n_raw}"
+
+
+def test_walker_source_shares_epoch_with_cpp():
+    """W1: source='walker' builds a deterministic Walker-Delta constellation at
+    a fixed epoch, so the twin can run the SAME elements an ns-3 scenario does
+    (WalkerConfig with matching planes/sats/altitude/inclination/epoch)."""
+    from ntn_digital_twin.twin_loop import LoopConfig, fetch_constellation
+
+    cfg = LoopConfig(source="walker", walker_planes=1, walker_sats_per_plane=24,
+                     walker_altitude_km=600.0, walker_inclination_deg=53.0,
+                     epoch_unix_s=1735689600.0, max_sats=24)
+    cons, n = fetch_constellation(cfg)
+    assert n == 24
+    # Deterministic: two builds at the same epoch give identical positions.
+    cons2, _ = fetch_constellation(cfg)
+    import datetime as _dt
+    when = _dt.datetime.fromtimestamp(1735689600.0, tz=_dt.timezone.utc)
+    p1 = cons[0].ecef_m(when)
+    p2 = cons2[0].ecef_m(when)
+    assert all(abs(a - b) < 1.0 for a, b in zip(p1, p2))

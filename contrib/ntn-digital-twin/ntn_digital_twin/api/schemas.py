@@ -49,6 +49,13 @@ class PredictHandoverRequest(BaseModel):
     horizon_min: float = Field(default=10.0, gt=0.0, le=1440.0)  # up to 24 h
     step_sec: float = Field(default=5.0, ge=0.1, le=3600.0)      # [0.1 s, 1 h]
     min_elevation_deg: float = Field(default=10.0, ge=0.0, le=90.0)
+    # W1: the sim executes A3-style handovers (hysteresis + time-to-trigger),
+    # not a bare per-tick best-elevation argmax. Mirror that here so the twin's
+    # predicted sequence can actually match the sim's executed one instead of
+    # ping-ponging at every elevation crossover.
+    hysteresis_deg: float = Field(default=3.0, ge=0.0, le=45.0)
+    time_to_trigger_sec: float = Field(default=0.0, ge=0.0, le=60.0)
+    min_service_sec: float = Field(default=0.0, ge=0.0, le=600.0)
 
 
 class PredictHandoverResponse(BaseModel):

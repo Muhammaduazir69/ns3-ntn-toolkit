@@ -174,6 +174,10 @@ def predict_handover(req: PredictHandoverRequest) -> PredictHandoverResponse:
     events: list[HandoverEvent] = []
     current_serving: int | None = None
     current_serving_name: str | None = None
+    # W1: A3 trigger state.
+    a3_since = None      # when the (candidate > serving + hysteresis) condition began
+    a3_target: int | None = None  # candidate the TTT window is tracking
+    last_ho_time = None  # for the minimum-service-time guard
 
     # Hard cap on the loop length (defense in depth on top of the schema
     # bounds): keeps a large horizon / fine step from pinning a CPU.
@@ -204,18 +208,53 @@ def predict_handover(req: PredictHandoverRequest) -> PredictHandoverResponse:
             continue
 
         best_sat = cons[best_idx]
-        if best_sat.norad_id != current_serving:
-            events.append(HandoverEvent(
-                time_iso=when.isoformat(),
-                sat_in_norad=best_sat.norad_id,
-                sat_in_name=best_sat.name.strip(),
-                sat_out_norad=current_serving,
-                sat_out_name=current_serving_name,
-                elevation_in_deg=best_el,
-                elevation_out_deg=current_el if current_serving is not None else None,
-            ))
+
+        # W1: A3-style guard. A handover fires only when the best candidate beats
+        # the serving cell by more than the hysteresis, that condition has held
+        # for the time-to-trigger, and the minimum service time since the last
+        # handover has elapsed -- exactly the conditions the sim's A3 algorithm
+        # enforces. The bare argmax fired on any crossover and ping-ponged.
+        if current_serving is None:
+            # Initial acquisition is not a handover.
             current_serving = best_sat.norad_id
             current_serving_name = best_sat.name.strip()
+            continue
+
+        if best_sat.norad_id == current_serving:
+            a3_since = None  # condition broken; reset the trigger timer
+            continue
+
+        margin_ok = best_el > current_el + req.hysteresis_deg
+        if not margin_ok:
+            a3_since = None
+            continue
+
+        # Start / continue the time-to-trigger window.
+        if a3_since is None:
+            a3_since = when
+            a3_target = best_sat.norad_id
+        elif a3_target != best_sat.norad_id:
+            a3_since = when  # target changed; restart the window
+            a3_target = best_sat.norad_id
+
+        held_for = (when - a3_since).total_seconds()
+        service_for = (when - last_ho_time).total_seconds() if last_ho_time else 1e9
+        if held_for < req.time_to_trigger_sec or service_for < req.min_service_sec:
+            continue
+
+        events.append(HandoverEvent(
+            time_iso=when.isoformat(),
+            sat_in_norad=best_sat.norad_id,
+            sat_in_name=best_sat.name.strip(),
+            sat_out_norad=current_serving,
+            sat_out_name=current_serving_name,
+            elevation_in_deg=best_el,
+            elevation_out_deg=current_el if current_serving is not None else None,
+        ))
+        current_serving = best_sat.norad_id
+        current_serving_name = best_sat.name.strip()
+        last_ho_time = when
+        a3_since = None
 
     elapsed_ms = (time.time() - t0) * 1000.0
     return PredictHandoverResponse(
