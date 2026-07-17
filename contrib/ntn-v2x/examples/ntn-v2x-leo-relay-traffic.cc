@@ -43,6 +43,7 @@
 #include "ns3/ntn-v2x-bsm-header.h"
 #include "ns3/ntn-oran-sink.h"
 #include "ns3/internet-module.h"
+#include "ns3/ipv4.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/v2x-leo-relay.h"
 
@@ -58,8 +59,10 @@ namespace
 constexpr double kC = 299792458.0;
 Ptr<ntnv2x::V2xLeoRelay> g_relay;
 Ptr<MobilityModel> g_veh0, g_veh1, g_sat;
-Ptr<RateErrorModel> g_emV2v, g_emUplink;
-Ptr<PointToPointChannel> g_chV2v, g_chUplink;
+Ptr<RateErrorModel> g_emV2v, g_emUplink, g_emDirect;
+Ptr<PointToPointChannel> g_chV2v, g_chUplink, g_chDirect;
+Ptr<Ipv4> g_veh0Ipv4;
+uint32_t g_ifV2v = 1, g_ifDirect = 2;
 Ptr<NtnOranSink> g_sink;
 Ptr<MobilityModel> g_veh0Mob;
 uint8_t g_bsmCnt = 0;
@@ -125,6 +128,31 @@ Tick()
     const bool relaySelected = d0 && !d0->directToLeo && !d0->relayPeerId.empty() &&
                                d0->v2vRangeM <= g_maxV2vRangeM;
     g_emV2v->SetRate(relaySelected ? 0.0 : 1.0);
+
+    // GAP V2 FIX: steer veh0's PATH to match the engine's decision. When it
+    // chooses direct, bring veh0's direct-to-sat interface UP and the V2V one
+    // DOWN (and vice-versa) and recompute routing, so packets follow the chosen
+    // egress instead of the fixed V2V chain. This is what makes "direct" deliver
+    // instead of dropping every packet.
+    const bool directSelected = d0 && d0->directToLeo;
+    const double directSlant = Dist(g_veh0->GetPosition(), g_sat->GetPosition());
+    g_chDirect->SetAttribute("Delay", TimeValue(Seconds(directSlant / kC)));
+    if (g_veh0Ipv4)
+    {
+        const bool v2vUpNow = g_veh0Ipv4->IsUp(g_ifV2v);
+        const bool directUpNow = g_veh0Ipv4->IsUp(g_ifDirect);
+        const bool wantV2vUp = !directSelected;
+        const bool wantDirectUp = directSelected;
+        if (v2vUpNow != wantV2vUp || directUpNow != wantDirectUp)
+        {
+            wantV2vUp ? g_veh0Ipv4->SetUp(g_ifV2v) : g_veh0Ipv4->SetDown(g_ifV2v);
+            wantDirectUp ? g_veh0Ipv4->SetUp(g_ifDirect) : g_veh0Ipv4->SetDown(g_ifDirect);
+            Ipv4GlobalRoutingHelper::RecomputeRoutingTables();
+        }
+        // The direct hop's own link budget still gates delivery: up only when
+        // veh0's direct LEO link clears the engine's SNR threshold.
+        g_emDirect->SetRate(directSelected ? 0.0 : 1.0);
+    }
 
     // Uplink hop carries traffic when the relay engine's chosen LEO link (the
     // relay peer's link when relaying, or veh0's own link when direct) clears
@@ -290,6 +318,27 @@ main(int argc, char* argv[])
     NetDeviceContainer dFeeder = p2p.Install(NodeContainer(nodes.Get(2), nodes.Get(3)));
     ipv4.SetBase("10.60.3.0", "255.255.255.0");
     Ipv4InterfaceContainer iFeeder = ipv4.Assign(dFeeder);
+
+    // GAP V2 FIX (the "direct decision -> PDR 0" bug): give veh0 a DIRECT link
+    // to the satellite, so when the relay engine decides direct-to-LEO the
+    // packets have a path that exists. Previously the only veh0 egress was the
+    // V2V link, so a "direct" decision closed the V2V gate and dropped every
+    // packet -- the engine choosing the BETTER link produced TOTAL loss.
+    NetDeviceContainer dDirect = p2p.Install(NodeContainer(nodes.Get(0), nodes.Get(2)));
+    g_emDirect = CreateObject<RateErrorModel>();
+    g_emDirect->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
+    g_emDirect->SetRate(0.0);
+    dDirect.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(g_emDirect));
+    g_chDirect = DynamicCast<PointToPointChannel>(dDirect.Get(0)->GetChannel());
+    ipv4.SetBase("10.60.4.0", "255.255.255.0");
+    ipv4.Assign(dDirect);
+    // veh0's egress interfaces: 1 = V2V (to veh1), 2 = direct (to sat). The Tick
+    // brings exactly one UP per the engine's decision and recomputes routing, so
+    // veh0's packets follow the CHOSEN path -- routing tracks the decision, not
+    // a fixed chain.
+    g_veh0Ipv4 = nodes.Get(0)->GetObject<Ipv4>();
+    g_ifV2v = 1;
+    g_ifDirect = 2;
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
