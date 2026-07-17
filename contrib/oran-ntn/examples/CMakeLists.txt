@@ -2,6 +2,17 @@
 # real mmwave NR NTN link, scale-out KPM from a TR 38.821-style budget over the
 # same live geometry (per-row provenance in kpm_feed.csv).
 build_lib_example(
+  NAME oran-ntn-gym-handover-example
+  SOURCE_FILES oran-ntn-gym-handover-example.cc
+  LIBRARIES_TO_LINK
+    ${liboran-ntn}
+    ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libns3-ai-ntn}
+)
+
+build_lib_example(
   NAME oran-ntn-full-scenario
   SOURCE_FILES oran-ntn-full-scenario.cc
   LIBRARIES_TO_LINK
