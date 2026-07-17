@@ -326,6 +326,58 @@ class Sib19CodecRejectsTruncatedTest : public TestCase
     }
 };
 
+/// GAP R3 (CI gate 14, population half): SIB19 must broadcast a NON-ZERO
+/// cellSpecificKoffset / kMac derived from the common TA, covering the cell
+/// round trip (TS 38.213 §4.2). Before the fix these were hard 0 on the wire.
+class Sib19KOffsetPopulatedTest : public TestCase
+{
+  public:
+    Sib19KOffsetPopulatedTest()
+        : TestCase("SIB19 cellSpecificKoffset is derived from the common TA (R3)")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // Satellite at 600 km straight overhead -> common TA (RTT) = 2*600km/c
+        // = 4.0028 ms. At numerology 1 (0.5 ms slot) K_offset = ceil(4.0028/0.5)
+        // + 1 = 9 slots.
+        Ptr<ConstantVelocityMobilityModel> sat = CreateObject<ConstantVelocityMobilityModel>();
+        sat->SetPosition(Vector{0.0, 0.0, 600e3});
+        sat->SetVelocity(Vector{0.0, 0.0, 0.0});
+
+        NtnRrcHelper helper;
+        helper.SetPayloadMode(PayloadMode::Transparent);
+        helper.SetReferencePosition(Vector{0, 0, 0});
+        Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(MakeStaticMob(Vector{0, 0, 0}), sat);
+
+        Ptr<NtnSib19Broadcaster> bc = CreateObject<NtnSib19Broadcaster>();
+        bc->SetSatelliteMobility(sat);
+        bc->SetTimingAdvance(ta);
+        bc->SetReferencePosition(Vector{0, 0, 0});
+        bc->SetCellId(7);
+        bc->SetNumerology(1); // 30 kHz SCS -> 0.5 ms slot
+        bc->SetPeriod(MilliSeconds(160));
+        bc->Start();
+        Simulator::Stop(MilliSeconds(10));
+        Simulator::Run();
+
+        const auto& sib = bc->GetLatest();
+        const double c = 299792458.0;
+        const double rttS = 2.0 * 600e3 / c;
+        const double slotS = 0.5e-3;
+        const uint32_t expected = static_cast<uint32_t>(std::ceil(rttS / slotS)) + 1;
+
+        NS_TEST_ASSERT_MSG_NE(sib.cellSpecificKoffset, 0u,
+                              "K_offset must not be 0 on the wire (R3)");
+        NS_TEST_ASSERT_MSG_EQ(sib.cellSpecificKoffset, expected,
+                              "K_offset must cover the common-TA round trip in slots");
+        NS_TEST_ASSERT_MSG_EQ(sib.kMac, expected, "kMac must match K_offset coverage");
+        Simulator::Destroy();
+    }
+};
+
 /// Broadcaster ticks every period, snapshotting the satellite ephemeris each
 /// time. After 5 ticks the latest content reflects the satellite's most
 /// recent position.
@@ -695,6 +747,7 @@ class NtnRrcTestSuite : public TestSuite
         AddTestCase(new DrxDataActivityTest, TestCase::Duration::QUICK);
         AddTestCase(new DrxPassAwareTest, TestCase::Duration::QUICK);
         AddTestCase(new DrxInvalidConfigTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19KOffsetPopulatedTest, TestCase::Duration::QUICK);
     }
 };
 

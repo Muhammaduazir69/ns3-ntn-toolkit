@@ -4,6 +4,8 @@
 
 #include "ntn-sib19.h"
 
+#include <cmath>
+
 #include "ntn-timing-advance.h"
 
 #include <ns3/log.h>
@@ -266,6 +268,23 @@ NtnSib19Broadcaster::RefreshNow()
     {
         m_latest.taCommon = m_ta->ComputeCommonTa();
         m_latest.taCommonDriftRate = m_ta->ComputeTaDriftRate();
+
+        // GAP R3 FIX: populate cellSpecificKoffset (and kMac) from the common
+        // TA instead of leaving them 0 on the wire. TS 38.213 §4.2: K_offset is
+        // the scheduling offset that pushes the UL grant / feedback beyond the
+        // cell round trip so a UE that has GNSS-pre-compensated its own TA still
+        // lands its transmission in the slot the gNB expects. It must cover at
+        // least the common (cell-wide) round-trip delay. ComputeCommonTa()
+        // returns 2*d/c (the RTT), so K_offset = ceil(RTT / slot) + 1 margin
+        // slot. kMac (TS 38.213 §4.2, the DL-config offset for MAC-CE timing) is
+        // set to the same coverage; both are in slots of the configured
+        // numerology.
+        const double slotS = 1.0e-3 / std::pow(2.0, static_cast<double>(m_numerology));
+        const double rttS = m_ta->ComputeCommonTa().GetSeconds();
+        const uint32_t koff =
+            static_cast<uint32_t>(std::ceil(rttS / slotS)) + 1;
+        m_latest.cellSpecificKoffset = koff;
+        m_latest.kMac = koff;
     }
 
     m_latestBytes.assign(Sib19Codec::kSerialisedBytes, 0);

@@ -52,7 +52,9 @@ struct EphemerisInfo
  *
  * NOTE (honest scope): in this toolkit no UE actually decodes this block, so the
  * above are the *intended* receiver actions, not modelled behaviour. The fields
- * are stored metadata: `cellSpecificKoffset` / `kMac` are NOT applied to any
+ * are stored metadata: `cellSpecificKoffset` / `kMac` are now DERIVED from the
+ * common TA (R3) and broadcast, but consuming them in the NR scheduler's K1/K2
+ * slot timing is a separate follow-on (they are not yet applied to any
  * ns-3 scheduling decision (the mmwave MAC never reads them), and `taCommon` is
  * consumed only by the offline TA accounting, not by a UL timing loop.
  */
@@ -119,6 +121,10 @@ class NtnSib19Broadcaster : public Object
     void SetCellId(uint16_t cellId);
     void SetPayloadMode(PayloadMode mode);
     void SetPeriod(Time period);
+    /// R3: numerology used to convert the common TA (RTT) into the
+    /// cellSpecificKoffset / kMac slot counts (TS 38.213 §4.2). Slot duration
+    /// = 1 ms / 2^numerology. Default 1 (30 kHz SCS).
+    void SetNumerology(uint8_t mu) { m_numerology = mu; }
 
     /// Force an immediate refresh of the broadcast content.
     void RefreshNow();
@@ -144,6 +150,7 @@ class NtnSib19Broadcaster : public Object
     Vector m_referencePos{0.0, 0.0, 0.0};
     uint16_t m_cellId{0};
     PayloadMode m_payloadMode{PayloadMode::Transparent};
+    uint8_t m_numerology{1}; // R3: for K_offset slot conversion
     Time m_period{MilliSeconds(160)};
     bool m_running{false};
     EventId m_event;
