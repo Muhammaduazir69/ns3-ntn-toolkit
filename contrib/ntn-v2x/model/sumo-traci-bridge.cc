@@ -200,28 +200,81 @@ SumoTraciBridge::EmitSample(const VehicleSample& s)
     m_traceSample(s);
 }
 
+double
+SumoTraciBridge::DetectTraceCadence() const
+{
+    // Smallest positive difference between consecutive distinct SUMO timestamps.
+    double best = 0.0;
+    double prev = -1.0;
+    for (const auto& smp : m_samples)
+    {
+        if (prev >= 0.0)
+        {
+            const double d = smp.simulationTimeSec - prev;
+            if (d > 1e-6 && (best == 0.0 || d < best))
+            {
+                best = d;
+            }
+        }
+        prev = smp.simulationTimeSec;
+    }
+    return best;
+}
+
 std::size_t
 SumoTraciBridge::Step()
 {
     if (m_mode == Mode::Replay)
     {
-        // Advance replay cursor: emit every sample whose timestamp is at or
-        // before the next-tick boundary. We keep grouping by sumo timestamp.
+        // GAP V2 FIX: TIME-LOCK the replay cursor to the simulation clock.
+        //
+        // This used to advance exactly one SUMO timestamp-group per Step() call,
+        // ignoring Simulator::Now() entirely. So if the caller's tick interval
+        // did not equal the trace cadence (e.g. Step() every 0.1 s on a 1 Hz
+        // FCD trace) the vehicles fast-forwarded 10x through their track while
+        // wall time crawled — positions applied at the wrong times, and the
+        // jitter metric ballooned with nothing to stop the desync.
+        //
+        // Now emit every sample whose trace timestamp is <= the current sim
+        // time, so playback tracks the simulation clock at whatever rate Step()
+        // is called. Warn once if the trace cadence and the observed tick
+        // interval disagree, since that is a scenario-configuration mistake.
         if (m_replayCursor >= m_samples.size())
         {
             return 0;
         }
-        double targetTime = m_samples[m_replayCursor].simulationTimeSec;
+        const double nowSec = Simulator::Now().GetSeconds();
         std::size_t emitted = 0;
+        double lastTime = m_currentSumoTime;
         while (m_replayCursor < m_samples.size() &&
-               std::abs(m_samples[m_replayCursor].simulationTimeSec - targetTime) < 1e-6)
+               m_samples[m_replayCursor].simulationTimeSec <= nowSec + 1e-6)
         {
             EmitSample(m_samples[m_replayCursor]);
+            lastTime = m_samples[m_replayCursor].simulationTimeSec;
             ++m_replayCursor;
             ++emitted;
         }
-        m_currentSumoTime = targetTime;
-        double nowSec = Simulator::Now().GetSeconds();
+        // One-time cadence sanity check: compare the trace's own step (first two
+        // distinct timestamps) against the tick interval this Step() was called
+        // at. A mismatch means the caller's --dt does not match the FCD rate.
+        if (!m_cadenceChecked && m_replayCursor >= 2)
+        {
+            m_cadenceChecked = true;
+            const double traceStep =
+                m_samples.size() > 1 ? DetectTraceCadence() : 0.0;
+            const double tickStep = nowSec - m_lastStepNowSec;
+            if (traceStep > 0.0 && tickStep > 0.0 &&
+                std::abs(traceStep - tickStep) > 0.25 * traceStep)
+            {
+                NS_LOG_WARN("SUMO FCD trace cadence ("
+                            << traceStep << " s) differs from the Step() tick interval ("
+                            << tickStep << " s). Replay is time-locked to Simulator::Now(), so "
+                            "positions stay correct, but set the tick interval to the trace "
+                            "cadence to avoid emitting many groups per tick or stalling.");
+            }
+        }
+        m_lastStepNowSec = nowSec;
+        m_currentSumoTime = lastTime;
         // Genuine replay clock offset: the absolute difference between the real
         // ns-3 scheduler clock and the trace timestamp at this sync point. In
         // locked trace-replay this is ~0 by construction; it is MEASURED from

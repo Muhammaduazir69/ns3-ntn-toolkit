@@ -24,6 +24,8 @@
 
 #include "ns3/address.h"
 #include "ns3/application.h"
+#include "ns3/buffer.h"
+#include "ns3/callback.h"
 #include "ns3/data-rate.h"
 #include "ns3/event-id.h"
 #include "ns3/nstime.h"
@@ -60,6 +62,16 @@ class NtnOranApplication : public Application
     void SetProfile(Profile p) { m_profile = p; }
     void SetFlowIdentity(uint8_t fiveQi, uint8_t sst, uint32_t sd, uint16_t srcId, uint16_t dstId);
 
+    /// Optional application-payload builder. When set, it fills the packet BODY
+    /// (the bytes after the in-band NtnOranPayloadHeader) with an
+    /// application-defined structure — e.g. a SAE J2735 BSM populated from a
+    /// vehicle's mobility. The in-band header (which the sink parses for
+    /// measured delay/jitter/loss) is still prepended on top, so the measured
+    /// KPI plane is unaffected; the body simply carries real content instead of
+    /// opaque padding. Receives (body buffer start, body size in bytes).
+    typedef Callback<void, Buffer::Iterator, uint32_t> PayloadBuilder;
+    void SetPayloadBuilder(PayloadBuilder cb) { m_payloadBuilder = cb; }
+
     uint32_t GetTxPackets() const { return m_seq; }
     uint64_t GetTxBytes() const { return m_txBytes; }
 
@@ -79,6 +91,7 @@ class NtnOranApplication : public Application
 
     Address m_remote;
     Profile m_profile{CBR_SATURATING};
+    PayloadBuilder m_payloadBuilder;
     uint8_t m_fiveQi{0};   // 0 = auto from profile
     uint8_t m_sst{1};
     uint32_t m_sd{0x000001};

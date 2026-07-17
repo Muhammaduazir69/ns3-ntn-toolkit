@@ -278,7 +278,21 @@ NtnOranApplication::SendOne(uint32_t bytes)
 
     const uint32_t body = std::max<uint32_t>(bytes, hdr.GetSerializedSize() + 1) -
                           hdr.GetSerializedSize();
-    Ptr<Packet> p = Create<Packet>(body);
+    Ptr<Packet> p;
+    if (!m_payloadBuilder.IsNull() && body > 0)
+    {
+        // Let the application fill the body (e.g. a J2735 BSM). The in-band KPI
+        // header is still added on top, so the sink's measured delay/jitter/loss
+        // are unchanged — only the opaque padding becomes real content.
+        Buffer buf;
+        buf.AddAtStart(body);
+        m_payloadBuilder(buf.Begin(), body);
+        p = Create<Packet>(buf.PeekData(), body);
+    }
+    else
+    {
+        p = Create<Packet>(body);
+    }
     p->AddHeader(hdr);
     m_txBytes += p->GetSize();
     m_txTrace(p);

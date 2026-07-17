@@ -112,6 +112,11 @@ class SumoTraciBridge : public Object
     std::vector<VehicleSample> m_samples;     ///< sorted by simulationTimeSec
     std::size_t m_replayCursor{0};
     double m_currentSumoTime{0.0};
+    double m_lastStepNowSec{0.0};   // V2: sim time at the previous Step()
+    bool m_cadenceChecked{false};   // V2: trace-vs-tick cadence warned once
+    /// V2: detected trace step (s) = smallest positive gap between distinct
+    /// SUMO timestamps in the loaded FCD samples.
+    double DetectTraceCadence() const;
 
     std::map<std::string, Ptr<MobilityModel>> m_vehicles;
     double m_lastJitterSec{0.0};

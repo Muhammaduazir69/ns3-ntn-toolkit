@@ -7,7 +7,9 @@
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/double.h"
 #include "ns3/maritime-scenario.h"
+#include "ns3/ntn-v2x-bsm-header.h"
 #include "ns3/ntn-v2x-helper.h"
+#include "ns3/packet.h"
 #include "ns3/simulator.h"
 #include "ns3/sumo-traci-bridge.h"
 #include "ns3/test.h"
@@ -219,6 +221,44 @@ class HundredVehicleSmokeTest : public TestCase
     }
 };
 
+/**
+ * \brief The J2735 BSM header serialises its kinematic state and reads it back
+ *        within each field's encoding resolution — proving the relay packets
+ *        carry a real BSM, not opaque padding.
+ */
+class J2735BsmHeaderRoundTripTest : public TestCase
+{
+  public:
+    J2735BsmHeaderRoundTripTest()
+        : TestCase("SAE J2735 BSM header round-trips through a packet")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        ntnv2x::NtnV2xBsmHeader tx;
+        tx.SetFromState(/*msgCnt=*/42, /*id=*/0x0A0B0C0Du, /*secMark=*/12345,
+                        /*lat=*/48.137154, /*lon=*/11.576124, /*elev=*/542.3,
+                        /*speed=*/27.4, /*heading=*/93.75);
+
+        Ptr<Packet> p = Create<Packet>(0);
+        p->AddHeader(tx);
+        ntnv2x::NtnV2xBsmHeader rx;
+        p->RemoveHeader(rx);
+
+        NS_TEST_ASSERT_MSG_EQ(rx.GetMsgCnt(), 42, "msgCnt");
+        NS_TEST_ASSERT_MSG_EQ(rx.GetId(), 0x0A0B0C0Du, "station id");
+        NS_TEST_ASSERT_MSG_EQ(rx.GetSecMark(), 12345, "secMark");
+        // 1/10 micro-degree resolution -> ~1e-7 deg.
+        NS_TEST_ASSERT_MSG_EQ_TOL(rx.GetLatDeg(), 48.137154, 1e-6, "latitude");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rx.GetLonDeg(), 11.576124, 1e-6, "longitude");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rx.GetElevM(), 542.3, 0.05, "elevation (1 dm)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rx.GetSpeedMps(), 27.4, 0.02, "speed (0.02 m/s)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rx.GetHeadingDeg(), 93.75, 0.0125, "heading (0.0125 deg)");
+    }
+};
+
 class NtnV2xTestSuite : public TestSuite
 {
   public:
@@ -229,6 +269,7 @@ class NtnV2xTestSuite : public TestSuite
         AddTestCase(new V2xLeoDirectFreeSpaceTest, TestCase::Duration::QUICK);
         AddTestCase(new V2xLeoRelayDirectVsRelayTest, TestCase::Duration::QUICK);
         AddTestCase(new MaritimeBouncesInBoxTest, TestCase::Duration::QUICK);
+        AddTestCase(new J2735BsmHeaderRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new HundredVehicleSmokeTest, TestCase::Duration::EXTENSIVE);
     }
 };

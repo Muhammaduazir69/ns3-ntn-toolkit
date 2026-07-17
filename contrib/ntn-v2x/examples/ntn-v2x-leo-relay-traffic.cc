@@ -40,6 +40,7 @@
 #include "ns3/sumo-traci-bridge.h"
 #include "ns3/error-model.h"
 #include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-v2x-bsm-header.h"
 #include "ns3/ntn-oran-sink.h"
 #include "ns3/internet-module.h"
 #include "ns3/point-to-point-module.h"
@@ -60,6 +61,8 @@ Ptr<MobilityModel> g_veh0, g_veh1, g_sat;
 Ptr<RateErrorModel> g_emV2v, g_emUplink;
 Ptr<PointToPointChannel> g_chV2v, g_chUplink;
 Ptr<NtnOranSink> g_sink;
+Ptr<MobilityModel> g_veh0Mob;
+uint8_t g_bsmCnt = 0;
 Ptr<ntnv2x::SumoTraciBridge> g_bridge;
 uint64_t g_lastRx = 0;
 double g_maxV2vRangeM = 1500.0;
@@ -298,13 +301,40 @@ main(int argc, char* argv[])
     g_sink->SetStartTime(Seconds(0.0));
     g_sink->SetStopTime(Seconds(simSeconds));
 
-    // BSM cadence: deterministic periodic V2X messages (5QI 82, URLLC class).
+    // BSM cadence: periodic V2X safety messages (5QI 82, URLLC class), each
+    // carrying a REAL SAE J2735 BSM Part I populated from veh0's live mobility
+    // (position + speed + heading) rather than opaque padding. The J2735 core
+    // fills the packet body; the in-band NtnOranPayloadHeader is still on top,
+    // so PDR/delay/jitter stay measured end-to-end.
     Ptr<NtnOranApplication> src = CreateObject<NtnOranApplication>();
     src->SetRemote(InetSocketAddress(iFeeder.GetAddress(1), port));
     src->SetProfile(NtnOranApplication::URLLC_PERIODIC);
     src->SetAttribute("PacketSize", UintegerValue(bsmBytes));
     src->SetAttribute("Period", TimeValue(Seconds(1.0 / bsmHz)));
     src->SetFlowIdentity(/*5qi*/ 82, /*sst*/ 2, /*sd*/ 0x000001, /*src*/ 0, /*dst*/ 3);
+    g_veh0Mob = nodes.Get(0)->GetObject<MobilityModel>();
+    src->SetPayloadBuilder(
+        MakeCallback(+[](Buffer::Iterator it, uint32_t bodyBytes) {
+            // Fill the leading J2735 BSM core; the rest stays padding (Part II).
+            ntnv2x::NtnV2xBsmHeader bsm;
+            const Vector p = g_veh0Mob ? g_veh0Mob->GetPosition() : Vector(0, 0, 0);
+            const Vector v = g_veh0Mob ? g_veh0Mob->GetVelocity() : Vector(0, 0, 0);
+            // ENU/local metres -> pseudo lat/lon degrees for the BSM fields; the
+            // absolute datum is arbitrary for a relay-latency study, the point is
+            // that the values move with the vehicle.
+            const double latDeg = p.y / 111320.0;
+            const double lonDeg = p.x / 111320.0;
+            const double speed = std::sqrt(v.x * v.x + v.y * v.y);
+            const double heading = std::fmod(std::atan2(v.x, v.y) * 180.0 / M_PI + 360.0, 360.0);
+            const uint16_t secMark =
+                static_cast<uint16_t>(std::llround(Simulator::Now().GetMilliSeconds()) % 60000);
+            bsm.SetFromState(g_bsmCnt++, /*stationId=*/0x00000001u, secMark, latDeg, lonDeg, p.z,
+                             speed, heading);
+            if (bodyBytes >= bsm.GetSerializedSize())
+            {
+                bsm.Serialize(it);
+            }
+        }));
     nodes.Get(0)->AddApplication(src);
     src->SetStartTime(Seconds(1.0));
     src->SetStopTime(Seconds(simSeconds));
