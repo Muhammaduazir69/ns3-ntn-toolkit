@@ -185,6 +185,48 @@ class NtnTimingAdvanceDriftRateTest : public TestCase
     }
 };
 
+/// Regression for the regenerative-mode drift bug (audit CRITICAL #7): drift was
+/// (d/c - 2d/c)/dt ~= -0.18 s/s at LEO for RegenerativeFull regardless of
+/// geometry, because t0 used 2d/c but t1 used 1d/c. With the fix (t1 = 2d/c) the
+/// regenerative drift must equal the transparent drift and stay < 25 µs/s.
+class NtnTimingAdvanceRegenerativeDriftRateTest : public TestCase
+{
+  public:
+    NtnTimingAdvanceRegenerativeDriftRateTest()
+        : TestCase("Regenerative TA drift rate is bounded under 25 us per s")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // Same geometry as the transparent test but RegenerativeFull payload.
+        const Vector sat{0, 0, kEarthRadiusMetres + 550e3};
+        const Vector satV{7590.0, 0.0, 0.0};
+
+        NtnRrcHelper regen;
+        regen.SetPayloadMode(PayloadMode::RegenerativeFull);
+        Ptr<NtnTimingAdvance> taRegen =
+            regen.InstallTimingAdvance(MakeStaticMob(Vector{0, 0, 0}),
+                                       MakeMovingMob(sat, satV));
+        const double driftRegen = std::abs(taRegen->ComputeTaDriftRate(MilliSeconds(10)));
+
+        // Must be physically bounded — NOT the ~0.18 s/s the old branch produced.
+        NS_TEST_ASSERT_MSG_LT(driftRegen, 25e-6,
+                              "Regenerative drift too large (got " << driftRegen << ")");
+
+        // Payload mode must not change the drift: TA_total is 2d/c either way.
+        NtnRrcHelper trans;
+        trans.SetPayloadMode(PayloadMode::Transparent);
+        Ptr<NtnTimingAdvance> taTrans =
+            trans.InstallTimingAdvance(MakeStaticMob(Vector{0, 0, 0}),
+                                       MakeMovingMob(sat, satV));
+        const double driftTrans = std::abs(taTrans->ComputeTaDriftRate(MilliSeconds(10)));
+        NS_TEST_ASSERT_MSG_EQ_TOL(driftRegen, driftTrans, 1e-12,
+                                  "Regenerative and transparent drift must match");
+    }
+};
+
 /// SIB19 codec round-trip: serialise → parse → all fields equal.
 class Sib19CodecRoundTripTest : public TestCase
 {
@@ -641,6 +683,7 @@ class NtnRrcTestSuite : public TestSuite
         AddTestCase(new NtnTimingAdvance38821ReferenceTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvanceCommonAndUeSpecificTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvanceDriftRateTest, TestCase::Duration::QUICK);
+        AddTestCase(new NtnTimingAdvanceRegenerativeDriftRateTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19CodecRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19CodecRejectsTruncatedTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19BroadcasterTickTest, TestCase::Duration::QUICK);

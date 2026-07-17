@@ -3,11 +3,17 @@
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit, Workstream W5)
  *
  * 3GPP TR 36.777 (Release 15) air-to-ground channel model for UAVs.
- *  - Scenario: gNB serves a UAV-as-UE between 1.5 m and 300 m AGL.
- *  - Closed-form path loss for UMa-AV / RMa-AV / UMi-AV (table 6.2-1).
- *  - LOS probability per table 7.6.3.1-2 (height-dependent).
+ *  - Scenario: gNB serves a UAV-as-UE.
+ *  - Closed-form path loss for UMa-AV / RMa-AV / UMi-AV (Table B-1.2).
+ *  - Height-dependent LOS probability per Table B-1.1.
+ *  - Shadow-fading standard deviation per Table B-1.2.
  *
- * Reference: 3GPP TR 36.777 V15.0.0 (2017-12).
+ * Validity bands (Table B-1.1 / B-1.2): the aerial-vehicle formulas hold only
+ * above the scenario height threshold — 22.5 m < h <= 300 m (UMa-AV, UMi-AV)
+ * and 10 m < h <= 300 m (RMa-AV). BELOW the threshold TR 36.777 mandates the
+ * TR 38.901 GROUND formulas, which this class applies as a fallback.
+ *
+ * Reference: 3GPP TR 36.777 V15.0.0 (2017-12), Annex B; TR 38.901 §7.4.
  */
 #ifndef NTN_SAGIN_A2G_CHANNEL_TR36777_H
 #define NTN_SAGIN_A2G_CHANNEL_TR36777_H
@@ -54,10 +60,22 @@ class A2gChannelTr36777 : public Object
     /**
      * @brief Probability the link is in LOS as a function of geometry.
      *
-     * Per TR 36.777 §7.6.3.1, table 7.6.3.1-2. For UAV altitudes above the
-     * scenario's threshold the probability monotonically rises to 1.
+     * Per TR 36.777 Table B-1.1. In the aerial band the spec form is
+     *   P_LOS = 1                                      for d2D <= d1
+     *         = d1/d2D + exp(-d2D/p1)*(1 - d1/d2D)     for d2D >  d1
+     * with height-dependent (d1, p1). Below the scenario threshold the
+     * TR 38.901 ground LOS-probability is used.
      */
     static double LosProbability(A2gScenario scenario, double d2dM, double hUtM);
+
+    /**
+     * @brief Shadow-fading standard deviation (dB) per TR 36.777 Table B-1.2.
+     *
+     * UMa-AV  LOS: 4.64*exp(-0.0066*h)   NLOS: 6 dB
+     * RMa-AV  LOS: 4.2 *exp(-0.0046*h)   NLOS: 8 dB
+     * UMi-AV  LOS: 4.64*exp(-0.0066*h)   NLOS: 8 dB
+     */
+    static double ShadowFadingSigmaDb(A2gScenario scenario, A2gLink link, double hUtM);
 };
 
 } // namespace ns3

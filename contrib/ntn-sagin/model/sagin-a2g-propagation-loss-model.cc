@@ -4,6 +4,7 @@
  */
 #include "sagin-a2g-propagation-loss-model.h"
 
+#include "ns3/boolean.h"
 #include "ns3/double.h"
 #include "ns3/enum.h"
 #include "ns3/log.h"
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace ns3
 {
@@ -47,12 +49,53 @@ SaginA2gPropagationLossModel::GetTypeId()
                           "UAV (UT) altitude AGL in m; <=0 derives from geometry.",
                           DoubleValue(-1.0),
                           MakeDoubleAccessor(&SaginA2gPropagationLossModel::m_uavAltM),
-                          MakeDoubleChecker<double>());
+                          MakeDoubleChecker<double>())
+            .AddAttribute("DrawStochasticLos",
+                          "Draw LOS/NLOS per Tx/Rx pair from TR 36.777 Table B-1.1 "
+                          "instead of using the static Link attribute.",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&SaginA2gPropagationLossModel::m_drawLos),
+                          MakeBooleanChecker())
+            .AddAttribute("ApplyShadowFading",
+                          "Add a per-pair TR 36.777 Table B-1.2 log-normal shadow "
+                          "fading term to the path loss.",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&SaginA2gPropagationLossModel::m_applyShadowFading),
+                          MakeBooleanChecker())
+            .AddAttribute("DecorrelationDistanceM",
+                          "Endpoint displacement (m) beyond which the cached LOS/"
+                          "shadowing realisation for a pair is re-drawn.",
+                          DoubleValue(10.0),
+                          MakeDoubleAccessor(&SaginA2gPropagationLossModel::m_decorrM),
+                          MakeDoubleChecker<double>(0.0));
     return tid;
 }
 
-SaginA2gPropagationLossModel::SaginA2gPropagationLossModel() = default;
+SaginA2gPropagationLossModel::SaginA2gPropagationLossModel()
+    : m_losRng(CreateObject<UniformRandomVariable>()),
+      m_sfRng(CreateObject<NormalRandomVariable>())
+{
+    m_losRng->SetAttribute("Min", DoubleValue(0.0));
+    m_losRng->SetAttribute("Max", DoubleValue(1.0));
+    m_sfRng->SetAttribute("Mean", DoubleValue(0.0));
+    m_sfRng->SetAttribute("Variance", DoubleValue(1.0));
+}
+
 SaginA2gPropagationLossModel::~SaginA2gPropagationLossModel() = default;
+
+namespace
+{
+/// Order-independent key for a mobility-model pair.
+uint64_t
+PairKey(Ptr<MobilityModel> a, Ptr<MobilityModel> b)
+{
+    const auto pa = reinterpret_cast<uintptr_t>(PeekPointer(a));
+    const auto pb = reinterpret_cast<uintptr_t>(PeekPointer(b));
+    const uint64_t lo = std::min<uint64_t>(pa, pb);
+    const uint64_t hi = std::max<uint64_t>(pa, pb);
+    return lo * 1000003ULL + hi;
+}
+} // namespace
 
 double
 SaginA2gPropagationLossModel::DoCalcRxPower(double txPowerDbm,
@@ -69,9 +112,48 @@ SaginA2gPropagationLossModel::DoCalcRxPower(double txPowerDbm,
 
     // The aerial node (UAV) is the higher endpoint; its altitude is h_UT.
     const double hUt = (m_uavAltM > 0.0) ? m_uavAltM : std::max(pa.z, pb.z);
+    // 2-D (ground-projected) separation feeds the LOS-probability model.
+    const double d2d = std::sqrt(dx * dx + dy * dy);
 
+    // --- Per-pair cached stochastic realisation (LOS state + shadowing) -----
+    // Re-drawn only when the pair is new or has decorrelated (either endpoint
+    // moved > m_decorrM), NOT on every call — otherwise the fading would become
+    // per-transport-block white noise.
+    const uint64_t key = PairKey(a, b);
+    PairState& st = m_cache[key];
+    const bool moved = st.valid &&
+                       (CalculateDistance(pa, st.posA) > m_decorrM ||
+                        CalculateDistance(pb, st.posB) > m_decorrM);
+    if (!st.valid || moved)
+    {
+        if (m_drawLos)
+        {
+            const double pLos = A2gChannelTr36777::LosProbability(m_scenario, d2d, hUt);
+            st.los = (m_losRng->GetValue() < pLos);
+        }
+        else
+        {
+            st.los = (m_link == A2gLink::LOS);
+        }
+        const A2gLink link = st.los ? A2gLink::LOS : A2gLink::NLOS;
+        if (m_applyShadowFading)
+        {
+            const double sigma =
+                A2gChannelTr36777::ShadowFadingSigmaDb(m_scenario, link, hUt);
+            st.sfDb = m_sfRng->GetValue() * sigma; // N(0, sigma^2)
+        }
+        else
+        {
+            st.sfDb = 0.0;
+        }
+        st.posA = pa;
+        st.posB = pb;
+        st.valid = true;
+    }
+
+    const A2gLink link = st.los ? A2gLink::LOS : A2gLink::NLOS;
     const double totalPlDb =
-        A2gChannelTr36777::PathLossDb(m_scenario, m_link, d3d, m_fcGHz, hUt);
+        A2gChannelTr36777::PathLossDb(m_scenario, link, d3d, m_fcGHz, hUt) + st.sfDb;
 
     // Free-space reference at the same geometry/frequency (matches the base
     // FriisPropagationLossModel: L = 20log10(d) + 20log10(f) - 147.55 dB).
@@ -85,9 +167,11 @@ SaginA2gPropagationLossModel::DoCalcRxPower(double txPowerDbm,
 }
 
 int64_t
-SaginA2gPropagationLossModel::DoAssignStreams(int64_t /*stream*/)
+SaginA2gPropagationLossModel::DoAssignStreams(int64_t stream)
 {
-    return 0;
+    m_losRng->SetStream(stream);
+    m_sfRng->SetStream(stream + 1);
+    return 2;
 }
 
 } // namespace ns3

@@ -31,8 +31,7 @@ namespace ntnrrc
  * pre-compensation, RACH preambles arrive far outside their reception window.
  *
  * This class computes:
- *   TA_total      = 2 * d_path / c           (transparent payload)
- *                 = d_path     / c           (regenerative payload, single leg)
+ *   TA_total      = 2 * d_path / c           (round-trip; both payload modes)
  *   TA_common     = 2 * d_to_reference / c   (broadcast in SIB19)
  *   TA_UE-specific = TA_total - TA_common
  *   TA_drift      = d/dt(TA_total)           (used to schedule TA refresh)
@@ -58,7 +57,7 @@ class NtnTimingAdvance : public Object
     void SetReferencePosition(const Vector& earthFixedRefPosition);
     void SetPayloadMode(PayloadMode mode);
 
-    /// Total TA (round-trip for transparent, one-way for regenerative).
+    /// Total TA: round-trip service-link delay (2*d/c) for both payload modes.
     Time ComputeTotalTa() const;
     /// Common TA referenced to `m_referencePos` — the value broadcast in SIB19.
     Time ComputeCommonTa() const;
