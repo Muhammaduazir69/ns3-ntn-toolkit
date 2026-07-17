@@ -12,6 +12,21 @@
 #include "ns3/haps-trajectory-mobility-model.h"
 #include "ns3/haps-trajectory-trace.h"
 #include "ns3/multi-layer-router.h"
+#include "ns3/data-rate.h"
+#include "ns3/error-model.h"
+#include "ns3/inet-socket-address.h"
+#include "ns3/internet-stack-helper.h"
+#include "ns3/ipv4-address-helper.h"
+#include "ns3/ipv4-global-routing-helper.h"
+#include "ns3/ipv4.h"
+#include "ns3/node-container.h"
+#include "ns3/on-off-helper.h"
+#include "ns3/packet-sink-helper.h"
+#include "ns3/packet-sink.h"
+#include "ns3/point-to-point-helper.h"
+#include "ns3/point-to-point-net-device.h"
+#include "ns3/pointer.h"
+#include "ns3/uinteger.h"
 #include "ns3/ais-maritime-trace.h"
 #include "ns3/ais-mobility-model.h"
 #include "ns3/hst-mobility-model.h"
@@ -1903,6 +1918,207 @@ class A2gStochasticFadingTest : public TestCase
 };
 
 
+// ---------------------------------------------------------------------------
+// Audit gap G3: the router's chosen path must ACTUATE the data plane. Build a
+// real IPv4 forwarding topology with two parallel LEO relays:
+//
+//     SRC --- LEO-A --- GW --- SRV
+//         \-- LEO-B --/
+//
+// The MultiLayerRouter chooses one LEO (greedy max-elevation); we bring that
+// LEO's two interfaces UP and the other LEO's DOWN, then let global routing
+// forward a UDP flow SRC->SRV. Per-LEO bytes are counted at the GW (MacRx) so
+// we can assert the delivered bytes follow the ROUTER's choice: the LEO the
+// router selected carries the flow; the LEO it rejected carries ~0. Flipping
+// the geometry flips the choice and reroutes the data plane.
+// ---------------------------------------------------------------------------
+namespace
+{
+void
+AddRxBytes(uint64_t* counter, Ptr<const Packet> p)
+{
+    *counter += p->GetSize();
+}
+} // namespace
+
+class RouterGatesDataPlaneTest : public TestCase
+{
+  public:
+    RouterGatesDataPlaneTest()
+        : TestCase("G3: router's chosen path gates the data plane (off-route "
+                   "hop delivers ~0; flipping the choice reroutes)")
+    {
+    }
+
+    struct PhaseResult
+    {
+        double chosenLeoZ;   // altitude of the LEO the router picked
+        bool routerPickedA;  // did the router select LEO-A?
+        uint64_t carriedA;   // bytes GW received from LEO-A
+        uint64_t carriedB;   // bytes GW received from LEO-B
+        uint64_t deliveredSrv; // bytes the server received end-to-end
+    };
+
+    // Run one phase. `overheadIsA==true` places LEO-A directly overhead the
+    // source (max elevation) and LEO-B far/low; false swaps them. Returns what
+    // the router picked and what each path actually carried.
+    PhaseResult RunPhase(bool overheadIsA)
+    {
+        NodeContainer nodes;
+        nodes.Create(5); // 0=SRC 1=LEO-A 2=LEO-B 3=GW 4=SRV
+
+        // Mobility: the router scores LEO elevation from the SRC position.
+        auto src = CreateObject<ConstantPositionMobilityModel>();
+        src->SetPosition(Vector{0, 0, 0});
+        auto leoAMob = CreateObject<ConstantPositionMobilityModel>();
+        auto leoBMob = CreateObject<ConstantPositionMobilityModel>();
+        const Vector overhead{0, 0, 550000.0};      // ~90 deg elevation
+        const Vector faraway{2.0e6, 0, 550000.0};   // ~15 deg elevation
+        leoAMob->SetPosition(overheadIsA ? overhead : faraway);
+        leoBMob->SetPosition(overheadIsA ? faraway : overhead);
+
+        Ptr<MultiLayerRouter> router = CreateObject<MultiLayerRouter>();
+        router->AddNode(SaginLayer::Leo, leoAMob);
+        router->AddNode(SaginLayer::Leo, leoBMob);
+
+        InternetStackHelper internet;
+        internet.Install(nodes);
+
+        PointToPointHelper p2p;
+        p2p.SetDeviceAttribute("DataRate", DataRateValue(DataRate(uint64_t(50e6))));
+        p2p.SetChannelAttribute("Delay", TimeValue(MilliSeconds(2)));
+        Ipv4AddressHelper ipv4;
+
+        // Build one link, return device container + a per-side RateErrorModel
+        // on the receiving (index-1) device so we can gate it.
+        struct Link
+        {
+            NetDeviceContainer dev;
+            Ptr<RateErrorModel> emRx; // on dev.Get(1)
+            Ptr<Ipv4> ipA, ipB;
+            uint32_t ifA, ifB;
+        };
+        auto makeLink = [&](Ptr<Node> a, Ptr<Node> b, const char* subnet) -> Link {
+            Link l;
+            l.dev = p2p.Install(NodeContainer(a, b));
+            l.emRx = CreateObject<RateErrorModel>();
+            l.emRx->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
+            l.emRx->SetRate(0.0);
+            l.dev.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(l.emRx));
+            ipv4.SetBase(Ipv4Address(subnet), "255.255.255.0");
+            auto ifc = ipv4.Assign(l.dev);
+            l.ipA = a->GetObject<Ipv4>();
+            l.ipB = b->GetObject<Ipv4>();
+            l.ifA = ifc.Get(0).second;
+            l.ifB = ifc.Get(1).second;
+            return l;
+        };
+
+        Link srcA = makeLink(nodes.Get(0), nodes.Get(1), "10.40.1.0"); // SRC-LEOA
+        Link aGw = makeLink(nodes.Get(1), nodes.Get(3), "10.40.2.0");  // LEOA-GW
+        Link srcB = makeLink(nodes.Get(0), nodes.Get(2), "10.40.3.0"); // SRC-LEOB
+        Link bGw = makeLink(nodes.Get(2), nodes.Get(3), "10.40.4.0");  // LEOB-GW
+        Link gwSrv = makeLink(nodes.Get(3), nodes.Get(4), "10.40.9.0"); // GW-SRV
+        Ipv4Address srvAddr =
+            nodes.Get(4)->GetObject<Ipv4>()->GetAddress(gwSrv.ifB, 0).GetLocal();
+
+        // Count bytes the GW receives from each LEO (GW is side 1 of *-GW).
+        uint64_t carriedA = 0;
+        uint64_t carriedB = 0;
+        aGw.dev.Get(1)->TraceConnectWithoutContext(
+            "MacRx", MakeBoundCallback(&AddRxBytes, &carriedA));
+        bGw.dev.Get(1)->TraceConnectWithoutContext(
+            "MacRx", MakeBoundCallback(&AddRxBytes, &carriedB));
+
+        // ---- ACTUATE THE ROUTER DECISION ONTO THE DATA PLANE ----
+        auto path = router->Route(src);
+        Ptr<MobilityModel> chosen = path.back().node;
+        const bool aChosen = (chosen == leoAMob);
+        // Bring the chosen LEO's two links UP + usable; the other DOWN.
+        auto gate = [](Link& l, bool on) {
+            l.emRx->SetRate(on ? 0.0 : 1.0);
+            if (on)
+            {
+                l.ipA->SetUp(l.ifA);
+                l.ipB->SetUp(l.ifB);
+            }
+            else
+            {
+                l.ipA->SetDown(l.ifA);
+                l.ipB->SetDown(l.ifB);
+            }
+        };
+        gate(srcA, aChosen);
+        gate(aGw, aChosen);
+        gate(srcB, !aChosen);
+        gate(bGw, !aChosen);
+
+        Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+
+        // ---- traffic: SRC -> SRV (stable address, reached over chosen LEO) ---
+        const uint16_t port = 8000;
+        OnOffHelper onoff("ns3::UdpSocketFactory",
+                          InetSocketAddress(srvAddr, port));
+        onoff.SetConstantRate(DataRate(uint64_t(4e6)), 1000);
+        onoff.SetAttribute("StartTime", TimeValue(Seconds(1.0)));
+        onoff.SetAttribute("StopTime", TimeValue(Seconds(6.0)));
+        onoff.Install(nodes.Get(0));
+
+        PacketSinkHelper sink("ns3::UdpSocketFactory",
+                              InetSocketAddress(Ipv4Address::GetAny(), port));
+        ApplicationContainer sinkApp = sink.Install(nodes.Get(4));
+        sinkApp.Start(Seconds(0.0));
+        sinkApp.Stop(Seconds(6.5));
+
+        Simulator::Stop(Seconds(6.5));
+        Simulator::Run();
+
+        PhaseResult r;
+        r.chosenLeoZ = chosen->GetPosition().z;
+        r.routerPickedA = aChosen;
+        r.carriedA = carriedA;
+        r.carriedB = carriedB;
+        r.deliveredSrv =
+            DynamicCast<PacketSink>(sinkApp.Get(0))->GetTotalRx();
+        Simulator::Destroy();
+        return r;
+    }
+
+    void DoRun() override
+    {
+        // Phase A: LEO-A overhead -> router picks A -> data plane carries via A.
+        PhaseResult a = RunPhase(true);
+        NS_TEST_ASSERT_MSG_EQ(a.routerPickedA, true,
+                              "phase A: router selects overhead LEO-A");
+        NS_TEST_ASSERT_MSG_EQ_TOL(a.chosenLeoZ, 550000.0, 1.0,
+                                  "phase A: router picked a LEO");
+        NS_TEST_ASSERT_MSG_GT(a.deliveredSrv, 100000u,
+                              "phase A: flow delivered end-to-end over LEO-A");
+        NS_TEST_ASSERT_MSG_GT(a.carriedA, 100000u,
+                              "phase A: chosen LEO-A carries the flow");
+        NS_TEST_ASSERT_MSG_EQ(a.carriedB, 0u,
+                              "phase A: off-route LEO-B carries ~0 bytes");
+
+        // Phase B: LEO-B overhead -> router picks B -> data plane REROUTES to B.
+        PhaseResult b = RunPhase(false);
+        NS_TEST_ASSERT_MSG_EQ(b.routerPickedA, false,
+                              "phase B: router selects overhead LEO-B");
+        NS_TEST_ASSERT_MSG_GT(b.deliveredSrv, 100000u,
+                              "phase B: flow delivered end-to-end over LEO-B");
+        NS_TEST_ASSERT_MSG_GT(b.carriedB, 100000u,
+                              "phase B: chosen LEO-B carries the flow");
+        NS_TEST_ASSERT_MSG_EQ(b.carriedA, 0u,
+                              "phase B: off-route LEO-A carries ~0 bytes");
+
+        // The carried traffic FOLLOWED the router decision, not a fixed chain:
+        // A-bytes dominate in phase A, B-bytes dominate in phase B.
+        NS_TEST_ASSERT_MSG_GT(a.carriedA, b.carriedA,
+                              "LEO-A only carries when the router selects it");
+        NS_TEST_ASSERT_MSG_GT(b.carriedB, a.carriedB,
+                              "LEO-B only carries when the router selects it");
+    }
+};
+
 class NtnSaginTestSuite : public TestSuite
 {
   public:
@@ -1915,6 +2131,7 @@ class NtnSaginTestSuite : public TestSuite
         AddTestCase(new A2gLosProbabilityMonotonicTest, TestCase::Duration::QUICK);
         AddTestCase(new A2gStochasticFadingTest, TestCase::Duration::QUICK);
         AddTestCase(new MultiLayerRouterConvergesTest, TestCase::Duration::QUICK);
+        AddTestCase(new RouterGatesDataPlaneTest, TestCase::Duration::QUICK);
         AddTestCase(new AeronauticalReachesArrivalTest, TestCase::Duration::QUICK);
         // Roadmap §4.4.1 — OpenSky ADS-B trace importer + replay mobility.
         AddTestCase(new OpenSkyImporterParseTest, TestCase::Duration::QUICK);

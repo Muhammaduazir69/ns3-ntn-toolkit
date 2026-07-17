@@ -139,9 +139,33 @@ SaginSliceRouter::RouteForSlice(Ptr<MobilityModel> source,
         return empty;
     }
     const ntnslice::SliceProfile profile = GetProfile(snssai);
+
+    // SAVE the caller's scorer state (global + per-layer) so installing the
+    // slice scorer for this one Route() does not destroy a scorer the caller
+    // had already installed (header contract: "restores the prior scorer").
+    const SaginScoreCallback savedGlobal = m_router->GetScorer();
+    SaginScoreCallback savedLayer[4] = {
+        m_router->GetLayerScorer(SaginLayer::Ground),
+        m_router->GetLayerScorer(SaginLayer::Uav),
+        m_router->GetLayerScorer(SaginLayer::Haps),
+        m_router->GetLayerScorer(SaginLayer::Leo),
+    };
+
+    // SetScorer installs the slice scorer globally and clears per-layer ones.
     m_router->SetScorer(MakeSliceScorer(profile));
     auto path = m_router->Route(source);
-    m_router->ClearScorer();
+
+    // RESTORE exactly what the caller had. SetScorer(savedGlobal) re-seats the
+    // saved global scorer (nullptr => default greedy) and clears per-layer
+    // scorers; then re-seat each saved per-layer scorer.
+    m_router->SetScorer(savedGlobal);
+    for (uint8_t l = 0; l < 4; ++l)
+    {
+        if (savedLayer[l])
+        {
+            m_router->SetLayerScorer(static_cast<SaginLayer>(l), savedLayer[l]);
+        }
+    }
     return path;
 }
 

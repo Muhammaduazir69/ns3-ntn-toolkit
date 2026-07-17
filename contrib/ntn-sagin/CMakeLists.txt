@@ -60,5 +60,11 @@ build_lib(
     ${libmobility}
     ${libpropagation}
     ${libntn-slice}
+    # point-to-point + internet + applications are needed by the router
+    # data-plane-actuation test (RouterGatesDataPlaneTest), which builds a
+    # real IPv4 forwarding topology and gates it from the route decision.
+    ${libpoint-to-point}
+    ${libinternet}
+    ${libapplications}
   TEST_SOURCES ${test_sources}
 )

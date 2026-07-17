@@ -108,6 +108,27 @@ class MultiLayerRouter : public Object
     /// Remove any installed scorers (global + per-layer).
     void ClearScorer();
 
+    /// Read back the currently-installed global scorer (may be nullptr).
+    /// Together with @c GetLayerScorer this lets a wrapper (e.g.
+    /// SaginSliceRouter) SAVE the router's scorer state, install its own for
+    /// one Route(), then RESTORE the caller's scorer exactly.
+    SaginScoreCallback GetScorer() const { return m_globalScorer; }
+
+    /// Read back the per-layer scorer for @c layer (may be nullptr).
+    SaginScoreCallback GetLayerScorer(SaginLayer layer) const
+    {
+        return m_layerScorer[static_cast<uint8_t>(layer)];
+    }
+
+    /// Minimum elevation (deg) a candidate must present to the previous hop
+    /// to be feasible. The DEFAULT (greedy max-elevation) scorer returns
+    /// -inf below this floor, so a below-horizon hop is never selected and
+    /// Route() truncates the path at the last feasible layer. Custom scorers
+    /// (installed via SetScorer / SetLayerScorer) are responsible for their
+    /// own feasibility and are not affected by this gate.
+    void SetMinElevationDeg(double deg) { m_minElevationDeg = deg; }
+    double GetMinElevationDeg() const { return m_minElevationDeg; }
+
     /// Set the RL observation that's surfaced to every scoring callback
     /// during the next Route() call. The router copies the vector, so
     /// callers can rewrite their state between calls.
@@ -124,6 +145,7 @@ class MultiLayerRouter : public Object
     std::vector<Ptr<MobilityModel>> m_layers[4];
     SaginScoreCallback m_globalScorer;
     SaginScoreCallback m_layerScorer[4];
+    double m_minElevationDeg{0.0};
     std::vector<double> m_observation;
     mutable std::atomic<uint64_t> m_routes{0};
     mutable std::atomic<uint64_t> m_scored{0};

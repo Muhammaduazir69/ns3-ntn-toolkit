@@ -4,6 +4,7 @@
  */
 #include "multi-layer-router.h"
 
+#include "ns3/double.h"
 #include "ns3/log.h"
 
 #include <cmath>
@@ -18,10 +19,19 @@ NS_OBJECT_ENSURE_REGISTERED(MultiLayerRouter);
 TypeId
 MultiLayerRouter::GetTypeId()
 {
-    static TypeId tid = TypeId("ns3::MultiLayerRouter")
-                           .SetParent<Object>()
-                           .SetGroupName("NtnSagin")
-                           .AddConstructor<MultiLayerRouter>();
+    static TypeId tid =
+        TypeId("ns3::MultiLayerRouter")
+            .SetParent<Object>()
+            .SetGroupName("NtnSagin")
+            .AddConstructor<MultiLayerRouter>()
+            .AddAttribute("MinElevationDeg",
+                          "Elevation floor (deg) below which the default "
+                          "max-elevation scorer treats a candidate as "
+                          "infeasible (returns -inf), so Route() truncates "
+                          "the path rather than selecting a below-horizon hop.",
+                          DoubleValue(0.0),
+                          MakeDoubleAccessor(&MultiLayerRouter::m_minElevationDeg),
+                          MakeDoubleChecker<double>());
     return tid;
 }
 
@@ -72,7 +82,14 @@ MultiLayerRouter::Score(const SaginHopCandidate& c) const
     {
         return m_globalScorer(c);
     }
-    // Default: greedy max-elevation.
+    // Default: greedy max-elevation with an honest feasibility gate. A hop
+    // whose elevation from the previous node is below the horizon floor is
+    // physically unusable, so it is handed -inf and never selected; when a
+    // whole layer is below the floor Route() truncates there.
+    if (c.elevationDeg < m_minElevationDeg)
+    {
+        return -std::numeric_limits<double>::infinity();
+    }
     return c.elevationDeg;
 }
 
