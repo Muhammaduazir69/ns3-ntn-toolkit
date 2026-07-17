@@ -99,9 +99,28 @@ NrPdcpHeader::Deserialize(Buffer::Iterator start)
     byte_1 = i.ReadU8();
     byte_2 = i.ReadU8();
     m_dcBit = (byte_1 & 0x80) > 7;
-    // For now, we just support DATA PDUs
-    NS_ASSERT(m_dcBit == DATA_PDU);
-    m_sequenceNumber = ((byte_1 & 0x0F) << 8) | byte_2;
+    // TS 38.323 §6.2.2/§6.2.3: the D/C bit selects Data (1) vs Control (0) PDU.
+    //
+    // This used to be `NS_ASSERT(m_dcBit == DATA_PDU)` with the note "For now,
+    // we just support DATA PDUs", which aborted the whole simulation the moment a
+    // Control PDU reached PDCP. That happens for real during an X2/Xn handover
+    // (SN-status transfer / end marker) once the X2 link carries a non-zero
+    // delay — i.e. on any NTN inter-satellite handover, where the X2 leg is tens
+    // of ms. Asserting here turned a normal, spec-mandated PDU into a crash.
+    //
+    // Deserialising a Control PDU is harmless; the CALLER decides what to do
+    // with it (NrPdcp::DoReceivePdu discards it, which is the correct behaviour
+    // for a PDCP that implements neither RoHC feedback nor status reports).
+    // Only the sequence number is Data-PDU-specific, so leave it at 0 for a
+    // Control PDU rather than reading the PDU-type/FMC fields as an SN.
+    if (m_dcBit == DATA_PDU)
+    {
+        m_sequenceNumber = ((byte_1 & 0x0F) << 8) | byte_2;
+    }
+    else
+    {
+        m_sequenceNumber = 0;
+    }
 
     return GetSerializedSize();
 }

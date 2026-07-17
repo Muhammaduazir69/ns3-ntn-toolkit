@@ -6,6 +6,10 @@
 
 #include "ntn-tr38811-excess-loss-model.h"
 
+#include <algorithm>
+
+#include "ns3/simulator.h"
+
 #include "ns3/boolean.h"
 #include "ns3/double.h"
 #include "ns3/enum.h"
@@ -60,10 +64,33 @@ Ntn38811ExcessLossModel::GetTypeId()
                           MakeBooleanChecker())
             .AddAttribute("EnableFastFading",
                           "Apply TR 38.811 §6.7/6.9 Rician small-scale fading "
-                          "(elevation-dependent K-factor).",
-                          BooleanValue(true),
+                          "(elevation-dependent K-factor). DEFAULT OFF (gap S6): both radio "
+                          "backends keep the 3GPP phased-array spectrum model, which already "
+                          "applies small-scale fading with Doppler on the same link — enabling "
+                          "this too multiplies two independent fast-fading processes onto one "
+                          "link. Enable only when no 3GPP spectrum model is in the path.",
+                          BooleanValue(false),
                           MakeBooleanAccessor(&Ntn38811ExcessLossModel::m_enableFastFading),
-                          MakeBooleanChecker());
+                          MakeBooleanChecker())
+            .AddAttribute("ShadowCorrelationDistanceM",
+                          "S6: distance (m) the ground node must move before the shadow-fading "
+                          "sample is redrawn (TR 38.811 §6.6.2 correlation distance).",
+                          DoubleValue(50.0),
+                          MakeDoubleAccessor(&Ntn38811ExcessLossModel::m_sfCorrDistanceM),
+                          MakeDoubleChecker<double>(0.0))
+            .AddAttribute("ShadowCorrelationElevationDeg",
+                          "S6: elevation change (deg) that also decorrelates the shadowing. For "
+                          "a static UE the geometry changes because the satellite moves, so "
+                          "displacement alone never decorrelates a LEO pass.",
+                          DoubleValue(5.0),
+                          MakeDoubleAccessor(&Ntn38811ExcessLossModel::m_sfCorrElevDeg),
+                          MakeDoubleChecker<double>(0.0))
+            .AddAttribute("ScintillationCoherenceS",
+                          "S6: ITU-R P.618 scintillation coherence time (s); the sample is held "
+                          "for this long instead of being redrawn per transport block.",
+                          DoubleValue(1.0),
+                          MakeDoubleAccessor(&Ntn38811ExcessLossModel::m_scintCoherenceS),
+                          MakeDoubleChecker<double>(0.0));
     return tid;
 }
 
@@ -194,24 +221,65 @@ Ntn38811ExcessLossModel::DoCalcRxPower(double txPowerDbm,
     //     Table 6.6.2-x NLOS clutter values apply only under an NLOS condition.) ---
     const double clutterDb = 0.0;
 
+    // --- S6: correlated large-scale parameters -----------------------------
+    // Shadow fading and scintillation are CORRELATED processes; re-drawing them
+    // per call (per transport block) made them white noise. Look up / refresh a
+    // per-node-pair cache instead. Key on the mobility-model pointers, ordered
+    // so the DL and UL of the same link share one state.
+    const uintptr_t ka = reinterpret_cast<uintptr_t>(PeekPointer(a));
+    const uintptr_t kb = reinterpret_cast<uintptr_t>(PeekPointer(b));
+    const auto key = std::minmax(ka, kb);
+    LargeScaleState& st = m_lssCache[{key.first, key.second}];
+
+    // The ground end is whichever node is lower; that is the one whose
+    // displacement decorrelates the shadowing per TR 38.811 §6.6.2.
+    const Vector pa = a->GetPosition();
+    const Vector pb = b->GetPosition();
+    const double ra = std::sqrt(pa.x * pa.x + pa.y * pa.y + pa.z * pa.z);
+    const double rb = std::sqrt(pb.x * pb.x + pb.y * pb.y + pb.z * pb.z);
+    const Vector groundPos = (ra <= rb) ? pa : pb;
+
+    const double moved = std::sqrt(std::pow(groundPos.x - st.lastPos.x, 2) +
+                                   std::pow(groundPos.y - st.lastPos.y, 2) +
+                                   std::pow(groundPos.z - st.lastPos.z, 2));
+    const bool sfStale = !st.valid || (moved > m_sfCorrDistanceM) ||
+                         (std::fabs(elevDeg - st.lastElevDeg) > m_sfCorrElevDeg);
+
     // --- Shadow fading: log-normal, sigma from TR 38.811 Table 6.6.2-x S-band
     //     LOS (per scenario, interpolated by elevation). Zero-mean. ---
-    double shadowDb = 0.0;
-    if (m_enableShadowFading)
+    if (m_enableShadowFading && sfStale)
     {
-        shadowDb = ShadowSigmaDb(elevDeg) * m_sfRng->GetValue();
+        st.shadowDb = ShadowSigmaDb(elevDeg) * m_sfRng->GetValue();
+        st.lastPos = groundPos;
+        st.lastElevDeg = elevDeg;
+        st.valid = true;
     }
+    else if (!m_enableShadowFading)
+    {
+        st.shadowDb = 0.0;
+    }
+    const double shadowDb = st.shadowDb;
 
     // --- Tropospheric scintillation (ITU-R P.618): sigma grows with sqrt(freq)
-    //     and shrinks with elevation^(-11/12). ---
-    double scintDb = 0.0;
+    //     and shrinks with elevation^(-11/12). Coherence is seconds-scale, so
+    //     hold the sample for m_scintCoherenceS rather than redrawing per TB. ---
     if (m_enableScintillation)
     {
-        const double fGHz = m_freqHz / 1.0e9;
-        const double sigmaXi =
-            0.5 * std::sqrt(fGHz / 2.0) / std::pow(sinElev, 11.0 / 12.0);
-        scintDb = sigmaXi * m_scintRng->GetValue();
+        const Time now = Simulator::Now();
+        if ((now - st.lastScintTime).GetSeconds() >= m_scintCoherenceS)
+        {
+            const double fGHz = m_freqHz / 1.0e9;
+            const double sigmaXi =
+                0.5 * std::sqrt(fGHz / 2.0) / std::pow(sinElev, 11.0 / 12.0);
+            st.scintDb = sigmaXi * m_scintRng->GetValue();
+            st.lastScintTime = now;
+        }
     }
+    else
+    {
+        st.scintDb = 0.0;
+    }
+    const double scintDb = st.scintDb;
 
     // --- Small-scale (fast) fading: TR 38.811 §6.7/§6.9 Rician process with the
     //     elevation-dependent K-factor from Table 6.7.2-Xa. Draw the complex

@@ -145,7 +145,16 @@ class NtnRealStackHelper
         uint64_t minPhyRxTb = 50;     ///< transport blocks decoded at the UE PHY
         double minRxThroughputMbps = 0.05; ///< measured app throughput floor
         bool requireSinrProvenance = true; ///< SINR must come from a PHY trace
-        bool requireErrorModelActive = true; ///< the error model must run (TBLER samples exist)
+        /// The error model must actually RUN. Checked by probing for a
+        /// strictly-positive TBLER sample: a live model always reports a finite
+        /// value (~1e-8 even on a pristine link), a disabled one writes exactly
+        /// 0.0 forever. (Before gap S9 this was the same predicate as
+        /// requireSinrProvenance and could not detect a disabled error model.)
+        bool requireErrorModelActive = true;
+        /// Measured app one-way delay must respect the speed of light: at least
+        /// satellite-altitude/c + backhaul. Catches a zero-delay air interface
+        /// (gap S2). Disable only for non-satellite topologies.
+        bool requireOwdFloor = true;
     };
 
     NtnRealStackHelper();
@@ -157,6 +166,14 @@ class NtnRealStackHelper
     void SetRunTag(std::string t) { m_runTag = std::move(t); }
     /// Select the radio backend (default Mmwave). Call before Build().
     void SetRadioBackend(RadioBackend b) { m_backend = b; }
+
+    /// S2: request a REAL ConstantSpeedPropagationDelayModel on the radio
+    /// channel (nr backend). DEFAULT OFF — see m_airIfaceDelayRequested: the
+    /// vendored nr v3.3 lacks NTN K_offset/TA and will abort with 'Cannot TX
+    /// while RX' on any uplink traffic, or assert on multi-UE UL alignment.
+    /// When off (the default) the service-link slant is carried on the backhaul
+    /// so the measured end-to-end OWD is still physically correct.
+    void SetAirInterfaceDelay(bool enable) { m_airIfaceDelayRequested = enable; }
     RadioBackend GetRadioBackend() const { return m_backend; }
     /// FR1 numerology for the Nr backend only: 0 = 15 kHz, 1 = 30 kHz (default).
     /// Ignored by the Mmwave backend. Call before Build().
@@ -166,7 +183,73 @@ class NtnRealStackHelper
     void SetBandwidthHz(double b) { m_bwHz = b; }
     double GetBandwidthHz() const { return m_bwHz; }
     double GetCarrierFrequencyHz() const { return m_freqHz; }
-    void SetSatEirpDbm(double p) { m_satEirpDbm = p; }   ///< gNB (satellite) Tx power / EIRP
+    /// gNB (satellite) CONDUCTED Tx power in dBm.
+    ///
+    /// WARNING (gap S7): this value is written verbatim into the PHY's TxPower,
+    /// i.e. it is the power at the array input. The UPA array gain
+    /// (10*log10(rows*cols), ~18 dB for the default 8x8) and any beamforming
+    /// gain are added ON TOP by the antenna model, so the radiated EIRP is
+    /// HIGHER than what you pass here. Passing a TR 38.821 Set-1 EIRP figure
+    /// (which already includes the 30 dBi satellite antenna) therefore
+    /// double-counts the antenna by ~20 dB. Prefer SetSatEirpTotalDbm() or
+    /// SetSatEirpDensityDbwMhz(), which back-compute the conducted power.
+    void SetSatEirpDbm(double p) { m_satEirpDbm = p; }
+
+    /// Set the intended TOTAL radiated EIRP in dBm (TR 38.821-style, antenna
+    /// gain INCLUDED). The helper back-computes the conducted TxPower by
+    /// subtracting the array gain, so the effective radiated EIRP matches \p
+    /// eirpDbm. Must be called after SetMimo()/antenna config (it reads the
+    /// array size) and before Build().
+    void SetSatEirpTotalDbm(double eirpDbm)
+    {
+        m_satEirpDbm = eirpDbm - ArrayGainDb();
+        m_eirpTotalDbm = eirpDbm;
+    }
+
+    /// TR 38.821 Set-1 style EIRP DENSITY (dBW/MHz). Converts to a total EIRP
+    /// over the configured bandwidth then back-computes conducted power:
+    ///   EIRP_dBm = density_dBW/MHz + 10log10(BW_MHz) + 30
+    /// Set the bandwidth (SetBandwidthHz) before calling.
+    void SetSatEirpDensityDbwMhz(double densityDbwPerMhz)
+    {
+        const double bwMhz = m_bwHz / 1e6;
+        SetSatEirpTotalDbm(densityDbwPerMhz + 10.0 * std::log10(std::max(bwMhz, 1e-9)) + 30.0);
+    }
+
+    /// UPA array gain (dB) implied by the configured gNB antenna panel.
+    double ArrayGainDb() const
+    {
+        const double n = static_cast<double>(m_gnbRows) * static_cast<double>(m_gnbCols);
+        return 10.0 * std::log10(std::max(n, 1.0));
+    }
+
+    /// Effective radiated EIRP (dBm) the current config will actually produce:
+    /// conducted TxPower + array gain, minus the per-BWP power split.
+    double GetEffectiveEirpDbm() const;
+
+    /// S8: one-way inter-gNB (X2/Xn) delay derived from the live inter-satellite
+    /// geometry — a direct ISL hop for a regenerative payload, or the double
+    /// feeder loop for a transparent one. Used to configure X2LinkDelay so
+    /// handover preparation is not instantaneous between orbiting gNBs.
+    Time ComputeX2LinkDelay() const;
+
+    /// S2: one-way UE<->satellite (service link) propagation delay from the
+    /// live geometry. On the mmwave backend (zero-delay air interface) this is
+    /// folded into the backhaul so the user-plane OWD is physically right; the
+    /// nr backend carries it on the air interface instead.
+    Time ComputeServiceLinkDelay() const;
+
+    /// S9 / gate 1: theoretical minimum app one-way delay (ms) for this
+    /// topology = satellite altitude / c (a UE directly under the sub-satellite
+    /// point — no geometry can beat it) + the configured backhaul. Returns 0 if
+    /// the geometry is unavailable (gate then skipped).
+    double ComputeOwdFloorMs() const;
+
+    /// S9: true when the UE PHY's DataErrorModelEnabled attribute is set, i.e.
+    /// the error model really runs. Attribute check, not a TBLER value probe:
+    /// both backends report TBLER 0 when the model is OFF, and a pristine link
+    /// reports 0 as well, so values cannot distinguish the two.
+    bool IsErrorModelEnabled() const;
     /// Configured value written verbatim into MmWaveEnbPhy::TxPower. NOTE
     /// (gap G16): mmwave adds the antenna-array gain SEPARATELY in the spectrum
     /// model, so the effective radiated EIRP = this value + array gain; treat
@@ -405,7 +488,12 @@ class NtnRealStackHelper
 
     // ---- Per-UE measured state (for CHO / RIC / slice logic) --------------
     /// Current RNTI assigned to the UE at index \p ueIndex (0 if not attached).
+    /// NOTE: an RNTI is only unique WITHIN a cell — pair it with
+    /// GetUeServingCellId() before using it as a per-UE key.
     uint16_t GetUeRnti(uint32_t ueIndex) const;
+    /// Cell id currently serving the UE at \p ueIndex (0 if not attached). This
+    /// tracks handovers, unlike GetServingCellId() which reports gNB[0].
+    uint16_t GetUeServingCellId(uint32_t ueIndex) const;
     /// Most recent measured DL SINR (dB) for the UE, or NaN if no samples yet.
     double GetUeRecentSinrDb(uint32_t ueIndex) const;
     /// Run-mean measured DL SINR (dB) for the UE, or NaN if no samples.
@@ -501,6 +589,7 @@ class NtnRealStackHelper
     double m_freqHz{2.0e9};       // S-band carrier; mmWave-NR FR2 numerology (60 kHz SCS), not a 3GPP NR-NTN FR1 band/numerology
     double m_bwHz{50.0e6};        // default exceeds the 20/30 MHz NTN-FR1 max
     double m_satEirpDbm{55.0};    // gNB conducted Tx power (UPA array gain added separately), Friis budget -> ~15-20 dB SINR
+    double m_eirpTotalDbm{std::numeric_limits<double>::quiet_NaN()}; // S7: intended total EIRP if set via SetSatEirpTotalDbm/Density
     double m_ueTxDbm{33.0};
     bool m_tr38811{true};         // chain TR 38.811 excess loss on the measured plane (G1)
     uint8_t m_ntnScenario{2};     // 0 DenseUrban,1 Urban,2 Suburban,3 Rural
@@ -540,6 +629,10 @@ class NtnRealStackHelper
     Ptr<NrPointToPointEpcHelper> m_nrEpc;
     Ptr<IdealBeamformingHelper> m_nrBeamforming;
     Ptr<PropagationLossModel> m_nrBaseLoss; // Friis head for AddExtraPropagationLoss chaining
+    /// S5: per-BWP Friis heads. Extra-loss chains MUST attach to every BWP —
+    /// chaining only head[0] left sliced runs (N BWPs) with no NTN physics on
+    /// slices 1..N-1, biasing the per-slice SINR comparison.
+    std::vector<Ptr<PropagationLossModel>> m_nrBaseLossPerBwp;
     NodeContainer m_gnb;
     NodeContainer m_ue;
     NetDeviceContainer m_enbDevs;
@@ -556,10 +649,35 @@ class NtnRealStackHelper
     // Measured-KPI sink state
     SinrAccum m_dlGlobal;
     std::map<uint16_t, SinrAccum> m_dlPerCell;
-    std::map<uint16_t, SinrAccum> m_dlPerRnti; // keyed by UE RNTI
+    /// S3: per-UE accumulators are keyed by (cellId,RNTI), NOT by bare RNTI.
+    /// RNTIs are allocated per cell and restart at each gNB, so a bare-RNTI key
+    /// silently blends UEs served by different satellites in EVERY multi-gNB run
+    /// (2-sat handover scenarios, constellations) and corrupts exactly the
+    /// accessors CHO / RIC / slice logic and the AI flow monitor consume.
+    static inline uint32_t UeKey(uint16_t cellId, uint16_t rnti)
+    {
+        return (static_cast<uint32_t>(cellId) << 16) | static_cast<uint32_t>(rnti);
+    }
+
+    std::map<uint32_t, SinrAccum> m_dlPerRnti; // keyed by UeKey(cellId, rnti)
     std::map<uint8_t, SinrAccum> m_dlPerBwp;   // keyed by NR BWP id (per-slice)
-    std::map<uint16_t, double> m_lastSinrDbPerRnti;
-    std::map<uint16_t, double> m_lastTblerPerRnti;
+    std::map<uint32_t, double> m_lastSinrDbPerRnti; // keyed by UeKey(cellId, rnti)
+    std::map<uint32_t, double> m_lastTblerPerRnti;  // keyed by UeKey(cellId, rnti)
+    bool m_sawNonZeroTbler{false}; // S9: proves the error model actually ran
+    /// S2: true when a real propagation-delay model sits on the RADIO channel.
+    /// False means the service-link slant is carried on the backhaul instead
+    /// (vendored stacks without NTN Timing Advance cannot align multi-UE UL
+    /// under a per-distance delay). Read by ComputePayloadExtraDelay to avoid
+    /// double-counting the slant.
+    bool m_airIfaceDelayActive{false};
+    /// S2 / R1-R3: opt-in request for a REAL propagation delay on the radio
+    /// channel. OFF by default: the vendored 5G-LENA v3.3 has no NTN K_offset
+    /// or Timing Advance, so a real delay makes the UE transmit while still
+    /// receiving ("Cannot TX while RX") and misaligns multi-UE UL control.
+    /// Until P3.16 lands K_offset, the service-link slant rides the backhaul
+    /// instead — the end-to-end delay is right, the air interface just does
+    /// not feel it. Safe to enable only for single-UE downlink-only studies.
+    bool m_airIfaceDelayRequested{false};
     uint32_t m_hoCount{0};                      // A: completed NR handovers
     std::vector<Ptr<NrHandoverAlgorithm>> m_hoAlgos; // A: per-gNB A3 algos (kept alive)
 

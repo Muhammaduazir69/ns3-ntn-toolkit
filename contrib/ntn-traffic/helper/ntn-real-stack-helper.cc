@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ntn-real-stack-helper.h"
 
+#include "ns3/ntn-spectrum-seam-model.h"
+
 #include "ns3/abort.h"
 #include "ns3/application-container.h"
 #include "ns3/boolean.h"
@@ -23,9 +25,12 @@
 #include "ns3/mmwave-point-to-point-epc-helper.h"
 // nr (5G-LENA) backend
 #include "ns3/antenna-module.h"
+#include "ns3/channel-condition-model.h"
 #include "ns3/nr-module.h"
+#include "ns3/propagation-delay-model.h"
 #include "ns3/spectrum-channel.h"
 #include "ns3/spectrum-propagation-loss-model.h"
+#include "ns3/three-gpp-spectrum-propagation-loss-model.h"
 #include "ns3/uinteger.h"
 #include "ns3/nr-gnb-net-device.h"
 #include "ns3/nr-ue-net-device.h"
@@ -297,20 +302,27 @@ NtnRealStackHelper::BuildMmwaveRadio()
     // elevation- and scenario-dependent rather than free-space-flat.
     m_mmwave->SetPathlossModelType("ns3::FriisPropagationLossModel");
     m_mmwave->SetChannelConditionModelType("ns3::AlwaysLosChannelConditionModel");
-    // G2 (propagation delay) — KNOWN, DOCUMENTED CONSTRAINT: the NTN one-way
-    // slant delay (LEO ~2-13 ms, GEO ~120 ms) is applied on the FEEDER/BACKHAUL
-    // P2P leg (see m_backhaulDelay / SetFeederGeometry), NOT on the mmwave air
-    // interface. The vendored NYU mmwave MAC/PHY assumes near-zero radio
-    // propagation and has no Rel-17 K_offset scheduling-offset machinery, so a
-    // ms-scale ConstantSpeedPropagationDelayModel on the radio SpectrumChannel
-    // de-syncs DCI/UCI slot timing and destabilises the stack. Consequently the
-    // END-TO-END user-plane one-way delay IS correct (the slant is carried on the
-    // feeder leg, which a P2P channel tolerates), while the air-interface HARQ /
-    // scheduling do NOT experience the slant — which is exactly why HARQ is off by
-    // default and why the NTN HARQ profile (SetNtnHarqProfile) only stretches the
-    // two timing knobs mmwave exposes. A fully air-interface-accurate slant delay
-    // would require implementing K_offset in mmwave (net-new functionality, out of
-    // scope). Callers needing correct end-to-end latency MUST wire SetFeederGeometry().
+    // G2 / S2 (propagation delay) — KNOWN, DOCUMENTED CONSTRAINT on this
+    // backend: the NTN one-way slant delay (LEO ~2-13 ms, GEO ~120 ms) is NOT
+    // applied on the mmwave air interface. The vendored NYU mmwave MAC/PHY
+    // assumes near-zero radio propagation and has no Rel-17 K_offset
+    // scheduling-offset machinery, so a ms-scale delay model on the radio
+    // SpectrumChannel de-syncs DCI/UCI slot timing. That is why HARQ is off by
+    // default here and why SetNtnHarqProfile only stretches the two timing knobs
+    // mmwave exposes. Use SetRadioBackend(Nr) for an air interface that really
+    // experiences the slant (the nr BWP channels get a
+    // ConstantSpeedPropagationDelayModel in BuildNrRadio).
+    //
+    // CORRECTION (2026-07 audit, gap S2): this comment previously claimed the
+    // END-TO-END user-plane delay was nonetheless "correct" because the slant
+    // rode the feeder leg. It was not — ComputePayloadExtraDelay added only the
+    // FEEDER slant, so the 2-6.4 ms UE<->satellite SERVICE leg was absent from
+    // every leg of the path and all mmwave OWD/jitter/URLLC figures were short
+    // by it. ComputePayloadExtraDelay now folds the live service-link slant into
+    // the backhaul on this backend, and the backhaul channel below is seeded
+    // with it at Build() even when SetFeederGeometry() is not wired (only a
+    // couple of examples wire it). The air interface still does not experience
+    // the slant — only the user-plane latency is now honest.
 
     m_epc = CreateObject<MmWavePointToPointEpcHelper>();
     m_mmwave->SetEpcHelper(m_epc);
@@ -363,6 +375,25 @@ NtnRealStackHelper::BuildMmwaveRadio()
 
     // The Friis loss is the head of the chain on CC 0 (used by AddExtraPropagationLoss).
     m_nrBaseLoss = m_mmwave->GetPathLossModel(0);
+    // mmwave runs a single carrier here, so the per-BWP head vector has one entry.
+    m_nrBaseLossPerBwp.assign(1, m_nrBaseLoss);
+
+    // S2: seed the backhaul with the service-link slant now that the devices and
+    // their mobility exist. Without this, a scenario that never calls
+    // SetFeederGeometry() (the vast majority) reports an app OWD that omits the
+    // UE<->satellite leg entirely — physically impossible, and now caught by the
+    // OWD-floor health gate.
+    if (m_backhaulCh)
+    {
+        const Time service = ComputeServiceLinkDelay();
+        if (service > Seconds(0))
+        {
+            m_backhaulCh->SetAttribute("Delay", TimeValue(m_backhaulDelay + service));
+            NS_LOG_INFO("mmwave backend: folded service-link delay "
+                        << service.GetMilliSeconds() << " ms into the backhaul leg (air "
+                        << "interface remains zero-delay on this backend)");
+        }
+    }
 }
 
 void
@@ -471,20 +502,109 @@ NtnRealStackHelper::BuildNrRadio()
 
     // Friis large-scale loss on EVERY BWP (frame-independent, valid at LEO
     // range); InitializeOperationBand keeps the 3GPP spatial model for array
-    // gain. Store the first Friis head so AddExtraPropagationLoss can chain.
+    // gain.
+    //
+    // GAP S5 FIX: keep a per-BWP Friis head (not just CC0's). The NTN excess
+    // loss / beam / caller-supplied chains attach to these heads; storing only
+    // head[0] meant a sliced run (N BWPs) left slices 1..N-1 on bare Friis with
+    // no atmosphere, scintillation, shadowing or beam roll-off — biasing exactly
+    // the per-slice SINR comparison the slicing feature exists to measure.
+    m_nrBaseLossPerBwp.assign(nBwp, nullptr);
     for (uint8_t cc = 0; cc < nBwp; ++cc)
     {
         BandwidthPartInfoPtr& bwp = band.GetBwpAt(cc, 0);
         Ptr<FriisPropagationLossModel> friis = CreateObject<FriisPropagationLossModel>();
-        friis->SetAttribute("Frequency", DoubleValue(m_freqHz));
+        // Each BWP sits at its own centre frequency; using the band centre for
+        // all of them mis-scales Friis across a wide multi-BWP band.
+        const double bwpFreqHz = (bwp->m_centralFrequency > 0.0) ? bwp->m_centralFrequency : m_freqHz;
+        friis->SetAttribute("Frequency", DoubleValue(bwpFreqHz));
         bwp->m_propagation = friis;
+        m_nrBaseLossPerBwp[cc] = friis;
         if (cc == 0)
         {
-            m_nrBaseLoss = friis;
+            m_nrBaseLoss = friis; // back-compat head
         }
     }
 
     m_nr->InitializeOperationBand(&band);
+
+    // ---- GAP S4 FIX: NTN geometry is always line-of-sight ------------------
+    // InitializeOperationBand attaches a UMi-StreetCanyon *probabilistic*
+    // channel-condition model (the scenario enum above only selects a parameter
+    // set; 5G-LENA has no NTN scenario in v3.3). Evaluated on ECEF coordinates a
+    // LEO link has d2D of hundreds-to-thousands of km, so the UMi LOS formula
+    // returns NLOS essentially always, and the fading draw then comes from UMi
+    // NLOS cluster tables with "antenna heights" of ~6.37e6 m. That is not
+    // TR 38.811 §6.7 NTN fading in any sense, and it is why the nr backend
+    // needed a physically impossible EIRP to close the link.
+    //
+    // A service link to a satellite above the minimum elevation is LOS by
+    // construction (TR 38.811 §6.6.1: LOS probability -> 1 at high elevation;
+    // the toolkit gates candidates on elevation anyway). Force it, mirroring
+    // what the mmwave backend already does, until a real TR 38.811 NTN-TDL
+    // spectrum model exists.
+    for (uint8_t cc = 0; cc < nBwp; ++cc)
+    {
+        BandwidthPartInfoPtr& bwp = band.GetBwpAt(cc, 0);
+        Ptr<ThreeGppSpectrumPropagationLossModel> sp =
+            DynamicCast<ThreeGppSpectrumPropagationLossModel>(bwp->m_3gppChannel);
+        if (sp)
+        {
+            sp->SetChannelModelAttribute(
+                "ChannelConditionModel",
+                PointerValue(CreateObject<AlwaysLosChannelConditionModel>()));
+        }
+    }
+
+    // ---- GAP S2 FIX: real propagation delay on the air interface -----------
+    // 5G-LENA creates each BWP SpectrumChannel with loss models only, so
+    // MultiModelSpectrumChannel leaves delay = 0: the UE "hears" the satellite
+    // instantaneously. Every NTN timing conclusion (HARQ stalling, K_offset,
+    // URLLC budgets, RTT) is meaningless without it, and the NTN-stretched HARQ
+    // pool this helper configures was sizing for an RTT the MAC never saw.
+    // TR 38.821 Table 4.2-2: LEO-600 one-way service-link delay 2.0-6.44 ms.
+    //
+    // HARD CONSTRAINT (measured, not assumed): the vendored 5G-LENA v3.3 has no
+    // Rel-17 NTN timing machinery, and a real per-distance delay breaks it in
+    // TWO independent ways. Both were reproduced, not theorised:
+    //
+    //  1. No Timing Advance (TS 38.213 §4.2). The gNB asserts that the UL
+    //     control from EVERY UE arrives at the same instant
+    //     (nr-spectrum-phy.cc:1098: NS_ASSERT(m_firstRxStart == Simulator::Now()
+    //     && ...)). Aligning those arrivals is precisely TA's job. With >1 UE at
+    //     different ranges the arrivals differ and the stack SIGABRTs.
+    //  2. No K_offset (TS 38.213 §4.2). The delayed DL lands inside the slot the
+    //     UE believes is its UL, so the half-duplex TDD check trips:
+    //     "Cannot TX while RX." (nr-spectrum-phy.cc:660/711). K_offset exists
+    //     exactly to push the UL grant beyond the round trip. This bites even a
+    //     SINGLE UE as soon as the scenario has uplink traffic.
+    //
+    // So the air-interface delay is OPT-IN and OFF by default on this stack: it
+    // is not a knob we can flip until K_offset/TA exist (gap R1/R3, plan phase
+    // P3.16) or the toolkit moves to a stack that has them (nr v5.0/ns-3.48,
+    // W-0). What we CAN do honestly today is carry the service-link slant on the
+    // backhaul leg (the mmwave treatment), so the end-to-end user-plane delay is
+    // physically correct on every path even though the air interface does not
+    // experience it. The OWD-floor health gate then still has teeth.
+    m_airIfaceDelayActive = false;
+    if (m_airIfaceDelayRequested)
+    {
+        for (uint8_t cc = 0; cc < nBwp; ++cc)
+        {
+            BandwidthPartInfoPtr& bwp = band.GetBwpAt(cc, 0);
+            Ptr<SpectrumChannel> ch = bwp->m_channel;
+            if (ch && !ch->GetPropagationDelayModel())
+            {
+                ch->SetPropagationDelayModel(CreateObject<ConstantSpeedPropagationDelayModel>());
+                m_airIfaceDelayActive = true;
+            }
+        }
+        NS_LOG_WARN("nr backend: real air-interface propagation delay ACTIVE by request. The "
+                    "vendored 5G-LENA v3.3 has no K_offset/TA, so this is only safe for a "
+                    "single UE with downlink-only traffic; anything else will abort with "
+                    "'Cannot TX while RX' or a UL-alignment assert. See gap R1/R3.");
+    }
+
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
 
     // Enabler B seam: keep each BWP's spectrum channel so a caller can install
@@ -551,9 +671,14 @@ NtnRealStackHelper::BuildNrRadio()
     stream += m_nr->AssignStreams(m_ueDevs, stream);
 
     // FR1 numerology + powers per device, on EVERY BWP (else BWPs 1..N-1 keep
-    // the default low TxPower and their slices see a collapsed SINR). The
-    // configured power is the per-BWP conducted power; splitting the EIRP across
-    // BWPs is a caller concern (each slice BWP carries m_satEirpDbm here).
+    // the default low TxPower and their slices see a collapsed SINR).
+    //
+    // GAP S7 FIX: split the conducted power across BWPs. A satellite has ONE
+    // power amplifier; giving every one of N slice BWPs the full m_satEirpDbm
+    // radiated N x the power budget (+10log10(N) dB of free EIRP), so a 3-slice
+    // run was ~4.8 dB hot relative to a 1-slice run of the "same" satellite.
+    const double bwpPowerSplitDb = 10.0 * std::log10(static_cast<double>(nBwp));
+    const double conductedPerBwpDbm = m_satEirpDbm - bwpPowerSplitDb;
     for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
     {
         for (uint8_t b = 0; b < nBwp; ++b)
@@ -561,8 +686,25 @@ NtnRealStackHelper::BuildNrRadio()
             m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
                 ->SetAttribute("Numerology", UintegerValue(m_numerology));
             m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
-                ->SetAttribute("TxPower", DoubleValue(m_satEirpDbm));
+                ->SetAttribute("TxPower", DoubleValue(conductedPerBwpDbm));
         }
+    }
+
+    // S7: state the radiated result so a physically impossible operating point
+    // cannot hide behind an innocuous-looking "TxPower" number.
+    NS_LOG_INFO("NtnRealStackHelper power budget: conducted "
+                << conductedPerBwpDbm << " dBm/BWP (+" << bwpPowerSplitDb << " dB split over "
+                << static_cast<uint32_t>(nBwp) << " BWP) + array gain " << ArrayGainDb()
+                << " dB (" << static_cast<uint32_t>(m_gnbRows) << "x"
+                << static_cast<uint32_t>(m_gnbCols) << " UPA) => effective EIRP "
+                << GetEffectiveEirpDbm() << " dBm");
+    if (GetEffectiveEirpDbm() > 90.0)
+    {
+        NS_LOG_WARN("effective satellite EIRP "
+                    << GetEffectiveEirpDbm()
+                    << " dBm exceeds any TR 38.821 Set-1/Set-2 figure (Set-1 LEO S-band is "
+                       "~78.8 dBm total, antenna INCLUDED). Use SetSatEirpTotalDbm() or "
+                       "SetSatEirpDensityDbwMhz() so the array gain is not double-counted.");
     }
     for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
     {
@@ -660,6 +802,18 @@ NtnRealStackHelper::BuildNrRadio()
     // X2 the following call stands up. GetHandoverCount() reports completions.
     if (m_handover && m_gnb.GetN() >= 2)
     {
+        // GAP S8 FIX: the X2 between two satellites is NOT a zero-delay wire.
+        // NrNoBackhaulEpcHelper defaults X2LinkDelay to 0 s, so handover
+        // preparation (HANDOVER REQUEST/ACK, SN status transfer) completed
+        // instantaneously between orbiting gNBs and every handover-interruption
+        // figure was structurally optimistic. Derive the one-way delay from the
+        // real inter-satellite geometry: either a direct ISL (range/c) or, for a
+        // transparent payload, the ground loop via both feeder links.
+        // TR 38.821 §8.3 counts this leg in the HO interruption budget.
+        const Time x2Delay = ComputeX2LinkDelay();
+        Config::SetDefault("ns3::NrNoBackhaulEpcHelper::X2LinkDelay", TimeValue(x2Delay));
+        NS_LOG_INFO("NtnRealStackHelper X2 (inter-satellite) one-way delay: "
+                    << x2Delay.GetMilliSeconds() << " ms");
         m_nr->AddX2Interface(m_gnb);
         Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/HandoverEndOk",
                         MakeCallback(&NtnRealStackHelper::NrHandoverEndOk, this));
@@ -679,10 +833,26 @@ NtnRealStackHelper::BuildNrRadio()
         }
     }
 
+    // S2: when the air interface could not take the slant (multi-UE without TA),
+    // seed the backhaul with it so the measured user-plane OWD is still correct
+    // and the OWD-floor health gate stays meaningful. Mirrors the mmwave path.
+    if (!m_airIfaceDelayActive && m_backhaulCh)
+    {
+        const Time service = ComputeServiceLinkDelay();
+        if (service > Seconds(0))
+        {
+            m_backhaulCh->SetAttribute("Delay", TimeValue(m_backhaulDelay + service));
+            NS_LOG_INFO("nr backend: folded service-link delay " << service.GetMilliSeconds()
+                                                                 << " ms into the backhaul leg");
+        }
+    }
+
     NS_LOG_INFO("NtnRealStackHelper nr backend: " << m_enbDevs.GetN() << " gNB, " << m_ueDevs.GetN()
                                                   << " UE, fc=" << m_freqHz / 1e9 << " GHz, BW="
                                                   << m_bwHz / 1e6 << " MHz, numerology="
-                                                  << m_numerology);
+                                                  << m_numerology
+                                                  << ", air-interface delay="
+                                                  << (m_airIfaceDelayActive ? "REAL" : "on-backhaul"));
 }
 
 void
@@ -693,18 +863,38 @@ NtnRealStackHelper::AddExtraPropagationLoss(Ptr<PropagationLossModel> loss)
     {
         return;
     }
-    // Chain after the built-in Friis loss head. m_nrBaseLoss is set by both
-    // backends (mmwave: m_mmwave->GetPathLossModel(0); nr: the Friis we placed
-    // on the BWP channel), so this is radio-agnostic.
-    Ptr<PropagationLossModel> friis = m_nrBaseLoss;
-    NS_ABORT_MSG_IF(!friis, "no base propagation loss model on the radio channel");
-    // Walk to the end of the chain, then append.
-    Ptr<PropagationLossModel> tail = friis;
-    while (tail->GetNext())
+    // Chain after the built-in Friis loss head on EVERY BWP. Both backends fill
+    // m_nrBaseLossPerBwp (mmwave: the single CC-0 head; nr: one Friis per BWP),
+    // so this is radio-agnostic.
+    //
+    // GAP S5 FIX: previously this appended only to m_nrBaseLoss (BWP 0), so with
+    // SetSlices() the URLLC/mMTC BWPs saw pure Friis — no atmosphere, no
+    // scintillation, no shadow fading, no beam roll-off — which biased the very
+    // per-slice SINR comparison slicing exists to produce. The loss instance is
+    // shared across chains deliberately: stateful models (e.g. correlated
+    // shadowing keyed by node pair) SHOULD see all BWPs of the same link.
+    NS_ABORT_MSG_IF(m_nrBaseLossPerBwp.empty(),
+                    "no base propagation loss model on the radio channel");
+    for (auto& head : m_nrBaseLossPerBwp)
     {
-        tail = tail->GetNext();
+        if (!head)
+        {
+            continue;
+        }
+        Ptr<PropagationLossModel> tail = head;
+        while (tail->GetNext())
+        {
+            if (tail->GetNext() == loss)
+            {
+                break; // already chained here
+            }
+            tail = tail->GetNext();
+        }
+        if (tail->GetNext() != loss)
+        {
+            tail->SetNext(loss);
+        }
     }
-    tail->SetNext(loss);
 }
 
 // ---- Enabler A: handover config -----------------------------------------
@@ -754,14 +944,44 @@ NtnRealStackHelper::AddSpectrumChannelLoss(Ptr<SpectrumPropagationLossModel> los
     NS_ABORT_MSG_IF(m_backend != RadioBackend::Nr,
                     "AddSpectrumChannelLoss is nr-backend only (SetRadioBackend(Nr))");
     NS_ABORT_MSG_IF(m_nrBwpChannels.empty(), "no NR BWP spectrum channels to plug into");
-    // Install onto every BWP's spectrum channel, so the caller's per-RB /
-    // per-antenna transfer function drives NR AMC/BLER/rank on all slices.
+
+    // GAP S1 FIX: compose, do NOT replace.
+    //
+    // MultiModelSpectrumChannel applies spectrum-loss ELSE-IF phased-array-loss.
+    // 5G-LENA installs the 3GPP channel (array gain + fading + the MIMO
+    // spectrumChannelMatrix) as the PHASED-ARRAY model, so the old code path
+    // here — ch->AddSpectrumPropagationLossModel(loss) — silently switched the
+    // entire 3GPP spatial channel OFF the moment a module plugged in a THz /
+    // Sionna / RIS transfer function. Enabler B's two halves (seam and MIMO)
+    // destroyed each other.
+    //
+    // Instead wrap the plugin in a phased-array composite that runs the 3GPP
+    // model first and then multiplies the plugin's per-RB gain into the result
+    // (rescaling the MIMO matrix to match), and install THAT on the
+    // phased-array slot so both survive.
     for (const auto& ch : m_nrBwpChannels)
     {
-        if (ch)
+        if (!ch)
         {
-            ch->AddSpectrumPropagationLossModel(loss);
+            continue;
         }
+        Ptr<PhasedArraySpectrumPropagationLossModel> installed =
+            ch->GetPhasedArraySpectrumPropagationLossModel();
+        Ptr<NtnSpectrumSeamModel> seam = DynamicCast<NtnSpectrumSeamModel>(installed);
+        if (!seam)
+        {
+            // First plugin on this channel: build the composite around whatever
+            // 3GPP model 5G-LENA already installed and take over the slot.
+            seam = CreateObject<NtnSpectrumSeamModel>();
+            seam->SetInnerModel(installed); // may be null (then the composite is pass-through)
+            ch->AddPhasedArraySpectrumPropagationLossModel(seam);
+            if (!installed)
+            {
+                NS_LOG_WARN("no 3GPP phased-array model on this BWP channel; the spectrum "
+                            "seam will carry the plugin alone (no array gain / fading)");
+            }
+        }
+        seam->AddPlugin(loss);
     }
 }
 
@@ -1024,25 +1244,60 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
 }
 
 Time
+NtnRealStackHelper::ComputeServiceLinkDelay() const
+{
+    // GAP S2: one-way UE<->satellite (service link) propagation.
+    // TR 38.821 Table 4.2-2: LEO-600 one-way service-link delay 2.0-6.44 ms.
+    constexpr double kC = 299792458.0;
+    if (m_gnb.GetN() == 0 || m_ue.GetN() == 0)
+    {
+        return Seconds(0);
+    }
+    Ptr<MobilityModel> gm = m_gnb.Get(0)->GetObject<MobilityModel>();
+    Ptr<MobilityModel> um = m_ue.Get(0)->GetObject<MobilityModel>();
+    if (!gm || !um)
+    {
+        return Seconds(0);
+    }
+    return Seconds(gm->GetDistanceFrom(um) / kC);
+}
+
+Time
 NtnRealStackHelper::ComputePayloadExtraDelay(double slantRangeM) const
 {
     constexpr double kC = 299792458.0;
     const Time prop = Seconds(slantRangeM / kC);
+
+    // GAP S2 FIX: fold the UE<->satellite SERVICE link into the user-plane delay
+    // whenever the air interface itself is NOT carrying it.
+    //
+    // The old code added only the FEEDER slant here, and the header claimed the
+    // end-to-end OWD was therefore "correct" — it was not: the 2-6.4 ms service
+    // leg was missing from every leg of the path, so every OWD / jitter / URLLC
+    // figure was short by it.
+    //
+    // m_airIfaceDelayActive is true only when a real ConstantSpeedPropagation-
+    // DelayModel sits on the radio channel (nr backend, single UE — see
+    // BuildNrRadio for why multi-UE cannot have it without TA). When it is
+    // true the slant is already in the path and adding it here would
+    // double-count.
+    const Time service = m_airIfaceDelayActive ? Seconds(0) : ComputeServiceLinkDelay();
+
     switch (m_payload)
     {
     case PayloadOption::Transparent:
         // Bent-pipe: the user plane rides the RF feeder leg too.
-        return prop + prop;
+        return prop + prop + service;
     case PayloadOption::RegenerativeRu:
         // Open-FH (split 7.2x) over the feeder; 0.25 ms lower-PHY budget.
-        return prop + MicroSeconds(250);
+        return prop + MicroSeconds(250) + service;
     case PayloadOption::RegenerativeRuDu:
         // F1 midhaul over the feeder.
-        return prop + MicroSeconds(150);
+        return prop + MicroSeconds(150) + service;
     case PayloadOption::FullGnb:
     default:
         // GTP backhaul to the ground core.
-        return prop + MicroSeconds(50);
+        return prop + MicroSeconds(50) + service;
     }
 }
 
@@ -1221,13 +1476,20 @@ NtnRealStackHelper::AccumulateDl(double sinrLinear,
 
     fold(m_dlGlobal);
     fold(m_dlPerCell[cellId]);
-    fold(m_dlPerRnti[rnti]);
+    fold(m_dlPerRnti[UeKey(cellId, rnti)]);
     if (mcs >= 0.0 || rank >= 0.0 || rbFrac >= 0.0)
     {
         fold(m_dlPerBwp[bwpId]); // Enabler C: per-slice (per-BWP) breakdown
     }
-    m_lastSinrDbPerRnti[rnti] = sinrDb;
-    m_lastTblerPerRnti[rnti] = tbler;
+    m_lastSinrDbPerRnti[UeKey(cellId, rnti)] = sinrDb;
+    m_lastTblerPerRnti[UeKey(cellId, rnti)] = tbler;
+    // S9: a live error model always reports a finite TBLER (~1e-8 even on a
+    // pristine link); a disabled one writes exactly 0.0. One positive sample is
+    // therefore proof the model ran — see the gateErrorModel probe.
+    if (tbler > 0.0)
+    {
+        m_sawNonZeroTbler = true;
+    }
 }
 
 void
@@ -1287,6 +1549,148 @@ NtnRealStackHelper::GetUeRnti(uint32_t ueIndex) const
     return dev->GetRrc()->GetRnti();
 }
 
+Time
+NtnRealStackHelper::ComputeX2LinkDelay() const
+{
+    // S8: one-way inter-gNB (inter-satellite) delay from the live geometry.
+    //  - FullGnb (regenerative, Rel-19): the Xn/X2 rides a direct ISL, so the
+    //    delay is the inter-satellite range / c.
+    //  - Transparent payload: both "gNBs" are on the ground behind their feeder
+    //    links, so the X2 loop is 2 x feeder slant / c plus the core hop.
+    // Falls back to m_backhaulDelay when the geometry is unavailable.
+    if (m_gnb.GetN() < 2)
+    {
+        return m_backhaulDelay;
+    }
+    Ptr<MobilityModel> a = m_gnb.Get(0)->GetObject<MobilityModel>();
+    Ptr<MobilityModel> b = m_gnb.Get(1)->GetObject<MobilityModel>();
+    if (!a || !b)
+    {
+        return m_backhaulDelay;
+    }
+    const double islRangeM = a->GetDistanceFrom(b);
+    const double c = 299792458.0;
+    if (m_payload == PayloadOption::FullGnb)
+    {
+        return Seconds(islRangeM / c);
+    }
+    // Transparent: the inter-gNB path goes down one feeder and up the other.
+    return m_backhaulDelay + m_backhaulDelay;
+}
+
+bool
+NtnRealStackHelper::IsErrorModelEnabled() const
+{
+    // S9: prefer the PHY's own DataErrorModelEnabled attribute — both backends
+    // zero the reported TBLER when it is false, so a value probe alone cannot
+    // tell "model off" from "no errors on a pristine link".
+    //
+    // CAVEAT: mmwave registers the attribute with a MEMBER accessor (readable),
+    // but nr registers it with a SETTER-ONLY accessor
+    // (MakeBooleanAccessor(&NrSpectrumPhy::SetDataErrorModelEnabled)), so it is
+    // not gettable and a plain GetAttribute() aborts the run. Use the fail-safe
+    // read and fall back to the TBLER-value probe when the attribute is
+    // write-only.
+    if (m_ueDevs.GetN() == 0)
+    {
+        return false;
+    }
+    BooleanValue enabled(false);
+    Ptr<Object> phyObj;
+    if (m_backend == RadioBackend::Nr)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(0));
+        if (dev && dev->GetPhy(0))
+        {
+            phyObj = dev->GetPhy(0)->GetSpectrumPhy();
+        }
+    }
+    else
+    {
+        Ptr<MmWaveUeNetDevice> dev = DynamicCast<MmWaveUeNetDevice>(m_ueDevs.Get(0));
+        if (dev && dev->GetPhy())
+        {
+            phyObj = dev->GetPhy()->GetDlSpectrumPhy();
+        }
+    }
+    if (phyObj && phyObj->GetAttributeFailSafe("DataErrorModelEnabled", enabled))
+    {
+        return enabled.Get();
+    }
+    // Attribute not readable on this backend (nr): fall back to the value probe.
+    // A live model reports a finite TBLER (~1e-8 even on a clean link); a
+    // disabled one writes exactly 0.0 for every TB. This can false-fail an
+    // extremely clean link, so treat "no TB samples at all" as inconclusive and
+    // let the separate provenance gate judge that case.
+    return m_sawNonZeroTbler || (m_dlGlobal.n == 0);
+}
+
+double
+NtnRealStackHelper::ComputeOwdFloorMs() const
+{
+    // S9 / gate 1. A packet cannot reach the UE faster than the satellite's
+    // ALTITUDE / c (the UE directly under the sub-satellite point) plus the
+    // configured backhaul. Using the altitude rather than the instantaneous
+    // slant keeps this a true lower bound for every geometry in the run, so the
+    // gate never false-fails as the satellite rises and sets.
+    if (m_gnb.GetN() == 0)
+    {
+        return 0.0;
+    }
+    Ptr<MobilityModel> gm = m_gnb.Get(0)->GetObject<MobilityModel>();
+    if (!gm)
+    {
+        return 0.0;
+    }
+    const Vector p = gm->GetPosition();
+    const double r = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+    // ECEF (|r| ~ Earth radius + altitude) vs a local/ENU frame (z = altitude).
+    const double kEarthR = 6371000.0;
+    double altM = (r > 6.0e6) ? (r - kEarthR) : p.z;
+    if (altM <= 0.0 || !std::isfinite(altM))
+    {
+        return 0.0;
+    }
+    const double c = 299792458.0;
+    return (altM / c) * 1000.0 + m_backhaulDelay.GetSeconds() * 1000.0;
+}
+
+double
+NtnRealStackHelper::GetEffectiveEirpDbm() const
+{
+    // Radiated EIRP = conducted power at the array input + array gain, less the
+    // per-BWP power split. Mirrors exactly what BuildNrRadio programs.
+    const double nBwp = static_cast<double>(std::max<size_t>(1, m_slices.size()));
+    return m_satEirpDbm - 10.0 * std::log10(nBwp) + ArrayGainDb();
+}
+
+uint16_t
+NtnRealStackHelper::GetUeServingCellId(uint32_t ueIndex) const
+{
+    // S3: the UE's OWN serving cell — not gNB[0]'s. Needed to key per-UE stats
+    // by (cellId,RNTI) and, after a handover, to read the accumulator of the
+    // cell the UE actually moved to (its old-cell history is a separate key).
+    if (ueIndex >= m_ueDevs.GetN())
+    {
+        return 0;
+    }
+    if (m_backend == RadioBackend::Nr)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(ueIndex));
+        if (!dev || !dev->GetPhy(0))
+        {
+            return 0;
+        }
+        return dev->GetPhy(0)->GetCellId();
+    }
+    Ptr<MmWaveUeNetDevice> dev = DynamicCast<MmWaveUeNetDevice>(m_ueDevs.Get(ueIndex));
+    if (!dev || !dev->GetRrc())
+    {
+        return 0;
+    }
+    return dev->GetRrc()->GetCellId();
+}
+
 uint16_t
 NtnRealStackHelper::GetServingCellId() const
 {
@@ -1307,8 +1711,8 @@ NtnRealStackHelper::GetServingCellId() const
 double
 NtnRealStackHelper::GetUeRecentSinrDb(uint32_t ueIndex) const
 {
-    uint16_t rnti = GetUeRnti(ueIndex);
-    auto it = m_lastSinrDbPerRnti.find(rnti);
+    const uint32_t key = UeKey(GetUeServingCellId(ueIndex), GetUeRnti(ueIndex));
+    auto it = m_lastSinrDbPerRnti.find(key);
     return (it != m_lastSinrDbPerRnti.end()) ? it->second
                                              : std::numeric_limits<double>::quiet_NaN();
 }
@@ -1316,8 +1720,8 @@ NtnRealStackHelper::GetUeRecentSinrDb(uint32_t ueIndex) const
 double
 NtnRealStackHelper::GetUeMeanSinrDb(uint32_t ueIndex) const
 {
-    uint16_t rnti = GetUeRnti(ueIndex);
-    auto it = m_dlPerRnti.find(rnti);
+    const uint32_t key = UeKey(GetUeServingCellId(ueIndex), GetUeRnti(ueIndex));
+    auto it = m_dlPerRnti.find(key);
     if (it == m_dlPerRnti.end() || it->second.n == 0)
     {
         return std::numeric_limits<double>::quiet_NaN();
@@ -1328,8 +1732,8 @@ NtnRealStackHelper::GetUeMeanSinrDb(uint32_t ueIndex) const
 double
 NtnRealStackHelper::GetUeRecentTbler(uint32_t ueIndex) const
 {
-    uint16_t rnti = GetUeRnti(ueIndex);
-    auto it = m_lastTblerPerRnti.find(rnti);
+    const uint32_t key = UeKey(GetUeServingCellId(ueIndex), GetUeRnti(ueIndex));
+    auto it = m_lastTblerPerRnti.find(key);
     return (it != m_lastTblerPerRnti.end()) ? it->second
                                             : std::numeric_limits<double>::quiet_NaN();
 }
@@ -1422,6 +1826,38 @@ NtnRealStackHelper::GetEpcHelper() const
 uint64_t
 NtnRealStackHelper::GetUeRxBytes(uint32_t ueIndex) const
 {
+    // GAP M6 FIX: m_dlSinks is a per-FLOW container, not per-UE. Indexing it by
+    // UE index was correct only by coincidence — when InstallTraffic happens to
+    // create exactly one DL flow per UE, in order. Any InstallOranFlow() call or
+    // reordering silently returned another UE's bytes. m_dlSinkUe maps sink
+    // index -> UE index precisely for this; use it and sum every flow of the UE.
+    uint64_t total = 0;
+    bool matched = false;
+    for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
+    {
+        if (i >= m_dlSinkUe.size() || m_dlSinkUe[i] != ueIndex)
+        {
+            continue;
+        }
+        matched = true;
+        Ptr<NtnOranSink> oranSink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
+        if (oranSink)
+        {
+            total += oranSink->GetTotalRx();
+            continue;
+        }
+        Ptr<PacketSink> sink = DynamicCast<PacketSink>(m_dlSinks.Get(i));
+        if (sink)
+        {
+            total += sink->GetTotalRx();
+        }
+    }
+    if (matched)
+    {
+        return total;
+    }
+    // No mapping recorded (e.g. sinks installed by a caller directly): fall back
+    // to the legacy positional lookup rather than silently reporting zero.
     if (ueIndex >= m_dlSinks.GetN())
     {
         return 0;
@@ -1454,15 +1890,46 @@ NtnRealStackHelper::WriteHealthReport()
                             .count();
     double wallSec = (wallEndNs - m_wallStartNs) / 1e9;
 
-    // ---- HONEST gates (2026-06 protocol-fidelity audit §8) ----
+    // ---- HONEST gates (2026-06 protocol-fidelity audit §8; hardened by the
+    //      2026-07 standards audit, gap S9) ----
+    //
+    // S9: the previous gate set could not fail a physically wrong radio. It
+    // passed a stack with +36 dB of EIRP, a zero-delay air interface, and
+    // UMi-NLOS fading at 600 km, because:
+    //   * gateProvenance and gateErrorModel were the SAME predicate (n > 0);
+    //   * "error model active" never checked the error model (nr writes
+    //     m_tbler = 0 when it is disabled, and the sample still counts);
+    //   * every delay / jitter / loss row hard-coded pass=1.
+    // The gates below add physical plausibility: an OWD floor from the geometry
+    // (no packet can beat altitude/c) and a real error-model probe.
     bool gateStackDepth = (m_phyRxTb >= m_gates.minPhyRxTb);          // packets crossed the radio PHY
     bool gateThroughput = (m_rxThroughputMbps >= m_gates.minRxThroughputMbps); // measured app KPI
     bool gateProvenance = (!m_gates.requireSinrProvenance) || (m_dlGlobal.n > 0); // SINR from PHY trace
-    bool gateErrorModel =
-        (!m_gates.requireErrorModelActive) || (m_dlGlobal.n > 0);    // TBLER samples exist
+    // Ask the PHY whether the error model is actually switched on, rather than
+    // inferring it from the reported TBLER. Both backends zero the TBLER field
+    // when the model is disabled (nr-phy-mac-common.h:585:
+    //   m_tbler(errorModelEnabled ? ... : 0)
+    // ), but a genuinely pristine link ALSO reports exactly 0 — so a value probe
+    // cannot tell "model off" from "no errors" and would false-fail a strong
+    // link. The attribute is unambiguous.
+    bool gateErrorModel = (!m_gates.requireErrorModelActive) || IsErrorModelEnabled();
     bool channelInPath = (m_ueDevs.GetN() > 0 && m_enbDevs.GetN() > 0); // packets rode mmwave devs
-    bool allOk =
-        gateStackDepth && gateThroughput && gateProvenance && gateErrorModel && channelInPath;
+
+    // GATE 1 (plan P0.1): measured one-way delay must respect the speed of
+    // light. The floor uses the satellite ALTITUDE as the minimum possible
+    // slant (a UE directly under the sub-satellite point) plus the configured
+    // backhaul, so it is a true lower bound for any geometry in the run. Before
+    // gap S2 was fixed, the air interface had zero delay and this gate fails.
+    const double owdFloorMs = ComputeOwdFloorMs();
+    const bool haveDelay = (m_meanDelayMs > 0.0);
+    bool gateOwdFloor = true;
+    if (m_gates.requireOwdFloor && haveDelay && owdFloorMs > 0.0)
+    {
+        gateOwdFloor = (m_meanDelayMs >= owdFloorMs);
+    }
+
+    bool allOk = gateStackDepth && gateThroughput && gateProvenance && gateErrorModel &&
+                 channelInPath && gateOwdFloor;
 
     const char* airTag = (m_backend == RadioBackend::Nr) ? "nr-fr1-ntn" : "mmwave-ntn";
 
@@ -1490,9 +1957,12 @@ NtnRealStackHelper::WriteHealthReport()
                           ? static_cast<double>(m_appRxPackets) / m_appTxPackets
                           : 0.0;
     out << "app_delivery_ratio," << delivery << ",-,1,app-trace\n";
-    out << "app_owd_ms," << m_meanDelayMs << ",-,1,inband-timestamp\n";
+    // S9: real floor + real pass flag (was: floor "-", pass hard-coded 1).
+    out << "app_owd_ms," << m_meanDelayMs << "," << owdFloorMs << "," << (gateOwdFloor ? 1 : 0)
+        << ",inband-timestamp\n";
     out << "app_jitter_ms," << m_meanJitterMs << ",-,1,inband-timestamp\n";
     out << "app_loss_ratio," << m_appLossRatio << ",-,1,inband-seq\n";
+    out << "effective_eirp_dbm," << GetEffectiveEirpDbm() << ",-,1,derived\n";
     out << "app_tx_pkts," << m_appTxPackets << ",-,1,app-trace\n";
     out << "app_rx_pkts," << m_appRxPackets << ",-,1,app-trace\n";
     out << "ues," << m_ue.GetN() << ",-,1,config\n";

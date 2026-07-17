@@ -20,6 +20,7 @@ set(source_files
     model/ntn-oran-payload-header.cc
     model/ntn-oran-sink.cc
     model/ntn-sat-beam-gain-model.cc
+    model/ntn-spectrum-seam-model.cc
     model/ntn-static-extra-loss-model.cc
     model/ntn-tr38811-excess-loss-model.cc
     model/three-gpp-http-satellite-client.cc
@@ -53,6 +54,7 @@ set(header_files
     model/ntn-oran-payload-header.h
     model/ntn-oran-sink.h
     model/ntn-sat-beam-gain-model.h
+    model/ntn-spectrum-seam-model.h
     model/ntn-static-extra-loss-model.h
     model/ntn-tr38811-excess-loss-model.h
     model/three-gpp-http-satellite-client.h

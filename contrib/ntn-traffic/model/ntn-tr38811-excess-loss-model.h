@@ -25,6 +25,16 @@
 #include "ns3/propagation-loss-model.h"
 #include "ns3/random-variable-stream.h"
 
+#include <map>
+
+#include <utility>
+
+#include "ns3/nstime.h"
+
+#include "ns3/vector.h"
+
+#include "ns3/simulator.h"
+
 namespace ns3
 {
 
@@ -77,11 +87,48 @@ class Ntn38811ExcessLossModel : public PropagationLossModel
     double m_freqHz{2.0e9};        ///< carrier (selects the P.676 gas band)
     bool m_enableShadowFading{true};
     bool m_enableScintillation{true};
-    bool m_enableFastFading{true}; ///< Rician small-scale fading (TR 38.811 §6.7/6.9)
+    /// Rician small-scale fading (TR 38.811 §6.7/6.9).
+    ///
+    /// GAP S6: defaults to FALSE. Both radio backends keep the 3GPP phased-array
+    /// spectrum model, which ALREADY applies small-scale fading (with Doppler)
+    /// on the same link. Running this Rician process as well multiplied two
+    /// independent fast-fading realisations onto one link — the measured SINR
+    /// scatter was an artifact, not physics. Enable only for a link with no 3GPP
+    /// spectrum model in the path.
+    bool m_enableFastFading{false};
     Ptr<NormalRandomVariable> m_sfRng;    ///< shadow fading N(0,1)
     Ptr<NormalRandomVariable> m_scintRng; ///< scintillation N(0,1)
     Ptr<NormalRandomVariable> m_fadeIRng; ///< Rician in-phase scatter N(0,1)
     Ptr<NormalRandomVariable> m_fadeQRng; ///< Rician quadrature scatter N(0,1)
+
+    // ---- S6: large-scale-parameter correlation ---------------------------
+    // TR 38.811 §6.6.2 shadow fading is a POSITION-CORRELATED large-scale
+    // process (correlation distance ~37-50 m), and P.618 scintillation has a
+    // seconds-scale coherence time. Both were previously re-drawn i.i.d. on
+    // EVERY DoCalcRxPower call — i.e. per transport block, and again for every
+    // interference evaluation — turning correlated physics into white noise:
+    // the mean SINR was unaffected while the per-sample variance ballooned,
+    // which is what forced the TR 38.821 calibration gate to be widened.
+    // Cache per node-pair and re-draw only when the link has genuinely
+    // decorrelated (pattern: ThreeGppPropagationLossModel::m_shadowingMap).
+    struct LargeScaleState
+    {
+        double shadowDb{0.0};
+        double scintDb{0.0};
+        Vector lastPos{0, 0, 0}; ///< ground-node position at the last SF draw
+        double lastElevDeg{0.0};
+        Time lastScintTime{Seconds(-1e9)};
+        bool valid{false};
+    };
+    /// Shadow-fading decorrelation distance (m), TR 38.811 §6.6.2.
+    double m_sfCorrDistanceM{50.0};
+    /// Elevation change (deg) that also decorrelates the shadowing: for a static
+    /// UE the geometry changes because the SATELLITE moves, so pure UE
+    /// displacement never decorrelates a LEO pass.
+    double m_sfCorrElevDeg{5.0};
+    /// Scintillation coherence time (s), ITU-R P.618 §2.4.
+    double m_scintCoherenceS{1.0};
+    mutable std::map<std::pair<uintptr_t, uintptr_t>, LargeScaleState> m_lssCache;
 };
 
 } // namespace ns3

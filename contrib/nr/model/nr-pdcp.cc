@@ -208,6 +208,24 @@ NrPdcp::DoReceivePdu(Ptr<Packet> p)
     p->RemoveHeader(pdcpHeader);
     NS_LOG_LOGIC("PDCP header: " << pdcpHeader);
 
+    // TS 38.323 §6.2.3: a Control PDU (D/C = 0) carries a PDCP status report or
+    // RoHC/EHC feedback — never a user-plane SDU. This PDCP models none of those
+    // features, so the spec-correct behaviour is to consume and discard it. It
+    // must NOT be delivered upward as an SDU (it is not one), and its SN field
+    // must not advance m_rxSequenceNumber (a Control PDU has no PDCP SN).
+    //
+    // This path is reached during a real X2/Xn handover: the source gNB's
+    // SN-status transfer / end marker crosses to the target. It only shows up
+    // once the X2 link has a non-zero delay, which is why a zero-delay X2 hid it
+    // and an NTN inter-satellite X2 (tens of ms) trips it immediately.
+    if (pdcpHeader.GetDcBit() != NrPdcpHeader::DATA_PDU)
+    {
+        NS_LOG_INFO("PDCP Control PDU received (rnti=" << m_rnti << " lcid=" << (uint32_t)m_lcid
+                                                       << "); status reports / RoHC feedback are "
+                                                          "not modelled - discarding");
+        return;
+    }
+
     m_rxSequenceNumber = pdcpHeader.GetSequenceNumber() + 1;
     if (m_rxSequenceNumber > m_maxPdcpSn)
     {
