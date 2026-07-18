@@ -320,8 +320,15 @@ NtnTteEstimator::FindBeamExitTime(GeoCoordinate uePos,
         }
 
         Time tMid = Seconds((tGood.GetSeconds() + tBad.GetSeconds()) / 2.0);
-        GeoCoordinate midPos = uePos; // For static UEs; projected for mobile
-        double gain = m_orbitPredictor->ComputeBeamGain(satId, beamId, midPos);
+        // GAP C1 (refinement half): propagate the SATELLITE to tMid via a beam
+        // snapshot — exactly as the coarse search (line ~148) and the sibling
+        // FindDistanceExitTime (line ~356) do. The old code called
+        // ComputeBeamGain(satId, beamId, uePos) with no time, so the gain was
+        // frozen at Simulator::Now() across the whole binary search: it never
+        // crossed the threshold and the refinement collapsed to the upper
+        // bracket (tBad), silently returning the coarse-grid granularity instead
+        // of a refined exit time. Evaluating at tMid makes the search real.
+        double gain = m_orbitPredictor->GetBeamSnapshotAtTime(satId, beamId, uePos, tMid).gainAtUe_dB;
 
         if (gain >= threshold_dB)
         {

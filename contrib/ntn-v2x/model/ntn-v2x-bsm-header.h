@@ -33,7 +33,8 @@ namespace ntnv2x
  *   elev      decimetre (int32; J2735 DE_Elevation is 1 dm)
  *   speed     0.02 m/s units (uint16, DE_Speed)
  *   heading   0.0125 degree units (uint16, DE_Heading)
- * The wire size of this core is 25 bytes; the example pads the datagram to its
+ * The wire size of this core is 23 bytes (1+4+2+4+4+4+2+2, see GetSerializedSize);
+ * the example pads the datagram to its
  * configured BSM size to also account for the (unmodelled) Part II extensions.
  */
 class NtnV2xBsmHeader : public Header
