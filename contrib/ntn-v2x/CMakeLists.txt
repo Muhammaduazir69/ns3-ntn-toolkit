@@ -1,6 +1,7 @@
 set(source_files
     model/sumo-traci-bridge.cc
     model/ntn-v2x-bsm-header.cc
+    model/ntn-nr-sidelink.cc
     model/v2x-leo-direct.cc
     model/v2x-leo-relay.cc
     model/maritime-scenario.cc
@@ -10,6 +11,7 @@ set(source_files
 set(header_files
     model/sumo-traci-bridge.h
     model/ntn-v2x-bsm-header.h
+    model/ntn-nr-sidelink.h
     model/v2x-leo-direct.h
     model/v2x-leo-relay.h
     model/maritime-scenario.h

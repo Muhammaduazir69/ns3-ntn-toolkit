@@ -98,3 +98,14 @@ build_lib_example(
     ${libmmwave}
     ${liblte}
 )
+
+# V1 — NR PC5 sidelink Mode 2 (TS 38.321 §5.22): direct V2V BSM broadcast,
+# reports PRR vs distance (TS 38.885). No gNB.
+build_lib_example(
+  NAME ntn-v2x-pc5-sidelink-bsm
+  SOURCE_FILES ntn-v2x-pc5-sidelink-bsm.cc
+  LIBRARIES_TO_LINK
+    ${libntn-v2x}
+    ${libcore}
+    ${libmobility}
+)
