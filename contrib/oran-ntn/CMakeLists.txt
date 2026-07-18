@@ -7,6 +7,8 @@ set(source_files
     model/oran-ntn-near-rt-ric.cc
     model/oran-ntn-space-ric.cc
     model/oran-ntn-sat-bridge.cc
+    # WS-C — digital-twin prediction consumer (closes the twin<->sim loop)
+    model/oran-ntn-twin-prediction-consumer.cc
     # T8 — canonical WG3 KPM metric-ID alignment (Roadmap §3 T8)
     model/oran-ntn-kpm-canonical-ids.cc
     # 4.1.3 — E2SM-RC v1.03 Style 3 Connected-Mode Mobility (Roadmap §4.1.3)
@@ -90,6 +92,7 @@ set(header_files
     model/oran-ntn-near-rt-ric.h
     model/oran-ntn-space-ric.h
     model/oran-ntn-sat-bridge.h
+    model/oran-ntn-twin-prediction-consumer.h
     model/oran-ntn-kpm-canonical-ids.h
     # 4.1.1 — FlexRIC field-name parity (Roadmap §4.1.1)
     model/oran-ntn-flexric-types.h

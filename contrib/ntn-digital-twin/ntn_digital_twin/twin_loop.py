@@ -154,6 +154,79 @@ def emit_influx_lp(cons: Constellation, when: dt.datetime, cfg: LoopConfig) -> i
     return len(lines)
 
 
+def emit_predictions_file(
+    cfg: LoopConfig,
+    *,
+    observer_lat_deg: float,
+    observer_lon_deg: float,
+    observer_alt_m: float,
+    out_path: Path,
+    horizon_s: float,
+    step_s: float = 10.0,
+    ue_id: int = 0,
+    min_confidence: float = 0.0,
+) -> int:
+    """Export the twin's handover schedule in the C++ consumer's file contract.
+
+    Format (read by ns3::OranNtnTwinPredictionConsumer::LoadPredictionsFromFile):
+
+        # ntn-twin handover predictions  epoch_unix=<...>
+        # t_s,ueId,recommendedGnbId,confidence
+        <t_s>,<ueId>,<recommendedGnbId>,<confidence>
+
+    ``t_s`` is seconds from the SHARED epoch (cfg.epoch_unix_s) — identical to
+    ns-3 simulation time — so the C++ side actuates each handover at the matching
+    instant. The recommended cell is the 1-indexed satellite position in the
+    constellation's iteration order (the same order the ns-3 scenario builds its
+    1-indexed E2 nodes). A line is written only when the serving satellite CHANGES
+    (a handover), with confidence set from the elevation margin over the runner-up.
+    Returns the number of predictions written.
+    """
+    cons, _n = fetch_constellation(cfg)
+    sats = list(cons)
+    epoch_unix = cfg.epoch_unix_s if cfg.epoch_unix_s is not None else time.time()
+    epoch = dt.datetime.fromtimestamp(epoch_unix, tz=dt.timezone.utc)
+
+    predictions: list[tuple[float, int, int, float]] = []
+    prev_serving: int | None = None
+    t = 0.0
+    while t <= horizon_s + 1e-9:
+        when = epoch + dt.timedelta(seconds=t)
+        elevs = [
+            s.elevation_deg(
+                when,
+                observer_lat_deg=observer_lat_deg,
+                observer_lon_deg=observer_lon_deg,
+                observer_alt_m=observer_alt_m,
+            )
+            for s in sats
+        ]
+        # argmax elevation = serving; runner-up sets the confidence margin.
+        best_idx = max(range(len(elevs)), key=lambda i: elevs[i])
+        best = elevs[best_idx]
+        others = [e for i, e in enumerate(elevs) if i != best_idx]
+        runner = max(others) if others else -90.0
+        # Confidence: how decisively the best beats the runner-up (0..1 over 30 deg).
+        confidence = max(0.0, min(1.0, (best - runner) / 30.0))
+        if best > 0.0 and best_idx != prev_serving:
+            predictions.append((t, ue_id, best_idx + 1, round(confidence, 3)))
+            prev_serving = best_idx
+        t += step_s
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    with out_path.open("w") as f:
+        f.write(f"# ntn-twin handover predictions  epoch_unix={epoch_unix:.3f}\n")
+        f.write("# t_s,ueId,recommendedGnbId,confidence\n")
+        for t_s, uid, gnb, conf in predictions:
+            if conf < min_confidence:
+                continue
+            f.write(f"{t_s:.3f},{uid},{gnb},{conf}\n")
+            written += 1
+    LOG.info("emit_predictions_file: wrote %d handover predictions to %s", written, out_path)
+    return written
+
+
 def run_iteration(cfg: LoopConfig, stats: LoopStats) -> None:
     t0 = time.time()
     when = dt.datetime.now(tz=dt.timezone.utc)

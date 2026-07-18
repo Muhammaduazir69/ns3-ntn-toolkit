@@ -53,6 +53,9 @@
 #include "ns3/oran-ntn-xapp-ho-predict.h"
 #include "ns3/oran-ntn-helper.h"
 #include "ns3/ntn-static-extra-loss-model.h"
+#include "ns3/oran-ntn-twin-prediction-consumer.h"
+
+#include <fstream>
 #include "ns3/oran-ntn-xapp-interference-mgmt.h"
 #include "ns3/oran-ntn-xapp-multi-conn.h"
 #include "ns3/oran-ntn-xapp-predictive-alloc.h"
@@ -5231,6 +5234,119 @@ class OranNtnHelperActuatorsWiredTest : public TestCase
 };
 
 // ============================================================================
+//  WS-C: the digital-twin C++ consumer must CLOSE the loop — a twin-exported
+//  handover prediction, loaded from a file, must actuate a real handover inside
+//  the running sim at the predicted time. This writes a 1-line prediction file,
+//  loads it, wires the consumer's submit callback to an xApp -> RIC -> E2 node,
+//  and asserts the E2 node's RC actuation fires at the predicted time with the
+//  twin's recommended target. Also checks the Non-RT GetRecommendation() query.
+// ============================================================================
+class OranNtnTwinConsumerClosesLoopTest : public TestCase
+{
+  public:
+    OranNtnTwinConsumerClosesLoopTest()
+        : TestCase("WS-C - digital twin prediction consumer actuates a handover into the E2 loop")
+    {
+    }
+
+  private:
+    Ptr<OranNtnXappHoPredict> m_xapp;
+    uint32_t m_rcFire{0};
+    uint32_t m_rcUe{0};
+    uint32_t m_rcGnb{0};
+    double m_rcTime{-1.0};
+
+    // Twin prediction -> submit a HANDOVER_TRIGGER through the xApp (the real
+    // path: xApp -> RIC -> E2 termination -> E2 node RC callback).
+    void SubmitViaXapp(uint32_t ueId, uint32_t gnbId, double conf)
+    {
+        E2RcAction a{};
+        a.actionType = E2RcActionType::HANDOVER_TRIGGER;
+        a.targetGnbId = gnbId;
+        a.targetUeId = ueId;
+        a.confidence = conf;
+        a.timestamp = Simulator::Now().GetSeconds();
+        a.xappId = m_xapp->GetXappId();
+        a.xappName = "twin-consumer";
+        m_xapp->SubmitAction(a);
+    }
+
+    bool CaptureRc(E2RcAction a)
+    {
+        m_rcFire++;
+        m_rcUe = a.targetUeId;
+        m_rcGnb = a.targetGnbId;
+        m_rcTime = Simulator::Now().GetSeconds();
+        return true;
+    }
+
+    void DoRun() override
+    {
+        const std::string path = "twin-predictions-wsc-test.txt";
+        {
+            std::ofstream f(path);
+            f << "# ntn-twin handover predictions  epoch_unix=1735689600\n";
+            f << "# t_s,ueId,recommendedGnbId,confidence\n";
+            f << "30.0,0,2,0.94\n";
+            f << "10.0,0,2,0.20\n"; // low confidence: must be filtered out by minConfidence
+            f.close();
+        }
+
+        const Time feederDelay = MilliSeconds(4);
+        auto ric = CreateObject<OranNtnNearRtRic>();
+        ric->Initialize();
+
+        auto e2 = CreateObject<OranNtnE2Node>();
+        e2->SetNodeId(2);
+        e2->SetIsNtn(true);
+        e2->SetFeederLinkDelay(feederDelay);
+        e2->RegisterRanFunction(3, "RC");
+        e2->SetRcActionCallback(
+            MakeCallback(&OranNtnTwinConsumerClosesLoopTest::CaptureRc, this));
+        ric->ConnectE2Node(e2);
+
+        m_xapp = CreateObject<OranNtnXappHoPredict>();
+        m_xapp->SetXappName("twin-consumer");
+        ric->RegisterXapp(m_xapp);
+
+        auto consumer = CreateObject<OranNtnTwinPredictionConsumer>();
+        uint32_t n = consumer->LoadPredictionsFromFile(path);
+        NS_TEST_ASSERT_MSG_EQ(n, 2u, "both predictions must load from the file");
+        NS_TEST_ASSERT_MSG_EQ(consumer->GetNumPredictions(), 2u, "two predictions held");
+
+        // Only confidence >= 0.5 fires: the 0.20 one at t=10 is filtered out.
+        consumer->Start(
+            MakeCallback(&OranNtnTwinConsumerClosesLoopTest::SubmitViaXapp, this), 0.5);
+
+        Simulator::Stop(Seconds(31));
+        Simulator::Run();
+
+        // The high-confidence prediction closed the loop: exactly one handover
+        // actuated at the E2 node, at the predicted time (+ feeder delay), to the
+        // twin's recommended cell.
+        NS_TEST_ASSERT_MSG_EQ(consumer->GetActuatedCount(), 1u,
+                              "only the high-confidence prediction should actuate");
+        NS_TEST_ASSERT_MSG_EQ(m_rcFire, 1u, "E2 node RC callback must fire once");
+        NS_TEST_ASSERT_MSG_EQ(m_rcGnb, 2u, "handover target must be the twin's recommended gNB 2");
+        NS_TEST_ASSERT_MSG_EQ(m_rcUe, 0u, "handover UE must be 0");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(m_rcTime, 30.0,
+                                    "actuation must occur at/after the predicted time (30 s)");
+        NS_TEST_ASSERT_MSG_LT(m_rcTime, 30.5,
+                              "actuation must occur near the predicted time + feeder delay");
+
+        // Non-RT policy query: at t=35 s the t=30 prediction applies.
+        uint32_t recGnb = 0;
+        double recConf = 0.0;
+        bool have = consumer->GetRecommendation(0, Seconds(35.0), recGnb, recConf);
+        NS_TEST_ASSERT_MSG_EQ(have, true, "a recommendation must exist for UE 0 at t=35 s");
+        NS_TEST_ASSERT_MSG_EQ(recGnb, 2u, "recommended cell must be 2");
+
+        Simulator::Destroy();
+        std::remove(path.c_str());
+    }
+};
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
 
@@ -5378,6 +5494,8 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnRlActionImprovesSinrTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnHelperActuatorsWiredTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnTwinConsumerClosesLoopTest,
                     TestCase::Duration::QUICK);
     }
 };
