@@ -128,7 +128,7 @@ std::ofstream g_kpiFile;
 std::ofstream g_satTrackFile;
 std::ofstream g_ueTrackFile;
 std::ofstream g_satGeo, g_ueGeo, g_beamGeo, g_hoGeo;
-bool g_fSat = true, g_fUe = true, g_fHo = true;
+bool g_fSat = true, g_fUe = true, g_fHo = true, g_fBeam = true;
 
 // Map a CHO algorithm/baseline string to a real trigger type.
 NtnChoAlgorithm::TriggerType
@@ -434,15 +434,32 @@ ChoTick()
                            << (calt / 1000.0) << "," << std::setprecision(0) << cspeed
                            << "\n";
         }
-        if (g_fSat)
+        // Serving-satellite position: one Feature PER timestep (the full track),
+        // comma-separated. (Was write-once, which left only the first point.)
+        if (!g_fSat)
         {
-            g_satGeo << "{\"type\":\"Feature\",\"properties\":{\"satId\":" << g_servSatId
-                     << ",\"time\":" << std::setprecision(1) << t
-                     << "},\"geometry\":{\"type\":\"Point\",\"coordinates\":["
-                     << std::setprecision(6) << slon << "," << slat << ","
-                     << (salt) << "]}}";
-            g_fSat = false;
+            g_satGeo << ",\n";
         }
+        g_satGeo << "{\"type\":\"Feature\",\"properties\":{\"satId\":" << g_servSatId
+                 << ",\"time\":" << std::setprecision(1) << t
+                 << "},\"geometry\":{\"type\":\"Point\",\"coordinates\":[" << std::setprecision(6)
+                 << slon << "," << slat << "," << (salt) << "]}}";
+        g_fSat = false;
+
+        // Serving-beam footprint: the sub-satellite ground point plus a 3 dB spot
+        // radius (~alt·tan(3°)), emitted per timestep so the beam layer is real
+        // instead of an empty FeatureCollection.
+        if (!g_fBeam)
+        {
+            g_beamGeo << ",\n";
+        }
+        const double beamRadiusKm = (salt / 1000.0) * std::tan(3.0 * M_PI / 180.0);
+        g_beamGeo << "{\"type\":\"Feature\",\"properties\":{\"satId\":" << g_servSatId
+                  << ",\"time\":" << std::setprecision(1) << t
+                  << ",\"beam_radius_km\":" << std::setprecision(1) << beamRadiusKm
+                  << "},\"geometry\":{\"type\":\"Point\",\"coordinates\":[" << std::setprecision(6)
+                  << slon << "," << slat << "]}}";
+        g_fBeam = false;
 
         for (size_t i = 0; i < g_ueModels.size(); ++i)
         {

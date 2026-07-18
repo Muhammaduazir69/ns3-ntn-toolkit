@@ -35,7 +35,10 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <system_error>
 
 using namespace ns3;
 using namespace ns3::ntnrrc;
@@ -256,6 +259,40 @@ main(int argc, char* argv[])
                 "(power-saving trade-off)\n",
                 drxEnabled ? "on" : "off", 100.0 * awakeFrac, rs.GetMeanDlSinrDb(),
                 rs.GetMeanDlTbler(), measGoodput, measGoodput * awakeFrac);
+
+    // Persist the DRX-specific KPIs (the signature of this example) to a file:
+    // per-state residency, the connected-mode DRX duty cycle (awake fraction),
+    // and the power-saving ratio (fraction of time the UE could sleep its Rx).
+    {
+        const double actS = g_drx->GetTimeInState(DrxState::Active).GetSeconds();
+        const double onS = g_drx->GetTimeInState(DrxState::OnDuration).GetSeconds();
+        const double shortS = g_drx->GetTimeInState(DrxState::ShortSleep).GetSeconds();
+        const double longS = g_drx->GetTimeInState(DrxState::LongSleep).GetSeconds();
+        const double awaitS = g_drx->GetTimeInState(DrxState::AwaitingPass).GetSeconds();
+        const double sleepS = shortS + longS + awaitS;
+        const double powerSaving = drxEnabled && simSeconds > 0.0 ? sleepS / simSeconds : 0.0;
+
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        std::ofstream f(outputDir + "/drx_metrics.csv");
+        f << "metric,value,unit,provenance\n";
+        f << "drx_enabled," << (drxEnabled ? 1 : 0) << ",bool,config\n";
+        f << "drx_long_cycle_ms," << drxLongCycleMs << ",ms,config\n";
+        f << "drx_on_duration_ms," << drxOnDurationMs << ",ms,config\n";
+        f << "duty_cycle_awake_frac," << awakeFrac << ",fraction,drx-state-machine\n";
+        f << "power_saving_frac," << powerSaving << ",fraction,drx-state-machine\n";
+        f << "time_active_s," << actS << ",s,drx-state-machine\n";
+        f << "time_on_duration_s," << onS << ",s,drx-state-machine\n";
+        f << "time_short_sleep_s," << shortS << ",s,drx-state-machine\n";
+        f << "time_long_sleep_s," << longS << ",s,drx-state-machine\n";
+        f << "time_awaiting_pass_s," << awaitS << ",s,drx-state-machine\n";
+        f << "measured_goodput_mbps," << measGoodput << ",Mbps,packetsink\n";
+        f << "drx_effective_goodput_mbps," << measGoodput * awakeFrac << ",Mbps,derived\n";
+        f.close();
+        std::printf("# wrote %s/drx_metrics.csv (duty cycle %.1f%%, power-saving %.1f%%)\n",
+                    outputDir.c_str(), 100.0 * awakeFrac, 100.0 * powerSaving);
+    }
+
     Simulator::Destroy();
     return 0;
 }

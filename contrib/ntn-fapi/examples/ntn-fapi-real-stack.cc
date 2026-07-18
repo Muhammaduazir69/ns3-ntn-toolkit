@@ -49,6 +49,9 @@
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <fstream>
+#include <filesystem>
+#include <system_error>
 
 #include "ns3/ntn-scene-helper.h"
 
@@ -231,6 +234,29 @@ main(int argc, char* argv[])
     }
     std::cout << "  FAPI delivered:               " << (realRxBytes / 1000)
               << " KB  goodput=" << goodputMbps << " Mbps\n";
+
+    // Persist the measured SCF-222 SAP latency (CI gate 15) to a result file, not
+    // just the console, so the FAPI KPI is inspectable alongside sim_health.csv.
+    if (g_bridge)
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        std::ofstream f(outputDir + "/fapi_sap.csv");
+        f << "metric,value,unit,provenance\n";
+        f << "slot_indication_count," << g_bridge->GetSlotIndicationCount()
+          << ",count,fapi-sap\n";
+        f << "dl_tti_request_count," << g_bridge->GetDlTtiRequestCount() << ",count,fapi-sap\n";
+        f << "dl_tti_with_data_count," << g_bridge->GetDlTtiWithDataCount() << ",count,fapi-sap\n";
+        f << "crc_indication_count," << g_bridge->GetCrcIndicationCount() << ",count,fapi-sap\n";
+        f << "matched_latency_count," << g_bridge->GetMatchedLatencyCount() << ",count,fapi-sap\n";
+        f << "sap_latency_mean_us," << g_bridge->GetMeanSapLatencySec() * 1e6 << ",us,measured\n";
+        f << "sap_latency_min_us," << g_bridge->GetMinSapLatencySec() * 1e6 << ",us,measured\n";
+        f << "sap_latency_max_us," << g_bridge->GetMaxSapLatencySec() * 1e6 << ",us,measured\n";
+        f << "sched_pipeline_mean_us," << g_bridge->GetMeanSchedPipelineSec() * 1e6
+          << ",us,measured\n";
+        f.close();
+        std::cout << "  wrote " << outputDir << "/fapi_sap.csv (SAP latency KPI)\n";
+    }
 
     Simulator::Destroy();
     return 0;

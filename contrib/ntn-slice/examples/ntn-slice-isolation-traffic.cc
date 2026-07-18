@@ -26,6 +26,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <system_error>
 
 using namespace ns3;
 using namespace ns3::ntnslice;
@@ -137,11 +140,15 @@ main(int argc, char* argv[])
     double sliceMbps[3] = {0, 0, 0};
     double sliceSinr[3] = {0, 0, 0};
     uint64_t sliceRxPkts[3] = {0, 0, 0};
+    double sliceOwd[3] = {0, 0, 0};
+    uint64_t sliceLost[3] = {0, 0, 0};
     for (uint32_t s = 0; s < 3; ++s)
     {
         const auto st = rs.GetSliceMeasuredStats(sliceFiveQi[s]);
         sliceMbps[s] = st.thrMbps;
         sliceRxPkts[s] = st.rxPackets;
+        sliceOwd[s] = st.meanOwdMs;
+        sliceLost[s] = st.lostPackets;
         const double bwpSinr = rs.GetBwpMeanSinrDb(sliceBwp[s]);
         sliceSinr[s] = std::isnan(bwpSinr) ? 0.0 : bwpSinr;
         for (uint64_t p = 0; p < st.rxPackets; ++p)
@@ -176,6 +183,48 @@ main(int argc, char* argv[])
     }
     std::printf("#   SLA breaches: %u/3 (isolation %s under eMBB saturation)\n", nBreach,
                 nBreach == 0 ? "HELD" : "violated");
+
+    // Persist the PER-SLICE breakdown (the signature of this example): per-BWP
+    // SINR, measured throughput, measured one-way delay and delivered/lost counts
+    // per slice, plus each slice's SLA breach verdict. URLLC latency conformance
+    // is judged against its configured budget (TS 23.501 5QI PDB) — over a LEO
+    // slant a 5 ms URLLC budget is expected to BREACH, which the file now shows.
+    {
+        using SstT = decltype(profiles[0].snssai.sst);
+        auto breachFor = [&](SstT sst, bool& lat, bool& rel) {
+            lat = rel = false;
+            for (const auto& b : breaches)
+            {
+                if (b.snssai.sst == sst)
+                {
+                    lat = b.latencyBreach;
+                    rel = b.reliabilityBreach;
+                }
+            }
+        };
+        const SstT sliceSst[3] = {profiles[0].snssai.sst, profiles[1].snssai.sst,
+                                  profiles[2].snssai.sst};
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        std::ofstream f(outputDir + "/slices.csv");
+        f << "slice,five_qi,sst,bwp,sinr_db,throughput_mbps,mean_owd_ms,rx_pkts,lost_pkts,"
+             "latency_breach,reliability_breach,provenance\n";
+        for (int s = 0; s < 3; ++s)
+        {
+            bool lat = false;
+            bool rel = false;
+            breachFor(sliceSst[s], lat, rel);
+            f << names[s] << "," << static_cast<unsigned>(sliceFiveQi[s]) << ","
+              << static_cast<unsigned>(sliceSst[s]) << "," << static_cast<unsigned>(sliceBwp[s])
+              << "," << sliceSinr[s] << "," << sliceMbps[s] << "," << sliceOwd[s] << ","
+              << static_cast<unsigned long>(sliceRxPkts[s]) << ","
+              << static_cast<unsigned long>(sliceLost[s]) << "," << (lat ? 1 : 0) << ","
+              << (rel ? 1 : 0) << ",measured-per-bwp\n";
+        }
+        f.close();
+        std::printf("# wrote %s/slices.csv (per-slice measured KPIs + SLA verdicts)\n",
+                    outputDir.c_str());
+    }
 
     Simulator::Destroy();
     return 0;
