@@ -5004,11 +5004,10 @@ class OranNtnXappMovesServingCellTest : public TestCase
 //  high-SINR gnb (verified at the target E2 node's RC callback), and (b) move
 //  the UE toward higher SINR (candidate SINR > pre-action serving SINR).
 //
-//  Model note (discovered, NOT fixed): OranNtnGymHandover treats the report
-//  with the HIGHEST gnbId for the UE as the "serving" cell, because
-//  GetUeReportsInWindow() iterates the gnbId-keyed std::map and takes .back().
-//  So the low-SINR serving cell is deliberately given the HIGHER gnbId (3) and
-//  the high-SINR handover target the lower id (2) to match the gym's semantics.
+//  Serving cell is resolved by IDENTITY: the test publishes the UE's true
+//  serving cell via OranNtnXappBase::SetUeServingCell(), so the low-SINR serving
+//  cell can carry the NATURAL lower gnbId (1) and the high-SINR target the higher
+//  id (2) — the old highest-gnbId map-ordering artifact is gone.
 // ============================================================================
 
 class OranNtnRlActionImprovesSinrTest : public TestCase
@@ -5037,7 +5036,7 @@ class OranNtnRlActionImprovesSinrTest : public TestCase
     {
         const Time feederDelay = MilliSeconds(10);
         const uint32_t ueId = 7;
-        const uint32_t servingGnb = 3; // low SINR (serving = highest gnbId)
+        const uint32_t servingGnb = 1; // low SINR, NATURAL lower id (serving by identity)
         const uint32_t targetGnb = 2;  // high SINR (handover candidate/target)
         const double servingSinr = 3.0;
         const double candSinr = 15.0;
@@ -5082,6 +5081,8 @@ class OranNtnRlActionImprovesSinrTest : public TestCase
         };
         feed(targetGnb, candSinr);
         feed(servingGnb, servingSinr);
+        // Publish the true serving cell by identity (not gnbId order).
+        xapp->SetUeServingCell(ueId, servingGnb);
 
         gym->SetCurrentUe(ueId);
 

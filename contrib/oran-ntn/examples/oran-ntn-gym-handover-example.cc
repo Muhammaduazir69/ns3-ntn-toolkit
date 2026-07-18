@@ -178,6 +178,10 @@ main(int argc, char* argv[])
             lastRx[ue] = rxBytes;
             helper->InjectKpmReport(1, ue, sinr, sinr - 95.0, tte, elev, doppler, thp, rxBytes,
                                     tbler);
+            // Publish the UE's TRUE serving cell (E2 node 1 in this scenario) so
+            // the gym reads the serving baseline by identity, not by gnbId map
+            // order. In a full RAN this is rs.GetUeServingCellId(ue).
+            hoPredict->SetUeServingCell(ue, 1);
 
             // Candidate satellites: real ephemeris elevation + Friis-ratio SINR
             // prediction off the measured serving baseline (flagged prediction).

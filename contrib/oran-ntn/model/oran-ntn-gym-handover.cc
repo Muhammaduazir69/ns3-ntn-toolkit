@@ -197,23 +197,35 @@ OranNtnGymHandover::GetObservation()
 
     if (m_xapp)
     {
-        // Query xApp for current UE's serving gNB state via base class API
-        auto ueReports = m_xapp->GetUeReportsInWindow(m_currentUeId, Seconds(10));
-        E2KpmReport report;
-        if (!ueReports.empty())
-        {
-            report = ueReports.back();
-        }
+        // Serving-cell state: resolve the TRUE serving cell (published by the RAN
+        // via SetUeServingCell), not the highest-gnbId report (a std::map ordering
+        // artifact). Falls back to the newest report by timestamp if unknown.
+        bool haveServing = false;
+        E2KpmReport report = m_xapp->GetUeServingReport(m_currentUeId, Seconds(10), haveServing);
         servingSinr = static_cast<float>(report.sinr_dB);
         servingTte = static_cast<float>(report.tte_s);
         servingElevation = static_cast<float>(report.elevation_deg);
         servingDoppler = static_cast<float>(report.doppler_Hz);
 
-        // Compute SINR slope from history
-        if (ueReports.size() >= 2)
+        // SINR slope from the serving cell's own history, ordered by TIME (the
+        // window vector is gnbId-ordered, so sort before differencing).
+        auto ueReports = m_xapp->GetUeReportsInWindow(m_currentUeId, Seconds(10));
+        std::vector<E2KpmReport> servingHist;
+        for (const auto& r : ueReports)
         {
-            sinrSlope = static_cast<float>(
-                ueReports.back().sinr_dB - ueReports[ueReports.size() - 2].sinr_dB);
+            if (r.gnbId == report.gnbId)
+            {
+                servingHist.push_back(r);
+            }
+        }
+        std::sort(servingHist.begin(), servingHist.end(),
+                  [](const E2KpmReport& a, const E2KpmReport& b) {
+                      return a.timestamp < b.timestamp;
+                  });
+        if (servingHist.size() >= 2)
+        {
+            sinrSlope = static_cast<float>(servingHist.back().sinr_dB -
+                                           servingHist[servingHist.size() - 2].sinr_dB);
         }
 
         // Best candidate info from all recent reports (different gNBs)
@@ -240,11 +252,12 @@ OranNtnGymHandover::GetObservation()
             bestCandElevation = static_cast<float>(bestIt->elevation_deg);
         }
 
-        // Compute time since last HO from UE report history timestamps
-        if (ueReports.size() >= 2)
+        // Time the UE has been on its current serving cell: age of the OLDEST
+        // serving-cell report in the window (time-ordered, not gnbId-ordered).
+        if (servingHist.size() >= 2)
         {
             timeSinceLastHo = static_cast<float>(
-                Simulator::Now().GetSeconds() - ueReports.front().timestamp);
+                Simulator::Now().GetSeconds() - servingHist.front().timestamp);
         }
         recentHoCount = 0.0f; // Approximated from report count changes
         prbUtil = static_cast<float>(report.prbUtilization);
@@ -355,13 +368,10 @@ OranNtnGymHandover::ExecuteActions(Ptr<OpenGymDataContainer> action)
         // Action > 0 means handover to candidate (chosenAction - 1)
         uint32_t candidateIdx = chosenAction - 1;
 
-        // Build candidate list from recent reports for other gNBs
-        auto servingReport = m_xapp->GetUeReportsInWindow(m_currentUeId, Seconds(5));
-        uint32_t servingGnb = 0;
-        if (!servingReport.empty())
-        {
-            servingGnb = servingReport.back().gnbId;
-        }
+        // Serving cell = the UE's TRUE serving cell (not the highest-gnbId report).
+        bool haveServing = false;
+        E2KpmReport servingRep = m_xapp->GetUeServingReport(m_currentUeId, Seconds(5), haveServing);
+        uint32_t servingGnb = haveServing ? servingRep.gnbId : 0;
         auto allReports = m_xapp->GetReportsInWindow(Seconds(5));
         std::vector<E2KpmReport> candidates;
         for (const auto& r : allReports)
@@ -386,6 +396,10 @@ OranNtnGymHandover::ExecuteActions(Ptr<OpenGymDataContainer> action)
             hoAction.executed = false;
 
             m_xapp->SubmitAction(hoAction);
+            // The RL action moved the UE: update the tracked serving cell so the
+            // next observation reads the new serving baseline (the RAN will also
+            // republish it once the real handover completes).
+            m_xapp->SetUeServingCell(m_currentUeId, candidates[candidateIdx].gnbId);
             m_handoverExecuted = true;
             NS_LOG_INFO("RL triggered HO: UE " << m_currentUeId << " -> gNB "
                                                 << candidates[candidateIdx].gnbId);

@@ -13,6 +13,8 @@
 #include <ns3/simulator.h>
 #include <ns3/uinteger.h>
 
+#include <limits>
+
 namespace ns3
 {
 
@@ -274,6 +276,74 @@ OranNtnXappBase::GetUeReportsInWindow(uint32_t ueId, Time window) const
         }
     }
     return result;
+}
+
+void
+OranNtnXappBase::SetUeServingCell(uint32_t ueId, uint32_t gnbId)
+{
+    m_ueServingCell[ueId] = gnbId;
+}
+
+bool
+OranNtnXappBase::GetUeServingCell(uint32_t ueId, uint32_t& gnbId) const
+{
+    auto it = m_ueServingCell.find(ueId);
+    if (it == m_ueServingCell.end())
+    {
+        return false;
+    }
+    gnbId = it->second;
+    return true;
+}
+
+E2KpmReport
+OranNtnXappBase::GetUeServingReport(uint32_t ueId, Time window, bool& found) const
+{
+    found = false;
+    E2KpmReport serving{};
+    uint32_t servingGnb = 0;
+    bool haveServing = GetUeServingCell(ueId, servingGnb);
+
+    // Pass 1: newest report from the KNOWN serving cell.
+    // Pass 2 (fallback): newest report from any cell — by timestamp, never by
+    // gnbId map order.
+    double bestServingTs = -std::numeric_limits<double>::infinity();
+    double bestAnyTs = -std::numeric_limits<double>::infinity();
+    E2KpmReport newestAny{};
+    bool haveAny = false;
+    double now = Simulator::Now().GetSeconds();
+    double windowSec = window.GetSeconds();
+
+    for (const auto& [gnbId, reports] : m_kpmDatabase)
+    {
+        for (const auto& r : reports)
+        {
+            if (r.ueId != ueId || (now - r.timestamp) > windowSec)
+            {
+                continue;
+            }
+            if (r.timestamp > bestAnyTs)
+            {
+                bestAnyTs = r.timestamp;
+                newestAny = r;
+                haveAny = true;
+            }
+            if (haveServing && gnbId == servingGnb && r.timestamp > bestServingTs)
+            {
+                bestServingTs = r.timestamp;
+                serving = r;
+                found = true;
+            }
+        }
+    }
+
+    if (found)
+    {
+        return serving;
+    }
+    // Serving cell unknown or has no report in window: newest report overall.
+    found = haveAny;
+    return newestAny;
 }
 
 // ---- A1 policy ----
