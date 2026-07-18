@@ -599,10 +599,23 @@ NtnRealStackHelper::BuildNrRadio()
                 m_airIfaceDelayActive = true;
             }
         }
-        NS_LOG_WARN("nr backend: real air-interface propagation delay ACTIVE by request. The "
-                    "vendored 5G-LENA v3.3 has no K_offset/TA, so this is only safe for a "
-                    "single UE with downlink-only traffic; anything else will abort with "
-                    "'Cannot TX while RX' or a UL-alignment assert. See gap R1/R3.");
+        if (m_kOffsetConsumption)
+        {
+            NS_LOG_WARN("nr backend: real air-interface propagation delay ACTIVE + K_offset "
+                        "CONSUMPTION on. The geometry-derived K_offset is applied to N2Delay "
+                        "(TS 38.213 §4.2), pushing the UL grant past the round trip — this "
+                        "resolves the 'Cannot TX while RX' half-duplex conflict, so single-UE "
+                        "uplink now runs. Multi-UE uplink still needs per-UE Timing Advance "
+                        "(separate mechanism, not yet in nr v3.3). See gap R1/R3.");
+        }
+        else
+        {
+            NS_LOG_WARN("nr backend: real air-interface propagation delay ACTIVE by request, but "
+                        "K_offset consumption is OFF. The vendored 5G-LENA v3.3 has no K_offset/TA, "
+                        "so this is only safe for a single UE with downlink-only traffic; uplink "
+                        "will abort with 'Cannot TX while RX'. Call SetKOffsetConsumption(true) to "
+                        "consume the SIB19 K_offset and unlock single-UE uplink. See gap R1/R3.");
+        }
     }
 
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
@@ -679,6 +692,26 @@ NtnRealStackHelper::BuildNrRadio()
     // run was ~4.8 dB hot relative to a 1-slice run of the "same" satellite.
     const double bwpPowerSplitDb = 10.0 * std::log10(static_cast<double>(nBwp));
     const double conductedPerBwpDbm = m_satEirpDbm - bwpPowerSplitDb;
+    // R1/R3 K_offset CONSUMPTION: TS 38.213 §4.2. When enabled, extend each gNB
+    // PHY's N2Delay (the DCI->PUSCH gap, in slots) by the geometry-derived
+    // K_offset. nr-gnb-phy.cc does `ulSfn.Add(GetN2Delay())`, so the UE's uplink
+    // grant is pushed K_offset slots later — past the service-link round trip —
+    // which is exactly what K_offset exists to do, and what stops the delayed
+    // downlink from landing in the UE's uplink slot ("Cannot TX while RX").
+    m_consumedKOffsetSlots = 0;
+    uint32_t baseN2 = 0;
+    if (m_kOffsetConsumption)
+    {
+        m_consumedKOffsetSlots = ComputeKOffsetSlots();
+        // Read the stack's default N2Delay so we ADD to it, not clobber it.
+        UintegerValue n2v;
+        m_nr->GetGnbPhy(m_enbDevs.Get(0), 0)->GetAttribute("N2Delay", n2v);
+        baseN2 = static_cast<uint32_t>(n2v.Get());
+        NS_LOG_INFO("NtnRealStackHelper: consuming SIB19 K_offset = "
+                    << m_consumedKOffsetSlots << " slots (numerology " << m_numerology
+                    << ", RTT " << (2.0 * ComputeServiceLinkDelay().GetSeconds() * 1e3)
+                    << " ms); N2Delay " << baseN2 << " -> " << (baseN2 + m_consumedKOffsetSlots));
+    }
     for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
     {
         for (uint8_t b = 0; b < nBwp; ++b)
@@ -687,6 +720,12 @@ NtnRealStackHelper::BuildNrRadio()
                 ->SetAttribute("Numerology", UintegerValue(m_numerology));
             m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
                 ->SetAttribute("TxPower", DoubleValue(conductedPerBwpDbm));
+            if (m_kOffsetConsumption)
+            {
+                m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
+                    ->SetAttribute("N2Delay",
+                                   UintegerValue(baseN2 + m_consumedKOffsetSlots));
+            }
         }
     }
 
@@ -1456,6 +1495,35 @@ NtnRealStackHelper::ComputeServiceLinkDelay() const
         return Seconds(0);
     }
     return Seconds(gm->GetDistanceFrom(um) / kC);
+}
+
+uint32_t
+NtnRealStackHelper::GetGnbN2Delay(uint32_t gnbIdx, uint8_t bwp) const
+{
+    if (m_backend != RadioBackend::Nr || !m_nr || gnbIdx >= m_enbDevs.GetN())
+    {
+        return 0;
+    }
+    UintegerValue v;
+    m_nr->GetGnbPhy(m_enbDevs.Get(gnbIdx), bwp)->GetAttribute("N2Delay", v);
+    return static_cast<uint32_t>(v.Get());
+}
+
+uint32_t
+NtnRealStackHelper::ComputeKOffsetSlots() const
+{
+    // TS 38.213 §4.2 cell-specific K_offset: enough slots to cover the service-
+    // link ROUND TRIP so a UL grant issued now is transmitted only after the DL
+    // has propagated and been decoded. Matches the SIB19 cellSpecificKoffset
+    // derivation (ceil(RTT / slot) + 1). Slot = 1 ms / 2^numerology.
+    const Time oneWay = ComputeServiceLinkDelay();
+    const double rttS = 2.0 * oneWay.GetSeconds();
+    const double slotS = 1.0e-3 / std::pow(2.0, static_cast<double>(m_numerology));
+    if (slotS <= 0.0)
+    {
+        return 0;
+    }
+    return static_cast<uint32_t>(std::ceil(rttS / slotS)) + 1;
 }
 
 Time

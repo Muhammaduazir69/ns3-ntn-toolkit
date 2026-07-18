@@ -339,6 +339,55 @@ class RealStackUeKeySeparationTest : public TestCase
     }
 };
 
+/// R1/R3 (WS-E): the SIB19 K_offset must be CONSUMED by the nr UL scheduler
+/// timing, not merely populated. NtnRealStackHelper applies the geometry-derived
+/// K_offset to NrGnbPhy::N2Delay (the UL DCI->PUSCH gap, TS 38.213 §4.2), which
+/// nr-gnb-phy adds to the uplink slot (`ulSfn.Add(GetN2Delay())`). This asserts:
+/// (1) the consumed K_offset equals the 600 km-zenith round-trip geometry and
+/// matches the SIB19 derivation; (2) it is actually programmed onto the built
+/// gNB PHY; and (3) it pushes N2Delay past the vendored terrestrial cap of 4
+/// slots (the NTN cap-raise, ntn-patches/05). NOTE: turning air-interface delay
+/// fully ON for uplink additionally needs NTN-aware SRS/PUCCH timing across all
+/// UL control channels, which the vendored nr v3.3 lacks (nr-spectrum-phy
+/// half-duplex assert) — that is the nr v5.0/ns-3.48 migration, tracked
+/// separately. This test verifies the K_offset CONSUMPTION path itself.
+class RealStackKOffsetConsumedTest : public TestCase
+{
+  public:
+    RealStackKOffsetConsumedTest()
+        : TestCase("R1/R3 - SIB19 K_offset is consumed into the nr UL scheduler N2Delay")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        LeoRig rig; // 600 km zenith slant at t=0 -> ~4 ms round trip
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetKOffsetConsumption(true); // no air delay here: verify consumption itself
+        rs.Build(rig.sat, rig.ue);
+
+        const uint32_t k = rs.GetConsumedKOffsetSlots();
+        NS_TEST_ASSERT_MSG_GT(k, 0u, "K_offset must be consumed");
+        NS_TEST_ASSERT_MSG_EQ(k, rs.ComputeKOffsetSlots(),
+                              "consumed K_offset must equal the geometry-derived value "
+                              "(matches the SIB19 cellSpecificKoffset derivation)");
+
+        // The K_offset is genuinely programmed onto the scheduler: N2Delay on the
+        // built gNB PHY equals the stack's base N2Delay (2) plus K_offset.
+        const uint32_t n2 = rs.GetGnbN2Delay(0, 0);
+        NS_TEST_ASSERT_MSG_EQ(n2, 2u + k,
+                              "N2Delay programmed on the gNB PHY = base(2) + consumed K_offset");
+        // And it exceeds the vendored terrestrial cap of 4 slots — proving the NTN
+        // cap-raise (ntn-patches/05) is live and the K_offset actually fits.
+        NS_TEST_ASSERT_MSG_GT(n2, 4u,
+                              "NTN K_offset pushes N2Delay past the terrestrial max of 4 slots");
+
+        Simulator::Destroy();
+    }
+};
+
 class NtnRealStackHelperTestSuite : public TestSuite
 {
   public:
@@ -349,6 +398,7 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new RealStackAiMonitorAfterInstallTest, Duration::QUICK);
         AddTestCase(new RealStackNtnHarqProfileTest, Duration::QUICK);
         AddTestCase(new RealStackUeKeySeparationTest, Duration::QUICK);
+        AddTestCase(new RealStackKOffsetConsumedTest, Duration::QUICK);
     }
 };
 

@@ -1,0 +1,23 @@
+# NTN/ns-3.43 adaptation patch — raise N2Delay checker max 4->320 so NTN K_offset (TS 38.213 §4.2) fits the UL DCI->PUSCH gap
+# base: upstream 5g-lena v3.3.1 (model/nr-gnb-phy.cc)
+# apply from contrib/nr/ with: patch -p1 < ntn-patches/05-nr-gnb-phy-n2delay-ntn-koffset-range.patch
+#
+diff --git a/model/nr-gnb-phy.cc b/model/nr-gnb-phy.cc
+index 83ef71203..806f3c84e 100644
+--- a/model/nr-gnb-phy.cc
++++ b/model/nr-gnb-phy.cc
+@@ -142,7 +142,13 @@ NrGnbPhy::GetTypeId()
+                           "Minimum processing delay needed to decode UL DCI and prepare UL data",
+                           UintegerValue(2),
+                           MakeUintegerAccessor(&NrGnbPhy::SetN2Delay, &NrGnbPhy::GetN2Delay),
+-                          MakeUintegerChecker<uint32_t>(0, 4))
++                          // NTN adaptation (NtnRealStackHelper K_offset consumption, TS 38.213
++                          // §4.2): the terrestrial upper bound of 4 slots cannot hold the NTN
++                          // cell-specific K_offset (tens of slots — ~9 for a 600 km LEO round
++                          // trip, more for MEO/GEO). Raised so N2Delay can absorb K_offset and
++                          // push the UL grant past the service-link round trip. See
++                          // contrib/nr/ntn-patches/05-*.patch.
++                          MakeUintegerChecker<uint32_t>(0, 320))
+             .AddAttribute("TbDecodeLatency",
+                           "Transport block decode latency",
+                           TimeValue(MicroSeconds(100)),

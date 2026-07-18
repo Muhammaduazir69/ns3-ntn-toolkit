@@ -174,6 +174,29 @@ class NtnRealStackHelper
     /// When off (the default) the service-link slant is carried on the backhaul
     /// so the measured end-to-end OWD is still physically correct.
     void SetAirInterfaceDelay(bool enable) { m_airIfaceDelayRequested = enable; }
+
+    /// R1/R3 CONSUMPTION: consume the SIB19 cell-specific K_offset in the nr
+    /// scheduler's UL timing (TS 38.213 §4.2). The populated K_offset is applied
+    /// as extra NrGnbPhy::N2Delay slots (the DCI->PUSCH gap), pushing the UE's
+    /// uplink grant beyond the round trip so the delayed downlink no longer lands
+    /// in the UE's uplink slot ("Cannot TX while RX"). This is the unlock that
+    /// lets SetAirInterfaceDelay(true) run uplink traffic for a single UE / a
+    /// downlink-heavy scenario. DEFAULT OFF. NOTE: it addresses ONLY the K_offset
+    /// half-duplex conflict; per-UE Timing Advance (multi-UE UL arrival
+    /// alignment, TS 38.213 §4.2) is a separate mechanism still absent in nr v3.3.
+    void SetKOffsetConsumption(bool enable) { m_kOffsetConsumption = enable; }
+    bool GetKOffsetConsumption() const { return m_kOffsetConsumption; }
+    /// The K_offset (in nr slots) actually applied to N2Delay after Build();
+    /// 0 when consumption is off. Derived from the service-link round trip.
+    uint32_t GetConsumedKOffsetSlots() const { return m_consumedKOffsetSlots; }
+    /// Compute the K_offset in slots from the current geometry and numerology
+    /// (ceil(RTT / slot) + 1), matching the SIB19 cellSpecificKoffset derivation.
+    uint32_t ComputeKOffsetSlots() const;
+    /// Read back the N2Delay (UL DCI->PUSCH gap, slots) actually programmed on a
+    /// built nr gNB PHY. After Build() with K_offset consumption on, this equals
+    /// the stack's base N2Delay + GetConsumedKOffsetSlots(). Nr backend only.
+    uint32_t GetGnbN2Delay(uint32_t gnbIdx = 0, uint8_t bwp = 0) const;
+
     RadioBackend GetRadioBackend() const { return m_backend; }
     /// FR1 numerology for the Nr backend only: 0 = 15 kHz, 1 = 30 kHz (default).
     /// Ignored by the Mmwave backend. Call before Build().
@@ -750,6 +773,11 @@ class NtnRealStackHelper
     /// instead — the end-to-end delay is right, the air interface just does
     /// not feel it. Safe to enable only for single-UE downlink-only studies.
     bool m_airIfaceDelayRequested{false};
+    /// R1/R3: opt-in consumption of the SIB19 K_offset in the nr UL scheduler
+    /// timing (applied as extra NrGnbPhy::N2Delay slots). OFF by default.
+    bool m_kOffsetConsumption{false};
+    /// K_offset (nr slots) applied to N2Delay in Build(); 0 when consumption off.
+    uint32_t m_consumedKOffsetSlots{0};
     uint32_t m_hoCount{0};                      // A: completed NR handovers
     uint32_t m_hoRequested{0};                  // P1: handovers REQUESTED via TriggerHandover
     std::vector<Ptr<NrHandoverAlgorithm>> m_hoAlgos; // A: per-gNB A3 algos (kept alive)

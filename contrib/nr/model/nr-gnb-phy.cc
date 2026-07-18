@@ -142,7 +142,13 @@ NrGnbPhy::GetTypeId()
                           "Minimum processing delay needed to decode UL DCI and prepare UL data",
                           UintegerValue(2),
                           MakeUintegerAccessor(&NrGnbPhy::SetN2Delay, &NrGnbPhy::GetN2Delay),
-                          MakeUintegerChecker<uint32_t>(0, 4))
+                          // NTN adaptation (NtnRealStackHelper K_offset consumption, TS 38.213
+                          // §4.2): the terrestrial upper bound of 4 slots cannot hold the NTN
+                          // cell-specific K_offset (tens of slots — ~9 for a 600 km LEO round
+                          // trip, more for MEO/GEO). Raised so N2Delay can absorb K_offset and
+                          // push the UL grant past the service-link round trip. See
+                          // contrib/nr/ntn-patches/05-*.patch.
+                          MakeUintegerChecker<uint32_t>(0, 320))
             .AddAttribute("TbDecodeLatency",
                           "Transport block decode latency",
                           TimeValue(MicroSeconds(100)),
