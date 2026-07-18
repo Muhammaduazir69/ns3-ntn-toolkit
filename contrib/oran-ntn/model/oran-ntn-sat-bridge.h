@@ -38,6 +38,17 @@
 #include <ns3/satellite-free-space-loss.h>
 #include <ns3/satellite-mobility-model.h>
 #include <ns3/satellite-sgp4-mobility-model.h>
+// The vendored SNS3 header satellite-sgp4unit.h (pulled in transitively above)
+// does `#define pi 3.14159...` and never undefs it. That macro leaks into any
+// translation unit that includes this bridge and then a header where `pi` is an
+// identifier — notably Boost's shared_count(sp_counted_base* pi) in the ns3-ai /
+// opengym stack, which fails to compile ("cannot convert double to
+// sp_counted_base*"). Undo the leak here: the satellite SGP4 .cc files that
+// legitimately use the macro include satellite-sgp4unit.h directly and are
+// unaffected; only downstream includers (e.g. the O-RAN gym example) are fixed.
+#ifdef pi
+#undef pi
+#endif
 #include <ns3/three-gpp-propagation-loss-model.h>
 #include <ns3/traced-callback.h>
 
