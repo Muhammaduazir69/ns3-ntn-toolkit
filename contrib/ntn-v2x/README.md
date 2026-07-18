@@ -1,13 +1,14 @@
 <h1 align="center">ntn-v2x</h1>
 
-<p align="center"><strong>SUMO TraCI Bridge and V2X-LEO Direct / Relay Channels for Vehicular and Maritime NTN Research</strong></p>
+<p align="center"><strong>SUMO TraCI Bridge, NR PC5 Sidelink (Mode 2) and V2X-LEO Direct / Relay Channels for Vehicular and Maritime NTN Research</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
   <img src="https://img.shields.io/badge/SUMO-TraCI%20v20%2B%20%2B%20FCD%20replay-orange.svg"/>
-  <img src="https://img.shields.io/badge/scenarios-rural--highway%20%E2%80%A2%20platoon--URLLC%20%E2%80%A2%20maritime-purple.svg"/>
-  <img src="https://img.shields.io/badge/unit_tests-5%20PASS-success.svg"/>
+  <img src="https://img.shields.io/badge/PC5-NR%20sidelink%20Mode%202%20(TS%2038.321)-red.svg"/>
+  <img src="https://img.shields.io/badge/scenarios-rural--highway%20%E2%80%A2%20platoon--URLLC%20%E2%80%A2%20PC5--sidelink%20%E2%80%A2%20maritime-purple.svg"/>
+  <img src="https://img.shields.io/badge/unit_tests-7%20PASS-success.svg"/>
 </p>
 
 > NTN-assisted V2X for rural and remote roads: SUMO-driven vehicle mobility, a direct-vs-satellite-relay decision per vehicle made on the **measured** SINR of a real mmwave NR LEO cell, and a URLLC platoon-control flagship with edge-AI placement — plus a 2-D maritime scenario.
@@ -25,6 +26,7 @@
 Vehicular networking research has historically lived in OMNeT++ via Veins. Veins is excellent but cannot be lifted into ns-3 without a parallel discrete-event kernel — and the rest of the 6G NTN toolkit is firmly in ns-3. `ntn-v2x` mirrors what Veins offers in spirit (a SUMO-driven mobility feed plus vehicular channel models) but builds it natively against the ns-3 mobility stack, and puts the radio on a real NR protocol stack:
 
 - **Vehicle FCD replay via `SumoTraciBridge`** — drive ns-3 mobility from SUMO floating-car-data (`time,vehid,x,y,z,speed`) for offline, bit-reproducible runs, or from a live TraCI v20+ socket.
+- **NR PC5 sidelink Mode 2 (direct V2V, no gNB)** — a genuine direct-V2V safety layer: vehicles broadcast SAE J2735 BSMs over PC5 with autonomous, sensing-based resource selection (`NtnNrSidelink`, per 3GPP TS 38.321 §5.22 / TS 38.331 SL-ResourcePool), evaluated with the TS 38.885 PRR-vs-distance methodology. This is the *sidelink* counterpart to the Uu/P2P relay path below, which instead routes traffic through a satellite gNB.
 - **Direct vs satellite-relay decision on measured radio** — vehicles are UEs on a real mmwave NR NTN cell (`NtnRealStackHelper`, SGP4 LEO); each vehicle's direct uplink quality is its measured DL SINR minus a 3GPP-style per-vehicle NLOS blockage loss, and a vehicle that cannot clear `minDirectSnr` relays through the nearest in-range peer (`maxV2vRange`).
 - **Closed-form reference** — `V2xLeoDirect` keeps the free-space PL + SNR + elevation budget as a comparison baseline; `ntn-v2x-real-stack` prints it next to the measured SINR so the formula-vs-measurement gap is visible.
 - **Measured traffic KPIs** — data-plane examples carry `NtnOranApplication` traffic with an in-band `NtnOranPayloadHeader`; `NtnOranSink` measures one-way delay, jitter, PDR and goodput from the packets themselves.
@@ -37,6 +39,13 @@ SUMO  ──TCP TraCI──►  SumoTraciBridge  ──MobilityModel.SetPosition
    ▼                                                                    ▼
 [SUMO live]                                              [real mmwave NR LEO cell]
 ```
+
+## What's new (July 2026)
+
+- **NR PC5 sidelink Mode 2 (`model/ntn-nr-sidelink.{h,cc}`)** — a direct-V2V safety layer with no gNB in the loop: `NtnSlResourcePool` + `NtnSlUeMac` (autonomous, sensing-based Mode-2 selection per TS 38.321 §5.22 over the TS 38.331 SL-ResourcePool) + `NtnSlChannel` (half-duplex, co-channel collisions, TS 38.885 PRR). A MAC / resource-pool abstraction — not a PSCCH/PSSCH PHY.
+- **New example `ntn-v2x-pc5-sidelink-bsm`** — vehicles broadcast SAE J2735 BSMs over PC5 and report PRR vs distance; PRR degrades gracefully as vehicle density saturates the pool.
+- **SAE J2735 BSM Part I header (`model/ntn-v2x-bsm-header.{h,cc}`)** — a real 23-byte BSMcoreData `Header` (msgCnt/id/secMark/lat/lon/elev/speed/heading), so a BSM carries genuine vehicle state.
+- Two new unit tests bring the suite to 7: a J2735 BSM header round-trip and `NtnSidelinkMode2Test` (Mode-2 selection, half-duplex, wide-pool vs 1-subchannel PRR).
 
 ## What's new (June 2026)
 
@@ -52,6 +61,8 @@ See the [CHANGELOG](CHANGELOG.md) for the full history.
 | Header | Provides |
 |---|---|
 | `model/sumo-traci-bridge.h` | `SumoTraciBridge` — single API for live TraCI (`ConnectTcp("127.0.0.1", 8813)`) and offline FCD replay (`LoadFcdTrace(csv)`); `RegisterVehicle()`, `Step()` advances regardless of source; tracks per-step sync jitter (`GetLastJitterSec()` / `GetMaxJitterSec()`) and exports per-vehicle samples via a `TracedCallback`. |
+| `model/ntn-nr-sidelink.h` | NR PC5 sidelink Mode 2 (TS 38.321 §5.22). `NtnSlResourcePool` — the SL-ResourcePool (subchannels × slots, TS 38.331). `NtnSlUeMac` — one vehicle's SL MAC with sensing-based autonomous selection (candidate set in the T1..T2 selection window, exclusion of resources a sensed neighbour reserved above an SL-RSRP threshold, the ≥20%-remaining rule with the +3 dB step, uniform-random pick, periodic reservation driven by a reselection counter). `NtnSlChannel` — the shared PC5 medium: log-distance SL-RSRP, half-duplex (a UE cannot receive in a slot it transmits in), co-channel collisions, and TS 38.885 PRR (`GetPrr`, `GetPrrWithinRange`). MAC / resource-pool abstraction only — it does **not** model PSCCH/PSSCH bit-level decoding, HARQ combining, or 2nd-stage SCI formats. |
+| `model/ntn-v2x-bsm-header.h` | `ntnv2x::NtnV2xBsmHeader` — a real SAE J2735 (2016) BSM Part I core (BSMcoreData) as an ns-3 `Header`: serialise/deserialise of `msgCnt`/`id`/`secMark`/`lat`/`lon`/`elev`/`speed`/`heading` in J2735 encoding resolutions (1/10 µ-degree, 1 dm, 0.02 m/s, 0.0125°); 23-byte wire core, `SetFromState()` fills it from SI quantities. So a BSM carries genuine vehicle state, not opaque padding. |
 | `model/v2x-leo-direct.h` | `V2xLeoDirect` — closed-form vehicle ↔ LEO uplink budget (free-space PL + SNR + elevation); `ComputeStatic` callable inside hot loops without `Object` allocation overhead. Kept as a reference baseline — the examples decide on measured SINR. |
 | `model/v2x-leo-relay.h` | `V2xLeoRelay` — V2V-via-LEO relay assignment; each vehicle uplinks direct or relays through the best peer within `m_maxV2vRangeM`; `m_minDirectSnrDb` sets the prefer-relay threshold; `EvaluateAll()` returns the per-vehicle decision. |
 | `model/maritime-scenario.h` | `MaritimeMobilityModel` — DEPRECATED / offline-test-only synthetic box-bounce vessel motion. The real maritime path reuses ntn-sagin `AisMobilityModel` (recorded AIS replay) via the `ntn-v2x-maritime-ais` example. |
@@ -80,6 +91,18 @@ Outputs:
 - `sim_health.csv` and `kpm_series.csv` in `--outputDir`.
 
 Key args: `--simSeconds` (sim duration, s) · `--edge` (inference placement: `sat` | `ground`) · `--outputDir`.
+
+### ntn-v2x-pc5-sidelink-bsm
+
+A line of highway vehicles broadcast SAE J2735 BSMs **directly over PC5** with NR sidelink Mode 2 — autonomous, sensing-based resource selection, **no gNB in the loop**. Each UE selects a single-subchannel resource in its selection window, reserves it periodically, and the shared `NtnSlChannel` resolves half-duplex and co-channel collisions to produce the TS 38.885 KPI: Packet Reception Ratio (PRR) vs distance. This is the genuine direct-V2V safety layer, in contrast to `ntn-v2x-real-stack` / `ntn-v2x-leo-relay-traffic`, which route V2X through a satellite gNB (Uu / P2P relay).
+
+```bash
+./ns3 run "ntn-v2x-pc5-sidelink-bsm --numVehicles=20 --numSubchannels=5 --duration=4"
+```
+
+Outputs: console summary of total TX BSMs, RX attempts/successes, and PRR bucketed by distance (within 50/100/200/300/500 m). As vehicle density rises the resource pool saturates and PRR degrades gracefully — e.g. ≈1.00 at 10 vehicles / 5 subchannels, falling to ≈0.96 at 60 vehicles.
+
+Key args: `--numVehicles` (vehicles on the highway) · `--numSubchannels` (SL-ResourcePool subchannels) · `--spacingM` (inter-vehicle spacing, m) · `--bsmPeriodMs` (BSM period / reservation interval, ms) · `--duration` (s) · `--txPowerDbm` (PC5 Tx power, dBm).
 
 ### ntn-v2x-rural-highway
 
@@ -127,7 +150,7 @@ Key args: `--simSeconds` (s) · `--bsmHz` (basic-safety-message rate, Hz) · `--
 ./test.py -s ntn-v2x
 ```
 
-The `ntn-v2x` suite has 5 unit tests: trace-replay sync jitter under the 100 ms gate, V2X-LEO direct free-space path loss within 0.1 dB of the closed form, relay fall-back to a peer when direct SNR is below threshold, maritime bounded mobility, and a 100-vehicle / 5-min replay that must complete inside the test budget.
+The `ntn-v2x` suite has 7 unit tests: trace-replay sync jitter under the 100 ms gate, V2X-LEO direct free-space path loss within 0.1 dB of the closed form, relay fall-back to a peer when direct SNR is below threshold, maritime bounded mobility, a 100-vehicle / 5-min replay that must complete inside the test budget, a SAE J2735 BSM header round-trip through a packet (each field within its encoding resolution), and `NtnSidelinkMode2Test` — NR PC5 Mode-2 selection with the half-duplex rule (no self-reception), high in-range PRR under a wide pool, and measurably lower PRR under a degenerate 1-subchannel pool (proving the sensing + collision model is real).
 
 ### Live SUMO co-simulation
 

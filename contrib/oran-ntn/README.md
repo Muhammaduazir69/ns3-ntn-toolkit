@@ -88,6 +88,16 @@ RAN actuation. (The cross-domain SMO example manipulates offered-rate caps /
 routes / edge rates directly in example code, outside the xApp→E2 action
 path.)
 
+The `OranNtnHelper` beam and handover actuator hooks
+(`RegisterBeamLossModel` / `SetHandoverActuator`) are **verified callable**
+through the full RIC → E2 termination → E2 node → RC path by
+`OranNtnHelperActuatorsWiredTest`: a `BEAM_SWITCH` rewrites the live channel
+loss model and a `HANDOVER_TRIGGER` reaches the wired actuator with the
+correct target. Honesty still holds, though: these hooks must be **wired by
+a scenario**. When no actuator is registered, the generic RC path honestly
+logs `actuated=false` (it never fakes success), so the shipped multi-xApp
+scenarios remain measure → decide → log unless a scenario opts in.
+
 ## What's new — AI-native ORAN-NTN release (June 2026)
 
 See [`CHANGELOG.md`](CHANGELOG.md) and the toolkit
@@ -119,6 +129,33 @@ fixes, the original RIC/xApp framework).
   adaptation, payload-options A/B, per-platform latency validation, and a
   post-disaster emergency-communication flagship.
 - **Two new test suites**: `oran-ntn-multi-tier-ric` and `oran-ntn-ws4`.
+
+## What's new — twin↔sim loop, gym action leg & verified actuators (July 2026)
+
+- **Digital-twin C++ consumer.** `OranNtnTwinPredictionConsumer`
+  (`model/oran-ntn-twin-prediction-consumer.h`) closes the twin↔sim loop:
+  it loads the Python digital twin's handover-prediction file and, on
+  `Start()`, schedules each prediction to actuate a `HANDOVER_TRIGGER` into
+  the running E2/CHO loop at the predicted time (confidence-gated). See the
+  new feature section below.
+- **Gym serving-cell resolved by identity.** `OranNtnXappBase` now tracks a
+  UE's *true* serving cell (`SetUeServingCell` / `GetUeServingCell` /
+  `GetUeServingReport`) published by the RAN or on handover, instead of the
+  previous "last report in the window" `std::map` ordering artifact (which
+  really returned the highest gnbId). The gym observation, action, and
+  SINR-slope all read this identity-resolved baseline.
+- **Gym example closes the action leg.** `oran-ntn-gym-handover-example`
+  now calls `ExecuteActions` with a greedy A3-offset policy AND feeds the
+  PHY-KPM extractor from the measured radio
+  (`RegisterRnti` / `IngestMeasuredSample`), so `GetRealKpmReport` SINR
+  tracks the measured serving SINR.
+- **O-RAN actuator wiring, verified by test.** A new core-suite test
+  (`OranNtnHelperActuatorsWiredTest`) drives the `OranNtnHelper` beam +
+  handover actuators (`RegisterBeamLossModel` / `SetHandoverActuator`)
+  end-to-end through the RIC → E2 termination → E2 node → RC path;
+  companion gates `OranNtnRlActionImprovesSinrTest` and
+  `OranNtnTwinConsumerClosesLoopTest` verify the RL action leg and the
+  twin-consumer loop.
 
 ## Models, helpers & key classes
 
@@ -171,6 +208,26 @@ All in `model/oran-ntn-cross-domain.h`:
   live.
 - Gym environments (`model/oran-ntn-gym-*.h`) — handover, beam-hop, slice,
   steering, predictive; plus `OranNtnFederatedLearning` aggregators.
+
+### Digital-twin prediction consumer (twin↔sim loop)
+- `OranNtnTwinPredictionConsumer`
+  (`model/oran-ntn-twin-prediction-consumer.h`) — the C++ side of the
+  twin↔sim loop. The Python digital twin (`ntn-digital-twin`) runs the SAME
+  Walker elements and SHARED EPOCH as the C++ simulation and predicts, ahead
+  of time, which satellite each UE should be served by; its
+  `emit_predictions_file` helper writes a plain newline-delimited file with
+  the contract `t_s,ueId,recommendedGnbId,confidence` (`t_s` is seconds from
+  the shared epoch, i.e. simulation time). The consumer loads that file
+  (`LoadPredictionsFromFile`; blank/`#` lines ignored, malformed lines
+  skipped with a warning — no silent fabrication) and, on `Start()`,
+  schedules each prediction whose confidence ≥ a floor to fire a
+  caller-supplied submit callback at its `t_s`. Wire that callback to an
+  xApp's `SubmitAction` (`HANDOVER_TRIGGER`) or to
+  `NtnRealStackHelper::TriggerHandover` and the twin's foresight actuates a
+  real handover in the running E2/CHO loop. A CHO algorithm can instead poll
+  `GetRecommendation()` to rank candidates by the twin's latest applicable
+  guidance — a Non-RT-RIC / rApp policy query. Verified end-to-end by
+  `OranNtnTwinConsumerClosesLoopTest`.
 
 ### Payload, fronthaul split, platform & role switch
 - `NtnFhSplitModel` (`model/oran-ntn-fh-split.h`) — 3GPP TR 38.801 / O-RAN
@@ -250,6 +307,15 @@ Doppler Comp, and TN-NTN Steering (`model/oran-ntn-xapp-*.h`). Additional
 advanced xApps (interference mgmt, energy harvest, predictive alloc,
 multi-connectivity, ISAC, THz beam/RIS/spectrum) ship in the same directory.
 
+`OranNtnXappBase` resolves a UE's serving cell **by identity**:
+`SetUeServingCell` records the true RRC-connected cell (published by the RAN
+via `NtnRealStackHelper::GetUeServingCellId`, or by the xApp itself when it
+actuates a `HANDOVER_TRIGGER`), and `GetUeServingReport` returns that cell's
+most recent KPM report — falling back to the newest report by timestamp, not
+the highest-gnbId `std::map` artifact. This is what O-RAN WG3 E2SM-KPM means
+by "serving cell" (CGI/PCI), and it is the baseline the gym environments read
+for their observation, action, and SINR-slope.
+
 ### Helpers
 - `OranNtnHelper` (`helper/oran-ntn-helper.h`) — one-call construction of the
   Non-RT RIC, Near-RT RIC, satellite/terrestrial E2 nodes, Space-RICs, A1
@@ -267,7 +333,7 @@ tiers (also annotated with doxygen `\warning` / `\note` in the headers):
 
 | Class | Header |
 |---|---|
-| `OranNtnGymBeamHop`, `OranNtnGymHandover`, `OranNtnGymPredictive`, `OranNtnGymSlice`, `OranNtnGymSteering` | `model/oran-ntn-gym-*.h` |
+| `OranNtnGymBeamHop`, `OranNtnGymPredictive`, `OranNtnGymSlice`, `OranNtnGymSteering` (`OranNtnGymHandover` is now exercised — example + RL test) | `model/oran-ntn-gym-*.h` |
 | `OranNtnXappThzBeamMgmt`, `OranNtnXappThzRis`, `OranNtnXappThzSpectrum` | `model/oran-ntn-xapp-thz-*.h` |
 | `OranNtnMmWaveBeamforming` | `model/oran-ntn-mmwave-beamforming.h` |
 | `OranNtnHelper` Phase 2–5 methods (`SetupMmWaveNtnStack`, `SetupDualConnectivity`, `SetupAiIntegration`, `EnablePhyKpmExtraction`, `CreateAllAdvancedXapps`, `SetupIslNetwork`, `SetupFederatedLearning`, `GetSatBridge`) | `helper/oran-ntn-helper.h` — **declared but not implemented; calling them is a link error** |
@@ -318,6 +384,7 @@ launched through `./ns3 run "<name> [--args]"` or by the direct binary path
 | `oran-ntn-payload-options-ab` | measured one-way delay per payload architecture |
 | `ntn-platform-latency-validation` | per-platform RTT vs. its latency band |
 | `oran-ntn-emergency-communication` | disaster recovery via role switch + emergency slice |
+| `oran-ntn-gym-handover-example` | `OranNtnGymHandover` RL env on the measured radio, action leg closed |
 
 ### oran-ntn-full-scenario
 
@@ -556,6 +623,33 @@ as a CI check.
 `36421`), `--duration` (RIC listen seconds; default 8), `--indications` (agent: number of RIC
 indications to send; default 5).
 
+### oran-ntn-gym-handover-example
+
+Boots the `OranNtnGymHandover` RL environment on a **measured** radio. A real
+Walker/SGP4 constellation (serving + candidate satellites) feeds a real NR-NTN
+access link (`NtnRealStackHelper`); the ho-predict xApp is fed measured PHY
+SINR every 100 ms and publishes the UE's serving cell by identity
+(`SetUeServingCell`), so the gym reads the correct baseline. Each control cycle
+the example pulls the observation from the measured plane and **closes the
+action leg**: a greedy A3-offset policy (best candidate must beat serving by
+`a3OffsetDb`) chooses the discrete action and calls `ExecuteActions`, so the RL
+decision travels the xApp → RIC → E2 → RC path (the gate-10 test
+`OranNtnRlActionImprovesSinrTest` proves the end-to-end actuation). It also
+feeds the PHY-KPM extractor from the real radio
+(`RegisterRnti` / `IngestMeasuredSample`) so `GetRealKpmReport` SINR is a
+genuine measured producer.
+
+Default (`--gym=0`) steps the env in-process with no Python peer (sweep-safe);
+`--gym=1` registers `OpenGymInterface::Get()` so an `ns3_ai_ntn.envs` RL agent
+can connect over shared memory (blocks for the peer, so it is opt-in).
+
+```bash
+./ns3 run "oran-ntn-gym-handover-example --duration=30 --numSats=3 --numUes=2"
+```
+
+**Key args:** `--duration`, `--numUes`, `--numSats` (serving + candidates),
+`--gym`, `--outputDir`.
+
 ## Build, run & test
 
 The module builds with the parent toolkit from the ns-3 root:
@@ -577,7 +671,7 @@ Run examples through the wrapper, e.g.:
 Run the test suites:
 
 ```bash
-./test.py -s oran-ntn                  # core RIC / SM / A1 / Space-RIC (58 cases)
+./test.py -s oran-ntn                  # core RIC / SM / A1 / Space-RIC + actuation & twin-loop gates (68 cases)
 ./test.py -s oran-ntn-multi-tier-ric   # RT-RIC bound, placement geometry, cross-domain loop, ONNX fallback
 ./test.py -s oran-ntn-ws4              # payload delay ladder, FH-split feasibility, endurance, role switch
 ```

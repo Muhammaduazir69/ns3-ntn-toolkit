@@ -161,6 +161,7 @@ Output lands in `--outputDir`: `sim_health.csv` (the realism gate),
 | `ntn-traffic` | `./ns3 run "ntn-oran-qos-flows"` — 4 5QI flows + C&C on a real NR NTN cell |
 | `ntn-traffic` (calibration) | `./ns3 run "ntn-tr38821-calibration"` — TR 38.821 Set-1 LEO-600 gate |
 | `thz-ntn` | `./ns3 run "thz-ntn-demo --example=8"` |
+| `ntn-v2x` (PC5 sidelink) | `./ns3 run "ntn-v2x-pc5-sidelink-bsm --numVehicles=20 --numSubchannels=5 --duration=4"` — NR PC5 Mode-2 J2735 BSM broadcast, PRR vs distance (TS 38.885) |
 | `ns3-ai-ntn` | `cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/ && python3 a-plus-b.py` |
 
 Per-module run details: see each module's own `README.md`.

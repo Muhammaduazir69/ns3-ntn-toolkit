@@ -133,7 +133,7 @@ Open research on 6G non-terrestrial networks is held back by **tool fragmentatio
 | Data plane | real mmWave NR NTN cell (SpectrumPhy/MAC/RLC/PDCP/RRC/EPC) under SGP4 mobility; all KPIs **measured in-band** |
 | NTN/O-RAN application layer | `NtnOranApplication` 5QI profiles + 24-byte wire payload header (5QI / S-NSSAI / seq / timestamp) |
 | KPM monitoring | `NtnOranAiFlowMonitor` — TS 28.552 / E2SM-KPM series, AI feature windows, anomaly events, CSV/XML/Influx/E2 export |
-| 3GPP NTN procedures implemented | TS 38.213 TA · TS 38.331 SIB19 + UE Location Report · TS 38.321 NTN-DRX · TR 36.777 A2G · NTN HO triggers: Rel-17 CondEvents A4/T1/D1 + Rel-18 D2 + TR 38.821-studied elevation/TA |
+| 3GPP NTN procedures implemented | TS 38.213 TA + §4.2 K_offset (SIB19-populated **and** consumed into the NR UL DCI→PUSCH gap) · TS 38.331 SIB19 + UE Location Report · TS 38.321 NTN-DRX + §5.22 PC5 sidelink Mode-2 (V2X) · TR 36.777 A2G · NTN HO triggers: Rel-17 CondEvents A4/T1/D1 + Rel-18 D2 + TR 38.821-studied elevation/TA |
 | Standards calibration | TR 38.821 Set-1 LEO-600 S-band link budget · orbital-theory test campaign · 36/36 fidelity + 12/12 standards gates |
 | 3GPP slicing | TS 23.501 + TS 22.261 default profiles, eMBB / URLLC / mMTC / V2X (S-NSSAI carried in-band) |
 | O-RAN xApps shipped | 16 (13 in `oran-ntn` + 3 NTN-aware in `flexric-bridge`) + ONNX Runtime xApp inference (optional) |
@@ -157,10 +157,10 @@ Open research on 6G non-terrestrial networks is held back by **tool fragmentatio
 | 4 | `ns3-ai` (fork) | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) | Modernised shared-memory bridge — ns-3.43 + Py 3.13 + NumPy 2 + Gymnasium 1.0 + SB3 + PyG |
 | 5 | `ntn-sagin` | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) | HAPS / UAV mobility + TR 36.777 A2G + multi-layer Ground→UAV→HAPS→LEO router |
 | 6 | `ntn-slice` | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) | TS 23.501 slicing (eMBB/URLLC/mMTC/V2X) + isolation monitor + GEO mode-skip |
-| 7 | `ntn-v2x` | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) | SUMO TraCI bridge + V2X-LEO direct/relay channels + maritime scenario |
+| 7 | `ntn-v2x` | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) | SUMO TraCI bridge + V2X-LEO direct/relay channels + maritime scenario + **NR PC5 sidelink Mode-2** (TS 38.321 §5.22 sensing-based selection, SAE J2735 BSM, TS 38.885 PRR) |
 | 8 | `flexric-bridge` | [flexric-bridge](https://github.com/Muhammaduazir69/flexric-bridge) | FlexRIC E2 real-wire integration: NTN E2 agent + 3 xApps + Docker stack |
 | 9 | `ntn-sionna` | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) | NVIDIA Sionna RT bridge: GPU-accelerated ray-traced sat-to-ground channel |
-| 10 | `ntn-digital-twin` | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) | Live TLE refresher + FastAPI predict-handover + CesiumJS Live mode |
+| 10 | `ntn-digital-twin` | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) | Live TLE refresher + FastAPI predict-handover + CesiumJS Live mode + handover-schedule export that an ns-3 C++ consumer actuates (closes the twin↔sim loop) |
 | 11 | `ntn-cho` | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) | TTE-aware 3GPP Rel-17 conditional handover + 7-class realistic UE mobility |
 | 12 | `oran-ntn` | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) | Space O-RAN: 13 xApps, multi-tier RIC (on-board RT / gateway / cloud), payload options + FH splits + role switch, NWDAF/TPN/SMO cross-domain, ONNX xApps |
 | 13 | `thz-ntn` | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) | 100 GHz – 1 THz physics: HITRAN-2020, UM-MIMO ≤ 128×128, RIS, ISAC, EKF beam tracking |
@@ -172,7 +172,8 @@ Plus the upstream packages this distribution patches and integrates:
 | Module | Source | Role |
 |---|---|---|
 | `satellite` (SNS3) | [SNS3/sns3-satellite](https://github.com/sns3/sns3-satellite) | SGP4 propagator + TR 38.811 NTN channel + Loo / Markov fading |
-| `mmwave` | [NYU/CTTC](https://github.com/nyuwireless-unipd/ns3-mmwave) | 5G NR PHY/MAC + dual-connectivity LTE patches |
+| `mmwave` | [NYU/CTTC](https://github.com/nyuwireless-unipd/ns3-mmwave) | 5G NR PHY/MAC + dual-connectivity LTE patches (default radio backend) |
+| `nr` (5G-LENA) | [CTTC/5g-lena](https://gitlab.com/cttc-lena/nr) | Second radio backend: upstream **v3.3.1** + 5 local NTN patches (`contrib/nr/ntn-patches/`), incl. TS 38.213 §4.2 K_offset via `N2Delay` |
 | `ns-3.43` | [nsnam/ns-3-dev](https://gitlab.com/nsnam/ns-3-dev) | core simulation kernel |
 
 ## Architecture

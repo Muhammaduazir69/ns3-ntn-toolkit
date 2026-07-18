@@ -84,8 +84,11 @@ a file, and the API does not require InfluxDB at all.
 ## Test
 
 ```bash
-pytest tests/      # 6 cases (LP schema, outage tolerance, /health,
-                   # /constellation/state, /predict/handover latency + events)
+pytest tests/      # 10 cases (LP schema, outage tolerance, /health,
+                   # /constellation/state, /predict/handover latency + events,
+                   # A3 hysteresis guard, shared-epoch Walker source,
+                   # emit_predictions_file export contract, and the gate-9
+                   # twin/sim handover-agreement check)
 ```
 
 ## systemd (optional, for long-running deployments)

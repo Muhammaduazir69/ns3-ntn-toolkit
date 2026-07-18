@@ -42,7 +42,7 @@ Real-stack flagship: the SCF-222 data ABI (DL_TTI / TX_DATA / RX_DATA / CRC.indi
 ./ns3 run "ntn-fapi-real-stack --duration=20 --numUes=4 --scsKhz=30"
 ```
 
-- **Outputs:** stdout — a header block and a final `--- FAPI Summary (SCF-222 ABI on MEASURED radio) ---` with measured mean SINR, measured mean DL TBLER, measured radio throughput, FAPI slots sent/crcOk/retx, delivered KB, and FAPI goodput (Mbps); plus `sim_health.csv` in `--outputDir`.
+- **Outputs:** stdout — a header block, a `--- FAPI SAP (CI gate 15: real request->indication latency) ---` block, and a final `--- FAPI Summary (SCF-222 ABI on MEASURED radio) ---` with measured mean SINR, measured mean DL TBLER, measured radio throughput, FAPI slots sent/crcOk/retx, delivered KB, and FAPI goodput (Mbps); plus `sim_health.csv` and **`fapi_sap.csv`** in `--outputDir`. `fapi_sap.csv` persists the measured SCF-222 SAP latency (previously console-only): slot / DL_TTI / CRC counts (`slot_indication_count`, `dl_tti_request_count`, `dl_tti_with_data_count`, `crc_indication_count`, `matched_latency_count`) plus `sap_latency_mean_us` / `_min_us` / `_max_us` and `sched_pipeline_mean_us`. The SAP latency is the **CI gate-15 KPI** and is genuinely **measured** — the `DL_TTI.request → CRC.indication` interval read off the real mmwave MAC↔PHY SAP, SFN/slot-aligned (a representative run: mean ≈ 627 µs over ≈ 21 000 matched samples), not a synthesised figure.
 - **Key args:** `--duration` (s), `--numUes`, `--scsKhz` (15/30/60/120 → slots per ms), `--tbBytes`, `--altitude` (km), `--satEirpDbm`, `--outputDir`.
 
 ### ntn-fapi-dl-data-slotloop

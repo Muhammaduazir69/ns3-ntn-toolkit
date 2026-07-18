@@ -165,6 +165,15 @@ Args: `role` (ric|agent), `proto` (sctp|tcp), `host`, `port`, `duration`,
 `oran-ntn-emergency-communication` (args: `simSeconds`, `disasterAt`,
 `outputDir`) cover the WS3–WS6 A/B and flagship studies.
 
+`oran-ntn-gym-handover-example` runs the `OranNtnGymHandover` RL env on the
+measured radio with its action leg closed (args: `duration`, `numUes`,
+`numSats`, `gym`, `outputDir`). Default `--gym=0` steps in-process with no
+Python peer; `--gym=1` opens the `ns3-ai-ntn` peer (blocks for a connection).
+
+```bash
+./ns3 run "oran-ntn-gym-handover-example --duration=30 --numSats=3 --numUes=2"
+```
+
 ---
 
 ## 6. Run the unit tests
@@ -172,7 +181,7 @@ Args: `role` (ric|agent), `proto` (sctp|tcp), `host`, `port`, `duration`,
 `oran-ntn` registers **three** test suites:
 
 ```bash
-./test.py --suite=oran-ntn                # core E2 / A1 / KPM / RIC / xApp framework
+./test.py --suite=oran-ntn                # core E2 / A1 / KPM / RIC / xApp + actuation & twin-loop gates
 ./test.py --suite=oran-ntn-multi-tier-ric # RT / Near-RT / Space-RIC + placement
 ./test.py --suite=oran-ntn-ws4            # payload options / FH split / platform spec
 ```

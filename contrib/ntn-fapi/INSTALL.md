@@ -120,6 +120,11 @@ sub-point, and CRC pass/fail + HARQ feedback follow the measured TBLER read off
 the mmwave `RxPacketTraceUe` trace. Prints a `--- FAPI Summary (SCF-222 ABI on
 MEASURED radio) ---` block (measured mean SINR, mean DL TBLER, radio
 throughput, FAPI slots sent/crcOk/retx, delivered KB, goodput).
+Also writes **`fapi_sap.csv`** to `--outputDir` (alongside `sim_health.csv`)
+persisting the measured SCF-222 SAP latency — slot/DL_TTI/CRC counts plus
+`sap_latency_mean_us`/`_min_us`/`_max_us` and `sched_pipeline_mean_us`. This
+`DL_TTI.request → CRC.indication` latency is the **CI gate-15 KPI**, measured
+SFN/slot-aligned off the real mmwave MAC↔PHY SAP.
 Args: `duration` (s), `numUes`, `scsKhz` (15/30/60/120), `tbBytes`,
 `altitude` (km), `satEirpDbm`, `outputDir`, `netSim` (NetSimulyzer JSON path),
 `czml` (Cesium CZML path).

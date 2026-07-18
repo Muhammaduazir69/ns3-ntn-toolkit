@@ -99,9 +99,13 @@ module ships its own FCD traces under `traces/` (`rural-highway-fcd.csv`,
 
 ## 5. Run the examples
 
-Five example programs ship under `examples/`:
+Six example programs ship under `examples/`:
 
 ```bash
+# Direct V2V over NR PC5 sidelink Mode 2 (no gNB); PRR vs distance (TS 38.885).
+# Needs no toolkit siblings — links only core ns-3 + the ntn-v2x library.
+./ns3 run "ntn-v2x-pc5-sidelink-bsm --numVehicles=20 --numSubchannels=5 --duration=4"
+
 # Flagship: V2X platoon URLLC with sat-vs-ground edge-AI inference placement.
 ./ns3 run "ntn-v2x-edge-urllc --edge=sat"
 ./ns3 run "ntn-v2x-edge-urllc --edge=ground"
@@ -123,8 +127,9 @@ Five example programs ship under `examples/`:
 ./ns3 run "ntn-v2x-maritime-ais --simSeconds=120 --aisTrace=contrib/ntn-sagin/data/ais-sample-trace.csv"
 ```
 
-Example target names: `ntn-v2x-edge-urllc`, `ntn-v2x-rural-highway`,
-`ntn-v2x-real-stack`, `ntn-v2x-leo-relay-traffic`, `ntn-v2x-maritime-ais`.
+Example target names: `ntn-v2x-pc5-sidelink-bsm`, `ntn-v2x-edge-urllc`,
+`ntn-v2x-rural-highway`, `ntn-v2x-real-stack`, `ntn-v2x-leo-relay-traffic`,
+`ntn-v2x-maritime-ais`.
 Each produces the binary `build/contrib/ntn-v2x/examples/ns3.43-<name>-default`.
 See the README for the full per-example argument list.
 
@@ -142,11 +147,14 @@ Or run the test runner directly:
 ./build/utils/ns3.43-test-runner-default --suite=ntn-v2x
 ```
 
-The suite registers as `TestSuite("ntn-v2x")` and has 5 unit tests:
+The suite registers as `TestSuite("ntn-v2x")` and has 7 unit tests:
 trace-replay sync jitter under the 100 ms gate, V2X-LEO direct free-space path
 loss within 0.1 dB of the closed form, relay fall-back to a peer when direct
-SNR is below threshold, maritime bounded mobility, and a 100-vehicle / 5-min
-replay that must complete inside the test budget.
+SNR is below threshold, maritime bounded mobility, a 100-vehicle / 5-min
+replay that must complete inside the test budget, a SAE J2735 BSM header
+round-trip through a packet, and an NR PC5 sidelink Mode-2 test (half-duplex
+rule, high in-range PRR under a wide pool vs collisions under a 1-subchannel
+pool).
 
 ---
 

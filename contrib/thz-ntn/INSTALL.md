@@ -24,10 +24,11 @@ examples additionally pull in `ntn-cho`, `ntn-constellation`, `ntn-traffic`,
 | ns-3 | **3.43** |
 | Disk | ~6 GB after build (incl. SNS3 TLE data) |
 
-No additional Python or HITRAN-database installation is required — the
+No additional Python or spectroscopic-database installation is required — the
 absorption lookup table ships with the module under
-`data/hitran2024-lut-subthz.csv` (HITRAN-2020 baseline; see README for the
-HITRAN versioning note).
+`data/hitran2024-lut-subthz.csv` (an ITU-R P.676-13 grid sample kept under a
+legacy filename; regenerate it with `tools/p676-lut-gen.py`, which is
+self-contained and needs no external HITRAN `.par` file).
 
 ---
 
@@ -150,8 +151,9 @@ dependency is missing. Clone the **NYU/UNIPD** module under `contrib/mmwave/`
 `ntn-constellation`, `ntn-traffic`, `oran-ntn`, and `ntn-observability` in
 `contrib/` (step 2c); the library builds without them, the examples do not.
 
-**HITRAN line file missing** — make sure `data/hitran2024-lut-subthz.csv`
-exists in your clone; it ships with the repo.
+**Absorption LUT missing** — make sure `data/hitran2024-lut-subthz.csv`
+(the ITU-R P.676-13 grid sample, under its legacy filename) exists in your
+clone; it ships with the repo and can be regenerated with `tools/p676-lut-gen.py`.
 
 **Build cache filtering modules** —
 `./ns3 configure --enable-modules='' --enable-tests --enable-examples`.

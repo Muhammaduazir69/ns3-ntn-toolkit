@@ -21,7 +21,7 @@ is compatible with this toolkit's ns-3 base. See
 and v5.0 (ns-3.48, the only line with native NTN) are ns-3-base migrations
 rather than in-place `nr` bumps.
 
-## The four patches (apply in order from `contrib/nr/`)
+## The five patches (apply in order from `contrib/nr/`)
 
     for p in ntn-patches/0*.patch; do patch -p1 < "$p"; done
 
@@ -42,13 +42,13 @@ The five (apply in order):
     # 2. copy into contrib/nr on the ns-3.43 tree, then:
     cd contrib/nr && for p in ntn-patches/0*.patch; do patch -p1 < "$p"; done
 
-Verified 2026-07-18: pristine v3.3.1 + these four patches reproduces the
+Verified 2026-07-18: pristine v3.3.1 + these five patches reproduces the
 vendored `model/` files byte-for-byte (0 mismatches).
 
 ## Upgrading later
 
 When the toolkit's ns-3 base moves to 3.44 (→ nr v4.0) or 3.48 (→ nr v5.0,
 native NTN), drop in the pristine upstream `nr` for that base and re-apply
-whichever of these four patches upstream has not itself fixed. Patches 03/04
+whichever of these five patches upstream has not itself fixed. Patches 03/04
 (PDCP Control-PDU handling) are the ones most likely still required, since they
 reflect a modelling scope choice, not an ns-3-version quirk.

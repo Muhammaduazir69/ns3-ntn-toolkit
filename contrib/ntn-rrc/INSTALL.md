@@ -154,9 +154,11 @@ cell; UEs auto-placed at the t=0 sub-point. Ships with a bundled ISS TLE
 ```
 Real UDP downlink with SIB19, live TA, and the connected-mode DRX cycle; reports
 measured KPIs with DRX on-duty fraction and effective goodput. Compare
-`--drxOn=true` vs `--drxOn=false`. Writes `sim_health.csv`. Args: `simSeconds`,
-`numUes`, `leoAltKm`, `freqGHz`, `satEirpDbm`, `drxOn`, `drxLongCycleMs`,
-`drxOnDurationMs`, `outputDir`.
+`--drxOn=true` vs `--drxOn=false`. Writes `drx_metrics.csv` (duty-cycle awake
+fraction, power-saving fraction, per-state residency, measured vs DRX-effective
+goodput; a representative run: duty cycle 0.125, ~87% power-saving) and
+`sim_health.csv`. Args: `simSeconds`, `numUes`, `leoAltKm`, `freqGHz`,
+`satEirpDbm`, `drxOn`, `drxLongCycleMs`, `drxOnDurationMs`, `outputDir`.
 
 ### 5e. ntn-rrc-real-stack — real-stack flagship
 

@@ -64,13 +64,27 @@ See the [CHANGELOG](CHANGELOG.md).
   sentinel values leaking into `ue_tracks`, `handover_events`, or
   `kpi_timeseries`; `avg_sinr` averages only currently-served UEs; the
   first-handover `time_of_stay` is no longer inflated.
+- **TTE refinement fix** — the binary-search refinement in
+  `NtnTteEstimator::FindBeamExitTime` now propagates the satellite through
+  time via `GetBeamSnapshotAtTime(...,tMid)` at each bracket midpoint, exactly
+  as the coarse search and the sibling `FindDistanceExitTime` do. Previously
+  the refinement evaluated a frozen `Now()` gain, so the bracket never crossed
+  the threshold and the result collapsed to the coarse-grid granularity; the
+  Time-to-Exit is now a genuinely refined exit time on the real propagated SGP4
+  geometry.
+- **GeoJSON writers fixed** in `ntn-cho-full-constellation` —
+  `satellite_positions.geojson` now carries the **full** serving-satellite
+  track (one `Feature` per timestep; it was previously written once, leaving a
+  single point) and `beam_footprints.geojson` is now populated with the
+  serving beam's ground point and a 3 dB spot radius per timestep (it was an
+  empty `FeatureCollection`).
 
 ## Models, helpers & key classes
 
 Model (`model/`):
 
 - `NtnChoAlgorithm` (`ntn-cho-algorithm.h`) — 3GPP Rel-17 CHO algorithm with TTE-aware candidate selection and the `CHO_IDLE → CHO_PREPARED → CHO_CONDITION_MONITORING → CHO_EXECUTING → CHO_COMPLETED` state machine. Trigger types: `TRIGGER_EVENT_A3`, `TRIGGER_LOCATION_D1`, `TRIGGER_TIME_BASED`, `TRIGGER_TTE_AWARE`, `TRIGGER_THZ_BEAM_QUALITY`, `TRIGGER_LTM_CONDITIONAL` (Rel-19 conditional LTM), `TRIGGER_TRAJECTORY_PREDICTIVE` (PCHO), and the standardized NTN classes `TRIGGER_TIME_T1`, `TRIGGER_ELEVATION`, `TRIGGER_TIMING_ADVANCE`. `ChoConfig` carries the per-class parameters (`t1WindowDuration`, `elevationMinDeg`/`elevationHystDeg`, `orbitAltitudeKm`, `taServingMax`/`taAdvantage`, the LTM/PCHO knobs, and `rachLess` + `rachDuration`/`choExecutionDelay` for RACH-less execution); `GetMechanismStats()` reports LTM switches, PCHO triggers, RACH-less vs RACH executions, and per-handover interruption.
-- `NtnTteEstimator` (`ntn-tte-estimator.h`) — estimates Time-to-Exit for satellite beam coverage, per-candidate and in batch.
+- `NtnTteEstimator` (`ntn-tte-estimator.h`) — estimates Time-to-Exit for satellite beam coverage, per-candidate and in batch. A coarse forward scan brackets the beam-exit instant and a binary-search refinement (`FindBeamExitTime` / `FindDistanceExitTime`) narrows it, both propagating the satellite through time with `GetBeamSnapshotAtTime` so the TTE is computed on the real SGP4 beam geometry rather than a frozen `Now()` snapshot.
 - `NtnOrbitPredictor` (`ntn-orbit-predictor.h`) — predicts satellite/beam positions and coverage over time and reports visible satellites and best beams per UE position.
 - `NtnMeasurementModel` (`ntn-measurement-model.h`) — computes RSRP/SINR from satellite beams using the 3GPP TR 38.811 NTN channel scenarios.
 - `NtnTr38811MobilityModel` (`ntn-tr38811-mobility-model.h`) — the 3GPP TR 38.811 §6.1.1.1 NTN UE classes (handheld static/pedestrian, vehicular, HST, maritime, aviation, fixed IoT) as a **real ns-3 `MobilityModel`** in ECEF, the same frame as the satellite side's SGP4 models; includes the `ntngeo` geometry utilities (geodetic↔ECEF, elevation, slant range) and `NtnTr38811MobilityHelper` for installing UE populations.
@@ -106,7 +120,7 @@ Full Walker constellation NTN-CHO run: multi-beam satellites, proper initial ser
 LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-cho/examples/ns3.43-ntn-cho-full-constellation-default --algorithm=tte-aware --numUes=50 --outputDir=/tmp/ntn-full
 ```
 
-Outputs (in `--outputDir`): `handover_events.csv`, `measurements.csv`, `tte_computations.csv`, `satellite_tracks.csv`, `ue_tracks.csv`, `kpi_timeseries.csv`, `kpi_summary.txt`, the GeoJSON layers (`satellite_positions.geojson`, `ue_positions.geojson`, `beam_footprints.geojson`, `handover_events.geojson`), and `sim_health.csv` (via `NtnRealisticTrafficHelper`).
+Outputs (in `--outputDir`): `handover_events.csv`, `measurements.csv`, `tte_computations.csv`, `satellite_tracks.csv`, `ue_tracks.csv`, `kpi_timeseries.csv`, `kpi_summary.txt`, the GeoJSON layers (`satellite_positions.geojson`, `ue_positions.geojson`, `beam_footprints.geojson`, `handover_events.geojson`), and `sim_health.csv` (via `NtnRealisticTrafficHelper`). The satellite-position, UE-position and beam-footprint layers carry one `Feature` per timestep. `handover_events.geojson` is legitimately an empty `FeatureCollection` when the run's geometry produces no handover (e.g. the serving satellite stays at high elevation for the whole short window) — that is correct behaviour, one Feature per handover when they occur, not a stub.
 Key args: `simTime`, `numUes`, `scenario`, `algorithm` (a3|location|time|tte-aware), `d1Threshold`, `qualityTh`, `tteMinimum`, `outputDir`, `rngRun`, `verbose`, `numPlanes`, `satsPerPlane`, `trafficUes` (UEs carrying the real UDP plane; 0 = all).
 
 ### ntn-cho-handover-traffic
