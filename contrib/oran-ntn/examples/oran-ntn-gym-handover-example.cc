@@ -39,6 +39,7 @@
 #include "ns3/oran-ntn-helper.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-xapp-ho-predict.h"
+#include "ns3/oran-ntn-phy-kpm-extractor.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 
@@ -136,6 +137,14 @@ main(int argc, char* argv[])
     env->SetXapp(hoPredict);
     env->SetMaxCandidates(numSats - 1);
 
+    // ---- D3: a REAL production feed for the PHY-KPM extractor. The extractor's
+    //      RegisterRnti/IngestMeasuredSample were previously only exercised by
+    //      unit tests; here the scenario feeds it from NtnRealStackHelper's
+    //      measured accessors each KPM period (exactly the path its docstring
+    //      describes), so GetRealKpmReport() is a genuine measured producer. ----
+    Ptr<OranNtnPhyKpmExtractor> kpmExtractor = CreateObject<OranNtnPhyKpmExtractor>();
+    std::set<uint32_t> registeredRnti;
+
     // ---- KPM feed: MEASURED PHY SINR + live-ephemeris enrichment ----
     std::map<uint32_t, double> lastElev;
     std::map<uint32_t, uint64_t> lastRx;
@@ -183,6 +192,19 @@ main(int argc, char* argv[])
             // order. In a full RAN this is rs.GetUeServingCellId(ue).
             hoPredict->SetUeServingCell(ue, 1);
 
+            // D3: feed the PHY-KPM extractor from the MEASURED radio. Register the
+            // UE's real RNTI once, then ingest each measured sample.
+            const uint16_t rnti = rs.GetUeRnti(ue);
+            if (rnti != 0 && registeredRnti.find(ue) == registeredRnti.end())
+            {
+                kpmExtractor->RegisterRnti(rnti, ue, rs.GetUeServingCellId(ue));
+                registeredRnti.insert(ue);
+            }
+            if (rnti != 0)
+            {
+                kpmExtractor->IngestMeasuredSample(rnti, sinr, rxBytes, tbler);
+            }
+
             // Candidate satellites: real ephemeris elevation + Friis-ratio SINR
             // prediction off the measured serving baseline (flagged prediction).
             for (uint32_t c = 1; c < numSats; ++c)
@@ -209,14 +231,35 @@ main(int argc, char* argv[])
             const float reward = env->GetReward();
             auto box = DynamicCast<OpenGymBoxContainer<float>>(obs);
             double servingSinr = 0.0;
-            if (box && !box->GetData().empty())
+            double bestCandSinr = -200.0;
+            if (box && box->GetData().size() > 5)
             {
-                servingSinr = box->GetData()[0]; // feature 0 = serving SINR
+                servingSinr = box->GetData()[0];  // feature 0 = serving SINR
+                bestCandSinr = box->GetData()[5]; // feature 5 = best candidate SINR
                 g_obsSum += std::abs(servingSinr);
                 ++g_steps;
             }
-            std::printf("  %5.1fs  gym-obs UE0 servingSINR=%6.2f dB  reward=%6.3f\n",
-                        Simulator::Now().GetSeconds(), servingSinr, reward);
+
+            // A1: CLOSE THE ACTION LEG. A greedy A3-style policy (best candidate
+            // must beat serving by an offset) chooses the discrete action, and we
+            // actually call ExecuteActions — the RL decision now leaves the env
+            // and travels the xApp -> RIC -> E2 -> RC path (see the gate-10 test
+            // for the end-to-end actuation proof). Action 0 = stay; action 1 =
+            // hand over to the best candidate.
+            const double a3OffsetDb = 3.0;
+            uint32_t chosen = (bestCandSinr > servingSinr + a3OffsetDb) ? 1u : 0u;
+            auto act = CreateObject<OpenGymDiscreteContainer>(numSats); // 0=stay, 1..=candidate
+            act->SetValue(chosen);
+            env->ExecuteActions(act);
+
+            // D3 consumer: the extractor's measured report for UE 0 (fed from the
+            // real radio above), proving the producer/consumer path is live.
+            const E2KpmReport phyRep = kpmExtractor->GetRealKpmReport(0);
+
+            std::printf("  %5.1fs  gym UE0 servingSINR=%6.2f dB  bestCand=%6.2f dB  "
+                        "action=%u(%s)  reward=%6.3f  kpmExtractorSINR=%6.2f dB\n",
+                        Simulator::Now().GetSeconds(), servingSinr, bestCandSinr, chosen,
+                        chosen ? "HANDOVER" : "STAY", reward, phyRep.sinr_dB);
         });
     }
     else

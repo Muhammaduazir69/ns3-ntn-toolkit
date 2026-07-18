@@ -51,6 +51,8 @@
 #include "ns3/oran-ntn-xapp-doppler-comp.h"
 #include "ns3/oran-ntn-xapp-energy-harvest.h"
 #include "ns3/oran-ntn-xapp-ho-predict.h"
+#include "ns3/oran-ntn-helper.h"
+#include "ns3/ntn-static-extra-loss-model.h"
 #include "ns3/oran-ntn-xapp-interference-mgmt.h"
 #include "ns3/oran-ntn-xapp-multi-conn.h"
 #include "ns3/oran-ntn-xapp-predictive-alloc.h"
@@ -5136,6 +5138,99 @@ class OranNtnRlActionImprovesSinrTest : public TestCase
 };
 
 // ============================================================================
+//  WS-B / D2: the OranNtnHelper actuator hooks (RegisterBeamLossModel,
+//  SetHandoverActuator) must be CALLABLE and actuate the real radio through the
+//  full RIC -> E2 termination -> E2 node -> DefaultRcActionHandler path. Before
+//  this, those hooks had zero callers and the generic RC path was "logged only,
+//  actuated=false" (a decision island). This drives one BEAM_SWITCH and one
+//  HANDOVER_TRIGGER end-to-end and asserts real actuation:
+//    - the beam action rewrites the live channel loss model to -gain (the same
+//      recipe as the oran-ntn-ric-controlled-traffic reference loop), and
+//    - the handover action reaches the wired actuator with the correct target.
+// ============================================================================
+class OranNtnHelperActuatorsWiredTest : public TestCase
+{
+  public:
+    OranNtnHelperActuatorsWiredTest()
+        : TestCase("WS-B D2 - OranNtnHelper beam + handover actuators actuate through the RC path")
+    {
+    }
+
+  private:
+    uint32_t m_hoFire{0};
+    uint32_t m_hoTargetGnb{0};
+    uint32_t m_hoTargetUe{0};
+
+    bool HoActuator(E2RcAction a)
+    {
+        m_hoFire++;
+        m_hoTargetGnb = a.targetGnbId;
+        m_hoTargetUe = a.targetUeId;
+        return true;
+    }
+
+    void DoRun() override
+    {
+        auto ric = CreateObject<OranNtnNearRtRic>();
+        ric->Initialize();
+
+        // Helper must outlive Simulator::Run() — its E2 nodes hold a callback to
+        // OranNtnHelper::DefaultRcActionHandler.
+        OranNtnHelper helper;
+        NodeContainer sats;
+        sats.Create(2);
+        auto e2nodes = helper.CreateSatelliteE2Nodes(sats, ric); // ids 1,2 -> DefaultRcActionHandler
+
+        // D2 (beam): register a REAL channel loss model on gNB 1.
+        auto beamModel = CreateObject<NtnStaticExtraLossModel>();
+        helper.RegisterBeamLossModel(1, beamModel);
+
+        // D2 (handover): wire the handover actuator (stands in for
+        // NtnRealStackHelper::TriggerHandover).
+        helper.SetHandoverActuator(
+            MakeCallback(&OranNtnHelperActuatorsWiredTest::HoActuator, this));
+
+        auto xapp = CreateObject<OranNtnXappHoPredict>();
+        xapp->SetXappName("ws-b-actuator");
+        ric->RegisterXapp(xapp);
+
+        const double beamGainDb = 15.0;
+        E2RcAction beam{};
+        beam.actionType = E2RcActionType::BEAM_SWITCH;
+        beam.targetGnbId = 1;
+        beam.parameter1 = beamGainDb;
+        beam.timestamp = Simulator::Now().GetSeconds();
+        beam.xappId = xapp->GetXappId();
+        beam.xappName = "ws-b-actuator";
+        xapp->SubmitAction(beam);
+
+        E2RcAction ho{};
+        ho.actionType = E2RcActionType::HANDOVER_TRIGGER;
+        ho.targetGnbId = 2;
+        ho.targetUeId = 5;
+        ho.timestamp = Simulator::Now().GetSeconds();
+        ho.xappId = xapp->GetXappId();
+        ho.xappName = "ws-b-actuator";
+        xapp->SubmitAction(ho);
+
+        Simulator::Stop(Seconds(1));
+        Simulator::Run();
+
+        // Beam actuation is REAL: a live channel reconfiguration to -gain (negative
+        // loss = array gain), visible to the measured plane.
+        NS_TEST_ASSERT_MSG_EQ_TOL(beamModel->GetLossDb(), -beamGainDb, 1e-9,
+                                  "BEAM_SWITCH must rewrite the live channel loss to -gain");
+        // Handover actuation reaches the wired actuator with the correct target —
+        // no longer "logged only, not actuated".
+        NS_TEST_ASSERT_MSG_EQ(m_hoFire, 1u, "handover actuator must fire exactly once");
+        NS_TEST_ASSERT_MSG_EQ(m_hoTargetGnb, 2u, "handover actuator target gNB must be 2");
+        NS_TEST_ASSERT_MSG_EQ(m_hoTargetUe, 5u, "handover actuator target UE must be 5");
+
+        Simulator::Destroy();
+    }
+};
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
 
@@ -5281,6 +5376,8 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new OranNtnXappMovesServingCellTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnRlActionImprovesSinrTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnHelperActuatorsWiredTest,
                     TestCase::Duration::QUICK);
     }
 };
