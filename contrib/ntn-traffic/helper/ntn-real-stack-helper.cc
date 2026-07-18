@@ -2195,7 +2195,14 @@ NtnRealStackHelper::WriteHealthReport()
     bool allOk = gateStackDepth && gateThroughput && gateProvenance && gateErrorModel &&
                  channelInPath && gateOwdFloor;
 
-    const char* airTag = (m_backend == RadioBackend::Nr) ? "nr-fr1-ntn" : "mmwave-ntn";
+    // Label the air interface by the ACTUAL carrier, not a hardcoded "fr1": a THz
+    // example at 100 GHz on the Nr data plane must not report "nr-fr1-ntn". FR1 is
+    // <= 7.125 GHz, FR2 24.25-71 GHz (TS 38.104); above that we tag "thz".
+    const char* backendTag = (m_backend == RadioBackend::Nr) ? "nr" : "mmwave";
+    const char* frTag = (m_freqHz <= 7.125e9)   ? "fr1"
+                        : (m_freqHz <= 71.0e9)   ? "fr2"
+                                                 : "thz";
+    const std::string airTag = std::string(backendTag) + "-" + frTag + "-ntn";
 
     std::error_code ec;
     std::filesystem::create_directories(m_outputDir, ec);
