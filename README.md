@@ -449,6 +449,17 @@ cd ns3-ntn-toolkit
 
 # 2. Pull SNS3 satellite (REQUIRED — not bundled, ~3.7 GB with TLE data)
 cd contrib/ && git clone https://github.com/sns3/sns3-satellite.git satellite && cd ..
+```
+
+2-1. Add the following libraries to `contrib/satellite/CMakeLists.txt`:
+
+```diff
+     ${libconfig-store}
++    ${libmagister-stats}
++    ${libntn-traffic}
++    ${libpoint-to-point}
+   TEST_SOURCES ${test_sources}
+```
 
 # 3. Configure & build (~15 min on a modern laptop)
 ./ns3 configure --enable-examples --enable-tests
