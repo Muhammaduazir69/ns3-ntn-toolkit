@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import math
 import json
 import logging
 import socket
@@ -28,6 +29,7 @@ from pathlib import Path
 from ntn_constellation.feeds import CelesTrakFeed, TleCache
 from ntn_constellation.propagator import Constellation, Satellite
 from ntn_constellation.cesium_export import write_czml
+from ntn_digital_twin import a3_guard
 
 LOG = logging.getLogger("ntn-digital-twin.twin-loop")
 
@@ -42,6 +44,9 @@ class LoopStats:
     error_count: int = 0
     last_iteration_seconds: float = 0.0
     cumulative_iteration_seconds: float = 0.0
+    # TWIN-03: predictions written on the last iteration. Zero when the loop is
+    # not configured to emit them, which is the default.
+    last_prediction_count: int = 0
 
 
 @dataclass
@@ -69,6 +74,49 @@ class LoopConfig:
     walker_inclination_deg: float = 53.0
     walker_phasing_factor: int = 1
     epoch_unix_s: float | None = None    # shared epoch; None = now
+
+    # ---- TWIN-03: prediction export from the shipped CLI ----
+    # emit_predictions_file() had exactly one caller, a test. run_iteration()
+    # never called it and main() exposed no flag for it, so the file the C++
+    # OranNtnTwinPredictionConsumer reads could not be produced by any shipped
+    # command. Setting predictions_path turns it on.
+    predictions_path: Path | None = None
+    # TWIN-02: dump the exact TLEs the twin propagated, so ns-3 can load the
+    # SAME orbits and the two handover sequences become comparable at all.
+    #
+    # Until TWIN-01 this could not have helped: Sgp4MobilityModel defaulted to
+    # Kepler + J2 even when handed a TLE, so feeding it the twin's elements
+    # still propagated a different orbit. With SetTle() now selecting SGP4,
+    # both sides run the same propagator on the same elements, and a
+    # disagreement in handover instants is a disagreement about MOBILITY
+    # DECISIONS rather than about where the satellites are.
+    tle_dump_path: Path | None = None
+    predictions_horizon_s: float = 2700.0   # 45 min, the exporter's own horizon
+    predictions_step_s: float = 10.0
+    observer_lat_deg: float = 0.0
+    observer_lon_deg: float = 0.0
+    observer_alt_m: float = 0.0
+
+    # ---- TWIN-04: an A3 guard on the path that actuates ----
+    # The exporter took a bare argmax over elevation and appended a prediction
+    # on every serving change: no hysteresis, no time-to-trigger, no minimum
+    # service time. The guarded REST path used elevation DEGREES, while the
+    # simulator's A3 uses SINR in dB - so the two admitted different handovers
+    # and the claim that the guard enforces "exactly the conditions the sim's A3
+    # algorithm enforces" held in neither units nor code path.
+    #
+    # The twin now computes a link budget from the ephemeris it already has, so
+    # its trigger quantity is a dB SNR like the simulator's, and applies A3 with
+    # hysteresis and time-to-trigger on top.
+    a3_offset_db: float = 3.0
+    a3_time_to_trigger_s: float = 0.0
+    min_service_time_s: float = 0.0
+    # Link-budget terms for the twin's SNR. Defaults are the toolkit's S-band
+    # reference point; a scenario should set them to whatever it is modelling.
+    link_eirp_dbm: float = 62.0
+    link_gt_db_per_k: float = 1.1
+    link_bandwidth_hz: float = 20.0e6
+    link_frequency_hz: float = 2.0e9
 
 
 def _walker_records(cfg: LoopConfig):
@@ -154,6 +202,39 @@ def emit_influx_lp(cons: Constellation, when: dt.datetime, cfg: LoopConfig) -> i
     return len(lines)
 
 
+def _a3_params(cfg: "LoopConfig") -> a3_guard.A3Params:
+    """The loop config's guard settings as the shared A3 parameters."""
+    return a3_guard.A3Params(
+        margin_quantity="db",
+        a3_offset_db=cfg.a3_offset_db,
+        time_to_trigger_s=cfg.a3_time_to_trigger_s,
+        min_service_s=cfg.min_service_time_s,
+        min_elevation_deg=0.0,
+        link_eirp_dbm=cfg.link_eirp_dbm,
+        link_gt_db_per_k=cfg.link_gt_db_per_k,
+        link_bandwidth_hz=cfg.link_bandwidth_hz,
+        link_frequency_hz=cfg.link_frequency_hz,
+    )
+
+
+def _slant_range_m(elev_deg: float, alt_km: float, earth_radius_m: float = 6371e3) -> float:
+    """Slant range to a satellite at `alt_km` seen at `elev_deg`.
+
+    TWIN-04: delegates to ntn_digital_twin.a3_guard, which the REST endpoint
+    also calls. Two copies of this budget existed and had already drifted.
+    """
+    return a3_guard.slant_range_m(elev_deg, alt_km, earth_radius_m)
+
+
+def _snr_db(cfg: "LoopConfig", elev_deg: float, alt_km: float) -> float:
+    """Link-budget SNR in dB, so the twin triggers on the sim's quantity.
+
+    TWIN-04: delegates to the shared guard. See a3_guard for what this budget
+    does and does not model.
+    """
+    return a3_guard.snr_db(_a3_params(cfg), elev_deg, alt_km)
+
+
 def emit_predictions_file(
     cfg: LoopConfig,
     *,
@@ -188,35 +269,67 @@ def emit_predictions_file(
     epoch = dt.datetime.fromtimestamp(epoch_unix, tz=dt.timezone.utc)
 
     predictions: list[tuple[float, int, int, float]] = []
-    prev_serving: int | None = None
-    t = 0.0
-    while t <= horizon_s + 1e-9:
-        when = epoch + dt.timedelta(seconds=t)
-        elevs = [
-            s.elevation_deg(
-                when,
-                observer_lat_deg=observer_lat_deg,
-                observer_lon_deg=observer_lon_deg,
-                observer_alt_m=observer_alt_m,
-            )
-            for s in sats
+    ev = a3_guard.A3Evaluator(_a3_params(cfg))
+
+    # Propagate each satellite across the WHOLE horizon in one call rather than
+    # per tick. This is the path the C++ OranNtnTwinPredictionConsumer reads, so
+    # it is swept over long horizons and large shells; the per-instant loop it
+    # replaced spent its time in Skyfield's per-call setup.
+    n_ticks = int(math.floor((horizon_s + 1e-9) / step_s)) + 1
+    tick_s = [k * step_s for k in range(n_ticks)]
+    times = [epoch + dt.timedelta(seconds=t) for t in tick_s]
+    elev_tracks = [
+        s_.elevation_deg_series(
+            times,
+            observer_lat_deg=observer_lat_deg,
+            observer_lon_deg=observer_lon_deg,
+            observer_alt_m=observer_alt_m,
+        )
+        for s_ in sats
+    ]
+    ecef_tracks = [s_.ecef_m_series(times) for s_ in sats]
+
+    for k, t in enumerate(tick_s):
+        elevs = [elev_tracks[i][k] for i in range(len(sats))]
+        # TWIN-04: the guard is ntn_digital_twin.a3_guard, the same evaluator
+        # the REST endpoint runs. This loop used to be a bare argmax over
+        # elevation that appended a prediction on every serving change - no
+        # hysteresis, no time-to-trigger, no minimum service time - and it is
+        # the path the C++ OranNtnTwinPredictionConsumer actuates on. So the
+        # twin's foresight reached ns-3 in its most ping-pong-prone form while
+        # the guarded REST variant that nothing consumed triggered on elevation
+        # DEGREES against a simulator whose A3 compares SINR in dB.
+        #
+        # Altitude is measured per satellite, not taken from the preset's
+        # nominal value: the endpoint measures it, and a constant here made the
+        # two paths disagree by one tick on a 45 minute horizon.
+        cands = [
+            a3_guard.Candidate(
+                key=i, elev_deg=e,
+                alt_km=a3_guard.altitude_km_from_ecef(ecef_tracks[i][k]))
+            for i, e in enumerate(elevs)
         ]
-        # argmax elevation = serving; runner-up sets the confidence margin.
-        best_idx = max(range(len(elevs)), key=lambda i: elevs[i])
-        best = elevs[best_idx]
-        others = [e for i, e in enumerate(elevs) if i != best_idx]
-        runner = max(others) if others else -90.0
-        # Confidence: how decisively the best beats the runner-up (0..1 over 30 deg).
-        confidence = max(0.0, min(1.0, (best - runner) / 30.0))
-        if best > 0.0 and best_idx != prev_serving:
-            predictions.append((t, ue_id, best_idx + 1, round(confidence, 3)))
-            prev_serving = best_idx
-        t += step_s
+        hit = ev.step(t, cands)
+        if hit is not None:
+            # Confidence from how far the incoming satellite clears the best of
+            # the rest, in elevation, capped at a 30 degree spread.
+            others = [e for i, e in enumerate(elevs) if i != hit.key_in]
+            runner = max(others) if others else -90.0
+            confidence = max(0.0, min(1.0, (hit.elev_in_deg - runner) / 30.0))
+            # E2 node ids are 1-indexed.
+            predictions.append((t, ue_id, hit.key_in + 1, round(confidence, 3)))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     written = 0
     with out_path.open("w") as f:
         f.write(f"# ntn-twin handover predictions  epoch_unix={epoch_unix:.3f}\n")
+        # TWIN-02: the observer and window travel WITH the predictions, so an
+        # ns-3 gate can replay the identical geometry instead of being told
+        # them out of band and silently diverging.
+        f.write(f"# observer_lat_deg={observer_lat_deg:.6f} "
+                f"observer_lon_deg={observer_lon_deg:.6f} "
+                f"observer_alt_m={observer_alt_m:.3f}\n")
+        f.write(f"# horizon_s={horizon_s:.3f} step_s={step_s:.3f}\n")
         f.write("# t_s,ueId,recommendedGnbId,confidence\n")
         for t_s, uid, gnb, conf in predictions:
             if conf < min_confidence:
@@ -233,14 +346,44 @@ def run_iteration(cfg: LoopConfig, stats: LoopStats) -> None:
     cons, nTle = fetch_constellation(cfg)
     emit_czml(cons, when, cfg.czml_path)
     nLp = emit_influx_lp(cons, when, cfg)
+
+    # TWIN-03: emit the prediction file the C++ consumer reads.
+    #
+    # emit_predictions_file() had exactly one caller - a test - and
+    # run_iteration() never called it, so the twin->sim loop both READMEs
+    # advertise as closed could not be executed by any shipped command.
+    # TWIN-02: write the orbits alongside the predictions.
+    if cfg.tle_dump_path is not None:
+        cfg.tle_dump_path.parent.mkdir(parents=True, exist_ok=True)
+        with cfg.tle_dump_path.open("w") as f:
+            n = 0
+            for sat in cons:  # Constellation is iterable
+                rec = sat.tle
+                f.write(f"{rec.name}\n{rec.line1}\n{rec.line2}\n")
+                n += 1
+        LOG.info("wrote %d TLEs to %s", n, cfg.tle_dump_path)
+
+    nPred = 0
+    if cfg.predictions_path is not None:
+        nPred = emit_predictions_file(
+            cfg,
+            observer_lat_deg=cfg.observer_lat_deg,
+            observer_lon_deg=cfg.observer_lon_deg,
+            observer_alt_m=cfg.observer_alt_m,
+            out_path=cfg.predictions_path,
+            horizon_s=cfg.predictions_horizon_s,
+            step_s=cfg.predictions_step_s,
+        )
+        stats.last_prediction_count = nPred
+
     stats.iterations += 1
     stats.last_iteration_iso = when.isoformat()
     stats.last_tle_count = nTle
     dt_s = time.time() - t0
     stats.last_iteration_seconds = dt_s
     stats.cumulative_iteration_seconds += dt_s
-    LOG.info("iter=%d  tle=%d  lp=%d  czml=%s  dt=%.2fs",
-             stats.iterations, nTle, nLp, cfg.czml_path, dt_s)
+    LOG.info("iter=%d  tle=%d  lp=%d  pred=%d  czml=%s  dt=%.2fs",
+             stats.iterations, nTle, nLp, nPred, cfg.czml_path, dt_s)
 
 
 def run_loop(cfg: LoopConfig, max_iterations: int | None = None) -> LoopStats:
@@ -262,6 +405,41 @@ def run_loop(cfg: LoopConfig, max_iterations: int | None = None) -> LoopStats:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
+    # ---- TWIN-03: the flags the shipped CLI was missing ----
+    # main() built LoopConfig with source='celestrak' and exposed no way to
+    # select Walker elements, pin an epoch, or emit predictions - so the
+    # deterministic run the C++ consumer is designed to read was unreachable
+    # from any shipped command, and the twin->sim loop both READMEs advertise
+    # as closed could not actually be executed.
+    parser.add_argument("--source", choices=["celestrak", "walker", "tle_file"],
+                        default="celestrak",
+                        help="orbit source; walker is deterministic and sim-comparable")
+    parser.add_argument("--tle-file", type=Path, default=None)
+    parser.add_argument("--walker-planes", type=int, default=1)
+    parser.add_argument("--walker-sats-per-plane", type=int, default=24)
+    parser.add_argument("--walker-altitude-km", type=float, default=600.0)
+    parser.add_argument("--walker-inclination-deg", type=float, default=53.0)
+    parser.add_argument("--walker-phasing-factor", type=int, default=1)
+    parser.add_argument("--epoch-unix", type=float, default=None,
+                        help="shared epoch with the ns-3 scenario; omit for now()")
+    parser.add_argument("--tle-dump", type=Path, default=None,
+                        help="write the exact TLEs the twin propagated, so an ns-3 "
+                             "scenario can load the SAME orbits (TWIN-02)")
+    parser.add_argument("--predictions", type=Path, default=None,
+                        help="write the handover-prediction file the C++ "
+                             "OranNtnTwinPredictionConsumer reads")
+    parser.add_argument("--predictions-horizon-s", type=float, default=2700.0)
+    parser.add_argument("--predictions-step-s", type=float, default=10.0)
+    parser.add_argument("--observer-lat", type=float, default=0.0)
+    parser.add_argument("--observer-lon", type=float, default=0.0)
+    parser.add_argument("--observer-alt-m", type=float, default=0.0)
+    # ---- TWIN-04: the A3 guard on the path that actuates ----
+    parser.add_argument("--a3-offset-db", type=float, default=3.0,
+                        help="candidate must beat serving by this margin, in dB")
+    parser.add_argument("--a3-ttt-s", type=float, default=0.0,
+                        help="time-to-trigger: the A3 condition must HOLD this long")
+    parser.add_argument("--min-service-time-s", type=float, default=0.0,
+                        help="minimum dwell on a cell before another switch is emitted")
     parser.add_argument("--group", default="starlink")
     parser.add_argument("--max-sats", type=int, default=50)
     parser.add_argument("--interval", type=float, default=60.0)
@@ -292,6 +470,24 @@ def main(argv: list[str] | None = None) -> int:
         influx_udp_port=args.udp_port,
         run_id=args.run_id,
         tle_cache_dir=args.cache_dir,
+        source=args.source,
+        tle_file=args.tle_file,
+        walker_planes=args.walker_planes,
+        walker_sats_per_plane=args.walker_sats_per_plane,
+        walker_altitude_km=args.walker_altitude_km,
+        walker_inclination_deg=args.walker_inclination_deg,
+        walker_phasing_factor=args.walker_phasing_factor,
+        epoch_unix_s=args.epoch_unix,
+        predictions_path=args.predictions,
+        tle_dump_path=args.tle_dump,
+        predictions_horizon_s=args.predictions_horizon_s,
+        predictions_step_s=args.predictions_step_s,
+        observer_lat_deg=args.observer_lat,
+        observer_lon_deg=args.observer_lon,
+        observer_alt_m=args.observer_alt_m,
+        a3_offset_db=args.a3_offset_db,
+        a3_time_to_trigger_s=args.a3_ttt_s,
+        min_service_time_s=args.min_service_time_s,
     )
     stats = run_loop(cfg, max_iterations=args.max_iterations)
     if args.stats_out:

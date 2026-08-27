@@ -1,5 +1,76 @@
 <h1 align="center">ntn-digital-twin</h1>
 
+> ## What the twin/sim loop does and does not establish (audit TWIN-01..04)
+>
+> **TWIN-01 — the propagators now match, and previously did not.** `Sgp4MobilityModel` declared
+> `m_useVallado{false}`, so `SetTle()` parsed the TLE and then propagated it with an analytic
+> Kepler + J2-secular model unless the caller *also* called `SetUseVallado(true)` — and nothing
+> in the tree did. The Python twin runs genuine `Satrec.sgp4`. Measured for the ISS TLE over the
+> exporter's 45-minute horizon, the two separate by **5.2 to 11.0 km**: about a second of
+> along-track lag, enough to move an argmax-elevation crossover and therefore every handover
+> instant the twin exports. `SetTle()` now selects SGP4 by default, and `IsUsingSgp4()` reports
+> which propagator is actually running (`IsValladoReady()` answers a different question — whether
+> the state is initialised — and stays true after opting out).
+>
+> **TWIN-02 — FIXED.** `ntn-digital-twin` is now an ns-3 module (it had no `CMakeLists.txt`,
+> so its tests never ran under `./test.py`), and the gate computes the number that did not
+> exist: **twin-predicted handover instants against ns-3 handover instants over the same
+> orbits.** The twin dumps the exact TLEs it propagated (`--tle-dump`) and carries the observer
+> and window in the prediction header, so ns-3 replays the identical geometry rather than being
+> told it out of band.
+>
+> This only became possible because of TWIN-01: `Sgp4MobilityModel` used to fall back to
+> Kepler + J2 even when handed a TLE, so feeding it the twin's own elements still produced a
+> different orbit and any disagreement would have been dominated by geometry.
+>
+> **Measured: agreement 0.21** — twin 7 handovers, ns-3 14, 3 matched, mean offset 15 s. That is
+> the honest number, and it is not 100%. The twin applies A3 in dB with hysteresis while the
+> replay is a bare argmax, so they are different policies over identical orbits. The pinned
+> "Gate 9: agreement 100%" was measuring two Python elevation formulas against each other.
+> Matching requires the same CELL as well as a nearby instant, so a handover to the wrong
+> satellite at the right time scores zero.
+>
+> Previously: `test_gate9_twin_sim_agreement.py`
+> compares `api_server._elevation_deg_ecef` against Skyfield's `Satellite.elevation_deg`, both
+> Python, both over the same Python-propagated constellation. ns-3 is never invoked, and
+> `ntn-digital-twin` has no `CMakeLists.txt`, so its tests never run under `./test.py`. A 100%
+> score between two elevation formulas over one orbit propagation is close to a tautology; it says
+> nothing about whether the twin agrees with the simulator. **The number that would matter —
+> twin-predicted handover instants versus ns-3 CHO handover instants — is not computed anywhere.**
+> Do not read the pinned "Gate 9: agreement 100%" as twin/sim agreement.
+>
+> **TWIN-03 — FIXED.** `run_iteration()` now calls the exporter when
+> `--predictions` is given, and `main()` exposes the flags it was missing:
+> `--source`, `--tle-file`, `--walker-*`, `--epoch-unix`, `--predictions`,
+> `--predictions-horizon-s`, `--predictions-step-s` and the observer position. A single
+> command now produces the file `OranNtnTwinPredictionConsumer` reads, in its exact
+> `t_s,ueId,recommendedGnbId,confidence` contract. Previously: `OranNtnTwinPredictionConsumer` is
+> instantiated only by a unit test; no example uses it. On the Python side `emit_predictions_file`
+> is called only from a test, `run_iteration()` never calls it, and `main()` exposes no
+> `--source` / `--walker-*` / `--epoch` / `--predictions` flags — so the shipped `ntn-twin-loop`
+> entry point always builds `LoopConfig(source='celestrak')` and can never emit the deterministic
+> Walker predictions the C++ consumer reads. The mechanism is real code with a real file contract,
+> but **there is no command that emits the file and no scenario that consumes it.**
+>
+> **TWIN-04 — FIXED on the actuating path.** The exporter now computes a link budget from
+> the ephemeris it already has (free-space loss over the slant range against a configured
+> EIRP and G/T), so its trigger quantity is an **SNR in dB** like the simulator's A3, and
+> applies `--a3-offset-db` with `--a3-ttt-s` time-to-trigger and `--min-service-time-s`
+> dwell on top. Measured over a 45-minute window: 14 predictions at 0 dB, 11 at 1 dB, 7 at
+> 3 dB — the offset genuinely filters marginal switches rather than being decorative. The
+> REST path's elevation-degree guard is unchanged and remains a different quantity;
+> `server.py`'s claim that it enforces "exactly the conditions the sim's A3 algorithm
+> enforces" is still not supportable and is not repaired here. Previously:
+> The exporter C++ actually consumes takes a bare argmax over elevation with no hysteresis, no
+> time-to-trigger and no minimum service time. The REST path does guard, but on
+> `best_el > current_el + hysteresis_deg` — topocentric elevation in **degrees**, whereas the
+> simulator's A3 is `sinr_dB > servingSinr_dB + a3Offset_dB`. Elevation and SINR are not
+> monotonically related once antenna pattern, scan loss and ITU-R P.618/P.676 attenuation enter,
+> so the two admit different handovers. `server.py`'s claim that the guard enforces "exactly the
+> conditions the sim's A3 algorithm enforces" is **not supportable in either units or code path.**
+>
+> TWIN-01, TWIN-02, TWIN-03 and TWIN-04's actuating path are fixed. The REST path's elevation-degree guard is unchanged and remains a different quantity from the simulator's dB-based A3.
+
 <p align="center"><strong>Live visualizer of the real-world CelesTrak constellation (SGP4 from fresh TLEs at wall-clock time) — refresh loop, REST prediction API and CesiumJS live mode for 6G NTN. A one-way mirror of the live sky; it does NOT ingest ns-3 simulation state and is not a twin of the simulator.</strong></p>
 
 <p align="center">Part of <strong>ns3-ntn-toolkit</strong> — <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">toolkit</a> / <a href="INSTALL.md">INSTALL</a>.</p>

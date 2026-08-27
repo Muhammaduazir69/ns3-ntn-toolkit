@@ -152,31 +152,78 @@ def test_api_predict_handover_returns_events(synthetic_constellation):
 
 
 def test_api_predict_handover_a3_hysteresis_reduces_pingpong(synthetic_constellation):
-    """W1: an A3-style hysteresis + minimum-service guard must produce no MORE
-    handovers than the bare argmax (hysteresis=0), and a large hysteresis + long
-    minimum-service must strictly damp the ping-pong the argmax exhibits."""
+    """W1: an A3-style margin + minimum-service guard must produce no MORE
+    handovers than the bare argmax, and a large margin + long minimum-service
+    must strictly damp the ping-pong the argmax exhibits.
+
+    TWIN-04: the margin gate is isolated from the TTT / min-service gates. An
+    earlier version of this test compared the bare argmax against all three
+    guards at once, so deleting the margin comparison outright left it green:
+    the min-service timer alone damps this shell below the argmax count. A test
+    that three mechanisms can carry says nothing about any one of them."""
     from fastapi.testclient import TestClient
 
     api_server._state.cons = synthetic_constellation
     client = TestClient(api_server.app)
+    # Pinned epoch and a site the shell actually passes over.
+    #
+    # This used to sit at (0, 0) and let the endpoint default to wall-clock
+    # now(), so the answer depended on the DAY the suite ran: the fixture's TLEs
+    # have a 2026-05-04 epoch, and the 50-satellite subset is only overhead at
+    # some longitudes. It passed for months and then returned 0 handovers when
+    # the date rolled over mid-session, which is a test measuring the calendar
+    # rather than the guard. start_iso exists precisely to remove that, and at
+    # (-40, 0) on the epoch this subset gives 30 crossings in an hour.
+    epoch_iso = "2026-05-04T00:00:00+00:00"
     base = {
-        "ue_lat_deg": 0.0, "ue_lon_deg": 0.0,
+        "ue_lat_deg": -40.0, "ue_lon_deg": 0.0,
         "horizon_min": 60.0, "step_sec": 5.0, "min_elevation_deg": 10.0,
+        "start_iso": epoch_iso,
     }
 
-    # Bare argmax (no A3 guard): hysteresis 0, no TTT, no min-service.
+    # Bare argmax (no A3 guard): zero margin, no TTT, no min-service.
     raw = client.post("/predict/handover",
-                      json={**base, "hysteresis_deg": 0.0,
+                      json={**base, "margin_quantity": "db", "a3_offset_db": 0.0,
                             "time_to_trigger_sec": 0.0, "min_service_sec": 0.0})
     assert raw.status_code == 200
     n_raw = raw.json()["n_handovers"]
 
-    # A3-guarded: real hysteresis + a minimum service time.
+    # A3-guarded. TWIN-04: the margin is now in dB, matching the simulator's A3
+    # (sinr_dB > servingSinr_dB + a3Offset_dB) rather than the topocentric
+    # elevation this endpoint used to compare. Measured on this shell and epoch:
+    # 0 dB gives 30 handovers, 3 dB gives 13, 10 dB gives 3.
     guarded = client.post("/predict/handover",
-                          json={**base, "hysteresis_deg": 5.0,
+                          json={**base, "margin_quantity": "db", "a3_offset_db": 10.0,
                                 "time_to_trigger_sec": 5.0, "min_service_sec": 60.0})
     assert guarded.status_code == 200
     n_guarded = guarded.json()["n_handovers"]
+
+    # The response must say which guard actually ran. A supplied parameter that
+    # is silently ignored is exactly what the echo exists to prevent.
+    assert guarded.json()["margin_quantity"] == "db"
+    assert guarded.json()["effective_margin"] == 10.0
+
+    # The margin gate ALONE, with both timers disabled, so nothing else can be
+    # credited for the reduction. This is the assertion that actually pins the
+    # dB comparison: drop it, or ignore a3_offset_db, and only this one goes red.
+    margin_only = client.post("/predict/handover",
+                              json={**base, "margin_quantity": "db", "a3_offset_db": 10.0,
+                                    "time_to_trigger_sec": 0.0, "min_service_sec": 0.0})
+    assert margin_only.status_code == 200
+    n_margin = margin_only.json()["n_handovers"]
+    assert n_margin < n_raw, (
+        f"a3_offset_db is not gating: {n_margin} handovers at 10 dB "
+        f"vs {n_raw} at 0 dB, timers off in both")
+
+    # The elevation path must still work, and must be reported as itself rather
+    # than silently falling through to the dB comparison.
+    elev = client.post("/predict/handover",
+                       json={**base, "margin_quantity": "elevation_deg",
+                             "hysteresis_deg": 3.0,
+                             "time_to_trigger_sec": 0.0, "min_service_sec": 0.0})
+    assert elev.status_code == 200
+    assert elev.json()["margin_quantity"] == "elevation_deg"
+    assert elev.json()["effective_margin"] == 3.0
 
     # The guard can never CREATE handovers, and on a multi-satellite shell it
     # must remove at least the crossover ping-pong the argmax produces.

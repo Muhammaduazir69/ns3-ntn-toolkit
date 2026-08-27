@@ -29,6 +29,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 
+from ntn_digital_twin import a3_guard
 from ntn_constellation.feeds import CelesTrakFeed, TleCache
 from ntn_constellation.propagator import Constellation, Satellite
 
@@ -162,104 +163,105 @@ def constellation_state(at: str | None = None) -> ConstellationStateResponse:
     )
 
 
+
+def _a3_params_from_request(req) -> a3_guard.A3Params:
+    """TWIN-04: the request's guard settings as the shared A3 parameters.
+
+    The endpoint used to carry its own copy of the link budget and its own copy
+    of the A3 state machine. Both now live in ntn_digital_twin.a3_guard, which
+    the exporter that ns-3 actuates on also calls, so the two paths cannot drift
+    apart again.
+    """
+    return a3_guard.A3Params(
+        margin_quantity=req.margin_quantity,
+        a3_offset_db=req.a3_offset_db,
+        hysteresis_deg=req.hysteresis_deg,
+        time_to_trigger_s=req.time_to_trigger_sec,
+        min_service_s=req.min_service_sec,
+        min_elevation_deg=req.min_elevation_deg,
+        link_eirp_dbm=req.link_eirp_dbm,
+        link_gt_db_per_k=req.link_gt_db_per_k,
+        link_bandwidth_hz=req.link_bandwidth_hz,
+        link_frequency_hz=req.link_frequency_hz,
+    )
+
+
 @app.post("/predict/handover", response_model=PredictHandoverResponse)
 def predict_handover(req: PredictHandoverRequest) -> PredictHandoverResponse:
     t0 = time.time()
     cons = _state.ensure_loaded()
-    now = dt.datetime.now(tz=dt.timezone.utc)
+    if req.start_iso:
+        try:
+            now = dt.datetime.fromisoformat(req.start_iso)
+        except ValueError as exc:
+            raise HTTPException(status_code=422,
+                                detail=f"start_iso is not ISO-8601: {exc}") from exc
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt.timezone.utc)
+    else:
+        now = dt.datetime.now(tz=dt.timezone.utc)
     horizon_sec = req.horizon_min * 60.0
     step = req.step_sec
 
     obs_ecef = _ecef_from_geodetic(req.ue_lat_deg, req.ue_lon_deg, req.ue_alt_m)
+    params = _a3_params_from_request(req)
+    ev = a3_guard.A3Evaluator(params)
     events: list[HandoverEvent] = []
-    current_serving: int | None = None
-    current_serving_name: str | None = None
-    # W1: A3 trigger state.
-    a3_since = None      # when the (candidate > serving + hysteresis) condition began
-    a3_target: int | None = None  # candidate the TTT window is tracking
-    last_ho_time = None  # for the minimum-service-time guard
 
     # Hard cap on the loop length (defense in depth on top of the schema
     # bounds): keeps a large horizon / fine step from pinning a CPU.
     MAX_STEPS = 20000
     n_steps = min(int(horizon_sec / step) + 1, MAX_STEPS)
+    times = [now + dt.timedelta(seconds=k * step) for k in range(n_steps)]
+
+    # Propagate each satellite across the WHOLE grid in one call. Looping
+    # ecef_m per satellite per tick spent its time in Skyfield's per-call setup
+    # rather than in SGP4, and it is what put a 10 minute horizon over the
+    # endpoint's own 500 ms budget.
+    tracks = [sat.ecef_m_series(times) for sat in cons]
+    names = [sat.name.strip() for sat in cons]
+    norads = [sat.norad_id for sat in cons]
+
     for k in range(n_steps):
-        when = now + dt.timedelta(seconds=k * step)
-        states = cons.state_vectors(when)
-        # Best-elevation satellite at this tick
-        best_idx = -1
-        best_el = -90.0
-        # Track current's elevation for outgoing handover annotation
-        current_el = -90.0
-        for i, sv in enumerate(states):
-            # gap B3: sv.r_eci_km is inertial (TEME); convert to true ECEF
-            # before computing topocentric elevation (was off by the
-            # Earth-rotation angle, invalidating the predicted HO sequence).
-            sat_ecef = cons[i].ecef_m(when)
+        t_s = k * step
+        when = times[k]
+        cands = []
+        for i in range(len(cons)):
+            # gap B3: state vectors are inertial (TEME); ecef_m_series returns
+            # the true Earth-fixed position, so the topocentric elevation is not
+            # off by the Earth-rotation angle.
+            sat_ecef = tracks[i][k]
             el = _elevation_deg_ecef(obs_ecef, sat_ecef,
                                      req.ue_lat_deg, req.ue_lon_deg)
-            if el > best_el:
-                best_el = el
-                best_idx = i
-            if cons[i].norad_id == current_serving:
-                current_el = el
+            cands.append(a3_guard.Candidate(
+                key=norads[i], elev_deg=el,
+                alt_km=a3_guard.altitude_km_from_ecef(sat_ecef), name=names[i]))
 
-        if best_idx < 0 or best_el < req.min_elevation_deg:
+        # TWIN-04: the guard itself lives in ntn_digital_twin.a3_guard and is
+        # shared with the exporter the C++ side actuates on. This endpoint used
+        # to compare a margin in topocentric elevation DEGREES while claiming it
+        # enforced "exactly the conditions the sim's A3 algorithm enforces"; the
+        # simulator's A3 is a dB margin on a signal level, and the two are not
+        # monotonically related once pattern, scan loss and P.618/P.676 enter.
+        hit = ev.step(t_s, cands)
+        if hit is None:
             continue
-
-        best_sat = cons[best_idx]
-
-        # W1: A3-style guard. A handover fires only when the best candidate beats
-        # the serving cell by more than the hysteresis, that condition has held
-        # for the time-to-trigger, and the minimum service time since the last
-        # handover has elapsed -- exactly the conditions the sim's A3 algorithm
-        # enforces. The bare argmax fired on any crossover and ping-ponged.
-        if current_serving is None:
-            # Initial acquisition is not a handover.
-            current_serving = best_sat.norad_id
-            current_serving_name = best_sat.name.strip()
-            continue
-
-        if best_sat.norad_id == current_serving:
-            a3_since = None  # condition broken; reset the trigger timer
-            continue
-
-        margin_ok = best_el > current_el + req.hysteresis_deg
-        if not margin_ok:
-            a3_since = None
-            continue
-
-        # Start / continue the time-to-trigger window.
-        if a3_since is None:
-            a3_since = when
-            a3_target = best_sat.norad_id
-        elif a3_target != best_sat.norad_id:
-            a3_since = when  # target changed; restart the window
-            a3_target = best_sat.norad_id
-
-        held_for = (when - a3_since).total_seconds()
-        service_for = (when - last_ho_time).total_seconds() if last_ho_time else 1e9
-        if held_for < req.time_to_trigger_sec or service_for < req.min_service_sec:
-            continue
-
         events.append(HandoverEvent(
             time_iso=when.isoformat(),
-            sat_in_norad=best_sat.norad_id,
-            sat_in_name=best_sat.name.strip(),
-            sat_out_norad=current_serving,
-            sat_out_name=current_serving_name,
-            elevation_in_deg=best_el,
-            elevation_out_deg=current_el if current_serving is not None else None,
+            sat_in_norad=hit.key_in,
+            sat_in_name=hit.name_in,
+            sat_out_norad=hit.key_out,
+            sat_out_name=hit.name_out,
+            elevation_in_deg=hit.elev_in_deg,
+            elevation_out_deg=hit.elev_out_deg,
         ))
-        current_serving = best_sat.norad_id
-        current_serving_name = best_sat.name.strip()
-        last_ho_time = when
-        a3_since = None
 
     elapsed_ms = (time.time() - t0) * 1000.0
     return PredictHandoverResponse(
         requested_at_iso=now.isoformat(),
         horizon_min=req.horizon_min,
+        margin_quantity=params.margin_quantity,
+        effective_margin=params.effective_margin,
         n_handovers=len(events),
         events=events,
         elapsed_ms=elapsed_ms,
