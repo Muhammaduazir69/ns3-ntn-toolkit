@@ -26,6 +26,19 @@ class OranNtnSatBridge;
  * \ingroup oran-ntn
  * \brief Gymnasium environment for beam-hopping RL training
  *
+ * \warning AI-04 - NOT WIRED END TO END, and not exercised anywhere.
+ *          No example or test constructs this class; the only reference to it
+ *          outside model/ is a setter. Its emitted action type (BEAM_HOP_SCHEDULE) has no
+ *          actuator in OranNtnHelper, so it lands in the dispatcher's default
+ *          arm, is logged as "not actuated", and reports failure. Nothing this
+ *          environment decides can reach a scheduler, beam manager or DC
+ *          controller under any configuration.
+ *
+ *          Its observation and action shapes have never been checked against a
+ *          live observation either, so treat the numeric contract as unverified.
+ *          Of the five RL environments the README advertises, one
+ *          (OranNtnGymSlice) now has an actuator path; this is not it.
+ *
  * \warning Experimental: not yet exercised by any example or test; API may
  *          change.
  */

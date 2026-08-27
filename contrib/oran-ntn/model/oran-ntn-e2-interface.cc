@@ -6,12 +6,16 @@
  */
 
 #include "oran-ntn-e2-interface.h"
+#include "oran-ntn-rc-style3.h"
+#include "oran-ntn-service-model-rc.h"
 
 #include <ns3/boolean.h>
 #include <ns3/double.h>
 #include <ns3/log.h>
 #include <ns3/simulator.h>
 #include <ns3/uinteger.h>
+
+#include <optional>
 
 namespace ns3
 {
@@ -120,6 +124,7 @@ OranNtnE2Node::DoDispose()
     m_ranFunctions.clear();
     m_rcActionCb = MakeNullCallback<bool, E2RcAction>();
     m_indicationCb = MakeNullCallback<void, E2Indication>();
+    m_loopProbe = nullptr;
     Object::DoDispose();
 }
 
@@ -226,6 +231,23 @@ OranNtnE2Node::SubmitKpmMeasurement(const E2KpmReport& report)
 {
     NS_LOG_FUNCTION(this << report.gnbId);
 
+    // R2.7 stage `e2_indication_construct`: the CPU cost of turning a KPM
+    // measurement into E2 indications and enqueueing their delayed delivery.
+    // This is the ON-PATH stand-in for encode + transport hand-off; it is NOT
+    // an E2AP wire serializer (E2AP-over-SCTP is not simulated -- see the
+    // class doc), which is why the stage is named for message construction.
+    std::optional<OranNtnLoopLatencyProbe::ScopedCpuTimer> constructTimer;
+    if (m_loopProbe)
+    {
+        constructTimer.emplace(m_loopProbe, oranntn::loopstage::kE2IndicationConstruct);
+    }
+
+    // ORAN-14: remember the most recent measurement so the periodic timer has
+    // something to publish at the subscription cadence. Keyed per UE, because a
+    // node serves several and the last one to arrive is not the whole picture.
+    m_latestReport[report.ueId] = report;
+    m_haveLatestReport = true;
+
     // Create indication for each active KPM subscription
     for (const auto& [subId, sub] : m_subscriptions)
     {
@@ -248,43 +270,62 @@ OranNtnE2Node::SubmitKpmMeasurement(const E2KpmReport& report)
             }
         }
 
-        E2Indication indication;
-        indication.subscriptionId = subId;
-        indication.ranFunctionId = 2;
-        // UnixEpochOffset = 0 keeps pure sim time; nonzero yields Unix-like
-        // stamps so an external RIC (FlexRIC bridge) accepts the indication.
-        indication.timestamp = m_unixEpochOffset + Simulator::Now().GetSeconds();
-        indication.kpmReport = report;
-        indication.originalTimestamp = Simulator::Now();
+        // ORAN-14: one implementation, shared with the periodic timer, so the
+        // two delivery paths cannot drift apart.
+        EmitIndication(sub, report);
+    }
+}
 
-        if (m_feederLinkAvailable)
+void
+OranNtnE2Node::EmitIndication(const E2Subscription& sub, const E2KpmReport& report)
+{
+    E2Indication indication;
+    indication.subscriptionId = sub.subscriptionId;
+    indication.ranFunctionId = 2;
+    // UnixEpochOffset = 0 keeps pure sim time; nonzero yields Unix-like
+    // stamps so an external RIC (FlexRIC bridge) accepts the indication.
+    indication.timestamp = m_unixEpochOffset + Simulator::Now().GetSeconds();
+    indication.kpmReport = report;
+    indication.originalTimestamp = Simulator::Now();
+
+    if (m_feederLinkAvailable)
+    {
+        indication.isBuffered = false;
+        indication.deliveryDelay = m_feederLinkDelay;
+        // Schedule delivery with feeder link delay
+        Simulator::Schedule(m_feederLinkDelay,
+                            &OranNtnE2Node::DeliverReport,
+                            this,
+                            indication);
+    }
+    else if (sub.batchOnVisibility)
+    {
+        // Buffer for later delivery
+        indication.isBuffered = true;
+        if (m_reportBuffer.size() < m_maxBufferSize)
         {
-            indication.isBuffered = false;
-            indication.deliveryDelay = m_feederLinkDelay;
-            // Schedule delivery with feeder link delay
-            Simulator::Schedule(m_feederLinkDelay,
-                                &OranNtnE2Node::DeliverReport,
-                                this,
-                                indication);
+            m_reportBuffer.push_back(indication);
+            m_reportBuffered(m_gnbId, static_cast<uint32_t>(m_reportBuffer.size()));
         }
-        else if (sub.batchOnVisibility)
+        else
         {
-            // Buffer for later delivery
-            indication.isBuffered = true;
-            if (m_reportBuffer.size() < m_maxBufferSize)
-            {
-                m_reportBuffer.push_back(indication);
-                m_reportBuffered(m_gnbId, static_cast<uint32_t>(m_reportBuffer.size()));
-            }
-            else
-            {
-                // Drop oldest
-                m_reportBuffer.pop_front();
-                m_reportBuffer.push_back(indication);
-                m_totalReportsDropped++;
-                m_reportDropped(m_gnbId, m_totalReportsDropped);
-            }
+            // Drop oldest
+            m_reportBuffer.pop_front();
+            m_reportBuffer.push_back(indication);
+            m_totalReportsDropped++;
+            m_reportDropped(m_gnbId, m_totalReportsDropped);
         }
+    }
+    else
+    {
+        // ORAN-05: the feeder is down and this subscription does not batch,
+        // so the indication cannot be delivered. It used to fall through
+        // both branches and vanish with no counter and no trace, so a
+        // scenario could lose every KPM report of an outage and report
+        // nothing unusual. Count it: telemetry lost to an outage is a
+        // result, not an absence.
+        m_totalReportsDropped++;
+        m_reportDropped(m_gnbId, m_totalReportsDropped);
     }
 }
 
@@ -313,6 +354,14 @@ OranNtnE2Node::DeliverReport(const E2Indication& indication)
     m_totalReportsSent++;
     m_kpmReportSent(m_gnbId, indication.kpmReport);
 
+    if (m_loopProbe)
+    {
+        // R2.7 stage `e2_indication_feeder_uplink`: simulated time from the
+        // measurement instant to arrival on the RIC side of the feeder link.
+        m_loopProbe->RecordSimulatedStage(oranntn::loopstage::kIndicationFeederUplink,
+                                          Simulator::Now() - indication.originalTimestamp);
+    }
+
     if (m_alignToControlLoop)
     {
         // Hold the indication until the next Near-RT RIC control-loop tick so
@@ -337,6 +386,23 @@ OranNtnE2Node::DeliverReport(const E2Indication& indication)
 void
 OranNtnE2Node::DispatchIndication(const E2Indication& indication)
 {
+    if (m_loopProbe)
+    {
+        // R2.7 stage `e2_indication_transport`: measurement instant -> the
+        // instant the xApp callback is entered. Measured directly, so it
+        // includes both the feeder leg and any RIC tick alignment.
+        const Time transport = Simulator::Now() - indication.originalTimestamp;
+        m_loopProbe->RecordSimulatedStage(oranntn::loopstage::kIndicationTransport,
+                                          transport);
+        // `ric_tick_align_wait`: whatever the transport spent waiting for the
+        // next Near-RT RIC tick beyond the delivery delay already charged to
+        // the feeder (indication.deliveryDelay). Exactly zero when
+        // AlignToControlLoop is off.
+        const Time tickWait = transport - indication.deliveryDelay;
+        m_loopProbe->RecordSimulatedStage(
+            oranntn::loopstage::kRicTickAlignWait,
+            tickWait.IsStrictlyPositive() ? tickWait : Time());
+    }
     if (!m_indicationCb.IsNull())
     {
         m_indicationCb(indication);
@@ -374,12 +440,24 @@ OranNtnE2Node::ReceiveRcAction(const E2RcAction& action)
     // Return feeder path: the RIC's command crosses the feeder link too, so a
     // full control loop costs one feeder delay in EACH direction (E2AP/SCTP
     // itself is not simulated; see the class doc).
-    Simulator::Schedule(m_feederLinkDelay, &OranNtnE2Node::ExecuteRcActionEvent, this, action);
+    // The routing instant travels with the event so the downlink leg is
+    // MEASURED at actuation time rather than assumed to equal FeederLinkDelay.
+    Simulator::Schedule(m_feederLinkDelay,
+                        &OranNtnE2Node::ExecuteRcActionEvent,
+                        this,
+                        action,
+                        Simulator::Now());
 }
 
 void
-OranNtnE2Node::ExecuteRcActionEvent(E2RcAction action)
+OranNtnE2Node::ExecuteRcActionEvent(E2RcAction action, Time routedAt)
 {
+    if (m_loopProbe)
+    {
+        // R2.7 stage `rc_action_transport`: the downlink feeder leg.
+        m_loopProbe->RecordSimulatedStage(oranntn::loopstage::kRcActionTransport,
+                                          Simulator::Now() - routedAt);
+    }
     ExecuteRcAction(action);
 }
 
@@ -388,9 +466,49 @@ OranNtnE2Node::ExecuteRcAction(const E2RcAction& action)
 {
     NS_LOG_FUNCTION(this << static_cast<uint8_t>(action.actionType));
 
+    // ORAN-10: decode before actuating. If the termination encoded a Style 3
+    // ControlMessage, this node must be able to read it back and must find the
+    // same target cell in it. A control whose bytes do not decode, or decode to
+    // a different cell, is not executed - which is what makes the codec part of
+    // the simulation rather than a parallel exercise.
+    if (!action.smControlMessage.empty())
+    {
+        using namespace oranntn::rc_v103::style3;
+        OranNtnServiceModelRc rc;
+        ControlMessage decoded{};
+        if (!rc.DecodeControl(action.smControlMessage, &decoded))
+        {
+            NS_LOG_WARN("E2Node " << m_gnbId << ": RC control message failed to decode; "
+                                  << "not actuating");
+            m_rcActionExecuted(m_gnbId, action, false);
+            return false;
+        }
+        if (const auto* hc = std::get_if<HandoverControl>(&decoded.action))
+        {
+            const uint64_t expect = NrCellIdentityFrom(action.targetGnbId);
+            if (hc->target_primary_cell_id.nr_cell_identity != expect)
+            {
+                NS_LOG_WARN("E2Node " << m_gnbId << ": decoded RC control names cell "
+                                      << hc->target_primary_cell_id.nr_cell_identity
+                                      << " but the action targets " << expect
+                                      << "; not actuating");
+                m_rcActionExecuted(m_gnbId, action, false);
+                return false;
+            }
+        }
+        ++m_rcControlsDecoded;
+    }
+
     bool success = false;
     if (!m_rcActionCb.IsNull())
     {
+        // R2.7 stage `actuation`: CPU cost of applying the action to the radio
+        // (the E2 node's registered RC action callback).
+        std::optional<OranNtnLoopLatencyProbe::ScopedCpuTimer> actTimer;
+        if (m_loopProbe)
+        {
+            actTimer.emplace(m_loopProbe, oranntn::loopstage::kActuation);
+        }
         success = m_rcActionCb(action);
     }
 
@@ -444,6 +562,18 @@ OranNtnE2Node::SetIndicationCallback(IndicationCallback cb)
 }
 
 void
+OranNtnE2Node::SetLoopLatencyProbe(Ptr<OranNtnLoopLatencyProbe> probe)
+{
+    m_loopProbe = probe;
+}
+
+Ptr<OranNtnLoopLatencyProbe>
+OranNtnE2Node::GetLoopLatencyProbe() const
+{
+    return m_loopProbe;
+}
+
+void
 OranNtnE2Node::PeriodicReportTimer(uint32_t subscriptionId)
 {
     NS_LOG_FUNCTION(this << subscriptionId);
@@ -451,6 +581,30 @@ OranNtnE2Node::PeriodicReportTimer(uint32_t subscriptionId)
     if (it == m_subscriptions.end())
     {
         return;
+    }
+
+    // ORAN-14: actually report.
+    //
+    // This used to look the subscription up and do nothing but re-arm, so every
+    // xApp's reportingPeriod - 100 to 500 ms across the shipped set - had no
+    // effect whatsoever, and indications appeared only when a scenario happened
+    // to call SubmitKpmMeasurement on its own schedule. E2SM-KPM periodic
+    // report style means the RAN publishes its current measurements at the
+    // subscription's cadence, which is what this now does.
+    //
+    // Gated on SetPeriodicReporting because every shipped xApp requests a
+    // period: emitting by default would change the indication count of every
+    // existing scenario at once, and the counts in the committed results were
+    // measured without it.
+    if (m_periodicReporting && !it->second.eventTrigger && it->second.ranFunctionId == 2 &&
+        m_haveLatestReport)
+    {
+        for (const auto& [ueId, rep] : m_latestReport)
+        {
+            (void)ueId;
+            EmitIndication(it->second, rep);
+            ++m_periodicIndications;
+        }
     }
 
     // Re-schedule next report
@@ -656,9 +810,36 @@ OranNtnE2Termination::RegisterXappCallback(uint32_t subscriptionId, uint32_t xap
 }
 
 bool
-OranNtnE2Termination::RouteRcAction(const E2RcAction& action)
+OranNtnE2Termination::RouteRcAction(const E2RcAction& inAction)
 {
-    NS_LOG_FUNCTION(this << action.targetGnbId);
+    NS_LOG_FUNCTION(this << inAction.targetGnbId);
+
+    // ORAN-10: put the service model on the control path.
+    //
+    // This used to pass the raw C++ struct straight through to the E2 node, so
+    // ConvertE2RcToStyle3 and the RC codec had callers only in the test suite -
+    // an encode-only universe running alongside the simulation rather than
+    // inside it. Encoding here and decoding at the node makes the codec
+    // load-bearing: a broken Style-3 mapping now breaks the run.
+    //
+    // Only HANDOVER_TRIGGER and HANDOVER_CANCEL have a Style-3 mapping. Other
+    // action types are delivered as the struct, and the empty smControlMessage
+    // says so rather than implying an encode that did not happen.
+    E2RcAction action = inAction;
+    if (auto sm = oranntn::rc_v103::style3::ConvertE2RcToStyle3(action))
+    {
+        oranntn::rc_v103::style3::ControlMessage msg{};
+        msg.action = *sm;
+        OranNtnServiceModelRc rc;
+        action.smControlMessage = rc.EncodeControl(msg);
+        if (action.smControlMessage.empty())
+        {
+            NS_LOG_WARN("E2 Termination: RC action has a Style 3 mapping but failed to "
+                        "encode; refusing to route an action we could not put on the wire");
+            m_actionRouted(action, false);
+            return false;
+        }
+    }
 
     // Cell-wide actions (targetGnbId=0) fan out to every registered E2 node.
     // E2AP (O-RAN.WG3.E2AP §8.4) has no "accept and discard" outcome: an RC

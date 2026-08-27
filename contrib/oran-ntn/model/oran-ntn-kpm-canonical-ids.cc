@@ -86,6 +86,11 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
         r.throughputMeasured ? provenance::kMeasured : provenance::kDerived;
     const char* prbProv =
         r.prbMeasured ? provenance::kMeasured : provenance::kDerived;
+    // ORAN-03: SINR gets the same treatment as throughput and PRB. Hardcoding
+    // kMeasured here labelled every closed-form candidate SINR as a
+    // measurement.
+    const char* sinrProv =
+        r.sinrMeasured ? provenance::kMeasured : provenance::kDerived;
 
     // DRB.UEThpDl — DL throughput, kbps (WG3 unit).
     const double thpDlKbps = r.throughput_Mbps * 1e3;
@@ -143,18 +148,14 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
     // averaging is wired the per-UE sinr is forwarded; reviewers should treat
     // the FIVE_QI label as the disambiguator.
     out.push_back(
-        MakeMeasurement(kpm::kCarrAvgSinr, r.sinr_dB, /*present=*/true, base,
-                        provenance::kMeasured));
+        MakeMeasurement(kpm::kCarrAvgSinr, r.sinr_dB, /*present=*/true, base, sinrProv));
 
     // L1M.RS-SINR.Mean — L1-measured RS-SINR mean (dB), per 3GPP TS 38.215
     // (RS-SINR PHY quantity), NOT a TS 28.552 PM counter. The mmwave PHY emits
     // the same source today; once srsRAN-style per-symbol L1 SINR averaging is
     // in place the two metrics will diverge.
-    out.push_back(MakeMeasurement(kpm::kL1mRsSinrMean,
-                                  r.sinr_dB,
-                                  /*present=*/true,
-                                  base,
-                                  provenance::kMeasured));
+    out.push_back(MakeMeasurement(kpm::kL1mRsSinrMean, r.sinr_dB, /*present=*/true, base,
+                                  sinrProv));
 
     // TB.TotNbrDl / TB.ErrTotNbrDl — canonical TS 28.552 DL transport-block
     // counters; the DL TB error rate is TB.ErrTotNbrDl / TB.TotNbrDl. That

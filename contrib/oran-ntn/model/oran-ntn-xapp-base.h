@@ -24,6 +24,7 @@
 
 #include "oran-ntn-e2-interface.h"
 #include "oran-ntn-types.h"
+#include "oran-ntn-a1-interface.h"
 
 #include <ns3/callback.h>
 #include <ns3/event-id.h>
@@ -72,7 +73,29 @@ enum class XappState : uint8_t
 struct XappMetrics
 {
     uint32_t totalDecisions;
+    /// ORAN-13: actions the RIC ACCEPTED AND ROUTED to an E2 node.
+    ///
+    /// This is not the same thing as an action that changed the simulated
+    /// network, and the difference used to be invisible.
+    /// OranNtnNearRtRic::ProcessXappAction returns
+    /// `m_e2Term->RouteRcAction(action)`, i.e. whether the action passed policy
+    /// and conflict checks and reached a node - while the helper's
+    /// action_log.csv records `success = actuated`, i.e. whether an actuator
+    /// existed and fired. Both were called "success", so xapp_metrics.csv and
+    /// action_log.csv could report different numbers for what read as the same
+    /// quantity, and a scenario with no actuator wired reported successes for
+    /// actions that moved nothing.
+    ///
+    /// Kept under its original name so existing readers are not silently
+    /// re-pointed at a different number; what it counts is now stated.
     uint32_t successfulActions;
+    /// ORAN-13: actions that an actuator actually carried out.
+    ///
+    /// Fed by the action-result path rather than by routing. The gap between
+    /// this and successfulActions is exactly the set of actions that were
+    /// accepted and reached a node where nothing was wired to act on them,
+    /// which is the decision-island condition this campaign keeps finding.
+    uint32_t actuatedActions;
     uint32_t failedActions;
     uint32_t conflictsEncountered;
     uint32_t conflictsWon;
@@ -199,7 +222,28 @@ class OranNtnXappBase : public Object
     /**
      * \brief Check if a proposed action complies with A1 policies
      */
+    /// ORAN-13: record that an action was actually carried out by an actuator.
+    ///
+    /// Called by whoever owns the actuator (OranNtnHelper does), because the
+    /// xApp cannot see past the RIC's routing decision. Without this the only
+    /// number an xApp could report was routing acceptance, under the name
+    /// "successful".
+    void RecordActuation(bool actuated)
+    {
+        if (actuated)
+        {
+            m_metrics.actuatedActions++;
+        }
+    }
+
     bool CheckPolicyCompliance(const E2RcAction& action) const;
+    /// ORAN-07: enforce a SLICE_SLA policy against a PRB-allocation action.
+    ///
+    /// Before this, CheckPolicyCompliance returned true for every action that
+    /// was not a HANDOVER_TRIGGER, so ten of the eleven A1 policy types
+    /// governed nothing and their violation counters could never leave zero.
+    bool CheckSlicePolicyCompliance(const E2RcAction& action,
+                                    const std::vector<A1NtnPolicy>& policies) const;
 
     // ---- RC action submission ----
     /**

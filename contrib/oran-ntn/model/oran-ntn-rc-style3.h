@@ -85,9 +85,27 @@ struct ConditionalHandoverControl
     static constexpr uint8_t kStyleId = 3;
     static constexpr uint8_t kActionId = 2;
 
-    /// Identifier shared by all per-UE conditional reconfigurations so the
-    /// RAN can cancel the full set in one shot (empty candidate_cell_list).
+    /// Identifier shared by all per-UE conditional reconfigurations.
     uint32_t conditional_reconfiguration_id;
+
+    /// ORAN-10: cancellation, expressed the way TS 38.331 expresses it.
+    ///
+    /// The previous mapping encoded "cancel everything" as
+    /// conditional_reconfiguration_id = 0 with an empty candidate list. That is
+    /// an invented semantic: CondReconfigId 0 is a perfectly valid identifier,
+    /// not a wildcard, and TS 38.331 section 5.3.5.13 removes conditional
+    /// reconfigurations by naming them in condReconfigToRemoveList. A receiver
+    /// implementing the standard would have read the old encoding as "cancel
+    /// the configuration whose id is 0" and left the rest in place.
+    ///
+    /// This mirrors condReconfigToRemoveList directly.
+    std::vector<uint32_t> conditional_reconfiguration_to_remove_list;
+
+    /// Explicit "release all pending conditional reconfigurations for this UE".
+    /// TS 38.331 achieves this by listing every configured CondReconfigId; the
+    /// flag keeps the intent unambiguous on the wire without pretending that a
+    /// particular id means "all".
+    bool remove_all_conditional_reconfigurations{false};
 
     struct CandidateCell
     {
@@ -139,9 +157,26 @@ struct ControlMessage
 ///
 /// All other action types return std::nullopt. PLMN defaults to "00101"
 /// (MCC=001 MNC=01) which matches the toolkit's default test PLMN.
+/// gNB-ID length in bits within the 36-bit NR Cell Identity.
+///
+/// ORAN-10: this was hardwired to a 28/8 split. TS 38.413 makes the gNB-ID
+/// length configurable from 22 to 32 bits, with the remaining bits carrying the
+/// cell identity, so a deployment using a 24-bit gNB-ID would have had its cell
+/// identities silently mangled by the fixed shift.
+inline constexpr uint8_t kDefaultGnbIdLengthBits = 28;
+inline constexpr uint8_t kMinGnbIdLengthBits = 22;
+inline constexpr uint8_t kMaxGnbIdLengthBits = 32;
+
+/// Pack a gNB ID and a cell ID into the 36-bit NR Cell Identity, honouring the
+/// configured gNB-ID length. Returns 0 if gnbIdLengthBits is out of range.
+uint64_t NrCellIdentityFrom(uint32_t gnbId,
+                            uint16_t cellId = 0,
+                            uint8_t gnbIdLengthBits = kDefaultGnbIdLengthBits);
+
 std::optional<ControlAction>
 ConvertE2RcToStyle3(const E2RcAction& action,
-                    const std::string& plmn_id = "00101");
+                    const std::string& plmn_id = "00101",
+                    uint8_t gnbIdLengthBits = kDefaultGnbIdLengthBits);
 
 } // namespace style3
 } // namespace rc_v103

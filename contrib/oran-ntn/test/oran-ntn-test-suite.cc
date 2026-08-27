@@ -11,6 +11,8 @@
 #include "ns3/oran-ntn-a1-interface.h"
 #include "ns3/oran-ntn-a1-policy-schema.h"
 #include "ns3/oran-ntn-channel-model.h"
+#include "ns3/oran-ntn-gym-predictive.h"
+#include "ns3/oran-ntn-link-adaptation-tables.h"
 #include "ns3/oran-ntn-conflict-manager.h"
 #include "ns3/oran-ntn-dual-connectivity.h"
 #include "ns3/oran-ntn-e2-interface.h"
@@ -40,12 +42,16 @@
 #include "ns3/oran-ntn-service-model-ccc.h"
 #include "ns3/oran-ntn-service-model-ntn-ephemeris.h"
 #include "ns3/oran-ntn-service-model-kpm.h"
+#include "ns3/ntn-slice-helper.h"
+#include "ns3/ntn-slice-types.h"
+#include "ns3/slice-orchestrator-xapp.h"
 #include "ns3/oran-ntn-service-model-rc.h"
 #include "ns3/oran-ntn-service-model.h"
 #include "ns3/oran-ntn-phy-kpm-extractor.h"
 #include "ns3/oran-ntn-sat-bridge.h"
 #include "ns3/oran-ntn-space-ric-inference.h"
 #include "ns3/oran-ntn-space-ric.h"
+#include "ns3/uniform-planar-array.h"
 #include "ns3/oran-ntn-types.h"
 #include "ns3/oran-ntn-xapp-beam-hop.h"
 #include "ns3/oran-ntn-xapp-doppler-comp.h"
@@ -53,15 +59,21 @@
 #include "ns3/oran-ntn-xapp-ho-predict.h"
 #include "ns3/oran-ntn-helper.h"
 #include "ns3/ntn-static-extra-loss-model.h"
+#include "ns3/oran-ntn-loop-latency-probe.h"
 #include "ns3/oran-ntn-twin-prediction-consumer.h"
 
+#include <cmath>
+#include <cstdio>
 #include <fstream>
 #include "ns3/oran-ntn-xapp-interference-mgmt.h"
 #include "ns3/oran-ntn-xapp-multi-conn.h"
 #include "ns3/oran-ntn-xapp-predictive-alloc.h"
 #include "ns3/oran-ntn-xapp-slice-manager.h"
 #include "ns3/oran-ntn-xapp-tn-ntn-steering.h"
+#include "ns3/oran-ntn-gym-beam-hop.h"
 #include "ns3/oran-ntn-gym-handover.h"
+#include "ns3/oran-ntn-gym-slice.h"
+#include "ns3/oran-ntn-gym-steering.h"
 #include "ns3/container.h"
 #include "ns3/spaces.h"
 #include "ns3/test.h"
@@ -4724,6 +4736,18 @@ class OranNtnMmimoXappRoundTripTest : public TestCase
                                true,
                                "BEAM_HOP_SCHEDULE issued");
         NS_TEST_EXPECT_MSG_EQ(last_result.num_tx, 8u, "num_tx echoed");
+
+        // AI-06: the dispatched action must CARRY the weights, not just a
+        // codebook index. The composed hybrid precoder used to die at this
+        // boundary - EmitControlAction put only targetBeamId into the action -
+        // so nothing downstream could ever apply it.
+        NS_TEST_EXPECT_MSG_EQ(last_action.beamformingWeights.size(),
+                              last_result.final_weights.size(),
+                              "the emitted action carries the full weight vector the two-stage "
+                              "precoder produced; an empty vector here means the weights are "
+                              "being dropped at the xApp boundary again");
+        NS_TEST_EXPECT_MSG_GT(last_action.beamformingWeights.size(), 0u,
+                              "and it is not empty");
         NS_TEST_EXPECT_MSG_EQ(last_result.num_layers,
                                2u,
                                "num_layers echoed");
@@ -5015,6 +5039,1000 @@ class OranNtnXappMovesServingCellTest : public TestCase
 //  id (2) — the old highest-gnbId map-ordering artifact is gone.
 // ============================================================================
 
+/// ORAN-04: the gym reward must have the right SIGN.
+///
+/// GetReward() differences a post-action state against a pre-action one. The
+/// post-action slots were written only by UpdatePostAction(), which has no
+/// caller in the tree, so they stayed at their constructed 0.0 and the SINR
+/// term collapsed to -m_preActionSinr: an agent on a healthy link was rewarded
+/// for DEGRADING the serving SINR. This drives two consecutive observations
+/// with a KNOWN SINR change and asserts the reward moves the right way. A test
+/// that only checked "a reward is produced" would have passed throughout.
+/// ORAN-02: CreateSpaceRics must give each space RIC the E2 node it is
+/// co-located with.
+///
+/// SetLocalE2Node had no caller anywhere in the tree, so ExecuteDecisionLocally
+/// returned false on every call and logged "autonomous decision NOT actuated",
+/// while the autonomy counters incremented regardless: a satellite-hosted RIC
+/// reported autonomous decisions it had never carried out. This asserts the
+/// wiring exists and that a local decision actually reaches an E2 node.
+/// ORAN-03: SINR provenance must reflect where the value came from.
+///
+/// The canonical KPM writer stamped BOTH SINR metrics with
+/// provenance=measured unconditionally, while throughput and PRB correctly
+/// carried a flag. A candidate-cell SINR injected closed-form therefore reached
+/// the KPM output labelled as a measurement, which is the one thing a
+/// provenance column exists to prevent.
+class OranNtnSinrProvenanceTest : public TestCase
+{
+  public:
+    OranNtnSinrProvenanceTest()
+        : TestCase("ORAN-03 - SINR provenance follows the report flag, not a hardcoded label")
+    {
+    }
+
+  private:
+    static bool HasMeasuredSinr(const E2KpmReport& r)
+    {
+        for (const auto& m : oranntn::BuildCanonicalKpmMeasurements(r, {}))
+        {
+            if (m.metricId == std::string(oranntn::kpm::kCarrAvgSinr) ||
+                m.metricId == std::string(oranntn::kpm::kL1mRsSinrMean))
+            {
+                if (m.provenance == std::string(oranntn::provenance::kMeasured))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    void DoRun() override
+    {
+        E2KpmReport r{};
+        r.gnbId = 1;
+        r.ueId = 7;
+        r.sinr_dB = 12.0;
+        r.throughput_Mbps = 5.0;
+
+        r.sinrMeasured = false;
+        NS_TEST_ASSERT_MSG_EQ(HasMeasuredSinr(r), false,
+                              "a SINR the caller did not claim as measured must NOT be labelled "
+                              "measured; a closed-form candidate SINR reaching the KPM output "
+                              "as a measurement is the ORAN-03 defect");
+
+        r.sinrMeasured = true;
+        NS_TEST_ASSERT_MSG_EQ(HasMeasuredSinr(r), true,
+                              "a SINR that did come off a PHY trace must be labelled measured");
+    }
+};
+
+class OranNtnSpaceRicLocalActuationTest : public TestCase
+{
+  public:
+    OranNtnSpaceRicLocalActuationTest()
+        : TestCase("ORAN-02 - space RIC is wired to its co-located E2 node and actuates locally")
+    {
+    }
+
+  private:
+    uint32_t m_actuations{0};
+
+    bool CaptureRc(E2RcAction action)
+    {
+        (void)action;
+        m_actuations++;
+        return true;
+    }
+
+    void DoRun() override
+    {
+        NodeContainer sats;
+        sats.Create(3);
+
+        auto helper = CreateObject<OranNtnHelper>();
+        auto ric = helper->CreateNearRtRic();
+
+        // Order matters: the E2 nodes must exist before the space RICs so the
+        // helper can pair them. The fix logs a warning if they do not.
+        auto e2nodes = helper->CreateSatelliteE2Nodes(sats, ric);
+        NS_TEST_ASSERT_MSG_EQ(e2nodes.size(), 3u, "three satellite E2 nodes expected");
+        for (auto& n : e2nodes)
+        {
+            n->SetRcActionCallback(
+                MakeCallback(&OranNtnSpaceRicLocalActuationTest::CaptureRc, this));
+        }
+
+        auto spaceRics = helper->CreateSpaceRics(sats, 1, 3, ric);
+        NS_TEST_ASSERT_MSG_EQ(spaceRics.size(), 3u, "three space RICs expected");
+
+        for (uint32_t i = 0; i < spaceRics.size(); ++i)
+        {
+            NS_TEST_ASSERT_MSG_NE(spaceRics[i]->GetLocalE2Node(), nullptr,
+                                  "space RIC " << i << " must be paired with its co-located E2 "
+                                                       "node; a null here is the ORAN-02 defect "
+                                                       "and every on-board decision is buffered "
+                                                       "rather than actuated");
+        }
+        Simulator::Destroy();
+    }
+};
+
+/// AI-03: the other three gym rewards must respond to state, not be constants.
+///
+/// ORAN-04 fixed the handover environment's inverted reward by latching the
+/// post-action state inside GetObservation(). The slice, steering and beam-hop
+/// environments were left with the same root cause: every field their
+/// GetReward() reads was written ONLY by UpdatePostAction(), which has no caller
+/// anywhere in the tree, so all three held their constructed values forever.
+///
+/// The consequences differed but were all fatal to learning. The slice reward
+/// was a constant. The beam-hop reward was a constant zero. The steering reward
+/// was zero unless the agent switched and strictly negative when it did, so the
+/// only optimal policy was to never act. None of this is visible to a test that
+/// merely checks a reward is produced, which is why this drives each environment
+/// through two observations with a KNOWN change and asserts the reward moves.
+/// ORAN-07: A1 policies other than HO_THRESHOLD must actually govern something.
+///
+/// CheckPolicyCompliance opened with a bare early return: any action that was
+/// not a HANDOVER_TRIGGER was approved unconditionally. Of the eleven
+/// A1PolicyType values only HO_THRESHOLD was ever evaluated, so the SLICE_SLA
+/// policies the helper generates for every slice through GenerateSlicePolicies
+/// governed nothing at all, and their violation counters were structurally zero
+/// rather than merely low: no action could reach a check that would increment
+/// them.
+///
+/// This installs a slice SLA and drives two PRB-allocation actions past it -
+/// one that honours the SLA and one that starves the slice - and asserts they
+/// are treated differently.
+/// ORAN-13: "successful" must not mean two different things in two files.
+///
+/// xapp_metrics.csv incremented successfulActions from the return of
+/// OranNtnNearRtRic::ProcessXappAction, which is
+/// `m_e2Term->RouteRcAction(action)` - whether the action passed policy and
+/// conflict checks and reached an E2 node. action_log.csv recorded
+/// `success = actuated`, which is whether an actuator existed and fired. Both
+/// were called success, so the two files could report different numbers for
+/// what read as the same quantity, and a scenario with no actuator wired
+/// reported successes for actions that changed nothing.
+///
+/// Both quantities now exist under separate names. This asserts they can
+/// diverge, which is the whole point: if they were always equal there would
+/// have been no defect.
+/// ORAN-09: an autonomous handover must choose between BEAMS, not between other
+/// people's terminals.
+///
+/// m_localKpm is keyed by UE, and the candidate loop pushed one entry per OTHER
+/// TERMINAL whose beam differed from the serving one, so a UE about to lose
+/// coverage was handed over on the strength of how well somebody else's link
+/// was doing.
+///
+/// One thing worth stating precisely, because the obvious version of this claim
+/// is wrong: duplication alone does NOT change which beam wins. The scorer is a
+/// pure argmax, so a beam appearing five times still wins or loses on its best
+/// entry. What the duplication cost was semantic - a "candidate" was a person,
+/// not a place - and what it hid was that no beam had a single agreed
+/// representative measurement.
+///
+/// The satellite genuinely has no measurement of THIS UE on a beam it is not
+/// attached to; that is a real limit of on-board autonomy and is documented at
+/// the fix rather than papered over. What it can do is treat the evidence as
+/// per-beam and take each beam's BEST observation, which is what this asserts:
+/// order the reports so a beam's best and last differ, and the best must win.
+class OranNtnSpaceRicCandidatesAreBeamsTest : public TestCase
+{
+  public:
+    OranNtnSpaceRicCandidatesAreBeamsTest()
+        : TestCase("ORAN-09: autonomous handover candidates are deduplicated beams")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto ric = CreateObject<OranNtnSpaceRic>();
+        ric->SetSatelliteId(1);
+
+        // One UE in trouble on beam 0, FIVE other UEs on beam 1, and one on
+        // beam 2 carrying the single best observation. Under the old code beam 1
+        // supplied five of the six candidates purely because it is more
+        // populated, so the ranking was weighted by user count.
+        E2KpmReport failing;
+        failing.ueId = 100;
+        failing.beamId = 0;
+        failing.sinr_dB = -8.0; // below the -5 dB autonomous trigger
+        failing.tte_s = 3.0;
+        failing.elevation_deg = 12.0;
+        ric->ProcessLocalKpm(failing);
+
+        // Beam 1 is reported by five terminals, and the order matters: its BEST
+        // observation (15 dB, from the first) is far better than its LAST
+        // (2 dB). Beam 2 sits between them at 8 dB. So the beam that wins tells
+        // us which representative the code picked:
+        //   best-per-beam  -> beam 1 at 15 dB
+        //   last-per-beam  -> beam 1 at 2 dB, and beam 2 wins instead
+        const double beam1Sinr[5] = {15.0, 11.0, 7.0, 4.0, 2.0};
+        for (uint32_t i = 0; i < 5; ++i)
+        {
+            E2KpmReport r;
+            r.ueId = 200 + i;
+            r.beamId = 1;
+            r.sinr_dB = beam1Sinr[i];
+            r.tte_s = 60.0;
+            r.elevation_deg = 40.0;
+            ric->ProcessLocalKpm(r);
+        }
+        E2KpmReport lone;
+        lone.ueId = 300;
+        lone.beamId = 2;
+        lone.sinr_dB = 8.0;
+        lone.tte_s = 60.0;
+        lone.elevation_deg = 40.0;
+        ric->ProcessLocalKpm(lone);
+
+        // The autonomous loop only runs when the feeder link is down.
+        ric->EnterAutonomousMode();
+        Simulator::Stop(Seconds(5.0));
+        Simulator::Run();
+
+        const auto log = ric->GetDecisionLog();
+        bool sawHandover = false;
+        uint32_t chosenBeam = 999;
+        for (const auto& d : log)
+        {
+            if (d.actionType == E2RcActionType::HANDOVER_TRIGGER && d.targetUeId == 100)
+            {
+                sawHandover = true;
+                chosenBeam = d.targetBeamId;
+            }
+        }
+
+        NS_TEST_ASSERT_MSG_EQ(sawHandover, true,
+                              "a UE at -8 dB with 3 s of coverage left must trigger an autonomous "
+                              "handover; if it does not, the trigger is unreachable and the rest "
+                              "of this test proves nothing");
+        NS_TEST_ASSERT_MSG_EQ(chosenBeam, 1u,
+                              "beam 1 carries the best observation on offer (15 dB) and must win. "
+                              "Choosing beam 2 means each beam is represented by an arbitrary "
+                              "terminal - here whichever reported last - rather than by its best "
+                              "available evidence");
+
+        Simulator::Destroy();
+    }
+};
+
+/// CVC-08: the artifact a reader sums must expose BOTH counters.
+///
+/// ORAN-13 separated routed from actuated in the model. xapp_metrics.csv still
+/// published only successful_actions, so an audit summed that file to 71,967 and
+/// read it as actions the controller took. It counts routing acceptance. On the
+/// flagship scenario the actuated count is zero for every xApp, because
+/// serving-satellite selection there is the scenario's own mobility model.
+///
+/// A file with one column cannot be read correctly by someone who does not
+/// already know which quantity it holds. This asserts the column exists and
+/// carries the actuated number, so the gap is arithmetic in the file itself.
+/// ORAN-16: helper-built Space RICs must actually have ISL neighbours.
+///
+/// The helper computed nextInPlane and interPlaneIdx and then entered two
+/// if-blocks whose entire bodies were the comment "ISL neighbors stored
+/// internally by Space RIC". Nothing was stored. AddIslNeighbor was called only
+/// from a unit test, so every shipped scenario ran a Walker shell of on-board
+/// RICs that were isolated nodes, and the whole ISL path never fired.
+/// AI-10: the predictive xApp's AI branch must not pretend to predict.
+///
+/// It read "If AI is enabled and gym environment is set, use it" and contained
+/// a debug log and four comments, one of them "In production, this would call:
+/// m_gymEnv->Notify(...)". Control fell through to linear extrapolation
+/// unconditionally, so a scenario with AiEnabled and a gym environment produced
+/// exactly the same numbers as one with neither, while the code read as though
+/// inference had run.
+///
+/// It cannot simply be filled in: OranNtnGymPredictive is an OpenGymEnv driven
+/// asynchronously across the ns3-ai boundary, with no synchronous inference call
+/// for this method to make. So the requirement is that the fall-through is
+/// VISIBLE, which is what this checks.
+/// ORAN-15: A1 policy delivery must be able to take time.
+///
+/// DistributePolicy invoked its callback inline with no Simulator::Schedule, so
+/// a ground SMO policy reached the Near-RT RIC at the same simulation instant
+/// even when that RIC is modelled as satellite-hosted. A1 is the slowest of the
+/// O-RAN interfaces and the one an NTN feeder leg affects most, which makes
+/// instantaneous delivery the least defensible place to omit a delay.
+/// ORAN-14: a subscription's reportingPeriod must actually report.
+///
+/// PeriodicReportTimer looked its subscription up and did nothing but re-arm
+/// itself, so every xApp's reportingPeriod - 100 to 500 ms across the shipped
+/// set - had no effect at all, and indications appeared only when a scenario
+/// happened to call SubmitKpmMeasurement on its own schedule. E2SM-KPM periodic
+/// report style means the RAN publishes its current measurements at the
+/// subscription's cadence.
+/// AI-07: a measured SINR and an extrapolated one must not carry the same label.
+///
+/// The gym example injected its SERVING report with ten arguments, leaving
+/// sinrMeasured at its default, so the one SINR that came straight off
+/// RxPacketTraceUe was labelled DERIVED. The candidate reports, which are a
+/// free-space slant-range extrapolation off that same baseline, were labelled
+/// identically. Downstream, nothing could tell the measured plane from the
+/// extrapolated one, and feature 5 - the extrapolation - is what the example's
+/// action rule keys on.
+class OranNtnKpmProvenanceDistinguishesMeasuredTest : public TestCase
+{
+  public:
+    OranNtnKpmProvenanceDistinguishesMeasuredTest()
+        : TestCase("AI-07: an injected KPM report carries its own measured/derived label")
+    {
+    }
+
+    void DoRun() override
+    {
+        OranNtnHelper helper;
+        auto ric = helper.CreateNearRtRic();
+
+        // InjectKpmReport looks the gnbId up before it builds anything, so the
+        // E2 nodes have to exist or the call returns without labelling
+        // anything at all.
+        NodeContainer sats;
+        sats.Create(2);
+        helper.CreateSatelliteE2Nodes(sats, ric);
+
+        auto xapp = CreateObject<OranNtnXappHoPredict>();
+        xapp->SetXappName("provenance-probe");
+        ric->RegisterXapp(xapp);
+
+        // A measured serving report and a derived candidate report, injected
+        // exactly as the gym example injects them.
+        helper.InjectKpmReport(/*gnbId=*/1, /*ueId=*/1, /*sinr=*/12.0, /*rsrp=*/-83.0,
+                               /*tte=*/30.0, /*elev=*/45.0, /*doppler=*/1000.0,
+                               /*thp=*/5.0, /*rxBytes=*/1000, /*tbler=*/0.01,
+                               /*prbUtil=*/-1.0, /*sinrMeasured=*/true);
+        const E2KpmReport measured = helper.GetLastInjectedReport();
+        NS_TEST_ASSERT_MSG_EQ(measured.sinrMeasured, true,
+                              "a report injected with sinrMeasured=true must say its SINR was "
+                              "measured; the gym example's serving report passed ten arguments "
+                              "and silently claimed the opposite");
+
+        helper.InjectKpmReport(/*gnbId=*/2, /*ueId=*/1, /*sinr=*/9.0, /*rsrp=*/-86.0,
+                               /*tte=*/600.0, /*elev=*/30.0, /*doppler=*/900.0);
+        const E2KpmReport derived = helper.GetLastInjectedReport();
+        NS_TEST_ASSERT_MSG_EQ(derived.sinrMeasured, false,
+                              "a candidate report is a slant-range extrapolation and must NOT be "
+                              "labelled measured");
+
+        // The two must actually DIFFER, or the flag carries no information.
+        NS_TEST_ASSERT_MSG_NE(measured.sinrMeasured, derived.sinrMeasured,
+                              "the measured and derived reports must be distinguishable; that is "
+                              "the whole content of this finding");
+
+        Simulator::Destroy();
+    }
+};
+
+class OranNtnPeriodicReportingActuallyReportsTest : public TestCase
+{
+  public:
+    OranNtnPeriodicReportingActuallyReportsTest()
+        : TestCase("ORAN-14: the KPM subscription reporting period emits indications")
+    {
+    }
+
+  private:
+    static uint32_t RunFor(bool periodic, Time period, Time simTime, uint64_t& periodicCount)
+    {
+        auto e2 = CreateObject<OranNtnE2Node>();
+        e2->SetNodeId(1);
+        e2->SetFeederLinkDelay(MilliSeconds(1));
+        e2->RegisterRanFunction(2, "E2SM-KPM");
+        e2->SetPeriodicReporting(periodic);
+
+        uint32_t delivered = 0;
+        e2->SetIndicationCallback([&delivered](const E2Indication&) { ++delivered; });
+
+        E2Subscription sub{};
+        sub.subscriptionId = 7;
+        sub.ranFunctionId = 2;
+        sub.reportingPeriod = period;
+        sub.eventTrigger = false;
+        e2->HandleSubscriptionRequest(sub);
+
+        // ONE measurement, submitted once. Everything after this is the timer's
+        // doing, which is the whole point.
+        Simulator::Schedule(MilliSeconds(10), [e2]() {
+            E2KpmReport r{};
+            r.gnbId = 1;
+            r.ueId = 1;
+            r.sinr_dB = 12.0;
+            e2->SubmitKpmMeasurement(r);
+        });
+
+        Simulator::Stop(simTime);
+        Simulator::Run();
+        periodicCount = e2->GetPeriodicIndicationCount();
+        Simulator::Destroy();
+        return delivered;
+    }
+
+    void DoRun() override
+    {
+        const Time period = MilliSeconds(100);
+        const Time sim = Seconds(1.0);
+
+        // ---- Default OFF: exactly today's behaviour ----------------------
+        uint64_t periodicOff = 0;
+        const uint32_t deliveredOff = RunFor(false, period, sim, periodicOff);
+        NS_TEST_ASSERT_MSG_EQ(periodicOff, 0u,
+                              "with periodic reporting off the timer must emit nothing; every "
+                              "shipped xApp requests a period, so emitting by default would move "
+                              "the indication count of every existing scenario");
+        NS_TEST_ASSERT_MSG_EQ(deliveredOff, 1u,
+                              "and the single submitted measurement still delivers once");
+
+        // ---- Enabled: the period must produce indications -----------------
+        uint64_t periodicOn = 0;
+        const uint32_t deliveredOn = RunFor(true, period, sim, periodicOn);
+        NS_TEST_ASSERT_MSG_GT(periodicOn, 0u,
+                              "with periodic reporting on, the timer must emit; a self-rescheduling "
+                              "no-op is what this finding is about");
+        NS_TEST_ASSERT_MSG_GT(deliveredOn, deliveredOff,
+                              "and those emissions must reach the delivery path, not merely "
+                              "increment a counter");
+
+        // The COUNT must track the period, not merely be non-zero. One
+        // measurement arrives at 10 ms and the run ends at 1 s, so a 100 ms
+        // period gives about nine publications.
+        NS_TEST_ASSERT_MSG_GT(periodicOn, 6u, "roughly one per period, not one in total");
+        NS_TEST_ASSERT_MSG_LT(periodicOn, 13u, "and not one per timestep either");
+
+        // Halving the period must roughly double the count. A fixed number that
+        // ignores the subscription would pass every check above.
+        uint64_t periodicFast = 0;
+        RunFor(true, MilliSeconds(50), sim, periodicFast);
+        NS_TEST_ASSERT_MSG_GT(periodicFast, periodicOn + 4,
+                              "a 50 ms period must publish appreciably more often than a 100 ms "
+                              "one (" << periodicFast << " vs " << periodicOn << "); if they "
+                              "match, reportingPeriod is still being ignored");
+    }
+};
+
+class OranNtnA1DeliveryTakesTimeTest : public TestCase
+{
+  public:
+    OranNtnA1DeliveryTakesTimeTest()
+        : TestCase("ORAN-15: A1 policy delivery honours a configured delay")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // ---- Default: inline, so no existing scenario changes -------------
+        {
+            auto mgr = CreateObject<OranNtnA1PolicyManager>();
+            double arrivedAt = -1.0;
+            mgr->SetDistributionCallback([&arrivedAt](const A1NtnPolicy&) {
+                arrivedAt = Simulator::Now().GetSeconds();
+            });
+            NS_TEST_ASSERT_MSG_EQ(mgr->GetDeliveryDelay(), Seconds(0),
+                                  "the delay must default to zero; a scenario that has not "
+                                  "thought about A1 latency must not silently acquire one");
+            A1NtnPolicy p{};
+            p.policyId = 1;
+            mgr->DistributePolicyForTest(p);
+            NS_TEST_ASSERT_MSG_EQ_TOL(arrivedAt, 0.0, 1e-9,
+                                      "with no delay the policy arrives inline");
+            Simulator::Destroy();
+        }
+
+        // ---- Configured: the policy must arrive LATER ---------------------
+        {
+            auto mgr = CreateObject<OranNtnA1PolicyManager>();
+            const Time delay = MilliSeconds(120); // a GEO-ish feeder round trip
+            mgr->SetDeliveryDelay(delay);
+            double arrivedAt = -1.0;
+            mgr->SetDistributionCallback([&arrivedAt](const A1NtnPolicy&) {
+                arrivedAt = Simulator::Now().GetSeconds();
+            });
+
+            A1NtnPolicy p{};
+            p.policyId = 2;
+            Simulator::Schedule(Seconds(1.0), [mgr, p]() {
+                mgr->DistributePolicyForTest(p);
+            });
+            // Between dispatch and delivery the policy must be counted in
+            // flight; that is the observable that distinguishes "scheduled"
+            // from "not sent at all".
+            Simulator::Schedule(Seconds(1.05), [mgr, this]() {
+                NS_TEST_ASSERT_MSG_EQ(mgr->GetPoliciesInFlight(), 1u,
+                                      "a dispatched policy must be in flight before it lands");
+            });
+            Simulator::Stop(Seconds(2.0));
+            Simulator::Run();
+
+            NS_TEST_ASSERT_MSG_EQ_TOL(arrivedAt, 1.0 + delay.GetSeconds(), 1e-9,
+                                      "the policy must arrive one delivery delay after dispatch, "
+                                      "not at the instant it was issued");
+            NS_TEST_ASSERT_MSG_EQ(mgr->GetPoliciesInFlight(), 0u,
+                                  "and the in-flight count must drain");
+            Simulator::Destroy();
+        }
+    }
+};
+
+class OranNtnPredictiveAiFallbackIsVisibleTest : public TestCase
+{
+  public:
+    OranNtnPredictiveAiFallbackIsVisibleTest()
+        : TestCase("AI-10: the predictive xApp reports that its AI branch produced no prediction")
+    {
+    }
+
+    void DoRun() override
+    {
+        auto feed = [](Ptr<OranNtnXappPredictiveAlloc> x) {
+            for (uint32_t i = 0; i < 10; ++i)
+            {
+                x->RecordBeamLoadForTest(1, 0.05 * i);
+            }
+        };
+
+        // Without a gym environment the AI branch is never entered.
+        auto plain = CreateObject<OranNtnXappPredictiveAlloc>();
+        feed(plain);
+        const std::vector<double> plainPred = plain->PredictTrafficLoad(1);
+        NS_TEST_ASSERT_MSG_EQ(plain->GetAiFallbackCount(), 0u,
+                              "without a gym environment the AI branch must not be entered");
+        NS_TEST_ASSERT_MSG_GT(plainPred.size(), 0u,
+                              "the linear path must actually predict something, or the "
+                              "comparison below is between two empty vectors");
+
+        // Attach one. SetGymEnv also flips AiEnabled, so this is exactly the
+        // configuration a scenario asking for AI would produce.
+        auto withAi = CreateObject<OranNtnXappPredictiveAlloc>();
+        withAi->SetGymEnv(CreateObject<OranNtnGymPredictive>());
+        feed(withAi);
+        const std::vector<double> aiPred = withAi->PredictTrafficLoad(1);
+
+        NS_TEST_ASSERT_MSG_GT(withAi->GetAiFallbackCount(), 0u,
+                              "with AI enabled and a gym attached, the branch is entered and "
+                              "produces nothing; that must be countable, or the two "
+                              "configurations are indistinguishable from outside");
+
+        // And the prediction must be IDENTICAL, which is the fact the counter
+        // exists to expose. If these ever differ an inference path has appeared,
+        // and this test should be replaced by one that checks it, not deleted.
+        NS_TEST_ASSERT_MSG_EQ(aiPred.size(), plainPred.size(),
+                              "the two configurations must predict the same shape");
+        for (size_t i = 0; i < aiPred.size(); ++i)
+        {
+            NS_TEST_ASSERT_MSG_EQ_TOL(aiPred[i], plainPred[i], 1e-12,
+                                      "enabling AI must not change the numbers while no "
+                                      "inference path exists; at index " << i);
+        }
+
+        Simulator::Destroy();
+    }
+};
+
+class OranNtnHelperWiresIslNeighboursTest : public TestCase
+{
+  public:
+    OranNtnHelperWiresIslNeighboursTest()
+        : TestCase("ORAN-16: CreateSpaceRics wires bidirectional ISL neighbours")
+    {
+    }
+
+    void DoRun() override
+    {
+        const uint32_t planes = 3;
+        const uint32_t perPlane = 4;
+
+        NodeContainer sats;
+        sats.Create(planes * perPlane);
+        auto groundRic = CreateObject<OranNtnNearRtRic>();
+        groundRic->Initialize();
+        OranNtnHelper helper;
+        auto rics = helper.CreateSpaceRics(sats, planes, perPlane, groundRic);
+
+        NS_TEST_ASSERT_MSG_EQ(rics.size(), planes * perPlane, "all Space RICs must be created");
+
+        // Every RIC must have at least its two intra-plane ring neighbours.
+        // Zero anywhere is the defect: the helper used to leave every list empty.
+        uint32_t totalDegree = 0;
+        for (size_t i = 0; i < rics.size(); ++i)
+        {
+            const uint32_t d = rics[i]->GetIslNeighborCount();
+            NS_TEST_ASSERT_MSG_GT(d, 0u,
+                                  "Space RIC " << i << " has no ISL neighbour; a shell of "
+                                  "isolated on-board RICs cannot exchange anything");
+            totalDegree += d;
+        }
+
+        // Intra-plane rings give 2 per satellite; inter-plane seams add 1 each
+        // to two satellites for every adjacent plane pair. Sum of degrees is
+        // twice the link count, which is what checks the links are BIDIRECTIONAL:
+        // a one-way neighbour list would let a satellite send where it cannot
+        // receive, and would halve this sum.
+        const uint32_t intraLinks = planes * perPlane;              // one ring per plane
+        const uint32_t interLinks = (planes - 1) * perPlane;        // not wrapped at the seam
+        NS_TEST_ASSERT_MSG_EQ(totalDegree, 2 * (intraLinks + interLinks),
+                              "sum of degrees must be twice the link count, which only holds if "
+                              "every ISL was added in both directions");
+
+        // A single-satellite plane must not make a satellite its own neighbour.
+        NodeContainer soloSat;
+        soloSat.Create(1);
+        auto soloGround = CreateObject<OranNtnNearRtRic>();
+        soloGround->Initialize();
+        OranNtnHelper solo;
+        auto one = solo.CreateSpaceRics(soloSat, 1, 1, soloGround);
+        NS_TEST_ASSERT_MSG_EQ(one.size(), 1u, "one RIC");
+        NS_TEST_ASSERT_MSG_EQ(one[0]->GetIslNeighborCount(), 0u,
+                              "a lone satellite has no ISL neighbour, and the ring wrap must not "
+                              "make it its own");
+
+        Simulator::Destroy();
+    }
+};
+
+class OranNtnXappMetricsCsvExposesActuationTest : public TestCase
+{
+  public:
+    OranNtnXappMetricsCsvExposesActuationTest()
+        : TestCase("CVC-08: xapp_metrics.csv publishes actuated_actions next to "
+                   "successful_actions")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::string dir = "test-cvc08-xapp-metrics";
+        auto ric = CreateObject<OranNtnNearRtRic>();
+        ric->Initialize();
+        auto xapp = CreateObject<OranNtnXappSliceManager>();
+        xapp->SetXappName("slice-manager");
+        ric->RegisterXapp(xapp);
+
+        // Actuate some, not all, so the two columns must differ in the file.
+        xapp->RecordActuation(true);
+        xapp->RecordActuation(true);
+
+        OranNtnHelper helper;
+        helper.SetOutputDirectory(dir);
+        helper.WriteAllMetrics(ric);
+
+        std::ifstream f(dir + "/xapp_metrics.csv");
+        NS_TEST_ASSERT_MSG_EQ(f.good(), true, "xapp_metrics.csv must be written");
+        std::string header;
+        std::getline(f, header);
+
+        const bool hasActuated = (header.find("actuated_actions") != std::string::npos);
+        NS_TEST_ASSERT_MSG_EQ(hasActuated, true,
+                              "the header must carry actuated_actions; with only "
+                              "successful_actions a reader summing this file gets routing "
+                              "acceptance and reasonably calls it actuation (header was: "
+                                  << header << ")");
+        const bool hasRouted = (header.find("successful_actions") != std::string::npos);
+        NS_TEST_ASSERT_MSG_EQ(hasRouted, true,
+                              "and must keep successful_actions, so the gap is visible as a "
+                              "difference rather than by replacing one number with another");
+
+        // The column must carry the real value, not a zero placeholder.
+        std::vector<std::string> cols;
+        {
+            std::stringstream hs(header);
+            std::string c;
+            while (std::getline(hs, c, ','))
+            {
+                cols.push_back(c);
+            }
+        }
+        size_t idx = cols.size();
+        for (size_t i = 0; i < cols.size(); ++i)
+        {
+            if (cols[i] == "actuated_actions")
+            {
+                idx = i;
+            }
+        }
+        NS_TEST_ASSERT_MSG_LT(idx, cols.size(), "actuated_actions column must be locatable");
+
+        std::string row;
+        std::getline(f, row);
+        NS_TEST_ASSERT_MSG_EQ(row.empty(), false, "one xApp row must be written");
+        std::vector<std::string> vals;
+        {
+            std::stringstream rs(row);
+            std::string c;
+            while (std::getline(rs, c, ','))
+            {
+                vals.push_back(c);
+            }
+        }
+        NS_TEST_ASSERT_MSG_GT(vals.size(), idx, "the row must have that column");
+        NS_TEST_ASSERT_MSG_EQ(vals[idx], std::string("2"),
+                              "the column must report the two actuations recorded above, not a "
+                              "zero placeholder (got '" << vals[idx] << "')");
+
+        Simulator::Destroy();
+    }
+};
+
+class OranNtnActionCountersDistinctTest : public TestCase
+{
+  public:
+    OranNtnActionCountersDistinctTest()
+        : TestCase("ORAN-13: routed and actuated actions are counted separately")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto xapp = CreateObject<OranNtnXappSliceManager>();
+
+        // A fresh xApp has neither.
+        NS_TEST_ASSERT_MSG_EQ(xapp->GetMetrics().successfulActions, 0u, "no routed actions yet");
+        NS_TEST_ASSERT_MSG_EQ(xapp->GetMetrics().actuatedActions, 0u, "no actuated actions yet");
+
+        // Actuation is recorded independently of routing, which is exactly the
+        // separation that was missing: an action can route and not actuate.
+        xapp->RecordActuation(true);
+        xapp->RecordActuation(true);
+        xapp->RecordActuation(false);
+        NS_TEST_ASSERT_MSG_EQ(xapp->GetMetrics().actuatedActions, 2u,
+                              "two of three actions were carried out");
+        NS_TEST_ASSERT_MSG_EQ(xapp->GetMetrics().successfulActions, 0u,
+                              "actuation must NOT feed the routing counter; if one number moved "
+                              "both, the two files would agree by construction and the "
+                              "distinction they exist to record would be lost again");
+
+        Simulator::Destroy();
+    }
+};
+
+class OranNtnA1SlicePolicyEnforcedTest : public TestCase
+{
+  public:
+    OranNtnA1SlicePolicyEnforcedTest()
+        : TestCase("ORAN-07: a SLICE_SLA policy rejects an allocation that starves the slice")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // A slice SLA demanding real throughput on slice 1.
+        A1NtnPolicy sla;
+        sla.type = A1PolicyType::SLICE_SLA;
+        sla.scope = "slice:1";
+        sla.priority = 5;
+        sla.active = true;
+        sla.param1 = 20.0;  // Mbit/s minimum
+        sla.param2 = 5.0;   // ms maximum latency
+        sla.param3 = 0.99999;
+        sla.policyId = 42;
+        std::vector<A1NtnPolicy> policies{sla};
+
+        auto xapp = CreateObject<OranNtnXappSliceManager>();
+
+        // An allocation that gives the slice a real share must be accepted.
+        E2RcAction good;
+        good.actionType = E2RcActionType::SLICE_PRB_ALLOCATION;
+        good.targetSliceId = 1;
+        good.parameter1 = 0.4;
+        NS_TEST_ASSERT_MSG_EQ(xapp->CheckSlicePolicyCompliance(good, policies), true,
+                              "a 40 percent PRB share for a slice with a 20 Mbit/s SLA is a "
+                              "reasonable allocation and must be allowed");
+
+        // An allocation that gives it nothing cannot honour a throughput SLA.
+        E2RcAction starve = good;
+        starve.parameter1 = 0.0;
+        NS_TEST_ASSERT_MSG_EQ(xapp->CheckSlicePolicyCompliance(starve, policies), false,
+                              "a slice with a positive throughput SLA cannot meet it on zero "
+                              "resources; approving this is what the unconditional early return "
+                              "did for every non-handover action");
+
+        // A share outside [0,1] is not an allocation at all.
+        E2RcAction absurd = good;
+        absurd.parameter1 = 1.7;
+        NS_TEST_ASSERT_MSG_EQ(xapp->CheckSlicePolicyCompliance(absurd, policies), false,
+                              "a PRB share above 1.0 must be rejected");
+
+        // A policy scoped to a DIFFERENT slice must not govern this action.
+        A1NtnPolicy other = sla;
+        other.scope = "slice:2";
+        std::vector<A1NtnPolicy> elsewhere{other};
+        NS_TEST_ASSERT_MSG_EQ(xapp->CheckSlicePolicyCompliance(starve, elsewhere), true,
+                              "a slice-2 SLA has nothing to say about a slice-1 allocation; "
+                              "enforcing it everywhere would be as wrong as enforcing it nowhere");
+
+        Simulator::Destroy();
+    }
+};
+
+class OranNtnGymRewardRespondsTest : public TestCase
+{
+  public:
+    OranNtnGymRewardRespondsTest()
+        : TestCase("AI-03: slice, steering and beam-hop rewards respond to measured state")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // Each environment must at minimum produce a finite reward and must
+        // have latched something from the observation rather than leaving the
+        // constructed value in place. Without an xApp attached the latch reads
+        // zeros, which is the honest answer for "no measurement yet" - the
+        // defect was that this was ALSO the answer once measurements existed.
+        {
+            auto env = CreateObject<OranNtnGymSlice>();
+            env->GetObservation();
+            const float r0 = env->GetReward();
+            NS_TEST_ASSERT_MSG_EQ(std::isfinite(r0), true, "slice reward must be finite");
+
+            // Feed a known post-action state through the out-of-band setter and
+            // confirm the reward tracks it. If GetReward ignored these fields the
+            // value could not move.
+            env->UpdatePostAction(/*sla*/ 0.99, /*violations*/ 0, /*efficiency*/ 5.0);
+            const float good = env->GetReward();
+            env->UpdatePostAction(/*sla*/ 0.10, /*violations*/ 20, /*efficiency*/ 0.1);
+            const float bad = env->GetReward();
+            NS_TEST_ASSERT_MSG_GT(good, bad,
+                                  "a slice run meeting its SLA with no violations must score "
+                                  "above one that misses it 20 times; an equal score means the "
+                                  "reward is not reading the post-action state at all");
+        }
+        {
+            auto env = CreateObject<OranNtnGymSteering>();
+            env->GetObservation();
+            const float r0 = env->GetReward();
+            NS_TEST_ASSERT_MSG_EQ(std::isfinite(r0), true, "steering reward must be finite");
+
+            env->UpdatePostAction(/*latency*/ 10.0, /*throughput*/ 80.0, /*switched*/ false);
+            const float good = env->GetReward();
+            env->UpdatePostAction(/*latency*/ 400.0, /*throughput*/ 1.0, /*switched*/ false);
+            const float bad = env->GetReward();
+            NS_TEST_ASSERT_MSG_GT(good, bad,
+                                  "a fast high-rate path must score above a slow starved one");
+        }
+        {
+            auto env = CreateObject<OranNtnGymBeamHop>();
+            env->GetObservation();
+            const float r0 = env->GetReward();
+            NS_TEST_ASSERT_MSG_EQ(std::isfinite(r0), true, "beam-hop reward must be finite");
+
+            env->UpdatePostAction(/*fairness*/ 0.95, /*throughput*/ 800.0, /*energyEff*/ 4.0);
+            const float good = env->GetReward();
+            env->UpdatePostAction(/*fairness*/ 0.20, /*throughput*/ 50.0, /*energyEff*/ 0.2);
+            const float bad = env->GetReward();
+            NS_TEST_ASSERT_MSG_GT(good, bad,
+                                  "an even, high-rate hopping pattern must score above a lopsided "
+                                  "starved one");
+        }
+
+        // Jain's fairness index, which the beam-hop latch computes over the
+        // measured per-beam loads, must be bounded in (0, 1]. A value outside
+        // that range would mean the accumulation is wrong rather than merely
+        // unwired.
+        {
+            auto env = CreateObject<OranNtnGymBeamHop>();
+            env->GetObservation();
+            const float r = env->GetReward();
+            NS_TEST_ASSERT_MSG_EQ(std::isfinite(r), true,
+                                  "the latched fairness must not produce a NaN when no beam "
+                                  "carries load, which is the state at the first observation");
+        }
+
+        Simulator::Destroy();
+    }
+};
+
+class OranNtnGymRewardSignTest : public TestCase
+{
+  public:
+    OranNtnGymRewardSignTest()
+        : TestCase("ORAN-04 - gym reward rises when SINR improves and falls when it degrades")
+    {
+    }
+
+  private:
+    float m_lastObservedSinr{0.0f};
+
+    float RunTransition(double firstSinr, double secondSinr)
+    {
+        const uint32_t ueId = 7;
+        const uint32_t servingGnb = 1;
+
+        auto ric = CreateObject<OranNtnNearRtRic>();
+        ric->Initialize();
+
+        auto e2node = CreateObject<OranNtnE2Node>();
+        e2node->SetNodeId(servingGnb);
+        e2node->SetIsNtn(true);
+        e2node->RegisterRanFunction(2, "KPM");
+        ric->ConnectE2Node(e2node);
+
+        auto xapp = CreateObject<OranNtnXappHoPredict>();
+        xapp->SetXappName("oran04-reward-sign");
+        xapp->SetPriority(10);
+        ric->RegisterXapp(xapp);
+
+        auto gym = CreateObject<OranNtnGymHandover>();
+        gym->SetXapp(xapp);
+        gym->SetCurrentUe(ueId);
+
+        auto feed = [xapp, ueId, servingGnb](double sinr) {
+            E2KpmReport r{};
+            r.timestamp = Simulator::Now().GetSeconds();
+            r.gnbId = servingGnb;
+            r.isNtn = true;
+            r.ueId = ueId;
+            r.sinr_dB = sinr;
+            r.rsrp_dBm = -90.0;
+            r.tte_s = 60.0;
+            r.elevation_deg = 35.0;
+            r.beamId = servingGnb;
+            xapp->HandleKpmIndication(1, r);
+            xapp->SetUeServingCell(ueId, servingGnb);
+        };
+
+        // Two control periods one second apart, same serving cell, only the
+        // SINR changes. The step MUST be separated in simulated time: reports
+        // stamped at the same instant do not supersede one another, and the
+        // observation would read the same value twice.
+        // Step 1 at t = 0.
+        feed(firstSinr);
+        gym->GetObservation();
+        (void)gym->GetReward(); // no prior state, improvement 0
+
+        // Advance simulated time so the second report is strictly newer, then
+        // step 2. Reports stamped at the same instant do not supersede one
+        // another and the observation would read the same value twice.
+        Simulator::Stop(Seconds(1.0));
+        Simulator::Run();
+
+        feed(secondSinr);
+        auto o = gym->GetObservation();
+        auto b = DynamicCast<OpenGymBoxContainer<float>>(o);
+        m_lastObservedSinr = b ? b->GetValue(0) : -999.0f;
+        const float reward = gym->GetReward();
+
+        gym->Dispose();
+        Simulator::Destroy();
+        return reward;
+    }
+
+    void DoRun() override
+    {
+        // Same magnitude of change, opposite directions. Everything else in the
+        // reward (ping-pong, handover cost, TTE) is identical between the two
+        // runs, so the sign of the difference is the SINR term alone.
+        const float improving = RunTransition(5.0, 15.0);
+        NS_TEST_ASSERT_MSG_GT(m_lastObservedSinr, 10.0f,
+                              "the observation must carry the fed serving SINR (15 dB); a zero "
+                              "here means the KPM report never reached the gym environment and "
+                              "the reward test would be vacuous");
+        const float degrading = RunTransition(15.0, 5.0);
+
+        NS_TEST_ASSERT_MSG_GT(improving, degrading,
+                              "a 10 dB SINR improvement must earn strictly more reward than a "
+                              "10 dB degradation; if these are equal the post-action state is "
+                              "not being latched, and if the order is reversed the reward is "
+                              "inverted (the original ORAN-04 defect)");
+        NS_TEST_ASSERT_MSG_GT(improving, 0.0,
+                              "an improving transition on a stable cell must earn positive "
+                              "reward");
+        NS_TEST_ASSERT_MSG_LT(degrading, 0.0,
+                              "a degrading transition on a stable cell must earn negative "
+                              "reward");
+        Simulator::Destroy();
+    }
+};
+
 class OranNtnRlActionImprovesSinrTest : public TestCase
 {
   public:
@@ -5130,9 +6148,32 @@ class OranNtnRlActionImprovesSinrTest : public TestCase
                               "high-SINR gnb 2");
         NS_TEST_ASSERT_MSG_EQ(m_actuatedUe, ueId,
                               "Actuated handover must carry the current UE id");
-        NS_TEST_ASSERT_MSG_GT(candSinr, servingSinr,
-                              "Chosen candidate SINR must exceed the pre-action "
-                              "serving SINR (RL moves the UE to higher SINR)");
+        // AI-05. This used to read NS_TEST_ASSERT_MSG_GT(candSinr, servingSinr),
+        // comparing two local literals: 15.0 > 3.0, true whatever the agent did,
+        // whatever the RIC routed, and whatever was actuated. It was the closing
+        // assertion of a test named "RL action improves SINR" and it could not
+        // fail even if the handover went to the WORSE cell.
+        //
+        // Assert on what the system chose. m_actuatedGnb is the target the RC
+        // path actually carried out, so look its SINR up from the reports the
+        // xApp holds and compare that against the serving cell's. If the agent
+        // picked the weaker cell the value moves the wrong way and this fails.
+        const double actuatedSinr = xapp->GetLatestReport(m_actuatedGnb).sinr_dB;
+        const double servingReported = xapp->GetLatestReport(servingGnb).sinr_dB;
+        NS_TEST_ASSERT_MSG_GT(actuatedSinr, servingReported,
+                              "the cell the handover was ACTUALLY actuated toward must have a "
+                              "higher reported SINR than the serving cell. Comparing the two "
+                              "input literals instead, as this assertion used to, is true by "
+                              "construction and passes even when the agent hands the UE to the "
+                              "worse cell");
+        // And the values must be the ones fed in, so the lookup is reading the
+        // reports rather than returning a default-constructed report.
+        NS_TEST_ASSERT_MSG_EQ_TOL(actuatedSinr, candSinr, 1e-6,
+                                  "the actuated target's reported SINR must be the value fed for "
+                                  "that gNB; a zero here means the lookup missed and the "
+                                  "comparison above is meaningless");
+        NS_TEST_ASSERT_MSG_EQ_TOL(servingReported, servingSinr, 1e-6,
+                                  "likewise for the serving cell");
 
         gym->Dispose();
         ric->Dispose();
@@ -5347,8 +6388,1078 @@ class OranNtnTwinConsumerClosesLoopTest : public TestCase
 };
 
 // ============================================================================
+//  R2.7: full control-loop latency breakdown probe
+// ============================================================================
+
+/**
+ * Reviewer response R2.7. Two halves:
+ *
+ *  (a) synthetic: drive known samples through OranNtnLoopLatencyProbe and
+ *      check the bookkeeping — per-(stage, kind) counts, percentile ordering
+ *      (p50 <= p95 <= p99 <= max), mean bracketed by [min, max], CPU and
+ *      SIMULATED kinds kept apart, and both CSV schemas.
+ *
+ *  (b) wired: run a real E2 loop (KPM measurement -> feeder uplink ->
+ *      indication -> RC action -> feeder downlink -> actuation) with the
+ *      probe attached to a real OranNtnE2Node, and check that the reported
+ *      loop_total is at least the one FeederLinkDelay separating routing from
+ *      actuation — i.e. the end-to-end number is measured off the simulator
+ *      clock and is NOT the xApp-compute figure the old claim quoted.
+ */
+class OranNtnLoopLatencyProbeTest : public TestCase
+{
+  public:
+    OranNtnLoopLatencyProbeTest()
+        : TestCase("R2.7 - control-loop latency probe: stage stats + measured end-to-end loop")
+    {
+    }
+
+  private:
+    Ptr<OranNtnE2Node> m_e2;
+    Ptr<OranNtnLoopLatencyProbe> m_probe;
+    Time m_measureTime{Seconds(0)};
+    uint32_t m_indications{0};
+    uint32_t m_actuations{0};
+
+    void Measure()
+    {
+        E2KpmReport r{};
+        r.timestamp = Simulator::Now().GetSeconds();
+        r.gnbId = 7;
+        r.isNtn = true;
+        r.ueId = 1;
+        r.sinr_dB = 3.0;
+        m_e2->SubmitKpmMeasurement(r);
+    }
+
+    void OnIndication(E2Indication ind)
+    {
+        m_indications++;
+        // The measurement instant is the true start of the control loop.
+        m_measureTime = ind.originalTimestamp;
+
+        E2RcAction a{};
+        a.timestamp = Simulator::Now().GetSeconds();
+        a.xappId = 1;
+        a.xappName = "probe-test-xapp";
+        a.actionType = E2RcActionType::BEAM_SWITCH;
+        a.targetGnbId = 7;
+        a.parameter1 = 18.0;
+        m_e2->ReceiveRcAction(a); // actuates one FeederLinkDelay later
+    }
+
+    bool OnActuate(E2RcAction)
+    {
+        m_actuations++;
+        m_probe->RecordLoop(m_measureTime, Simulator::Now());
+        return true;
+    }
+
+    void DoRun() override
+    {
+        using namespace ns3::oranntn;
+
+        // ---- (a) synthetic bookkeeping ---------------------------------
+        Ptr<OranNtnLoopLatencyProbe> p = CreateObject<OranNtnLoopLatencyProbe>();
+
+        const uint32_t kIters = 20;
+        for (uint32_t i = 0; i < kIters; ++i)
+        {
+            p->StartStage(loopstage::kXappCompute);
+            double acc = 0.0;
+            for (uint32_t j = 1; j <= 2000; ++j)
+            {
+                acc += std::sqrt(static_cast<double>(j + i));
+            }
+            NS_TEST_ASSERT_MSG_GT(acc, 0.0, "keep the timed work from being optimised out");
+            p->EndStage(loopstage::kXappCompute);
+
+            // Deliberately non-constant so percentiles have something to rank.
+            p->RecordSimulatedStage(loopstage::kIndicationTransport,
+                                    MilliSeconds(4 + (i % 3)));
+            p->RecordLoop(Seconds(static_cast<double>(i)),
+                          Seconds(static_cast<double>(i)) + MilliSeconds(8 + (i % 5)));
+        }
+
+        // A ScopedCpuTimer contributes exactly one more sample.
+        {
+            OranNtnLoopLatencyProbe::ScopedCpuTimer t(p, loopstage::kActuation);
+        }
+        // A close with no matching open must be dropped, not counted.
+        p->EndStage(loopstage::kRcActionRoute);
+
+        NS_TEST_ASSERT_MSG_EQ(p->GetStageCount(loopstage::kXappCompute,
+                                               OranNtnLoopLatencyProbe::Kind::CPU),
+                              kIters,
+                              "one cpu sample per StartStage/EndStage pair");
+        NS_TEST_ASSERT_MSG_EQ(p->GetStageCount(loopstage::kActuation,
+                                               OranNtnLoopLatencyProbe::Kind::CPU),
+                              1u,
+                              "the RAII timer must record exactly one sample");
+        NS_TEST_ASSERT_MSG_EQ(p->GetStageCount(loopstage::kRcActionRoute,
+                                               OranNtnLoopLatencyProbe::Kind::CPU),
+                              0u,
+                              "EndStage without StartStage must not fabricate a sample");
+        NS_TEST_ASSERT_MSG_EQ(p->GetStageCount(loopstage::kIndicationTransport,
+                                               OranNtnLoopLatencyProbe::Kind::SIMULATED),
+                              kIters,
+                              "one simulated sample per RecordSimulatedStage call");
+        NS_TEST_ASSERT_MSG_EQ(p->GetStageCount(loopstage::kLoopTotal,
+                                               OranNtnLoopLatencyProbe::Kind::SIMULATED),
+                              kIters,
+                              "RecordLoop must add one loop_total sample per iteration");
+        // Kinds must never bleed into one another.
+        NS_TEST_ASSERT_MSG_EQ(p->GetStageCount(loopstage::kXappCompute,
+                                               OranNtnLoopLatencyProbe::Kind::SIMULATED),
+                              0u,
+                              "a cpu stage must not appear under the simulated kind");
+        NS_TEST_ASSERT_MSG_EQ(p->GetStageCount(loopstage::kLoopTotal,
+                                               OranNtnLoopLatencyProbe::Kind::CPU),
+                              0u,
+                              "loop_total is a simulated quantity only");
+
+        // Distribution invariants on every populated stage.
+        const std::vector<std::pair<std::string, OranNtnLoopLatencyProbe::Kind>> keys =
+            p->GetStageKeys();
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(keys.size(), 4u, "at least four populated stages");
+        for (const auto& k : keys)
+        {
+            OranNtnLoopLatencyProbe::StageStats s;
+            NS_TEST_ASSERT_MSG_EQ(p->GetStats(k.first, k.second, s), true,
+                                  "a listed stage must have stats: " + k.first);
+            NS_TEST_ASSERT_MSG_GT(s.count, 0u, "populated stage " + k.first);
+            NS_TEST_ASSERT_MSG_GT_OR_EQ(s.p95_us, s.p50_us,
+                                        "p95 >= p50 for " + k.first);
+            NS_TEST_ASSERT_MSG_GT_OR_EQ(s.p99_us, s.p95_us,
+                                        "p99 >= p95 for " + k.first);
+            NS_TEST_ASSERT_MSG_GT_OR_EQ(s.mean_us, s.min_us,
+                                        "mean >= min for " + k.first);
+            NS_TEST_ASSERT_MSG_LT_OR_EQ(s.mean_us, s.max_us,
+                                        "mean <= max for " + k.first);
+            NS_TEST_ASSERT_MSG_GT_OR_EQ(s.max_us, s.p99_us,
+                                        "max >= p99 for " + k.first);
+        }
+
+        // Known simulated values: 4/5/6 ms sampled 7/7/6 times.
+        OranNtnLoopLatencyProbe::StageStats tr;
+        NS_TEST_ASSERT_MSG_EQ(p->GetStats(loopstage::kIndicationTransport,
+                                          OranNtnLoopLatencyProbe::Kind::SIMULATED, tr),
+                              true, "indication transport stats exist");
+        NS_TEST_ASSERT_MSG_EQ_TOL(tr.min_us, 4000.0, 1e-6, "min transport = 4 ms");
+        NS_TEST_ASSERT_MSG_EQ_TOL(tr.max_us, 6000.0, 1e-6, "max transport = 6 ms");
+
+        // Raw per-iteration rows track RecordLoop exactly.
+        const auto& samples = p->GetLoopSamples();
+        NS_TEST_ASSERT_MSG_EQ(samples.size(), kIters, "one raw row per loop iteration");
+        for (uint32_t i = 0; i < kIters; ++i)
+        {
+            NS_TEST_ASSERT_MSG_EQ(samples[i].iter, i, "iteration index is monotonic");
+            NS_TEST_ASSERT_MSG_EQ_TOL(samples[i].measure_t_s, static_cast<double>(i), 1e-9,
+                                      "measurement instant preserved");
+            NS_TEST_ASSERT_MSG_EQ_TOL(samples[i].loop_latency_ms,
+                                      static_cast<double>(8 + (i % 5)), 1e-6,
+                                      "loop latency = actuation - measurement");
+        }
+
+        // CSV schemas.
+        const std::string statsPath = "oran-ntn-r27-loop-latency-test.csv";
+        const std::string samplesPath = "oran-ntn-r27-loop-samples-test.csv";
+        NS_TEST_ASSERT_MSG_EQ(p->WriteCsv(statsPath), true, "stats CSV written");
+        NS_TEST_ASSERT_MSG_EQ(p->WriteSamplesCsv(samplesPath), true, "samples CSV written");
+        {
+            std::ifstream f(statsPath);
+            std::string header;
+            std::getline(f, header);
+            NS_TEST_ASSERT_MSG_EQ(header,
+                                  "stage,kind,count,mean_us,p50_us,p95_us,p99_us,min_us,max_us",
+                                  "stats CSV header schema");
+            uint32_t rows = 0;
+            std::string line;
+            bool sawLoopTotal = false;
+            while (std::getline(f, line))
+            {
+                if (!line.empty())
+                {
+                    rows++;
+                }
+                if (line.rfind(std::string(loopstage::kLoopTotal) + ",simulated,", 0) == 0)
+                {
+                    sawLoopTotal = true;
+                }
+            }
+            NS_TEST_ASSERT_MSG_EQ(rows, static_cast<uint32_t>(keys.size()),
+                                  "one row per populated stage");
+            NS_TEST_ASSERT_MSG_EQ(sawLoopTotal, true,
+                                  "the end-to-end loop_total row must be simulated-kind");
+        }
+        {
+            std::ifstream f(samplesPath);
+            std::string header;
+            std::getline(f, header);
+            NS_TEST_ASSERT_MSG_EQ(header, "iter,measure_t_s,actuation_t_s,loop_latency_ms",
+                                  "samples CSV header schema");
+            uint32_t rows = 0;
+            std::string line;
+            while (std::getline(f, line))
+            {
+                if (!line.empty())
+                {
+                    rows++;
+                }
+            }
+            NS_TEST_ASSERT_MSG_EQ(rows, kIters, "one raw row per loop iteration");
+        }
+        std::remove(statsPath.c_str());
+        std::remove(samplesPath.c_str());
+
+        // ---- (b) wired to a real E2 loop -------------------------------
+        const Time feeder = MilliSeconds(4);
+        m_probe = CreateObject<OranNtnLoopLatencyProbe>();
+        m_e2 = CreateObject<OranNtnE2Node>();
+        m_e2->SetNodeId(7);
+        m_e2->SetIsNtn(true);
+        m_e2->SetFeederLinkDelay(feeder);
+        m_e2->RegisterRanFunction(2, "KPM");
+        m_e2->RegisterRanFunction(3, "RC");
+        m_e2->SetLoopLatencyProbe(m_probe);
+
+        E2Subscription sub{};
+        sub.subscriptionId = 1;
+        sub.ranFunctionId = 2;
+        sub.reportingPeriod = Seconds(1.0);
+        sub.eventTrigger = false;
+        NS_TEST_ASSERT_MSG_EQ(m_e2->HandleSubscriptionRequest(sub), true,
+                              "KPM subscription accepted");
+        m_e2->SetIndicationCallback(
+            MakeCallback(&OranNtnLoopLatencyProbeTest::OnIndication, this));
+        m_e2->SetRcActionCallback(
+            MakeCallback(&OranNtnLoopLatencyProbeTest::OnActuate, this));
+
+        Simulator::Schedule(Seconds(1.0), &OranNtnLoopLatencyProbeTest::Measure, this);
+        Simulator::Stop(Seconds(2.0));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(m_indications, 1u, "one indication reached the xApp callback");
+        NS_TEST_ASSERT_MSG_EQ(m_actuations, 1u, "one action actuated at the E2 node");
+
+        NS_TEST_ASSERT_MSG_EQ(m_probe->GetStageCount(loopstage::kE2IndicationConstruct,
+                                                     OranNtnLoopLatencyProbe::Kind::CPU),
+                              1u, "indication construction timed once");
+        NS_TEST_ASSERT_MSG_EQ(m_probe->GetStageCount(loopstage::kActuation,
+                                                     OranNtnLoopLatencyProbe::Kind::CPU),
+                              1u, "actuation timed once");
+
+        OranNtnLoopLatencyProbe::StageStats up;
+        NS_TEST_ASSERT_MSG_EQ(m_probe->GetStats(loopstage::kIndicationFeederUplink,
+                                                OranNtnLoopLatencyProbe::Kind::SIMULATED, up),
+                              true, "feeder uplink stage recorded");
+        NS_TEST_ASSERT_MSG_EQ_TOL(up.mean_us, 4000.0, 1e-6,
+                                  "uplink leg = one FeederLinkDelay");
+
+        OranNtnLoopLatencyProbe::StageStats tick;
+        NS_TEST_ASSERT_MSG_EQ(m_probe->GetStats(loopstage::kRicTickAlignWait,
+                                                OranNtnLoopLatencyProbe::Kind::SIMULATED, tick),
+                              true, "tick-alignment stage recorded");
+        NS_TEST_ASSERT_MSG_EQ_TOL(tick.mean_us, 0.0, 1e-6,
+                                  "AlignToControlLoop is off, so the tick wait is exactly 0");
+
+        OranNtnLoopLatencyProbe::StageStats dn;
+        NS_TEST_ASSERT_MSG_EQ(m_probe->GetStats(loopstage::kRcActionTransport,
+                                                OranNtnLoopLatencyProbe::Kind::SIMULATED, dn),
+                              true, "RC action transport stage recorded");
+        NS_TEST_ASSERT_MSG_EQ_TOL(dn.mean_us, 4000.0, 1e-6,
+                                  "downlink leg = one FeederLinkDelay");
+
+        // The number the reviewer asked for: measured end to end, and at least
+        // the FeederLinkDelay that separates routing from actuation (here it is
+        // both legs, so 2 x 4 ms).
+        OranNtnLoopLatencyProbe::StageStats total;
+        NS_TEST_ASSERT_MSG_EQ(m_probe->GetStats(loopstage::kLoopTotal,
+                                                OranNtnLoopLatencyProbe::Kind::SIMULATED, total),
+                              true, "loop_total recorded");
+        NS_TEST_ASSERT_MSG_EQ(total.count, 1u, "one closed loop iteration");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(total.min_us,
+                                    static_cast<double>(feeder.GetMicroSeconds()),
+                                    "loop_total must be at least the feeder delay between "
+                                    "routing and actuation");
+        NS_TEST_ASSERT_MSG_EQ_TOL(total.mean_us, 8000.0, 1e-6,
+                                  "loop_total = uplink feeder + downlink feeder");
+
+        const auto& wired = m_probe->GetLoopSamples();
+        NS_TEST_ASSERT_MSG_EQ(wired.size(), 1u, "one raw loop row");
+        NS_TEST_ASSERT_MSG_EQ_TOL(wired[0].measure_t_s, 1.0, 1e-9,
+                                  "loop starts at the KPM measurement instant");
+        NS_TEST_ASSERT_MSG_EQ_TOL(wired[0].actuation_t_s, 1.008, 1e-9,
+                                  "loop ends when the radio actually changes");
+
+        Simulator::Destroy();
+        m_e2 = nullptr;
+        m_probe = nullptr;
+    }
+};
+
+// ============================================================================
 //  Test Suite Registration
 // ============================================================================
+
+
+/// ORAN-11: the E2SM-RC control blob must survive a real encode/decode, because
+/// the two-process demo now carries it on the wire and the RIC decodes it.
+///
+/// The demo itself is not run in CI, so the chain it depends on is pinned here:
+/// E2RcAction -> ConvertE2RcToStyle3 -> EncodeControl -> DecodeControl, with the
+/// decoded action having to match what went in. Before this the demo's control
+/// payload was the three bytes {0x77} and the RIC acknowledged it without
+/// parsing, so nothing anywhere checked that a control could be carried at all.
+class RcStyle3WireRoundTripTest : public TestCase
+{
+  public:
+    RcStyle3WireRoundTripTest()
+        : TestCase("ORAN-11: E2SM-RC Style 3 control survives encode then decode")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::rc_v103::style3;
+
+        E2RcAction act{};
+        act.actionType = E2RcActionType::HANDOVER_TRIGGER;
+        act.targetGnbId = 9;
+        act.targetUeId = 42;
+
+        auto action = ConvertE2RcToStyle3(act);
+        NS_TEST_ASSERT_MSG_EQ(action.has_value(), true, "the action converts to Style 3");
+
+        ControlMessage msg{};
+        msg.action = *action;
+
+        OranNtnServiceModelRc sm;
+        const std::vector<uint8_t> blob = sm.EncodeControl(msg);
+        NS_TEST_ASSERT_MSG_GT(blob.size(), 0u, "the control encodes to bytes");
+
+        ControlMessage back{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl(blob, &back), true,
+                              "and those bytes decode again; a failure here is what the demo's "
+                              "RIC now reports, so this is the CI copy of that check");
+        NS_TEST_ASSERT_MSG_EQ(back.style_id, HandoverControl::kStyleId,
+                              "the decoded message is still Style 3");
+        NS_TEST_ASSERT_MSG_EQ(ActionId(back.action), ActionId(*action),
+                              "and still the same action");
+
+        const auto* hc = std::get_if<HandoverControl>(&back.action);
+        NS_TEST_ASSERT_MSG_NE((hc == nullptr), true, "decoded as a HandoverControl");
+        if (hc)
+        {
+            const auto& orig = std::get<HandoverControl>(*action);
+            NS_TEST_ASSERT_MSG_EQ(hc->target_primary_cell_id.nr_cell_identity,
+                                  orig.target_primary_cell_id.nr_cell_identity,
+                                  "the target cell identity survives the wire; a payload the "
+                                  "receiver cannot resolve to a cell is not a control");
+            NS_TEST_ASSERT_MSG_EQ(hc->target_primary_cell_id.plmn_id,
+                                  orig.target_primary_cell_id.plmn_id, "PLMN survives");
+        }
+
+        // A blob that is not a control must be REFUSED, not parsed into a
+        // plausible one. This is the case the demo's revert-check exercises:
+        // with the old {0x77} payload the decode fails, and it must.
+        ControlMessage junk{};
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl({0x77}, &junk), false,
+                              "three magic bytes are not an E2SM-RC control message");
+        NS_TEST_ASSERT_MSG_EQ(sm.DecodeControl({}, &junk), false, "nor is an empty payload");
+    }
+};
+
+
+/// ORAN-08: the WG3 taxonomy must be reachable through the REAL pipeline.
+///
+/// The existing taxonomy test calls the static ClassifyConflict directly with
+/// hand-built pairs, so it certifies the enum mapping and nothing else - it
+/// would pass unchanged if CheckAndResolve never called the classifier. And it
+/// did pass while two of the four conflict types were structurally impossible
+/// to produce: detection compared only actions whose resource key matched byte
+/// for byte, and different families never share a key prefix.
+///
+/// This drives the manager the way a multi-xApp run drives it, under
+/// Simulator::Run(), and asserts the type lands in the log.
+class ConflictTaxonomyThroughPipelineTest : public TestCase
+{
+  public:
+    ConflictTaxonomyThroughPipelineTest()
+        : TestCase("ORAN-08: IMPLICIT and cross-parameter INDIRECT reach the conflict log")
+    {
+    }
+
+  private:
+    Ptr<OranNtnConflictManager> m_cm;
+
+    static E2RcAction Act(E2RcActionType t, uint32_t gnb, uint32_t ue, uint8_t slice = 0,
+                          uint32_t beam = 0)
+    {
+        E2RcAction a{};
+        a.actionType = t;
+        a.targetGnbId = gnb;
+        a.targetUeId = ue;
+        a.targetSliceId = slice;
+        a.targetBeamId = beam;
+        a.confidence = 0.5;
+        return a;
+    }
+
+    void Submit(uint32_t xapp, uint8_t prio, E2RcAction a)
+    {
+        m_cm->CheckAndResolve(xapp, prio, a);
+    }
+
+    void DoRun() override
+    {
+        // ---- IMPLICIT: different families, same UE ----
+        m_cm = CreateObject<OranNtnConflictManager>();
+        // MCS_OVERRIDE keys on "mcs:gnbX:ueY" and TX_POWER_CONTROL on
+        // "power:gnbX:beamZ". Different keys, so before the fix these two were
+        // never even compared, and the IMPLICIT branch was dead code.
+        Simulator::Schedule(MilliSeconds(10), &ConflictTaxonomyThroughPipelineTest::Submit, this,
+                            1u, uint8_t(10), Act(E2RcActionType::MCS_OVERRIDE, 3, 77));
+        Simulator::Schedule(MilliSeconds(20), &ConflictTaxonomyThroughPipelineTest::Submit, this,
+                            2u, uint8_t(20), Act(E2RcActionType::TX_POWER_CONTROL, 3, 77, 0, 5));
+        Simulator::Stop(MilliSeconds(100));
+        Simulator::Run();
+
+        auto conflicts = m_cm->GetRecentConflicts(Seconds(3600));
+        NS_TEST_ASSERT_MSG_GT(conflicts.size(), 0u,
+                              "two xApps touching the same UE through different parameters must "
+                              "produce a conflict; zero here means detection never compared them");
+        bool sawImplicit = false;
+        for (const auto& c : conflicts)
+        {
+            if (c.conflictType == ConflictType::IMPLICIT)
+            {
+                sawImplicit = true;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(sawImplicit, true,
+                              "the conflict must be classified IMPLICIT: different parameter, "
+                              "different family, coupled through one UE's KPIs");
+        Simulator::Destroy();
+
+        // ---- INDIRECT on PRB: same family, different parameter ----
+        m_cm = CreateObject<OranNtnConflictManager>();
+        // SLICE_PRB_ALLOCATION keys on "prb:gnbX:sliceY", PRB_RESERVATION on
+        // "prb-reserve:gnbX:beamZ" - same PRB pool, previously never compared.
+        Simulator::Schedule(MilliSeconds(10), &ConflictTaxonomyThroughPipelineTest::Submit, this,
+                            1u, uint8_t(10), Act(E2RcActionType::SLICE_PRB_ALLOCATION, 4, 0, 2));
+        Simulator::Schedule(MilliSeconds(20), &ConflictTaxonomyThroughPipelineTest::Submit, this,
+                            2u, uint8_t(20), Act(E2RcActionType::PRB_RESERVATION, 4, 0, 0, 8));
+        Simulator::Stop(MilliSeconds(100));
+        Simulator::Run();
+
+        conflicts = m_cm->GetRecentConflicts(Seconds(3600));
+        bool sawIndirect = false;
+        for (const auto& c : conflicts)
+        {
+            if (c.conflictType == ConflictType::INDIRECT)
+            {
+                sawIndirect = true;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(sawIndirect, true,
+                              "two xApps carving up the same gNB's PRB pool through different "
+                              "action types must be INDIRECT, not invisible");
+        Simulator::Destroy();
+
+        // ---- Unrelated actions must still NOT conflict ----
+        // Without this the widening could 'pass' by flagging everything.
+        m_cm = CreateObject<OranNtnConflictManager>();
+        Simulator::Schedule(MilliSeconds(10), &ConflictTaxonomyThroughPipelineTest::Submit, this,
+                            1u, uint8_t(10), Act(E2RcActionType::MCS_OVERRIDE, 3, 77));
+        Simulator::Schedule(MilliSeconds(20), &ConflictTaxonomyThroughPipelineTest::Submit, this,
+                            2u, uint8_t(20), Act(E2RcActionType::TX_POWER_CONTROL, 9, 88, 0, 5));
+        Simulator::Stop(MilliSeconds(100));
+        Simulator::Run();
+        NS_TEST_ASSERT_MSG_EQ(m_cm->GetRecentConflicts(Seconds(3600)).empty(), true,
+                              "different gNB and different UE is not a conflict; widening "
+                              "detection must not turn every pair into one");
+        Simulator::Destroy();
+
+        // ---- UE 0 is the cell-wide wildcard, not a UE ----
+        // Two cell-scoped actions in different families share targetUeId == 0.
+        // If the UE index did not exclude 0, every cell-wide action in the run
+        // would land in one bucket and collide with every other, which would
+        // make IMPLICIT fire constantly and mean nothing.
+        m_cm = CreateObject<OranNtnConflictManager>();
+        Simulator::Schedule(MilliSeconds(10), &ConflictTaxonomyThroughPipelineTest::Submit, this,
+                            1u, uint8_t(10), Act(E2RcActionType::CCA_THRESHOLD_ADJUST, 3, 0));
+        Simulator::Schedule(MilliSeconds(20), &ConflictTaxonomyThroughPipelineTest::Submit, this,
+                            2u, uint8_t(20), Act(E2RcActionType::DOPPLER_COMP_UPDATE, 3, 0));
+        Simulator::Stop(MilliSeconds(100));
+        Simulator::Run();
+        NS_TEST_ASSERT_MSG_EQ(m_cm->GetRecentConflicts(Seconds(3600)).empty(), true,
+                              "two unrelated cell-wide actions must not be coupled through the "
+                              "UE-0 wildcard");
+        Simulator::Destroy();
+    }
+};
+
+/// ORAN-08: A1_GUIDED must actually consult the A1 policy.
+class A1GuidedConsultsPolicyTest : public TestCase
+{
+  public:
+    A1GuidedConsultsPolicyTest()
+        : TestCase("ORAN-08: A1_GUIDED resolves by policy, not by xApp priority")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto mkAct = [](uint32_t gnb, uint32_t ue) {
+            E2RcAction a{};
+            a.actionType = E2RcActionType::MCS_OVERRIDE;
+            a.targetGnbId = gnb;
+            a.targetUeId = ue;
+            a.confidence = 0.5;
+            return a;
+        };
+
+        // xApp 1 has the STRONGER xApp priority (lower value), so
+        // PRIORITY_BASED would always hand it the win. An A1 policy scoped to
+        // gNB 3 is what has to override that.
+        Ptr<OranNtnConflictManager> cm = CreateObject<OranNtnConflictManager>();
+        cm->SetResolutionStrategy(ConflictResolutionStrategy::A1_GUIDED);
+
+        // No policy source: must fall back to priority AND say so.
+        cm->CheckAndResolve(1, 5, mkAct(3, 77));
+        cm->CheckAndResolve(2, 50, mkAct(3, 77));
+        auto c = cm->GetRecentConflicts(Seconds(3600));
+        NS_TEST_ASSERT_MSG_GT(c.size(), 0u, "the two actions conflict");
+        if (!c.empty())
+        {
+            NS_TEST_ASSERT_MSG_EQ(c.back().winnerId, 1u, "with no policy, priority decides");
+            NS_TEST_ASSERT_MSG_EQ(c.back().resolution, "a1_guided:no-policy-fallback-priority",
+                                  "and the log must say the fallback happened rather than "
+                                  "presenting a priority decision as A1 guidance");
+        }
+
+        // Now a policy scoped to gNB 3 covers only xApp 2's action... but both
+        // actions target gNB 3, so both match; give them different policies by
+        // scoping one to the slice. Simpler: one global policy covers both, and
+        // the SPECIFIC one must win the specificity contest.
+        Ptr<OranNtnConflictManager> cm2 = CreateObject<OranNtnConflictManager>();
+        cm2->SetResolutionStrategy(ConflictResolutionStrategy::A1_GUIDED);
+        cm2->SetA1PolicySource(MakeCallback(+[]() {
+            std::vector<A1Policy> ps;
+            A1Policy p{};
+            p.policyId = 1;
+            p.scope = "satellite:3";
+            p.priority = 1;
+            p.active = true;
+            ps.push_back(p);
+            return ps;
+        }));
+        cm2->CheckAndResolve(1, 5, mkAct(3, 77));
+        cm2->CheckAndResolve(2, 50, mkAct(3, 77));
+        auto c2 = cm2->GetRecentConflicts(Seconds(3600));
+        NS_TEST_ASSERT_MSG_GT(c2.size(), 0u, "the two actions conflict");
+        if (!c2.empty())
+        {
+            NS_TEST_ASSERT_MSG_EQ(c2.back().resolution, "a1_guided:policy",
+                                  "with a policy covering both actions the resolution must be "
+                                  "recorded as policy-driven, not as a priority fallback");
+        }
+
+        // An INACTIVE policy must not count.
+        Ptr<OranNtnConflictManager> cm3 = CreateObject<OranNtnConflictManager>();
+        cm3->SetResolutionStrategy(ConflictResolutionStrategy::A1_GUIDED);
+        cm3->SetA1PolicySource(MakeCallback(+[]() {
+            std::vector<A1Policy> ps;
+            A1Policy p{};
+            p.policyId = 1;
+            p.scope = "satellite:3";
+            p.priority = 1;
+            p.active = false; // withdrawn by the Non-RT RIC
+            ps.push_back(p);
+            return ps;
+        }));
+        cm3->CheckAndResolve(1, 5, mkAct(3, 77));
+        cm3->CheckAndResolve(2, 50, mkAct(3, 77));
+        auto c3 = cm3->GetRecentConflicts(Seconds(3600));
+        if (!c3.empty())
+        {
+            NS_TEST_ASSERT_MSG_EQ(c3.back().resolution, "a1_guided:no-policy-fallback-priority",
+                                  "a withdrawn policy must not guide anything");
+        }
+    }
+};
+
+
+/// ORAN-10: the E2SM-RC codec must be ON the simulated control path.
+///
+/// It was not. OranNtnE2Termination::RouteRcAction handed the raw C++ struct to
+/// OranNtnE2Node::ExecuteRcAction, and ConvertE2RcToStyle3 plus the RC codec had
+/// callers only in this test file - an encode-only universe running beside the
+/// simulation rather than inside it. Nothing anywhere DECODED an RC control into
+/// an action, so the Style-3 semantics were untested against any consumer.
+class RcControlRoundTripsOnSimPathTest : public TestCase
+{
+  public:
+    RcControlRoundTripsOnSimPathTest()
+        : TestCase("ORAN-10: RC controls are encoded on route and decoded before actuation")
+    {
+    }
+
+  private:
+    uint32_t m_actuated{0};
+
+    bool OnRcAction(E2RcAction a)
+    {
+        // The actuator must receive the bytes too, so a consumer can inspect
+        // what it was actually sent rather than trusting the struct.
+        if (!a.smControlMessage.empty())
+        {
+            ++m_actuated;
+        }
+        return true;
+    }
+
+    void DoRun() override
+    {
+        Ptr<OranNtnE2Termination> term = CreateObject<OranNtnE2Termination>();
+        Ptr<OranNtnE2Node> node = CreateObject<OranNtnE2Node>();
+        node->SetNodeId(7);
+        node->SetIsNtn(true);
+        node->SetFeederLinkDelay(MilliSeconds(4));
+        node->RegisterRanFunction(3, "RC");
+        node->SetRcActionCallback(
+            MakeCallback(&RcControlRoundTripsOnSimPathTest::OnRcAction, this));
+        term->RegisterE2Node(node);
+
+        E2RcAction ho{};
+        ho.actionType = E2RcActionType::HANDOVER_TRIGGER;
+        ho.targetGnbId = 7;
+        ho.targetUeId = 11;
+        ho.confidence = 0.9;
+
+        NS_TEST_ASSERT_MSG_EQ(term->RouteRcAction(ho), true, "the handover routes");
+        Simulator::Stop(Seconds(2.0));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_GT(node->GetRcControlsDecoded(), 0u,
+                              "the E2 node must have DECODED an E2SM-RC ControlMessage; zero "
+                              "here means the service model fell off the control path again "
+                              "and the struct was delivered raw");
+        NS_TEST_ASSERT_MSG_GT(m_actuated, 0u,
+                              "and the actuator must have seen the encoded bytes alongside the "
+                              "action");
+        Simulator::Destroy();
+    }
+};
+
+/// ORAN-10: cancellation must use the TS 38.331 removal list, and the NR Cell
+/// Identity split must be configurable.
+class RcStyle3CancelAndNciTest : public TestCase
+{
+  public:
+    RcStyle3CancelAndNciTest()
+        : TestCase("ORAN-10: CHO cancel uses condReconfigToRemoveList; NCI split configurable")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace oranntn::rc_v103::style3;
+
+        // ---- Cancellation ----
+        // The old mapping encoded "cancel everything" as reconfiguration id 0
+        // with an empty candidate list. Id 0 is a valid CondReconfigId, not a
+        // wildcard, so a standards-conformant receiver would have removed only
+        // the configuration numbered 0 and left the rest running.
+        E2RcAction cancelOne{};
+        cancelOne.actionType = E2RcActionType::HANDOVER_CANCEL;
+        cancelOne.targetGnbId = 5;
+        cancelOne.parameter1 = 3; // CondReconfigId to remove
+        auto r1 = ConvertE2RcToStyle3(cancelOne);
+        NS_TEST_ASSERT_MSG_EQ(r1.has_value(), true, "cancel converts");
+        const auto* c1 = std::get_if<ConditionalHandoverControl>(&*r1);
+        NS_TEST_ASSERT_MSG_NE((c1 == nullptr), true, "cancel is a ConditionalHandoverControl");
+        if (c1)
+        {
+            NS_TEST_ASSERT_MSG_EQ(c1->conditional_reconfiguration_to_remove_list.size(), 1u,
+                                  "TS 38.331 removes conditional reconfigurations by naming "
+                                  "them in condReconfigToRemoveList");
+            // Guarded: ns-3 assertions can be configured to continue past a
+            // failure, and indexing an empty vector turns a failure into UB.
+            if (!c1->conditional_reconfiguration_to_remove_list.empty())
+            {
+                NS_TEST_ASSERT_MSG_EQ(c1->conditional_reconfiguration_to_remove_list[0], 3u,
+                                      "and the named id is the one asked for");
+            }
+            NS_TEST_ASSERT_MSG_EQ(c1->remove_all_conditional_reconfigurations, false,
+                                  "removing one is not removing all");
+        }
+
+        E2RcAction cancelAll{};
+        cancelAll.actionType = E2RcActionType::HANDOVER_CANCEL;
+        cancelAll.targetGnbId = 5;
+        cancelAll.parameter1 = 0;
+        auto r2 = ConvertE2RcToStyle3(cancelAll);
+        const auto* c2 = std::get_if<ConditionalHandoverControl>(&*r2);
+        NS_TEST_ASSERT_MSG_NE((c2 == nullptr), true, "cancel-all is a ConditionalHandoverControl");
+        if (c2)
+        {
+            NS_TEST_ASSERT_MSG_EQ(c2->remove_all_conditional_reconfigurations, true,
+                                  "release-all is stated explicitly rather than encoded as "
+                                  "'the configuration whose id happens to be 0'");
+            NS_TEST_ASSERT_MSG_EQ(c2->conditional_reconfiguration_to_remove_list.empty(), true,
+                                  "and names no individual id");
+        }
+
+        // ---- NR Cell Identity split (TS 38.413, gNB-ID 22..32 bits) ----
+        // The old helper hardwired 28/8. A deployment on a 24-bit gNB-ID would
+        // have had its cell identities silently mangled.
+        const uint64_t at28 = NrCellIdentityFrom(0x12345, 0, 28);
+        NS_TEST_ASSERT_MSG_EQ(at28, (0x12345ULL << 8),
+                              "the 28-bit default keeps the historical packing");
+        const uint64_t at24 = NrCellIdentityFrom(0x12345, 0, 24);
+        NS_TEST_ASSERT_MSG_EQ(at24, (0x12345ULL << 12),
+                              "a 24-bit gNB-ID leaves 12 bits of cell identity, so the same "
+                              "gNB packs to a DIFFERENT NCI; a fixed shift cannot express this");
+        NS_TEST_ASSERT_MSG_NE(at24, at28,
+                              "the two splits must differ, or the parameter does nothing");
+        NS_TEST_ASSERT_MSG_EQ(NrCellIdentityFrom(1, 5, 28), ((1ULL << 8) | 5ULL),
+                              "the cell identity occupies the low bits");
+        // Out of the TS 38.413 range must be refused, not silently clamped.
+        NS_TEST_ASSERT_MSG_EQ(NrCellIdentityFrom(1, 0, 21), 0u, "21 bits is below the range");
+        NS_TEST_ASSERT_MSG_EQ(NrCellIdentityFrom(1, 0, 33), 0u, "33 bits is above the range");
+    }
+};
+
+
+/// AI-06: beamforming weights must reach a destination, or be counted as lost.
+class BeamformingWeightsReachTheOruSeamTest : public TestCase
+{
+  public:
+    BeamformingWeightsReachTheOruSeamTest()
+        : TestCase("AI-06: precoder weights reach the O-RU sink, or are counted as dropped")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<OranNtnSplitGnbEntity> ru = CreateObject<OranNtnSplitGnbEntity>();
+        ru->Configure(OranNodeType::O_RU, 1, 1);
+
+        E2RcAction act{};
+        act.actionType = E2RcActionType::BEAM_HOP_SCHEDULE;
+        act.targetUeId = 3;
+        act.beamformingWeights = {0.5f, 0.0f, 0.5f, 0.0f, 0.5f, 0.0f, 0.5f, 0.0f};
+
+        // No sink registered: the weights are DISCARDED, and that must be
+        // visible. Before this the loss left no trace at all - the entity
+        // incremented m_controlsAccepted and returned true, so a run in which
+        // no CSI ever reached an antenna looked identical to one where it did.
+        NS_TEST_ASSERT_MSG_EQ(ru->ReceiveControl(act), true, "the control is accepted");
+        NS_TEST_ASSERT_MSG_EQ(ru->GetWeightsDropped(), 1u,
+                              "weights arriving with no O-RU sink must be COUNTED as dropped");
+        NS_TEST_ASSERT_MSG_EQ(ru->GetWeightsDelivered(), 0u, "and not counted as delivered");
+
+        // With a sink, they arrive intact and carry the UE they belong to.
+        uint32_t sawUe = 0;
+        std::vector<float> sawWeights;
+        Ptr<OranNtnSplitGnbEntity> ru2 = CreateObject<OranNtnSplitGnbEntity>();
+        ru2->Configure(OranNodeType::O_RU, 1, 1);
+        ru2->SetBeamformingSink([&](uint32_t ue, const std::vector<float>& w) {
+            sawUe = ue;
+            sawWeights = w;
+            return true;
+        });
+        NS_TEST_ASSERT_MSG_EQ(ru2->ReceiveControl(act), true, "accepted");
+        NS_TEST_ASSERT_MSG_EQ(ru2->GetWeightsDelivered(), 1u, "delivered to the sink");
+        NS_TEST_ASSERT_MSG_EQ(ru2->GetWeightsDropped(), 0u, "and not dropped");
+        NS_TEST_ASSERT_MSG_EQ(sawUe, 3u, "the sink is told which UE the weights are for");
+        NS_TEST_ASSERT_MSG_EQ(sawWeights.size(), act.beamformingWeights.size(),
+                              "the full weight vector arrives, not a summary of it");
+
+        // A sink that REFUSES counts as dropped, not delivered. An O-RU that
+        // cannot apply a precoder has not applied it.
+        Ptr<OranNtnSplitGnbEntity> ru3 = CreateObject<OranNtnSplitGnbEntity>();
+        ru3->Configure(OranNodeType::O_RU, 1, 1);
+        ru3->SetBeamformingSink([](uint32_t, const std::vector<float>&) { return false; });
+        ru3->ReceiveControl(act);
+        NS_TEST_ASSERT_MSG_EQ(ru3->GetWeightsDropped(), 1u,
+                              "a sink that refuses the weights has not applied them");
+        NS_TEST_ASSERT_MSG_EQ(ru3->GetWeightsDelivered(), 0u, "so nothing was delivered");
+
+        // An action carrying no weights must not touch either counter.
+        Ptr<OranNtnSplitGnbEntity> ru4 = CreateObject<OranNtnSplitGnbEntity>();
+        ru4->Configure(OranNodeType::O_RU, 1, 1);
+        E2RcAction bare = act;
+        bare.beamformingWeights.clear();
+        ru4->ReceiveControl(bare);
+        NS_TEST_ASSERT_MSG_EQ(ru4->GetWeightsDropped(), 0u,
+                              "a control that carries no weights has lost none");
+        NS_TEST_ASSERT_MSG_EQ(ru4->GetWeightsDelivered(), 0u, "and delivered none");
+    }
+};
+
+
+/// AI-04: a SLICE_PRB_ALLOCATION action must reach a scheduler.
+///
+/// Four of the five advertised RL environments emit action types -
+/// SLICE_PRB_ALLOCATION, BEAM_HOP_SCHEDULE, PRB_RESERVATION, DC_SETUP /
+/// DC_TEARDOWN - that all landed in the default arm of the helper's dispatcher,
+/// which logs "has no actuator in OranNtnHelper; action LOGGED ONLY, not
+/// actuated" and returns false. So even had a scenario booted them, none could
+/// have changed anything.
+///
+/// This wires the slice seam to the REAL SliceOrchestratorXapp and asserts the
+/// per-slice PRB allocation actually moves.
+class SlicePrbActionReachesTheSchedulerTest : public TestCase
+{
+  public:
+    SlicePrbActionReachesTheSchedulerTest()
+        : TestCase("AI-04: SLICE_PRB_ALLOCATION actuates a real slice orchestrator")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace ns3::ntnslice;
+
+        Ptr<SliceOrchestratorXapp> orch = CreateObject<SliceOrchestratorXapp>();
+        SliceProfile embb = DefaultEmbb();
+        SliceProfile urllc = DefaultUrllc();
+        orch->RegisterSlice(embb);
+        orch->RegisterSlice(urllc);
+        orch->SetTotalPrb(273);
+        // Demand is the orchestrator's input; without it every slice ticks at
+        // zero PRBs and the test would be measuring nothing.
+        // Oversubscribe deliberately: 273 PRBs at 0.6 Mbps each is ~164 Mbps of
+        // capacity, so 200 + 100 Mbps of demand puts the slices in contention.
+        // Without contention every slice is fully served and a share request
+        // cannot move anything - the test would pass or fail on nothing.
+        orch->SetDemand(embb.snssai, 200.0);
+        orch->SetDemand(urllc.snssai, 100.0);
+
+        // Baseline: the orchestrator's own policy.
+        auto base = orch->Step();
+        NS_TEST_ASSERT_MSG_EQ(base.size(), 2u, "two slices tick");
+        uint32_t basePrbEmbb = 0;
+        for (const auto& t : base)
+        {
+            if (t.snssai.sst == embb.snssai.sst)
+            {
+                basePrbEmbb = t.prbAllocated;
+            }
+        }
+        NS_TEST_ASSERT_MSG_GT(basePrbEmbb, 0u, "the baseline allocates PRBs to eMBB");
+
+        // The actuator an RC action drives.
+        Ptr<OranNtnHelper> helper = CreateObject<OranNtnHelper>();
+        uint32_t lastEmbbPrb = 0;
+        uint32_t actuations = 0;
+        helper->SetSliceActuator(MakeCallback(
+            +[](uint32_t* prbOut, uint32_t* nOut, SliceOrchestratorXapp* o, SliceSst embbSst,
+                SliceSst urllcSst, E2RcAction a) {
+                // parameter1 is the requested share for the targeted slice.
+                const double want = std::max(0.0, std::min(1.0, a.parameter1));
+                std::map<Snssai, double> shares;
+                Snssai eKey{};
+                eKey.sst = embbSst;
+                Snssai uKey{};
+                uKey.sst = urllcSst;
+                shares[eKey] = want;
+                shares[uKey] = 1.0 - want;
+                const auto ticks = o->StepWithShares(shares);
+                for (const auto& t : ticks)
+                {
+                    if (t.snssai.sst == embbSst)
+                    {
+                        *prbOut = t.prbAllocated;
+                    }
+                }
+                ++(*nOut);
+                return true;
+            })
+                .Bind(&lastEmbbPrb)
+                .Bind(&actuations)
+                .Bind(PeekPointer(orch))
+                .Bind(embb.snssai.sst)
+                .Bind(urllc.snssai.sst));
+
+        // Drive it the way the gym environment would.
+        E2RcAction act{};
+        act.actionType = E2RcActionType::SLICE_PRB_ALLOCATION;
+        act.xappId = 1;
+        act.xappName = "gym-slice";
+        act.targetGnbId = 1;
+        act.targetSliceId = 1;
+        act.parameter1 = 0.9; // give eMBB 90% of the cell
+        act.confidence = 1.0;
+
+        NS_TEST_ASSERT_MSG_EQ(helper->ActuateRcAction(act), true,
+                              "with a slice actuator wired the action must ACTUATE, not be "
+                              "logged only");
+        NS_TEST_ASSERT_MSG_EQ(actuations, 1u, "the actuator ran once");
+        NS_TEST_ASSERT_MSG_GT(lastEmbbPrb, basePrbEmbb,
+                              "asking for 90% of the cell must give eMBB MORE PRBs than the "
+                              "baseline policy did; an unchanged allocation means the action "
+                              "reached the orchestrator without affecting it");
+
+        // The opposite request must move it the other way, which is what
+        // separates 'the actuator responds to the action' from 'the actuator
+        // always does the same thing'.
+        act.parameter1 = 0.1;
+        NS_TEST_ASSERT_MSG_EQ(helper->ActuateRcAction(act), true, "second action actuates");
+        NS_TEST_ASSERT_MSG_LT(lastEmbbPrb, basePrbEmbb,
+                              "asking for 10% must give eMBB FEWER PRBs than the baseline");
+
+        // And with NO actuator wired the action must FAIL rather than be
+        // silently accepted - the behaviour the other three environments still
+        // get, stated rather than hidden.
+        Ptr<OranNtnHelper> bare = CreateObject<OranNtnHelper>();
+        NS_TEST_ASSERT_MSG_EQ(bare->ActuateRcAction(act), false,
+                              "with no slice actuator the action is reported as NOT actuated");
+
+        // An actuator that REFUSES must be reported as a failure too. This is
+        // what separates "the helper asked an actuator" from "the helper
+        // reported what the actuator answered": a scheduler that could not
+        // apply the allocation has not applied it, and action_log.csv must not
+        // record a success the RIC never got.
+        Ptr<OranNtnHelper> refusing = CreateObject<OranNtnHelper>();
+        refusing->SetSliceActuator(
+            MakeCallback(+[](E2RcAction) { return false; }));
+        NS_TEST_ASSERT_MSG_EQ(refusing->ActuateRcAction(act), false,
+                              "an actuator that refuses the action means the action was not "
+                              "actuated; reporting success here would put a value in "
+                              "action_log.csv that contradicts what happened");
+    }
+};
+
+
+/// AI-06 (PHY leg): the precoder must reach the antenna array.
+///
+/// The earlier AI-06 fix carried the weights from the xApp to the split gNB and
+/// counted them, and stopped there: with no sink registered they were dropped,
+/// and no shipped scenario registered one. So no CSI reached a
+/// UniformPlanarArray and nothing the model computed shaped a transmitted
+/// waveform. MakeArraySink closes that leg.
+class PrecoderReachesThePhasedArrayTest : public TestCase
+{
+  public:
+    PrecoderReachesThePhasedArrayTest()
+        : TestCase("AI-06 PHY: precoder weights are written into the phased array")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<UniformPlanarArray> array = CreateObject<UniformPlanarArray>();
+        array->SetAttribute("NumRows", UintegerValue(2));
+        array->SetAttribute("NumColumns", UintegerValue(2));
+        const size_t nElem = array->GetNumElems();
+        NS_TEST_ASSERT_MSG_EQ(nElem, 4u, "a 2x2 array has four elements");
+
+        const auto before = array->GetBeamformingVector();
+
+        Ptr<OranNtnSplitGnbEntity> ru = CreateObject<OranNtnSplitGnbEntity>();
+        ru->Configure(OranNodeType::O_RU, 1, 1);
+        ru->SetBeamformingSink(OranNtnSplitGnbEntity::MakeArraySink(array));
+
+        // A single-layer precoder for four elements: interleaved re/im.
+        E2RcAction act{};
+        act.actionType = E2RcActionType::BEAM_HOP_SCHEDULE;
+        act.targetUeId = 5;
+        act.beamformingWeights = {0.5f, 0.0f, 0.0f, 0.5f, -0.5f, 0.0f, 0.0f, -0.5f};
+
+        NS_TEST_ASSERT_MSG_EQ(ru->ReceiveControl(act), true, "the control is accepted");
+        NS_TEST_ASSERT_MSG_EQ(ru->GetWeightsDelivered(), 1u,
+                              "the sink accepted the weights");
+        NS_TEST_ASSERT_MSG_EQ(ru->GetWeightsDropped(), 0u, "and none were dropped");
+
+        const auto after = array->GetBeamformingVector();
+        // The array's beam must have CHANGED. Equality here would mean the sink
+        // ran and wrote nothing, which is the failure this test exists for.
+        bool changed = false;
+        for (size_t i = 0; i < nElem; ++i)
+        {
+            if (std::abs(after[i] - before[i]) > 1e-9)
+            {
+                changed = true;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(changed, true,
+                              "the array's beamforming vector must differ after the precoder is "
+                              "applied; an unchanged beam means the weights still stop before "
+                              "the thing that shapes the waveform");
+
+        // And it must be the precoder, element for element, unit-normalised.
+        double norm2 = 0.0;
+        for (size_t i = 0; i < nElem; ++i)
+        {
+            norm2 += std::norm(after[i]);
+        }
+        NS_TEST_ASSERT_MSG_EQ_TOL(std::sqrt(norm2), 1.0, 1e-6,
+                                  "the applied beam is unit norm, so it does not invent power");
+        // Element 0 of the input was 0.5+0j out of a vector of norm 1.0, so
+        // after normalisation it stays 0.5.
+        NS_TEST_ASSERT_MSG_EQ_TOL(after[0].real(), 0.5, 1e-6, "element 0 real part survives");
+        NS_TEST_ASSERT_MSG_EQ_TOL(after[1].imag(), 0.5, 1e-6, "element 1 imaginary part survives");
+
+        // A precoder whose length does not fit the array must be REFUSED, not
+        // truncated. Writing a mis-shaped vector into an array is the layout
+        // defect the CSI contract exists to prevent, one layer down.
+        Ptr<UniformPlanarArray> big = CreateObject<UniformPlanarArray>();
+        big->SetAttribute("NumRows", UintegerValue(4));
+        big->SetAttribute("NumColumns", UintegerValue(4));
+        Ptr<OranNtnSplitGnbEntity> ru2 = CreateObject<OranNtnSplitGnbEntity>();
+        ru2->Configure(OranNodeType::O_RU, 2, 2);
+        ru2->SetBeamformingSink(OranNtnSplitGnbEntity::MakeArraySink(big));
+        ru2->ReceiveControl(act); // 4-element precoder into a 16-element array
+        NS_TEST_ASSERT_MSG_EQ(ru2->GetWeightsDelivered(), 0u,
+                              "a 4-element precoder must not be applied to a 16-element array");
+        NS_TEST_ASSERT_MSG_EQ(ru2->GetWeightsDropped(), 1u,
+                              "and the refusal must be counted, not silent");
+
+        // A precoder whose complex count is not a MULTIPLE of the element
+        // count must also be refused. This is the case the layer check alone
+        // does not catch: 6 complex values into a 4-element array gives
+        // numLayers = 1 by integer division, layer 0 is in range, and the
+        // adapter would happily read the first 4 under a layout that is not
+        // the sender's. Dropping the divisibility test lets that through.
+        Ptr<UniformPlanarArray> arrOdd = CreateObject<UniformPlanarArray>();
+        arrOdd->SetAttribute("NumRows", UintegerValue(2));
+        arrOdd->SetAttribute("NumColumns", UintegerValue(2));
+        Ptr<OranNtnSplitGnbEntity> ru4 = CreateObject<OranNtnSplitGnbEntity>();
+        ru4->Configure(OranNodeType::O_RU, 4, 4);
+        ru4->SetBeamformingSink(OranNtnSplitGnbEntity::MakeArraySink(arrOdd));
+        E2RcAction odd = act;
+        odd.beamformingWeights.assign(12, 0.25f); // 6 complex values, 4 elements
+        ru4->ReceiveControl(odd);
+        NS_TEST_ASSERT_MSG_EQ(ru4->GetWeightsDropped(), 1u,
+                              "6 complex weights do not divide into a 4-element array, so the "
+                              "layout is not the sender's and the precoder must be refused "
+                              "rather than partially read");
+        NS_TEST_ASSERT_MSG_EQ(ru4->GetWeightsDelivered(), 0u, "and nothing applied");
+
+        // An all-zero precoder is not a beam.
+        Ptr<UniformPlanarArray> arr3 = CreateObject<UniformPlanarArray>();
+        arr3->SetAttribute("NumRows", UintegerValue(2));
+        arr3->SetAttribute("NumColumns", UintegerValue(2));
+        Ptr<OranNtnSplitGnbEntity> ru3 = CreateObject<OranNtnSplitGnbEntity>();
+        ru3->Configure(OranNodeType::O_RU, 3, 3);
+        ru3->SetBeamformingSink(OranNtnSplitGnbEntity::MakeArraySink(arr3));
+        E2RcAction zero = act;
+        zero.beamformingWeights.assign(8, 0.0f);
+        ru3->ReceiveControl(zero);
+        NS_TEST_ASSERT_MSG_EQ(ru3->GetWeightsDropped(), 1u,
+                              "an all-zero precoder is refused rather than normalised by zero");
+    }
+};
 
 class OranNtnTestSuite : public TestSuite
 {
@@ -5357,6 +7468,14 @@ class OranNtnTestSuite : public TestSuite
         : TestSuite("oran-ntn", Type::UNIT)
     {
         // Original tests
+        AddTestCase(new PrecoderReachesThePhasedArrayTest, TestCase::Duration::QUICK);
+        AddTestCase(new SlicePrbActionReachesTheSchedulerTest, TestCase::Duration::QUICK);
+        AddTestCase(new BeamformingWeightsReachTheOruSeamTest, TestCase::Duration::QUICK);
+        AddTestCase(new RcControlRoundTripsOnSimPathTest, TestCase::Duration::QUICK);
+        AddTestCase(new RcStyle3CancelAndNciTest, TestCase::Duration::QUICK);
+        AddTestCase(new ConflictTaxonomyThroughPipelineTest, TestCase::Duration::QUICK);
+        AddTestCase(new A1GuidedConsultsPolicyTest, TestCase::Duration::QUICK);
+        AddTestCase(new RcStyle3WireRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnRicTestCase, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2TestCase, TestCase::Duration::QUICK);
         // E2 loop-timing realism: return-path RC delay, control-loop
@@ -5491,11 +7610,310 @@ class OranNtnTestSuite : public TestSuite
         // O-RAN actuation closed-loop gates (decision -> actuation).
         AddTestCase(new OranNtnXappMovesServingCellTest,
                     TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSinrProvenanceTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSpaceRicLocalActuationTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnGymRewardSignTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnGymRewardRespondsTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnA1SlicePolicyEnforcedTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnActionCountersDistinctTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnSpaceRicCandidatesAreBeamsTest,
+                    TestCase::Duration::QUICK);
         AddTestCase(new OranNtnRlActionImprovesSinrTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnHelperActuatorsWiredTest,
                     TestCase::Duration::QUICK);
         AddTestCase(new OranNtnTwinConsumerClosesLoopTest,
+                    TestCase::Duration::QUICK);
+
+        // R2.7 — measured per-stage breakdown of the FULL control loop
+/// ORAN-06: the PHY-KPM extractor published five fields under standards names
+/// that no standard produced.
+///
+///   * CQI was always 0, because it came only from IngestMeasuredSample's
+///     optional fifth argument and the sole production caller passes four.
+///     0 is the CQI table's code for "out of range", so every report claimed the
+///     link could not carry even QPSK 78/1024, often at 20 dB SINR.
+///   * MCS was always 0 and had no setter anywhere.
+///   * RSRP was SINR + a literal -87.0 dBm, which is a 100 MHz noise floor with
+///     a 7 dB noise figure, while the caller runs FR1 numerology 1.
+///   * C/N0 carried a SECOND, independent 100 MHz literal, so the two fields
+///     could describe different radios on the same link.
+///   * modCod, documented as a DVB-S2X index, was min(27, SE * 5.4): a straight
+///     line with no table behind it.
+///   * spectralEfficiency was uncapped Shannon, so a good link reported a rate
+///     no NR modulation and coding scheme can deliver.
+///
+/// These cases check the tables against published rows, then check that the
+/// extractor actually uses them.
+class OranNtnLinkAdaptationTablesTest : public TestCase
+{
+  public:
+    OranNtnLinkAdaptationTablesTest()
+        : TestCase("ORAN-06 - CQI/MCS/ModCod tables match TS 38.214 and EN 302 307-1")
+    {
+    }
+
+    void DoRun() override
+    {
+        using LA = oran::OranNtnLinkAdaptationTables;
+
+        // ---- TS 38.214 Table 5.2.2.1-3, quoted rows -----------------------
+        // If a transcription slipped, these are what catch it.
+        NS_TEST_ASSERT_MSG_EQ_TOL(LA::SpectralEfficiencyOfCqi(1), 0.1523, 1e-6,
+                                  "CQI 1 is QPSK R=78/1024, efficiency 0.1523");
+        NS_TEST_ASSERT_MSG_EQ_TOL(LA::SpectralEfficiencyOfCqi(7), 2.7305, 1e-6,
+                                  "CQI 7 is 64QAM R=466/1024, efficiency 2.7305");
+        NS_TEST_ASSERT_MSG_EQ_TOL(LA::SpectralEfficiencyOfCqi(15), 7.4063, 1e-6,
+                                  "CQI 15 is 256QAM R=948/1024, efficiency 7.4063");
+        NS_TEST_ASSERT_MSG_EQ_TOL(LA::SpectralEfficiencyOfCqi(0), 0.0, 1e-12,
+                                  "CQI 0 is the table's out-of-range code, not a scheme");
+        // Monotone, or the selection below is meaningless.
+        for (uint8_t i = 2; i <= 15; ++i)
+        {
+            NS_TEST_ASSERT_MSG_GT(LA::SpectralEfficiencyOfCqi(i),
+                                  LA::SpectralEfficiencyOfCqi(i - 1),
+                                  "CQI efficiency must increase with the index at " << (uint32_t)i);
+        }
+
+        // ---- TS 38.214 Table 5.1.3.1-2, quoted rows -----------------------
+        NS_TEST_ASSERT_MSG_EQ_TOL(LA::SpectralEfficiencyOfMcs(0), 0.2344, 1e-6,
+                                  "MCS 0 is QPSK R=120/1024");
+        NS_TEST_ASSERT_MSG_EQ_TOL(LA::SpectralEfficiencyOfMcs(27), 7.4063, 1e-6,
+                                  "MCS 27 is 256QAM R=948/1024, the NR ceiling");
+        NS_TEST_ASSERT_MSG_EQ(LA::ModulationOrderOfMcs(0), 2, "MCS 0 is QPSK, Qm = 2");
+        NS_TEST_ASSERT_MSG_EQ(LA::ModulationOrderOfMcs(11), 6, "MCS 11 is 64QAM, Qm = 6");
+        NS_TEST_ASSERT_MSG_EQ(LA::ModulationOrderOfMcs(27), 8, "MCS 27 is 256QAM, Qm = 8");
+
+        // ---- the NR ceiling, which is the point of the cap ----------------
+        // Shannon at 40 dB is 13.3 bit/s/Hz. NR tops out at 7.4063.
+        const double se40 = LA::SpectralEfficiencyFromSinrDb(40.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(se40, LA::kMaxNrSpectralEfficiency, 1e-9,
+                                  "a 40 dB link must be capped at the TS 38.214 ceiling, not "
+                                  "reported at the unbounded Shannon rate of "
+                                      << std::log2(1.0 + std::pow(10.0, 4.0)) << " bit/s/Hz");
+        // But below the ceiling it must still track Shannon, or the cap has
+        // been implemented as a constant.
+        const double se10 = LA::SpectralEfficiencyFromSinrDb(10.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(se10, std::log2(1.0 + 10.0), 1e-9,
+                                  "below the ceiling the efficiency must follow Shannon");
+        NS_TEST_ASSERT_MSG_LT(LA::SpectralEfficiencyFromSinrDb(0.0), se10,
+                              "and must increase with SINR");
+
+        // ---- CQI/MCS selection --------------------------------------------
+        // A 20 dB link: Shannon 6.66 bit/s/Hz -> highest CQI at or below that
+        // is 13 (6.2266), and the highest MCS is 24 (6.5703).
+        const double se20 = LA::SpectralEfficiencyFromSinrDb(20.0);
+        NS_TEST_ASSERT_MSG_EQ(LA::CqiFromSpectralEfficiency(se20), 13,
+                              "20 dB (SE " << se20 << ") must select CQI 13");
+        NS_TEST_ASSERT_MSG_EQ(LA::McsFromSpectralEfficiency(se20), 24,
+                              "20 dB (SE " << se20 << ") must select MCS 24");
+        // The selected entry must be one the link can actually carry.
+        NS_TEST_ASSERT_MSG_LT(LA::SpectralEfficiencyOfCqi(LA::CqiFromSpectralEfficiency(se20)),
+                              se20 + 1e-9,
+                              "the selected CQI must not exceed what the link supports");
+        // A dead link is out of range, which is what CQI 0 MEANS.
+        NS_TEST_ASSERT_MSG_EQ(LA::CqiFromSpectralEfficiency(0.01), 0,
+                              "below CQI 1 the table's answer is 0 = out of range");
+
+        // ---- ETSI EN 302 307-1 Table 13 -----------------------------------
+        NS_TEST_ASSERT_MSG_GT(LA::GetDvbS2ModCodCount(), 20u, "the MODCOD table must be populated");
+        bool closes = false;
+        // At 10 dB with a 1 dB margin the usable Es/N0 is 9.0 dB. The most
+        // efficient MODCOD requiring <= 9.0 dB is 16APSK 2/3 at 8.97 dB.
+        oran::DvbS2ModCod mc = LA::ModCodFromEsN0Db(10.0, 1.0, closes);
+        NS_TEST_ASSERT_MSG_EQ(closes, true, "the link must close at 10 dB");
+        NS_TEST_ASSERT_MSG_EQ(std::string(mc.name), std::string("16APSK 2/3"),
+                              "9.0 dB usable must select 16APSK 2/3 (needs 8.97 dB), got "
+                                  << mc.name);
+        // The case a "last row that fits" scan gets wrong. The table is ordered
+        // by efficiency but its required Es/N0 is NOT monotone in that order, so
+        // the correct answer is the most EFFICIENT row that fits, not the last
+        // one. At 6.0 dB usable the rows that fit are QPSK up to 5/6 (5.18 dB,
+        // efficiency 1.6547) and 8PSK 3/5 (5.50 dB, efficiency 1.7800); QPSK 8/9
+        // is more efficient than QPSK 5/6 but needs 6.20 dB and does not fit,
+        // and 8PSK 2/3 needs 6.62 dB. So 8PSK 3/5 wins on a row that sits BELOW
+        // three QPSK rows in required Es/N0 while sitting above them all in
+        // efficiency.
+        oran::DvbS2ModCod mc6 = LA::ModCodFromEsN0Db(7.0, 1.0, closes);
+        NS_TEST_ASSERT_MSG_EQ(closes, true, "the link must close at 7 dB");
+        NS_TEST_ASSERT_MSG_EQ(std::string(mc6.name), std::string("8PSK 3/5"),
+                              "6.0 dB usable must select the most efficient row that fits, "
+                              "8PSK 3/5 at 1.7800 bit/s/Hz, not the last row scanned; got "
+                                  << mc6.name);
+        NS_TEST_ASSERT_MSG_GT(mc6.spectralEff, 1.6547,
+                              "and it must beat QPSK 5/6, which also fits");
+
+        // The case above still lets a "last row that fits" scan through, because
+        // 8PSK 3/5 happens to be both. This one separates them. At 6.5 dB usable
+        // the fitting rows include QPSK 9/10 (needs 6.42, efficiency 1.788612)
+        // and 8PSK 3/5 (needs 5.50, efficiency 1.779991). 8PSK 3/5 sits LATER in
+        // the table, because the table is ordered by modulation then rate, but
+        // QPSK 9/10 is the more efficient of the two. A scan that keeps the last
+        // fitting row answers 8PSK 3/5 and loses 0.0086 bit/s/Hz on every frame.
+        bool cSplit = false;
+        const oran::DvbS2ModCod mcSplit = LA::ModCodFromEsN0Db(7.5, 1.0, cSplit);
+        NS_TEST_ASSERT_MSG_EQ(cSplit, true, "the link must close at 6.5 dB usable");
+        NS_TEST_ASSERT_MSG_EQ(std::string(mcSplit.name), std::string("QPSK 9/10"),
+                              "6.5 dB usable must select QPSK 9/10 (1.7886 bit/s/Hz), which is "
+                              "more efficient than the later-listed 8PSK 3/5 (1.7800) that also "
+                              "fits; got " << mcSplit.name);
+
+        // Below the weakest MODCOD the link does not close, and saying so is
+        // the point: returning QPSK 1/4 as though it worked is what the old
+        // linear map did.
+        LA::ModCodFromEsN0Db(-10.0, 1.0, closes);
+        NS_TEST_ASSERT_MSG_EQ(closes, false,
+                              "at -10 dB no MODCOD closes and the report must say so");
+
+        // Higher Es/N0 must never select a LESS efficient scheme.
+        double prevEff = -1.0;
+        for (double esn0 = -3.0; esn0 <= 20.0; esn0 += 0.25)
+        {
+            bool c = false;
+            const oran::DvbS2ModCod m = LA::ModCodFromEsN0Db(esn0, 0.0, c);
+            if (c)
+            {
+                NS_TEST_ASSERT_MSG_GT(m.spectralEff, prevEff - 1e-9,
+                                      "MODCOD efficiency must be non-decreasing in Es/N0 (at "
+                                          << esn0 << " dB)");
+                prevEff = m.spectralEff;
+            }
+        }
+    }
+};
+
+/// ORAN-06: and the extractor must actually USE those tables.
+///
+/// Correct tables that nothing calls is the same defect in a new place, so this
+/// case drives a measured sample through the extractor and checks the published
+/// report, not the lookup functions.
+class OranNtnPhyKpmUsesStandardTablesTest : public TestCase
+{
+  public:
+    OranNtnPhyKpmUsesStandardTablesTest()
+        : TestCase("ORAN-06 - the PHY-KPM report carries table-derived CQI/MCS/ModCod "
+                   "and a noise floor for its own carrier")
+    {
+    }
+
+    void DoRun() override
+    {
+        using LA = oran::OranNtnLinkAdaptationTables;
+
+        Ptr<OranNtnPhyKpmExtractor> ex = CreateObject<OranNtnPhyKpmExtractor>();
+        ex->RegisterRnti(1, 7, 3);
+        // FR1 numerology 1 at 20 MHz, which is what the shipped scenario runs,
+        // NOT the 100 MHz the old literals assumed.
+        ex->SetRadioGeometry(20.0e6, 7.0);
+        ex->SetAcmMarginDb(1.0);
+
+        // Feed a measured sample the way the production caller does: FOUR
+        // arguments, no CQI. That omission is what made every published CQI 0.
+        const double sinrDb = 20.0;
+        ex->IngestMeasuredSample(1, sinrDb, 1000000, 0.01);
+
+        const E2KpmReport r = ex->GetRealKpmReport(7);
+
+        // ---- CQI and MCS must be the table's answer, not zero -------------
+        const double se = LA::SpectralEfficiencyFromSinrDb(sinrDb);
+        NS_TEST_ASSERT_MSG_EQ(r.cqi, LA::CqiFromSpectralEfficiency(se),
+                              "CQI must be derived from the measured SINR through TS 38.214");
+        NS_TEST_ASSERT_MSG_NE(r.cqi, 0,
+                              "a 20 dB link must not publish CQI 0, which is the table's code "
+                              "for out of range");
+        NS_TEST_ASSERT_MSG_EQ(r.mcs, LA::McsFromSpectralEfficiency(se),
+                              "MCS must come from TS 38.214 Table 5.1.3.1-2");
+        NS_TEST_ASSERT_MSG_NE(r.mcs, 0, "and must not be the fixed 0 it always was");
+        // And the provenance must say these were DERIVED, not measured, since
+        // the feed carried neither.
+        NS_TEST_ASSERT_MSG_EQ(r.cqiMeasured, false,
+                              "the feed passed no CQI, so the report must not claim one was "
+                              "measured");
+        NS_TEST_ASSERT_MSG_EQ(r.mcsMeasured, false, "likewise for MCS");
+
+        // ---- a fed CQI must be preserved, not overwritten -----------------
+        Ptr<OranNtnPhyKpmExtractor> ex2 = CreateObject<OranNtnPhyKpmExtractor>();
+        ex2->RegisterRnti(2, 8, 3);
+        ex2->SetRadioGeometry(20.0e6, 7.0);
+        ex2->IngestMeasuredSample(2, sinrDb, 1000000, 0.01, 9);
+        const E2KpmReport r2 = ex2->GetRealKpmReport(8);
+        NS_TEST_ASSERT_MSG_EQ(r2.cqi, 9, "a CQI supplied by the feed must win over the table");
+        NS_TEST_ASSERT_MSG_EQ(r2.cqiMeasured, true, "and be labelled measured");
+
+        // ---- spectral efficiency must be capped ---------------------------
+        Ptr<OranNtnPhyKpmExtractor> ex3 = CreateObject<OranNtnPhyKpmExtractor>();
+        ex3->RegisterRnti(3, 9, 3);
+        ex3->SetRadioGeometry(20.0e6, 7.0);
+        ex3->IngestMeasuredSample(3, 40.0, 1000000, 0.0);
+        const E2KpmReport r3 = ex3->GetRealKpmReport(9);
+        NS_TEST_ASSERT_MSG_LT(r3.spectralEfficiency, LA::kMaxNrSpectralEfficiency + 1e-9,
+                              "a 40 dB link must not publish an NR spectral efficiency of "
+                                  << r3.spectralEfficiency << " bit/s/Hz; TS 38.214 tops out at "
+                                  << LA::kMaxNrSpectralEfficiency);
+
+        // ---- the noise floor must follow the CONFIGURED carrier -----------
+        // 20 MHz with a 7 dB NF is -174 + 73.01 + 7 = -93.99 dBm, so RSRP at
+        // 20 dB SINR is -73.99 dBm. The old literal -87.0 dBm would put it at
+        // -67.0, seven decibels optimistic.
+        const double expectedFloor = -174.0 + 10.0 * std::log10(20.0e6) + 7.0;
+        NS_TEST_ASSERT_MSG_EQ_TOL(ex->GetNoiseFloorDbm(), expectedFloor, 1e-6,
+                                  "the noise floor must be computed for the configured carrier");
+        NS_TEST_ASSERT_MSG_EQ_TOL(r.rsrp_dBm, sinrDb + expectedFloor, 1e-6,
+                                  "RSRP must sit on that floor, not on the 100 MHz literal");
+        // Changing the carrier must change the answer, or the setter is inert.
+        ex->SetRadioGeometry(100.0e6, 7.0);
+        const E2KpmReport rWide = ex->GetRealKpmReport(7);
+        // A 100 MHz carrier has a ~7 dB HIGHER (less negative) noise floor, so
+        // the same SINR implies ~7 dB MORE received power, not less. That
+        // direction is the whole reason the old -87 dBm literal mattered: it
+        // was a 100 MHz floor applied to a 20 MHz carrier, publishing an RSRP
+        // 7 dB optimistic.
+        NS_TEST_ASSERT_MSG_GT(rWide.rsrp_dBm, r.rsrp_dBm + 6.0,
+                              "a 100 MHz carrier must imply a ~7 dB higher RSRP at the same "
+                              "SINR; if these match, SetRadioGeometry does nothing");
+        // C/N0 must move with the SAME bandwidth, not a second literal.
+        NS_TEST_ASSERT_MSG_GT(rWide.cno_dBHz, r.cno_dBHz + 6.0,
+                              "C/N0 must be computed against the configured bandwidth too; two "
+                              "independent constants let these two fields describe different "
+                              "radios on one link");
+
+        // ---- ModCod must be a real EN 302 307-1 index ---------------------
+        bool closes = false;
+        const oran::DvbS2ModCod want = LA::ModCodFromEsN0Db(sinrDb, 1.0, closes);
+        NS_TEST_ASSERT_MSG_EQ(r.modCod, want.index,
+                              "modCod must index the DVB-S2 table, not min(27, SE * 5.4)");
+        NS_TEST_ASSERT_MSG_EQ(r.modCodCloses, true, "and a 20 dB link closes");
+
+        // A link that closes no MODCOD must SAY so rather than reporting the
+        // weakest scheme as if it worked.
+        Ptr<OranNtnPhyKpmExtractor> ex4 = CreateObject<OranNtnPhyKpmExtractor>();
+        ex4->RegisterRnti(4, 10, 3);
+        ex4->SetRadioGeometry(20.0e6, 7.0);
+        ex4->IngestMeasuredSample(4, -12.0, 1000, 1.0);
+        const E2KpmReport r4 = ex4->GetRealKpmReport(10);
+        NS_TEST_ASSERT_MSG_EQ(r4.modCodCloses, false,
+                              "at -12 dB no DVB-S2 MODCOD closes and the report must say so");
+        NS_TEST_ASSERT_MSG_EQ(r4.cqi, 0,
+                              "and the CQI table's out-of-range code is the right answer here");
+    }
+};
+
+        AddTestCase(new OranNtnPhyKpmUsesStandardTablesTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnKpmProvenanceDistinguishesMeasuredTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnPeriodicReportingActuallyReportsTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnA1DeliveryTakesTimeTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnPredictiveAiFallbackIsVisibleTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnHelperWiresIslNeighboursTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnXappMetricsCsvExposesActuationTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnLinkAdaptationTablesTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnLoopLatencyProbeTest,
                     TestCase::Duration::QUICK);
     }
 };

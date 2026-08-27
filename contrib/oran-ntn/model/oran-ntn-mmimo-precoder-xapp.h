@@ -89,6 +89,21 @@ class OranNtnMmimoTwoStageComposer
  * \note Currently exercised by unit tests only (round-trip / failure-mode /
  *       simulator-time cases); the ric-controlled-traffic example implements
  *       its control loop directly on OranNtnMmimoCodebook.
+ *
+ * \note AI-06, on where the weights end up. The composed hybrid precoder used
+ *       to be dropped at this boundary: EmitControlAction put only a codebook
+ *       INDEX into the E2RcAction, so final_weights never left the xApp, and
+ *       OranNtnSplitGnbEntity::ReceiveControl merely counted the action. The
+ *       weights now travel in E2RcAction::beamformingWeights and are handed to
+ *       the split gNB's O-RU beamforming sink.
+ *
+ *       Be clear about what that does and does not buy. No shipped scenario
+ *       registers a sink, so on those runs the weights still stop at the O-RU
+ *       seam and no CSI influences a transmitted waveform - the difference is
+ *       that OranNtnSplitGnbEntity::GetWeightsDropped() now counts it and logs
+ *       a warning instead of the loss being invisible. Wiring the sink to an
+ *       NR UniformPlanarArray, so the effect appears in measured SINR, is the
+ *       remaining step and is not done here.
  */
 class OranNtnMmimoPrecoderXapp : public Object
 {

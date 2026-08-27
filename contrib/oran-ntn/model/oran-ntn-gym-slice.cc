@@ -125,6 +125,25 @@ OranNtnGymSlice::SetCurrentGnb(uint32_t gnbId)
     m_currentGnbId = gnbId;
 }
 
+double
+OranNtnGymSlice::SliceLatencyBoundMs(uint32_t sliceId)
+{
+    // AI-03: the TS 22.261 service-class latency bounds the ntn-slice module
+    // already orchestrates against (eMBB 50 ms, URLLC 5 ms, mMTC 1 s). Slice
+    // ids follow E2KpmReport's convention: 0 = eMBB, 1 = URLLC, 2 = mMTC.
+    switch (sliceId)
+    {
+    case 0:
+        return 50.0;
+    case 1:
+        return 5.0;
+    case 2:
+        return 1000.0;
+    default:
+        return 50.0;
+    }
+}
+
 void
 OranNtnGymSlice::UpdatePostAction(double slaCompliance, uint32_t violations, double efficiency)
 {
@@ -164,6 +183,12 @@ OranNtnGymSlice::GetObservation()
     std::vector<uint32_t> shape = {m_numSlices * 5};
     auto box = CreateObject<OpenGymBoxContainer<float>>(shape);
 
+    // AI-03: accumulators for the post-action state latched below.
+    double sumCompliance = 0.0;
+    double sumEfficiency = 0.0;
+    uint32_t violations = 0;
+    uint32_t counted = 0;
+
     for (uint32_t s = 0; s < m_numSlices; s++)
     {
         float prbShare = 0.0f;
@@ -198,7 +223,38 @@ OranNtnGymSlice::GetObservation()
         box->AddValue(latency);
         box->AddValue(reliability);
         box->AddValue(demand);
+
+        // AI-03. Latch the post-action state here, where the measured slice KPIs
+        // are in hand. GetReward() is built entirely from m_postSlaCompliance,
+        // m_postViolations and m_postEfficiency, and those were written ONLY by
+        // UpdatePostAction(), which has no caller anywhere in the tree. They held
+        // their constructed values forever, so the reward was a CONSTANT: the
+        // agent's action could not change its own return and nothing could be
+        // learned. Deriving them from the same reports the observation uses makes
+        // the reward respond to what the action actually did.
+        //
+        // SLA compliance is the measured packet delivery ratio; a violation is a
+        // slice whose measured latency exceeds its TS 22.261 bound; efficiency is
+        // delivered throughput per unit of PRB actually consumed, which is what
+        // an allocation decision is supposed to improve.
+        sumCompliance += reliability;
+        if (latency > SliceLatencyBoundMs(s))
+        {
+            ++violations;
+        }
+        if (prbShare > 1e-6)
+        {
+            sumEfficiency += throughput / (prbShare * 100.0);
+        }
+        ++counted;
     }
+
+    if (counted > 0)
+    {
+        m_postSlaCompliance = sumCompliance / counted;
+        m_postEfficiency = sumEfficiency / counted;
+    }
+    m_postViolations = violations;
 
     NS_LOG_DEBUG("Slice observation: " << m_numSlices << " slices for gNB " << m_currentGnbId);
     return box;

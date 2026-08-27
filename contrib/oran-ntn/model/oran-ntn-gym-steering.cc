@@ -139,6 +139,8 @@ OranNtnGymSteering::GetObservation()
     float ntnThroughput = 0.0f;
     float qosReq = 0.0f;
     float currentNetwork = 0.0f;
+    // AI-03: measured one-way delay of the serving path, for the reward below.
+    double lastReportLatencyMs = 0.0;
 
     if (m_xapp)
     {
@@ -157,6 +159,7 @@ OranNtnGymSteering::GetObservation()
         tnThroughput = static_cast<float>(report.tnThroughput_Mbps);
         ntnThroughput = static_cast<float>(report.ntnThroughput_Mbps);
         qosReq = static_cast<float>(report.sliceId); // Slice as QoS proxy
+        lastReportLatencyMs = report.propagationDelay_ms;
         // Encode current network from steering xApp: 0=TN, 1=NTN, 2=DC
         NetworkSelection sel = m_xapp->GetUeNetworkSelection(m_currentUeId);
         currentNetwork = static_cast<float>(static_cast<uint8_t>(sel));
@@ -170,6 +173,38 @@ OranNtnGymSteering::GetObservation()
     box->AddValue(ntnThroughput);
     box->AddValue(qosReq);
     box->AddValue(currentNetwork);
+
+    // AI-03. Latch the post-action state from the same measured report the
+    // observation was built from. GetReward() is built from m_postLatency,
+    // m_postThroughput and m_switchOccurred, and the first two were written ONLY
+    // by UpdatePostAction(), which has no caller anywhere in the tree. They held
+    // their constructed 0.0 forever, which made the reward
+    //     -0/100 + min(0/100, 1) - switchingCost
+    // i.e. zero unless the agent switched, and strictly negative when it did.
+    // The only policy that could maximise it was "never act".
+    //
+    // The delivered throughput and the one-way delay of whichever network the UE
+    // is actually on are the honest post-action quantities: they are what the
+    // steering decision changed.
+    // On a dual-connected UE both legs carry traffic, so the delivered rate is
+    // the sum; otherwise it is the leg the xApp actually selected.
+    if (m_xapp)
+    {
+        const NetworkSelection sel = m_xapp->GetUeNetworkSelection(m_currentUeId);
+        switch (sel)
+        {
+        case NetworkSelection::TERRESTRIAL:
+            m_postThroughput = tnThroughput;
+            break;
+        case NetworkSelection::SATELLITE:
+            m_postThroughput = ntnThroughput;
+            break;
+        case NetworkSelection::DUAL_CONNECTED:
+            m_postThroughput = tnThroughput + ntnThroughput;
+            break;
+        }
+    }
+    m_postLatency = lastReportLatencyMs;
 
     NS_LOG_DEBUG("Steering obs: tnSinr=" << tnSinr << " ntnSinr=" << ntnSinr
                                          << " currentNet=" << currentNetwork);

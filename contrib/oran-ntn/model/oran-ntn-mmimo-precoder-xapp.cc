@@ -286,6 +286,9 @@ OranNtnMmimoPrecoderXapp::EmitControlAction(
         result.codebook_indices.empty()
             ? 0
             : result.codebook_indices.front();
+    // AI-06: carry the weights, not just the codebook index. Without this the
+    // composed hybrid precoder was discarded one call before it could matter.
+    act.beamformingWeights = result.final_weights;
     if (m_ru->ReceiveControl(act))
     {
         ++m_actions;

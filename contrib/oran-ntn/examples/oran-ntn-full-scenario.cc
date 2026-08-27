@@ -174,7 +174,7 @@ class RealGeometryKpmFeed
         std::filesystem::create_directories(m_p.outputDir);
         m_csv.open(m_p.outputDir + "/kpm_feed.csv");
         m_csv << "time_s,ue_id,gnb_id,role,sinr_db,rsrp_dbm,elev_deg,doppler_hz,"
-                 "tte_s,provenance\n";
+                 "tte_s,provenance,rsrp_provenance\n";
     }
 
     /// The real mmwave stack of the anchored cells (nullptr if numRealCells=0).
@@ -238,6 +238,10 @@ class RealGeometryKpmFeed
             double sinr;
             double rsrp;
             const char* provenance;
+            // OBS-09: RSRP provenance is tracked separately from SINR
+            // provenance, because on the anchored path the two have different
+            // origins and one label cannot honestly cover both.
+            const char* rsrpProvenance = "geometry-budget";
             // Serving TTE: computed ONCE per (ue,sat) per tick (EstimateTteS
             // mutates its elevation memory, so a second call the same tick
             // would read a zero rate). chosenTte carries it from the sticky
@@ -253,7 +257,7 @@ class RealGeometryKpmFeed
                 {
                     continue; // no PHY sample yet — never substitute a formula
                 }
-                rsrp = sinr - 95.0; // module convention (see real-stack scenario)
+                rsrp = MeasuredRsrpDbm(sinr, rsrpProvenance);
                 provenance = "phy-trace";
             }
             else if (!m_p.stickyServing)
@@ -357,7 +361,7 @@ class RealGeometryKpmFeed
             m_helper->InjectKpmReport(servingSat + 1, ue, sinr, rsrp, tte, elev, doppler,
                                       measThp, measBytes, measTbler);
             LogRow(t, ue, servingSat + 1, "serving", sinr, rsrp, elev, doppler, tte,
-                   provenance);
+                   provenance, rsrpProvenance);
 
             // ---- Candidate report: best VISIBLE satellite that isn't serving -
             uint32_t cand = (best != servingSat) ? best : second;
@@ -377,7 +381,7 @@ class RealGeometryKpmFeed
                 m_helper->InjectKpmReport(cand + 1, ue, cSinr, cRsrp, cTte, cElev,
                                           cDoppler);
                 LogRow(t, ue, cand + 1, "candidate", cSinr, cRsrp, cElev, cDoppler,
-                       cTte, "geometry-budget");
+                       cTte, "geometry-budget", "geometry-budget");
             }
 
             // ---- Feed the serving sat's on-board Space-RIC (if autonomous):
@@ -437,7 +441,7 @@ class RealGeometryKpmFeed
                 const uint32_t tnGnbId = 10001 + tnIdx;
                 m_helper->InjectKpmReport(tnGnbId, ue, tnSinr, tnRx, 999.0, 90.0, 0.0);
                 LogRow(t, ue, tnGnbId, "tn", tnSinr, tnRx, 90.0, 0.0, 999.0,
-                       "geometry-budget");
+                       "geometry-budget", "geometry-budget");
             }
         }
 
@@ -521,11 +525,45 @@ class RealGeometryKpmFeed
 
     void LogRow(double t, uint32_t ue, uint32_t gnbId, const char* role, double sinr,
                 double rsrp, double elev, double doppler, double tte,
-                const char* provenance)
+                const char* provenance, const char* rsrpProvenance)
     {
         m_csv << std::fixed << std::setprecision(3) << t << "," << ue << "," << gnbId
               << "," << role << "," << sinr << "," << rsrp << "," << elev << ","
-              << doppler << "," << tte << "," << provenance << "\n";
+              << doppler << "," << tte << "," << provenance << "," << rsrpProvenance
+              << "\n";
+    }
+
+    // OBS-09: RSRP for a UE attached to the real cell. The measured path is the
+    // UE's own RRC measurement report (TS 38.331 measResultPCell mapped to dBm
+    // by TS 38.133). Where the backend runs ideal RRC and reports nothing, the
+    // fallback reconstructs it from the measured SINR, and it must subtract the
+    // resource-element count: SINR + noise floor is the TOTAL in-band power,
+    // whereas TS 38.215 Sec. 5.1.1 defines SS-RSRP per resource element. The
+    // "sinr - 95" convention this replaces was neither, and was being written
+    // out under phy-trace provenance.
+    double MeasuredRsrpDbm(double sinrDb, const char*& provOut) const
+    {
+        const double reported = m_rs->GetServingRsrpDbm();
+        if (!std::isnan(reported))
+        {
+            provOut = "rrc-meas-report";
+            return reported;
+        }
+        double nfDb = m_rs->GetUeNoiseFigureDb();
+        if (std::isnan(nfDb))
+        {
+            nfDb = 5.0;
+        }
+        const double noiseFloorDbm =
+            -174.0 + nfDb + 10.0 * std::log10(m_rs->GetBandwidthHz());
+        const uint32_t re = m_rs->GetSignalResourceElements();
+        if (re == 0)
+        {
+            provOut = "unavailable";
+            return std::nan("");
+        }
+        provOut = "derived-per-re";
+        return sinrDb + noiseFloorDbm - 10.0 * std::log10(static_cast<double>(re));
     }
 
     Ptr<OranNtnHelper> m_helper;
@@ -917,7 +955,10 @@ main(int argc, char* argv[])
         rs.SetRunTag("oran-ntn-full-scenario");
         rs.SetCarrierFrequencyHz(params.freqGhz * 1e9);
         rs.SetBandwidthHz(params.bwMhz * 1e6);
-        rs.SetSatEirpDbm(params.satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+        rs.SetSatConductedPowerDbm(params.satEirpDbm);
         rs.Build(realGnbs, realUes);
         // The measured mmwave cell carries traffic only for the first
         // measuredWindowS — long enough to populate phy-trace KPIs — while the
@@ -1018,17 +1059,42 @@ main(int argc, char* argv[])
               << "  Coverage-gap KPM samples skipped: "
               << kpmFeed.GetCoverageGapSamples() << "\n";
 
+    // CVC-08: print ROUTED and ACTUATED side by side.
+    //
+    // This summary reported successfulActions as "actions", and an audit
+    // reasonably read the resulting 71,967 as things the controller did. It
+    // counts routing acceptance. Actuation is a different number, and on this
+    // scenario the serving satellite is chosen by the scenario's own mobility
+    // model (hysteretic CHO, or per-tick max-elevation reselection when
+    // --stickyServing=false), so no xApp decision moves a UE. Printing one
+    // number let that read as controller-driven mobility. Printing both makes
+    // the gap visible without anyone having to know which counter is which.
     std::cout << "\n--- Per-xApp Summary ---\n";
+    uint32_t totalRouted = 0;
+    uint32_t totalActuated = 0;
     for (const auto& [name, xapp] : xapps)
     {
         auto m = xapp->GetMetrics();
+        totalRouted += m.successfulActions;
+        totalActuated += m.actuatedActions;
         std::cout << "  " << std::left << std::setw(18) << name
                   << " | decisions: " << std::setw(6) << m.totalDecisions
-                  << " | actions: " << std::setw(5) << m.successfulActions << "/"
+                  << " | routed: " << std::setw(5) << m.successfulActions << "/"
                   << (m.successfulActions + m.failedActions)
+                  << " | actuated: " << std::setw(5) << m.actuatedActions
                   << " | conflicts: " << m.conflictsEncountered
                   << " | confidence: " << std::fixed << std::setprecision(3)
                   << m.avgConfidence << "\n";
+    }
+    std::cout << "  " << std::left << std::setw(18) << "TOTAL"
+              << " | routed: " << totalRouted << "  actuated: " << totalActuated
+              << "  (routed-but-not-actuated: " << (totalRouted - totalActuated) << ")\n";
+    if (totalActuated == 0 && totalRouted > 0)
+    {
+        std::cout << "  NOTE: no xApp action was actuated in this run. Serving-satellite "
+                  << "selection here is the scenario's own mobility model, not a controller "
+                  << "decision, so the routed count above must not be read as controller-driven "
+                  << "mobility.\n";
     }
 
     if (params.enableSpaceRic)

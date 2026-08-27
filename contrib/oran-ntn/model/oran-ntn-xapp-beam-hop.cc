@@ -664,7 +664,8 @@ OranNtnXappBeamHop::GetRequiredSubscription() const
     sub.reportingPeriod = MilliSeconds(200);
     sub.eventTrigger = false; // Periodic reporting
     sub.eventThreshold = 0.0;
-    sub.batchOnVisibility = false;
+    // ORAN-05: left at the default (true) so a feeder outage buffers on board
+    // instead of silently discarding this xApp's telemetry.
     sub.maxBufferAge = Seconds(5);
     sub.useIslRelay = false;
     return sub;

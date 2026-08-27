@@ -716,7 +716,8 @@ OranNtnXappHoPredict::GetRequiredSubscription() const
     sub.eventThreshold = 0.0;
 
     // NTN extensions
-    sub.batchOnVisibility = false; // Need real-time SINR updates
+    // ORAN-05: left at the default (true) so a feeder outage buffers on board
+    // instead of silently discarding this xApp's telemetry. // Need real-time SINR updates
     sub.maxBufferAge = Seconds(1);
     sub.useIslRelay = true; // Use ISL if feeder link unavailable
 

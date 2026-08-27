@@ -91,6 +91,30 @@ class OranNtnPhyKpmExtractor : public Object
     void RegisterRnti(uint16_t rnti, uint32_t ueId, uint32_t servingCellId = 0);
 
     /**
+     * \brief ORAN-06: the radio geometry the derived KPIs are computed against.
+     *
+     * RSRP and C/N0 were each derived from SINR using their OWN hardcoded
+     * 100 MHz bandwidth and a 7 dB noise figure baked into a -87 dBm literal,
+     * while the shipped caller runs an FR1 numerology-1 carrier that is nowhere
+     * near 100 MHz. Two independent constants for one radio also meant the two
+     * fields could disagree about the same link. Set these to the carrier the
+     * scenario actually runs.
+     */
+    void SetRadioGeometry(double bandwidthHz, double noiseFigureDb);
+    double GetBandwidthHz() const { return m_bandwidthHz; }
+    double GetNoiseFigureDb() const { return m_noiseFigureDb; }
+    /// Thermal noise power in the configured bandwidth, dBm. -174 dBm/Hz + 10log10(BW) + NF.
+    double GetNoiseFloorDbm() const;
+
+    /**
+     * \brief ACM margin (dB) held back when selecting a DVB-S2 MODCOD.
+     *
+     * A real ACM loop does not run at the quasi-error-free threshold with zero
+     * headroom. Default 1 dB.
+     */
+    void SetAcmMarginDb(double m) { m_acmMarginDb = m; }
+
+    /**
      * \brief Feed one MEASURED PHY sample for a UE keyed by its RNTI.
      *
      * This is the real feed path used in the shipped toolkit: the scenario
@@ -162,6 +186,10 @@ class OranNtnPhyKpmExtractor : public Object
     std::vector<uint32_t> GetTrackedUeIds() const;
 
     // ---- Trace sources ----
+    double m_bandwidthHz{20.0e6};   //!< ORAN-06: was two separate 100 MHz literals
+    double m_noiseFigureDb{7.0};    //!< ORAN-06: was baked into a -87 dBm constant
+    double m_acmMarginDb{1.0};      //!< headroom held back by the ACM selection
+
     TracedCallback<uint32_t, double> m_sinrMeasured;      //!< ueId, sinr_dB
     TracedCallback<uint32_t, uint8_t> m_cqiMeasured;      //!< ueId, cqi
     TracedCallback<uint32_t, double> m_throughputMeasured; //!< ueId, Mbps
@@ -194,6 +222,9 @@ class OranNtnPhyKpmExtractor : public Object
         // Error rate (measured DL TBLER)
         double latestTbler;             //!< NaN until a measured value is fed
         bool haveTbler;
+        /// ORAN-03: a real SINR sample has been ingested for this UE, so the
+        /// KPM writer may label it provenance=measured.
+        bool haveSinr = false;
 
         // Timing
         double lastUpdateTime;

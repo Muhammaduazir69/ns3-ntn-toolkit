@@ -53,7 +53,6 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
 
     // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 60.
-    const double satEirpDbm = (radio == "mmwave") ? 60.0 : 70.0;
 
     using PO = NtnRealStackHelper::PayloadOption;
     PO opt = PO::FullGnb;
@@ -120,7 +119,12 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("oran-ntn-payload-options-ab-" + payload);
     rs.SetCarrierFrequencyHz(2.0e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
+    // S-band LEO reference payload. Declared as a DENSITY so the helper
+    // back-computes conducted power against the array gain instead of the
+    // antenna being counted twice.
+    rs.SetSatEirpDensityDbwMhz(
+        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
     rs.SetPayloadOption(opt);
     rs.Build(satNodes, ueNodes);
     rs.SetFeederGeometry(satEnu, gwNodes.Get(0)->GetObject<MobilityModel>());

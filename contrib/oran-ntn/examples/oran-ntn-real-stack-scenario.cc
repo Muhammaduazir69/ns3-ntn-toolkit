@@ -148,7 +148,10 @@ main(int argc, char* argv[])
     rs.SetRunTag("oran-ntn-real-stack");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
     rs.SetBandwidthHz(bwMhz * 1e6);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(servingGnb, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));

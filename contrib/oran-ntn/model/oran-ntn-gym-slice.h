@@ -26,6 +26,14 @@ class OranNtnSatBridge;
  * \ingroup oran-ntn
  * \brief Gymnasium environment for slice-management RL training
  *
+ * \note AI-04: this is the one RL environment with an actuator path. Its
+ *       SLICE_PRB_ALLOCATION actions are dispatched by OranNtnHelper to the
+ *       callback installed via SetSliceActuator - point that at
+ *       SliceOrchestratorXapp::StepWithShares and the per-slice prbAllocated
+ *       moves measurably. With no actuator wired the action is reported as
+ *       NOT actuated rather than silently accepted. The other three
+ *       environments remain unwired; their headers say so.
+ *
  * \warning Experimental: not yet exercised by any example or test; API may
  *          change.
  */
@@ -49,7 +57,12 @@ class OranNtnGymSlice : public OpenGymEnv
     std::string GetExtraInfo() override;
     bool ExecuteActions(Ptr<OpenGymDataContainer> action) override;
 
+    /// AI-03: kept so a scenario that measures the post-action state out of
+    /// band can still override what GetObservation() latches.
     void UpdatePostAction(double slaCompliance, uint32_t violations, double efficiency);
+
+    /// TS 22.261 latency bound in ms for a slice id (0 eMBB, 1 URLLC, 2 mMTC).
+    static double SliceLatencyBoundMs(uint32_t sliceId);
 
   protected:
     void DoDispose() override;

@@ -26,6 +26,7 @@
 
 #include <ns3/object.h>
 #include <ns3/traced-callback.h>
+#include <ns3/callback.h>
 
 #include <atomic>
 #include <functional>
@@ -77,11 +78,22 @@ class OranNtnE2Listener : public Object
     /// Counters (test asserts).
     uint64_t SetupRequestsHandled() const { return m_setupReq; }
     uint64_t SubscriptionRequestsHandled() const { return m_subReq; }
+    /// Subscribe to the raw payload of each RIC Control Request.
+    void SetControlSink(Callback<void, std::vector<uint8_t>> cb) { m_controlSink = cb; }
+    /// Subscribe to the raw payload of each RIC Indication.
+    void SetIndicationSink(Callback<void, std::vector<uint8_t>> cb) { m_indicationSink = cb; }
     uint64_t IndicationsForwarded() const { return m_indFwd; }
     uint64_t ControlRequestsHandled() const { return m_ctrlReq; }
 
     /// Indication trace — fired for every RIC Indication received.
     TracedCallback<std::vector<uint8_t>> m_indicationTrace;
+    /// ORAN-11: the RIC side must be able to DECODE what it was sent, not just
+    /// count frames. Without a hook on the control payload the listener could
+    /// acknowledge a control it never looked at, which is what let the example
+    /// carry {0x77} and still report a completed procedure.
+    TracedCallback<std::vector<uint8_t>> m_controlTrace;
+    Callback<void, std::vector<uint8_t>> m_controlSink;
+    Callback<void, std::vector<uint8_t>> m_indicationSink;
 
   protected:
     void DoDispose() override;

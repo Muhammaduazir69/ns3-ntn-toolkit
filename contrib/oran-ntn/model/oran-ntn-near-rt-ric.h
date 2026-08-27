@@ -25,6 +25,7 @@
 #include "oran-ntn-a1-interface.h"
 #include "oran-ntn-conflict-manager.h"
 #include "oran-ntn-e2-interface.h"
+#include "oran-ntn-loop-latency-probe.h"
 #include "oran-ntn-types.h"
 #include "oran-ntn-xapp-base.h"
 
@@ -166,6 +167,27 @@ class OranNtnNearRtRic : public Object
      */
     bool ProcessXappAction(uint32_t xappId, const E2RcAction& action);
 
+    // ---- Control-loop latency instrumentation (reviewer response R2.7) ----
+    /**
+     * \brief Attach a latency probe so ProcessXappAction() contributes its
+     *        share of the end-to-end control-loop breakdown.
+     *
+     * Stages recorded here (all cpu):
+     *   ric_a1_policy_check  A1 policy compliance (step 1). The shipped
+     *                        HO_THRESHOLD policies govern HANDOVER_TRIGGER
+     *                        actions only, so for other action types this
+     *                        stage measures a short-circuiting check and is a
+     *                        LOWER BOUND for policy-governed action types.
+     *   ric_conflict_check   conflict manager CheckAndResolve (step 2)
+     *   rc_action_route      E2 termination RouteRcAction (step 3); covers
+     *                        target lookup / fan-out and enqueue of the
+     *                        downlink delivery event, not the actuation.
+     *
+     * Passing a null Ptr (the default) disables every probe hook.
+     */
+    void SetLoopLatencyProbe(Ptr<OranNtnLoopLatencyProbe> probe);
+    Ptr<OranNtnLoopLatencyProbe> GetLoopLatencyProbe() const;
+
     // ---- Conflict manager ----
     Ptr<OranNtnConflictManager> GetConflictManager() const;
 
@@ -212,6 +234,7 @@ class OranNtnNearRtRic : public Object
     Ptr<OranNtnA1Adapter> m_a1Adapter;
     Ptr<OranNtnConflictManager> m_conflictMgr;
     Ptr<OranNtnSdl> m_sdl;
+    Ptr<OranNtnLoopLatencyProbe> m_loopProbe; //!< null = instrumentation off
 
     // xApp registry
     std::map<uint32_t, Ptr<OranNtnXappBase>> m_xapps;

@@ -30,6 +30,7 @@
 #ifndef ORAN_NTN_E2_INTERFACE_H
 #define ORAN_NTN_E2_INTERFACE_H
 
+#include "oran-ntn-loop-latency-probe.h"
 #include "oran-ntn-types.h"
 
 #include <ns3/callback.h>
@@ -66,7 +67,16 @@ struct E2Subscription
     double eventThreshold;         //!< Threshold for event trigger
 
     // NTN extensions
-    bool batchOnVisibility;        //!< Batch reports during feeder link windows
+    /// ORAN-05: buffer indications on board while the feeder link is down and
+    /// deliver them when it returns.
+    ///
+    /// Defaults TRUE. It used to default false and all thirteen shipped xApps
+    /// set it false explicitly, so the on-board buffer this class implements was
+    /// unreachable in every shipped configuration and a feeder outage silently
+    /// discarded telemetry. Store-and-forward across a visibility gap is the
+    /// correct behaviour for an orbiting E2 node, and is what the buffer, its
+    /// size limit and its drop counters exist for.
+    bool batchOnVisibility = true;
     Time maxBufferAge;             //!< Max age before discarding buffered reports
     bool useIslRelay;              //!< Route E2 via ISL if feeder link unavailable
 };
@@ -171,6 +181,10 @@ class OranNtnE2Node : public Object
      * \return true if action was executed successfully
      */
     bool ExecuteRcAction(const E2RcAction& action);
+    /// ORAN-10: how many RC controls arrived as E2SM-RC bytes and decoded
+    /// successfully. Zero on a run that routed handover actions means the
+    /// service model has fallen off the control path again.
+    uint64_t GetRcControlsDecoded() const { return m_rcControlsDecoded; }
 
     /**
      * \brief Deliver an RC action from the RIC over the RETURN feeder path.
@@ -186,6 +200,21 @@ class OranNtnE2Node : public Object
      * \brief Notify E2 node that feeder link is available/unavailable
      */
     void SetFeederLinkAvailable(bool available);
+
+    /**
+     * \brief ORAN-14: make the subscription reporting period actually report.
+     *
+     * When enabled, each KPM subscription's timer publishes the node's most
+     * recent measurement at its own reportingPeriod, which is what E2SM-KPM
+     * periodic report style means. When disabled (the default) the timer only
+     * re-arms, which is the behaviour every committed result was measured
+     * under.
+     */
+    void SetPeriodicReporting(bool enable) { m_periodicReporting = enable; }
+    bool GetPeriodicReporting() const { return m_periodicReporting; }
+    /// Indications emitted by the periodic timer (ORAN-14), as distinct from
+    /// those emitted by a SubmitKpmMeasurement call.
+    uint64_t GetPeriodicIndicationCount() const { return m_periodicIndications; }
     bool IsFeederLinkAvailable() const;
 
     /**
@@ -196,6 +225,30 @@ class OranNtnE2Node : public Object
     // ---- Callbacks to RIC ----
     typedef Callback<void, E2Indication> IndicationCallback;
     void SetIndicationCallback(IndicationCallback cb);
+
+    // ---- Control-loop latency instrumentation (reviewer response R2.7) ----
+    /**
+     * \brief Attach a latency probe so this node contributes its share of the
+     *        end-to-end control-loop breakdown.
+     *
+     * Stages recorded here:
+     *   e2_indication_construct       (cpu)       SubmitKpmMeasurement body:
+     *                                             E2Indication construction +
+     *                                             delivery-event enqueue. NOT a
+     *                                             wire serializer -- E2AP/SCTP
+     *                                             is not simulated.
+     *   e2_indication_feeder_uplink   (simulated) measurement -> DeliverReport
+     *   ric_tick_align_wait           (simulated) DeliverReport -> xApp dispatch
+     *                                             (zero unless AlignToControlLoop)
+     *   e2_indication_transport       (simulated) measurement -> xApp dispatch
+     *   rc_action_transport           (simulated) ReceiveRcAction -> actuation
+     *   actuation                     (cpu)       the RC action callback itself
+     *
+     * Passing a null Ptr (the default) disables every probe hook; the node's
+     * behaviour is bit-identical with and without the probe.
+     */
+    void SetLoopLatencyProbe(Ptr<OranNtnLoopLatencyProbe> probe);
+    Ptr<OranNtnLoopLatencyProbe> GetLoopLatencyProbe() const;
 
     // ---- Trace sources ----
     TracedCallback<uint32_t, E2KpmReport> m_kpmReportSent;
@@ -208,16 +261,40 @@ class OranNtnE2Node : public Object
 
   private:
     void PeriodicReportTimer(uint32_t subscriptionId);
+    /// ORAN-14: build and deliver one indication for `sub` from `report`,
+    /// honouring the feeder link and buffering. Shared by the submit path and
+    /// the periodic timer so the two cannot diverge.
+    void EmitIndication(const E2Subscription& sub, const E2KpmReport& report);
     void DeliverReport(const E2Indication& indication);
     void DispatchIndication(const E2Indication& indication);
     void DispatchAlignedIndications();
-    void ExecuteRcActionEvent(E2RcAction action);
+    /**
+     * \brief Deferred actuation of an RC action.
+     * \param routedAt simulated instant the action entered ReceiveRcAction --
+     *        carried through the event so the downlink feeder leg
+     *        (rc_action_transport) is measured, not assumed.
+     */
+    void ExecuteRcActionEvent(E2RcAction action, Time routedAt);
     void CheckBufferAge();
 
     uint32_t m_gnbId;
     bool m_isNtn;
     Time m_feederLinkDelay;
     bool m_feederLinkAvailable;
+    /// ORAN-14: the most recent measurement this node holds, for the periodic
+    /// report timer to publish at the subscription's cadence.
+    std::map<uint32_t, E2KpmReport> m_latestReport; //!< keyed by ueId
+    bool m_haveLatestReport{false};
+    /// ORAN-14: whether the periodic timer actually emits.
+    ///
+    /// PeriodicReportTimer looked up its subscription and did nothing but
+    /// re-arm itself, so every xApp's reportingPeriod (100-500 ms) had no
+    /// effect and indications appeared only when a scenario happened to call
+    /// SubmitKpmMeasurement. Defaults FALSE, which is exactly today's
+    /// behaviour: every shipped xApp requests a period, so emitting by default
+    /// would change the indication count of every existing scenario at once.
+    bool m_periodicReporting{false};
+    uint64_t m_periodicIndications{0};
     uint32_t m_maxBufferSize;
     bool m_alignToControlLoop;
     Time m_controlLoopPeriod;
@@ -230,6 +307,7 @@ class OranNtnE2Node : public Object
 
     RcActionCallback m_rcActionCb;
     IndicationCallback m_indicationCb;
+    Ptr<OranNtnLoopLatencyProbe> m_loopProbe; //!< null = instrumentation off
 
     std::deque<E2Indication> m_alignedQueue; //!< Held for the next loop tick
     EventId m_alignedDispatchEvent;
@@ -237,6 +315,7 @@ class OranNtnE2Node : public Object
     uint32_t m_totalReportsSent;
     uint32_t m_totalReportsDropped;
     uint32_t m_totalActionsExecuted;
+    uint64_t m_rcControlsDecoded{0};
 };
 
 // ============================================================================

@@ -164,6 +164,13 @@ OranNtnGymBeamHop::GetObservation()
     std::vector<uint32_t> shape = {m_numBeams * 4};
     auto box = CreateObject<OpenGymBoxContainer<float>>(shape);
 
+    // AI-03: accumulators for the post-action state latched after the loop.
+    double sumLoad = 0.0;
+    double sumSqLoad = 0.0;
+    double sumRate = 0.0;
+    uint32_t activeBeams = 0;
+    uint32_t countedBeams = 0;
+
     for (uint32_t b = 0; b < m_numBeams; b++)
     {
         float demand = 0.0f;
@@ -201,7 +208,43 @@ OranNtnGymBeamHop::GetObservation()
         box->AddValue(load);
         box->AddValue(avgSinr);
         box->AddValue(interference);
+
+        // AI-03: accumulate the post-action state from the same measured
+        // per-beam quantities the observation was built from.
+        sumLoad += load;
+        sumSqLoad += static_cast<double>(load) * load;
+        if (load > 1e-6)
+        {
+            ++activeBeams;
+        }
+        // Shannon rate over the beam's measured SINR, weighted by how much of
+        // the beam is actually in use. This is a rate proxy, not a measured
+        // goodput, and is named as one.
+        sumRate += static_cast<double>(load) *
+                   std::log2(1.0 + std::pow(10.0, static_cast<double>(avgSinr) / 10.0));
+        ++countedBeams;
     }
+
+    // AI-03. GetReward() is built from m_postFairness, m_postThroughput and
+    // m_postEnergyEff, and all three were written ONLY by UpdatePostAction(),
+    // which has no caller anywhere in the tree. They held their constructed 0.0
+    // forever, so the reward was a constant zero and the agent's beam-hopping
+    // action could not change its own return.
+    //
+    // Jain's fairness index over the measured per-beam loads is the standard
+    // measure of how evenly a hopping pattern spreads capacity, which is what
+    // this environment exists to optimise. Energy efficiency is rate per lit
+    // beam: lighting fewer beams for the same delivered rate is the saving.
+    if (countedBeams > 0 && sumSqLoad > 0.0)
+    {
+        m_postFairness = (sumLoad * sumLoad) / (countedBeams * sumSqLoad);
+    }
+    else
+    {
+        m_postFairness = 0.0;
+    }
+    m_postThroughput = sumRate;
+    m_postEnergyEff = (activeBeams > 0) ? (sumRate / activeBeams) : 0.0;
 
     NS_LOG_DEBUG("BeamHop observation: " << m_numBeams << " beams for sat " << m_currentSatId);
     return box;

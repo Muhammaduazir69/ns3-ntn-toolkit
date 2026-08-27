@@ -22,7 +22,17 @@ OranNtnE2Listener::GetTypeId()
     static TypeId tid = TypeId("ns3::oranntn::flexric::OranNtnE2Listener")
                             .SetParent<Object>()
                             .SetGroupName("OranNtn")
-                            .AddConstructor<OranNtnE2Listener>();
+                            .AddConstructor<OranNtnE2Listener>()
+                            .AddTraceSource("Indication",
+                                            "Raw payload of each RIC Indication received",
+                                            MakeTraceSourceAccessor(
+                                                &OranNtnE2Listener::m_indicationTrace),
+                                            "ns3::TracedValueCallback::Void")
+                            .AddTraceSource("ControlRequest",
+                                            "Raw payload of each RIC Control Request received",
+                                            MakeTraceSourceAccessor(
+                                                &OranNtnE2Listener::m_controlTrace),
+                                            "ns3::TracedValueCallback::Void");
     return tid;
 }
 
@@ -137,9 +147,18 @@ OranNtnE2Listener::HandleMessage(ClientSession& cs, const E2Message& msg)
     case E2MessageType::ric_indication:
         ++m_indFwd;
         m_indicationTrace(msg.payload);
+        if (!m_indicationSink.IsNull())
+        {
+            m_indicationSink(msg.payload);
+        }
         break;
     case E2MessageType::ric_control_request:
         ++m_ctrlReq;
+        m_controlTrace(msg.payload);
+        if (!m_controlSink.IsNull())
+        {
+            m_controlSink(msg.payload);
+        }
         if (cs.e2_setup_done)
         {
             SendSimpleResponse(cs, E2MessageType::ric_control_acknowledge);

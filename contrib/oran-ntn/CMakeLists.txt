@@ -7,6 +7,8 @@ set(source_files
     model/oran-ntn-near-rt-ric.cc
     model/oran-ntn-space-ric.cc
     model/oran-ntn-sat-bridge.cc
+    # R2.7 — measured per-stage breakdown of the FULL control loop
+    model/oran-ntn-loop-latency-probe.cc
     # WS-C — digital-twin prediction consumer (closes the twin<->sim loop)
     model/oran-ntn-twin-prediction-consumer.cc
     # T8 — canonical WG3 KPM metric-ID alignment (Roadmap §3 T8)
@@ -48,6 +50,7 @@ set(source_files
     model/oran-ntn-mmwave-beamforming.cc
     model/oran-ntn-channel-model.cc
     model/oran-ntn-ntn-scheduler.cc
+    model/oran-ntn-link-adaptation-tables.cc
     model/oran-ntn-phy-kpm-extractor.cc
     model/oran-ntn-dual-connectivity.cc
     # Phase 3: AI/ML integration via ns3-ai
@@ -92,6 +95,8 @@ set(header_files
     model/oran-ntn-near-rt-ric.h
     model/oran-ntn-space-ric.h
     model/oran-ntn-sat-bridge.h
+    # R2.7 — measured per-stage breakdown of the FULL control loop
+    model/oran-ntn-loop-latency-probe.h
     model/oran-ntn-twin-prediction-consumer.h
     model/oran-ntn-kpm-canonical-ids.h
     # 4.1.1 — FlexRIC field-name parity (Roadmap §4.1.1)
@@ -134,6 +139,7 @@ set(header_files
     model/oran-ntn-mmwave-beamforming.h
     model/oran-ntn-channel-model.h
     model/oran-ntn-ntn-scheduler.h
+    model/oran-ntn-link-adaptation-tables.h
     model/oran-ntn-phy-kpm-extractor.h
     model/oran-ntn-dual-connectivity.h
     # Phase 3: AI/ML integration
@@ -216,6 +222,7 @@ build_lib(
         ${libmmwave}
         ${libns3-ai-ntn}
         ${libntn-traffic}
+        ${libntn-slice}
         ${oran_ntn_extra_libs}
     TEST_SOURCES ${test_sources}
 )

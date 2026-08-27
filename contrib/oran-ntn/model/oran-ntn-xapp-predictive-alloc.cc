@@ -198,7 +198,8 @@ OranNtnXappPredictiveAlloc::GetRequiredSubscription() const
     sub.reportingPeriod = MilliSeconds(100);
     sub.eventTrigger = false; // Periodic reporting
     sub.eventThreshold = 0.0;
-    sub.batchOnVisibility = false;
+    // ORAN-05: left at the default (true) so a feeder outage buffers on board
+    // instead of silently discarding this xApp's telemetry.
     sub.maxBufferAge = Seconds(5);
     sub.useIslRelay = true;
     return sub;
@@ -364,8 +365,20 @@ OranNtnXappPredictiveAlloc::DecisionCycle()
 }
 
 // --------------------------------------------------------------------------
-//  PredictTrafficLoad -- AI or linear fallback
+//  PredictTrafficLoad -- linear extrapolation (AI-10: the AI branch produces
+//  no prediction; see the comment inside)
 // --------------------------------------------------------------------------
+
+void
+OranNtnXappPredictiveAlloc::RecordBeamLoadForTest(uint32_t beamId, double load)
+{
+    auto& h = m_beamHistories[beamId];
+    h.loadHistory.push_back(load);
+    while (h.loadHistory.size() > m_historyWindow && m_historyWindow > 0)
+    {
+        h.loadHistory.pop_front();
+    }
+}
 
 std::vector<double>
 OranNtnXappPredictiveAlloc::PredictTrafficLoad(uint32_t beamId)
@@ -378,18 +391,34 @@ OranNtnXappPredictiveAlloc::PredictTrafficLoad(uint32_t beamId)
         return {};
     }
 
-    // If AI is enabled and gym environment is set, use it
+    // AI-10: this branch produces NO prediction, and now says so.
+    //
+    // It used to read "If AI is enabled and gym environment is set, use it" and
+    // contain a debug log and four comments, one of which was "In production,
+    // this would call: m_gymEnv->Notify(...)". Control fell through to linear
+    // extrapolation unconditionally, so a scenario that set AiEnabled(true) and
+    // attached a gym environment got exactly the same numbers as one that did
+    // neither, while the code read as though inference had run.
+    //
+    // It cannot simply be filled in. OranNtnGymPredictive is an OpenGymEnv: the
+    // learning agent drives it asynchronously across the ns3-ai shared-memory
+    // boundary, and there is no synchronous "give me a prediction now" call for
+    // this method to make. Wiring one is a real piece of work (a blocking
+    // request/response on the gym channel, or an agent-pushed prediction cache
+    // this method reads), not a line to uncomment.
+    //
+    // So the honest thing is to make the fall-through visible rather than
+    // implied, and to let a caller detect it.
     if (m_aiEnabled && m_gymEnv)
     {
-        // Prepare observation vector from history for the gym environment
-        // The gym env handles LSTM inference and returns predictions
-        NS_LOG_DEBUG("PredictiveAlloc: using AI prediction for beam" << beamId);
-
-        // Notify the gym environment with current state
-        // The gym env will run inference and return action (predicted loads)
-        // For now, fall through to linear if gym interaction fails
-        // In production, this would call: m_gymEnv->Notify(beamId, history)
-        // and retrieve the prediction from the gym env's action space
+        ++m_aiFallbackCount;
+        if (!m_aiFallbackWarned)
+        {
+            m_aiFallbackWarned = true;
+            NS_LOG_WARN("PredictiveAlloc: AiEnabled is set and a gym environment is attached, "
+                        "but no AI inference path exists in this method; every prediction is "
+                        "linear extrapolation. See GetAiFallbackCount().");
+        }
     }
 
     // Fallback: use linear extrapolation

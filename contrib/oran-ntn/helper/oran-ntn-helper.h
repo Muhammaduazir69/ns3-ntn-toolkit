@@ -149,7 +149,21 @@ class OranNtnHelper : public Object
                           double measThroughputMbps = -1.0,
                           uint64_t measRxBytes = 0,
                           double measTbler = -1.0,
-                          double measPrbUtil = -1.0);
+                          double measPrbUtil = -1.0,
+                          /// ORAN-03: set true only when \p sinr came off a PHY
+                          /// trace. Defaults FALSE so a caller must claim the
+                          /// measurement; a closed-form candidate-cell SINR
+                          /// injected here is then labelled derived in the KPM
+                          /// output rather than inheriting a measured label.
+                          bool sinrMeasured = false);
+
+    /// AI-07 test seam: the last report InjectKpmReport() built.
+    ///
+    /// The provenance flag is set inside the helper and then handed to an E2
+    /// node, so a test could not see whether a given call labelled its SINR
+    /// measured or derived - which is exactly how the gym example's serving
+    /// report came to claim the wrong one.
+    const E2KpmReport& GetLastInjectedReport() const { return m_lastInjectedReport; }
 
     // ---- Phase 2: mmWave NTN stack setup ----
     //
@@ -249,6 +263,38 @@ class OranNtnHelper : public Object
      */
     void SetHandoverActuator(RcActuatorCallback cb);
 
+    /**
+     * \brief Wire a SLICE PRB actuator (AI-04).
+     *
+     * SLICE_PRB_ALLOCATION and PRB_RESERVATION fell into the default arm of the
+     * dispatcher, which logs "has no actuator in OranNtnHelper; action LOGGED
+     * ONLY, not actuated" and returns false. Every gym environment that emits
+     * those action types therefore had no path to a scheduler under any
+     * configuration - so four of the five advertised RL environments could not
+     * have changed anything even if a scenario had booted them.
+     *
+     * The callback keeps oran-ntn free of a dependency on ntn-slice, the same
+     * way SetHandoverActuator keeps it free of ntn-traffic. A scenario points
+     * this at SliceOrchestratorXapp::StepWithShares, whose per-slice
+     * prbAllocated then moves measurably.
+     *
+     * If left unset the default handler names the missing actuator and reports
+     * failure; it never silently accepts.
+     */
+    void SetSliceActuator(RcActuatorCallback cb);
+
+    /**
+     * \brief Actuate one RC action through the helper's dispatcher.
+     *
+     * This is the same entry point the RIC installs as its RC callback; it is
+     * public so a test can assert what an action type ACTUATES rather than only
+     * that it was routed. AI-04 turned on exactly that distinction: several
+     * action types were routed successfully and actuated nothing.
+     *
+     * \return whether an actuator existed and applied the action.
+     */
+    bool ActuateRcAction(const E2RcAction& action) { return DefaultRcActionHandler(action); }
+
     // ---- Output ----
 
     /**
@@ -297,6 +343,7 @@ class OranNtnHelper : public Object
   private:
     std::string m_outputDir;
     std::map<uint32_t, Ptr<OranNtnE2Node>> m_e2Nodes;
+    E2KpmReport m_lastInjectedReport{}; //!< AI-07
     std::vector<Ptr<OranNtnSpaceRic>> m_spaceRics;
 
     bool DefaultRcActionHandler(E2RcAction action);
@@ -317,6 +364,7 @@ class OranNtnHelper : public Object
     };
     std::map<uint32_t, BeamActuatorState> m_beamActuators;
     RcActuatorCallback m_handoverActuator;
+    RcActuatorCallback m_sliceActuator;
 
     // Action log
     struct ActionLogEntry

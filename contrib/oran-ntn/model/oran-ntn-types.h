@@ -119,9 +119,29 @@ struct E2KpmReport
     // the canonical exporter labels it "derived" (link-budget estimate) or
     // "synthesized" (fabrication suppressed to NaN) rather than "measured".
     // InjectKpmReport() sets these true only when a measured value was supplied.
+    /// ORAN-03: sinr_dB came from a PHY trace, not a link-budget estimate.
+    ///
+    /// The canonical KPM writer used to stamp BOTH SINR metrics
+    /// (CARR.AvgSINR and L1M.RS-SINR.Mean) with provenance=measured
+    /// unconditionally, while throughput and PRB correctly carried a flag. A
+    /// candidate-cell SINR injected closed-form therefore reached the KPM CSV
+    /// labelled as a measurement, which is the one thing the provenance column
+    /// exists to prevent. Defaults false so a caller must claim the
+    /// measurement rather than inherit the claim.
+    bool sinrMeasured = false;
     bool throughputMeasured = false;   //!< throughput_Mbps came from FlowMonitor/RX bytes
     bool prbMeasured = false;          //!< prbUtilization came from the real scheduler
     bool blerMeasured = false;         //!< harqBler came from measured HARQ NACKs
+    /// ORAN-06: true when cqi/mcs came from the FEED, false when this extractor
+    /// derived them from the measured SINR through TS 38.214's tables. Both are
+    /// legitimate; conflating them is not, and before this the fields were
+    /// simply always 0 while carrying the standards' names.
+    bool cqiMeasured = false;
+    bool mcsMeasured = false;
+    /// ORAN-06: false means no DVB-S2 MODCOD in ETSI EN 302 307-1 Table 13
+    /// closes at this Es/N0 and `modCod` is the weakest entry reported for
+    /// reference, NOT a scheme the link can actually run.
+    bool modCodCloses = false;
 };
 
 // ============================================================================
@@ -169,19 +189,59 @@ enum class E2RcActionType : uint8_t
  */
 struct E2RcAction
 {
-    double timestamp;
-    uint32_t xappId;               //!< xApp that issued the action
+    // ORAN-08 follow-on: every scalar here now has a default initializer.
+    //
+    // They did not, and `E2RcAction a;` therefore left them INDETERMINATE. That
+    // was harmless only for as long as nothing read a field the caller had not
+    // set. Widening conflict detection to index by targetUeId read exactly such
+    // a field, and a long-standing test that built an action with `E2RcAction
+    // action3;` and set only gnb/beam began failing - its targetUeId picked up
+    // 42 from the stack slot of the action built just before it, so a
+    // deliberately NON-conflicting action collided with the earlier one.
+    //
+    // The test was reading uninitialized memory all along; it passed by luck,
+    // and the luck changed when adding fields to this struct moved the stack
+    // layout. Defaulting the members fixes the class of bug rather than the one
+    // instance, and makes `E2RcAction a;` mean what every call site assumed.
+    double timestamp{0.0};
+    uint32_t xappId{0};            //!< xApp that issued the action
     std::string xappName;          //!< Human-readable xApp name
-    E2RcActionType actionType;
-    uint32_t targetGnbId;          //!< Target gNB/satellite
-    uint32_t targetUeId;           //!< Target UE (0 = cell-wide)
-    uint32_t targetBeamId;         //!< Target beam
-    uint8_t targetSliceId;         //!< Target slice
-    double confidence;             //!< Agent confidence (0-1)
-    double parameter1;             //!< Action-specific parameter
-    double parameter2;             //!< Action-specific parameter
-    bool executed;                 //!< Whether action was executed
+    E2RcActionType actionType{};
+    uint32_t targetGnbId{0};       //!< Target gNB/satellite
+    uint32_t targetUeId{0};        //!< Target UE (0 = cell-wide)
+    uint32_t targetBeamId{0};      //!< Target beam
+    uint8_t targetSliceId{0};      //!< Target slice
+    double confidence{0.0};        //!< Agent confidence (0-1)
+    double parameter1{0.0};        //!< Action-specific parameter
+    double parameter2{0.0};        //!< Action-specific parameter
+    bool executed{false};          //!< Whether action was executed
     std::string rejectionReason;   //!< Why rejected (if not executed)
+
+    /// ORAN-10: the E2SM-RC ControlMessage bytes this action was carried as.
+    ///
+    /// The simulated control path used to hand this raw C++ struct straight
+    /// from the RIC to the E2 node, so the service models were a parallel
+    /// encode-only universe: nothing in the module ever DECODED an RC control
+    /// into an action, and the Style-3 semantics were untested against any
+    /// consumer. The termination now encodes into this field and the E2 node
+    /// decodes it before actuating, which makes the codec load-bearing - a
+    /// round-trip failure becomes a simulation failure instead of going
+    /// unnoticed.
+    ///
+    /// Empty when the action type has no Style-3 mapping (only HANDOVER_TRIGGER
+    /// and HANDOVER_CANCEL do), in which case the struct is delivered directly
+    /// and that is stated rather than implied.
+    std::vector<uint8_t> smControlMessage;
+
+    /// AI-06: the beamforming weights this action carries, interleaved
+    /// real/imaginary, shape (num_tx, num_layers) in tx-major order.
+    ///
+    /// The mMIMO precoder xApp composed hybrid weights and then dropped them:
+    /// the action it emitted carried only a codebook index, so final_weights
+    /// died at the xApp boundary and no CSI influenced any transmitted
+    /// waveform anywhere in the toolkit. Carrying them here gives them a
+    /// destination that can be inspected and tested.
+    std::vector<float> beamformingWeights;
 };
 
 // ============================================================================

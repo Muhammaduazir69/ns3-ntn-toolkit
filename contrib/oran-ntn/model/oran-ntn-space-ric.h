@@ -121,6 +121,11 @@ class OranNtnSpaceRic : public Object
      */
     void SetLocalE2Node(Ptr<OranNtnE2Node> e2Node);
 
+    /// ORAN-02: the co-located E2 node, or nullptr when the space RIC was never
+    /// paired with one (in which case every autonomous decision is buffered
+    /// rather than actuated). Exposed so a test can assert the pairing.
+    Ptr<OranNtnE2Node> GetLocalE2Node() const { return m_localE2Node; }
+
     void SetComputeBudget(double mflops);       //!< OBP compute limit
     void SetMemoryBudget(double megabytes);     //!< OBP memory limit
 
@@ -192,6 +197,12 @@ class OranNtnSpaceRic : public Object
      * \brief Add ISL neighbor with direct pointer (legacy mode)
      */
     void AddIslNeighbor(Ptr<OranNtnSpaceRic> neighbor);
+    /// ORAN-16: how many ISL neighbours this RIC actually has.
+    ///
+    /// The helper computed neighbour indices and stored none of them, so every
+    /// shipped scenario ran a shell of isolated on-board RICs. Nothing outside
+    /// could see that, because the list was private and no accessor existed.
+    uint32_t GetIslNeighborCount() const { return static_cast<uint32_t>(m_islNeighbors.size()); }
 
     /**
      * \brief Receive ISL packet (callback for real ISL devices)

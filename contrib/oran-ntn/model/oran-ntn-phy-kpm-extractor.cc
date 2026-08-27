@@ -13,6 +13,8 @@
 
 #include "oran-ntn-phy-kpm-extractor.h"
 
+#include "oran-ntn-link-adaptation-tables.h"
+
 #include "oran-ntn-sat-bridge.h"
 
 #include <ns3/double.h>
@@ -193,6 +195,24 @@ OranNtnPhyKpmExtractor::RegisterRnti(uint16_t rnti, uint32_t ueId, uint32_t serv
 }
 
 void
+OranNtnPhyKpmExtractor::SetRadioGeometry(double bandwidthHz, double noiseFigureDb)
+{
+    NS_ABORT_MSG_IF(bandwidthHz <= 0.0, "bandwidth must be positive");
+    m_bandwidthHz = bandwidthHz;
+    m_noiseFigureDb = noiseFigureDb;
+}
+
+double
+OranNtnPhyKpmExtractor::GetNoiseFloorDbm() const
+{
+    // kTB in dBm: -174 dBm/Hz at 290 K, plus the bandwidth, plus the receiver
+    // noise figure. ORAN-06: this used to be the literal -87.0, which is this
+    // expression evaluated at 100 MHz and never re-evaluated for the carrier
+    // the scenario actually runs.
+    return -174.0 + 10.0 * std::log10(m_bandwidthHz) + m_noiseFigureDb;
+}
+
+void
 OranNtnPhyKpmExtractor::IngestMeasuredSample(uint16_t rnti, double sinrDb,
                                              uint64_t cumulativeRxBytes, double tbler,
                                              uint8_t cqi)
@@ -214,6 +234,7 @@ OranNtnPhyKpmExtractor::IngestMeasuredSample(uint16_t rnti, double sinrDb,
 
     // Measured SINR (dB) straight from the real PHY -- no closed-form estimate.
     state.latestSinr_dB = sinrDb;
+    state.haveSinr = true; // ORAN-03: a real sample has now been ingested
     state.sinrHistory.push_back({now, sinrDb});
     while (state.sinrHistory.size() > m_maxSinrHistory)
     {
@@ -282,9 +303,31 @@ OranNtnPhyKpmExtractor::GetRealKpmReport(uint32_t ueId) const
 
         report.gnbId = s.servingSatId;
         report.sinr_dB = s.latestSinr_dB;
-        report.cqi = s.latestCqi;
-        report.mcs = s.latestMcs;
-        report.wbCqi = static_cast<double>(s.latestCqi);
+        // ORAN-03: this value came off the radio through IngestMeasuredSample,
+        // so it may legitimately be labelled measured. Reports built any other
+        // way leave the flag false and are labelled derived.
+        report.sinrMeasured = s.haveSinr;
+        // ORAN-06: CQI and MCS are now DERIVED from the measured SINR through
+        // the published tables when the feed does not carry them.
+        //
+        // report.cqi used to be s.latestCqi, written only from IngestMeasuredSample's
+        // optional fifth argument, which the sole production caller does not pass -
+        // so every published CQI was 0. report.mcs had no setter anywhere and was
+        // always 0 too. A consumer reading "CQI 0" got the table's own code for
+        // "out of range" on a link that was often at 20 dB SINR.
+        const double achievableSe =
+            oran::OranNtnLinkAdaptationTables::SpectralEfficiencyFromSinrDb(s.latestSinr_dB);
+        report.cqi = (s.latestCqi != 0)
+                         ? s.latestCqi
+                         : oran::OranNtnLinkAdaptationTables::CqiFromSpectralEfficiency(
+                               achievableSe);
+        report.cqiMeasured = (s.latestCqi != 0);
+        report.mcs = (s.latestMcs != 0)
+                         ? s.latestMcs
+                         : oran::OranNtnLinkAdaptationTables::McsFromSpectralEfficiency(
+                               achievableSe);
+        report.mcsMeasured = (s.latestMcs != 0);
+        report.wbCqi = static_cast<double>(report.cqi);
 
         // Throughput from measured RX-byte history (fed via IngestMeasuredSample).
         report.throughput_Mbps = GetAvgThroughput(ueId, 1.0);
@@ -295,10 +338,14 @@ OranNtnPhyKpmExtractor::GetRealKpmReport(uint32_t ueId) const
         report.blerMeasured = s.haveTbler;
         report.harqRetx = 0;
 
-        // Approximate RSRP from SINR (assumes noise-limited)
-        // RSRP ~ SINR + thermal noise floor
-        // Noise floor for 100 MHz BW: -174 + 10*log10(1e8) + NF ~ -174 + 80 + 7 = -87 dBm
-        double noisePower_dBm = -87.0;
+        // RSRP from SINR under a noise-limited assumption, against the noise
+        // floor of the CONFIGURED carrier.
+        //
+        // ORAN-06: this was `noisePower_dBm = -87.0`, a literal standing for
+        // 100 MHz plus a 7 dB noise figure, while the shipped caller runs an FR1
+        // numerology-1 carrier. At 20 MHz the floor is -94 dBm, so every
+        // published RSRP was 7 dB optimistic. See SetRadioGeometry.
+        const double noisePower_dBm = GetNoiseFloorDbm();
         report.rsrp_dBm = s.latestSinr_dB + noisePower_dBm;
         // Bounded RSRQ from SINR: S/(S+I+N) per RE, clamped to 3GPP [-19.5,-3].
         {
@@ -307,19 +354,30 @@ OranNtnPhyKpmExtractor::GetRealKpmReport(uint32_t ueId) const
                                 10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
         }
 
-        // Spectral efficiency from MCS (approximate Shannon bound)
-        // SE ~ log2(1 + 10^(SINR/10))
-        double sinrLinear = std::pow(10.0, s.latestSinr_dB / 10.0);
-        report.spectralEfficiency = std::log2(1.0 + sinrLinear);
+        // Spectral efficiency: Shannon, capped at what NR can actually carry.
+        //
+        // ORAN-06: this was uncapped log2(1+SINR), so a 40 dB link published
+        // 13.3 bit/s/Hz. TS 38.214 Table 5.1.3.1-2 tops out at 7.4063 (MCS 27,
+        // 256QAM, R = 948/1024); no NR scheme delivers more, whatever the SINR.
+        report.spectralEfficiency = achievableSe;
 
-        // ModCod index: map spectral efficiency to DVB-S2X index (0-27 typical range)
-        report.modCod = static_cast<uint8_t>(
-            std::min(27.0, std::max(0.0, report.spectralEfficiency * 5.4)));
+        // DVB-S2 MODCOD by required Es/N0, which is what an ACM loop does.
+        //
+        // ORAN-06: this was min(27, SE * 5.4) - a straight line with no table
+        // behind it, published in a field documented as a "DVB-S2X ModCod
+        // index". It now indexes ETSI EN 302 307-1 Table 13 and reports whether
+        // the link closes at all, instead of silently returning the weakest
+        // scheme as though it did.
+        bool linkCloses = false;
+        const oran::DvbS2ModCod mc = oran::OranNtnLinkAdaptationTables::ModCodFromEsN0Db(
+            s.latestSinr_dB, m_acmMarginDb, linkCloses);
+        report.modCod = mc.index;
+        report.modCodCloses = linkCloses;
 
-        // C/N0 from SINR and bandwidth
-        // C/N0 = SINR + 10*log10(BW)
-        double bwHz = 1.0e8; // 100 MHz default
-        report.cno_dBHz = s.latestSinr_dB + 10.0 * std::log10(bwHz);
+        // C/N0 from SINR and the CONFIGURED bandwidth. ORAN-06: this carried a
+        // second, independent 100 MHz literal, so RSRP and C/N0 could describe
+        // two different radios on the same link.
+        report.cno_dBHz = s.latestSinr_dB + 10.0 * std::log10(m_bandwidthHz);
 
         NS_LOG_DEBUG("PHY KPM for UE " << ueId << ": SINR=" << s.latestSinr_dB
                      << " dB, CQI=" << (uint32_t)s.latestCqi

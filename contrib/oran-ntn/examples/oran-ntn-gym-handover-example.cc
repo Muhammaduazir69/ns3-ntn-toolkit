@@ -55,6 +55,13 @@ using ns3::ntncon::WalkerConstellation;
 
 NS_LOG_COMPONENT_DEFINE("OranNtnGymHandoverExample");
 
+namespace
+{
+// File scope so the RC actuator can be a plain function pointer (ns-3 callbacks
+// take no captures). Set immediately after rs.Build().
+NtnRealStackHelper* g_rs = nullptr;
+} // namespace
+
 int
 main(int argc, char* argv[])
 {
@@ -105,8 +112,12 @@ main(int argc, char* argv[])
     auto ueModels = ueMobility.Install(ueNodes, profile, subLat - 0.03, subLat + 0.03,
                                        subLon - 0.03, subLon + 0.03);
 
-    // ---- Real NR-NTN access link on the serving satellite ----
-    NodeContainer servingGnb(satNodes.Get(0));
+    // ---- Real NR-NTN access link ----
+    // AI-01 FIX (2026-08-24): every satellite is a real gNB, not just the
+    // serving one. Previously rs.Build() received a single node, so the RL
+    // action could travel xApp -> RIC -> E2 -> RC and still have nowhere to
+    // actuate: there was no second cell to hand over to. The candidates were
+    // E2 nodes carrying injected KPM but had no radio.
     NtnRealStackHelper rs;
     rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
     rs.SetNumerology(1);
@@ -114,7 +125,9 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("oran-ntn-gym-handover");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
-    rs.Build(servingGnb, ueNodes);
+    rs.SetHandover(true, /*hysteresisDb=*/3.0, MilliSeconds(256));
+    rs.Build(satNodes, ueNodes);
+    g_rs = &rs;
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(1.0),
                       Seconds(duration - 0.5));
 
@@ -132,6 +145,15 @@ main(int argc, char* argv[])
         DynamicCast<OranNtnXappHoPredict>(nearRtRic->GetXappByName("ho-predict"));
     NS_ABORT_MSG_IF(!hoPredict, "ho-predict xApp not found");
 
+    // ORAN-01 / AI-01 FIX: give the RC path a real actuator. Without this the
+    // helper logs "action LOGGED ONLY -- no handover actuator wired" and reports
+    // actuated=false, so the whole RL loop terminated in a log line.
+    // SetHandoverActuator had exactly one caller in the tree, inside a unit
+    // test, and none in any shipped scenario.
+    helper->SetHandoverActuator(MakeCallback(
+        +[](E2RcAction action) -> bool { return g_rs->TriggerHandover(action.targetUeId,
+                                                                            action.targetGnbId); }));
+
     // ---- The gym env, wired to the measured xApp (A1 FIX) ----
     Ptr<OranNtnGymHandover> env = CreateObject<OranNtnGymHandover>();
     env->SetXapp(hoPredict);
@@ -143,6 +165,11 @@ main(int argc, char* argv[])
     //      measured accessors each KPM period (exactly the path its docstring
     //      describes), so GetRealKpmReport() is a genuine measured producer. ----
     Ptr<OranNtnPhyKpmExtractor> kpmExtractor = CreateObject<OranNtnPhyKpmExtractor>();
+    // ORAN-06: tell the extractor which carrier it is reporting on. Its RSRP and
+    // C/N0 were each derived against their OWN hardcoded 100 MHz literal while
+    // this scenario runs an FR1 carrier, so both were wrong and could disagree.
+    // Take the value from the helper rather than restating it, or the two drift.
+    kpmExtractor->SetRadioGeometry(rs.GetBandwidthHz(), 7.0);
     std::set<uint32_t> registeredRnti;
 
     // ---- KPM feed: MEASURED PHY SINR + live-ephemeris enrichment ----
@@ -185,8 +212,17 @@ main(int argc, char* argv[])
                 thp = (rxBytes - b->second) * 8.0 / (kpmIntervalS * 1e6);
             }
             lastRx[ue] = rxBytes;
+            // AI-07: the SERVING SINR is measured, so say so.
+            //
+            // This call passed ten arguments, leaving measPrbUtil and
+            // sinrMeasured at their defaults, so the serving report was
+            // labelled DERIVED even though its SINR came straight off
+            // rs.GetUeRecentSinrDb(). The candidate reports below are correctly
+            // left unflagged because theirs is a slant-range extrapolation; the
+            // one report that had a right to the measured label was the one not
+            // claiming it.
             helper->InjectKpmReport(1, ue, sinr, sinr - 95.0, tte, elev, doppler, thp, rxBytes,
-                                    tbler);
+                                    tbler, /*measPrbUtil=*/-1.0, /*sinrMeasured=*/true);
             // Publish the UE's TRUE serving cell (E2 node 1 in this scenario) so
             // the gym reads the serving baseline by identity, not by gnbId map
             // order. In a full RAN this is rs.GetUeServingCellId(ue).
@@ -206,7 +242,15 @@ main(int argc, char* argv[])
             }
 
             // Candidate satellites: real ephemeris elevation + Friis-ratio SINR
-            // prediction off the measured serving baseline (flagged prediction).
+            // prediction off the measured serving baseline.
+            //
+            // AI-07: this is a free-space slant-range extrapolation. It carries
+            // no antenna pattern, no per-satellite beam gain, no atmospheric
+            // term and no interference, so it cannot reproduce TR 38.821
+            // candidate-cell behaviour, and it is the feature the example's
+            // action rule keys on. It stays unflagged (sinrMeasured defaults
+            // false) so downstream consumers see it as derived, which is the
+            // honest label for what it is.
             for (uint32_t c = 1; c < numSats; ++c)
             {
                 const Vector cp = satMobs[c]->GetPosition();
@@ -264,11 +308,23 @@ main(int argc, char* argv[])
     }
     else
     {
-        // Python RL path: hand the env to the ns3-ai interface. Blocks until a
-        // Python Ns3Env peer connects.
+        // Python RL path: hand the env to the ns3-ai interface.
+        //
+        // AI-02 FIX (2026-08-24): registering the interface is not enough. The
+        // agent is only stepped when someone calls Notify(), and there was no
+        // Notify() call site anywhere in the tree, so --gym=1 opened a peer that
+        // then sat idle for the whole run: the observation was never sent, no
+        // action was ever received, and the example still exited reporting
+        // success. Step it on the same control period the in-process branch
+        // uses, and close the episode at the end so the peer does not hang.
         Ptr<OpenGymInterface> gymIface = OpenGymInterface::Get();
         env->SetOpenGymInterface(gymIface);
-        std::printf("# --gym=1: waiting for a Python ns3-ai RL agent to connect...\n");
+        rs.RegisterPeriodicCallback(Seconds(1.0), [&](Time) {
+            env->SetCurrentUe(0);
+            env->Notify(); // observation -> Python, action -> ExecuteActions
+        });
+        Simulator::Schedule(Seconds(duration - 0.01), [&]() { env->NotifySimulationEnd(); });
+        std::printf("# --gym=1: stepping a Python ns3-ai RL agent every 1.0 s\n");
     }
 
     std::printf("# oran-ntn-gym-handover-example — OranNtnGymHandover on the MEASURED radio\n"
@@ -284,8 +340,18 @@ main(int argc, char* argv[])
         OpenGymInterface::Get()->NotifySimulationEnd();
     }
 
+    // AI-07: name WHICH feature is measured.
+    //
+    // This line read "non-zero proves the env read the MEASURED plane", which is
+    // true of feature 0 and of nothing else. Feature 5, bestCandSinr, is a
+    // free-space slant-range extrapolation, and it is the feature the action
+    // rule at `chosen = (bestCandSinr > servingSinr + 3.0)` actually keys on.
+    // A statement true of one feature, printed as a claim about the whole
+    // observation, is how a derived number acquires a measured reputation.
     std::printf("# === summary === gym steps=%u  mean|servingSINR| from env obs=%.2f dB "
-                "(non-zero proves the env read the MEASURED plane, not defaults)\n",
+                "(feature 0 is MEASURED, off RxPacketTraceUe; feature 5 "
+                "bestCandSinr is a free-space slant-range extrapolation and is "
+                "what the action rule keys on)\n",
                 g_steps, g_steps ? g_obsSum / g_steps : 0.0);
     Simulator::Destroy();
     return 0;

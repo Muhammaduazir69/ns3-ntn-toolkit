@@ -111,7 +111,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-e2e-full-stack");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(duration - 0.5));
@@ -189,19 +192,82 @@ main(int argc, char* argv[])
     rs.WriteHealthReport();
     kpiLog.close();
 
-    // ---- (b) slice: per-UE measured delivery + real geometric latency ----
-    const Vector spEnd = servSat->GetPosition();
+    // ---- (b) slice: the MEASURED one-way-delay distribution ----
+    //
+    // WF-05. This used to be
+    //     latencyMs = slant/c*1e3 + 5.0;                 // geometry + a magic 5 ms
+    //     for (p = 0; p < rxBytes / 1400; ++p) RecordPacket(..., latencyMs, true);
+    // and the summary then called the result "measured geometry". Two defects
+    // in three lines. The latency was a closed form, identical for every packet
+    // of a UE, so the monitor's p99 was a percentile over N copies of one
+    // number and no percentile SLA could ever breach. And rxBytes/1400 is the
+    // packet estimate the helper documents as wrong for any non-1400 B packet -
+    // this example runs MixedBouquet, whose mMTC flows are 128 B and URLLC 256 B,
+    // so the count was off by up to a factor of ten for two of the three slices.
+    //
+    // Both have real replacements that already existed and were not called:
+    // GetSliceDelayHistogram() returns the pooled measured OWD distribution in
+    // 1 ms bins, and GetUeRxPackets() counts delivered packets correctly for any
+    // size. Replaying the histogram gives the monitor a distribution with actual
+    // spread, so a percentile bound can be breached by a tail rather than only
+    // by the mean.
+    const uint8_t sliceQi[3] = {9, 82, 9}; // eMBB / URLLC / mMTC 5QIs in this run
+    uint64_t replayed = 0;
+    for (uint32_t slice = 0; slice < 3; ++slice)
+    {
+        const auto hist = rs.GetSliceDelayHistogram(sliceQi[slice]);
+        for (const auto& [delayMsBin, count] : hist)
+        {
+            for (uint64_t p = 0; p < count; ++p)
+            {
+                sliceMon.RecordPacket(profiles[slice].snssai,
+                                      static_cast<double>(delayMsBin), true);
+                ++replayed;
+            }
+        }
+    }
+    // Losses are measured too, so the reliability verdict is not asserted.
+    uint64_t measuredLost = 0;
     for (uint32_t u = 0; u < numUes; ++u)
     {
-        uint32_t slice = u % 3;
-        uint64_t rxBytes = rs.GetUeRxBytes(u);
-        const Vector up = ueModels[u]->GetPosition();
-        double slantM = ntngeo::SlantRangeM(up, spEnd);
-        double latencyMs = slantM / 299792458.0 * 1e3 + 5.0;
-        for (uint64_t p = 0; p < rxBytes / 1400; ++p)
+        measuredLost += rs.GetUeLostPackets(u);
+    }
+    for (uint64_t p = 0; p < measuredLost; ++p)
+    {
+        sliceMon.RecordPacket(profiles[0].snssai, 0.0, false);
+    }
+    // Report the SPREAD, because its absence was the defect. A distribution
+    // stamped with one value has zero range, and a p99 over it equals the mean
+    // by construction - which is how a percentile SLA became unbreachable.
+    {
+        uint32_t lo = 0xFFFFFFFF;
+        uint32_t hi = 0;
+        for (uint32_t slice = 0; slice < 3; ++slice)
         {
-            sliceMon.RecordPacket(profiles[slice].snssai, latencyMs, true);
+            for (const auto& [bin, count] : rs.GetSliceDelayHistogram(sliceQi[slice]))
+            {
+                if (count == 0)
+                {
+                    continue;
+                }
+                lo = std::min(lo, bin);
+                hi = std::max(hi, bin);
+            }
         }
+        if (replayed > 0)
+        {
+            std::cout << "  [slice] replayed " << replayed
+                      << " MEASURED OWD samples spanning " << lo << " to " << hi
+                      << " ms (a closed-form stamp would span 0 ms, which is why the old p99 "
+                         "could never breach)\n";
+        }
+    }
+
+    if (replayed == 0)
+    {
+        // Say so rather than reporting an SLA verdict over an empty sample.
+        std::cout << "  NOTE: no measured OWD samples for these 5QIs; the slice SLA "
+                     "verdict below is over an empty distribution and means nothing\n";
     }
     auto breaches = sliceMon.EvaluateAll();
     helper->WriteAllMetrics(nearRtRic);
@@ -227,7 +293,7 @@ main(int argc, char* argv[])
               << "  shared cell measured throughput:  " << rs.GetRxThroughputMbps() << " Mbps\n"
               << "  [RIC]           xApp actions on measured KPM: " << totalXappActions
               << " (E2 nodes " << m.totalE2Nodes << ")\n"
-              << "  [slice]         SLA latency-breaches on measured geometry: " << latencyBreaches
+              << "  [slice]         SLA latency-breaches on the MEASURED OWD distribution: " << latencyBreaches
               << "/3\n"
               << "  [observability] measured-KPI rows logged: " << outputDir
               << "/measured_kpi_log.csv\n"

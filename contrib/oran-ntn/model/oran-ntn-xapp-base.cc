@@ -179,7 +179,8 @@ OranNtnXappBase::Stop()
 
     NS_LOG_INFO("xApp " << m_xappName << " stopped. Metrics: "
                 << m_metrics.totalDecisions << " decisions, "
-                << m_metrics.successfulActions << " successful actions");
+                << m_metrics.successfulActions << " routed actions, "
+                << m_metrics.actuatedActions << " actuated");
 }
 
 void
@@ -365,6 +366,59 @@ OranNtnXappBase::GetApplicablePolicies() const
 }
 
 bool
+OranNtnXappBase::CheckSlicePolicyCompliance(const E2RcAction& action,
+                                            const std::vector<A1NtnPolicy>& policies) const
+{
+    // ORAN-07. A1 slice policies carry the TS 22.261 SLA the slice was admitted
+    // under: param1 = minimum throughput (Mbit/s), param2 = maximum latency
+    // (ms), param3 = reliability target. A PRB-allocation action that starves
+    // the slice cannot honour any of them, so the check that is both meaningful
+    // and decidable from the action alone is the allocation itself.
+    //
+    // Action semantics (see the slice-manager xApp): parameter1 = target PRB
+    // share in [0,1] for the slice named by action.targetSliceId.
+    const double requestedShare = action.parameter1;
+    const std::string scope = "slice:" + std::to_string(static_cast<int>(action.targetSliceId));
+
+    for (const auto& policy : policies)
+    {
+        if (policy.type != A1PolicyType::SLICE_SLA || !policy.active)
+        {
+            continue;
+        }
+        // Match the policy scoped to this slice; a global slice policy applies
+        // to all of them.
+        if (policy.scope != scope && policy.scope != "global")
+        {
+            continue;
+        }
+        // A slice with a positive minimum throughput cannot meet it on zero
+        // resources. This is deliberately the weakest defensible test: turning
+        // a Mbit/s floor into a PRB count needs the spectral efficiency the
+        // action does not carry, and inventing one here would be a fabricated
+        // number in an enforcement path.
+        if (policy.param1 > 0.0 && requestedShare <= 0.0)
+        {
+            NS_LOG_INFO("xApp " << m_xappName << ": SLICE_PRB_ALLOCATION rejected -- slice "
+                        << static_cast<int>(action.targetSliceId)
+                        << " has an A1 SLA requiring " << policy.param1
+                        << " Mbit/s but the action allocates no resources (policy "
+                        << policy.policyId << ")");
+            return false;
+        }
+        // A share outside [0,1] is not an allocation at all.
+        if (requestedShare < 0.0 || requestedShare > 1.0)
+        {
+            NS_LOG_INFO("xApp " << m_xappName << ": SLICE_PRB_ALLOCATION rejected -- share "
+                        << requestedShare << " is outside [0,1] (policy " << policy.policyId
+                        << ")");
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
 OranNtnXappBase::CheckPolicyCompliance(const E2RcAction& action) const
 {
     if (!m_ric)
@@ -375,7 +429,23 @@ OranNtnXappBase::CheckPolicyCompliance(const E2RcAction& action) const
     auto a1Adapter = m_ric->GetA1Adapter();
     auto policies = a1Adapter->GetActivePolicies();
 
-    // Only HANDOVER_TRIGGER actions are governed by HO_THRESHOLD policies here.
+    // ORAN-07. This used to be a bare early return: every action that was not a
+    // HANDOVER_TRIGGER was approved unconditionally, so of the eleven
+    // A1PolicyType values only HO_THRESHOLD was ever evaluated. Slice SLA
+    // policies - which the helper generates for every slice through
+    // GenerateSlicePolicies - governed nothing, and no action could ever violate
+    // them, which is why the violation counter for those types was structurally
+    // zero rather than merely low.
+    //
+    // A SLICE_PRB_ALLOCATION action is now checked against the SLICE_SLA policy
+    // scoped to the slice it targets. The other action types still have no
+    // governing policy semantics defined; they are approved, but that is stated
+    // here rather than hidden behind an early return, so the next person can see
+    // what is and is not enforced.
+    if (action.actionType == E2RcActionType::SLICE_PRB_ALLOCATION)
+    {
+        return CheckSlicePolicyCompliance(action, policies);
+    }
     if (action.actionType != E2RcActionType::HANDOVER_TRIGGER)
     {
         return true;
@@ -466,6 +536,10 @@ OranNtnXappBase::SubmitAction(const E2RcAction& action)
 
     if (success)
     {
+        // ORAN-13: this counts ROUTING acceptance, which is what
+        // ProcessXappAction returns. Actuation is counted separately through
+        // RecordActuation, because the two genuinely differ whenever no
+        // actuator is wired for an action type.
         m_metrics.successfulActions++;
     }
     else

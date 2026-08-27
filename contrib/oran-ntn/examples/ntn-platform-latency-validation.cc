@@ -14,6 +14,21 @@
 // round trip (2x measured OWD) must land in the Table-3 band:
 //   UAV ~1 ms | HAP ~1-2 ms | LEO 30-50 ms | MEO ~150 ms | GEO ~600 ms
 //
+// ORAN-12, scope stated so the result is not read for more than it is. What
+// this validates is the PROPAGATION-dominated component of platform access
+// latency, end to end through a real IP stack: the packets are real, the
+// timestamps are in-band, and the acceptance bands are Table 3's published
+// figures rather than the configured delay played back. Measured LEO lands at
+// 26.7 ms inside a [20, 60] band whose width the configured 4 x slant/c does
+// not determine, so the check can fail.
+//
+// What it does NOT include is a radio: there is no NetDevice with a PHY, no
+// MAC, no HARQ and no scheduler on this path, so queueing, retransmission and
+// grant-timing latency are absent by construction. A platform whose Table-3
+// figure was dominated by scheduling rather than by geometry would pass here
+// while being wrong. That is a limit of the experiment, not of the numbers it
+// reports.
+//
 // Quick test: (no arguments; runs all five classes in one process)
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
@@ -111,16 +126,36 @@ main(int argc, char* argv[])
         app->SetStartTime(Seconds(0.5));
         app->SetStopTime(Seconds(simSeconds - 0.5));
 
+        // CVC-16: enforce the ENDURANCE envelope, not only the latency one.
+        //
+        // The manuscript says "the same scenarios enforce the endurance
+        // envelopes (an untethered UAV scenario past thirty minutes fails)".
+        // NtnPlatformSpec::ScheduleEnduranceEnd was called from exactly one
+        // place in the tree, a unit test, and this scenario - the one that
+        // paragraph is about - never called it. The envelope was enforced
+        // nowhere a reader could run.
+        bool enduranceExhausted = false;
+        NtnPlatformSpec::ScheduleEnduranceEnd(c.cls, [&enduranceExhausted, &spec]() {
+            enduranceExhausted = true;
+            std::printf("#   %s endurance (%.0f min) exhausted: the platform cannot "
+                        "sustain this mission.\n",
+                        spec.name.c_str(), spec.endurance.GetMinutes());
+        });
+
         Simulator::Stop(Seconds(simSeconds));
         Simulator::Run();
 
         const double owdMs = sink->GetMeanDelayMs();
         const double rttMs = 2.0 * owdMs;
-        const bool ok = (rttMs >= c.rttMinMs && rttMs <= c.rttMaxMs);
+        // CVC-16: a run that outlives its platform's endurance FAILS, which is
+        // what "enforce" has to mean if the word is to carry any weight.
+        const bool withinEndurance = !enduranceExhausted;
+        const bool ok = (rttMs >= c.rttMinMs && rttMs <= c.rttMaxMs) && withinEndurance;
         allOk = allOk && ok && sink->GetRxPackets() > 100;
-        std::printf("# %-18s %10.1f %12.1f %12.2f  [%5.0f,%5.0f] %6s\n",
+        std::printf("# %-18s %10.1f %12.1f %12.2f  [%5.0f,%5.0f] %6s%s\n",
                     spec.name.c_str(), c.altM / 1e3, slantM / 1e3, rttMs, c.rttMinMs,
-                    c.rttMaxMs, ok ? "PASS" : "FAIL");
+                    c.rttMaxMs, ok ? "PASS" : "FAIL",
+                    enduranceExhausted ? "  (endurance exceeded)" : "");
         Simulator::Destroy();
         ++port;
     }

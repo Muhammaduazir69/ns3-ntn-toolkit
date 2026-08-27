@@ -18,6 +18,70 @@ namespace ns3
 {
 
 NS_LOG_COMPONENT_DEFINE("OranNtnConflictManager");
+
+// ORAN-08: hoisted above its first use so the secondary index keys can
+// classify by resource family.
+enum class ResourceFamily : uint8_t
+{
+    PRB,
+    BEAM,
+    POWER,
+    HANDOVER,
+    TIMING,
+    MCS,
+    THZ,
+    SLICE,
+    AI_ML,
+    OTHER,
+};
+
+ResourceFamily
+FamilyOf(E2RcActionType t)
+{
+    switch (t)
+    {
+    case E2RcActionType::SLICE_PRB_ALLOCATION:
+    case E2RcActionType::PRB_RESERVATION:
+        return ResourceFamily::PRB;
+    case E2RcActionType::BEAM_SWITCH:
+    case E2RcActionType::BEAM_HOP_SCHEDULE:
+    case E2RcActionType::BEAM_SHUTDOWN:
+    case E2RcActionType::INTERFERENCE_NULLING:
+        return ResourceFamily::BEAM;
+    case E2RcActionType::TX_POWER_CONTROL:
+    case E2RcActionType::ENERGY_PROFILE_UPDATE:
+    case E2RcActionType::COMPUTE_THROTTLE:
+    case E2RcActionType::ACTION_THZ_POWER_BACKOFF:
+        return ResourceFamily::POWER;
+    case E2RcActionType::HANDOVER_TRIGGER:
+    case E2RcActionType::HANDOVER_CANCEL:
+    case E2RcActionType::DC_SETUP:
+    case E2RcActionType::DC_TEARDOWN:
+    case E2RcActionType::BEARER_SPLIT:
+        return ResourceFamily::HANDOVER;
+    case E2RcActionType::TIMING_ADVANCE_UPDATE:
+    case E2RcActionType::DOPPLER_COMP_UPDATE:
+        return ResourceFamily::TIMING;
+    case E2RcActionType::MCS_OVERRIDE:
+    case E2RcActionType::MODCOD_OVERRIDE:
+    case E2RcActionType::CCA_THRESHOLD_ADJUST:
+        return ResourceFamily::MCS;
+    case E2RcActionType::ACTION_THZ_FREQ_SELECT:
+    case E2RcActionType::ACTION_THZ_BEAM_CODEBOOK:
+    case E2RcActionType::ACTION_THZ_RIS_CONFIG:
+    case E2RcActionType::ACTION_THZ_WAVEFORM_SELECT:
+    case E2RcActionType::ACTION_THZ_ISAC_MODE:
+    case E2RcActionType::ACTION_THZ_WINDOW_HOP:
+        return ResourceFamily::THZ;
+    case E2RcActionType::ISL_ROUTE_UPDATE:
+    case E2RcActionType::REGEN_MODE_SWITCH:
+    case E2RcActionType::FL_MODEL_PUSH:
+        return ResourceFamily::AI_ML;
+    default:
+        return ResourceFamily::OTHER;
+    }
+}
+
 NS_OBJECT_ENSURE_REGISTERED(OranNtnConflictManager);
 
 TypeId
@@ -30,7 +94,8 @@ OranNtnConflictManager::GetTypeId()
             .AddConstructor<OranNtnConflictManager>()
             .AddAttribute("ResolutionStrategy",
                           "Conflict resolution strategy (0=priority, 1=temporal, "
-                          "2=merge, 3=A1-guided, 4=ML)",
+                          "2=merge, 3=A1-guided, 4=confidence). 4 was advertised as "
+                          "'ML' and is a confidence comparison; there is no model.",
                           UintegerValue(0),
                           // Setter/getter accessor so the attribute drives the
                           // SAME m_strategy the resolver switches on. (The old
@@ -225,6 +290,51 @@ OranNtnConflictManager::DetectConflict(const PendingAction& newAction,
     return true;
 }
 
+const A1Policy*
+OranNtnConflictManager::MatchPolicy(const E2RcAction& action) const
+{
+    // Find an ACTIVE policy whose scope covers this action. Scopes are the
+    // strings A1Policy documents: "global", "satellite:<id>", "slice:<id>".
+    // A global policy covers everything but loses to a more specific one, so
+    // the most specific match is returned.
+    if (m_a1Source.IsNull())
+    {
+        return nullptr;
+    }
+    static thread_local std::vector<A1Policy> policies;
+    policies = m_a1Source();
+
+    const A1Policy* best = nullptr;
+    int bestSpecificity = -1;
+    for (const auto& p : policies)
+    {
+        if (!p.active)
+        {
+            continue;
+        }
+        int spec = -1;
+        if (p.scope == "global")
+        {
+            spec = 0;
+        }
+        else if (p.scope == "satellite:" + std::to_string(action.targetGnbId))
+        {
+            spec = 1;
+        }
+        else if (p.scope ==
+                 "slice:" + std::to_string(static_cast<uint32_t>(action.targetSliceId)))
+        {
+            spec = 2;
+        }
+        if (spec > bestSpecificity)
+        {
+            bestSpecificity = spec;
+            best = &p;
+        }
+    }
+    return best;
+}
+
 XappConflict
 OranNtnConflictManager::ResolveConflict(const PendingAction& a1,
                                           const PendingAction& a2) const
@@ -266,15 +376,45 @@ OranNtnConflictManager::ResolveConflict(const PendingAction& a1,
             (a1.action.confidence >= a2.action.confidence) ? a1.xappId : a2.xappId;
         break;
 
-    case ConflictResolutionStrategy::A1_GUIDED:
-        conflict.resolution = "a1_guided";
-        // Falls back to priority if no A1 guidance
-        conflict.winnerId = (a1.xappPriority <= a2.xappPriority) ? a1.xappId : a2.xappId;
+    case ConflictResolutionStrategy::A1_GUIDED: {
+        // ORAN-08. This arm used to be byte-identical to PRIORITY_BASED, so
+        // "A1-guided" meant nothing: the Non-RT RIC's policy had no bearing on
+        // which xApp won. It now consults the active policies, and the scoped
+        // policy's own priority decides - which can hand the conflict to the
+        // xApp with the WEAKER xApp priority, the outcome PRIORITY_BASED can
+        // never produce. That difference is the whole point of the strategy.
+        const A1Policy* p1 = MatchPolicy(a1.action);
+        const A1Policy* p2 = MatchPolicy(a2.action);
+        if (p1 && p2)
+        {
+            conflict.resolution = "a1_guided:policy";
+            // Lower policy priority value wins (0 = highest), per A1Policy.
+            conflict.winnerId = (p1->priority <= p2->priority) ? a1.xappId : a2.xappId;
+        }
+        else if (p1 || p2)
+        {
+            // Exactly one action is covered by an active policy: the covered
+            // one wins, because the Non-RT RIC has explicitly scoped it.
+            conflict.resolution = "a1_guided:scoped";
+            conflict.winnerId = p1 ? a1.xappId : a2.xappId;
+        }
+        else
+        {
+            // No policy covers this resource. Fall back to xApp priority, and
+            // SAY SO in the log rather than presenting it as A1 guidance.
+            conflict.resolution = "a1_guided:no-policy-fallback-priority";
+            conflict.winnerId = (a1.xappPriority <= a2.xappPriority) ? a1.xappId : a2.xappId;
+        }
         break;
+    }
 
     case ConflictResolutionStrategy::ML_BASED:
-        conflict.resolution = "ml_based";
-        // Use confidence as proxy for ML decision
+        // ORAN-08. There is no model here, and there never was: this arm was
+        // byte-identical to CONFIDENCE_BASED. Rather than keep advertising an
+        // ML strategy that is a confidence comparison, it names itself for what
+        // it does. The attribute description no longer offers it as a distinct
+        // choice.
+        conflict.resolution = "confidence (ML_BASED is not implemented)";
         conflict.winnerId =
             (a1.action.confidence >= a2.action.confidence) ? a1.xappId : a2.xappId;
         break;
@@ -309,10 +449,52 @@ OranNtnConflictManager::CheckAndResolve(uint32_t xappId, uint8_t xappPriority,
     newAction.submissionTime = Simulator::Now();
     newAction.processed = false;
 
-    // Check for conflicts with recent actions on the same resource
-    auto& recentForResource = m_recentActions[resourceKey];
-    for (const auto& existing : recentForResource)
+    // ORAN-08: look wider than the exact resource key.
+    //
+    // Detection used to compare only against m_recentActions[resourceKey], i.e.
+    // actions whose key was byte-identical. That made two of the four WG3
+    // conflict types structurally unreachable, so conflict_log.csv could never
+    // carry them however many xApps were running:
+    //
+    //   IMPLICIT (different family, same UE) - unreachable, because different
+    //   families always produce different key prefixes ("mcs:..." vs
+    //   "power:..."), so the two actions were never compared at all.
+    //
+    //   INDIRECT on PRB - unreachable, because SLICE_PRB_ALLOCATION keys on
+    //   "prb:gnbX:sliceY" and PRB_RESERVATION on "prb-reserve:gnbX:beamZ".
+    //
+    // The taxonomy test passed regardless: it called the static ClassifyConflict
+    // directly with exactly those pairs, so it certified the enum mapping and
+    // not the mechanism. It would still have passed if CheckAndResolve had never
+    // called the classifier.
+    //
+    // Candidates are now gathered from three indices: the exact key (DIRECT and
+    // same-key INDIRECT, as before), the family+gNB index (cross-parameter
+    // INDIRECT), and the UE index (cross-family IMPLICIT). Duplicates are
+    // suppressed so a pair reachable through two indices is judged once.
+    std::vector<const PendingAction*> candidates;
+    std::set<const PendingAction*> seen;
+    auto gather = [&](const std::string& key) {
+        auto it = m_recentActions.find(key);
+        if (it == m_recentActions.end())
+        {
+            return;
+        }
+        for (const auto& e : it->second)
+        {
+            if (seen.insert(&e).second)
+            {
+                candidates.push_back(&e);
+            }
+        }
+    };
+    gather(resourceKey);
+    gather(FamilyIndexKey(action));
+    gather(UeIndexKey(action));
+
+    for (const auto* existingPtr : candidates)
     {
+        const PendingAction& existing = *existingPtr;
         if (DetectConflict(newAction, existing))
         {
             XappConflict conflict = ResolveConflict(newAction, existing);
@@ -342,10 +524,50 @@ OranNtnConflictManager::CheckAndResolve(uint32_t xappId, uint8_t xappPriority,
     }
 
     // Record this action
+    // Record under all three indices so a later action can find this one by
+    // whichever relationship applies. The deques are small and pruned on the
+    // same window, so the duplication costs little and keeps the lookup O(1).
     newAction.processed = true;
-    recentForResource.push_back(newAction);
+    m_recentActions[resourceKey].push_back(newAction);
+    const std::string famKey = FamilyIndexKey(action);
+    if (famKey != resourceKey)
+    {
+        m_recentActions[famKey].push_back(newAction);
+    }
+    const std::string ueKey = UeIndexKey(action);
+    if (!ueKey.empty() && ueKey != resourceKey && ueKey != famKey)
+    {
+        m_recentActions[ueKey].push_back(newAction);
+    }
 
     return true;
+}
+
+std::string
+OranNtnConflictManager::FamilyIndexKey(const E2RcAction& action)
+{
+    // Same resource family on the same gNB, regardless of which parameter of
+    // that family the action touches. This is the INDIRECT relationship.
+    std::ostringstream oss;
+    oss << "#fam" << static_cast<uint32_t>(FamilyOf(action.actionType)) << ":gnb"
+        << action.targetGnbId;
+    return oss.str();
+}
+
+std::string
+OranNtnConflictManager::UeIndexKey(const E2RcAction& action)
+{
+    // Same UE, regardless of family: two xApps tuning unrelated parameters on
+    // one UE still couple through that UE's KPIs, which is what IMPLICIT means.
+    // UE 0 is the cell-wide wildcard and would otherwise collect every
+    // cell-scoped action into one bucket, so it is excluded.
+    if (action.targetUeId == 0)
+    {
+        return {};
+    }
+    std::ostringstream oss;
+    oss << "#ue" << action.targetUeId;
+    return oss.str();
 }
 
 void
@@ -460,75 +682,6 @@ OranNtnConflictManager::WriteConflictLog(const std::string& filename) const
             << ConflictTypeName(c.conflictType) << "\n";
     }
 }
-
-namespace
-{
-
-// WG3 §4.1.10 resource families used for INDIRECT classification.
-// Two action types belong to the same family when they affect a shared pool
-// of physical / logical resources on the same gNB.
-enum class ResourceFamily : uint8_t
-{
-    PRB,
-    BEAM,
-    POWER,
-    HANDOVER,
-    TIMING,
-    MCS,
-    THZ,
-    SLICE,
-    AI_ML,
-    OTHER,
-};
-
-ResourceFamily
-FamilyOf(E2RcActionType t)
-{
-    switch (t)
-    {
-    case E2RcActionType::SLICE_PRB_ALLOCATION:
-    case E2RcActionType::PRB_RESERVATION:
-        return ResourceFamily::PRB;
-    case E2RcActionType::BEAM_SWITCH:
-    case E2RcActionType::BEAM_HOP_SCHEDULE:
-    case E2RcActionType::BEAM_SHUTDOWN:
-    case E2RcActionType::INTERFERENCE_NULLING:
-        return ResourceFamily::BEAM;
-    case E2RcActionType::TX_POWER_CONTROL:
-    case E2RcActionType::ENERGY_PROFILE_UPDATE:
-    case E2RcActionType::COMPUTE_THROTTLE:
-    case E2RcActionType::ACTION_THZ_POWER_BACKOFF:
-        return ResourceFamily::POWER;
-    case E2RcActionType::HANDOVER_TRIGGER:
-    case E2RcActionType::HANDOVER_CANCEL:
-    case E2RcActionType::DC_SETUP:
-    case E2RcActionType::DC_TEARDOWN:
-    case E2RcActionType::BEARER_SPLIT:
-        return ResourceFamily::HANDOVER;
-    case E2RcActionType::TIMING_ADVANCE_UPDATE:
-    case E2RcActionType::DOPPLER_COMP_UPDATE:
-        return ResourceFamily::TIMING;
-    case E2RcActionType::MCS_OVERRIDE:
-    case E2RcActionType::MODCOD_OVERRIDE:
-    case E2RcActionType::CCA_THRESHOLD_ADJUST:
-        return ResourceFamily::MCS;
-    case E2RcActionType::ACTION_THZ_FREQ_SELECT:
-    case E2RcActionType::ACTION_THZ_BEAM_CODEBOOK:
-    case E2RcActionType::ACTION_THZ_RIS_CONFIG:
-    case E2RcActionType::ACTION_THZ_WAVEFORM_SELECT:
-    case E2RcActionType::ACTION_THZ_ISAC_MODE:
-    case E2RcActionType::ACTION_THZ_WINDOW_HOP:
-        return ResourceFamily::THZ;
-    case E2RcActionType::ISL_ROUTE_UPDATE:
-    case E2RcActionType::REGEN_MODE_SWITCH:
-    case E2RcActionType::FL_MODEL_PUSH:
-        return ResourceFamily::AI_ML;
-    default:
-        return ResourceFamily::OTHER;
-    }
-}
-
-} // namespace
 
 ConflictType
 OranNtnConflictManager::ClassifyConflict(const E2RcAction& a,

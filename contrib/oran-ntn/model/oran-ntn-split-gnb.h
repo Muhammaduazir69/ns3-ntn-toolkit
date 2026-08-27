@@ -32,6 +32,7 @@
 //     which RIC Function IDs the entity responds to in E2 Subscribe
 
 #include "oran-ntn-e2-interface.h"
+#include "ns3/phased-array-model.h"
 #include "oran-ntn-types.h"
 
 #include <ns3/node.h>
@@ -115,6 +116,45 @@ class OranNtnSplitGnbEntity : public Object
     using ControlObserver = std::function<void(const E2RcAction&)>;
     void SetControlObserver(ControlObserver cb) { m_controlCb = std::move(cb); }
 
+    /// AI-06: where beamforming weights actually go.
+    ///
+    /// ReceiveControl used to increment a counter and fire an observer, so a
+    /// precoder computed from CSI reached this object and stopped. The sink is
+    /// the O-RU side of the split: whoever owns the antenna array registers
+    /// here, and the weights are handed over with the UE they belong to.
+    ///
+    /// HONEST SCOPE: nothing in the shipped scenarios registers a sink yet, so
+    /// on those runs the weights still do not reach a UniformPlanarArray and no
+    /// CSI influences a transmitted waveform. The difference is that this is now
+    /// COUNTED and warned about (GetWeightsDropped) instead of being invisible,
+    /// and there is a defined seam for the array to attach to.
+    using BeamformingSink = std::function<bool(uint32_t ueId, const std::vector<float>& weights)>;
+    void SetBeamformingSink(BeamformingSink cb) { m_bfSink = std::move(cb); }
+
+    /// AI-06 (PHY leg): apply the weights to a real antenna array.
+    ///
+    /// Builds a BeamformingSink that writes the received precoder into a
+    /// PhasedArrayModel's beamforming vector, so a precoder computed from CSI
+    /// finally reaches the thing that shapes the transmitted waveform and shows
+    /// up in measured SINR. This is the step the AI-06 fix stopped short of:
+    /// the weights reached this object and were counted, and went no further.
+    ///
+    /// The adapter refuses rather than truncates when the weight vector does
+    /// not match the array's element count. A precoder written into the wrong
+    /// number of elements is not a beam, and silently reshaping it would
+    /// recreate the layout defect the CSI contract exists to prevent.
+    ///
+    /// \param array the array to steer.
+    /// \param layer which layer of the (num_tx, num_layers) precoder to apply;
+    ///        a single phased array carries one.
+    static BeamformingSink MakeArraySink(Ptr<PhasedArrayModel> array, uint32_t layer = 0);
+
+    /// Weight vectors handed to a registered sink.
+    uint64_t GetWeightsDelivered() const { return m_weightsDelivered; }
+    /// Weight vectors that arrived with no sink registered, i.e. discarded.
+    /// Non-zero on a run that computed precoders means the O-RU seam is open.
+    uint64_t GetWeightsDropped() const { return m_weightsDropped; }
+
     /// Force-receive a control action (the F1 / OFH layer pushes here
     /// after a delayed delivery).
     bool ReceiveControl(const E2RcAction& act);
@@ -132,6 +172,9 @@ class OranNtnSplitGnbEntity : public Object
     uint64_t m_indicationsEmitted{0};
     uint64_t m_controlsAccepted{0};
     ControlObserver m_controlCb;
+    BeamformingSink m_bfSink;
+    uint64_t m_weightsDelivered{0};
+    uint64_t m_weightsDropped{0};
 };
 
 } // namespace ns3

@@ -86,6 +86,13 @@ class OranNtnGymHandover : public OpenGymEnv
     double m_preActionTte;
     double m_postActionTte;
     bool m_pingPongDetected;
+    /// ORAN-04: temporal-difference bookkeeping for the reward, latched inside
+    /// GetObservation() so it does not depend on an external UpdatePostAction()
+    /// caller (there was none, which left the reward inverted).
+    bool m_haveFirstObservation{false};
+    uint32_t m_lastObservedServingCell{0};
+    uint32_t m_servingCellPrev{0};
+    uint32_t m_servingCellPrevPrev{0};
     bool m_handoverExecuted;
     double m_hoLeadTime;
 

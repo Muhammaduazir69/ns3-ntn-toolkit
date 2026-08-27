@@ -88,6 +88,26 @@ class OranNtnXappPredictiveAlloc : public OranNtnXappBase
     };
     PredictiveMetrics GetPredictiveMetrics() const;
 
+    /// AI-10: number of predictions where the AI branch was taken and produced
+    /// nothing, so linear extrapolation was used. See the comment in
+    /// PredictTrafficLoad(); the gym environment is asynchronous and has no
+    /// synchronous inference call for that method to make.
+    uint64_t GetAiFallbackCount() const { return m_aiFallbackCount; }
+
+    /**
+     * \brief Predicted load for a beam over the configured horizon.
+     *
+     * AI-10: public because it is the computation whose AI branch produces
+     * nothing, and a test that cannot call it can only observe the defect
+     * indirectly through a timer-driven decision cycle. It is a query over
+     * recorded history with no side effect beyond the fallback counter.
+     */
+    std::vector<double> PredictTrafficLoad(uint32_t beamId);
+
+    /// AI-10: feed one load sample for a beam, so the prediction path can be
+    /// exercised without standing up a RIC and a subscription.
+    void RecordBeamLoadForTest(uint32_t beamId, double load);
+
   protected:
     void ProcessKpmReport(const E2KpmReport& report) override;
     void DecisionCycle() override;
@@ -97,7 +117,7 @@ class OranNtnXappPredictiveAlloc : public OranNtnXappBase
     /**
      * \brief Run LSTM prediction (via Gym env or internal model)
      */
-    std::vector<double> PredictTrafficLoad(uint32_t beamId);
+
 
     /**
      * \brief Detect anomalies using z-score on prediction residuals
@@ -123,6 +143,13 @@ class OranNtnXappPredictiveAlloc : public OranNtnXappBase
     double m_reservationAggression;
     double m_anomalyThreshold;
     bool m_aiEnabled;
+    /// AI-10: how many times the AI branch was entered and produced nothing.
+    ///
+    /// Non-zero means AiEnabled was set, a gym environment was attached, and
+    /// every prediction still came from linear extrapolation. Nothing outside
+    /// could previously tell those two configurations apart.
+    uint64_t m_aiFallbackCount{0};
+    bool m_aiFallbackWarned{false};
 
     // Per-beam traffic history
     struct BeamTrafficHistory

@@ -561,14 +561,43 @@ OranNtnSpaceRic::AutonomousControlLoop()
         // Trigger autonomous HO if SINR < -5 dB or TTE < 5s
         if (report.sinr_dB < -5.0 || report.tte_s < 5.0)
         {
-            // Collect candidates from local beam measurements
-            std::vector<E2KpmReport> candidates;
+            // ORAN-09. m_localKpm is keyed by UE, so this loop used to push one
+            // candidate per OTHER TERMINAL: a UE about to lose coverage was
+            // handed over on the strength of how well somebody else's link was
+            // doing, and the same beam appeared as many times as it had users.
+            // Worse, the scorer reads tte_s and elevation_deg, which are
+            // properties of the reporting UE's own geometry and mean nothing
+            // for a different terminal.
+            //
+            // What the satellite genuinely holds on board is per-BEAM evidence,
+            // observed through whichever terminals happen to be on each beam.
+            // Deduplicate to one candidate per beam and keep that beam's BEST
+            // observation, so the candidate set is a set of beams rather than a
+            // roster of other users.
+            //
+            // This does not manufacture the missing quantity. The satellite has
+            // no measurement of THIS UE on a beam it is not attached to, so the
+            // score below is a beam-level proxy and is named as one; that is a
+            // documented limit of on-board autonomy, not something to paper
+            // over with a borrowed number presented as the UE's own.
+            std::map<uint32_t, E2KpmReport> bestPerBeam;
             for (const auto& [otherUeId, otherReport] : m_localKpm)
             {
-                if (otherReport.beamId != report.beamId)
+                if (otherReport.beamId == report.beamId)
                 {
-                    candidates.push_back(otherReport);
+                    continue; // the beam it is already on is not a candidate
                 }
+                auto it = bestPerBeam.find(otherReport.beamId);
+                if (it == bestPerBeam.end() || otherReport.sinr_dB > it->second.sinr_dB)
+                {
+                    bestPerBeam[otherReport.beamId] = otherReport;
+                }
+            }
+            std::vector<E2KpmReport> candidates;
+            candidates.reserve(bestPerBeam.size());
+            for (const auto& [beamId, best] : bestPerBeam)
+            {
+                candidates.push_back(best);
             }
 
             if (!candidates.empty())

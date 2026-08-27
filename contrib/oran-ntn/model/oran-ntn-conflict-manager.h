@@ -121,6 +121,15 @@ class OranNtnConflictManager : public Object
     /**
      * \brief Explicitly lock a resource for an xApp (prevents others)
      */
+    /// ORAN-08: supply the active A1 policies so A1_GUIDED can actually
+    /// consult them.
+    ///
+    /// Without this the A1_GUIDED arm was byte-identical to PRIORITY_BASED -
+    /// five advertised strategies were three behaviors. A callback rather than a
+    /// direct dependency keeps the conflict manager independent of the A1
+    /// interface object; the RIC wires them together.
+    void SetA1PolicySource(Callback<std::vector<A1Policy>> src) { m_a1Source = src; }
+
     void LockResource(uint32_t xappId, const std::string& resourceType,
                        uint32_t resourceId, Time duration);
 
@@ -169,6 +178,15 @@ class OranNtnConflictManager : public Object
     Time m_conflictWindow;
 
     // Recent actions indexed by resource key
+    /// ORAN-08: secondary index keys. Detection used to compare only actions
+    /// whose resource key matched byte for byte, which made the IMPLICIT and
+    /// PRB INDIRECT branches of the WG3 taxonomy unreachable through the real
+    /// pipeline. These let cross-parameter and cross-family pairs meet.
+    const A1Policy* MatchPolicy(const E2RcAction& action) const;
+    static std::string FamilyIndexKey(const E2RcAction& action);
+    static std::string UeIndexKey(const E2RcAction& action);
+
+    Callback<std::vector<A1Policy>> m_a1Source;
     std::map<std::string, std::deque<PendingAction>> m_recentActions;
 
     // Resource locks: resourceKey -> (xappId, expiryTime)

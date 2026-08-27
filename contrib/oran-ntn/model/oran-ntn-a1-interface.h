@@ -145,6 +145,31 @@ class OranNtnA1PolicyManager : public Object
     typedef Callback<void, A1NtnPolicy> PolicyDistributionCallback;
     void SetDistributionCallback(PolicyDistributionCallback cb);
 
+    /**
+     * \brief ORAN-15: one-way A1 delivery delay from the Non-RT RIC to the
+     *        Near-RT RIC.
+     *
+     * DistributePolicy invoked the callback INLINE, with no
+     * Simulator::Schedule, so a ground SMO policy reached the Near-RT RIC at
+     * the same simulation instant even when that RIC is modelled as
+     * satellite-hosted (OranNtnRicPlacement::Site::OnBoardSatellite). A1 is the
+     * slowest of the O-RAN interfaces and the one most affected by an NTN
+     * feeder leg, so instantaneous delivery is the least defensible place to
+     * omit a delay.
+     *
+     * Defaults to zero, which is the previous behaviour: a scenario that has
+     * not thought about A1 latency should not silently acquire one. Set it from
+     * the placement the scenario actually models.
+     */
+    void SetDeliveryDelay(Time d) { m_deliveryDelay = d; }
+    Time GetDeliveryDelay() const { return m_deliveryDelay; }
+    /// Policies dispatched but not yet delivered (ORAN-15).
+    uint32_t GetPoliciesInFlight() const { return m_inFlight; }
+    /// ORAN-15 test seam: dispatch a policy down the distribution path.
+    /// DistributePolicy is private and is normally reached through the policy
+    /// lifecycle, which is why the inline delivery went unnoticed.
+    void DistributePolicyForTest(const A1NtnPolicy& p) { DistributePolicy(p); }
+
     // ---- Metrics ----
     uint32_t GetTotalPolicies() const;
     uint32_t GetActivePolicies() const;
@@ -167,6 +192,8 @@ class OranNtnA1PolicyManager : public Object
     Time m_expiryCheckInterval;
 
     PolicyDistributionCallback m_distributionCb;
+    Time m_deliveryDelay{Seconds(0)}; //!< ORAN-15: one-way A1 delivery delay
+    uint32_t m_inFlight{0};           //!< ORAN-15: dispatched, not yet delivered
     PolicyFeedbackCallback m_feedbackCb;
 
     uint32_t m_violationCount;

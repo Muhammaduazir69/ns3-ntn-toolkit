@@ -181,6 +181,20 @@ OranNtnGymHandover::GetObservation()
     std::vector<uint32_t> shape = {12};
     auto box = CreateObject<OpenGymBoxContainer<float>>(shape);
 
+    // ORAN-04 FIX (2026-08-24). GetReward() differences a post-action state
+    // against a pre-action one, but the post-action slots were written ONLY by
+    // UpdatePostAction(), which has no caller anywhere in the tree. They
+    // therefore held their constructed 0.0 forever, so sinrImprovement reduced
+    // to -m_preActionSinr: on a healthy link the agent was rewarded, linearly,
+    // for LOWERING the serving SINR. The transition is now latched here, at the
+    // one point where both ends of it are known. Rolling last cycle's
+    // observation into "pre" before this cycle's becomes "post" makes the
+    // reward a genuine temporal difference over one control period, with no
+    // external bookkeeping required. UpdatePostAction() is kept so a scenario
+    // that measures the post-action state out of band can still override it.
+    m_preActionSinr = m_postActionSinr;
+    m_preActionTte = m_postActionTte;
+
     // Default values when xApp/bridge not connected
     float servingSinr = 0.0f;
     float servingTte = 0.0f;
@@ -206,6 +220,7 @@ OranNtnGymHandover::GetObservation()
         servingTte = static_cast<float>(report.tte_s);
         servingElevation = static_cast<float>(report.elevation_deg);
         servingDoppler = static_cast<float>(report.doppler_Hz);
+        m_lastObservedServingCell = haveServing ? report.gnbId : 0;
 
         // SINR slope from the serving cell's own history, ordered by TIME (the
         // window vector is gnbId-ordered, so sort before differencing).
@@ -264,9 +279,30 @@ OranNtnGymHandover::GetObservation()
         activeUes = static_cast<float>(report.activeUes);
     }
 
-    // Store pre-action SINR/TTE for reward computation
-    m_preActionSinr = servingSinr;
-    m_preActionTte = servingTte;
+    // This cycle's measured state is the POST-action end of the transition the
+    // next GetReward() scores. On the very first observation there is no prior
+    // state, so seed "pre" from it and let the first improvement be zero rather
+    // than a spurious step from 0 dB.
+    m_postActionSinr = servingSinr;
+    m_postActionTte = servingTte;
+    if (!m_haveFirstObservation)
+    {
+        m_preActionSinr = servingSinr;
+        m_preActionTte = servingTte;
+        m_haveFirstObservation = true;
+    }
+
+    // Ping-pong: the serving cell returned to the one it held two control
+    // periods ago. Derived from the observed serving-cell sequence rather than
+    // asserted by a caller, so the penalty term is measured like the rest.
+    if (m_xapp)
+    {
+        const uint32_t nowCell = m_lastObservedServingCell;
+        m_pingPongDetected = (m_servingCellPrevPrev != 0 && nowCell != 0 &&
+                              nowCell == m_servingCellPrevPrev && nowCell != m_servingCellPrev);
+        m_servingCellPrevPrev = m_servingCellPrev;
+        m_servingCellPrev = nowCell;
+    }
 
     box->AddValue(servingSinr);
     box->AddValue(servingTte);

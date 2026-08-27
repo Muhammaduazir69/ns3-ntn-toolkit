@@ -190,11 +190,85 @@ OranNtnSplitGnbEntity::ReceiveControl(const E2RcAction& act)
         break;
     }
     ++m_controlsAccepted;
+
+    // AI-06: hand the weights on, or record that there was nowhere to hand
+    // them. Either way they stop being silently discarded.
+    if (!act.beamformingWeights.empty())
+    {
+        if (m_bfSink && m_bfSink(act.targetUeId, act.beamformingWeights))
+        {
+            ++m_weightsDelivered;
+        }
+        else
+        {
+            ++m_weightsDropped;
+            NS_LOG_WARN("SplitGnb: " << act.beamformingWeights.size() / 2
+                                     << " beamforming weights for UE " << act.targetUeId
+                                     << " have no O-RU sink registered and are discarded; "
+                                     << "no CSI reaches the antenna array on this run");
+        }
+    }
+
     if (m_controlCb)
     {
         m_controlCb(act);
     }
     return true;
 }
+
+OranNtnSplitGnbEntity::BeamformingSink
+OranNtnSplitGnbEntity::MakeArraySink(Ptr<PhasedArrayModel> array, uint32_t layer)
+{
+    return [array, layer](uint32_t /*ueId*/, const std::vector<float>& w) -> bool {
+        if (!array)
+        {
+            return false;
+        }
+        const size_t nElem = array->GetNumElems();
+        if (nElem == 0)
+        {
+            return false;
+        }
+        // The precoder is interleaved re/im, shape (num_tx, num_layers) in
+        // tx-major order, so element t of layer L sits at 2*(t*numLayers + L).
+        // Recover numLayers from the vector length and the array size; refuse
+        // if they do not divide.
+        const size_t complexCount = w.size() / 2;
+        if (w.size() % 2 != 0 || complexCount == 0 || complexCount % nElem != 0)
+        {
+            return false; // not a precoder for this array
+        }
+        const size_t numLayers = complexCount / nElem;
+        if (layer >= numLayers)
+        {
+            return false;
+        }
+
+        PhasedArrayModel::ComplexVector bf(nElem);
+        double norm2 = 0.0;
+        for (size_t t = 0; t < nElem; ++t)
+        {
+            const size_t off = 2 * (t * numLayers + layer);
+            const std::complex<double> c(w[off], w[off + 1]);
+            bf[t] = c;
+            norm2 += std::norm(c);
+        }
+        if (norm2 <= 0.0)
+        {
+            return false; // an all-zero precoder is not a beam
+        }
+        // Renormalise to unit norm: the array applies the vector as given, and
+        // a precoder that was power-split across layers would otherwise
+        // under-drive this one.
+        const double inv = 1.0 / std::sqrt(norm2);
+        for (size_t t = 0; t < nElem; ++t)
+        {
+            bf[t] *= inv;
+        }
+        array->SetBeamformingVector(bf);
+        return true;
+    };
+}
+
 
 } // namespace ns3

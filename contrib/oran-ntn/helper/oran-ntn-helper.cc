@@ -200,6 +200,28 @@ OranNtnHelper::CreateSpaceRics(NodeContainer satNodes,
         spaceRic->SetOrbitalPlaneId(i / satsPerPlane);
         spaceRic->SetGroundRic(groundRic);
 
+        // ORAN-02 FIX (2026-08-24): give the space RIC the E2 node it is
+        // co-located with. Without it ExecuteDecisionLocally() returns false on
+        // every call and logs "autonomous decision NOT actuated", while the
+        // autonomy counters incremented regardless, so a satellite-hosted RIC
+        // reported autonomous decisions it never carried out. SetLocalE2Node
+        // had no caller anywhere in the tree; the helper builds both objects
+        // and simply never connected them. Satellite ids are 1-indexed in both
+        // CreateSatelliteE2Nodes() and here, so the lookup is exact.
+        auto e2it = m_e2Nodes.find(i + 1);
+        if (e2it != m_e2Nodes.end())
+        {
+            spaceRic->SetLocalE2Node(e2it->second);
+        }
+        else
+        {
+            NS_LOG_WARN("Space RIC for satellite "
+                        << (i + 1)
+                        << " has no co-located E2 node: call CreateSatelliteE2Nodes() BEFORE "
+                           "CreateSpaceRics(), otherwise on-board decisions cannot actuate "
+                           "and will be counted as buffered only.");
+        }
+
         // Initialize with default HO scoring model
         std::vector<double> hoWeights = {2.0, 0.5, 0.1}; // TTE, SINR, elevation
         spaceRic->ReceiveModelUpdate("ho-scorer", 1, hoWeights);
@@ -207,29 +229,55 @@ OranNtnHelper::CreateSpaceRics(NodeContainer satNodes,
         spaceRics.push_back(spaceRic);
     }
 
-    // Connect ISL neighbors (intra-plane: adjacent sats; inter-plane: same index)
+    // Connect ISL neighbours (intra-plane: adjacent sats; inter-plane: same index).
+    //
+    // ORAN-16: this loop computed nextInPlane and interPlaneIdx and then entered
+    // two if-blocks whose entire bodies were the comment "ISL neighbors stored
+    // internally by Space RIC". Nothing was stored. AddIslNeighbor() was called
+    // only from a unit test, so m_islNeighbors was empty for every
+    // helper-built Space RIC and the whole ISL path - IslExchangeState() and
+    // SendIslMessage(), which does apply a real per-link delay from
+    // OranNtnSatBridge::GetIslLinkState - never fired in any shipped scenario.
+    // A Walker shell of on-board RICs was, in every run, a set of isolated
+    // nodes.
+    //
+    // Links are made in BOTH directions: an ISL is bidirectional, and a
+    // one-way neighbour list would let a satellite send where it cannot
+    // receive.
+    uint32_t islLinks = 0;
     for (uint32_t i = 0; i < spaceRics.size(); i++)
     {
-        uint32_t plane = i / satsPerPlane;
-        uint32_t posInPlane = i % satsPerPlane;
+        const uint32_t plane = i / satsPerPlane;
+        const uint32_t posInPlane = i % satsPerPlane;
 
-        // Intra-plane neighbor (next satellite in same plane)
-        uint32_t nextInPlane = plane * satsPerPlane + ((posInPlane + 1) % satsPerPlane);
-        if (nextInPlane < spaceRics.size())
+        // Intra-plane neighbour: the next satellite in the same plane, wrapping
+        // at the end of the ring. Skip the degenerate case of a single-satellite
+        // plane, where the wrap makes a satellite its own neighbour.
+        const uint32_t nextInPlane = plane * satsPerPlane + ((posInPlane + 1) % satsPerPlane);
+        if (satsPerPlane > 1 && nextInPlane < spaceRics.size() && nextInPlane != i)
         {
-            // ISL neighbors stored internally by Space RIC
+            spaceRics[i]->AddIslNeighbor(spaceRics[nextInPlane]);
+            spaceRics[nextInPlane]->AddIslNeighbor(spaceRics[i]);
+            ++islLinks;
         }
 
-        // Inter-plane neighbor (same position in adjacent plane)
+        // Inter-plane neighbour: same position in the adjacent plane. Not
+        // wrapped, because the seam between the first and last planes of a
+        // Walker-Delta shell is where the relative velocity is highest and a
+        // permanent ISL is not generally maintained across it.
         if (plane + 1 < numPlanes)
         {
-            uint32_t interPlaneIdx = (plane + 1) * satsPerPlane + posInPlane;
+            const uint32_t interPlaneIdx = (plane + 1) * satsPerPlane + posInPlane;
             if (interPlaneIdx < spaceRics.size())
             {
-                // ISL neighbors stored internally by Space RIC
+                spaceRics[i]->AddIslNeighbor(spaceRics[interPlaneIdx]);
+                spaceRics[interPlaneIdx]->AddIslNeighbor(spaceRics[i]);
+                ++islLinks;
             }
         }
     }
+    NS_LOG_INFO("OranNtnHelper: wired " << islLinks << " bidirectional ISL neighbour links across "
+                << spaceRics.size() << " Space RICs");
 
     m_spaceRics = spaceRics;
     NS_LOG_INFO("OranNtnHelper: Created " << spaceRics.size()
@@ -400,7 +448,8 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
                                  double measThroughputMbps,
                                  uint64_t measRxBytes,
                                  double measTbler,
-                                 double measPrbUtil)
+                                 double measPrbUtil,
+                                 bool sinrMeasured)
 {
     auto it = m_e2Nodes.find(gnbId);
     if (it == m_e2Nodes.end())
@@ -415,6 +464,8 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
     report.isNtn = it->second->IsNtn();
     report.ueId = ueId;
     report.sinr_dB = sinr;
+    report.sinrMeasured = sinrMeasured; // ORAN-03: the caller's word, not an assumption
+    m_lastInjectedReport = report; // AI-07: expose what this call actually labelled
     report.rsrp_dBm = rsrp;
     report.tte_s = tte;
     report.elevation_deg = elevation;
@@ -552,6 +603,12 @@ OranNtnHelper::SetHandoverActuator(RcActuatorCallback cb)
     m_handoverActuator = cb;
 }
 
+void
+OranNtnHelper::SetSliceActuator(RcActuatorCallback cb)
+{
+    m_sliceActuator = cb;
+}
+
 bool
 OranNtnHelper::ApplyBeamAction(const E2RcAction& action)
 {
@@ -627,6 +684,27 @@ OranNtnHelper::DefaultRcActionHandler(E2RcAction action)
         }
         break;
 
+    case E2RcActionType::SLICE_PRB_ALLOCATION:
+    case E2RcActionType::PRB_RESERVATION:
+        // AI-04: these used to fall into default: and be logged only, so the
+        // slice and predictive-allocation gym environments emitted action types
+        // that could not reach a scheduler under any configuration.
+        if (!m_sliceActuator.IsNull())
+        {
+            actuated = m_sliceActuator(action);
+        }
+        else
+        {
+            NS_LOG_WARN("OranNtnHelper: SLICE/PRB action from xApp "
+                        << action.xappName << " for gNB " << action.targetGnbId
+                        << " slice " << static_cast<uint32_t>(action.targetSliceId)
+                        << " NOT actuated -- no slice actuator wired "
+                        "(SetSliceActuator, e.g. SliceOrchestratorXapp::StepWithShares); "
+                        "action LOGGED ONLY");
+            actuated = false;
+        }
+        break;
+
     default:
         // No real-stack actuator is wired in this helper for the remaining RC
         // action types. Be honest: log it, name what is not actuated, fail.
@@ -651,6 +729,19 @@ OranNtnHelper::DefaultRcActionHandler(E2RcAction action)
     entry.confidence = action.confidence;
     entry.success = actuated;
     m_actionLog.push_back(entry);
+
+    // ORAN-13: tell the issuing xApp what actually happened. Its own
+    // successfulActions counter records only that the RIC ROUTED the action;
+    // whether an actuator existed and fired is knowable here and nowhere else,
+    // so without this the two files disagreed about the word "success".
+    for (const auto& kv : m_allXapps)
+    {
+        if (kv.second && kv.second->GetXappId() == action.xappId)
+        {
+            kv.second->RecordActuation(actuated);
+            break;
+        }
+    }
 
     return actuated;
 }
@@ -689,10 +780,18 @@ OranNtnHelper::WriteAllMetrics(Ptr<OranNtnNearRtRic> ric) const
     // (oran-ntn-xapp-base.cc::RecordDecision).  We sort the per-xApp vector
     // and read off P50/P95/P99 here; -1 indicates no samples were recorded.
     std::ofstream xappOfs(m_outputDir + "/xapp_metrics.csv");
+    // CVC-08: actuated_actions sits next to successful_actions on purpose.
+    //
+    // successful_actions counts ROUTING acceptance. This file was read as an
+    // actuation count (an audit summed it to 71,967 and called them actions
+    // that "actuate nothing"), and nothing in the file said otherwise. The two
+    // columns side by side make the gap arithmetic rather than a matter of
+    // knowing which is which: whatever routed but never reached an actuator is
+    // successful_actions minus actuated_actions.
     xappOfs << "xapp_id,xapp_name,priority,decisions,successful_actions,"
-               "failed_actions,conflicts,conflicts_won,avg_confidence,"
-               "avg_latency_ms,p50_latency_ms,p95_latency_ms,p99_latency_ms,"
-               "min_latency_ms,max_latency_ms\n";
+               "actuated_actions,failed_actions,conflicts,conflicts_won,"
+               "avg_confidence,avg_latency_ms,p50_latency_ms,p95_latency_ms,"
+               "p99_latency_ms,min_latency_ms,max_latency_ms\n";
 
     auto pctl = [](const std::vector<double>& v, double q) {
         if (v.empty())
@@ -720,7 +819,8 @@ OranNtnHelper::WriteAllMetrics(Ptr<OranNtnNearRtRic> ric) const
         double lmax = lat.empty() ? -1.0 : lat.back();
         xappOfs << id << "," << xapp->GetXappName() << ","
                 << (int)xapp->GetPriority() << "," << m.totalDecisions << ","
-                << m.successfulActions << "," << m.failedActions << ","
+                << m.successfulActions << "," << m.actuatedActions << ","
+                << m.failedActions << ","
                 << m.conflictsEncountered << "," << m.conflictsWon << ","
                 << m.avgConfidence << "," << m.avgDecisionLatency_ms << ","
                 << p50 << "," << p95 << "," << p99 << ","

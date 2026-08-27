@@ -314,10 +314,37 @@ OranNtnA1PolicyManager::GetViolationCount() const
 void
 OranNtnA1PolicyManager::DistributePolicy(const A1NtnPolicy& policy)
 {
-    if (!m_distributionCb.IsNull())
+    if (m_distributionCb.IsNull())
+    {
+        return;
+    }
+    // ORAN-15: A1 delivery takes time.
+    //
+    // This used to invoke the callback inline, so a ground SMO policy reached
+    // the Near-RT RIC at the same simulation instant even when that RIC is
+    // modelled as satellite-hosted. A1 is the slowest O-RAN interface and the
+    // one an NTN feeder leg affects most, so instantaneous delivery is the
+    // least defensible place to omit a delay.
+    //
+    // Zero keeps the previous behaviour and dispatches inline, so a scenario
+    // that has not thought about A1 latency does not silently acquire one, and
+    // no existing result moves.
+    if (m_deliveryDelay <= Seconds(0))
     {
         m_distributionCb(policy);
+        return;
     }
+    ++m_inFlight;
+    Simulator::Schedule(m_deliveryDelay, [this, policy]() {
+        if (m_inFlight > 0)
+        {
+            --m_inFlight;
+        }
+        if (!m_distributionCb.IsNull())
+        {
+            m_distributionCb(policy);
+        }
+    });
 }
 
 void

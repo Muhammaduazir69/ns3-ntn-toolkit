@@ -14,14 +14,38 @@
  *   # terminal 2 — the gNB / E2 node side
  *   ./ns3 run "oran-ntn-e2-termination --role=agent --proto=sctp --port=36421 --indications=5"
  *
- * The agent runs the real E2AP procedures — E2 Setup, RIC Subscription, a burst
- * of RIC Indications whose payload is a genuine E2SM-KPM message PER-encoded by
- * OranNtnServiceModelKpm, then a RIC Control Request — and prints what it got
- * back. The RIC accepts the association, completes the handshake, counts the
- * indications, and acknowledges control. This closes the loopback-only gap: the
- * PER + SCTP stack is exercised across a process boundary. (Interop with the
- * third-party FlexRIC binary is the same wire protocol; point --host/--port at a
- * running FlexRIC nearRT-RIC to drive it.)
+ * WHAT THIS IS, PRECISELY (audit ORAN-11).
+ *
+ * This is a two-process demo of a TOOLKIT-PRIVATE framing over a real SCTP (or
+ * TCP) association, carrying real E2SM payloads. It is not E2AP.
+ *
+ *   - The framing is 2-byte type + 4-byte length, defined by this repo. Its
+ *     message-type values are toolkit-internal and do not map onto E2AP
+ *     codepoints; e2-message-types.h says so itself. No SCTP PPID 70 is
+ *     negotiated, and the procedure codes are not ASN.1 InitiatingMessage tags.
+ *   - The E2SM payloads ARE real: the Indications carry an E2SM-KPM
+ *     IndicationMessage and the Control Request carries an E2SM-RC Style 3
+ *     ControlMessage, both produced by the toolkit's own codecs. Those codecs
+ *     round-trip against themselves but are NOT bit-conformant Aligned-PER
+ *     (full-byte CHOICE index, octet-aligned preambles, no extension markers),
+ *     exactly as README.md states.
+ *
+ * It therefore does NOT interoperate with FlexRIC or any asn1c peer. An earlier
+ * version of this header invited the reader to "point --host/--port at a running
+ * FlexRIC nearRT-RIC to drive it"; a reader who did would get an association
+ * that desynchronises on the first frame. That sentence is removed, and it is
+ * worth being blunt about why it mattered: every other honesty statement in this
+ * module is careful, and this was the one file a user opens to find out whether
+ * E2 is real.
+ *
+ * What the demo genuinely establishes is that the codecs survive a process
+ * boundary. The RIC side DECODES what it receives rather than counting frames:
+ * every Indication is run through OranNtnServiceModelKpm::DecodeIndication and
+ * the Control Request through OranNtnServiceModelRc::DecodeControl, and a
+ * decode failure fails the run. Before this, the control payload was the three
+ * bytes {0x77} and the RIC acknowledged it without looking, so the "full E2
+ * procedure" it reported would have been reported just the same by a peer that
+ * sent nothing meaningful at all.
  */
 
 #include "ns3/core-module.h"
@@ -30,6 +54,9 @@
 #include "ns3/e2-transport.h"
 #include "ns3/oran-ntn-kpm-canonical-ids.h"
 #include "ns3/oran-ntn-service-model-kpm.h"
+#include "ns3/oran-ntn-rc-style3.h"
+#include "ns3/oran-ntn-service-model-rc.h"
+#include "ns3/oran-ntn-types.h"
 
 #include <chrono>
 #include <iostream>
@@ -79,6 +106,27 @@ RunRic(E2Transport::Protocol proto, const std::string& host, uint16_t port, doub
     std::cout << "[ric] E2 termination listening on " << host << ":" << port << " ("
               << (proto == E2Transport::Protocol::sctp ? "SCTP" : "TCP") << ")\n";
 
+    // ORAN-11: decode, do not merely count. A listener that acknowledges a
+    // control it never parsed cannot tell a real peer from a peer sending
+    // three magic bytes, which is exactly what it used to be handed.
+    uint32_t indOk = 0;
+    uint32_t indBad = 0;
+    uint32_t ctrlOk = 0;
+    uint32_t ctrlBad = 0;
+
+    ric->SetIndicationSink(MakeCallback(
+        +[](uint32_t* okp, uint32_t* badp, std::vector<uint8_t> payload) {
+            OranNtnServiceModelKpm sm;
+            oranntn::flexric::kpm_v3::kpm_ind_msg_format_1_t out{};
+            (sm.DecodeIndication(payload, out) ? *okp : *badp)++;
+        }).Bind(&indOk).Bind(&indBad));
+    ric->SetControlSink(MakeCallback(
+        +[](uint32_t* okp, uint32_t* badp, std::vector<uint8_t> payload) {
+            OranNtnServiceModelRc sm;
+            oranntn::rc_v103::style3::ControlMessage out{};
+            (sm.DecodeControl(payload, &out) ? *okp : *badp)++;
+        }).Bind(&ctrlOk).Bind(&ctrlBad));
+
     const auto start = std::chrono::steady_clock::now();
     while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() <
            durationSec)
@@ -88,8 +136,11 @@ RunRic(E2Transport::Protocol proto, const std::string& host, uint16_t port, doub
 
     std::cout << "[ric] clients=" << ric->NumClients()
               << " setups=" << ric->SetupRequestsHandled()
-              << " indications=" << ric->IndicationsForwarded() << "\n";
-    const bool ok = ric->SetupRequestsHandled() >= 1 && ric->IndicationsForwarded() >= 1;
+              << " indications=" << ric->IndicationsForwarded()
+              << " (KPM decoded ok=" << indOk << " bad=" << indBad << ")"
+              << " (RC control decoded ok=" << ctrlOk << " bad=" << ctrlBad << ")\n";
+    const bool ok = ric->SetupRequestsHandled() >= 1 && ric->IndicationsForwarded() >= 1 &&
+                    indOk >= 1 && indBad == 0 && ctrlOk >= 1 && ctrlBad == 0;
     ric->Stop();
     std::cout << "[ric] " << (ok ? "PASS" : "no traffic seen") << "\n";
     return ok ? 0 : 1;
@@ -107,6 +158,36 @@ Exchange(E2Transport* c, const E2Message& req, E2Message& reply, E2MessageType w
         return false;
     }
     return reply.type == want;
+}
+
+/// ORAN-11: a real E2SM-RC Style 3 ControlMessage, not {0x77}.
+///
+/// Built the way the in-sim path would build it: an E2RcAction goes through
+/// ConvertE2RcToStyle3 and then through the RC codec. If the conversion or the
+/// encode is wrong, the RIC's decode fails and the run fails with it - which is
+/// the point of carrying real bytes rather than a magic number.
+std::vector<uint8_t>
+MakeRcControlBlob(uint32_t targetGnbId)
+{
+    E2RcAction act{};
+    act.timestamp = 0.0;
+    act.xappId = 1;
+    act.xappName = "e2-termination-demo";
+    act.actionType = E2RcActionType::HANDOVER_TRIGGER;
+    act.targetGnbId = targetGnbId;
+    act.targetUeId = 42;
+    act.confidence = 1.0;
+
+    auto action = oranntn::rc_v103::style3::ConvertE2RcToStyle3(act);
+    if (!action)
+    {
+        return {};
+    }
+    oranntn::rc_v103::style3::ControlMessage msg{};
+    msg.action = *action;
+
+    OranNtnServiceModelRc sm;
+    return sm.EncodeControl(msg);
 }
 
 int
@@ -152,16 +233,26 @@ RunAgent(E2Transport::Protocol proto,
     }
     std::cout << "[agent] sent " << indications << " PER-encoded KPM indications\n";
 
-    if (!Exchange(c.get(), {E2MessageType::ric_control_request, {0x77}}, reply,
+    const std::vector<uint8_t> ctrl = MakeRcControlBlob(/*targetGnbId=*/9);
+    if (ctrl.empty())
+    {
+        std::cerr << "[agent] could not build an E2SM-RC Style 3 control\n";
+        return 1;
+    }
+    if (!Exchange(c.get(), {E2MessageType::ric_control_request, ctrl}, reply,
                   E2MessageType::ric_control_acknowledge))
     {
         std::cerr << "[agent] RIC Control failed\n";
         return 1;
     }
-    std::cout << "[agent] RIC Control -> Acknowledge OK\n";
+    std::cout << "[agent] RIC Control (" << ctrl.size()
+              << " B E2SM-RC Style 3 ControlMessage) -> Acknowledge OK\n";
 
     c->Close();
-    std::cout << "[agent] PASS (full E2 procedure over real " << (proto == E2Transport::Protocol::sctp ? "SCTP" : "TCP") << ")\n";
+    // Deliberately NOT "full E2 procedure": the framing is this repo's own.
+    std::cout << "[agent] PASS (toolkit framing over real "
+              << (proto == E2Transport::Protocol::sctp ? "SCTP" : "TCP")
+              << ", carrying real E2SM-KPM and E2SM-RC payloads)\n";
     return 0;
 }
 

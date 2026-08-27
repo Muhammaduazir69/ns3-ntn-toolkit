@@ -227,6 +227,7 @@ OranNtnNearRtRic::DoDispose()
         m_sdl->Dispose();
         m_sdl = nullptr;
     }
+    m_loopProbe = nullptr;
 
     Object::DoDispose();
 }
@@ -369,7 +370,21 @@ OranNtnNearRtRic::ProcessXappAction(uint32_t xappId, const E2RcAction& action)
     uint8_t xappPriority = xappIt->second->GetPriority();
 
     // Step 1: A1 policy compliance check
-    if (!xappIt->second->CheckPolicyCompliance(action))
+    // R2.7 stage `ric_a1_policy_check` (cpu). See SetLoopLatencyProbe(): for
+    // action types no active A1 policy governs, this check short-circuits, so
+    // the recorded cost is a lower bound rather than a representative one.
+    bool compliant;
+    if (m_loopProbe)
+    {
+        OranNtnLoopLatencyProbe::ScopedCpuTimer t(m_loopProbe,
+                                                  oranntn::loopstage::kRicPolicyCheck);
+        compliant = xappIt->second->CheckPolicyCompliance(action);
+    }
+    else
+    {
+        compliant = xappIt->second->CheckPolicyCompliance(action);
+    }
+    if (!compliant)
     {
         m_totalPolicyViolations++;
         NS_LOG_INFO("Near-RT RIC: Action from xApp " << xappId
@@ -379,7 +394,18 @@ OranNtnNearRtRic::ProcessXappAction(uint32_t xappId, const E2RcAction& action)
     }
 
     // Step 2: Conflict checking
-    bool allowed = m_conflictMgr->CheckAndResolve(xappId, xappPriority, action);
+    // R2.7 stage `ric_conflict_check` (cpu).
+    bool allowed;
+    if (m_loopProbe)
+    {
+        OranNtnLoopLatencyProbe::ScopedCpuTimer t(m_loopProbe,
+                                                  oranntn::loopstage::kRicConflictCheck);
+        allowed = m_conflictMgr->CheckAndResolve(xappId, xappPriority, action);
+    }
+    else
+    {
+        allowed = m_conflictMgr->CheckAndResolve(xappId, xappPriority, action);
+    }
     if (!allowed)
     {
         m_totalConflicts++;
@@ -399,7 +425,20 @@ OranNtnNearRtRic::ProcessXappAction(uint32_t xappId, const E2RcAction& action)
     // Step 3: Route to E2 node. The action crosses the downlink feeder link and
     // actuates one FeederLinkDelay from now, so `accepted` means the action was
     // scheduled for delivery -- the execution outcome is not knowable here.
-    bool accepted = m_e2Term->RouteRcAction(action);
+    // R2.7 stage `rc_action_route` (cpu): target lookup / fan-out and enqueue
+    // of the downlink delivery event only -- the actuation itself is charged
+    // to the `actuation` stage one feeder delay later.
+    bool accepted;
+    if (m_loopProbe)
+    {
+        OranNtnLoopLatencyProbe::ScopedCpuTimer t(m_loopProbe,
+                                                  oranntn::loopstage::kRcActionRoute);
+        accepted = m_e2Term->RouteRcAction(action);
+    }
+    else
+    {
+        accepted = m_e2Term->RouteRcAction(action);
+    }
 
     m_totalActionsProcessed++;
     m_actionProcessed(action, accepted);
@@ -411,6 +450,20 @@ OranNtnNearRtRic::ProcessXappAction(uint32_t xappId, const E2RcAction& action)
     m_sdl->Set("ric", "last_action_xapp", static_cast<double>(xappId));
 
     return accepted;
+}
+
+// ---- Control-loop latency instrumentation ----
+
+void
+OranNtnNearRtRic::SetLoopLatencyProbe(Ptr<OranNtnLoopLatencyProbe> probe)
+{
+    m_loopProbe = probe;
+}
+
+Ptr<OranNtnLoopLatencyProbe>
+OranNtnNearRtRic::GetLoopLatencyProbe() const
+{
+    return m_loopProbe;
 }
 
 // ---- Conflict manager ----
