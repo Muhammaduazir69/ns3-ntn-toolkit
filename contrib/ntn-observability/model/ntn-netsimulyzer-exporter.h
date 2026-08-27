@@ -75,6 +75,21 @@ class NtnNetSimulyzerExporter : public Object
     /// Append (timeSec, value) to a series.
     void SampleSeries(uint32_t seriesIdx, double timeSec, double value);
 
+    /// OBS-06: declare a communication link between two nodes.
+    ///
+    /// The scene recorder kept its beams in m_beams and forwarded them only to
+    /// live stdout and to the CZML sink; nothing ever reached this exporter, so
+    /// its JSON described nodes moving with no links between them while a commit
+    /// message claimed links landed here too. Returns the link index used by
+    /// LinkChange(). Callable after Start(): a handover creates a link that did
+    /// not exist when the header was written, and dropping it would hide the
+    /// only case anyone watches this file for.
+    uint32_t AddLink(uint32_t aNodeId, uint32_t bNodeId);
+
+    /// Raise or lower a declared link. A handover is a lower on the outgoing
+    /// edge followed by a raise on the incoming one.
+    void LinkChange(uint32_t linkIdx, double timeSec, bool up);
+
     void Stop();
 
     uint64_t GetEventCount() const;
@@ -83,6 +98,13 @@ class NtnNetSimulyzerExporter : public Object
     void DoDispose() override;
 
   private:
+    struct LinkDecl
+    {
+        uint32_t idx;
+        uint32_t aNodeId;
+        uint32_t bNodeId;
+    };
+
     struct NodeDecl
     {
         uint32_t id;
@@ -109,6 +131,7 @@ class NtnNetSimulyzerExporter : public Object
     bool m_firstEvent{true};
     std::vector<NodeDecl> m_nodes;
     std::vector<SeriesDecl> m_series;
+    std::vector<LinkDecl> m_links;
     uint64_t m_eventCount{0};
 };
 

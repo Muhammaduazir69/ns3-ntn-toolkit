@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// Generated at CMake configure time. Do not edit; edit
+// ntn-build-provenance.h.in instead.
+//
+// OBS-07. The reproducibility manifest used to ship with an empty
+// toolkit_git_sha and an ns-3 version that was a string literal in a header
+// rather than the version actually built. A manifest whose provenance fields
+// are blank cannot establish what produced a result file, which is the only
+// thing the manifest exists to do.
+#ifndef NTN_BUILD_PROVENANCE_H
+#define NTN_BUILD_PROVENANCE_H
+
+namespace ns3
+{
+namespace ntnobs
+{
+
+/// Git SHA of the working tree at configure time. "unknown" outside a
+/// repository; a trailing "-dirty" means the tree had uncommitted changes,
+/// which is itself provenance a reader needs.
+inline constexpr const char* kToolkitGitSha = "@NTN_TOOLKIT_GIT_SHA@";
+
+/// ns-3 version read from the VERSION file of the tree being built.
+inline constexpr const char* kNs3Version = "ns-@NTN_NS3_VERSION@";
+
+} // namespace ntnobs
+} // namespace ns3
+
+#endif // NTN_BUILD_PROVENANCE_H

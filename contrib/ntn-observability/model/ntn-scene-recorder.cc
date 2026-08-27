@@ -6,6 +6,8 @@
 
 #include "ntn-scene-recorder.h"
 
+#include <algorithm>
+
 #include <ns3/abort.h>
 #include <ns3/log.h>
 #include <ns3/mobility-model.h>
@@ -46,6 +48,50 @@ GeodeticToEcefLocal(double latDeg, double lonDeg, double altM)
     return Vector((n + altM) * cphi * clam,
                   (n + altM) * cphi * slam,
                   (n * (1.0 - kE2) + altM) * sphi);
+}
+
+/// OBS-10: escape a string for embedding in a CZML (JSON) document.
+///
+/// The writer emitted node labels and KPI series names straight into JSON
+/// string literals with no escaping at all. A label containing a double quote
+/// does not merely render oddly, it terminates the string and produces a
+/// document no parser will accept; a label containing a newline or any other
+/// C0 control character is likewise invalid JSON. These labels are
+/// caller-supplied - TrackNode and TrackKpiSeries both take one - so a scenario
+/// naming a node from a file or a command-line argument could emit a broken
+/// scene with no indication of why.
+///
+/// This is the same escaping NtnReproManifest already applies to its own
+/// strings; the scene writer simply never used it.
+std::string
+CzmlEscape(const std::string& in)
+{
+    std::ostringstream os;
+    for (char c : in)
+    {
+        switch (c)
+        {
+        case '"':  os << "\\\""; break;
+        case '\\': os << "\\\\"; break;
+        case '\b': os << "\\b"; break;
+        case '\f': os << "\\f"; break;
+        case '\n': os << "\\n"; break;
+        case '\r': os << "\\r"; break;
+        case '\t': os << "\\t"; break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20)
+            {
+                char hex[8];
+                std::snprintf(hex, sizeof(hex), "\\u%04x", static_cast<unsigned char>(c));
+                os << hex;
+            }
+            else
+            {
+                os << c;
+            }
+        }
+    }
+    return os.str();
 }
 
 std::string
@@ -262,6 +308,13 @@ NtnSceneRecorder::Start()
                                        ecef.z * m_sceneScale),
                                 1.0);
         }
+        // OBS-06: the beams the scenario declared are links in the scene, and
+        // the exporter never heard about them. Declaring them here, before
+        // Start(), is what puts a "links" array in the JSON at all.
+        for (auto& b : m_beams)
+        {
+            b.exporterIdx = m_exporter->AddLink(b.fromId, b.toId);
+        }
         for (auto& k : m_kpis)
         {
             const char* unit = (k.kind == Sinr      ? "dB"
@@ -372,6 +425,20 @@ NtnSceneRecorder::OnHandover(uint32_t ueNodeId, uint32_t fromId, uint32_t toId)
         m_exporter->LogMessage(ueNodeId, t, ss.str());
     }
     m_handovers.push_back({t, ueNodeId, fromId, toId});
+    // OBS-05. Make the serving EDGE follow the handover, not just log it.
+    //
+    // The serving edge was declared once with TrackBeam() during setup and then
+    // never touched again: OnHandover recorded the event and left m_beams alone,
+    // so the CZML polyline and the live ##NTNSCENE_LINK## frame both kept
+    // pointing at the original satellite for the whole run. A viewer watching a
+    // handover study saw the association it was studying never change.
+    //
+    // OnLinkChange already builds the availability intervals the CZML writer
+    // needs, and had zero production callers. Driving it from here retires the
+    // old edge and opens the new one through that existing mechanism, so the
+    // polyline's availability splits at the handover instant instead of a
+    // second edge being invented.
+    SetServingEdge(ueNodeId, fromId, toId);
     if (m_liveStdout)
     {
         std::cout << R"(##NTNSCENE_HO## {"t":)" << FmtD(t) << R"(,"ue":)" << ueNodeId
@@ -406,6 +473,51 @@ NtnSceneRecorder::PositionAt(uint32_t id, double t, Vector& out) const
 }
 
 void
+NtnSceneRecorder::SetServingEdge(uint32_t ueNodeId, uint32_t fromId, uint32_t toId)
+{
+    if (fromId == toId)
+    {
+        return;
+    }
+    // Retire the outgoing edge. Only if it was actually declared: a scenario
+    // that never called TrackBeam has no polyline to gate, and inventing a
+    // down-transition for an edge that was never up would produce an
+    // availability interval for a link that never existed.
+    const bool haveOld = std::any_of(m_beams.begin(), m_beams.end(), [&](const Beam& b) {
+        return (b.fromId == fromId && b.toId == ueNodeId) ||
+               (b.fromId == ueNodeId && b.toId == fromId);
+    });
+    if (haveOld)
+    {
+        OnLinkChange(fromId, ueNodeId, false);
+    }
+    // Open the incoming edge, declaring it if this is the first time the UE has
+    // been served by that satellite.
+    const bool haveNew = std::any_of(m_beams.begin(), m_beams.end(), [&](const Beam& b) {
+        return (b.fromId == toId && b.toId == ueNodeId) ||
+               (b.fromId == ueNodeId && b.toId == toId);
+    });
+    if (!haveNew)
+    {
+        Beam nb{toId, ueNodeId, 0};
+        // OBS-06: a beam that first appears at a handover must be declared to
+        // the exporter too, or the link that the handover creates is the one
+        // link missing from the scene.
+        if (m_exporter)
+        {
+            nb.exporterIdx = m_exporter->AddLink(nb.fromId, nb.toId);
+        }
+        m_beams.push_back(nb);
+        // A beam declared mid-run must not be shown from t=0: the CZML writer
+        // treats a beam with no transitions as up for the whole run, so an
+        // explicit down at the start of the run keeps it dark until this
+        // handover opens it.
+        m_linkEvents.push_back({m_t0Sec, toId, ueNodeId, false});
+    }
+    OnLinkChange(toId, ueNodeId, true);
+}
+
+void
 NtnSceneRecorder::OnLinkChange(uint32_t aId, uint32_t bId, bool up)
 {
     const double t = Simulator::Now().GetSeconds();
@@ -414,6 +526,19 @@ NtnSceneRecorder::OnLinkChange(uint32_t aId, uint32_t bId, bool up)
     if (m_exporter)
     {
         m_exporter->LogMessage(aId, t, ss.str());
+        // OBS-06: and as a real link transition, not only as a log line. A
+        // reader of the JSON could previously see the TEXT "link 3<->7 up" in a
+        // message stream but had no link object to raise or lower.
+        for (const auto& b : m_beams)
+        {
+            const bool match = (b.fromId == aId && b.toId == bId) ||
+                               (b.fromId == bId && b.toId == aId);
+            if (match && b.exporterIdx != 0)
+            {
+                m_exporter->LinkChange(b.exporterIdx, t, up);
+                break;
+            }
+        }
     }
     // Record the transition so WriteCzml() can gate the corresponding polyline's
     // `availability` interval(s).
@@ -473,7 +598,8 @@ NtnSceneRecorder::WriteCzml()
         }
         const bool isSat = (tr.kind == Sat);
         out << ",";
-        out << R"({"id":"node-)" << tr.id << R"(","name":")" << tr.label << R"(",)";
+        out << R"({"id":"node-)" << tr.id << R"(","name":")" << CzmlEscape(tr.label)
+            << R"(",)";
         out << R"("point":{"pixelSize":)" << (isSat ? "8" : "6")
             << R"(,"color":{"rgba":[)"
             << (isSat ? "255,210,80,255" : "80,200,255,255") << "]}}";
@@ -496,7 +622,8 @@ NtnSceneRecorder::WriteCzml()
             }
             out << (wroteProps ? "," : R"(,"properties":{)");
             wroteProps = true;
-            out << R"(")" << k.name << R"(":{"epoch":")" << epoch << R"(","number":[)";
+            out << R"(")" << CzmlEscape(k.name) << R"(":{"epoch":")" << epoch
+                << R"(","number":[)";
             for (size_t i = 0; i < k.samples.size(); ++i)
             {
                 if (i > 0)

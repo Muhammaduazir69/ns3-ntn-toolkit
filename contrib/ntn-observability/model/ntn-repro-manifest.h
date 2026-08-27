@@ -18,15 +18,30 @@ namespace ntnobs
 /**
  * Reproducibility manifest — 2026 realism roadmap §3 T9.
  *
- * Every example writes one of these JSON files alongside its CSV/Parquet
- * outputs. A subsequent run can pass `--replay-manifest=path.json` to
- * deterministically replay the scenario: scenario name, duration, RNG
- * seed/run, TLE epoch + NORAD IDs, constellation generator parameters,
- * and CLI argv are restored from the manifest before Simulator::Run().
+ * NtnRealStackHelper::WriteHealthReport writes one of these beside every
+ * run's sim_health.csv, so any scenario built on the real-stack helper gets a
+ * provenance record without opting in. Scenarios that do not use that helper
+ * can construct and write one directly.
  *
- * Provenance fields (git SHA, ns-3 version, Sionna RT version, Sionna
- * scene SHA-256, HITRAN release tag, ITU-Rpy version, RIC service-model
- * versions) are recorded but not used by the replay path.
+ * OBS-07. Two claims used to sit here that the code did not support. The first
+ * was that "every example writes one": exactly one example out of roughly 87
+ * did. The second was that a run could pass `--replay-manifest=path.json` to
+ * replay a scenario deterministically - no such option existed anywhere in the
+ * tree, and no replay path was ever written. Both are corrected rather than
+ * papered over: the first is now true, and the second is described below as
+ * what it actually is.
+ *
+ * What this class does is RECORD and READ BACK. WriteJson serialises the
+ * record; LoadJson and ParseJson restore it, which lets a reader inspect or
+ * compare runs and lets a scenario re-apply values it chooses to re-apply.
+ * Re-applying them is the scenario's job; nothing here reaches into the
+ * simulator. A reader who wants byte-identical repetition needs the git SHA,
+ * the RNG seed and run, and the CLI argv, all of which are recorded.
+ *
+ * The git SHA and ns-3 version come from the build itself through
+ * ntn-build-provenance.h, generated at CMake configure time. A "-dirty" suffix
+ * on the SHA means the tree carried uncommitted changes when it was
+ * configured, which is provenance a reader needs rather than noise.
  *
  * The JSON schema is "ns3-ntn-toolkit/manifest" version 1; reviewers can
  * pin the schema in their citations. Unknown top-level keys are ignored

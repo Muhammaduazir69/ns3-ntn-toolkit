@@ -20,6 +20,7 @@
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-influx-sink.h"
+#include "ns3/ntn-metric-schema.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -130,7 +131,10 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-observability-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
@@ -174,22 +178,25 @@ main(int argc, char* argv[])
             lastRx = tot;
 
             Point p;
-            p.measurement = "ntn_downlink";
-            p.tags["link"] = "leo-gnd";
-            p.tags["band"] = "Ku";
-            p.tags["provenance"] = "phy-trace";
-            p.fieldsFloat["goodput_mbps"] = mbps;
+            // OBS-13: schema constants, not bare literals. This example invented
+            // its measurement and five field names, none of which appeared in
+            // ntn-metric-schema.h or in any shipped dashboard.
+            p.measurement = ntnobs::measurement::kDownlink;
+            p.tags[ntnobs::tag::kLink] = "leo-gnd";
+            p.tags[ntnobs::tag::kBand] = "Ku";
+            p.tags[ntnobs::tag::kProvenance] = "phy-trace";
+            p.fieldsFloat[ntnobs::field::kGoodputMbps] = mbps;
             if (!std::isnan(sinr))
             {
-                p.fieldsFloat["sinr_db"] = sinr;
+                p.fieldsFloat[ntnobs::field::kSinrDb] = sinr;
             }
             if (!std::isnan(tbler))
             {
-                p.fieldsFloat["tbler"] = tbler;
+                p.fieldsFloat[ntnobs::field::kTbler] = tbler;
             }
-            p.fieldsFloat["elevation_deg"] = elev;
-            p.fieldsFloat["slant_range_km"] = rangeM / 1000.0;
-            p.fieldsInt["rx_bytes_total"] = static_cast<long long>(tot);
+            p.fieldsFloat[ntnobs::field::kElevationDeg] = elev;
+            p.fieldsFloat[ntnobs::field::kSlantRangeKm] = rangeM / 1000.0;
+            p.fieldsInt[ntnobs::field::kRxBytesTotal] = static_cast<long long>(tot);
             p.timestamp = now;
             influx->Push(p);
 

@@ -48,6 +48,7 @@ struct Wiring
     Ptr<NtnDrxStateMachine> drx;
     Ptr<MobilityModel> ueMob;
     Ptr<MobilityModel> satMob;
+    Ptr<MobilityModel> nbrMob; //!< OBS-03: real neighbour, for the ISL measurement
     NtnRealStackHelper* rs{nullptr};
     std::string runId;
     uint32_t satNodeId{1};
@@ -89,6 +90,42 @@ SampleEverySecond(Wiring* w)
         // Also push to NetSimulyzer
         w->netSim->NodeMove(w->satNodeId, now, pos);
     }
+    // OBS-03: the ISL the ntn-isl dashboard queries. Range is the distance
+    // between two REAL propagated ephemerides. There is deliberately no
+    // isl_load_mbps here: the toolkit does not model ISL traffic, and emitting
+    // a number for it would be the synthetic data this schema exists to avoid.
+    if (w->nbrMob)
+    {
+        const Vector a = w->satMob->GetPosition();
+        const Vector b = w->nbrMob->GetPosition();
+        const double rangeKm =
+            std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) +
+                      (a.z - b.z) * (a.z - b.z)) /
+            1000.0;
+        Point p;
+        p.measurement = measurement::kIsl;
+        p.tags[tag::kRunId] = w->runId;
+        p.fieldsFloat[field::kIslRangeKm] = rangeKm;
+        w->sink->Push(p);
+    }
+    // OBS-03: the handover counters the ntn-handover dashboard queries, taken
+    // from the radio's own counts. Requested is what the control plane asked
+    // for, exec is what the RRC confirmed through HandoverEndOk, and the
+    // difference is the failures - so a dashboard showing a gap is showing a
+    // real one rather than a fabricated series.
+    if (w->rs)
+    {
+        const uint32_t requested = w->rs->GetHandoverRequestedCount();
+        const uint32_t executed = w->rs->GetHandoverCount();
+        Point p;
+        p.measurement = measurement::kHandover;
+        p.tags[tag::kRunId] = w->runId;
+        p.fieldsInt[field::kHoTriggerCount] = static_cast<long long>(requested);
+        p.fieldsInt[field::kHoExecCount] = static_cast<long long>(executed);
+        p.fieldsInt[field::kHoFailCount] =
+            static_cast<long long>(requested > executed ? requested - executed : 0);
+        w->sink->Push(p);
+    }
     {
         Point p;
         p.measurement = measurement::kDrx;
@@ -99,36 +136,64 @@ SampleEverySecond(Wiring* w)
              w->drx->GetTimeInState(DrxState::OnDuration)).GetMilliSeconds();
         w->sink->Push(p);
     }
-    // MEASURED radio KPIs from the real NR cell (phy-trace provenance):
-    // the dashboard now shows the genuine link, not a synthetic curve. The
-    // radio point is only exported when a measured SINR sample exists — no
-    // heuristic fallback values masquerade as measurements. RSRP is derived
-    // from the cell's actual configuration: this is a single-cell,
-    // noise-limited link, so SINR == SNR and the received signal power is
-    //   RSRP [dBm] = SINR [dB] + noise floor [dBm]
-    //   noise floor = -174 dBm/Hz + NF + 10 log10(BW)
-    // with BW read from the helper's configured carrier bandwidth and NF the
-    // UE PHY default (5 dB for both backends; the helper leaves it untouched).
+    // MEASURED radio KPIs from the real NR cell (phy-trace provenance): the
+    // dashboard shows the genuine link, not a synthetic curve. The radio point
+    // is only exported when a measured SINR sample exists - no heuristic
+    // fallback values masquerade as measurements.
+    //
+    // OBS-09. RSRP comes from the UE's own RRC measurement report where the
+    // backend produces one. That is the standards-defined quantity: TS 38.331
+    // measResultPCell, mapped to dBm by TS 38.133, quantized to 1 dB exactly as
+    // a real UE reports it. Nothing is reconstructed and the provenance is
+    // measured.
+    //
+    // The mmwave backend runs ideal RRC and never sends a measurement report,
+    // so it falls back to a reconstruction from the measured SINR. That path
+    // used to publish
+    //     RSRP = SINR + (-174 + NF + 10 log10 BW)
+    // which is the TOTAL in-band received power, i.e. an RSSI. TS 38.215
+    // Sec. 5.1.1 defines SS-RSRP as a PER-RESOURCE-ELEMENT power, so the total
+    // has to be divided by the number of REs the SINR was averaged over - about
+    // 28 dB on a 20 MHz FR1 carrier. Without that term the export was a plausible
+    // looking -70 dBm carrying a standards name it did not earn. The noise
+    // figure is now read off the live UE PHY rather than assumed, so a scenario
+    // that changes it cannot silently bias the result.
     const double measSinr = w->rs ? w->rs->GetUeRecentSinrDb(0) : std::nan("");
     if (!std::isnan(measSinr))
     {
-        constexpr double kUeNoiseFigureDb = 5.0; // UE PHY NoiseFigure default
-        const double bwHz = w->rs->GetBandwidthHz();
-        const double noiseFloorDbm = -174.0 + kUeNoiseFigureDb + 10.0 * std::log10(bwHz);
-        const double measRsrp = measSinr + noiseFloorDbm;
+        double rsrpDbm = w->rs->GetServingRsrpDbm();
+        const char* rsrpProv = "measured";
+        if (std::isnan(rsrpDbm))
+        {
+            const double bwHz = w->rs->GetBandwidthHz();
+            double nfDb = w->rs->GetUeNoiseFigureDb();
+            if (std::isnan(nfDb))
+            {
+                nfDb = 5.0; // both backends' attribute default
+            }
+            const double noiseFloorDbm = -174.0 + nfDb + 10.0 * std::log10(bwHz);
+            const double rssiDbm = measSinr + noiseFloorDbm;
+            const uint32_t re = w->rs->GetSignalResourceElements();
+            rsrpDbm = (re > 0) ? rssiDbm - 10.0 * std::log10(static_cast<double>(re))
+                               : std::nan("");
+            rsrpProv = "derived-per-re";
+        }
         Point p;
         p.measurement = measurement::kRadio;
         p.tags[tag::kRunId] = w->runId;
         p.tags[tag::kCellId] = "C-1";
         p.tags[tag::kUeImsi] = "100001";
-        // sinr_db is MEASURED (PHY trace); rsrp_dbm is DERIVED closed-form from
-        // that SINR + noise floor (see above). Tag the derived provenance of the
-        // RSRP field so a dashboard/query never mistakes it for a measured RSRP.
-        p.tags["rsrp_provenance"] = "derived";
-        p.fieldsFloat[field::kRsrpDbm] = measRsrp;
+        // sinr_db is MEASURED (PHY trace). rsrp_dbm is either the UE's reported
+        // value (measured) or a per-RE reconstruction from it (derived-per-re);
+        // the tag says which, so a query can never mistake one for the other.
+        p.tags[tag::kRsrpProvenance] = rsrpProv;
+        if (!std::isnan(rsrpDbm))
+        {
+            p.fieldsFloat[field::kRsrpDbm] = rsrpDbm;
+            w->netSim->SampleSeries(w->rsrpSeriesIdx, now, rsrpDbm);
+        }
         p.fieldsFloat[field::kSinrDb] = measSinr;
         w->sink->Push(p);
-        w->netSim->SampleSeries(w->rsrpSeriesIdx, now, measRsrp);
     }
     w->netSim->SampleSeries(w->taSeriesIdx, now,
                             w->ta->ComputeTotalTa().GetMicroSeconds());
@@ -215,9 +280,19 @@ main(int argc, char* argv[])
     Ptr<ns3::ntncon::Sgp4MobilityModel> satMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
     satMob->SetElements(wElements[0]);
+    // OBS-03: a real in-plane neighbour. The ISL and handover dashboards query
+    // measurements that nothing in the toolkit ever wrote, so both rendered
+    // empty forever; with one satellite there was no inter-satellite link to
+    // report and no neighbour cell to hand over to. This is the same Walker
+    // shell, so the ISL range below comes from two real ephemerides rather than
+    // from a placed constant.
+    Ptr<ns3::ntncon::Sgp4MobilityModel> nbrMob =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    nbrMob->SetElements(wElements[1]);
     NodeContainer satNodes;
-    satNodes.Create(1);
+    satNodes.Create(2);
     satNodes.Get(0)->AggregateObject(satMob);
+    satNodes.Get(1)->AggregateObject(nbrMob);
     NodeContainer ueNodes;
     ueNodes.Create(1);
     double subLat, subLon, subAlt;
@@ -229,6 +304,7 @@ main(int argc, char* argv[])
     Ptr<MobilityModel> ueMob = ueModels[0];
     w.ueMob = ueMob;
     w.satMob = satMob;
+    w.nbrMob = nbrMob;
 
     // ---- real NR cell: the MEASURED radio the dashboard observes ----
     NtnRealStackHelper rs;
@@ -242,7 +318,10 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-observability-demo");
     // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    rs.SetSatEirpDbm(radio == "mmwave" ? 55.0 : 70.0);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(radio == "mmwave" ? 55.0 : 70.0);
     rs.Build(satNodes, ueNodes);
     // One UE -> a saturating eMBB stream so the dashboard observes a live
     // data plane (MixedBouquet would give the single UE the 1 kbps NB-IoT mix).

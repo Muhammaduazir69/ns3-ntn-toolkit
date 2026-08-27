@@ -146,7 +146,15 @@ class NtnSceneRecorder : public Object
     /// FIXED-frame position samples. Default is 2026-01-01T00:00:00Z. Pass the
     /// scenario's TLE epoch (e.g. WalkerConfig::epoch_unix_s) so Cesium's sun /
     /// lighting matches the orbital epoch instead of being a year off.
+    /// OBS-14: the CZML scene epoch, 2026-01-01T00:00:00Z.
+    ///
+    /// Named rather than a bare literal so a scenario aligning the scene with
+    /// another export surface has something to refer to. The three surfaces
+    /// anchor time differently on purpose (see NtnInfluxSink::TimeAnchorNote);
+    /// what was missing is that none of it was written down or tested.
+    static constexpr double kDefaultSceneEpochUnix = 1767225600.0;
     void SetSceneEpochUnix(double unixSeconds) { m_sceneEpochUnix = unixSeconds; }
+    double GetSceneEpochUnix() const { return m_sceneEpochUnix; }
 
     // ---- lifecycle -------------------------------------------------------
     /// Position sampling interval (default 1 s).
@@ -162,6 +170,20 @@ class NtnSceneRecorder : public Object
     /// Note a handover (UE moves from one serving node to another).
     void OnHandover(uint32_t ueNodeId, uint32_t fromId, uint32_t toId);
     /// Note a link state change between two tracked nodes.
+    /// OBS-05: move a UE's serving edge from \p fromId to \p toId.
+    ///
+    /// Retires the outgoing edge and opens the incoming one through the same
+    /// OnLinkChange transitions the CZML writer already uses for availability,
+    /// declaring the new edge if the UE has not been served by that satellite
+    /// before. Called automatically by OnHandover, so a scenario that already
+    /// reports handovers gets a serving edge that follows them without any
+    /// further wiring.
+    ///
+    /// The serving edge used to be declared once by TrackBeam() at setup and
+    /// never touched, so the polyline pointed at the original satellite for the
+    /// whole run and a handover study's own association never moved on screen.
+    void SetServingEdge(uint32_t ueNodeId, uint32_t fromId, uint32_t toId);
+
     void OnLinkChange(uint32_t aId, uint32_t bId, bool up);
 
     /// Number of scene events written (positions + KPI samples + log events).
@@ -182,6 +204,10 @@ class NtnSceneRecorder : public Object
     {
         uint32_t fromId;
         uint32_t toId;
+        /// OBS-06: index of this beam in the NetSimulyzer exporter, or 0 if it
+        /// was declared after Start() and so has no exporter link. Beams reached
+        /// only live stdout and the CZML sink before this.
+        uint32_t exporterIdx{0};
     };
     struct KpiSeries
     {
@@ -224,6 +250,19 @@ class NtnSceneRecorder : public Object
 
     /// Convert a tracked position to ECEF metres given the configured frame.
     Vector ToEcef(const Vector& p) const;
+
+  public:
+    /// OBS-15: test seam for the LocalEnu-to-ECEF conversion.
+    ///
+    /// Roughly forty examples reach the scene recorder through the LocalEnu
+    /// path, and the only test of the recorder set EcefGlobal, which makes
+    /// ToEcef the identity for the whole test. The conversion every one of
+    /// those examples depends on therefore had zero coverage, and a numerically
+    /// wrong position would have passed every assertion, all of which are
+    /// substring searches on the output files.
+    Vector ToEcefForTest(const Vector& p) const { return ToEcef(p); }
+
+  private:
     /// Periodic poll: read every tracked node and emit a position sample.
     void Poll();
     /// Map a NodeKind to a 3D model name (matches our custom .obj asset set).
@@ -256,7 +295,7 @@ class NtnSceneRecorder : public Object
     std::string m_czmlPath;
     bool m_liveStdout{false};
 
-    double m_sceneEpochUnix{1767225600.0}; //!< CZML t=0 (default 2026-01-01T00:00:00Z)
+    double m_sceneEpochUnix{kDefaultSceneEpochUnix}; //!< CZML t=0
     Time m_sampleDt{Seconds(1.0)};
     bool m_running{false};
     double m_t0Sec{0.0};

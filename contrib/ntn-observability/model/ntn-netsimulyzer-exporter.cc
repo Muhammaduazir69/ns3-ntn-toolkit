@@ -114,6 +114,36 @@ NtnNetSimulyzerExporter::AddSeries(const std::string& name,
     return idx;
 }
 
+uint32_t
+NtnNetSimulyzerExporter::AddLink(uint32_t aNodeId, uint32_t bNodeId)
+{
+    const uint32_t idx = static_cast<uint32_t>(m_links.size()) + 1;
+    m_links.push_back({idx, aNodeId, bNodeId});
+    if (m_running)
+    {
+        // A handover creates a link that did not exist when the header was
+        // written, and that is the case worth seeing. Emit it as an event so
+        // the reader can add it to the scene rather than dropping it, which is
+        // what a header-only declaration would do.
+        std::ostringstream ss;
+        ss << R"({"type":"LinkAdd","time":)"
+           << FormatDouble(Simulator::Now().GetSeconds())
+           << R"(,"linkId":)" << idx << R"(,"a":)" << aNodeId << R"(,"b":)" << bNodeId << "}";
+        WriteEvent(ss.str());
+    }
+    return idx;
+}
+
+void
+NtnNetSimulyzerExporter::LinkChange(uint32_t linkIdx, double timeSec, bool up)
+{
+    std::ostringstream ss;
+    ss << R"({"type":"LinkChange","time":)" << FormatDouble(timeSec)
+       << R"(,"linkId":)" << linkIdx
+       << R"(,"up":)" << (up ? "true" : "false") << "}";
+    WriteEvent(ss.str());
+}
+
 void
 NtnNetSimulyzerExporter::Start()
 {
@@ -197,6 +227,17 @@ NtnNetSimulyzerExporter::WriteHeader()
               << R"(,"position":[)" << FormatDouble(n.initialPosition.x) << ","
               << FormatDouble(n.initialPosition.y) << ","
               << FormatDouble(n.initialPosition.z) << "]}";
+    }
+    m_out << "]";
+
+    m_out << R"(,"links":[)";
+    for (size_t i = 0; i < m_links.size(); ++i)
+    {
+        const auto& l = m_links[i];
+        if (i > 0)
+            m_out << ",";
+        m_out << R"({"id":)" << l.idx << R"(,"a":)" << l.aNodeId << R"(,"b":)" << l.bNodeId
+              << "}";
     }
     m_out << "]";
 

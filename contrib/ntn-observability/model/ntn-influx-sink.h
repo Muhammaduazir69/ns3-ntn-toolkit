@@ -91,6 +91,36 @@ class NtnInfluxSink : public Object
     /// The base epoch currently applied (defaults to wall-clock at construction).
     Time GetBaseEpoch() const;
 
+    /**
+     * \brief OBS-14: one line naming the time anchor this sink is using.
+     *
+     * The toolkit has three export surfaces and they anchor time differently
+     * ON PURPOSE, which was never written down anywhere and never tested:
+     *
+     *   - this sink adds a WALL-CLOCK base epoch (default: construction time),
+     *     because a live Grafana query is "last 1 hour" and pure sim time would
+     *     land every point in 1970;
+     *   - NtnSceneRecorder's CZML uses a SCENARIO epoch
+     *     (NtnSceneRecorder::kDefaultSceneEpochUnix), because a globe has to
+     *     animate at the date the ephemeris is for;
+     *   - the Python backend stamps datetime.now() when it accumulates.
+     *
+     * They are not interchangeable and the difference is not a defect. Being
+     * unable to tell which one an artifact used IS: cross-referencing a CZML
+     * timestamp against an Influx point was guesswork. This states it.
+     */
+    std::string TimeAnchorNote() const;
+
+    /// OBS-14 test seam: apply the base epoch to a point exactly as Push()
+    /// does. Push() also enqueues and flushes, so the epoch arithmetic - the
+    /// part no test exercised - was not reachable on its own.
+    Point StampForTest(const Point& p) const
+    {
+        Point copy = p;
+        copy.timestamp = m_baseEpoch + p.timestamp;
+        return copy;
+    }
+
     /// Append a fully-formed Point to the buffer. The implementation is
     /// reentrant-safe across simulation time but not across threads.
     void Push(const Point& p);

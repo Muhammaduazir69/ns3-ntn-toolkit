@@ -35,12 +35,41 @@ namespace
 {
 
 // Escape rules per https://docs.influxdata.com/influxdb/v2/reference/syntax/line-protocol/
+/// OBS-10: strip characters that line protocol cannot represent at all.
+///
+/// A newline TERMINATES a point in InfluxDB line protocol, and the format
+/// provides no escape for it: a value containing one does not produce a
+/// mis-rendered point, it produces a second point whose entire content is
+/// attacker-supplied. The same is true of a carriage return. These values reach
+/// the sink straight from the command line - ntn-observability-demo takes
+/// --runId and writes it into a tag - so this is reachable by anyone who can
+/// pass an argument, and by any scenario that builds a label from file contents.
+///
+/// Since the format cannot encode them, the only correct handling is to remove
+/// them rather than pretend an escape exists.
 std::string
-EscapeKey(const std::string& s)
+StripControl(const std::string& s)
 {
     std::string out;
     out.reserve(s.size());
     for (char c : s)
+    {
+        const unsigned char u = static_cast<unsigned char>(c);
+        // Replace every C0 control character, not just the two that break the
+        // line framing: none of them belong in an identifier, and a value that
+        // silently carries one is a value nobody can grep for.
+        out.push_back(u < 0x20 || u == 0x7f ? ' ' : c);
+    }
+    return out;
+}
+
+std::string
+EscapeKey(const std::string& s)
+{
+    const std::string clean = StripControl(s);
+    std::string out;
+    out.reserve(clean.size());
+    for (char c : clean)
     {
         if (c == ',' || c == ' ' || c == '=')
         {
@@ -70,10 +99,14 @@ EscapeMeasurement(const std::string& s)
 std::string
 EscapeStringValue(const std::string& s)
 {
+    // OBS-10: same reasoning as EscapeKey. A quoted field value still cannot
+    // contain a raw newline, because the newline ends the point before the
+    // closing quote is ever reached.
+    const std::string cleaned = StripControl(s);
     std::string out;
-    out.reserve(s.size() + 2);
+    out.reserve(cleaned.size() + 2);
     out.push_back('"');
-    for (char c : s)
+    for (char c : cleaned)
     {
         if (c == '"' || c == '\\')
         {
@@ -254,6 +287,25 @@ Time
 NtnInfluxSink::GetBaseEpoch() const
 {
     return m_baseEpoch;
+}
+
+std::string
+NtnInfluxSink::TimeAnchorNote() const
+{
+    std::ostringstream os;
+    os << "[influx/time-anchor] base_epoch_s=" << m_baseEpoch.GetSeconds();
+    if (m_baseEpoch == Time(0))
+    {
+        os << "  -> PURE SIM TIME (points land at epoch 1970; a wall-clock "
+              "dashboard query will not find them)";
+    }
+    else
+    {
+        os << "  -> sim time + base epoch. NOTE (OBS-14): the CZML scene uses a "
+              "SCENARIO epoch and the Python backend stamps wall-clock at "
+              "accumulation; the three surfaces are not on one clock.";
+    }
+    return os.str();
 }
 
 void

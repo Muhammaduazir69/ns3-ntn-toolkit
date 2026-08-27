@@ -36,6 +36,7 @@
 #include "ns3/walker-constellation.h"
 
 #include <cmath>
+#include <ctime>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -105,7 +106,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(duration));
     rs.SetRunTag("ntn-netsimulyzer-official-demo");
     // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    rs.SetSatEirpDbm(radio == "mmwave" ? 55.0 : 70.0);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(radio == "mmwave" ? 55.0 : 70.0);
     // Enable the REAL NR inter-cell handover path (A3-RSRP + X2) so the scene's
     // handover events, if any, come from a genuine RRC serving-cell change
     // (TS 38.300: reconfiguration-with-sync) — not a geometric guess. Requires
@@ -161,7 +165,6 @@ main(int argc, char* argv[])
         scene->TrackKpiSeries(ueSceneId0, ntnobs::NtnSceneRecorder::Tbler, "best-geo-candidate-idx");
     scene->EnableNetSimulyzer(out + ".scene.json");
     scene->EnableCzml(out + ".czml");
-    scene->Start();
 
     // Map each gNB's real cell id -> scene sat id, so a real serving-cell change
     // can be rendered against the right satellites.
@@ -175,6 +178,33 @@ main(int argc, char* argv[])
         }
     }
 
+    // OBS-06: declare the serving beam BEFORE Start(), so the scene has a
+    // communication link in it at all.
+    //
+    // This example tracked seven nodes and four KPI series and never called
+    // TrackBeam, so its CZML sink held node positions and handover arcs and not
+    // one link-<a>-<b> polyline: a scene of satellites and a terminal with
+    // nothing drawn between them. Everything needed was already here, the
+    // cellToScene map and the real GetUeServingCellId below.
+    //
+    // Declared from the REAL serving cell, not from the nearest satellite. A
+    // geometric argmin would draw a link the stack is not using, which is the
+    // fabricated-beam habit OBS-01 exists to stop.
+    const uint16_t servingAtStart = rs.GetUeServingCellId(0);
+    auto itStart = cellToScene.find(servingAtStart);
+    if (itStart != cellToScene.end())
+    {
+        scene->TrackBeam(itStart->second, ueSceneId0);
+    }
+    else
+    {
+        NS_LOG_UNCOND("[obs-06] no RRC serving cell at t0 (cell id "
+                      << servingAtStart << "); the serving beam will be declared at the first "
+                      << "handover instead, and until then the scene correctly shows no link");
+    }
+
+    scene->Start();
+
     // 1 Hz tick: push MEASURED values into the scene. A handover is emitted ONLY
     // when the UE's REAL RRC serving cell changes (GetUeServingCellId tracks the
     // actual A3/X2 handover, unlike a geometric nearest-sat argmin). If the stack
@@ -182,7 +212,7 @@ main(int argc, char* argv[])
     // shown, because none executed. The geometric nearest-sat is recorded
     // separately as "best-geo-candidate-idx", never as a handover.
     uint64_t lastRx = 0;
-    uint16_t prevCell = 0;
+    uint16_t prevCell = servingAtStart;
     rs.RegisterPeriodicCallback(
         Seconds(1.0),
         [&rs, scene, &satNodes, sats, ueNodes, sinrSeries, thrSeries, tblerSeries, geoCandSeries,
@@ -277,10 +307,24 @@ main(int argc, char* argv[])
     // ---- Reproducibility manifest (roadmap T9): exercise BOTH WriteJson + LoadJson ----
     const std::string manifestPath = out + ".manifest.json";
     ntnobs::NtnReproManifest manifest;
+    // OBS-07: SetConstellation's third parameter is satsPerPlane, and this
+    // passed wcfg.total_sats, which is only the same number because num_planes
+    // is 1. Divide so the field means what it is named.
+    const uint32_t satsPerPlane =
+        (wcfg.num_planes > 0) ? (wcfg.total_sats / wcfg.num_planes) : wcfg.total_sats;
+    // OBS-07: the epoch was sitting in wcfg all along and the manifest recorded
+    // an empty string for it.
+    const std::time_t epochT = static_cast<std::time_t>(wcfg.epoch_unix_s);
+    std::tm epochTm{};
+    gmtime_r(&epochT, &epochTm);
+    char epochBuf[32];
+    std::strftime(epochBuf, sizeof(epochBuf), "%Y-%m-%dT%H:%M:%SZ", &epochTm);
+
     manifest.SetScenarioName("ntn-netsimulyzer-official-demo")
         .SetScenarioDuration(duration)
         .SetRng(RngSeedManager::GetSeed(), RngSeedManager::GetRun())
-        .SetConstellation("walker-delta", wcfg.num_planes, wcfg.total_sats, altitudeKm, 53.0)
+        .SetTleEpoch(epochBuf)
+        .SetConstellation("walker-delta", wcfg.num_planes, satsPerPlane, altitudeKm, 53.0)
         .SetCliArgv(argc, argv)
         .AddExtra("mean_dl_sinr_db", std::to_string(rs.GetMeanDlSinrDb()));
     const bool wrote = manifest.WriteJson(manifestPath);

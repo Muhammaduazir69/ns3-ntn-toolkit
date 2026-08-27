@@ -4,6 +4,8 @@
 
 #include "ntn-repro-manifest.h"
 
+#include "ntn-build-provenance.h"
+
 #include "ns3/log.h"
 
 #include <algorithm>
@@ -339,6 +341,13 @@ class JsonReader
 NtnReproManifest::NtnReproManifest()
     : m_createdUtc(NowIso8601Utc())
 {
+    // OBS-07: seed provenance from the build itself. Every manifest the repo
+    // shipped carried an empty toolkit_git_sha and an ns-3 version that was a
+    // literal in a header rather than the version being built, so no result
+    // file could be traced back to the code that produced it. A scenario may
+    // still override either, but it can no longer forget them.
+    m_gitSha = kToolkitGitSha;
+    m_ns3Version = kNs3Version;
 }
 
 NtnReproManifest&
@@ -583,6 +592,25 @@ NtnReproManifest::ToJson() const
 bool
 NtnReproManifest::WriteJson(const std::string& path) const
 {
+    // OBS-07: a manifest exists so a reader can establish what produced a
+    // result. One with no scenario name, no duration or no build SHA cannot do
+    // that, and the shipped example printed "manifest round-trip: PASS" over
+    // exactly such a file because the check compared only the two fields it
+    // had set. Say so loudly rather than writing a confident-looking blank.
+    if (m_scenarioName.empty())
+    {
+        NS_LOG_WARN("NtnReproManifest: writing " << path << " with no scenario name");
+    }
+    if (m_scenarioDuration <= 0.0)
+    {
+        NS_LOG_WARN("NtnReproManifest: writing " << path << " with no scenario duration");
+    }
+    if (m_gitSha.empty() || m_gitSha == "unknown")
+    {
+        NS_LOG_WARN("NtnReproManifest: writing "
+                    << path << " with git sha '" << m_gitSha
+                    << "'; the result cannot be traced to a commit");
+    }
     const std::string body = ToJson();
     const std::string tmp = path + ".tmp";
     {

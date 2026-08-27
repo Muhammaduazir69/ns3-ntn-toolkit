@@ -26,6 +26,13 @@ inline constexpr const char* kSatPosition = "ntn_sat_pos";  //!< sat ECEF positi
 inline constexpr const char* kUeReport = "ntn_ue_report";   //!< UE GNSS lat/lon/alt
 inline constexpr const char* kSlice = "ntn_slice";          //!< per-slice throughput / latency
 inline constexpr const char* kBeam = "ntn_beam";            //!< beam selection / gain
+/// OBS-13: the module's own traffic example emitted "ntn_downlink" and five
+/// field names that appear nowhere in this header and in none of the four
+/// shipped dashboards. A schema whose own module bypasses it is advisory, and
+/// an advisory schema is a naming convention nobody has to follow. The
+/// measurement is legitimate, so it is adopted here rather than the example
+/// being made to fake one of the existing ones.
+inline constexpr const char* kDownlink = "ntn_downlink"; //!< per-UE DL goodput + link geometry
 
 } // namespace measurement
 
@@ -39,6 +46,28 @@ inline constexpr const char* kBeamId = "beam_id";
 inline constexpr const char* kSliceSst = "slice_sst";
 inline constexpr const char* kPayloadMode = "payload_mode";
 inline constexpr const char* kRunId = "run_id";
+
+// OBS-08: provenance is part of the schema.
+//
+// It was not, so every exporter invented its own key as a bare string literal.
+// Two names were in use for the same concept - "provenance" and
+// "rsrp_provenance" - plus "band" and "link", none of which any consumer could
+// discover from the schema. A dashboard or a lint that wants to reject a series
+// whose numbers are derived has to know what the key is called.
+//
+// The convention, stated here so it stops being reinvented:
+//   kProvenance          applies to the whole point
+//   <field>_provenance   overrides it for one field, where a point genuinely
+//                        mixes origins (a measured SINR beside a reconstructed
+//                        RSRP is the case that forced this)
+//
+// Values in use across the toolkit: "measured", "phy-trace", "app-trace",
+// "inband-timestamp", "inband-seq", "rrc-meas-report", "derived",
+// "derived-per-re", "geometry-budget", "config", "bler-errormodel".
+inline constexpr const char* kProvenance = "provenance";
+inline constexpr const char* kRsrpProvenance = "rsrp_provenance";
+inline constexpr const char* kBand = "band";
+inline constexpr const char* kLink = "link";
 
 } // namespace tag
 
@@ -65,6 +94,12 @@ inline constexpr const char* kThroughputMbps = "throughput_mbps";
 inline constexpr const char* kLatencyMs = "latency_ms";
 inline constexpr const char* kBroadcastSeq = "broadcast_seq";
 inline constexpr const char* kReportSeq = "report_seq";
+// OBS-13: fields the traffic example was emitting off-schema.
+inline constexpr const char* kGoodputMbps = "goodput_mbps";
+inline constexpr const char* kTbler = "tbler";
+inline constexpr const char* kElevationDeg = "elevation_deg";
+inline constexpr const char* kSlantRangeKm = "slant_range_km";
+inline constexpr const char* kRxBytesTotal = "rx_bytes_total";
 inline constexpr const char* kHoExecCount = "ho_exec_count";
 inline constexpr const char* kHoTriggerCount = "ho_trigger_count";
 inline constexpr const char* kHoFailCount = "ho_fail_count";
