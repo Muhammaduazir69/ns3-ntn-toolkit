@@ -104,12 +104,25 @@ class SionnaCachingTransport : public SionnaTransport
         int64_t rxGz;
         uint64_t freqHz;
         uint64_t tBucket;
+        /// SIONNA-04: every non-geometric input that changes the server's
+        /// answer, folded into one digest.
+        ///
+        /// The key used to be geometry, frequency and time only. The server
+        /// rebuilds the PlanarArray and installs or removes the RIS per query
+        /// (sionna-server.py), and honours los_only, so two requests that agree
+        /// on position and differ on antenna or surface configuration get
+        /// genuinely different answers. Hashing only the first set meant a
+        /// single transport shared between a SISO and an 8x8 run, or between
+        /// RIS-on and RIS-off, returned whichever was asked first within the
+        /// same 100 m cell and 1 ms bucket. That silently turns an A/B
+        /// comparison into a constant, which is worse than a slow cache.
+        uint64_t cfg;
 
         bool operator==(const Key& o) const
         {
             return txGx == o.txGx && txGy == o.txGy && txGz == o.txGz &&
                    rxGx == o.rxGx && rxGy == o.rxGy && rxGz == o.rxGz &&
-                   freqHz == o.freqHz && tBucket == o.tBucket;
+                   freqHz == o.freqHz && tBucket == o.tBucket && cfg == o.cfg;
         }
     };
 
@@ -131,6 +144,7 @@ class SionnaCachingTransport : public SionnaTransport
             h = mix(h, static_cast<uint64_t>(k.rxGz));
             h = mix(h, k.freqHz);
             h = mix(h, k.tBucket);
+            h = mix(h, k.cfg);
             return h;
         }
     };

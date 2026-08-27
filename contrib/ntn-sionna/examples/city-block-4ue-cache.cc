@@ -25,6 +25,8 @@
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
+
+#include <iostream>
 #include "ns3/simulator.h"
 
 #include "ns3/ns3-sionna-channel.h"
@@ -38,6 +40,13 @@
 #include <vector>
 
 using namespace ns3;
+
+
+// WF-12: the channel this run used, kept at file scope so main() can print the
+// provenance of its numbers. GetFallbacks() existed and no example read it, so on
+// a host without Sionna every run here printed Sionna framing over pure
+// free-space results with nothing in the output to show it.
+static Ptr<NtnSionnaChannel> base;
 
 NS_LOG_COMPONENT_DEFINE("CityBlock4ueCache");
 
@@ -123,7 +132,7 @@ main(int argc, char* argv[])
 
     // --- 4 cascade channels sharing the cached transport ---
     auto buildChannel = [&]() {
-        Ptr<NtnSionnaChannel> base = CreateObject<NtnSionnaChannel>();
+        base = CreateObject<NtnSionnaChannel>();
         base->SetTransport(cache);
         base->SetFrequencyHz(freqHz);
         Ptr<NtnAtmosphericLossChain> chain =
@@ -219,5 +228,10 @@ main(int argc, char* argv[])
                 (unsigned long)cache->GetEvictions(),
                 cache->GetHitRate(),
                 (unsigned long)cache->GetEntries());
+
+    // WF-12: say what produced these numbers. GetFallbacks() existed and no
+    // example read it, so on a host without Sionna every run here printed
+    // Sionna framing over pure free-space results with nothing to show it.
+    std::cout << base->ProvenanceLine() << std::endl;
     return 0;
 }

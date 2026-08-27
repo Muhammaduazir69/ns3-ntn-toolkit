@@ -2,6 +2,25 @@
 
 <p align="center"><strong>NVIDIA Sionna RT GPU ray-tracing bridged into ns-3 for non-terrestrial channels: cascade composition, caching/replay transports, RIS relay, and TR 38.811 calibration.</strong></p>
 
+> ## Small-scale fading: what is and is not modelled (audit BOTH-01)
+>
+> **There is no TR 38.811 §6.9 NTN-TDL or CDL multipath in this module.** A grep for
+> `ntn-tdl|NtnTdl|CDL` across its model and helper sources returns only bibliography lines. The
+> small-scale processes that do exist are the ITU-R P.681-11 Lutz two-state model (environment-
+> keyed, **not** elevation-dependent), the alpha-mu model, and a hand-written four-tap snapshot
+> inside one example. None is parameterised by elevation angle.
+>
+> Concretely, this module produces **no frequency-selective fading, no delay spread, and no
+> elevation-dependent Rician K-factor.** Any BLER or throughput number from it reflects a flatter,
+> smoother channel than a real NTN link. `SCOPE_AND_LIMITATIONS.md` A1 records that
+> `ntn-traffic`'s excess-loss chain *does* carry the §6.7.2 elevation-dependent K-factor; that
+> statement does **not** extend here, and this note exists because it previously was not repeated
+> anywhere a reader of this module would look.
+>
+> The fix is an `NtnTdlSpectrumPropagationLossModel` carrying the Table 6.9.2-x tap powers and
+> delays with an elevation-interpolated K-factor, chainable through
+> `NtnRealStackHelper::AddExtraPropagationLoss`. It is not implemented.
+
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>

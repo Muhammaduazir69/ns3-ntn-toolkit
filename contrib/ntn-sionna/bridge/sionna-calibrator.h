@@ -71,6 +71,17 @@ class SionnaCalibrator : public Object
         double mean_dB{0.0};
         double std_dB{0.0};
         bool los_only{false};
+        /// SIONNA-07: the largest grid distance, so a reader can see when the
+        /// sweep ran past what the reference scene can answer. Sionna's
+        /// `simple_reflector` is room-scale; a kilometre-plus probe returns a
+        /// free-space fall-through rather than a traced path, and a calibration
+        /// report that does not say so reads as agreement with a ray tracer.
+        double max_distance_m{0.0};
+        /// True when the whole sweep was answered by the model side and the
+        /// Sionna side with the SAME closed form, i.e. the report compares free
+        /// space against free space and validates the harness rather than the
+        /// channel.
+        bool both_sides_closed_form{false};
     };
 
     static TypeId GetTypeId();

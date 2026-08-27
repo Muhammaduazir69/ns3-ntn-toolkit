@@ -48,8 +48,8 @@ SionnaCirPropagationLossModel::SetSnapshot(const CirSnapshot& snap)
 
 double
 SionnaCirPropagationLossModel::DoCalcRxPower(double txPowerDbm,
-                                             Ptr<MobilityModel> /*a*/,
-                                             Ptr<MobilityModel> /*b*/) const
+                                             Ptr<MobilityModel> a,
+                                             Ptr<MobilityModel> b) const
 {
     if (m_snap.taps.empty())
     {
@@ -57,10 +57,31 @@ SionnaCirPropagationLossModel::DoCalcRxPower(double txPowerDbm,
         return txPowerDbm;
     }
 
+    // SIONNA-06. Both mobility models used to be commented out of the signature
+    // and the tap Doppler was computed from m_txVel / m_rxVel, velocities set
+    // once through SetTxVelocity / SetRxVelocity and never updated. On a LEO
+    // link that is the wrong quantity twice over: the endpoints are moving at
+    // 7.5 km/s and their relative velocity turns over completely during a pass,
+    // and a scenario that never called the setters got a Doppler of exactly
+    // zero on a satellite link while the model reported it as evolving the CIR.
+    //
+    // Prefer the live mobility this method is handed. Fall back to the stored
+    // velocities so a caller driving the model without mobility (a replay
+    // harness, or a unit test feeding a fixed geometry) behaves as before.
+    Vector txVel = m_txVel;
+    Vector rxVel = m_rxVel;
+    if (a)
+    {
+        txVel = a->GetVelocity();
+    }
+    if (b)
+    {
+        rxVel = b->GetVelocity();
+    }
+
     const double dt = Simulator::Now().GetSeconds() - m_snap.t_ref_s;
     // Evolve every tap by its Doppler phase (Sionna paths.apply_doppler()).
-    const CirEvolution ev =
-        CirDopplerSynthesizer::Synthesize(m_snap, m_txVel, m_rxVel, dt);
+    const CirEvolution ev = CirDopplerSynthesizer::Synthesize(m_snap, txVel, rxVel, dt);
 
     // Narrowband coherent combine of the FULL multipath CIR at time t.
     std::complex<double> h{0.0, 0.0};

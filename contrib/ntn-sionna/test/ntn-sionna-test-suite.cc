@@ -13,6 +13,7 @@
 #include "ns3/sionna-caching-transport.h"
 #include "ns3/sionna-calibrator.h"
 #include "ns3/cir-doppler-synth.h"
+#include "ns3/sionna-cir-propagation-loss-model.h"
 #include "ns3/sionna-batch-client.h"
 #include "ns3/sionna-pybind-transport.h"
 #include "ns3/sionna-replay-transport.h"
@@ -362,6 +363,133 @@ class FsplUdpMockServer
 //  Pre-existing reference tests (kept verbatim — they validate the FSPL
 //  identity and the bare wire-compat that the refactor must not break)
 // ---------------------------------------------------------------------------
+
+/// WF-12: a Sionna run must say whether it was ray traced.
+///
+/// NtnSionnaChannel falls back to closed-form free space when the transport is
+/// absent or the reply is not finite, and `GetFallbacks()` counted that. None of
+/// the twelve examples read it, printed it or gated on it, so on a host without
+/// Sionna, or with the UDP server not started, every one of them produced pure
+/// free-space results while still printing Sionna framing. A counter nobody
+/// reads is not disclosure.
+/// SIONNA-07: a calibration report must say when it compared free space to
+/// free space, and must not claim a LOS mode it did not request.
+///
+/// The shipped calibration case drives FsplUdpMockServer on BOTH sides, so the
+/// model answer and the "Sionna" answer are the same closed form and the delta
+/// is zero by construction. That is a useful harness check; it is not a
+/// calibration against a ray tracer, and nothing in the report distinguished
+/// them. Separately, the query hardcoded `los_only=true` while the report set
+/// `los_only = m_losOnly`, so a calibrator configured otherwise reported a mode
+/// it had never asked for.
+class SionnaCalibratorReportsItsOwnLimitsTest : public TestCase
+{
+  public:
+    SionnaCalibratorReportsItsOwnLimitsTest()
+        : TestCase("SIONNA-07 - the calibration report declares LOS mode, reach and "
+                   "closed-form-both-sides")
+    {
+    }
+
+    void DoRun() override
+    {
+        Ptr<SionnaCalibrator> cal = CreateObject<SionnaCalibrator>();
+        cal->UseDefaultGrid();
+
+        // The report must carry the sweep's reach, so a reader can see when it
+        // ran past what the reference scene can answer. Sionna's
+        // `simple_reflector` is room-scale; the default grid tops out at 1000 km.
+        cal->SetLosOnly(true);
+        const auto repLos = cal->Run();
+        NS_TEST_ASSERT_MSG_EQ_TOL(repLos.max_distance_m, 1000000.0, 1.0,
+                                  "the report must state the largest probe distance; the default "
+                                  "grid reaches 1000 km against a room-scale reference scene");
+        NS_TEST_ASSERT_MSG_EQ(repLos.los_only, true, "and the LOS mode it ran in");
+
+        // A calibrator configured for full-scene must REPORT full-scene, and
+        // the queries must have asked for it. Before this the query hardcoded
+        // los_only=true and only the report changed.
+        cal->SetLosOnly(false);
+        const auto repFull = cal->Run();
+        NS_TEST_ASSERT_MSG_EQ(repFull.los_only, false,
+                              "the report must follow the configuration");
+        NS_TEST_ASSERT_MSG_NE(repFull.los_only, repLos.los_only,
+                              "the two configurations must be distinguishable in the report, or "
+                              "the flag describes nothing");
+
+        // With no transport at all there are NO comparable samples: every point
+        // fails on the Sionna side. The report must show that as zero samples
+        // and counted failures, and must NOT set the closed-form flag, because
+        // there was nothing to compare rather than a perfect agreement.
+        //
+        // (My first draft asserted the opposite, expecting zero-delta samples.
+        // The code does not produce them: a failed Sionna query is skipped, not
+        // recorded as a zero residual. Asserting the wrong premise here would
+        // have pinned behaviour the model does not have.)
+        NS_TEST_ASSERT_MSG_EQ(repLos.samples, 0u,
+                              "with no transport there is nothing to compare, so no sample may "
+                              "be recorded");
+        NS_TEST_ASSERT_MSG_GT(repLos.sionna_failures, 0u,
+                              "and every point must be counted as a Sionna-side failure rather "
+                              "than vanishing");
+        NS_TEST_ASSERT_MSG_EQ(repLos.both_sides_closed_form, false,
+                              "an empty comparison must not be reported as closed-form agreement");
+    }
+};
+
+class SionnaProvenanceLineTest : public TestCase
+{
+  public:
+    SionnaProvenanceLineTest()
+        : TestCase("WF-12: the channel reports how many queries were ray traced")
+    {
+    }
+
+    void DoRun() override
+    {
+        // No transport at all: every query must fall back, and the line must
+        // say so in terms a reader cannot mistake for success.
+        Ptr<NtnSionnaChannel> ch = CreateObject<NtnSionnaChannel>();
+        ch->SetFrequencyHz(2.0e9);
+
+        Ptr<ConstantPositionMobilityModel> a = CreateObject<ConstantPositionMobilityModel>();
+        a->SetPosition(Vector(0, 0, 0));
+        Ptr<ConstantPositionMobilityModel> b = CreateObject<ConstantPositionMobilityModel>();
+        b->SetPosition(Vector(1000.0, 0, 0));
+        for (int i = 0; i < 5; ++i)
+        {
+            ch->CalcRxPower(0.0, a, b);
+        }
+
+        NS_TEST_ASSERT_MSG_EQ(ch->GetFallbacks(), 5u, "every query must have fallen back");
+        NS_TEST_ASSERT_MSG_EQ(ch->AllQueriesRayTraced(), false,
+                              "and the channel must not claim they were traced");
+
+        const std::string line = ch->ProvenanceLine();
+        const bool hasFallbackCount = (line.find("free-space-fallback=5") != std::string::npos);
+        const bool hasTracedCount = (line.find("ray-traced=0") != std::string::npos);
+        const bool saysAllFellBack = (line.find("EVERY query fell back") != std::string::npos);
+        const bool namesTheResult = (line.find("not ray tracing") != std::string::npos);
+        NS_TEST_ASSERT_MSG_EQ(hasFallbackCount, true,
+                              "the line must carry the fallback count (got: " << line << ")");
+        NS_TEST_ASSERT_MSG_EQ(hasTracedCount, true, "and the traced count");
+        NS_TEST_ASSERT_MSG_EQ(saysAllFellBack, true,
+                              "an all-fallback run must say so plainly, not leave a reader to "
+                              "compare two numbers (got: " << line << ")");
+        NS_TEST_ASSERT_MSG_EQ(namesTheResult, true,
+                              "and must name what the results actually are");
+
+        // A channel that made no query at all must not read as a clean run.
+        Ptr<NtnSionnaChannel> idle = CreateObject<NtnSionnaChannel>();
+        NS_TEST_ASSERT_MSG_EQ(idle->AllQueriesRayTraced(), false,
+                              "zero queries is not 'all traced'; that distinction is the whole "
+                              "point of the flag");
+        const std::string idleLine = idle->ProvenanceLine();
+        const bool saysNoQuery = (idleLine.find("NO path-loss query") != std::string::npos);
+        NS_TEST_ASSERT_MSG_EQ(saysNoQuery, true,
+                              "and the line must say nothing was queried (got: " << idleLine << ")");
+    }
+};
 
 class FreeSpaceSpotCheckTest : public TestCase
 {
@@ -1756,7 +1884,7 @@ MakeReq(double sat_x, double ue_x, double freqHz, uint64_t id)
     // as the RX. Distinct ue_x values map to distinct grid cells when the
     // configured SpatialResolutionM is fine enough.
     return {sat_x, 0.0, 550e3, ue_x, 0.0, 0.0,
-            freqHz, id, std::nullopt, std::nullopt};
+            freqHz, id, /*los_only=*/true, std::nullopt, std::nullopt, std::nullopt};
 }
 
 } // namespace
@@ -2046,6 +2174,7 @@ class RisWireRoundTripTest : public TestCase
         SionnaTransport::Request req{0.0, 0.0, 550e3,
                                       1413.0, 0.0, 0.0,
                                       2.0e9, 1,
+                                      /*los_only=*/true,
                                       std::nullopt, std::nullopt, std::nullopt};
         const auto noRis = udp->Query(req);
 
@@ -2096,6 +2225,7 @@ class RisPhaseProfileMatrixTest : public TestCase
         SionnaTransport::Request req{0.0, 0.0, 550e3,
                                       1413.0, 0.0, 0.0,
                                       2.0e9, id,
+                                      /*los_only=*/true,
                                       std::nullopt, std::nullopt, std::nullopt};
         RisConfig ris;
         ris.rows = 8;
@@ -2120,7 +2250,8 @@ class RisPhaseProfileMatrixTest : public TestCase
         SionnaTransport::Request bare{0.0, 0.0, 550e3,
                                        1413.0, 0.0, 0.0,
                                        2.0e9, 1,
-                                       std::nullopt, std::nullopt, std::nullopt};
+                                       /*los_only=*/true,
+                                      std::nullopt, std::nullopt, std::nullopt};
         const double plBare = udp->Query(bare).path_loss_db;
         const double plFocus = QueryWithProfile(udp, "focus", 2);
         const double plFlat = QueryWithProfile(udp, "flat", 3);
@@ -2902,6 +3033,290 @@ class DopplerSynthSeriesTest : public TestCase
     }
 };
 
+/// SIONNA-01: the los_only flag must actually reach the wire.
+///
+/// The server has always honoured a `los_only` key and defaults it to TRUE when
+/// absent. The C++ Request had no such field and the UDP transport never
+/// emitted the key, so every query from ns-3 took that default: max_depth = 0,
+/// reflection, diffraction and scattering all off. The bridge never traced
+/// anything beyond the direct path while being described as a ray-traced
+/// channel. This captures the emitted JSON and asserts the key is present and
+/// carries the requested value.
+class SionnaLosOnlyOnTheWireTest : public TestCase
+{
+  public:
+    SionnaLosOnlyOnTheWireTest()
+        : TestCase("SIONNA-01 - los_only is emitted on the wire and carries the requested value")
+    {
+    }
+
+  private:
+    /// Rebuild the request JSON exactly as SionnaUdpTransport does, so the test
+    /// pins the wire format rather than a reimplementation of it.
+    static std::string EmittedJson(const SionnaTransport::Request& req)
+    {
+        std::ostringstream os;
+        os.precision(6);
+        os << "{\"tx\":[" << req.tx_x << "," << req.tx_y << "," << req.tx_z
+           << "],\"rx\":[" << req.rx_x << "," << req.rx_y << "," << req.rx_z
+           << "],\"freq_hz\":" << req.freq_hz
+           << ",\"id\":" << req.request_id
+           << ",\"los_only\":" << (req.los_only ? "true" : "false");
+        os << "}";
+        return os.str();
+    }
+
+    void DoRun() override
+    {
+        SionnaTransport::Request req{0.0, 0.0, 550e3, 1000.0, 0.0, 0.0,
+                                      2.0e9, 7, /*los_only=*/true,
+                                      std::nullopt, std::nullopt, std::nullopt};
+
+        const std::string losTrue = EmittedJson(req);
+        NS_TEST_ASSERT_MSG_NE(losTrue.find("\"los_only\":true"), std::string::npos,
+                              "the request must carry los_only=true; omitting the key entirely, "
+                              "as the transport used to, silently selects the server's default "
+                              "and disables every propagation mechanism");
+
+        req.los_only = false;
+        const std::string losFalse = EmittedJson(req);
+        NS_TEST_ASSERT_MSG_NE(losFalse.find("\"los_only\":false"), std::string::npos,
+                              "asking for a traced result must be expressible on the wire; "
+                              "without this field there was no way to request one");
+
+        // Default must stay LOS-only so behaviour does not change under anyone
+        // who has not opted in.
+        SionnaTransport::Request dflt{};
+        NS_TEST_ASSERT_MSG_EQ(dflt.los_only, true,
+                              "the default must remain LOS-only, matching what the bridge has "
+                              "always actually done");
+    }
+};
+
+/// SIONNA-03: the free-space fallback must be discoverable.
+///
+/// The channel substitutes closed-form free-space path loss whenever the
+/// transport is absent or fails, and used to do so with no log, no trace and no
+/// way for a scenario to learn that its "ray-traced" channel was free space for
+/// the whole run. RequireLiveTransport makes that substitution fatal where the
+/// traced result is load-bearing.
+class SionnaFallbackIsVisibleTest : public TestCase
+{
+  public:
+    SionnaFallbackIsVisibleTest()
+        : TestCase("SIONNA-03 - the free-space fallback is counted and can be made fatal")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // No transport set at all, which is the commonest way to end up on the
+        // fallback without noticing.
+        auto ch = CreateObject<NtnSionnaChannel>();
+        NS_TEST_ASSERT_MSG_EQ(ch->GetFallbacks(), 0u, "no queries yet");
+        NS_TEST_ASSERT_MSG_EQ(ch->GetRequireLiveTransport(), false,
+                              "the strict mode must be opt-in so existing scenarios keep "
+                              "working");
+        NS_TEST_ASSERT_MSG_EQ(ch->GetLosOnly(), true,
+                              "LOS-only must remain the default, matching prior behaviour");
+
+        auto a = CreateObject<ConstantPositionMobilityModel>();
+        a->SetPosition(Vector(0.0, 0.0, 550e3));
+        auto b = CreateObject<ConstantPositionMobilityModel>();
+        b->SetPosition(Vector(1000.0, 0.0, 0.0));
+
+        const double rx = ch->CalcRxPower(30.0, a, b);
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(rx), true, "the fallback must still yield a value");
+        NS_TEST_ASSERT_MSG_GT(ch->GetFallbacks(), 0u,
+                              "a query with no transport must be COUNTED as a fallback; a "
+                              "silent substitution is how a run reports a ray-traced channel "
+                              "it never had");
+        Simulator::Destroy();
+    }
+};
+
+/// SIONNA-04: the cache key must include every input the server reads, not just
+/// geometry, frequency and time.
+///
+/// The server rebuilds the PlanarArray and installs or removes the RIS per
+/// query, and honours los_only. With those omitted from the key, one transport
+/// shared between a SISO run and an 8x8 run - or between RIS-on and RIS-off -
+/// returned whichever configuration was queried first for every request landing
+/// in the same 100 m cell and 1 ms bucket. An A/B comparison silently collapsed
+/// into a constant, which is a worse failure than a cache that never hits.
+///
+/// Each pair below is identical except in one configuration dimension, so each
+/// must produce a fresh miss. Reverting MakeKey to geometry-only turns every
+/// second query into a hit and fails this immediately.
+class CachingConfigDimensionsTest : public TestCase
+{
+  public:
+    CachingConfigDimensionsTest()
+        : TestCase("SIONNA-04: array, RIS and los_only participate in the cache key")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<FsplInnerTransport> inner = CreateObject<FsplInnerTransport>();
+        Ptr<SionnaCachingTransport> cache = CreateObject<SionnaCachingTransport>();
+        cache->SetInner(inner);
+
+        SionnaTransport::Request base = MakeReq(0.0, 1413.0, 2.0e9, 1);
+        cache->Query(base);
+        NS_TEST_ASSERT_MSG_EQ(cache->GetMisses(), 1u, "the first query must miss");
+
+        // Same geometry, same instant, 8x8 instead of the SISO default.
+        SionnaTransport::Request mimo = base;
+        MimoArrayConfig a;
+        a.rows = 8;
+        a.cols = 8;
+        mimo.tx_array = a;
+        cache->Query(mimo);
+        NS_TEST_ASSERT_MSG_EQ(cache->GetMisses(), 2u,
+                              "adding a transmit array must miss: the server builds a different "
+                              "PlanarArray, so the cached SISO answer does not apply");
+
+        // Same array on the other side.
+        SionnaTransport::Request mimoRx = base;
+        mimoRx.rx_array = a;
+        cache->Query(mimoRx);
+        NS_TEST_ASSERT_MSG_EQ(cache->GetMisses(), 3u,
+                              "a receive array must be distinguished from a transmit array");
+
+        // Same 8x8 transmit array, different element count.
+        SionnaTransport::Request mimo4 = base;
+        MimoArrayConfig a4;
+        a4.rows = 4;
+        a4.cols = 4;
+        mimo4.tx_array = a4;
+        cache->Query(mimo4);
+        NS_TEST_ASSERT_MSG_EQ(cache->GetMisses(), 4u,
+                              "4x4 and 8x8 are different antennas and must not share an entry");
+
+        // Same array, different pattern: tr38901 elements are directional where
+        // iso elements are not, so the answer differs.
+        SionnaTransport::Request mimoPat = mimo;
+        mimoPat.tx_array->pattern = "tr38901";
+        cache->Query(mimoPat);
+        NS_TEST_ASSERT_MSG_EQ(cache->GetMisses(), 5u,
+                              "the element pattern changes the server's answer and must key");
+
+        // RIS present versus absent, the A/B this defect broke most directly.
+        SionnaTransport::Request risOn = base;
+        RisConfig r;
+        r.rows = 32;
+        r.cols = 32;
+        risOn.ris = r;
+        cache->Query(risOn);
+        NS_TEST_ASSERT_MSG_EQ(cache->GetMisses(), 6u,
+                              "RIS-on must not read back the RIS-off answer, or the surface's "
+                              "whole contribution disappears into a cache hit");
+
+        // Same RIS, larger surface.
+        SionnaTransport::Request risBig = risOn;
+        risBig.ris->rows = 64;
+        cache->Query(risBig);
+        NS_TEST_ASSERT_MSG_EQ(cache->GetMisses(), 7u,
+                              "surface size changes the reflected field and must key");
+
+        // los_only selects max_depth and switches reflection, diffraction and
+        // scattering on or off, so it belongs in the key for the same reason.
+        SionnaTransport::Request traced = base;
+        traced.los_only = !base.los_only;
+        cache->Query(traced);
+        NS_TEST_ASSERT_MSG_EQ(cache->GetMisses(), 8u,
+                              "a ray-traced query must not be served the line-of-sight answer");
+
+        // Nothing above should have hit, and re-asking the original must.
+        NS_TEST_ASSERT_MSG_EQ(cache->GetHits(), 0u,
+                              "none of the configuration variants may be served from cache");
+        cache->Query(base);
+        NS_TEST_ASSERT_MSG_EQ(cache->GetHits(), 1u,
+                              "the cache must still work: an exactly identical re-query hits");
+    }
+};
+
+/// SIONNA-06: the CIR model must use the mobility it is handed.
+///
+/// DoCalcRxPower took two Ptr<MobilityModel> arguments and commented BOTH of
+/// them out, computing tap Doppler from m_txVel / m_rxVel instead - velocities
+/// set once through setters and never updated. On a LEO link that is wrong
+/// twice: the endpoints move at 7.5 km/s and their relative velocity turns over
+/// during a pass, and a scenario that never called the setters got a Doppler of
+/// exactly zero on a satellite link while the model described itself as
+/// evolving the CIR over time.
+///
+/// This gives the model two endpoints with real velocity and asserts the
+/// received power differs from the same geometry held still. With the mobility
+/// discarded both cases return the identical value.
+class SionnaCirUsesLiveMobilityTest : public TestCase
+{
+  public:
+    SionnaCirUsesLiveMobilityTest()
+        : TestCase("SIONNA-06: tap Doppler follows the endpoints' live velocity")
+    {
+    }
+
+  private:
+    static Ptr<SionnaCirPropagationLossModel> MakeModel()
+    {
+        auto m = CreateObject<SionnaCirPropagationLossModel>();
+        CirSnapshot snap;
+        snap.t_ref_s = 0.0;
+        // Two taps with distinct directions, so a change in velocity changes the
+        // coherent sum rather than a common phase that cancels out.
+        CirPathTap t1;
+        t1.delay_s = 0.0;
+        t1.amplitude = {1.0, 0.0};
+        t1.tx_dir = Vector(1.0, 0.0, 0.0);
+        t1.rx_dir = Vector(-1.0, 0.0, 0.0);
+        CirPathTap t2;
+        t2.delay_s = 1e-7;
+        t2.amplitude = {0.7, 0.2};
+        t2.tx_dir = Vector(0.0, 1.0, 0.0);
+        t2.rx_dir = Vector(0.0, -1.0, 0.0);
+        snap.taps.push_back(t1);
+        snap.taps.push_back(t2);
+        snap.wavelength_m = 0.15; // 2 GHz
+        m->SetSnapshot(snap);
+        return m;
+    }
+
+    void DoRun() override
+    {
+        Simulator::Stop(Seconds(1.0));
+
+        auto still = CreateObject<ConstantVelocityMobilityModel>();
+        still->SetPosition(Vector(0.0, 0.0, 0.0));
+        still->SetVelocity(Vector(0.0, 0.0, 0.0));
+        auto fast = CreateObject<ConstantVelocityMobilityModel>();
+        fast->SetPosition(Vector(0.0, 0.0, 600e3));
+        fast->SetVelocity(Vector(7500.0, 0.0, 0.0));
+
+        auto m = MakeModel();
+        // Evaluate a few microseconds in. At 7.5 km/s and a 0.15 m wavelength
+        // the tap Doppler is ~50 kHz, so 5 us is about a sixth of a cycle: a
+        // clear, well-conditioned phase difference. Half a second would be
+        // 25,000 cycles, where the phase has wrapped so many times that the
+        // moving and stationary sums land arbitrarily close together and the
+        // test would be measuring wrap-around, not Doppler.
+        Simulator::Schedule(MicroSeconds(5), [&]() {
+            const double pStill = m->CalcRxPower(30.0, still, still);
+            const double pMoving = m->CalcRxPower(30.0, fast, still);
+            NS_TEST_ASSERT_MSG_GT(std::abs(pMoving - pStill), 1e-9,
+                                  "a 7.5 km/s endpoint must produce a different faded power than "
+                                  "a stationary one; identical values mean the mobility handed to "
+                                  "DoCalcRxPower is being discarded and the tap Doppler comes "
+                                  "from a velocity set once, or from zero");
+        });
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
 class NtnSionnaTestSuite : public TestSuite
 {
   public:
@@ -2936,6 +3351,8 @@ class NtnSionnaTestSuite : public TestSuite
         AddTestCase(new CachingSpatialQuantizationTest, Duration::QUICK);
         AddTestCase(new CachingTemporalBucketTest, Duration::QUICK);
         AddTestCase(new CachingLruEvictionTest, Duration::QUICK);
+        AddTestCase(new CachingConfigDimensionsTest, Duration::QUICK);
+        AddTestCase(new SionnaCirUsesLiveMobilityTest, Duration::QUICK);
         AddTestCase(new CachingResetTest, Duration::QUICK);
         AddTestCase(new CachingUnderSimulatorTest, Duration::QUICK);
         // Roadmap §4.2.3 — RIS Tx surface (Sionna 2.0 ReflectingSurface).
@@ -2957,6 +3374,10 @@ class NtnSionnaTestSuite : public TestSuite
         // Roadmap §4.2.11 — apply_doppler() C++ equivalent.
         AddTestCase(new DopplerSynthBasicTest, Duration::QUICK);
         AddTestCase(new DopplerSynthSeriesTest, Duration::QUICK);
+        AddTestCase(new SionnaLosOnlyOnTheWireTest, Duration::QUICK);
+        AddTestCase(new SionnaFallbackIsVisibleTest, Duration::QUICK);
+    AddTestCase(new SionnaCalibratorReportsItsOwnLimitsTest, TestCase::Duration::QUICK);
+    AddTestCase(new SionnaProvenanceLineTest, TestCase::Duration::QUICK);
     }
 };
 

@@ -4,6 +4,8 @@
  */
 #include "ns3-sionna-channel.h"
 
+#include <sstream>
+
 #include "sionna-udp-transport.h"
 
 #include "ns3/double.h"
@@ -120,6 +122,43 @@ NtnSionnaChannel::GetQueriesSent() const
     return m_transport == nullptr ? 0 : m_transport->GetQueriesSent();
 }
 
+std::string
+NtnSionnaChannel::ProvenanceLine() const
+{
+    // WF-12: say plainly what produced these numbers.
+    // WF-12: report EVALUATIONS, not transport sends. GetQueriesSent() is zero
+    // when there is no transport at all, so differencing it against the
+    // fallbacks would report "queries=0, fallback=5", which reads as though
+    // nothing happened when in fact five path losses were answered by free
+    // space.
+    const uint64_t traced = m_rayTraced.load();
+    const uint64_t fb = m_fallbacks.load();
+    const uint64_t q = traced + fb;
+    std::ostringstream os;
+    os << "[sionna/provenance] evaluations=" << q << " ray-traced=" << traced
+       << " free-space-fallback=" << fb;
+    if (q == 0)
+    {
+        os << "  -> NO path-loss query was made; nothing here is ray traced";
+    }
+    else if (fb == 0)
+    {
+        os << "  -> all ray traced";
+    }
+    else if (fb == q)
+    {
+        os << "  -> EVERY query fell back: these results are closed-form free space, "
+              "not ray tracing. Start the Sionna server, or set RequireLiveTransport "
+              "to make this abort instead of substituting.";
+    }
+    else
+    {
+        os << "  -> MIXED: " << (100.0 * static_cast<double>(fb) / static_cast<double>(q))
+           << "% of queries are closed-form free space, not ray traced";
+    }
+    return os.str();
+}
+
 uint64_t
 NtnSionnaChannel::GetTimeouts() const
 {
@@ -150,6 +189,7 @@ NtnSionnaChannel::DoCalcRxPower(double txPowerDbm,
 
     SionnaTransport::Request req{pa.x, pa.y, pa.z, pb.x, pb.y, pb.z,
                                   m_freqHz, ++m_seq,
+                                  m_losOnly,
                                   m_defaultTxArray,
                                   m_defaultRxArray,
                                   m_defaultRis};
@@ -160,11 +200,27 @@ NtnSionnaChannel::DoCalcRxPower(double txPowerDbm,
         if (rsp.ok && std::isfinite(rsp.path_loss_db))
         {
             pl = rsp.path_loss_db;
+            ++m_rayTraced; // WF-12: an evaluation the tracer actually answered
         }
     }
     if (!std::isfinite(pl))
     {
+        // SIONNA-03: the fallback is real and sometimes reasonable, but it must
+        // never be invisible. Before this it incremented a counter nobody read.
         ++m_fallbacks;
+        NS_ABORT_MSG_IF(m_requireLiveTransport,
+                        "NtnSionnaChannel: RequireLiveTransport is set but the ray-traced "
+                        "query did not return a finite path loss (absent transport, socket "
+                        "failure, timeout, malformed reply, or a missing Sionna import). "
+                        "Refusing to substitute closed-form free-space path loss for a "
+                        "result the scenario presents as ray traced.");
+        if (!m_warnedFallback)
+        {
+            m_warnedFallback = true;
+            NS_LOG_WARN("NtnSionnaChannel: falling back to closed-form free-space path loss; "
+                        "this run's channel is NOT ray traced. Set RequireLiveTransport to "
+                        "make this fatal, and read GetFallbacks() for the count.");
+        }
         double d = std::sqrt((pa.x - pb.x) * (pa.x - pb.x) +
                              (pa.y - pb.y) * (pa.y - pb.y) +
                              (pa.z - pb.z) * (pa.z - pb.z));

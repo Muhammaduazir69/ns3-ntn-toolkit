@@ -96,14 +96,33 @@ class SionnaTransport : public Object
   public:
     struct Request
     {
-        double tx_x;
-        double tx_y;
-        double tx_z;
-        double rx_x;
-        double rx_y;
-        double rx_z;
-        double freq_hz;
-        uint64_t request_id;
+        // Default-initialized on purpose. Callers legitimately write
+        // `Request req;` and then set only the fields they care about, and
+        // without these the remaining scalars were INDETERMINATE: the replay
+        // transport's nearest-neighbour lookup then compared against
+        // uninitialized memory, which is undefined behaviour and showed up as a
+        // test that failed roughly one run in three.
+        double tx_x = 0.0;
+        double tx_y = 0.0;
+        double tx_z = 0.0;
+        double rx_x = 0.0;
+        double rx_y = 0.0;
+        double rx_z = 0.0;
+        double freq_hz = 0.0;
+        uint64_t request_id = 0;
+        /// SIONNA-01: whether the server should restrict itself to the direct
+        /// line-of-sight path.
+        ///
+        /// The server has always honoured a `los_only` key, defaulting it to
+        /// TRUE when absent, and the Python test exercises both values. But the
+        /// C++ Request had no such field and the UDP transport never emitted
+        /// the key, so every query from ns-3 arrived without it and the server
+        /// took the default: max_depth = 0, reflection, diffraction and
+        /// scattering all off. The bridge therefore never ray-traced anything
+        /// beyond the direct path, while being described as a ray-traced
+        /// channel. Kept defaulting to true so behaviour does not change
+        /// silently; set it false to actually trace.
+        bool los_only = true;
         /// Optional MIMO array config (Roadmap §4.2.2). When present, the
         /// transport forwards the (rows, cols, spacing, pattern, pol) per
         /// side; when absent the server falls back to its SISO defaults.

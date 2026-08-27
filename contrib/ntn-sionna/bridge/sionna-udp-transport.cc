@@ -142,7 +142,10 @@ SionnaUdpTransport::Query(const Request& req) const
     req_os << "{\"tx\":[" << req.tx_x << "," << req.tx_y << "," << req.tx_z
            << "],\"rx\":[" << req.rx_x << "," << req.rx_y << "," << req.rx_z
            << "],\"freq_hz\":" << req.freq_hz
-           << ",\"id\":" << req.request_id;
+           << ",\"id\":" << req.request_id
+           // SIONNA-01: emit los_only explicitly. Omitting it let the server's
+           // own default (true) silently disable every propagation mechanism.
+           << ",\"los_only\":" << (req.los_only ? "true" : "false");
     auto emitArray = [](std::ostringstream& os,
                         const char* key,
                         const MimoArrayConfig& a) {

@@ -27,6 +27,8 @@
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
+
+#include <iostream>
 #include "ns3/simulator.h"
 
 #include "ns3/ns3-sionna-channel.h"
@@ -237,5 +239,10 @@ main(int argc, char* argv[])
     PrintAggregate("delta_dB", delta);
     PrintAggregate("rain_dB", rain);
     PrintAggregate("gas_dB", gas);
+
+    // WF-12: say what produced these numbers. GetFallbacks() existed and no
+    // example read it, so on a host without Sionna every run here printed
+    // Sionna framing over pure free-space results with nothing to show it.
+    std::cout << baseSiso->ProvenanceLine() << std::endl;
     return 0;
 }

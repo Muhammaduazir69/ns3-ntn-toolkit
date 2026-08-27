@@ -135,11 +135,30 @@ NtnAtmosphericLossChain::GetTypeId()
                           IntegerValue(1),
                           MakeIntegerAccessor(&NtnAtmosphericLossChain::SetLmsEnvironmentInt,
                                               &NtnAtmosphericLossChain::GetLmsEnvironmentInt),
-                          MakeIntegerChecker<int>(0, 3));
+                          MakeIntegerChecker<int>(0, 3))
+            .AddAttribute("LmsTerminalSpeedMps",
+                          "THZ-08: terminal speed for the ITU-R P.681-11 LMS fade-duration "
+                          "statistics, m/s. Was pinned at the 13.9 m/s default in every "
+                          "shipped run because this chain never passed one through.",
+                          DoubleValue(13.9),
+                          MakeDoubleAccessor(&NtnAtmosphericLossChain::SetTerminalSpeedMps,
+                                             &NtnAtmosphericLossChain::GetTerminalSpeedMps),
+                          MakeDoubleChecker<double>(0.0));
     return tid;
 }
 
 NtnAtmosphericLossChain::NtnAtmosphericLossChain() = default;
+
+void
+NtnAtmosphericLossChain::SetTerminalSpeedMps(double v)
+{
+    m_lmsSpeedMps = v;
+    if (m_lms)
+    {
+        m_lms->SetSpeedMps(v);
+    }
+}
+
 NtnAtmosphericLossChain::~NtnAtmosphericLossChain() = default;
 
 void
@@ -210,6 +229,10 @@ NtnAtmosphericLossChain::ApplyConfig() const
     if (m_lms)
     {
         m_lms->SetEnvironment(ToLmsEnv(m_lmsEnvInt));
+        // THZ-08: pass the speed through. Setting only the environment left the
+        // P.681 fade-duration statistics on their 13.9 m/s default for every
+        // terminal class the toolkit models.
+        m_lms->SetSpeedMps(m_lmsSpeedMps);
     }
 }
 
@@ -281,7 +304,12 @@ NtnAtmosphericLossChain::ComputeAttenuationDb(const Vector& groundPos,
     double total = 0.0;
     if (m_enableGaseous)
     {
-        m_last.gaseousDb = m_gas->SlantPathAttenuationDb(m_freqHz, elevDeg);
+        // SIONNA-05: pass the configured station altitude. It used to reach
+        // the rain term only, so a mountain-top station paid the full sea-level
+        // gaseous column while its rain path was correctly shortened - the two
+        // halves of the same cascade disagreed about where the station was.
+        m_last.gaseousDb =
+            m_gas->SlantPathAttenuationDb(m_freqHz, elevDeg, m_groundAltKm);
         total += m_last.gaseousDb;
     }
     if (m_enableRain && m_rainRate > 0.0)

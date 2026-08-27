@@ -48,6 +48,9 @@ class SionnaCirPropagationLossModel : public PropagationLossModel
     /// the reference combine so the time-0 fading deviation is 0 dB.
     void SetSnapshot(const CirSnapshot& snap);
     /// Tx/Rx velocities (m/s, ECEF) that drive the per-tap Doppler.
+    /// SIONNA-06: fallback velocities, used only when DoCalcRxPower is called
+    /// without mobility models. The live mobility wins where it exists, because
+    /// a value set once cannot describe a LEO pass.
     void SetTxVelocity(const Vector& v) { m_txVel = v; }
     void SetRxVelocity(const Vector& v) { m_rxVel = v; }
 

@@ -137,6 +137,20 @@ class NtnAtmosphericLossChain : public Object
     void SetLmsEnvironmentInt(int env);
     int GetLmsEnvironmentInt() const { return m_lmsEnvInt; }
 
+    /**
+     * \brief THZ-08: terminal speed for the ITU-R P.681-11 LMS model, m/s.
+     *
+     * Itu681LmsModel::SetSpeedMps existed and was called from exactly one place
+     * in the tree: a unit test. This chain, the model's only production
+     * consumer, set the ENVIRONMENT and nothing else, and exposed no speed
+     * attribute, so every shipped run used the 13.9 m/s default (50 km/h)
+     * regardless of what the scenario was actually modelling: a stationary
+     * VSAT, a walking handheld and a 900 km/h aircraft all got the same
+     * fade-duration statistics.
+     */
+    void SetTerminalSpeedMps(double v);
+    double GetTerminalSpeedMps() const { return m_lmsSpeedMps; }
+
   private:
     /// Lazily create the underlying ITU-R model objects on first use so
     /// the chain can be constructed cheaply and parameterised before any
@@ -154,6 +168,9 @@ class NtnAtmosphericLossChain : public Object
     int m_climateRegionInt{1}; // midlat_summer
     int m_polInt{1};            // vertical
     int m_lmsEnvInt{1};         // suburban
+    /// THZ-08: 13.9 m/s is the P.681 default and stays the default here, so no
+    /// existing result moves; what changes is that a scenario can now set it.
+    double m_lmsSpeedMps{13.9};
 
     mutable Ptr<itu::Itu618LossModel> m_rain;
     mutable Ptr<itu::Itu676AbsorptionModel> m_gas;

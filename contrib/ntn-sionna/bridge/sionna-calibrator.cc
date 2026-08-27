@@ -38,6 +38,13 @@ SionnaCalibrator::UseDefaultGrid()
 {
     // 3 carrier frequencies × 6 ground-to-satellite distances.
     const double freqs[] = {2.0e9, 12.0e9, 28.0e9};
+    // SIONNA-07: the top of this grid is well outside what the reference scene
+    // can answer meaningfully. Sionna's `simple_reflector` scene is a small
+    // room-scale geometry; probing it at 1,000,000 m asks the ray tracer about a
+    // world that does not exist there, and the answer it returns is a free-space
+    // fall-through rather than a traced path. The distances stay, because a
+    // slant-range sweep is what a calibration wants, and the caller is told which
+    // of them lie outside the scene.
     const double dists[] = {1000.0, 5000.0, 50000.0, 200000.0, 500000.0, 1000000.0};
     m_grid.clear();
     m_grid.reserve(18);
@@ -58,14 +65,26 @@ SionnaCalibrator::QuerySionnaDb(const GridPoint& g, bool& ok) const
     {
         return 0.0;
     }
+    // SIONNA-01: los_only is now an explicit field on the Request and the UDP
+    // transport emits it. The comment that used to sit here claimed the
+    // transport "always emits this"; it did not, because there was no field to
+    // emit, so every query reached the server without the key and took its
+    // default. The calibrator wants the matched-scenario LOS reference, so it
+    // asks for it rather than relying on a default.
     SionnaTransport::Request req{0.0, 0.0, g.dist_m,
                                   0.0, 0.0, 0.0,
                                   g.freq_hz, 1,
+                                  // SIONNA-07: ask for what the report will CLAIM.
+                                  //
+                                  // This was hardcoded true while the report set
+                                  // `rep.los_only = m_losOnly`, so a calibrator
+                                  // configured with SetLosOnly(false) sent
+                                  // los_only=true on every query and then
+                                  // reported los_only=false. The flag on the
+                                  // report described a configuration, not the
+                                  // run.
+                                  /*los_only=*/m_losOnly,
                                   std::nullopt, std::nullopt, std::nullopt};
-    // Note: the los_only flag goes into the JSON `los_only` field on the
-    // wire side (the SionnaUdpTransport always emits this); concrete
-    // transports decide whether to forward it. For non-UDP transports the
-    // hint is harmless.
     SionnaTransport::Response rsp = m_transport->Query(req);
     if (rsp.ok && std::isfinite(rsp.path_loss_db))
     {
@@ -115,6 +134,13 @@ SionnaCalibrator::Run()
 {
     Report rep;
     rep.los_only = m_losOnly;
+    // SIONNA-07: record how far the sweep reached, so a report cannot silently
+    // include probes the reference scene cannot answer.
+    rep.max_distance_m = 0.0;
+    for (const auto& g : m_grid)
+    {
+        rep.max_distance_m = std::max(rep.max_distance_m, g.dist_m);
+    }
     const auto pts = RunPoints();
     double sum = 0.0;
     double sumSq = 0.0;
@@ -140,6 +166,16 @@ SionnaCalibrator::Run()
         rep.std_dB = std::sqrt(std::max(0.0, var));
         rep.max_abs_dB = maxAbs;
     }
+    // SIONNA-07: was this a calibration or a harness check?
+    //
+    // The shipped test drives FsplUdpMockServer on BOTH sides, so the model
+    // answer and the "Sionna" answer are the same closed form and the delta is
+    // zero by construction. That is a useful harness check and it is not a
+    // calibration against a ray tracer, and a report that does not distinguish
+    // them invites the second reading. Near-zero spread across the whole sweep
+    // is the signature.
+    rep.both_sides_closed_form = (n > 2) && (rep.max_abs_dB < 1e-6);
+
     return rep;
 }
 

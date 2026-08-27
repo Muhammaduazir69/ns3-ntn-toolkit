@@ -35,6 +35,8 @@
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/core-module.h"
+
+#include <iostream>
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-real-stack-helper.h"
@@ -186,7 +188,10 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ris-assisted-leo-link");
     rs.SetCarrierFrequencyHz(freqHz);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
 
     // ITU-R atmospheric excess stays in the packet path the whole run (the
@@ -271,5 +276,10 @@ main(int argc, char* argv[])
                 g_gains.size(), gMin, gMax, gMean);
 
     Simulator::Destroy();
+
+    // WF-12: say what produced these numbers. GetFallbacks() existed and no
+    // example read it, so on a host without Sionna every run here printed
+    // Sionna framing over pure free-space results with nothing to show it.
+    std::cout << baseNoRis->ProvenanceLine() << std::endl;
     return 0;
 }

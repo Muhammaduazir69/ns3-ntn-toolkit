@@ -37,6 +37,7 @@
  * Run:
  *   ./ns3 run "leo-pass-sionna-vs-tr38811 --duration=12"
  */
+#include "ns3/sionna-udp-transport.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/core-module.h"
@@ -59,6 +60,13 @@
 #include <vector>
 
 using namespace ns3;
+
+
+// WF-12: the channel this run actually used, so the provenance of the
+// numbers below can be printed. GetFallbacks() existed and nothing read it,
+// so on a host without Sionna this example printed Sionna framing over pure
+// free-space results with nothing in the output to show it.
+static Ptr<NtnSionnaChannel> g_provenanceCh;
 
 NS_LOG_COMPONENT_DEFINE("LeoPassSionnaVsTr38811");
 
@@ -139,9 +147,23 @@ Tick(Time now)
     }
 }
 
-// Sionna-RT-style multipath CIR snapshot: a dominant LOS tap plus reflected
-// taps with distinct arrival directions (so they Doppler-rotate at different
-// rates -> real constructive/destructive fading) and short delays.
+// SIONNA-02 (2026-08-25): this is a PARAMETRIC multipath profile, not Sionna
+// output.
+//
+// The comment here used to call it a "Sionna-RT-style multipath CIR snapshot",
+// in an example named leo-pass-sionna-vs-tr38811, while the four taps below are
+// hand-chosen amplitudes, delays and arrival directions and the example never
+// contacted a Sionna server at all. The Doppler rotation and the resulting
+// constructive and destructive fading are real consequences of these taps, so
+// the fading is genuinely simulated - but the taps are an assumption, and
+// calling them ray-traced made an assumption look like a measurement.
+//
+// Pass --sionnaServer to attach a live SionnaUdpTransport instead, in which
+// case the profile below is not used. The run prints which source it used.
+// SIONNA-02: true when the CIR came from a live ray tracer rather than the
+// parametric profile below.
+bool g_cirFromServer = false;
+
 CirSnapshot
 MakeSnapshot(double freqHz)
 {
@@ -173,6 +195,12 @@ main(int argc, char* argv[])
     std::string replayFile = "leo-pass-sionna-vs-tr38811-replay.bin";
 
     CommandLine cmd(__FILE__);
+    std::string sionnaServer; // SIONNA-02: "host:port" for a LIVE traced CIR
+    cmd.AddValue("sionnaServer",
+                 "host:port of a live Sionna RT server. When set the channel queries it with "
+                 "los_only=false so reflection, diffraction and scattering are traced; when "
+                 "unset the run uses a hand-specified parametric multipath profile and says so",
+                 sionnaServer);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("freqHz", "Carrier frequency (Hz)", freqHz);
     cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
@@ -236,13 +264,41 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("leo-pass-sionna-vs-tr38811");
     rs.SetCarrierFrequencyHz(freqHz);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
+    // S-band LEO reference payload. Declared as a DENSITY so the helper
+    // back-computes conducted power against the array gain instead of the
+    // antenna being counted twice.
+    rs.SetSatEirpDensityDbwMhz(
+        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
     rs.Build(satNodes, ueNodes);
 
     // ---- Channel plug-in: the Sionna multipath+Doppler EXCESS fades real
     // packets (NOT the full-PL channel — that would double-count FSPL). ----
     g_cir = CreateObject<SionnaCirPropagationLossModel>();
-    g_cir->SetSnapshot(MakeSnapshot(freqHz));
+    // SIONNA-02: prefer a LIVE traced CIR when the caller supplies a server.
+    if (!sionnaServer.empty())
+    {
+        const auto colon = sionnaServer.rfind(':');
+        NS_ABORT_MSG_IF(colon == std::string::npos,
+                        "--sionnaServer must be host:port, got '" << sionnaServer << "'");
+        auto udp = CreateObject<SionnaUdpTransport>();
+        udp->SetServer(sionnaServer.substr(0, colon),
+                       static_cast<uint16_t>(std::stoi(sionnaServer.substr(colon + 1))));
+        // los_only=false is what actually asks the server to trace: with it
+        // absent or true the solver runs at max_depth 0 and no reflection,
+        // diffraction or scattering is computed at all (SIONNA-01).
+        auto ch = CreateObject<NtnSionnaChannel>();
+        g_provenanceCh = ch; // WF-12: keep a handle so main() can report provenance
+        ch->SetLosOnly(false);
+        ch->SetRequireLiveTransport(true);
+        ch->SetTransport(udp);
+        rs.AddExtraPropagationLoss(ch);
+        g_cirFromServer = true;
+    }
+    else
+    {
+        g_cir->SetSnapshot(MakeSnapshot(freqHz));
+    }
     g_cir->SetTxVelocity(satEnu->GetVelocity());
     g_cir->SetRxVelocity(Vector(0.0, 0.0, 0.0));
     rs.AddExtraPropagationLoss(g_cir);
@@ -255,6 +311,13 @@ main(int argc, char* argv[])
     // Offline replay backend (§4.2.6): record the free-space reference per tick.
     g_writerOpen = g_writer.Open(replayFile, static_cast<uint64_t>(freqHz));
 
+    // SIONNA-02: state the CIR provenance every run, so a reader never has to
+    // infer it from the example's name.
+    std::printf("# CIR source: %s\n",
+                g_cirFromServer
+                    ? "LIVE Sionna ray tracer (los_only=false)"
+                    : "PARAMETRIC 4-tap profile (hand-specified, NOT ray traced); "
+                      "pass --sionnaServer=host:port for a traced CIR");
     std::printf("# %6s  %8s  %10s  %9s  %9s  %8s\n",
                 "t_s", "elev", "PL_fs_ref", "fade_dB", "sinr_dB", "tbler");
     rs.RegisterPeriodicCallback(Seconds(1.0), &Tick);
@@ -302,6 +365,18 @@ main(int argc, char* argv[])
               << "     reference column, not the deliverable.\n";
 
     Simulator::Destroy();
+    if (g_provenanceCh)
+    {
+        std::cout << g_provenanceCh->ProvenanceLine() << std::endl;
+    }
+    else
+    {
+        // WF-12: say so rather than printing nothing. Without --sionnaServer
+        // this example runs its replay transport, whose provenance is reported
+        // in the summary above; a silent absence would read as "all traced".
+        std::cout << "[sionna/provenance] no live NtnSionnaChannel in this run "
+                  << "(pass --sionnaServer host:port for the live path)" << std::endl;
+    }
     // Sanity gate on the excess fading magnitude (replaces the old PL ±3 dB gate).
     return (g_maxFadeDb <= 30.0) ? 0 : 1;
 }

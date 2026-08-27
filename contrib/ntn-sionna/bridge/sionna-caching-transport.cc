@@ -105,6 +105,81 @@ SionnaCachingTransport::Reset()
     m_evictions.store(0);
 }
 
+namespace
+{
+
+/// SIONNA-04 helper: fold one value into a running 64-bit digest.
+///
+/// This is the same xor/shift combine the key hash uses, kept separate so the
+/// digest is stable and does not depend on std::hash's implementation-defined
+/// behaviour across runs.
+inline uint64_t
+CfgMix(uint64_t h, uint64_t v)
+{
+    h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    return h;
+}
+
+inline uint64_t
+CfgMixDouble(uint64_t h, double v)
+{
+    // Quantize before hashing: a spacing of 0.5 must digest identically however
+    // it was computed, and bit-identical doubles are not guaranteed across
+    // arithmetic paths. 1e-6 is far finer than any physically meaningful
+    // difference in wavelengths or metres.
+    return CfgMix(h, static_cast<uint64_t>(static_cast<int64_t>(std::llround(v * 1e6))));
+}
+
+inline uint64_t
+CfgMixString(uint64_t h, const std::string& s)
+{
+    for (unsigned char c : s)
+    {
+        h = CfgMix(h, static_cast<uint64_t>(c));
+    }
+    return CfgMix(h, s.size());
+}
+
+inline uint64_t
+CfgMixArray(uint64_t h, const std::optional<MimoArrayConfig>& a)
+{
+    if (!a.has_value())
+    {
+        return CfgMix(h, 0x4e4f4e45ULL); // "NONE": absent is its own state
+    }
+    h = CfgMix(h, a->rows);
+    h = CfgMix(h, a->cols);
+    h = CfgMixDouble(h, a->spacing_lambda);
+    h = CfgMixString(h, a->pattern);
+    h = CfgMixString(h, a->polarization);
+    return h;
+}
+
+inline uint64_t
+CfgMixRis(uint64_t h, const std::optional<RisConfig>& r)
+{
+    if (!r.has_value())
+    {
+        return CfgMix(h, 0x4e4f524953ULL); // "NORIS"
+    }
+    h = CfgMixDouble(h, r->pos_x);
+    h = CfgMixDouble(h, r->pos_y);
+    h = CfgMixDouble(h, r->pos_z);
+    h = CfgMixDouble(h, r->normal_x);
+    h = CfgMixDouble(h, r->normal_y);
+    h = CfgMixDouble(h, r->normal_z);
+    h = CfgMix(h, r->rows);
+    h = CfgMix(h, r->cols);
+    h = CfgMixDouble(h, r->spacing_lambda);
+    h = CfgMixString(h, r->phase_profile);
+    h = CfgMixDouble(h, r->focal_x);
+    h = CfgMixDouble(h, r->focal_y);
+    h = CfgMixDouble(h, r->focal_z);
+    return h;
+}
+
+} // namespace
+
 SionnaCachingTransport::Key
 SionnaCachingTransport::MakeKey(const Request& req) const
 {
@@ -120,6 +195,16 @@ SionnaCachingTransport::MakeKey(const Request& req) const
     const uint64_t now_us =
         static_cast<uint64_t>(Simulator::Now().GetMicroSeconds());
     k.tBucket = now_us / m_temporalBucketUs;
+    // SIONNA-04: everything else the server reads off the Request. los_only is
+    // included because it selects max_depth and switches reflection,
+    // diffraction and scattering on or off, so it changes the answer at least
+    // as much as the arrays do.
+    uint64_t cfg = 0;
+    cfg = CfgMix(cfg, req.los_only ? 1u : 0u);
+    cfg = CfgMixArray(cfg, req.tx_array);
+    cfg = CfgMixArray(cfg, req.rx_array);
+    cfg = CfgMixRis(cfg, req.ris);
+    k.cfg = cfg;
     return k;
 }
 
