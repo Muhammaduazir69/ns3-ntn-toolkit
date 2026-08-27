@@ -84,12 +84,30 @@ NtnSlUeMac::PruneSensing(uint64_t nowSlot)
 }
 
 void
-NtnSlUeMac::DeliverRx(uint32_t fromUeId, uint32_t bytes)
+NtnSlUeMac::DeliverRx(uint32_t fromUeId, Ptr<Packet> pkt)
 {
     if (!m_rx.IsNull())
     {
-        m_rx(fromUeId, bytes);
+        m_rx(fromUeId, pkt);
     }
+}
+
+Ptr<Packet>
+NtnSlUeMac::BuildTxPacket()
+{
+    // V2X-3. A real packet crosses PC5 now. When the scenario supplies a
+    // builder it stamps its own payload (a J2735 BSM, in the shipped example);
+    // otherwise synthesise an opaque packet of the configured size so
+    // byte-count-only scenarios are unaffected.
+    if (!m_txPacket.IsNull())
+    {
+        Ptr<Packet> p = m_txPacket(m_ueId);
+        if (p)
+        {
+            return p;
+        }
+    }
+    return Create<Packet>(m_pktBytes);
 }
 
 NtnSlGrant
@@ -189,6 +207,14 @@ NtnSlChannel::GetTypeId()
 
 NtnSlChannel::NtnSlChannel()
 {
+    // V2X-4: shadowing and blockage draws. Seeded from ns-3's stream manager,
+    // so a run stays reproducible under RngSeedManager like everything else.
+    m_shadowRv = CreateObject<NormalRandomVariable>();
+    m_shadowRv->SetAttribute("Mean", DoubleValue(0.0));
+    m_shadowRv->SetAttribute("Variance", DoubleValue(m_shadowSigmaDb * m_shadowSigmaDb));
+    m_nlosvRv = CreateObject<NormalRandomVariable>();
+    m_nlosvRv->SetAttribute("Mean", DoubleValue(m_nlosvMeanDb));
+    m_nlosvRv->SetAttribute("Variance", DoubleValue(m_nlosvSigmaDb * m_nlosvSigmaDb));
 }
 
 NtnSlChannel::~NtnSlChannel()
@@ -205,10 +231,133 @@ NtnSlChannel::AddUe(Ptr<NtnSlUeMac> ue)
 double
 NtnSlChannel::SlRsrpDbm(Ptr<MobilityModel> tx, Ptr<MobilityModel> rx) const
 {
+    if (m_useTr37885)
+    {
+        return m_txPowerDbm - Tr37885PathLossDb(tx, rx);
+    }
     double d = tx->GetDistanceFrom(rx);
     d = std::max(d, 1.0);
     double pl = m_refLossDb + 10.0 * m_plExp * std::log10(d);
     return m_txPowerDbm - pl;
+}
+
+bool
+NtnSlChannel::IsNlosv(Ptr<MobilityModel> tx, Ptr<MobilityModel> rx) const
+{
+    // NLOSv per TR 37.885: another VEHICLE obstructs the tx-rx path. A third
+    // registered UE counts as a blocker when it lies between the two and close
+    // to the line joining them. This is geometry the module already has; the
+    // old model had no notion of blockage at all.
+    const Vector a = tx->GetPosition();
+    const Vector b = rx->GetPosition();
+    const double abx = b.x - a.x;
+    const double aby = b.y - a.y;
+    const double abLen2 = abx * abx + aby * aby;
+    if (abLen2 < 1.0)
+    {
+        return false;
+    }
+    std::vector<Ptr<MobilityModel>> candidates;
+    candidates.reserve(m_ues.size() + m_extraBlockers.size());
+    for (const auto& ue : m_ues)
+    {
+        candidates.push_back(ue->GetMobility());
+    }
+    for (const auto& e : m_extraBlockers)
+    {
+        candidates.push_back(e);
+    }
+    for (const auto& m : candidates)
+    {
+        if (!m || m == tx || m == rx)
+        {
+            continue;
+        }
+        const Vector c = m->GetPosition();
+        // Projection parameter of c onto the segment ab.
+        const double t = ((c.x - a.x) * abx + (c.y - a.y) * aby) / abLen2;
+        if (t <= 0.0 || t >= 1.0)
+        {
+            continue; // not between them
+        }
+        const double px = a.x + t * abx;
+        const double py = a.y + t * aby;
+        const double lateral = std::hypot(c.x - px, c.y - py);
+        if (lateral <= m_blockerLateralM)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+double
+NtnSlChannel::Tr37885PathLossDb(Ptr<MobilityModel> tx, Ptr<MobilityModel> rx) const
+{
+    // TR 37.885 Table 6.2.1-1, Highway LOS:
+    //   PL = 32.4 + 20 log10(d_3D [m]) + 20 log10(fc [GHz])
+    double d = tx->GetDistanceFrom(rx);
+    d = std::max(d, 1.0);
+    const double fcGhz = m_carrierHz / 1e9;
+    double pl = 32.4 + 20.0 * std::log10(d) + 20.0 * std::log10(fcGhz);
+
+    // Log-normal shadowing, sigma 3 dB in LOS.
+    if (m_shadowSigmaDb > 0.0 && m_shadowRv)
+    {
+        pl += m_shadowRv->GetValue();
+    }
+    // sigma == 0 contributes nothing, which keeps the closed form checkable.
+
+    // NLOSv: an additional blockage loss when a vehicle obstructs the path.
+    // Clamped at zero because blockage cannot improve the link.
+    if (IsNlosv(tx, rx) && m_nlosvRv)
+    {
+        pl += std::max(0.0, m_nlosvRv->GetValue());
+    }
+    return pl;
+}
+
+void
+NtnSlChannel::SetShadowingSigmaDb(double db)
+{
+    // The RNGs are built in the constructor from the defaults, so a setter
+    // that only wrote the member left the DRAW at its old variance - the
+    // configured value would have been silently ignored.
+    m_shadowSigmaDb = db;
+    if (m_shadowRv)
+    {
+        m_shadowRv->SetAttribute("Variance", DoubleValue(db * db));
+    }
+}
+
+void
+NtnSlChannel::SetNlosvBlockage(double meanDb, double sigmaDb)
+{
+    m_nlosvMeanDb = meanDb;
+    m_nlosvSigmaDb = sigmaDb;
+    if (m_nlosvRv)
+    {
+        m_nlosvRv->SetAttribute("Mean", DoubleValue(meanDb));
+        m_nlosvRv->SetAttribute("Variance", DoubleValue(sigmaDb * sigmaDb));
+    }
+}
+
+bool
+NtnSlChannel::AddBlockerForTest(Ptr<MobilityModel> m)
+{
+    if (!m)
+    {
+        return false;
+    }
+    m_extraBlockers.push_back(m);
+    return true;
+}
+
+double
+NtnSlChannel::NoiseFloorDbm() const
+{
+    // kTB at 290 K plus the receiver noise figure, over one subchannel.
+    return -174.0 + 10.0 * std::log10(std::max(1.0, m_subchBwHz)) + m_noiseFigureDb;
 }
 
 void
@@ -243,6 +392,11 @@ NtnSlChannel::SlotTick()
     {
         Ptr<NtnSlUeMac> ue;
         uint32_t subch;
+        /// V2X-3: the packet this transmission carries. Built ONCE per
+        /// transmission, so every receiver in the slot decodes the same bytes -
+        /// building per receiver would give each one its own BSM and quietly
+        /// break any continuity check on the sequence.
+        Ptr<Packet> pkt;
     };
     std::vector<Tx> txs;
     for (auto& ue : m_ues)
@@ -250,7 +404,7 @@ NtnSlChannel::SlotTick()
         auto it = m_grants.find(ue->GetUeId());
         if (it != m_grants.end() && it->second.valid && it->second.slot == m_slot)
         {
-            txs.push_back({ue, it->second.startSubch});
+            txs.push_back({ue, it->second.startSubch, ue->BuildTxPacket()});
         }
     }
 
@@ -288,22 +442,51 @@ NtnSlChannel::SlotTick()
                 }
             }
 
-            bool decodable = rsrp > m_decodeThreshDbm;
-            // Co-channel collision: another transmitter on the same subchannel
-            // heard within the margin.
-            if (decodable)
+            bool decodable;
+            if (m_useTr37885)
             {
+                // V2X-4: decode is an SINR test against a TS 38.214 threshold,
+                // not a bare RSRP threshold. Same-subchannel transmitters are
+                // summed as INTERFERENCE in linear power rather than compared
+                // one at a time against a margin, so two weak interferers can
+                // jointly break a link that neither breaks alone - which is the
+                // behaviour that produces a real PRR-vs-distance curve.
+                const double noiseMw = std::pow(10.0, NoiseFloorDbm() / 10.0);
+                double interfMw = 0.0;
                 for (const auto& other : txs)
                 {
                     if (other.ue == t.ue || other.subch != t.subch)
                     {
                         continue;
                     }
-                    double rsrpOther = SlRsrpDbm(other.ue->GetMobility(), rxUe->GetMobility());
-                    if (rsrpOther > rsrp - m_collisionMarginDb)
+                    const double rsrpOther =
+                        SlRsrpDbm(other.ue->GetMobility(), rxUe->GetMobility());
+                    interfMw += std::pow(10.0, rsrpOther / 10.0);
+                }
+                const double sigMw = std::pow(10.0, rsrp / 10.0);
+                const double sinrDb = 10.0 * std::log10(sigMw / (noiseMw + interfMw));
+                decodable = (sinrDb > m_decodeSinrDb);
+            }
+            else
+            {
+                decodable = rsrp > m_decodeThreshDbm;
+                // Co-channel collision: another transmitter on the same
+                // subchannel heard within the margin.
+                if (decodable)
+                {
+                    for (const auto& other : txs)
                     {
-                        decodable = false;
-                        break;
+                        if (other.ue == t.ue || other.subch != t.subch)
+                        {
+                            continue;
+                        }
+                        double rsrpOther =
+                            SlRsrpDbm(other.ue->GetMobility(), rxUe->GetMobility());
+                        if (rsrpOther > rsrp - m_collisionMarginDb)
+                        {
+                            decodable = false;
+                            break;
+                        }
                     }
                 }
             }
@@ -319,7 +502,26 @@ NtnSlChannel::SlotTick()
                         break;
                     }
                 }
-                rxUe->DeliverRx(t.ue->GetUeId(), t.ue->m_pktBytes);
+                // V2X-5. Delivery used to happen synchronously inside SlotTick,
+                // in the same event as the transmission, so the one-way delay of
+                // every PC5 message was identically zero and the module exposed
+                // no delay KPI at all. A V2X safety study whose latency is zero
+                // by construction cannot say anything about latency.
+                //
+                // A transmission occupies its slot: the receiver cannot decode
+                // before the slot ends. Add the propagation time on top, which
+                // at V2X ranges is sub-microsecond and so is dominated by the
+                // slot, but is the term that makes the number a delay rather
+                // than a constant.
+                const double propS = dist / 299792458.0;
+                const Time owd = m_pool.slotDuration + Seconds(propS);
+                m_delaySumS += owd.GetSeconds();
+                m_delayMaxS = std::max(m_delayMaxS, owd.GetSeconds());
+                ++m_delayCount;
+                Ptr<NtnSlUeMac> dst = rxUe;
+                const uint32_t src = t.ue->GetUeId();
+                Ptr<Packet> copy = t.pkt->Copy();
+                Simulator::Schedule(owd, [dst, src, copy]() { dst->DeliverRx(src, copy); });
             }
         }
     }

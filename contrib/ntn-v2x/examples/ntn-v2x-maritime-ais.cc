@@ -165,7 +165,12 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-maritime-ais");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
+    // S-band LEO reference payload. Declared as a DENSITY so the helper
+    // back-computes conducted power against the array gain instead of the
+    // antenna being counted twice.
+    rs.SetSatEirpDensityDbwMhz(
+        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));

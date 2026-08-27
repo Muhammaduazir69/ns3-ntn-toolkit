@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
+#include "ns3/constant-velocity-mobility-model.h"
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -195,7 +196,72 @@ SumoTraciBridge::EmitSample(const VehicleSample& s)
     auto it = m_vehicles.find(s.vehId);
     if (it != m_vehicles.end())
     {
-        it->second->SetPosition(Vector{s.x, s.y, s.z});
+        const Vector pos{s.x, s.y, s.z};
+
+        // V2X-6: push VELOCITY too, not only position.
+        //
+        // This used to call SetPosition and nothing else, so the speedMps
+        // parsed out of the FCD trace was read and discarded. Every consumer
+        // that asked the mobility model how fast a vehicle was going got zero:
+        // the BSM header's speed and heading fields (SAE J2735 Part I) were
+        // computed from GetVelocity() and so were 0 and atan2(0,0)=0 on every
+        // packet, and any Doppler or velocity-dependent channel attached to a
+        // SUMO-driven vehicle saw a stationary car.
+        //
+        // Direction comes from the displacement between consecutive samples,
+        // magnitude from SUMO's own speed column when it has one - SUMO is
+        // authoritative about speed, and differencing positions across a coarse
+        // trace cadence is not. With no speed column the displacement supplies
+        // both.
+        Vector vel{0.0, 0.0, 0.0};
+        auto prev = m_lastSample.find(s.vehId);
+        if (prev != m_lastSample.end())
+        {
+            const double dt = s.simulationTimeSec - prev->second.timeSec;
+            if (dt > 0.0)
+            {
+                const Vector d{pos.x - prev->second.pos.x,
+                               pos.y - prev->second.pos.y,
+                               pos.z - prev->second.pos.z};
+                const double dist = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+                if (dist > 1e-9)
+                {
+                    const double speed = (s.speedMps > 0.0) ? s.speedMps : (dist / dt);
+                    vel = Vector{d.x / dist * speed, d.y / dist * speed, d.z / dist * speed};
+                }
+            }
+        }
+
+        it->second->SetPosition(pos);
+        Ptr<ConstantVelocityMobilityModel> cv =
+            DynamicCast<ConstantVelocityMobilityModel>(it->second);
+        if (cv)
+        {
+            cv->SetVelocity(vel);
+            if (vel.x != 0.0 || vel.y != 0.0 || vel.z != 0.0)
+            {
+                ++m_velocitySamples;
+            }
+        }
+        else if (s.speedMps > 0.0)
+        {
+            // Say it once. A ConstantPositionMobilityModel cannot carry a
+            // velocity, so a scenario that registers one silently throws away
+            // every speed SUMO reported - which is the defect this fixes, one
+            // layer up.
+            if (!m_warnedNoVelocity)
+            {
+                m_warnedNoVelocity = true;
+                NS_LOG_WARN("SumoTraciBridge: vehicle "
+                            << s.vehId << " is registered against a mobility model that cannot "
+                            << "hold a velocity, so SUMO's speed is discarded. Register a "
+                            << "ConstantVelocityMobilityModel if BSM speed/heading or any "
+                            << "velocity-dependent channel matters.");
+            }
+            ++m_velocityDropped;
+        }
+
+        m_lastSample[s.vehId] = LastSample{pos, s.simulationTimeSec};
     }
     m_traceSample(s);
 }

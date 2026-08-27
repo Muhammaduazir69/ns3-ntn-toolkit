@@ -90,6 +90,14 @@ class SumoTraciBridge : public Object
     /// Number of FCD trace rows currently loaded (0 if live).
     std::size_t LoadedSampleCount() const;
 
+    /// V2X-6: samples that produced a non-zero velocity on a registered
+    /// mobility model. Zero on a run with moving vehicles means the speed
+    /// column is being parsed and discarded again.
+    uint64_t VelocitySamplesApplied() const { return m_velocitySamples; }
+    /// Samples whose speed could not be applied because the registered mobility
+    /// model cannot hold one.
+    uint64_t VelocitySamplesDropped() const { return m_velocityDropped; }
+
     /// Trace fired for every per-vehicle position emitted.
     typedef TracedCallback<const VehicleSample&> SampleTrace;
 
@@ -119,6 +127,28 @@ class SumoTraciBridge : public Object
     double DetectTraceCadence() const;
 
     std::map<std::string, Ptr<MobilityModel>> m_vehicles;
+
+    /// V2X-6: previous position/time per vehicle, so a heading can be derived
+
+    /// from consecutive samples.
+
+    struct LastSample
+
+    {
+
+        Vector pos;
+
+        double timeSec{0.0};
+
+    };
+
+    std::map<std::string, LastSample> m_lastSample;
+
+    uint64_t m_velocitySamples{0};
+
+    uint64_t m_velocityDropped{0};
+
+    bool m_warnedNoVelocity{false};
     double m_lastJitterSec{0.0};
     double m_maxJitterSec{0.0};
     SampleTrace m_traceSample;

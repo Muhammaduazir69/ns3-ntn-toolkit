@@ -40,6 +40,7 @@
 #include <iostream>
 #include <vector>
 
+#include "ns3/ntn-oran-application.h"
 using namespace ns3;
 using namespace ns3::ntnv2x;
 
@@ -49,6 +50,19 @@ namespace
 {
 NtnRealStackHelper* g_rs = nullptr;
 NodeContainer g_vehicles;
+// V2X-2: per-vehicle flow handles and decision state, so the relay decision can
+// actuate rather than only counting.
+enum class Decision : uint8_t
+{
+    Direct,
+    Relay,
+    Outage
+};
+std::vector<ApplicationContainer> g_vehFlows;
+std::vector<Decision> g_vehDecision;
+std::vector<bool> g_vehOnAir;
+uint32_t g_gatedOff = 0;
+uint32_t g_gatedOn = 0;
 std::vector<double> g_blockageDb; // per-vehicle NLOS blockage (0 = LOS)
 double g_simTime = 20.0;
 double g_minDirectSnrDb = 6.0;
@@ -96,6 +110,7 @@ RelayTick()
         if (directSinr[v] >= g_minDirectSnrDb)
         {
             ++direct; // good measured direct link
+            g_vehDecision[v] = Decision::Direct;
             continue;
         }
         // Shadowed: look for the best in-range peer with a good MEASURED link.
@@ -118,15 +133,53 @@ RelayTick()
         if (bestPeerSinr >= g_minDirectSnrDb)
         {
             ++relay; // relayed through a peer on the MEASURED-best link
+            g_vehDecision[v] = Decision::Relay;
         }
         else
         {
             ++outage; // neither direct nor any peer clears the threshold
+            g_vehDecision[v] = Decision::Outage;
         }
     }
     g_directDecisions += direct;
     g_relayDecisions += relay;
     g_outageDecisions += outage;
+
+    // V2X-2 FIX (2026-08-25): ACTUATE the decision.
+    //
+    // This loop used to terminate in ++direct / ++relay / ++outage and nothing
+    // else: no flow was gated, rerouted, started or stopped, so the reported
+    // split described a calculation rather than anything that happened to a
+    // packet. A vehicle the model has just declared to be in outage now
+    // genuinely stops transmitting, and one that recovers resumes, so the
+    // measured per-UE delivery reflects the decision instead of running
+    // independently of it.
+    for (uint32_t v = 0; v < n && v < g_vehFlows.size(); ++v)
+    {
+        const bool onAir = (g_vehDecision[v] != Decision::Outage);
+        if (onAir == g_vehOnAir[v])
+        {
+            continue; // no change, do not churn the applications
+        }
+        for (uint32_t a = 0; a < g_vehFlows[v].GetN(); ++a)
+        {
+            Ptr<NtnOranApplication> app =
+                DynamicCast<NtnOranApplication>(g_vehFlows[v].Get(a));
+            if (app)
+            {
+                app->SetTransmitEnabled(onAir);
+            }
+        }
+        g_vehOnAir[v] = onAir;
+        if (!onAir)
+        {
+            ++g_gatedOff;
+        }
+        else
+        {
+            ++g_gatedOn;
+        }
+    }
 
     static double s_lastPrint = -1.0;
     if (t - s_lastPrint >= 4.0)
@@ -225,10 +278,27 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-real-stack");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, g_vehicles);
-    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
-                      Seconds(1.0), Seconds(duration - 0.5));
+    // V2X-2 FIX (2026-08-25): install ONE flow per vehicle and keep the
+    // handles, so the relay decision below has something to act on. With the
+    // bouquet installed in bulk there were no per-vehicle handles, which is
+    // part of why the decision loop could only increment counters.
+    for (uint32_t v = 0; v < numVehicles; ++v)
+    {
+        g_vehDecision.push_back(Decision::Direct);
+        g_vehOnAir.push_back(true);
+        g_vehFlows.push_back(rs.InstallOranFlow(v,
+                                                /*fiveQi=*/79,
+                                                /*sst=*/2,
+                                                /*sd=*/0x000002,
+                                                NtnOranApplication::URLLC_PERIODIC,
+                                                Seconds(1.0),
+                                                Seconds(duration - 0.5)));
+    }
     rs.EnableAiFlowMonitor("ntn-v2x-real-stack"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 
@@ -260,6 +330,36 @@ main(int argc, char* argv[])
               << "    relayed via peer:          " << g_relayDecisions << "\n"
               << "    outage (no link):          " << g_outageDecisions << "\n"
               << "  -> direct/relay decided on MEASURED SINR, not V2xLeoDirect::Compute().\n";
+
+    // V2X-2: evidence that the decision ACTUATED. Gate transitions are the
+    // number of times a vehicle was actually taken off the air or put back,
+    // and the per-vehicle delivery below is measured from the sink, so a
+    // reader can check the outage decisions against packets that stopped
+    // rather than taking the counter's word for it.
+    uint64_t rxOnAir = 0;
+    uint64_t rxGated = 0;
+    uint64_t lostOnAir = 0;
+    for (uint32_t v = 0; v < g_vehicles.GetN() && v < g_vehOnAir.size(); ++v)
+    {
+        const uint64_t rx = g_rs->GetUeRxPackets(v);
+        const uint64_t lost = g_rs->GetUeLostPackets(v);
+        if (g_vehOnAir[v])
+        {
+            rxOnAir += rx;
+            lostOnAir += lost;
+        }
+        else
+        {
+            rxGated += rx;
+        }
+    }
+    std::cout << "  actuation (V2X-2):\n"
+              << "    gate transitions off/on:   " << g_gatedOff << " / " << g_gatedOn << "\n"
+              << "    measured rx, on-air UEs:   " << rxOnAir << " pkts (lost " << lostOnAir
+              << ")\n"
+              << "    measured rx, gated UEs:    " << rxGated << " pkts\n"
+              << "  -> an outage decision now stops that vehicle transmitting; before this the\n"
+              << "     decision incremented a counter and every flow ran on regardless.\n";
 
     Simulator::Destroy();
     return 0;

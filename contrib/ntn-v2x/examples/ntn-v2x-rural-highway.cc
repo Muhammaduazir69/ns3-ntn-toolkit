@@ -42,7 +42,6 @@ namespace
 NtnRealStackHelper* g_rs = nullptr;
 Ptr<SumoTraciBridge> g_bridge;
 std::vector<Ptr<MobilityModel>> g_vMobs;
-std::vector<double> g_blockageDb;
 std::ofstream g_out;
 double g_minDirectSnrDb = 4.0;
 double g_maxV2vRangeM = 1500.0;
@@ -70,15 +69,16 @@ Step()
     // and reads 0 during the run, which froze every relay-decision column
     // at zero (caught by the regeneration sweep). Use the per-UE recent
     // PHY samples instead and skip the tick until samples exist.
+    // V2X-1: each vehicle's OWN measured PHY SINR. No cell-wide mean, and no
+    // blockage constant standing in for a measurement that now exists.
     const uint32_t n = static_cast<uint32_t>(g_vMobs.size());
-    double baseline = 0.0;
+    std::vector<double> directSinr(n, std::numeric_limits<double>::quiet_NaN());
     uint32_t nMeas = 0;
     for (uint32_t v = 0; v < n; ++v)
     {
-        const double s = g_rs->GetUeRecentSinrDb(v);
-        if (!std::isnan(s))
+        directSinr[v] = g_rs->GetUeRecentSinrDb(v);
+        if (!std::isnan(directSinr[v]))
         {
-            baseline += s;
             ++nMeas;
         }
     }
@@ -86,13 +86,6 @@ Step()
     {
         Simulator::Schedule(Seconds(g_dt), &Step);
         return; // no PHY samples yet this early in the run
-    }
-    baseline /= nMeas;
-
-    std::vector<double> directSinr(n);
-    for (uint32_t v = 0; v < n; ++v)
-    {
-        directSinr[v] = baseline - g_blockageDb[v];
     }
     uint32_t nDirect = 0, nRelay = 0, nOrphan = 0;
     for (uint32_t v = 0; v < n; ++v)
@@ -122,11 +115,42 @@ Step()
         }
     }
     const double directPct = n ? 100.0 * nDirect / n : 0.0;
+    // Mean over the vehicles that actually have a PHY sample this tick. This is
+    // now a REPORTED statistic over per-vehicle measurements, not the input the
+    // decisions are derived from, which is the change V2X-1 is about.
+    double meanSinr = 0.0;
+    for (uint32_t v = 0; v < n; ++v)
+    {
+        if (!std::isnan(directSinr[v]))
+        {
+            meanSinr += directSinr[v];
+        }
+    }
+    meanSinr = nMeas ? meanSinr / nMeas : 0.0;
+    // V2X-1: the spread across vehicles is the evidence that these are genuinely
+    // per-vehicle measurements. Under the old baseline-minus-parity scheme the
+    // spread was exactly the blockage constant, taking one of two values; a
+    // real spread that moves with the geometry cannot be produced that way.
+    double minSinr = std::numeric_limits<double>::infinity();
+    double maxSinr = -std::numeric_limits<double>::infinity();
+    for (uint32_t v = 0; v < n; ++v)
+    {
+        if (!std::isnan(directSinr[v]))
+        {
+            minSinr = std::min(minSinr, directSinr[v]);
+            maxSinr = std::max(maxSinr, directSinr[v]);
+        }
+    }
+    if (!std::isfinite(minSinr))
+    {
+        minSinr = 0.0;
+        maxSinr = 0.0;
+    }
     if (g_out.is_open())
     {
         g_out << std::fixed << std::setprecision(3) << t << "," << nDirect << "," << nRelay << ","
               << nOrphan << "," << directPct << "," << g_bridge->GetLastJitterSec() * 1000.0 << ","
-              << baseline << "\n";
+              << meanSinr << "," << minSinr << "," << maxSinr << "," << nMeas << "\n";
     }
     Simulator::Schedule(Seconds(g_dt), &Step);
 }
@@ -135,23 +159,25 @@ Step()
 int
 main(int argc, char* argv[])
 {
-    std::size_t nVehicles = 40;
+    // V2X-1: every vehicle is a real UE of the measured cell now, and the
+    // vendored nr v3.3 RRC cannot bring an arbitrary number of them through
+    // connection setup at once. Measured on this scenario: 16 attach cleanly,
+    // 24 aborts with "unexpected event in state IDLE_CONNECTING". The default
+    // is the largest count that actually runs rather than one that crashes.
+    std::size_t nVehicles = 16;
     double simTimeSec = 30.0;
-    uint32_t numCellUes = 4; // representative real-cell terminals for the baseline
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
-    double blockageDb = 14.0;
     double dtSec = 1.0;
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string tracePath = "contrib/ntn-v2x/traces/rural-highway-fcd.csv";
     std::string outputDir = "ntn-v2x-rural-highway-output";
 
     CommandLine cmd(__FILE__);
-    cmd.AddValue("vehicles", "Number of vehicles", nVehicles);
+    cmd.AddValue("vehicles", "Number of vehicles (each is a real UE; see the nr limit below)",
+                 nVehicles);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
-    cmd.AddValue("numCellUes", "Representative real-cell terminals", numCellUes);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
-    cmd.AddValue("blockageDb", "NLOS blockage on shadowed vehicles (dB)", blockageDb);
     cmd.AddValue("dt", "TraCI tick (s)", dtSec);
     cmd.AddValue("trace",
                  "FCD-format CSV trace path (time,vehid,x,y,z,speed). Defaults to the "
@@ -187,21 +213,46 @@ main(int argc, char* argv[])
                      "fcd-export also works.\n";
         return 1;
     }
-    g_blockageDb.assign(nVehicles, 0.0);
+    // V2X-1 FIX (2026-08-25): every vehicle is a REAL UE of the measured cell.
+    //
+    // Before this, the cell carried a handful of separate stand-in terminals at
+    // fixed positions, and each vehicle's "measured" SINR was reconstructed as
+    // the mean over those stand-ins minus a per-vehicle blockage constant that
+    // was assigned by ARRAY INDEX PARITY: `(i % 2 == 1) ? blockageDb : 0.0`,
+    // odd-indexed vehicles declared NLOS because they were odd-indexed. So no
+    // vehicle had a measurement of its own, and the LOS/NLOS split that drove
+    // every relay decision was a property of the loop counter rather than of
+    // the road, the traffic or the geometry.
+    //
+    // Attaching the vehicles themselves to the radio removes both problems at
+    // once and needs no substitute model: GetUeRecentSinrDb(v) becomes vehicle
+    // v's own PHY measurement, so blockage, shadowing and the elevation change
+    // over the pass arrive through the channel that is already there.
+    // Fail with an explanation rather than an opaque RRC assertion deep in the
+    // vendored stack. This bound is a property of nr v3.3's connection setup,
+    // not of the scenario, and it lifts with the ns-3.48 migration.
+    NS_ABORT_MSG_IF(nVehicles > 16,
+                    "vehicles=" << nVehicles
+                                << ": each vehicle is a real UE, and vendored nr v3.3 cannot "
+                                   "bring more than about 16 through connection setup at once "
+                                   "(24 aborts with 'unexpected event in state "
+                                   "IDLE_CONNECTING'). Reduce --vehicles.");
+    NodeContainer ueNodes;
+    ueNodes.Create(static_cast<uint32_t>(nVehicles));
     for (std::size_t i = 0; i < nVehicles; ++i)
     {
         Ptr<ConstantPositionMobilityModel> mob = CreateObject<ConstantPositionMobilityModel>();
         mob->SetPosition(Vector(300.0 * i, 0, 1.5));
         g_bridge->RegisterVehicle("veh" + std::to_string(i), mob);
         g_vMobs.push_back(mob);
-        g_blockageDb[i] = (i % 2 == 1) ? blockageDb : 0.0; // odd-indexed = NLOS
+        // The SAME mobility model the TraCI replay drives, so the UE moves with
+        // the vehicle rather than shadowing it.
+        ueNodes.Get(static_cast<uint32_t>(i))->AggregateObject(mob);
     }
 
     // Real mmwave NR cell over representative highway terminals -> MEASURED baseline.
     NodeContainer satNodes;
     satNodes.Create(1);
-    NodeContainer ueNodes;
-    ueNodes.Create(numCellUes);
     MobilityHelper mh;
     mh.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     // Real SGP4 orbit projected into the scenario's local ENU frame: the
@@ -223,13 +274,6 @@ main(int argc, char* argv[])
     satEnu->SetSource(satSgp4);
     satEnu->SetReference(satSubLat, satSubLon, 0.0);
     satNodes.Get(0)->AggregateObject(satEnu);
-    Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
-    for (uint32_t i = 0; i < numCellUes; ++i)
-    {
-        uePos->Add(Vector(2000.0 * i, 0.0, 1.5));
-    }
-    mh.SetPositionAllocator(uePos);
-    mh.Install(ueNodes);
 
     NtnRealStackHelper rs;
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
@@ -241,7 +285,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-rural-highway");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
@@ -250,7 +297,8 @@ main(int argc, char* argv[])
 
     std::filesystem::create_directories(outputDir);
     g_out.open(outputDir + "/ntn-v2x-rural-highway.csv");
-    g_out << "time_s,n_direct,n_relay,n_orphan,direct_pct,jitter_ms,measured_baseline_db\n";
+    g_out << "time_s,n_direct,n_relay,n_orphan,direct_pct,jitter_ms,"
+             "measured_mean_sinr_db,measured_min_sinr_db,measured_max_sinr_db,n_measured\n";
 
     Simulator::Schedule(Seconds(1.0), &Step);
     Simulator::Stop(Seconds(simTimeSec));

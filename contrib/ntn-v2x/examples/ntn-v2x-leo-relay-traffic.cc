@@ -35,6 +35,7 @@
 #include "ns3/walker-constellation.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
+#include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/core-module.h"
 #include "ns3/ntn-v2x-helper.h"
 #include "ns3/sumo-traci-bridge.h"
@@ -244,12 +245,21 @@ main(int argc, char* argv[])
     {
         NS_FATAL_ERROR("could not load FCD trace " << fcdTrace);
     }
-    Ptr<ConstantPositionMobilityModel> veh0 = CreateObject<ConstantPositionMobilityModel>();
+    // V2X-6: ConstantVelocity, not ConstantPosition.
+    //
+    // These were ConstantPositionMobilityModel, which cannot hold a velocity,
+    // so GetVelocity() returned (0,0,0) no matter what SUMO reported. Every
+    // BSM this example put on the wire therefore carried speed 0 and heading
+    // atan2(0,0) = 0 - two of the three SAE J2735 Part I fields the module's
+    // own headline claims to populate from real mobility. The bridge now
+    // derives velocity from consecutive FCD samples and SUMO's speed column,
+    // and needs a model that can carry it.
+    Ptr<ConstantVelocityMobilityModel> veh0 = CreateObject<ConstantVelocityMobilityModel>();
     veh0->SetPosition(Vector(0, 0, 1.5));
     nodes.Get(0)->AggregateObject(veh0);
     g_veh0 = veh0;
     g_bridge->RegisterVehicle("veh0", veh0);
-    Ptr<ConstantPositionMobilityModel> veh1 = CreateObject<ConstantPositionMobilityModel>();
+    Ptr<ConstantVelocityMobilityModel> veh1 = CreateObject<ConstantVelocityMobilityModel>();
     veh1->SetPosition(Vector(50, 0, 1.5));
     nodes.Get(1)->AggregateObject(veh1);
     g_veh1 = veh1;
@@ -403,6 +413,20 @@ main(int argc, char* argv[])
                 "mean e2e delay=%.2f ms jitter=%.3f ms (real range delays through the relay)\n",
                 (unsigned long)txP, (unsigned long)rxP, txP ? 100.0 * rxP / txP : 0.0,
                 g_sink->GetMeanDelayMs(), g_sink->GetMeanJitterMs());
+
+    // V2X-6: report what the BSM headers actually carried. Until this fix the
+    // answer was speed 0 and heading 0 on every packet, because the vehicles
+    // were registered against a mobility model that cannot hold a velocity and
+    // the FCD speed column was parsed and discarded.
+    {
+        const Vector vFinal = g_veh0Mob ? g_veh0Mob->GetVelocity() : Vector(0, 0, 0);
+        const double speedFinal = std::sqrt(vFinal.x * vFinal.x + vFinal.y * vFinal.y);
+        std::cout << "#   BSM mobility: veh0 final speed=" << speedFinal << " m/s heading="
+                  << (speedFinal > 0.0 ? std::atan2(vFinal.y, vFinal.x) * 180.0 / M_PI : 0.0)
+                  << " deg | FCD velocity samples applied="
+                  << g_bridge->VelocitySamplesApplied()
+                  << " dropped=" << g_bridge->VelocitySamplesDropped() << "\n";
+    }
     Simulator::Destroy();
     return 0;
 }

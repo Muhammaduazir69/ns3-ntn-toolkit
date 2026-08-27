@@ -48,12 +48,20 @@ main(int argc, char* argv[])
     std::string edge = "sat";
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-v2x-edge-urllc-output";
+    double satEirpDensityDbwMhz = -999.0; // sentinel: TR 38.821 Set-1
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("edge", "Inference placement: sat|ground", edge);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("satEirpDensityDbwMhz",
+                 "V2X-9: satellite EIRP density (dBW/MHz); default is TR 38.821 Set-1. Lower it "
+                 "to drive the control link below the xApp's 5 dB SINR brake threshold, which is "
+                 "how the actuation path gets exercised: on a healthy link the heuristic never "
+                 "decides to brake, so the brake was never applied and, before this change, "
+                 "would not have applied to anything if it had.",
+                 satEirpDensityDbwMhz);
     cmd.Parse(argc, argv);
 
     std::printf("# ntn-v2x-edge-urllc (REAL %s cell, edge=%s)\n", radio.c_str(), edge.c_str());
@@ -102,7 +110,19 @@ main(int argc, char* argv[])
     rs.SetRunTag("ntn-v2x-edge-urllc-" + edge);
     rs.SetCarrierFrequencyHz(2.0e9);
     // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 60 dBm.
-    rs.SetSatEirpDbm(radio == "mmwave" ? 60.0 : 70.0);
+    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
+    // S-band LEO reference payload. Declared as a DENSITY so the helper
+    // back-computes conducted power against the array gain instead of the
+    // antenna being counted twice.
+    // V2X-9: the declared EIRP density, overridable so a scenario can drive the
+    // control link into the region where the brake heuristic actually fires. On
+    // the TR 38.821 Set-1 value the SINR sits near 18 dB, far above the 5 dB
+    // threshold, so the brake never triggers and, before this change, would not
+    // have applied to anything if it had.
+    rs.SetSatEirpDensityDbwMhz(
+        (satEirpDensityDbwMhz > -900.0)
+            ? satEirpDensityDbwMhz
+            : NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
     rs.Build(satNodes, vehNodes);
 
     const Time start = Seconds(1.0);
@@ -127,6 +147,23 @@ main(int argc, char* argv[])
     Ptr<MobilityModel> vehMob = vehNodes.Get(0)->GetObject<MobilityModel>();
     std::vector<double> decisionLatenciesMs;
     uint32_t brakeCommands = 0;
+    // V2X-9: the brake must reach the vehicle.
+    //
+    // The inference result used to be reduced to `if (brake) ++brakeCommands;`
+    // and a latency sample. The two vehicles were ConstantVelocityMobilityModel
+    // at a fixed 27.8 m/s and were never decelerated, and no RAN parameter was
+    // touched either, so the xApp's decision changed nothing anywhere in the
+    // simulation: the "edge URLLC brake" was a counter.
+    Ptr<ConstantVelocityMobilityModel> vehCvm =
+        vehNodes.Get(0)->GetObject<ConstantVelocityMobilityModel>();
+    NS_ABORT_MSG_IF(!vehCvm, "vehicle 0 must carry a ConstantVelocityMobilityModel to brake");
+    const double kCruiseMps = 27.8;
+    const double kBrakeDecelMps2 = 3.0;   // a firm but ordinary service brake
+    const double kReleaseAccelMps2 = 1.0; // resume gently
+    double vehSpeedMps = kCruiseMps;
+    double minSpeedSeen = kCruiseMps;
+    uint32_t brakeApplications = 0;
+    const double kTickS = 0.1; // the KPM/decision cadence below
     rs.RegisterPeriodicCallback(MilliSeconds(100), [&](Time now) {
         // Feature sense on the URLLC flow.
         FlowId urllcId = 0;
@@ -152,12 +189,27 @@ main(int argc, char* argv[])
             const auto act = xapp->Infer({f.delayMeanMs, f.lossMean, f.sinrMeanDb});
             const bool brake = !act.empty() && act[0] > 0.5;
             Simulator::Schedule(leg, [&, sensedAt, brake] {
-                decisionLatenciesMs.push_back(
-                    (Simulator::Now() - sensedAt).GetSeconds() * 1e3);
+                const double dt = (Simulator::Now() - sensedAt).GetSeconds();
+                decisionLatenciesMs.push_back(dt * 1e3);
+                // V2X-9: actuate. The command applies to the vehicle's own
+                // mobility model, so the decision changes the trajectory the
+                // rest of the simulation sees rather than only a tally.
                 if (brake)
                 {
                     ++brakeCommands;
+                    const double before = vehSpeedMps;
+                    vehSpeedMps = std::max(0.0, vehSpeedMps - kBrakeDecelMps2 * kTickS);
+                    if (vehSpeedMps < before - 1e-9)
+                    {
+                        ++brakeApplications;
+                    }
                 }
+                else
+                {
+                    vehSpeedMps = std::min(kCruiseMps, vehSpeedMps + kReleaseAccelMps2 * kTickS);
+                }
+                minSpeedSeen = std::min(minSpeedSeen, vehSpeedMps);
+                vehCvm->SetVelocity(Vector(vehSpeedMps, 0.0, 0.0));
             });
         });
     });
@@ -186,6 +238,23 @@ main(int argc, char* argv[])
                     fs.MeanDelayMs() < 100.0 ? "MET" : "MISSED",
                     1.0 - fs.LossRatio(), fs.jitterMs);
     }
+    // V2X-9: report the ACTUATION, not just the decision count. A brake command
+    // that never reached the vehicle used to be indistinguishable from one that
+    // did, because only the tally was printed.
+    std::printf("# === actuation (V2X-9) ===  brakeCommands=%u applied=%u "
+                "cruise=%.1f m/s minSpeed=%.2f m/s finalSpeed=%.2f m/s\n",
+                brakeCommands, brakeApplications, kCruiseMps, minSpeedSeen, vehSpeedMps);
+    // V2X-9: a decision that reaches nothing is the defect this closes, so the
+    // example FAILS on it rather than printing a note nobody reads. That is the
+    // same reasoning as the counter itself: an observation with no consequence
+    // is how the original condition survived.
+    const bool brakeIsInert = (brakeCommands > 0 && brakeApplications == 0);
+    if (brakeIsInert)
+    {
+        std::printf("#   FAIL: %u brake commands were issued and none changed the vehicle's "
+                    "velocity; the decision is not reaching the mobility model.\n",
+                    brakeCommands);
+    }
     std::printf("# === summary ===  edge=%s inference=%s decisions=%zu "
                 "meanDecisionLatency=%.2f ms brakeCommands=%u cellSINR=%.2f dB\n",
                 edge.c_str(),
@@ -193,5 +262,5 @@ main(int argc, char* argv[])
                 decisionLatenciesMs.size(), meanDecMs, brakeCommands,
                 rs.GetMeanDlSinrDb());
     Simulator::Destroy();
-    return 0;
+    return brakeIsInert ? 1 : 0;
 }
