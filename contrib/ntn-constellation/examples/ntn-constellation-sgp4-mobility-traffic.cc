@@ -173,7 +173,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-constellation-sgp4-mobility-traffic");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simSeconds - 0.5));

@@ -68,6 +68,22 @@ class ContactGraphScheduler : public Object
     void SetMaxIslRangeM(double r) { m_maxIslRangeM = r; }
     double GetMinElevationDeg() const { return m_minElevDeg; }
     double GetMaxIslRangeM() const { return m_maxIslRangeM; }
+    void SetIslMinTangentAltM(double m) { m_islMinTangentAltM = m; }
+    double GetIslMinTangentAltM() const { return m_islMinTangentAltM; }
+
+    /**
+     * \brief CON-3: is the straight segment a-b clear of the atmospheric limb?
+     *
+     * True when the segment's closest approach to geocentre clears the
+     * ellipsoid by at least \p minTangentAltM. Extracted from the contact loop
+     * so the predicate can be exercised at a chosen tangent height directly:
+     * inline in the loop it was only reachable through SGP4 ephemeris, which is
+     * why a grazing acceptance went unnoticed.
+     *
+     * Endpoints are satellites, above the surface, so a blocked link occurs
+     * only when the closest point lies strictly between them.
+     */
+    static bool IsLimbClear(const Vector& a, const Vector& b, double minTangentAltM);
 
     /// GSL gate hysteresis (deg): a contact comes UP at MinElevationDeg and
     /// goes DOWN at MinElevationDeg - hysteresis. Default 2.0 (also exposed
@@ -101,6 +117,20 @@ class ContactGraphScheduler : public Object
     /// Traced callbacks fired on every contact transition.
     TracedCallback<ContactEvent> m_contactUp;
     TracedCallback<ContactEvent> m_contactDown;
+    /// SAGIN-1: fires once per tick for every contact that is already up,
+    /// carrying the CURRENT range and elevation.
+    ///
+    /// m_contactUp and m_contactDown fire on visibility TRANSITIONS only, so a
+    /// consumer that took its geometry from the up event kept that value for
+    /// the whole pass. At 550 km with a 20 degree elevation floor the GSL slant
+    /// sweeps from about 550 km at zenith to about 1075 km at the floor, so a
+    /// pinned delay is wrong by up to ~1.8 ms one way and a link budget
+    /// evaluated once at zenith never degrades on the way down.
+    ///
+    /// Consumers that only care about topology can keep ignoring this; those
+    /// that model delay, link budget or path cost should subscribe to it in
+    /// addition to the transition traces.
+    TracedCallback<ContactEvent> m_contactUpdate;
 
   private:
     void Tick();
@@ -115,6 +145,18 @@ class ContactGraphScheduler : public Object
     double m_minElevDeg{25.0};
     double m_gateHysteresisDeg{2.0};
     double m_maxIslRangeM{5'000'000.0};
+    /// CON-3: minimum clearance above the ellipsoid an ISL must keep, in metres.
+    ///
+    /// The limb test accepted a link whose closest approach was exactly one
+    /// Earth radius, i.e. a ray grazing the surface. A grazing path is not a
+    /// usable optical or RF crosslink: it crosses the full depth of the
+    /// atmosphere twice, with refraction, absorption and scintillation that
+    /// rise without bound as the tangent height falls to zero. Real
+    /// constellations budget a tangent-height margin and drop the link below it.
+    ///
+    /// 80 km is the default, which clears the mesosphere and is the usual
+    /// engineering floor for treating a crosslink as effectively in vacuum.
+    double m_islMinTangentAltM{80.0e3};
 
     std::map<uint32_t, Ptr<Sgp4MobilityModel>> m_sats;
     std::map<uint32_t, GsRecord> m_gss;

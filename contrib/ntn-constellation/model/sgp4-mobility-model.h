@@ -32,6 +32,7 @@
 
 #include "orbital-elements.h"
 
+#include "ns3/geocentric-constant-position-mobility-model.h"
 #include "ns3/mobility-model.h"
 #include "ns3/nstime.h"
 
@@ -46,7 +47,29 @@ namespace ntncon
 /// header stays free of the satellite-module sgp4 headers.
 struct ValladoState;
 
-class Sgp4MobilityModel : public MobilityModel
+/// NT-03: derives from GeocentricConstantPositionMobilityModel rather than
+/// MobilityModel directly.
+///
+/// The satellite still propagates its own orbit; nothing about that changes and
+/// GetPosition() still returns live ECEF metres. The base class is adopted for
+/// its INTERFACE: ns-3's ThreeGppChannelModel refuses to evaluate any of the
+/// TR 38.811 NTN scenarios unless both endpoints DynamicCast to
+/// GeocentricConstantPositionMobilityModel
+/// (three-gpp-channel-model.cc, "Mobility Models needs to be of type Geocentric
+/// for NTN scenarios"), and it reads the elevation angle and the
+/// satellite-versus-HAPS decision off GetGeographicPosition().z.
+///
+/// Without this the toolkit could not use the NTN cluster tables at all: the
+/// small-scale plane that produces the array gain and the fading behind every
+/// measured SINR ran terrestrial UMa/UMi street-canyon statistics at 600 to
+/// 2000 km, with hand-rolled TR 38.811 large-scale terms chained on top - two
+/// different standards on one link. Setting the scenario string alone would
+/// have aborted the run at the first channel realization.
+///
+/// The geographic accessors below are overridden to derive from the live
+/// propagated ECEF position, so they track the orbit instead of the constant
+/// the base class would otherwise store.
+class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
 {
   public:
     static TypeId GetTypeId();
@@ -68,6 +91,16 @@ class Sgp4MobilityModel : public MobilityModel
     void SetUseVallado(bool on);
     /// True once a TLE has been loaded into the Vallado propagator.
     bool IsValladoReady() const;
+
+    /// TWIN-01: which propagator is ACTUALLY running.
+    ///
+    /// IsValladoReady() answers whether the SGP4 state is initialised, which is
+    /// not the same question and reads as though it were - it stays true after
+    /// SetUseVallado(false). This one is the propagator in effect: true means
+    /// GetPosition() comes from SGP4, false means the analytic Kepler + J2
+    /// path. Anything comparing the two must assert on this, or it risks
+    /// comparing SGP4 against itself.
+    bool IsUsingSgp4() const;
 
     /// Read-only access to the installed elements.
     const KeplerianElements& GetElements() const { return m_elements; }
@@ -99,6 +132,10 @@ class Sgp4MobilityModel : public MobilityModel
     void DoSetPosition(const Vector& position) override;
     Vector DoGetVelocity() const override;
 
+    // NT-03: geographic view of the live orbit, for the TR 38.811 NTN channel.
+    Vector DoGetGeographicPosition() const override;
+    Vector DoGetGeocentricPosition() const override;
+
     /// Propagate to absolute time `unix_s` and fill ECI position/velocity.
     void Propagate(double unix_s, Vector& pos_eci, Vector& vel_eci) const;
 
@@ -116,7 +153,26 @@ class Sgp4MobilityModel : public MobilityModel
 
     // Full Vallado SGP4 backend (opaque; reuses the satellite module's proven
     // sgp4unit). Null until SetTle() is called; active only when m_useVallado.
-    bool m_useVallado{false};
+    /// TWIN-01: default TRUE, so a TLE actually gets SGP4.
+    ///
+    /// This was false, which meant SetTle() parsed the TLE into Keplerian
+    /// elements and then propagated them with an analytic Kepler + J2-secular
+    /// model unless the caller ALSO remembered SetUseVallado(true). Nothing in
+    /// the tree did. So a class named Sgp4MobilityModel, fed a real TLE, was
+    /// not running SGP4 - while the Python twin
+    /// (ntn_constellation/propagator.py) runs genuine Satrec.sgp4. The digital
+    /// twin's stated premise is that "twin and sim propagate identical orbits";
+    /// they did not.
+    ///
+    /// Measured for the ISS TLE over the exporter's 45-minute horizon, the two
+    /// propagators separate by 5.2 to 11.0 km - roughly a second of along-track
+    /// lag at orbital speed, enough to move an argmax-elevation crossover and
+    /// therefore every handover instant the twin exports.
+    ///
+    /// SetElements() callers are unaffected: with no TLE there is nothing for
+    /// SGP4 to initialise from, and the Kepler + J2 path still runs. Use
+    /// IsValladoReady() to find out which propagator a given object is on.
+    bool m_useVallado{true};
     std::shared_ptr<ValladoState> m_vallado;
 
     // Cache.

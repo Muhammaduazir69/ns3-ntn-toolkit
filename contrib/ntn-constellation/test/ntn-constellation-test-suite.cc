@@ -2,6 +2,11 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include "ns3/boolean.h"
+#include "ns3/geocentric-constant-position-mobility-model.h"
+#include "ns3/double.h"
+#include "ns3/uinteger.h"
+#include <limits>
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/contact-graph-router.h"
 #include "ns3/contact-graph-scheduler.h"
@@ -9,6 +14,9 @@
 #include "ns3/orbital-elements.h"
 #include "ns3/packet.h"
 #include "ns3/tr38821-corpus.h"
+#include "ns3/ntn-xn-handover.h"
+#include "ns3/ntn-xnap-messages.h"
+#include "ns3/ntn-visibility-index.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
@@ -318,6 +326,331 @@ class ContactSchedulerLeoPassTest : public TestCase
                               "least one GSL transition in 6000 s");
         // At least one sat should be visible at some point.
         NS_TEST_ASSERT_MSG_GT(cg->GslEventsUp(), 0u, "≥1 GSL rise event");
+
+        Simulator::Destroy();
+    }
+};
+
+/// SAGIN-1: an established contact must keep publishing its geometry.
+///
+/// ContactGraphScheduler emitted on visibility TRANSITIONS only, so anything
+/// that took its range from the contact-up event kept that value for the whole
+/// pass. Two consumers were affected: sagin-sgp4-routed-traffic pinned both the
+/// channel delay and the binary link budget, and ContactGraphRouter pinned the
+/// Dijkstra edge weight, so the shortest path was chosen on stale distances.
+/// A GSL slant at 550 km sweeps from roughly 550 km at zenith to 1075 km at a
+/// 20 degree floor, which is ~1.8 ms one way - larger than most of the effects
+/// the SAGIN examples exist to show.
+///
+/// This asserts that updates fire while a contact is up, that the range they
+/// carry actually moves, and that the transition counters are untouched by the
+/// new trace. Reverting the scheduler to transition-only emission gives zero
+/// updates and fails on the first assertion.
+/// CON-2: the satellite link budget must include the atmosphere.
+///
+/// EsNoDbFor was EIRP - FSPL + G/T - k - 10log10(B) and nothing else, at a
+/// 20 GHz Ka default. No rain, no gaseous absorption, no scintillation, and no
+/// elevation input at all beyond what the slant range implies. At Ka, rain
+/// alone runs from single digits to well over 15 dB at 0.01 percent
+/// availability. The omission grows as elevation falls, which is exactly where
+/// handover decisions are made, so the C/N0 and BLER series written to
+/// sim_health.csv under provenance "bler-errormodel" were optimistic in a
+/// systematic, geometry-correlated way.
+///
+/// All three terms reuse the ITU models thz-ntn already ships, so this adds no
+/// second implementation of P.676, P.838/P.618 or the scintillation model.
+/// NT-03 enabler: the toolkit's mobility models must satisfy the geocentric
+/// contract ns-3's TR 38.811 NTN channel model requires.
+///
+/// ThreeGppChannelModel raises NS_FATAL_ERROR("Mobility Models needs to be of
+/// type Geocentric for NTN scenarios") unless BOTH endpoints DynamicCast to
+/// GeocentricConstantPositionMobilityModel, and it reads the elevation angle
+/// and the satellite-versus-HAPS decision off GetGeographicPosition().z. The
+/// toolkit's satellites and terminals derived straight from MobilityModel, so
+/// every NTN scenario string was unreachable and the small-scale plane behind
+/// every measured SINR ran terrestrial UMa/UMi street-canyon statistics at 600
+/// to 2000 km instead.
+///
+/// Setting the scenario string alone would have aborted at the first channel
+/// realization rather than fixing anything, which is why this is asserted
+/// separately from any channel wiring.
+class Sgp4GeocentricContractTest : public TestCase
+{
+  public:
+    Sgp4GeocentricContractTest()
+        : TestCase("NT-03: SGP4 satellites satisfy the geocentric NTN channel contract")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        KeplerianElements el;
+        el.semi_major_axis_m = 6371e3 + 600e3;
+        el.eccentricity = 0.0;
+        el.inclination_rad = 53.0 * M_PI / 180.0;
+        el.epoch_unix_s = 1735689600.0;
+        auto sat = CreateObject<Sgp4MobilityModel>();
+        sat->SetElements(el);
+
+        // The cast the channel model performs.
+        Ptr<MobilityModel> asBase = sat;
+        NS_TEST_ASSERT_MSG_NE(DynamicCast<GeocentricConstantPositionMobilityModel>(asBase),
+                              nullptr,
+                              "an SGP4 satellite must cast to the geocentric type, or every "
+                              "TR 38.811 NTN scenario aborts at the first channel realization");
+
+        // The geographic position must track the ORBIT, not a stored constant:
+        // the base class holds one (lat, lon, alt) and a satellite's is never
+        // constant. A stale value would silently select the wrong elevation-keyed
+        // cluster table rather than fail.
+        const Vector g0 = sat->GetGeographicPosition();
+        NS_TEST_ASSERT_MSG_GT(g0.z, 500e3,
+                              "a 600 km shell must report an altitude in the hundreds of km; the "
+                              "channel model's satellite test is a 50 km threshold on this field");
+        NS_TEST_ASSERT_MSG_LT(g0.z, 700e3, "and it must not be wildly above the shell either");
+        NS_TEST_ASSERT_MSG_GT(g0.x, -91.0, "latitude must be a real latitude");
+        NS_TEST_ASSERT_MSG_LT(g0.x, 91.0, "latitude must be a real latitude");
+
+        Simulator::Stop(Seconds(300.0));
+        Simulator::Run();
+        const Vector g1 = sat->GetGeographicPosition();
+        NS_TEST_ASSERT_MSG_GT(std::abs(g1.y - g0.y) + std::abs(g1.x - g0.x), 1.0,
+                              "the geographic position must move as the orbit propagates; a "
+                              "constant means the base class's stored value is being returned "
+                              "and the channel would key its tables off the wrong geometry");
+
+        // The elevation the channel model forms must be a real elevation.
+        auto gs = CreateObject<GeocentricConstantPositionMobilityModel>();
+        gs->SetGeographicPosition(Vector(45.0, 0.0, 0.0));
+        const double elev = gs->GetElevationAngle(sat);
+        NS_TEST_ASSERT_MSG_GT(elev, 0.0, "elevation must be positive and finite");
+        NS_TEST_ASSERT_MSG_LT(elev, 90.001, "elevation cannot exceed the zenith");
+
+        Simulator::Destroy();
+    }
+};
+
+class SatLinkErrorAtmosphericChainTest : public TestCase
+{
+  public:
+    SatLinkErrorAtmosphericChainTest()
+        : TestCase("CON-2: the Ka link budget carries gas, rain and scintillation")
+    {
+    }
+
+  private:
+    /// Place a satellite at a requested elevation over a pole-mounted station.
+    static void Place(double elevDeg,
+                      Ptr<ConstantPositionMobilityModel>& gs,
+                      Ptr<ConstantPositionMobilityModel>& sat)
+    {
+        const double Re = 6371e3;
+        const double alt = 550e3;
+        const double e = elevDeg * M_PI / 180.0;
+        const double slant =
+            std::sqrt(std::pow(Re + alt, 2) - std::pow(Re * std::cos(e), 2)) - Re * std::sin(e);
+        gs = CreateObject<ConstantPositionMobilityModel>();
+        gs->SetPosition(Vector(0, 0, Re));
+        sat = CreateObject<ConstantPositionMobilityModel>();
+        sat->SetPosition(Vector(slant * std::cos(e), 0, Re + slant * std::sin(e)));
+    }
+
+    void DoRun() override
+    {
+        // Elevation must be recovered from the two ECEF positions. Without it
+        // no atmospheric term can be evaluated at all.
+        for (double want : {90.0, 30.0, 10.0})
+        {
+            Ptr<ConstantPositionMobilityModel> gs, sat;
+            Place(want, gs, sat);
+            auto m = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            m->SetEndpoints(sat, gs);
+            NS_TEST_ASSERT_MSG_EQ_TOL(m->CurrentElevationDeg(), want, 0.5,
+                                      "the model must recover the link elevation from the two "
+                                      "endpoint positions; it had no elevation input at all");
+        }
+
+        // Clear sky: gaseous and scintillation still apply, and both must grow
+        // as elevation falls because the path through the atmosphere lengthens.
+        double prevExcess = -1.0;
+        for (double elev : {90.0, 30.0, 10.0, 5.0})
+        {
+            Ptr<ConstantPositionMobilityModel> gs, sat;
+            Place(elev, gs, sat);
+            auto m = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            m->SetAttribute("CarrierHz", DoubleValue(20e9));
+            m->SetEndpoints(sat, gs);
+            const double excess = m->CurrentExcessLossDb();
+            NS_TEST_ASSERT_MSG_GT(excess, 0.0,
+                                  "a Ka Earth-space path always crosses some atmosphere; zero "
+                                  "excess loss means the chain is not wired in");
+            NS_TEST_ASSERT_MSG_GT(m->LastGaseousDb(), 0.0, "gaseous absorption must be positive");
+            NS_TEST_ASSERT_MSG_GT(m->LastScintillationDb(), 0.0, "scintillation must be positive");
+            NS_TEST_ASSERT_MSG_EQ_TOL(m->LastRainDb(), 0.0, 1e-9,
+                                      "rain must be off when no rain rate is configured, so the "
+                                      "default stays clear-sky");
+            NS_TEST_ASSERT_MSG_GT(excess, prevExcess,
+                                  "excess loss must increase monotonically as elevation falls; "
+                                  "a flat value means the terms ignore geometry");
+            prevExcess = excess;
+        }
+
+        // Rain at Ka dominates, and that is the whole point of the finding.
+        {
+            Ptr<ConstantPositionMobilityModel> gs, sat;
+            Place(30.0, gs, sat);
+            auto dry = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            dry->SetAttribute("CarrierHz", DoubleValue(20e9));
+            dry->SetEndpoints(sat, gs);
+            auto wet = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            wet->SetAttribute("CarrierHz", DoubleValue(20e9));
+            wet->SetAttribute("RainRateMmH", DoubleValue(42.0)); // a heavy 0.01% rate
+            wet->SetEndpoints(sat, gs);
+            const double dryDb = dry->CurrentExcessLossDb();
+            const double wetDb = wet->CurrentExcessLossDb();
+            NS_TEST_ASSERT_MSG_GT(wet->LastRainDb(), 5.0,
+                                  "a heavy 0.01 percent rain rate at 20 GHz must cost many dB; "
+                                  "this is the term whose absence made the budget optimistic");
+            NS_TEST_ASSERT_MSG_GT(wetDb - dryDb, 5.0, "rain must move the total, not just a field");
+            // And it must reach the budget, not merely be reported.
+            NS_TEST_ASSERT_MSG_LT(wet->CurrentEsNoDb(), dry->CurrentEsNoDb() - 5.0,
+                                  "the excess loss must be subtracted from Es/No; a term that is "
+                                  "computed and not applied is the decision-island pattern");
+        }
+
+        // Every term must be switchable off, so a study can isolate one.
+        {
+            Ptr<ConstantPositionMobilityModel> gs, sat;
+            Place(20.0, gs, sat);
+            auto m = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            m->SetAttribute("EnableGaseous", BooleanValue(false));
+            m->SetAttribute("EnableRain", BooleanValue(false));
+            m->SetAttribute("EnableScintillation", BooleanValue(false));
+            m->SetEndpoints(sat, gs);
+            NS_TEST_ASSERT_MSG_EQ_TOL(m->CurrentExcessLossDb(), 0.0, 1e-9,
+                                      "with every term disabled the budget must return to free "
+                                      "space exactly, so the old behaviour stays reachable");
+        }
+
+        // An inter-satellite link crosses no weather.
+        {
+            auto a = CreateObject<ConstantPositionMobilityModel>();
+            a->SetPosition(Vector(0, 0, 6371e3 + 550e3));
+            auto b = CreateObject<ConstantPositionMobilityModel>();
+            b->SetPosition(Vector(1000e3, 0, 6371e3 + 550e3));
+            auto m = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            m->SetAttribute("RainRateMmH", DoubleValue(42.0));
+            m->SetEndpoints(a, b);
+            NS_TEST_ASSERT_MSG_EQ_TOL(m->CurrentExcessLossDb(), 0.0, 1e-9,
+                                      "a link between two satellites must not be charged rain; "
+                                      "the geometry, not a link-type flag, has to decide");
+        }
+
+        // The real DVB-S2 curve must be reachable, and must be a genuine
+        // waterfall rather than the erfc it replaces.
+        {
+            Ptr<ConstantPositionMobilityModel> gs, sat;
+            Place(90.0, gs, sat);
+            auto m = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            m->SetAttribute("UseDvbS2LinkResults", BooleanValue(true));
+            m->SetAttribute("Modcod", UintegerValue(2)); // QPSK 1/2
+            m->SetAttribute("CarrierHz", DoubleValue(20e9));
+            m->SetAttribute("RxGtDbK", DoubleValue(15.0));
+            m->SetAttribute("EirpDbw", DoubleValue(5.0));
+            m->SetEndpoints(sat, gs);
+            const double weak = m->CurrentBler();
+            m->SetAttribute("EirpDbw", DoubleValue(25.0));
+            const double strong = m->CurrentBler();
+            NS_TEST_ASSERT_MSG_GT(weak, 0.5,
+                                  "below the QPSK 1/2 threshold the measured DVB-S2 table must "
+                                  "report a failing link");
+            NS_TEST_ASSERT_MSG_LT(strong, 0.01,
+                                  "well above threshold it must report a clean one; a flat "
+                                  "response means the look-up tables did not load");
+        }
+
+        Simulator::Destroy();
+    }
+};
+
+class ContactSchedulerRangeUpdateTest : public TestCase
+{
+  public:
+    ContactSchedulerRangeUpdateTest()
+        : TestCase("SAGIN-1: an up contact republishes its live range every tick")
+    {
+    }
+
+  private:
+    uint32_t m_updates{0};
+    double m_minRange{std::numeric_limits<double>::max()};
+    double m_maxRange{0.0};
+    uint32_t m_ups{0};
+
+    void OnUpdate(ContactEvent ev)
+    {
+        ++m_updates;
+        NS_TEST_ASSERT_MSG_EQ(ev.up, true, "an update may only fire for a contact that is up");
+        m_minRange = std::min(m_minRange, ev.range_m);
+        m_maxRange = std::max(m_maxRange, ev.range_m);
+    }
+
+    void OnUp(ContactEvent) { ++m_ups; }
+
+    void DoRun() override
+    {
+        WalkerConfig cfg;
+        cfg.inclination_deg = 53.0;
+        cfg.total_sats = 11;
+        cfg.num_planes = 1;
+        cfg.phasing_f = 0;
+        cfg.altitude_km = 550.0;
+        cfg.epoch_unix_s = 1577836800.0;
+        auto elts = WalkerConstellation::BuildDelta(cfg);
+
+        Ptr<ContactGraphScheduler> cg = CreateObject<ContactGraphScheduler>();
+        cg->SetSamplingInterval(Seconds(10.0));
+        cg->SetMinElevationDeg(5.0);
+        for (size_t i = 0; i < elts.size(); ++i)
+        {
+            Ptr<Sgp4MobilityModel> sat = CreateObject<Sgp4MobilityModel>();
+            sat->SetElements(elts[i]);
+            cg->RegisterSatellite(static_cast<uint32_t>(i + 1), sat);
+        }
+        cg->RegisterGroundStation(101, 53.0, 0.0);
+        cg->m_contactUpdate.ConnectWithoutContext(
+            MakeCallback(&ContactSchedulerRangeUpdateTest::OnUpdate, this));
+        cg->m_contactUp.ConnectWithoutContext(
+            MakeCallback(&ContactSchedulerRangeUpdateTest::OnUp, this));
+        cg->Start();
+
+        Simulator::Stop(Seconds(6000.0));
+        Simulator::Run();
+        cg->Stop();
+
+        NS_TEST_ASSERT_MSG_GT(m_ups, 0u, "the window must contain at least one contact");
+        NS_TEST_ASSERT_MSG_GT(m_updates, 10u,
+                              "a contact that stays up across many 10 s ticks must republish its "
+                              "range on each of them; zero or a handful means the scheduler is "
+                              "back to emitting only on transitions and every consumer is once "
+                              "again working from the range sampled at contact-up");
+
+        // The whole point is that the number MOVES. A LEO pass over a 5 degree
+        // floor spans hundreds of kilometres of slant, so anything under 100 km
+        // of spread means a constant is being republished.
+        NS_TEST_ASSERT_MSG_GT(m_maxRange - m_minRange, 100e3,
+                              "the republished range must actually track the pass; a small spread "
+                              "means the value is stale even though the trace fires");
+        NS_TEST_ASSERT_MSG_GT(m_minRange, 500e3, "a 550 km LEO slant cannot be shorter than this");
+        NS_TEST_ASSERT_MSG_LT(m_maxRange, 4000e3, "implausible slant for a 550 km shell");
+
+        // Transition accounting must be unchanged by the new trace: updates are
+        // additional information, not a reinterpretation of up and down. The
+        // up trace carries GSL and ISL rises together, so compare against both
+        // counters.
+        NS_TEST_ASSERT_MSG_EQ(cg->GslEventsUp() + cg->IslEventsUp(), m_ups,
+                              "the update trace must not disturb the up/down counters");
 
         Simulator::Destroy();
     }
@@ -1067,6 +1400,172 @@ ToggleRegenMode(Ptr<ContactGraphRouter> router, uint32_t node, RegenMode m)
 
 } // namespace
 
+/// CON-3: an ISL that grazes the surface is not a link.
+///
+/// The limb test accepted a crosslink whose closest approach to geocentre was
+/// exactly one Earth radius. That ray crosses the full depth of the atmosphere
+/// twice, with refraction, absorption and scintillation that rise without bound
+/// as the tangent height falls to zero. Real constellations budget a
+/// tangent-height margin and drop the link below it.
+/// SAGIN-7: the hop-count route and the weighted route are different questions.
+///
+/// The routed-traffic example computed a Dijkstra path and printed it beside a
+/// measured goodput, while forwarding was Ipv4GlobalRoutingHelper, which
+/// minimises HOP COUNT over whatever interfaces the contact graph brought up.
+/// Nothing fed the Dijkstra result into the tables, so the printed "model
+/// decision" and the data plane could disagree with nothing to reveal it.
+class ContactGraphHopVsWeightedPathTest : public TestCase
+{
+  public:
+    ContactGraphHopVsWeightedPathTest()
+        : TestCase("SAGIN-7: ShortestPathHops finds the minimum-HOP route, not the cheapest")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ntncon::ContactGraphRouter> r = CreateObject<ntncon::ContactGraphRouter>();
+
+        // A graph where the two rules MUST disagree:
+        //   0 -> 3 direct, one hop, but a very long link (10,000 km)
+        //   0 -> 1 -> 2 -> 3, three hops, each short (100 km), so 300 km total
+        // Minimum hop takes the long direct link; minimum weight takes the chain.
+        auto link = [](Ptr<ntncon::ContactGraphRouter> rr, uint32_t a, uint32_t b, double m) {
+            ntncon::ContactEvent ev{};
+            ev.timestamp_s = 0.0;
+            ev.node_a = a;
+            ev.node_b = b;
+            ev.is_isl = true;
+            ev.up = true;
+            ev.range_m = m;
+            ev.elevation_deg = 90.0;
+            rr->InjectContactForTest(ev);
+        };
+        link(r, 0, 3, 10000e3);
+        link(r, 0, 1, 100e3);
+        link(r, 1, 2, 100e3);
+        link(r, 2, 3, 100e3);
+
+        const auto w = r->ShortestPathWeighted(0, 3);
+        const auto h = r->ShortestPathHops(0, 3);
+
+        NS_TEST_ASSERT_MSG_EQ(w.path.size(), 4u,
+                              "the cheapest route is the three-hop chain (300 km)");
+        NS_TEST_ASSERT_MSG_EQ(h.path.size(), 2u,
+                              "the fewest-hop route is the direct 10,000 km link");
+        NS_TEST_ASSERT_MSG_LT(w.total_weight, h.total_weight,
+                              "the weighted route must be cheaper, or this graph does not "
+                              "separate the two rules and the comparison proves nothing");
+        NS_TEST_ASSERT_MSG_EQ_TOL(h.total_weight, 10000e3, 1.0,
+                                  "the hop path's weight must be the range sum ALONG THAT PATH, "
+                                  "so the two results compare in latency terms");
+        NS_TEST_ASSERT_MSG_EQ_TOL(w.total_weight, 300e3, 1.0, "and likewise for the chain");
+
+        // Where the graph does not separate them, they must agree, or the
+        // comparison would flag every scenario.
+        Ptr<ntncon::ContactGraphRouter> r2 = CreateObject<ntncon::ContactGraphRouter>();
+        link(r2, 0, 1, 500e3);
+        link(r2, 1, 2, 500e3);
+        const auto w2 = r2->ShortestPathWeighted(0, 2);
+        const auto h2 = r2->ShortestPathHops(0, 2);
+        NS_TEST_ASSERT_MSG_EQ((w2.path == h2.path), true,
+                              "with only one route available the two rules must agree");
+
+        // No route: both must say so rather than returning a partial path.
+        Ptr<ntncon::ContactGraphRouter> r3 = CreateObject<ntncon::ContactGraphRouter>();
+        link(r3, 0, 1, 100e3);
+        const auto h3 = r3->ShortestPathHops(0, 9);
+        NS_TEST_ASSERT_MSG_EQ(h3.path.empty(), true, "an unreachable target has no hop path");
+        NS_TEST_ASSERT_MSG_EQ(std::isinf(h3.total_weight), true, "and infinite weight");
+
+        // Source == destination is a zero-hop path, not an empty one.
+        const auto h4 = r3->ShortestPathHops(0, 0);
+        NS_TEST_ASSERT_MSG_EQ(h4.path.size(), 1u, "src == dst is a one-node path");
+        NS_TEST_ASSERT_MSG_EQ_TOL(h4.total_weight, 0.0, 1e-12, "with zero weight");
+    }
+};
+
+class IslLimbTestKeepsAtmosphericClearanceTest : public TestCase
+{
+  public:
+    IslLimbTestKeepsAtmosphericClearanceTest()
+        : TestCase("CON-3: the ISL limb test requires a tangent-height margin, not a graze")
+    {
+    }
+
+  private:
+    /// Two satellites at `altM` on a common circle, placed symmetrically about
+    /// the +x axis so the chord between them has exactly `tangentAltM` of
+    /// tangent height above the ellipsoid. Returns whether the limb test calls
+    /// that chord clear.
+    static bool LimbClear(double altM, double tangentAltM, double minTangentAltM)
+    {
+        const double R = 6378137.0;
+        const double r = R + altM;
+        const double h = R + tangentAltM;
+        if (h >= r)
+        {
+            return true; // geometry impossible; not the case under test
+        }
+        const double halfAngle = std::acos(h / r);
+        const Vector a(r * std::cos(halfAngle), r * std::sin(halfAngle), 0.0);
+        const Vector b(r * std::cos(halfAngle), -r * std::sin(halfAngle), 0.0);
+        return ntncon::ContactGraphScheduler::IsLimbClear(a, b, minTangentAltM);
+    }
+
+    void DoRun() override
+    {
+        const double alt = 600e3;
+
+        // The construction must be right before anything else means something:
+        // the chord's closest approach must actually be the tangent height asked
+        // for. Checked by bracketing the margin tightly around it.
+        NS_TEST_ASSERT_MSG_EQ(LimbClear(alt, 200e3, 199e3), true,
+                              "a 200 km tangent height must clear a 199 km margin");
+        NS_TEST_ASSERT_MSG_EQ(LimbClear(alt, 200e3, 201e3), false,
+                              "and must fail a 201 km one; if both agree the geometry is not "
+                              "being built at the tangent height this test thinks it is");
+
+        // Well clear of the atmosphere: usable.
+        NS_TEST_ASSERT_MSG_EQ(LimbClear(alt, 300e3, 80e3), true,
+                              "a crosslink with 300 km of tangent height must be usable");
+
+        // Grazing the surface: blocked. This is the case the old test accepted,
+        // because it compared against exactly one Earth radius.
+        NS_TEST_ASSERT_MSG_EQ(LimbClear(alt, 1.0e3, 80e3), false,
+                              "a ray with 1 km of tangent height skims the whole atmosphere and "
+                              "must not be reported as a usable ISL");
+
+        // The threshold must sit where it is configured.
+        NS_TEST_ASSERT_MSG_EQ(LimbClear(alt, 60e3, 80e3), false,
+                              "60 km is below the 80 km margin and must be blocked");
+        NS_TEST_ASSERT_MSG_EQ(LimbClear(alt, 100e3, 80e3), true,
+                              "100 km is above it and must pass");
+
+        // And the margin must be what does the work: at zero the grazing link
+        // comes back, which proves the block comes from the margin rather than
+        // from the geometry happening to fail.
+        NS_TEST_ASSERT_MSG_EQ(LimbClear(alt, 1.0e3, 0.0), true,
+                              "with the margin disabled the grazing link is accepted again");
+
+        // A link through the planet must be blocked regardless of margin: two
+        // satellites on opposite sides have a chord passing through geocentre.
+        const double R = 6378137.0;
+        const Vector p(R + alt, 0.0, 0.0);
+        const Vector q(-(R + alt), 0.0, 0.0);
+        NS_TEST_ASSERT_MSG_EQ(ntncon::ContactGraphScheduler::IsLimbClear(p, q, 0.0), false,
+                              "a chord through geocentre is a link through the planet");
+
+        // Endpoints on the same side, closest approach outside the segment:
+        // nothing is between them, so the limb does not apply.
+        const Vector u(R + alt, 0.0, 0.0);
+        const Vector v(R + alt + 100e3, 0.0, 0.0);
+        NS_TEST_ASSERT_MSG_EQ(ntncon::ContactGraphScheduler::IsLimbClear(u, v, 80e3), true,
+                              "a radial pair has no limb crossing between the endpoints");
+    }
+};
+
 class ContactGraphRouterRegenSimulatorTimeTest : public TestCase
 {
   public:
@@ -1262,7 +1761,7 @@ class CalibrationHarnessEndToEndTest : public TestCase
 {
   public:
     CalibrationHarnessEndToEndTest()
-        : TestCase("§4.4.11: harness against full TR 38.821 link budgets")
+        : TestCase("§4.4.11: the calibration HARNESS gates residuals correctly")
     {
     }
 
@@ -1280,9 +1779,14 @@ class CalibrationHarnessEndToEndTest : public TestCase
                                true,
                                "load link budgets");
         CalibrationHarness h;
-        // Simulate a toolkit prediction that matches reference within
-        // ≤ 0.5 dB on every entry (synthetic stand-in for the actual
-        // module). Then verify all-within-gate passes.
+        // CON-1. What this test checks, stated plainly because its NAME used to
+        // claim more: it feeds CalibrationHarness a prediction constructed as
+        // corpus + 0.3 dB and verifies the harness reports "within gate". That
+        // exercises the HARNESS. It says nothing about the toolkit's own
+        // propagation, which never enters this test at all.
+        //
+        // Tr38821FsplConformanceTest below does the comparison this test was
+        // named for.
         for (const auto& lb : r.LinkBudgets())
         {
             const double toolkit_pl = lb.pathloss_db + 0.3;
@@ -1301,6 +1805,149 @@ class CalibrationHarnessEndToEndTest : public TestCase
         NS_TEST_EXPECT_MSG_EQ(h.Residuals().size(),
                                r.LinkBudgets().size() * 3,
                                "3 metrics per row");
+    }
+};
+
+/// CON-1: compare the toolkit's OWN propagation against the TR 38.821 corpus.
+///
+/// The harness test above feeds itself `corpus + 0.3 dB` and checks that the
+/// residual gate accepts it. That validates the gate. Nothing in the suite
+/// compared the module's actual path loss against the reference, so the corpus
+/// shipped as data nothing was measured against.
+///
+/// This computes slant range from each scenario's orbit and elevation and free
+/// space loss at its carrier, then compares against the corpus pathloss. The
+/// comparison is made at ZENITH, where the reference is dominated by free space
+/// and the residual is the atmospheric and scintillation margin the corpus
+/// includes and pure free space does not. Measured across all eight scenarios -
+/// GEO, LEO-1200 and LEO-600, S band and Ka - that residual runs -0.24 to
+/// +0.77 dB, tight and consistent, which is what makes a 1.5 dB bound
+/// defensible rather than arbitrary.
+///
+/// It is deliberately NOT asserted at low elevation. There the gap grows to
+/// 7-15 dB, well beyond the corpus's own atmos_loss_db column, so the reference
+/// clearly carries margin terms this comparison does not model. Asserting a
+/// wide tolerance there would pass on anything; asserting a tight one would
+/// fail on a difference that is not the toolkit's error. The elevation trend is
+/// checked structurally instead.
+class Tr38821FsplConformanceTest : public TestCase
+{
+  public:
+    Tr38821FsplConformanceTest()
+        : TestCase("CON-1: toolkit free-space loss matches the TR 38.821 corpus at zenith")
+    {
+    }
+
+  private:
+    /// Slant range to a satellite at \p altKm seen at \p elevDeg, spherical Earth.
+    static double SlantM(double altKm, double elevDeg)
+    {
+        const double Re = 6371e3;
+        const double h = altKm * 1e3;
+        const double e = elevDeg * M_PI / 180.0;
+        return std::sqrt(std::pow(Re + h, 2) - std::pow(Re * std::cos(e), 2)) - Re * std::sin(e);
+    }
+
+    void DoRun() override
+    {
+        Tr38821CorpusReader r;
+        const std::string sp = FindCorpusFile("tr38821/scenarios.csv");
+        const std::string lp = FindCorpusFile("tr38821/link_budgets.csv");
+        if (sp.empty() || lp.empty())
+        {
+            std::cout << "  corpus not reachable, soft skip" << std::endl;
+            return;
+        }
+        NS_TEST_ASSERT_MSG_EQ(r.LoadScenarios(sp), true, "load scenarios");
+        NS_TEST_ASSERT_MSG_EQ(r.LoadLinkBudgets(lp), true, "load link budgets");
+
+        std::map<std::string, Tr38821Scenario> byId;
+        for (const auto& sc : r.Scenarios())
+        {
+            byId[sc.scenario_id] = sc;
+        }
+
+        uint32_t zenithChecked = 0;
+        std::map<std::string, double> plAt90;
+        std::map<std::string, double> plAt10;
+
+        for (const auto& lb : r.LinkBudgets())
+        {
+            auto it = byId.find(lb.scenario_id);
+            const bool haveScenario = (it != byId.end());
+            NS_TEST_ASSERT_MSG_EQ(haveScenario, true,
+                                  "every link-budget row must name a scenario that exists; a "
+                                  "dangling id means the two corpus files disagree");
+            const double d = SlantM(it->second.alt_km, lb.elevation_deg);
+            const double fspl =
+                20.0 * std::log10(4.0 * M_PI * d * it->second.freq_ghz * 1e9 / 299792458.0);
+
+            if (std::abs(lb.elevation_deg - 90.0) < 0.5)
+            {
+                const double residual = lb.pathloss_db - fspl;
+                // Bound the MAGNITUDE, not the sign.
+                //
+                // The obvious assertion is that the reference must exceed free
+                // space, since it carries atmospheric and scintillation terms
+                // on top. That is not quite true of this corpus and the
+                // exception is instructive: the GEO S-band row sits 0.24 dB
+                // BELOW pure free space, because the reference figures are
+                // quoted to 0.1 dB and derived with 3GPP's own rounding and
+                // slant conventions. At that scale the sign carries no
+                // information, so asserting it would encode an artifact of the
+                // table's precision as physics.
+                //
+                // What the magnitude bound does check is real: at zenith the
+                // reference is dominated by free space, so agreement to within
+                // 1.5 dB across every orbit and both bands validates the slant
+                // geometry and the free-space formula against 3GPP's numbers.
+                // Measured spread on this corpus is -0.24 to +0.77 dB.
+                NS_TEST_ASSERT_MSG_LT(std::abs(residual), 1.5,
+                                      "at zenith the reference is dominated by free space; a "
+                                      "residual beyond 1.5 dB means the slant geometry or the "
+                                      "free-space formula disagrees with 3GPP, not that the "
+                                      "atmosphere is unusually heavy");
+                ++zenithChecked;
+                // Record the TOOLKIT's value, not the corpus's: the trend check
+                // below has to exercise the slant formula at a non-zenith
+                // elevation, and comparing two corpus rows would only test the
+                // corpus. An earlier version of this test did exactly that and
+                // passed unchanged when the slant computation was replaced by
+                // the bare altitude - which is correct at zenith and wrong
+                // everywhere else.
+                plAt90[lb.scenario_id] = fspl;
+            }
+            if (std::abs(lb.elevation_deg - 10.0) < 0.5)
+            {
+                plAt10[lb.scenario_id] = fspl;
+            }
+        }
+
+        NS_TEST_ASSERT_MSG_GT(zenithChecked, 5u,
+                              "the corpus must supply a zenith row for most scenarios, or this "
+                              "test is checking almost nothing");
+
+        // Structural: path loss must grow as the satellite descends, in every
+        // scenario. This needs no tolerance and no reference value.
+        for (const auto& [id, pl90] : plAt90)
+        {
+            auto lo = plAt10.find(id);
+            if (lo == plAt10.end())
+            {
+                continue;
+            }
+            // A satellite at 10 degrees is substantially further away than one
+            // overhead, so the toolkit's own free-space loss must grow. The
+            // smallest case in this corpus is GEO, where the slant grows from
+            // 35786 km to about 41127 km, worth 1.2 dB; LEO cases are far
+            // larger. Requiring a full dB keeps the check meaningful while
+            // staying below the tightest real margin.
+            NS_TEST_ASSERT_MSG_GT(lo->second - pl90, 1.0,
+                                  "the toolkit's free-space loss at 10 degrees must exceed its "
+                                  "value at zenith by at least a dB: the slant is materially "
+                                  "longer. Equality means the slant computation is ignoring "
+                                  "elevation and returning the altitude");
+        }
     }
 };
 
@@ -1392,7 +2039,7 @@ class Sgp4ValladoVerificationTest : public TestCase
         Ptr<Sgp4MobilityModel> sat = CreateObject<Sgp4MobilityModel>();
         sat->SetUseVallado(true);
         NS_TEST_ASSERT_MSG_EQ(sat->SetTle(tle), true, "TLE must parse");
-        NS_TEST_ASSERT_MSG_EQ(sat->IsValladoReady(), true, "Vallado SGP4 must initialise");
+        NS_TEST_ASSERT_MSG_EQ(sat->IsUsingSgp4(), true, "Vallado SGP4 must initialise");
 
         // Published TEME position at tsince = 0 min (km -> m).
         const Vector eci0 = sat->GetEciPosition(); // Now()==0 -> tsince 0
@@ -1403,7 +2050,18 @@ class Sgp4ValladoVerificationTest : public TestCase
         // A Kepler+J2 model from the same TLE must diverge over many orbits,
         // proving the Vallado perturbations are real (not a relabelled Kepler).
         Ptr<Sgp4MobilityModel> kep = CreateObject<Sgp4MobilityModel>();
-        kep->SetTle(tle); // Vallado OFF -> Kepler+J2 fast path
+        kep->SetTle(tle);
+        // TWIN-01: ask for the Kepler+J2 path EXPLICITLY. This used to rely on
+        // SetUseVallado defaulting to false, which is exactly the defect that
+        // finding is about - a class named Sgp4MobilityModel, handed a real
+        // TLE, quietly propagating Kepler. Now that SetTle gives SGP4 by
+        // default, a test that wants the analytic path has to say so.
+        kep->SetUseVallado(false);
+        NS_TEST_ASSERT_MSG_EQ(kep->IsUsingSgp4(), false,
+                              "the reference object must really be on the Kepler+J2 path, or "
+                              "this comparison is SGP4 against itself");
+        NS_TEST_ASSERT_MSG_EQ(sat->IsValladoReady(), true,
+                              "and the subject must really be on SGP4");
 
         Simulator::Schedule(Seconds(36000.0), [&]() { // 600 min ~ 4.5 orbits
             const Vector vEci = sat->GetEciPosition();
@@ -1486,12 +2144,473 @@ class SatLinkErrorModelBlerTest : public TestCase
     }
 };
 
+
+/// TWIN-01: a TLE must get SGP4, because the twin's premise depends on it.
+///
+/// Sgp4MobilityModel declared `bool m_useVallado{false}`, so SetTle() parsed
+/// the TLE into Keplerian elements and then propagated them with an analytic
+/// Kepler + J2-secular model unless the caller ALSO called
+/// SetUseVallado(true). Nothing in the tree did - the gym example and every
+/// WalkerConstellation::BuildDelta consumer use SetElements and never touch it.
+/// Meanwhile the Python twin runs genuine Satrec.sgp4.
+///
+/// ntn-digital-twin/twin_loop.py states the design premise outright: "twin and
+/// sim propagate identical orbits and their handover sequences are comparable".
+/// They did not.
+class Sgp4DefaultsToRealSgp4TestCase : public TestCase
+{
+  public:
+    Sgp4DefaultsToRealSgp4TestCase()
+        : TestCase("TWIN-01: SetTle gives SGP4 by default, and the two propagators differ")
+    {
+    }
+
+  private:
+    static TleRecord Iss()
+    {
+        TleRecord t;
+        t.name = "ISS";
+        t.line1 = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9993";
+        t.line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.49815350 12345";
+        return t;
+    }
+
+    void DoRun() override
+    {
+        const TleRecord tle = Iss();
+
+        // A TLE alone must put the model on SGP4. This is the whole finding.
+        Ptr<Sgp4MobilityModel> def = CreateObject<Sgp4MobilityModel>();
+        NS_TEST_ASSERT_MSG_EQ(def->SetTle(tle), true, "the TLE parses");
+        NS_TEST_ASSERT_MSG_EQ(def->IsUsingSgp4(), true,
+                              "a model handed a real TLE must propagate it with SGP4; running "
+                              "Kepler + J2 here is what broke the twin/sim premise");
+
+        // The opt-out still works, and IsUsingSgp4 reports it honestly.
+        Ptr<Sgp4MobilityModel> kep = CreateObject<Sgp4MobilityModel>();
+        kep->SetTle(tle);
+        kep->SetUseVallado(false);
+        NS_TEST_ASSERT_MSG_EQ(kep->IsUsingSgp4(), false, "the analytic path is still reachable");
+        NS_TEST_ASSERT_MSG_EQ(kep->IsValladoReady(), true,
+                              "and IsValladoReady stays true because it reports whether the SGP4 "
+                              "state is INITIALISED, not whether it is in use - which is why the "
+                              "assertions above use IsUsingSgp4 instead");
+
+        // With no TLE there is nothing for SGP4 to initialise from, so a
+        // SetElements caller correctly stays analytic rather than silently
+        // claiming SGP4.
+        Ptr<Sgp4MobilityModel> el = CreateObject<Sgp4MobilityModel>();
+        KeplerianElements e{};
+        e.semi_major_axis_m = 6971e3;
+        e.eccentricity = 0.001;
+        e.inclination_rad = 51.6 * M_PI / 180.0;
+        el->SetElements(e);
+        NS_TEST_ASSERT_MSG_EQ(el->IsUsingSgp4(), false,
+                              "SetElements has no TLE to feed SGP4, so it stays analytic and "
+                              "says so");
+
+        // The two propagators must genuinely differ, or defaulting to SGP4
+        // would be a distinction without a difference. Measured over the
+        // exporter's 45-minute prediction horizon.
+        Simulator::Schedule(Seconds(2700.0), [this, def, kep]() {
+            const Vector a = def->GetPosition();
+            const Vector b = kep->GetPosition();
+            const double d = std::sqrt(std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) +
+                                       std::pow(a.z - b.z, 2));
+            NS_TEST_ASSERT_MSG_GT(d, 1000.0,
+                                  "over a 45-minute horizon SGP4 and Kepler+J2 separate by "
+                                  "kilometres for this TLE (measured 5.2 to 11.0 km), which at "
+                                  "orbital speed is about a second of along-track lag - enough "
+                                  "to move an argmax-elevation crossover and therefore every "
+                                  "handover instant the twin exports");
+        });
+        Simulator::Stop(Seconds(2701.0));
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
+
+/// WF-10: the visibility index must return EXACTLY what the brute force does.
+///
+/// Serving-satellite selection is an unindexed double loop across the toolkit -
+/// every terminal against every satellite on every tick, O(S x U x T). At a
+/// 1584-satellite shell with 1000 terminals over 600 s that is close to a
+/// billion elevation evaluations, and the stress report records the
+/// consequence: "each sim-second costs ~3-10 s wall".
+///
+/// An index is only worth having if it is EXACT. A serving-cell choice that
+/// differs from the brute force changes every downstream KPI, so this test
+/// uses the brute force as an oracle over randomised geometries - including
+/// mixed altitudes, where the naive "closest sub-point wins" shortcut is
+/// WRONG and a branch-and-bound on the real elevation expression is not.
+class NtnVisibilityIndexExactTestCase : public TestCase
+{
+  public:
+    NtnVisibilityIndexExactTestCase()
+        : TestCase("WF-10: the visibility index matches brute force exactly, and prunes")
+    {
+    }
+
+  private:
+    /// Elevation from first principles, written out here rather than reused
+    /// from the module under test. An oracle that shares code with the thing
+    /// it checks can agree with it for the wrong reason.
+    static double ElevDeg(const Vector& ue, const Vector& sat)
+    {
+        const double dx = sat.x - ue.x;
+        const double dy = sat.y - ue.y;
+        const double dz = sat.z - ue.z;
+        const double dn = std::max(1.0, std::sqrt(dx * dx + dy * dy + dz * dz));
+        const double un = std::max(1.0, std::sqrt(ue.x * ue.x + ue.y * ue.y + ue.z * ue.z));
+        const double sinEl = (dx * ue.x + dy * ue.y + dz * ue.z) / (dn * un);
+        return std::asin(std::max(-1.0, std::min(1.0, sinEl))) * 180.0 / M_PI;
+    }
+
+    static std::size_t BruteForce(const std::vector<Vector>& sats, const Vector& ue,
+                                  double& bestEl)
+    {
+        bestEl = -1e9;
+        std::size_t best = 0;
+        for (std::size_t s = 0; s < sats.size(); ++s)
+        {
+            const double el = ElevDeg(ue, sats[s]);
+            if (el > bestEl)
+            {
+                bestEl = el;
+                best = s;
+            }
+        }
+        return best;
+    }
+
+    void DoRun() override
+    {
+        Ptr<UniformRandomVariable> rv = CreateObject<UniformRandomVariable>();
+        rv->SetStream(20260826);
+
+        const double Re = 6371e3;
+        // Mixed altitudes on purpose: with one shell, "smallest central angle"
+        // and "highest elevation" coincide, so a shortcut that is wrong in
+        // general would still pass. Spanning 500 to 1500 km separates them.
+        std::vector<Vector> sats;
+        const std::size_t nSat = 800;
+        sats.reserve(nSat);
+        for (std::size_t i = 0; i < nSat; ++i)
+        {
+            const double lat = (rv->GetValue(0.0, 1.0) - 0.5) * M_PI;
+            const double lon = (rv->GetValue(0.0, 1.0) - 0.5) * 2.0 * M_PI;
+            const double alt = 500e3 + rv->GetValue(0.0, 1.0) * 1000e3;
+            const double r = Re + alt;
+            sats.push_back(Vector(r * std::cos(lat) * std::cos(lon),
+                                  r * std::cos(lat) * std::sin(lon),
+                                  r * std::sin(lat)));
+        }
+
+        NtnVisibilityIndex idx(10.0);
+        idx.Build(sats);
+        NS_TEST_ASSERT_MSG_EQ(idx.SatelliteCount(), nSat, "all satellites indexed");
+
+        uint64_t totalEvaluated = 0;
+        const std::size_t nUe = 400;
+        for (std::size_t u = 0; u < nUe; ++u)
+        {
+            const double lat = (rv->GetValue(0.0, 1.0) - 0.5) * M_PI;
+            const double lon = (rv->GetValue(0.0, 1.0) - 0.5) * 2.0 * M_PI;
+            const Vector ue(Re * std::cos(lat) * std::cos(lon),
+                            Re * std::cos(lat) * std::sin(lon),
+                            Re * std::sin(lat));
+
+            double refEl = 0.0;
+            const std::size_t ref = BruteForce(sats, ue, refEl);
+            double gotEl = 0.0;
+            const std::size_t got = idx.BestElevation(ue, gotEl);
+            totalEvaluated += idx.LastEvaluated();
+
+            // The ELEVATION must match to floating-point noise. The index is
+            // asserted on the value rather than only the identity because two
+            // satellites can tie, and either answer is then correct.
+            NS_TEST_ASSERT_MSG_EQ_TOL(gotEl, refEl, 1e-6,
+                                      "the index must return the same best elevation as the "
+                                      "brute force for UE " << u << "; a mismatch means a "
+                                      "satellite was pruned that should not have been, and every "
+                                      "downstream KPI would shift with the serving cell");
+            if (got != ref)
+            {
+                // Only acceptable as a tie.
+                NS_TEST_ASSERT_MSG_EQ_TOL(ElevDeg(ue, sats[got]), refEl, 1e-9,
+                                          "a different index is only acceptable on an exact tie");
+            }
+        }
+
+        // And it must actually prune, or it is a slower brute force.
+        const double meanEvaluated = static_cast<double>(totalEvaluated) /
+                                     static_cast<double>(nUe);
+        NS_TEST_ASSERT_MSG_LT(meanEvaluated, 0.5 * static_cast<double>(nSat),
+                              "the index must evaluate well under half the constellation per "
+                              "query; it evaluated " << meanEvaluated << " of " << nSat
+                              << ". Exactness without pruning is just a slower loop");
+
+        // A SINGLE-ALTITUDE shell, which is what every Walker scenario builds.
+        // The mixed-altitude case above passed while this one did not, so both
+        // stay: a bound bug can hide in one and not the other.
+        {
+            std::vector<Vector> shell;
+            shell.reserve(1584);
+            for (std::size_t i = 0; i < 1584; ++i)
+            {
+                const double la = (rv->GetValue(0.0, 1.0) - 0.5) * M_PI;
+                const double lo = (rv->GetValue(0.0, 1.0) - 0.5) * 2.0 * M_PI;
+                const double r = Re + 550e3;
+                shell.push_back(Vector(r * std::cos(la) * std::cos(lo),
+                                       r * std::cos(la) * std::sin(lo), r * std::sin(la)));
+            }
+            NtnVisibilityIndex sidx(10.0);
+            sidx.Build(shell);
+            double worst = 0.0;
+            for (std::size_t u = 0; u < 300; ++u)
+            {
+                const double la = (rv->GetValue(0.0, 1.0) - 0.5) * M_PI;
+                const double lo = (rv->GetValue(0.0, 1.0) - 0.5) * 2.0 * M_PI;
+                const Vector ue(Re * std::cos(la) * std::cos(lo),
+                                Re * std::cos(la) * std::sin(lo), Re * std::sin(la));
+                double refEl = 0.0;
+                BruteForce(shell, ue, refEl);
+                double gotEl = 0.0;
+                sidx.BestElevation(ue, gotEl);
+                worst = std::max(worst, std::abs(gotEl - refEl));
+            }
+            NS_TEST_ASSERT_MSG_LT(worst, 1e-6,
+                                  "single-altitude shell: worst elevation error " << worst
+                                  << " deg. Every Walker scenario builds exactly this, so a "
+                                  "bound valid only for mixed altitudes is no use");
+        }
+
+        // Degenerate inputs must not crash or lie.
+        NtnVisibilityIndex empty(10.0);
+        empty.Build({});
+        double el = 0.0;
+        NS_TEST_ASSERT_MSG_EQ(empty.BestElevation(Vector(Re, 0, 0), el),
+                              std::numeric_limits<std::size_t>::max(),
+                              "an empty constellation has no best satellite");
+
+        NtnVisibilityIndex one(10.0);
+        one.Build({Vector(Re + 600e3, 0, 0)});
+        NS_TEST_ASSERT_MSG_EQ(one.BestElevation(Vector(Re, 0, 0), el), 0u,
+                              "a single satellite is trivially the best");
+        NS_TEST_ASSERT_MSG_EQ_TOL(el, 90.0, 1e-6, "and it is at zenith");
+    }
+};
+
+
+/// SAGIN-3: inter-satellite Xn handover signalling, which did not exist.
+///
+/// A repo-wide grep for 'Xn' or 'XnAP' across ntn-sagin and ntn-constellation
+/// returned ZERO hits. RegenMode existed but was a Dijkstra transit filter that
+/// nothing outside its own test ever set, so a regenerative-payload handover -
+/// the main Rel-19 NTN topic - could not be run while the enum implied it
+/// could.
+///
+/// The real-gNB half already existed (NtnRealStackHelper builds an
+/// NrGnbNetDevice on the satellite under PayloadOption::FullGnb). What was
+/// missing is the PROCEDURE, and this drives it end to end over an ISL whose
+/// delay comes from orbital separation.
+class NtnXnHandoverProcedureTestCase : public TestCase
+{
+  public:
+    NtnXnHandoverProcedureTestCase()
+        : TestCase("SAGIN-3: the TS 38.300 Xn handover runs between two satellites")
+    {
+    }
+
+  private:
+    Ptr<ntncon::NtnXnHandover> m_a;
+    Ptr<ntncon::NtnXnHandover> m_b;
+    std::vector<ntncon::XnapMessageType> m_order;
+    uint32_t m_completed{0};
+    bool m_lastOk{false};
+    Time m_elapsed{};
+
+    void Deliver(uint32_t peer, ntncon::NtnXnapHeader h, Time delay)
+    {
+        m_order.push_back(h.GetMessageType());
+        // Every leg crosses the ISL: the procedure takes real time.
+        Ptr<ntncon::NtnXnHandover> dst = (peer == m_a->GetGnbId()) ? m_a : m_b;
+        Simulator::Schedule(delay, &ntncon::NtnXnHandover::Receive, dst, h);
+    }
+
+    void OnComplete(uint32_t /*ue*/, Time elapsed, bool ok)
+    {
+        ++m_completed;
+        m_elapsed = elapsed;
+        m_lastOk = ok;
+    }
+
+    void Build(bool admit, Time islOneWay)
+    {
+        m_order.clear();
+        m_completed = 0;
+        m_a = CreateObject<ntncon::NtnXnHandover>();
+        m_b = CreateObject<ntncon::NtnXnHandover>();
+        m_a->SetGnbId(1);
+        m_b->SetGnbId(2);
+        m_b->SetAdmitIncoming(admit);
+        m_a->SetPeerDelay(2, islOneWay);
+        m_b->SetPeerDelay(1, islOneWay);
+        m_a->SetSendCallback(
+            MakeCallback(&NtnXnHandoverProcedureTestCase::Deliver, this));
+        m_b->SetSendCallback(
+            MakeCallback(&NtnXnHandoverProcedureTestCase::Deliver, this));
+        m_a->SetCompleteCallback(
+            MakeCallback(&NtnXnHandoverProcedureTestCase::OnComplete, this));
+    }
+
+    void DoRun() override
+    {
+        using ntncon::XnapMessageType;
+
+        // 1500 km of inter-satellite separation is 5.0036 ms one way.
+        const Time isl = NanoSeconds(5003600);
+
+        // ---- The wire format must round-trip ----
+        {
+            ntncon::NtnXnapHeader h;
+            h.SetMessageType(XnapMessageType::SnStatusTransfer);
+            h.SetSourceUeXnapId(77);
+            h.SetTargetUeXnapId(1234);
+            h.SetSourceGnbId(1);
+            h.SetTargetGnbId(2);
+            h.SetTargetNrCgi(0x123456789ULL);
+            h.SetDlPdcpSn(4095);
+            h.SetUlPdcpSn(2047);
+            h.SetHfn(9);
+            Ptr<Packet> p = Create<Packet>(0);
+            p->AddHeader(h);
+            ntncon::NtnXnapHeader back;
+            p->RemoveHeader(back);
+            NS_TEST_ASSERT_MSG_EQ(static_cast<int>(back.GetMessageType()),
+                                  static_cast<int>(XnapMessageType::SnStatusTransfer),
+                                  "the message type survives the wire");
+            NS_TEST_ASSERT_MSG_EQ(back.GetTargetNrCgi(), 0x123456789ULL,
+                                  "the 36-bit NR CGI survives; truncating it would send the "
+                                  "handover to a different cell");
+            NS_TEST_ASSERT_MSG_EQ(back.GetDlPdcpSn(), 4095u,
+                                  "and so does the PDCP sequence number, which is the entire "
+                                  "purpose of SN STATUS TRANSFER");
+            NS_TEST_ASSERT_MSG_EQ(back.GetHfn(), 9u, "with its hyper frame number");
+        }
+
+        // ---- The successful procedure, in order, over the ISL ----
+        {
+            Build(/*admit=*/true, isl);
+            NS_TEST_ASSERT_MSG_EQ(m_a->StartHandover(77, 2, 0xABCDEF, 4095, 2047, 9), true,
+                                  "the source starts the procedure");
+            Simulator::Stop(Seconds(1.0));
+            Simulator::Run();
+
+            NS_TEST_ASSERT_MSG_EQ(m_completed, 1u, "the handover completes at the source");
+            NS_TEST_ASSERT_MSG_EQ(m_lastOk, true, "successfully");
+            NS_TEST_ASSERT_MSG_EQ(m_order.size(), 4u,
+                                  "TS 38.300 section 9.2.3 is four messages: REQUEST, ACK, SN "
+                                  "STATUS TRANSFER, UE CONTEXT RELEASE");
+            if (m_order.size() == 4)
+            {
+                NS_TEST_ASSERT_MSG_EQ(static_cast<int>(m_order[0]),
+                                      static_cast<int>(XnapMessageType::HandoverRequest), "1st");
+                NS_TEST_ASSERT_MSG_EQ(
+                    static_cast<int>(m_order[1]),
+                    static_cast<int>(XnapMessageType::HandoverRequestAcknowledge), "2nd");
+                NS_TEST_ASSERT_MSG_EQ(static_cast<int>(m_order[2]),
+                                      static_cast<int>(XnapMessageType::SnStatusTransfer), "3rd");
+                NS_TEST_ASSERT_MSG_EQ(static_cast<int>(m_order[3]),
+                                      static_cast<int>(XnapMessageType::UeContextRelease), "4th");
+            }
+
+            // Four legs across the ISL, so the procedure costs four one-way
+            // delays. A procedure that completes instantly is not crossing an
+            // inter-satellite link at all.
+            NS_TEST_ASSERT_MSG_EQ_TOL(m_elapsed.GetSeconds(), 4.0 * isl.GetSeconds(), 1e-6,
+                                      "the Xn handover costs four ISL traversals (20.01 ms at "
+                                      "1500 km); an instant completion means the geometry is "
+                                      "not in the procedure");
+
+            // The target must have RECEIVED the PDCP state, not merely been
+            // told a handover happened.
+            NS_TEST_ASSERT_MSG_EQ(m_b->GetLastReceivedDlPdcpSn(), 4095u,
+                                  "the target holds the DL PDCP SN it was sent");
+            NS_TEST_ASSERT_MSG_EQ(m_b->GetLastReceivedHfn(), 9u, "and the HFN");
+            NS_TEST_ASSERT_MSG_EQ(m_b->GetRequestsReceived(), 1u, "target saw one request");
+            NS_TEST_ASSERT_MSG_EQ(m_b->GetAcksSent(), 1u, "and acknowledged once");
+            Simulator::Destroy();
+        }
+
+        // ---- A target that cannot admit must FAIL the preparation ----
+        {
+            Build(/*admit=*/false, isl);
+            m_a->StartHandover(88, 2, 0xABCDEF, 1, 1, 0);
+            Simulator::Stop(Seconds(1.0));
+            Simulator::Run();
+            NS_TEST_ASSERT_MSG_EQ(m_completed, 1u, "the source is told the outcome");
+            NS_TEST_ASSERT_MSG_EQ(m_lastOk, false,
+                                  "a target that cannot admit must answer HANDOVER PREPARATION "
+                                  "FAILURE; silence would leave the source believing a handover "
+                                  "is in flight");
+            NS_TEST_ASSERT_MSG_EQ(m_b->GetFailuresSent(), 1u, "and the failure is counted");
+            NS_TEST_ASSERT_MSG_EQ(m_b->GetAcksSent(), 0u, "with no acknowledge");
+            Simulator::Destroy();
+        }
+
+        // ---- SAGIN-3 step 3: RegenMode must SELECT behaviour ----
+        //
+        // RegenMode was a Dijkstra transit filter and nothing else, so a
+        // bent-pipe satellite was indistinguishable from a regenerative one
+        // outside routing. A transparent payload has no on-board gNB, so there
+        // is nothing there to originate or terminate an Xn procedure.
+        {
+            Build(/*admit=*/true, isl);
+            m_b->SetRegenerative(false); // target is bent-pipe
+            m_a->StartHandover(99, 2, 0xABCDEF, 1, 1, 0);
+            Simulator::Stop(Seconds(1.0));
+            Simulator::Run();
+            NS_TEST_ASSERT_MSG_EQ(m_lastOk, false,
+                                  "a bent-pipe target has no on-board gNB and cannot terminate "
+                                  "Xn; admitting the handover would be the enum being "
+                                  "decorative");
+            NS_TEST_ASSERT_MSG_EQ(m_b->GetFailuresSent(), 1u,
+                                  "and it must SAY so rather than go silent, which would leave "
+                                  "the source believing a procedure is in flight");
+            Simulator::Destroy();
+
+            // And a bent-pipe SOURCE cannot originate one either.
+            Build(/*admit=*/true, isl);
+            m_a->SetRegenerative(false);
+            NS_TEST_ASSERT_MSG_EQ(m_a->StartHandover(100, 2, 0xABCDEF, 1, 1, 0), false,
+                                  "a transparent payload cannot originate an Xn handover");
+            NS_TEST_ASSERT_MSG_EQ(m_a->GetRequestsSent(), 0u, "and sends nothing");
+            Simulator::Destroy();
+        }
+
+        // ---- No transport wired: refuse rather than pretend ----
+        {
+            Ptr<ntncon::NtnXnHandover> lonely = CreateObject<ntncon::NtnXnHandover>();
+            lonely->SetGnbId(9);
+            NS_TEST_ASSERT_MSG_EQ(lonely->StartHandover(1, 2, 0, 0, 0, 0), false,
+                                  "a handover with nowhere to send must be refused, not "
+                                  "silently started");
+            NS_TEST_ASSERT_MSG_EQ(lonely->GetRequestsSent(), 0u, "and nothing counted as sent");
+        }
+    }
+};
+
 class NtnConstellationTestSuite : public TestSuite
 {
   public:
     NtnConstellationTestSuite()
         : TestSuite("ntn-constellation", Type::UNIT)
     {
+        AddTestCase(new Sgp4DefaultsToRealSgp4TestCase, TestCase::Duration::QUICK);
+        AddTestCase(new NtnVisibilityIndexExactTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new NtnXnHandoverProcedureTestCase, TestCase::Duration::QUICK);
         AddTestCase(new Sgp4ValladoVerificationTest, Duration::QUICK);
         AddTestCase(new SatLinkErrorModelBlerTest, Duration::QUICK);
         AddTestCase(new TleParseChecksumTest, Duration::QUICK);
@@ -1516,10 +2635,16 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new ContactGraphRouterRegenOnlyDijkstraTest,
                     Duration::QUICK);
         // Roadmap §4.4.11 — TR 38.821 + Starlink calibration corpus.
+        AddTestCase(new ContactSchedulerRangeUpdateTest, Duration::QUICK);
+        AddTestCase(new SatLinkErrorAtmosphericChainTest, Duration::QUICK);
+        AddTestCase(new Sgp4GeocentricContractTest, Duration::QUICK);
         AddTestCase(new Tr38821CorpusLoadTest, Duration::QUICK);
         AddTestCase(new CalibrationHarnessGateTest, Duration::QUICK);
         AddTestCase(new CalibrationHarnessEndToEndTest, Duration::QUICK);
+        AddTestCase(new Tr38821FsplConformanceTest, Duration::QUICK);
         AddTestCase(new CalibrationHarnessStarlinkTest, Duration::QUICK);
+        AddTestCase(new ContactGraphHopVsWeightedPathTest, Duration::QUICK);
+        AddTestCase(new IslLimbTestKeepsAtmosphericClearanceTest, Duration::QUICK);
         AddTestCase(new ContactGraphRouterRegenSimulatorTimeTest,
                     Duration::QUICK);
     }

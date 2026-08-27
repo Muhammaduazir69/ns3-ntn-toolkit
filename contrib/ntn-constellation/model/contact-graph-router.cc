@@ -4,6 +4,12 @@
 
 #include "contact-graph-router.h"
 
+#include <limits>
+
+#include <set>
+
+#include <deque>
+
 #include "ns3/log.h"
 
 #include <algorithm>
@@ -40,6 +46,27 @@ ContactGraphRouter::Attach(Ptr<ContactGraphScheduler> scheduler)
         MakeCallback(&ContactGraphRouter::OnContactUp, this));
     scheduler->m_contactDown.ConnectWithoutContext(
         MakeCallback(&ContactGraphRouter::OnContactDown, this));
+    // SAGIN-1: track the geometry of an established contact, not just its
+    // existence. Without this the Dijkstra weight was the range sampled at
+    // contact-up and stayed there for the whole pass, so the shortest path was
+    // chosen on stale distances and any latency derived from total_weight was a
+    // frozen number that happened to look stable.
+    scheduler->m_contactUpdate.ConnectWithoutContext(
+        MakeCallback(&ContactGraphRouter::OnContactUpdate, this));
+}
+
+void
+ContactGraphRouter::UpdateEdgeWeight(const ContactEvent& ev)
+{
+    // Refresh the weight of an edge that is already in the graph. Deliberately
+    // does NOT insert: an update for an edge we never saw come up would mean
+    // the transition traces and this one disagree, and silently inventing the
+    // edge would hide that.
+    const auto key = CanonicalEdge(ev.node_a, ev.node_b);
+    if (m_edges.count(key) != 0)
+    {
+        m_edgeWeights[key] = ev.range_m;
+    }
 }
 
 void
@@ -55,9 +82,8 @@ ContactGraphRouter::HandleContactEvent(const ContactEvent& ev)
             m_adj[ev.node_b].insert(ev.node_a);
             ++m_added;
         }
-        // Always refresh the weight on a contact-up event — the
-        // scheduler emits the current range every time visibility
-        // toggles, so this is the freshest snapshot we have.
+        // Seed the weight from the contact-up range; OnContactUpdate keeps
+        // it current for the rest of the pass.
         m_edgeWeights[key] = ev.range_m;
     }
     else
@@ -189,6 +215,73 @@ ContactGraphRouter::ShortestPathWeightedRegenOnly(uint32_t src,
         }
     }
     return {{}, std::numeric_limits<double>::infinity()};
+}
+
+ContactGraphRouter::WeightedPath
+ContactGraphRouter::ShortestPathHops(uint32_t src, uint32_t dst) const
+{
+    // SAGIN-7: BFS, because ns-3's Ipv4GlobalRouting minimises hop count. This
+    // is the route packets take; ShortestPathWeighted is the route the model
+    // recommends, and a scenario printing one beside measured goodput needs to
+    // know whether they are the same route.
+    WeightedPath out;
+    out.total_weight = std::numeric_limits<double>::infinity();
+    if (src == dst)
+    {
+        out.path = {src};
+        out.total_weight = 0.0;
+        return out;
+    }
+
+    std::map<uint32_t, uint32_t> prev;
+    std::set<uint32_t> seen{src};
+    std::deque<uint32_t> q{src};
+    bool found = false;
+    while (!q.empty() && !found)
+    {
+        const uint32_t u = q.front();
+        q.pop_front();
+        for (uint32_t v : Neighbours(u))
+        {
+            if (seen.count(v))
+            {
+                continue;
+            }
+            seen.insert(v);
+            prev[v] = u;
+            if (v == dst)
+            {
+                found = true;
+                break;
+            }
+            q.push_back(v);
+        }
+    }
+    if (!found)
+    {
+        return out;
+    }
+
+    std::vector<uint32_t> rev{dst};
+    while (rev.back() != src)
+    {
+        rev.push_back(prev[rev.back()]);
+    }
+    out.path.assign(rev.rbegin(), rev.rend());
+
+    // Range sum along THIS path, so the two results compare in latency terms.
+    double w = 0.0;
+    for (size_t i = 1; i < out.path.size(); ++i)
+    {
+        const double e = EdgeWeight(out.path[i - 1], out.path[i]);
+        if (!std::isfinite(e))
+        {
+            return WeightedPath{{}, std::numeric_limits<double>::infinity()};
+        }
+        w += e;
+    }
+    out.total_weight = w;
+    return out;
 }
 
 ContactGraphRouter::WeightedPath

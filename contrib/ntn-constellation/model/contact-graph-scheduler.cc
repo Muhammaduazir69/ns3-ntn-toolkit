@@ -33,8 +33,49 @@ ContactGraphScheduler::GetTypeId()
                                           "0 restores the legacy single-threshold gate.",
                                           DoubleValue(2.0),
                                           MakeDoubleAccessor(&ContactGraphScheduler::m_gateHysteresisDeg),
+                                          MakeDoubleChecker<double>(0.0))
+                            .AddAttribute("IslMinTangentAltM",
+                                          "CON-3: minimum tangent height (m) above the ellipsoid "
+                                          "an inter-satellite link must clear. The limb test used "
+                                          "to accept a ray grazing the surface at exactly one "
+                                          "Earth radius, which crosses the full depth of the "
+                                          "atmosphere twice and is not a usable crosslink. "
+                                          "80 km clears the mesosphere. 0 restores the grazing "
+                                          "behaviour.",
+                                          DoubleValue(80.0e3),
+                                          MakeDoubleAccessor(&ContactGraphScheduler::m_islMinTangentAltM),
                                           MakeDoubleChecker<double>(0.0));
     return tid;
+}
+
+bool
+ContactGraphScheduler::IsLimbClear(const Vector& a, const Vector& b, double minTangentAltM)
+{
+    const double dx = b.x - a.x;
+    const double dy = b.y - a.y;
+    const double dz = b.z - a.z;
+    const double seg2 = dx * dx + dy * dy + dz * dz;
+    if (seg2 <= 0.0)
+    {
+        return true; // coincident endpoints: nothing between them
+    }
+    // Parameter of closest approach to the origin along a->b.
+    const double tt = -(a.x * dx + a.y * dy + a.z * dz) / seg2;
+    if (tt <= 0.0 || tt >= 1.0)
+    {
+        // The closest point is outside the segment, so the chord does not pass
+        // the limb between the endpoints.
+        return true;
+    }
+    const double cx = a.x + tt * dx;
+    const double cy = a.y + tt * dy;
+    const double cz = a.z + tt * dz;
+    const double cr = std::sqrt(cx * cx + cy * cy + cz * cz);
+    // CON-3: a MARGIN above the ellipsoid, not a graze. `cr >= kEarthRadiusM`
+    // accepted a ray skimming the surface, which crosses the full depth of the
+    // atmosphere twice and is not a usable crosslink at any wavelength this
+    // toolkit models.
+    return cr >= kEarthRadiusM + minTangentAltM;
 }
 
 ContactGraphScheduler::ContactGraphScheduler() = default;
@@ -123,28 +164,30 @@ ContactGraphScheduler::Tick()
             const bool visible =
                 prev ? (elev >= m_minElevDeg - m_gateHysteresisDeg)
                      : (elev >= m_minElevDeg);
+            // SAGIN-1: the range is needed on every tick a link is up, not
+            // only on the transition, so hoist it out of the transition test.
+            Vector p = satIt.second->GetEcefPosition();
+            // Range to GS via ECEF.
+            const double lat = gsIt.second.lat_deg * M_PI / 180.0;
+            const double lon = gsIt.second.lon_deg * M_PI / 180.0;
+            const double cosLat = std::cos(lat);
+            const double sinLat = std::sin(lat);
+            // WGS-84 ellipsoid surface (gap B2: was a sphere at the
+            // equatorial radius). N = a / sqrt(1 - e^2 sin^2 lat).
+            const double Ngs =
+                kEarthRadiusM / std::sqrt(1.0 - kWgs84E2 * sinLat * sinLat);
+            const Vector gs(Ngs * cosLat * std::cos(lon),
+                             Ngs * cosLat * std::sin(lon),
+                             Ngs * (1.0 - kWgs84E2) * sinLat);
+            const double dx = p.x - gs.x;
+            const double dy = p.y - gs.y;
+            const double dz = p.z - gs.z;
+            const double range = std::sqrt(dx * dx + dy * dy + dz * dz);
+            ContactEvent ev{
+                t, satIt.first, gsIt.first, false, visible, range, elev};
             if (visible != prev)
             {
                 m_gslState[key] = visible;
-                Vector p = satIt.second->GetEcefPosition();
-                // Range to GS via ECEF.
-                const double lat = gsIt.second.lat_deg * M_PI / 180.0;
-                const double lon = gsIt.second.lon_deg * M_PI / 180.0;
-                const double cosLat = std::cos(lat);
-                const double sinLat = std::sin(lat);
-                // WGS-84 ellipsoid surface (gap B2: was a sphere at the
-                // equatorial radius). N = a / sqrt(1 - e^2 sin^2 lat).
-                const double Ngs =
-                    kEarthRadiusM / std::sqrt(1.0 - kWgs84E2 * sinLat * sinLat);
-                const Vector gs(Ngs * cosLat * std::cos(lon),
-                                 Ngs * cosLat * std::sin(lon),
-                                 Ngs * (1.0 - kWgs84E2) * sinLat);
-                const double dx = p.x - gs.x;
-                const double dy = p.y - gs.y;
-                const double dz = p.z - gs.z;
-                const double range = std::sqrt(dx * dx + dy * dy + dz * dz);
-                ContactEvent ev{
-                    t, satIt.first, gsIt.first, false, visible, range, elev};
                 if (visible)
                 {
                     ++m_gslUp;
@@ -155,6 +198,11 @@ ContactGraphScheduler::Tick()
                     ++m_gslDown;
                     m_contactDown(ev);
                 }
+            }
+            else if (visible)
+            {
+                // Same contact, new geometry.
+                m_contactUpdate(ev);
             }
         }
     }
@@ -181,38 +229,18 @@ ContactGraphScheduler::Tick()
                 // segment to the origin; endpoints are satellites (above the
                 // surface), so a blocked link only occurs when the closest
                 // point lies strictly between them.
-                bool losClear = true;
-                {
-                    const double seg2 = dx * dx + dy * dy + dz * dz;
-                    if (seg2 > 0.0)
-                    {
-                        // param of closest approach to origin along pa->pb
-                        const double tt =
-                            -((pa.x) * (pb.x - pa.x) + (pa.y) * (pb.y - pa.y) +
-                              (pa.z) * (pb.z - pa.z)) /
-                            seg2;
-                        if (tt > 0.0 && tt < 1.0)
-                        {
-                            const double cx = pa.x + tt * (pb.x - pa.x);
-                            const double cy = pa.y + tt * (pb.y - pa.y);
-                            const double cz = pa.z + tt * (pb.z - pa.z);
-                            const double cr =
-                                std::sqrt(cx * cx + cy * cy + cz * cz);
-                            losClear = (cr >= kEarthRadiusM);
-                        }
-                    }
-                }
+                const bool losClear = IsLimbClear(pa, pb, m_islMinTangentAltM);
                 const bool inRange = (range <= m_maxIslRangeM) && losClear;
                 const std::pair<uint32_t, uint32_t> key{a->first, b->first};
                 auto stateIt = m_islState.find(key);
                 const bool prev =
                     (stateIt == m_islState.end()) ? false : stateIt->second;
+                ContactEvent ev{t,           a->first, b->first,
+                                 true,       inRange,  range,
+                                 0.0};
                 if (inRange != prev)
                 {
                     m_islState[key] = inRange;
-                    ContactEvent ev{t,           a->first, b->first,
-                                     true,       inRange,  range,
-                                     0.0};
                     if (inRange)
                     {
                         ++m_islUp;
@@ -223,6 +251,13 @@ ContactGraphScheduler::Tick()
                         ++m_islDown;
                         m_contactDown(ev);
                     }
+                }
+                else if (inRange)
+                {
+                    // SAGIN-1: ISL range changes continuously as the two
+                    // satellites move relative to each other, so an established
+                    // link still needs its geometry republished.
+                    m_contactUpdate(ev);
                 }
             }
         }

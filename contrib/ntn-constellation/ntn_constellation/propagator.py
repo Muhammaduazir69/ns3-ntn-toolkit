@@ -75,26 +75,25 @@ class Satellite:
     def geodetic(self, when: datetime) -> GeodeticPosition:
         when = _ensure_utc(when)
         t = self._ts.from_datetime(when)
-        sub = wgs84.subpoint_of(self._es.at(t))
+        # One propagation, not two: this used to call self._es.at(t) once for
+        # the subpoint and again for the height, doubling the SGP4 cost of
+        # every geodetic, ecef_m and elevation query in the package.
+        at = self._es.at(t)
+        sub = wgs84.subpoint_of(at)
         return GeodeticPosition(
             epoch=when,
             lat_deg=sub.latitude.degrees,
             lon_deg=sub.longitude.degrees,
-            alt_km=wgs84.height_of(self._es.at(t)).km,
+            alt_km=wgs84.height_of(at).km,
         )
 
-    def ecef_m(self, when: datetime) -> tuple[float, float, float]:
-        """True Earth-fixed (ECEF/ITRS) position in metres.
-
-        gap B3: the raw ``StateVector.r_eci_km`` is INERTIAL (TEME), not
-        Earth-fixed — using it as ECEF (for elevation or a globe overlay) is
-        wrong by the Earth-rotation angle. This derives ECEF from the WGS-84
-        subpoint (which Skyfield computes in the Earth-fixed frame).
-        """
-        g = self.geodetic(when)
-        lat = math.radians(g.lat_deg)
-        lon = math.radians(g.lon_deg)
-        h = g.alt_km * 1000.0
+    @staticmethod
+    def _geodetic_to_ecef_m(lat_deg: float, lon_deg: float,
+                            alt_km: float) -> tuple[float, float, float]:
+        """WGS-84 geodetic to Earth-fixed metres."""
+        lat = math.radians(lat_deg)
+        lon = math.radians(lon_deg)
+        h = alt_km * 1000.0
         a = 6378137.0
         e2 = (1.0 / 298.257223563) * (2.0 - 1.0 / 298.257223563)
         sl = math.sin(lat)
@@ -105,6 +104,39 @@ class Satellite:
             (n + h) * cl * math.sin(lon),
             (n * (1.0 - e2) + h) * sl,
         )
+
+    def ecef_m_series(self, times: Sequence[datetime]) -> list[tuple[float, float, float]]:
+        """ECEF positions (metres) for a whole time grid, in one propagation.
+
+        Skyfield propagates over an array of times far more cheaply than over
+        the same instants one at a time: the per-call setup dominates a single
+        SGP4 step. A caller sweeping a horizon (handover prediction, a CZML
+        track) should use this rather than looping on ecef_m, which was costing
+        roughly two orders of magnitude more than the arithmetic warrants.
+
+        Returns the same values ecef_m returns for each instant.
+        """
+        if not times:
+            return []
+        t = self._ts.from_datetimes([_ensure_utc(w) for w in times])
+        at = self._es.at(t)
+        sub = wgs84.subpoint_of(at)
+        lats = sub.latitude.degrees
+        lons = sub.longitude.degrees
+        alts = wgs84.height_of(at).km
+        return [self._geodetic_to_ecef_m(float(la), float(lo), float(al))
+                for la, lo, al in zip(lats, lons, alts)]
+
+    def ecef_m(self, when: datetime) -> tuple[float, float, float]:
+        """True Earth-fixed (ECEF/ITRS) position in metres.
+
+        gap B3: the raw ``StateVector.r_eci_km`` is INERTIAL (TEME), not
+        Earth-fixed — using it as ECEF (for elevation or a globe overlay) is
+        wrong by the Earth-rotation angle. This derives ECEF from the WGS-84
+        subpoint (which Skyfield computes in the Earth-fixed frame).
+        """
+        g = self.geodetic(when)
+        return self._geodetic_to_ecef_m(g.lat_deg, g.lon_deg, g.alt_km)
 
     def trajectory(
         self, start: datetime, stop: datetime, step: timedelta
@@ -128,6 +160,24 @@ class Satellite:
         topocentric = (self._es - observer).at(t)
         alt, _az, _dist = topocentric.altaz()
         return alt.degrees
+
+    def elevation_deg_series(
+        self, times: Sequence[datetime], *, observer_lat_deg: float,
+        observer_lon_deg: float, observer_alt_m: float = 0.0,
+    ) -> list[float]:
+        """Elevation angles over a whole time grid, in one propagation.
+
+        Same relationship to elevation_deg that ecef_m_series has to ecef_m:
+        Skyfield's per-call setup, not SGP4, dominates a per-instant loop. The
+        prediction exporter that feeds ns-3 sweeps a horizon over every
+        satellite, so this is the shape it actually needs.
+        """
+        if not times:
+            return []
+        observer = wgs84.latlon(observer_lat_deg, observer_lon_deg, observer_alt_m)
+        t = self._ts.from_datetimes([_ensure_utc(w) for w in times])
+        alt, _az, _dist = (self._es - observer).at(t).altaz()
+        return [float(v) for v in alt.degrees]
 
 
 class Constellation:

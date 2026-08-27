@@ -90,6 +90,21 @@ class ContactGraphRouter : public Object
     };
     WeightedPath ShortestPathWeighted(uint32_t src, uint32_t dst) const;
 
+    /**
+     * \brief SAGIN-7: minimum-HOP path over the same contact graph.
+     *
+     * ns-3's Ipv4GlobalRouting forwards on hop count, so this is the route
+     * packets actually take, while ShortestPathWeighted is the route the
+     * contact-graph model recommends. A scenario that prints the weighted path
+     * beside measured goodput is comparing a model decision with a data plane
+     * that may have chosen differently, and before this there was no way to
+     * tell whether the two agreed.
+     *
+     * `total_weight` carries the range sum ALONG THE HOP-COUNT PATH, so the two
+     * results are directly comparable in latency terms.
+     */
+    WeightedPath ShortestPathHops(uint32_t src, uint32_t dst) const;
+
     /// Current weight of the edge (a, b); returns NaN if no edge.
     double EdgeWeight(uint32_t a, uint32_t b) const;
 
@@ -116,8 +131,23 @@ class ContactGraphRouter : public Object
 
   private:
     void HandleContactEvent(const ContactEvent& ev);
+    /// SAGIN-1: refresh an established edge's weight from the live range.
+    void UpdateEdgeWeight(const ContactEvent& ev);
+  public:
+    /// SAGIN-7 test seam: feed a contact directly. The router is normally
+    /// driven by an attached scheduler, so a unit test could not build a
+    /// specific topology, which is why the hop-vs-weight distinction had no
+    /// coverage.
+    void InjectContactForTest(const ContactEvent& ev)
+    {
+        HandleContactEvent(ev);
+        UpdateEdgeWeight(ev);
+    }
+
+  private:
     void OnContactUp(ContactEvent ev) { HandleContactEvent(ev); }
     void OnContactDown(ContactEvent ev) { HandleContactEvent(ev); }
+    void OnContactUpdate(ContactEvent ev) { UpdateEdgeWeight(ev); }
 
     static std::pair<uint32_t, uint32_t> CanonicalEdge(uint32_t a, uint32_t b)
     {

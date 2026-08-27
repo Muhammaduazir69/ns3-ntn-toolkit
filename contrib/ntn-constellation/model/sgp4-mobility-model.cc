@@ -4,6 +4,8 @@
 
 #include "sgp4-mobility-model.h"
 
+#include "ns3/geographic-positions.h"
+
 #include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/satellite-sgp4io.h"   // twoline2rv
@@ -101,7 +103,7 @@ Sgp4MobilityModel::GetTypeId()
 {
     static TypeId tid =
         TypeId("ns3::ntncon::Sgp4MobilityModel")
-            .SetParent<MobilityModel>()
+            .SetParent<GeocentricConstantPositionMobilityModel>()
             .SetGroupName("NtnConstellation")
             .AddConstructor<Sgp4MobilityModel>();
     return tid;
@@ -157,6 +159,12 @@ bool
 Sgp4MobilityModel::IsValladoReady() const
 {
     return m_vallado && m_vallado->ready;
+}
+
+bool
+Sgp4MobilityModel::IsUsingSgp4() const
+{
+    return m_useVallado && m_vallado && m_vallado->ready;
 }
 
 void
@@ -407,6 +415,34 @@ Vector
 Sgp4MobilityModel::DoGetVelocity() const
 {
     return GetEcefVelocity();
+}
+
+// NT-03: the geographic view of the live orbit.
+//
+// The base class stores a constant (lat, lon, alt) and derives everything from
+// it. A satellite's is anything but constant, so both accessors are recomputed
+// from the propagated ECEF position on every call. ThreeGppChannelModel reads
+// GetGeographicPosition().z to decide satellite versus HAPS (the threshold is
+// 50 km) and GetGeocentricPosition() to form the elevation angle that keys the
+// TR 38.811 cluster tables, so a stale value here would silently select the
+// wrong table rather than fail.
+Vector
+Sgp4MobilityModel::DoGetGeographicPosition() const
+{
+    // WGS-84, matching the ellipsoid the scheduler and the TLE frame already
+    // use elsewhere in this module; a sphere would misplace the altitude by up
+    // to ~21 km at the poles, which straddles the 50 km satellite threshold for
+    // a low-flying platform.
+    return GeographicPositions::CartesianToGeographicCoordinates(
+        DoGetPosition(),
+        GeographicPositions::WGS84);
+}
+
+Vector
+Sgp4MobilityModel::DoGetGeocentricPosition() const
+{
+    // DoGetPosition() already IS the geocentric (ECEF) position for this model.
+    return DoGetPosition();
 }
 
 } // namespace ntncon

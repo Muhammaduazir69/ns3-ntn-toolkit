@@ -1,10 +1,20 @@
+# WF-14: `data/` used to be ignored wholesale, so the 3.7 MB of preset TLE,
+# CZML and ISL fixtures existed only on the author's machine and in this
+# module's own nested repo. A fresh clone of the parent, and the Docker image,
+# got ntn-constellation WITHOUT the constellation data its own CLI presets read,
+# so live_starlink_demo.py and walker_kuiper.py could not reproduce. The paper
+# pins a release artifact, so "works on the machine it was written on" is the
+# failure mode that matters here. The fixtures are now tracked; only genuinely
+# regenerable local output stays ignored.
 .venv/
-data/
 *.egg-info/
 __pycache__/
 *.pyc
 .pytest_cache/
-.tle-cache/
+# Root-level fetch cache only. The caches UNDER data/ are pinned preset inputs:
+# a preset that refetches from CelesTrak is not a preset, and cannot reproduce
+# offline or at a fixed epoch.
+/.tle-cache/
 dist/
 build/
 *.whl

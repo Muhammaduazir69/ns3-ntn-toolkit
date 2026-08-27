@@ -1,6 +1,9 @@
 set(source_files
     model/orbital-elements.cc
     model/sgp4-mobility-model.cc
+    model/ntn-visibility-index.cc
+    model/ntn-xnap-messages.cc
+    model/ntn-xn-handover.cc
     model/walker-constellation.cc
     model/contact-graph-scheduler.cc
     # 4.4.4 — Contact-graph router integration (Roadmap §4.4 deep work)
@@ -14,6 +17,9 @@ set(source_files
 set(header_files
     model/orbital-elements.h
     model/sgp4-mobility-model.h
+    model/ntn-visibility-index.h
+    model/ntn-xnap-messages.h
+    model/ntn-xn-handover.h
     model/walker-constellation.h
     model/contact-graph-scheduler.h
     # 4.4.4 — Contact-graph router integration (Roadmap §4.4 deep work)
@@ -36,5 +42,6 @@ build_lib(
     ${libmobility}
     # Full Vallado SGP4 backend reuses the satellite module's reference sgp4unit.
     ${libsatellite}
+    ${libthz-ntn}
   TEST_SOURCES ${test_sources}
 )

@@ -1,5 +1,27 @@
 # ntn-constellation
 
+> ## Which propagator a scenario actually runs (audit TWIN-01 / CVC-12)
+>
+> `Sgp4MobilityModel` carries two propagators and the class name only describes one of them.
+> **Ask `IsUsingSgp4()`**, not the class name, and not `IsValladoReady()` — that reports whether
+> the SGP4 state is *initialised* and stays true after you opt out.
+>
+> | How the orbit was supplied | Propagator | Why |
+> |---|---|---|
+> | `SetTle(...)` — a real two-line element set | **SGP4** (Vallado `sgp4unit`) | A TLE carries SGP4 mean elements plus a drag term; propagating it any other way discards them. |
+> | `SetElements(...)` — Keplerian elements, e.g. every `WalkerConstellation::BuildDelta` shell | **Kepler + J2 secular** | There is no TLE, so there is nothing for SGP4 to initialise from. Feeding synthetic Keplerian elements to an SGP4 propagator would misuse its mean-element convention. |
+>
+> Until v2.5.0 `m_useVallado` defaulted to **false**, so even `SetTle()` ran Kepler + J2 unless the
+> caller separately called `SetUseVallado(true)` — and nothing in the tree did. That is fixed: a
+> TLE now gets SGP4.
+>
+> **What has not changed, and matters for any write-up:** roughly 76 of the shipped example files
+> build their orbits from Walker shells via `SetElements`, and those correctly run **Kepler + J2**.
+> Only about 4 drive a real TLE. So a blanket "SGP4" claim covering all scenarios is not supported
+> — the accurate statement is *SGP4 for TLE-driven scenarios, Kepler with J2 secular rates for
+> Walker-defined shells*. Measured divergence between the two for the ISS TLE over 45 minutes:
+> **5.2 to 11.0 km**, about a second of along-track lag.
+
 > Walker constellation generation, orbital propagation, contact-graph scheduling/routing, and a TR 38.821 + Starlink calibration corpus for ns-3 6G NTN research. Part of **ns3-ntn-toolkit** — [README](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
 
 <p align="center">
