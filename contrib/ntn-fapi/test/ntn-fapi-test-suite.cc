@@ -23,6 +23,102 @@
 using namespace ns3;
 using namespace ns3::fapi;
 
+/// FAPI-4: a slot that schedules several UEs must give each its own HARQ id.
+///
+/// The HARQ process id was stored once per SLOT, taken from whichever DL DCI
+/// came last in the TTI loop, and read back for every CRC.indication in that
+/// slot. With more than one UE scheduled, every CRC carried the last UE's pid.
+/// And because the per-slot entry was erased on the first match, a second
+/// transport block in the same slot found nothing and reported pid 0.
+///
+/// The shipped examples default to four UEs; the only test scheduled one, which
+/// is exactly why the key survived.
+class FapiHarqIdIsPerUeTest : public TestCase
+{
+  public:
+    FapiHarqIdIsPerUeTest()
+        : TestCase("FAPI-4: CRC.indication carries each UE's own HARQ process id")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<fapi::NtnFapiSapBridge> bridge = CreateObject<fapi::NtnFapiSapBridge>();
+
+        // Two UEs scheduled in ONE slot, with different HARQ processes.
+        const uint32_t frame = 3;
+        const uint8_t sf = 4;
+        const uint8_t slot = 1;
+        bridge->RecordDlHarqForTest(frame, sf, slot, /*rnti=*/11, /*pid=*/5);
+        bridge->RecordDlHarqForTest(frame, sf, slot, /*rnti=*/22, /*pid=*/9);
+
+        std::vector<std::pair<uint16_t, uint16_t>> seen; // (rnti, harqId)
+        bridge->TraceConnectWithoutContext(
+            "CrcIndication",
+            MakeCallback(&FapiHarqIdIsPerUeTest::OnCrc, this));
+        m_seen = &seen;
+
+        auto rx = [&](uint16_t rnti) {
+            mmwave::RxPacketTraceParams p{};
+            p.m_frameNum = frame;
+            p.m_sfNum = sf;
+            p.m_slotNum = slot;
+            p.m_rnti = rnti;
+            p.m_tbSize = 100;
+            p.m_corrupt = false;
+            p.m_sinr = 100.0;
+            bridge->OnPhyRx(p);
+        };
+
+        // Deliberately deliver the SECOND-scheduled UE first. Under the old
+        // per-slot key the first arrival erased the entry, so whichever came
+        // second got pid 0 regardless of order.
+        rx(22);
+        rx(11);
+
+        NS_TEST_ASSERT_MSG_EQ(seen.size(), 2u,
+                              "both transport blocks must produce a CRC.indication; the per-slot "
+                              "entry used to be erased on the first match, so the second found "
+                              "nothing");
+
+        uint16_t harqFor11 = 0xffff;
+        uint16_t harqFor22 = 0xffff;
+        for (const auto& [rnti, hid] : seen)
+        {
+            if (rnti == 11)
+            {
+                harqFor11 = hid;
+            }
+            if (rnti == 22)
+            {
+                harqFor22 = hid;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(harqFor11, 5,
+                              "UE 11 was scheduled on HARQ process 5 and must be told so");
+        NS_TEST_ASSERT_MSG_EQ(harqFor22, 9,
+                              "UE 22 was scheduled on HARQ process 9; reporting the other UE's "
+                              "id is the defect");
+        NS_TEST_ASSERT_MSG_NE(harqFor11, harqFor22,
+                              "and the two must differ, or one slot-wide value is still being "
+                              "handed to every UE");
+    }
+
+    void OnCrc(fapi::CrcIndication ind)
+    {
+        if (m_seen)
+        {
+            for (const auto& c : ind.crcList)
+            {
+                m_seen->emplace_back(c.rnti, c.harqId);
+            }
+        }
+    }
+
+    std::vector<std::pair<uint16_t, uint16_t>>* m_seen{nullptr};
+};
+
 class FapiMessageIdsStableTest : public TestCase
 {
   public:
@@ -344,13 +440,223 @@ class FapiRealSapBridgeTest : public TestCase
         NS_TEST_ASSERT_MSG_EQ(std::isfinite(lastLat), true, "gate 15: last SAP latency finite");
         NS_TEST_ASSERT_MSG_GT(lastLat, 0.0,
                               "gate 15: request->indication latency strictly positive");
-        // Physical sanity: a DL slot -> UE decode round trip is sub-second.
+        // FAPI-2: the gate has to know WHAT it measured.
+        //
+        // The old bound here was `meanLat < 1.0` s, which a channel with no
+        // propagation delay at all passes trivially - and that is exactly the
+        // channel this backend has. The resulting figure was published as the
+        // NTN L1/L2 turnaround while containing no part of the NTN round trip.
+        // The bound is now anchored to the geometry and is two-sided, so it
+        // fails whichever way the truth and the label disagree.
+        const bool airProp = g_testBridge->HasAirPropagationDelay();
+        const double floorSec = g_testBridge->GetOneWayPropagationFloorSec();
+        NS_TEST_ASSERT_MSG_GT(floorSec, 0.0,
+                              "the bridge must recover the real gNB-UE separation; without it "
+                              "there is nothing to anchor the latency bound to");
+        // 600 km straight up is 2.0018 ms one way.
+        NS_TEST_ASSERT_MSG_EQ_TOL(floorSec, 600e3 / 299792458.0, 1e-6,
+                                  "the floor comes from the real geometry of this scenario");
+
+        if (airProp)
+        {
+            // If the channel does carry propagation, a request->indication
+            // turnaround must contain at least the one-way flight.
+            NS_TEST_ASSERT_MSG_GT(meanLat, floorSec,
+                                  "a turnaround measured over a channel WITH propagation delay "
+                                  "cannot be shorter than the one-way flight time");
+        }
+        else
+        {
+            // If it does not, the number must be BELOW the floor. That is not
+            // a weaker check: it is the assertion that the published figure is
+            // the slot pipeline and nothing else. Should someone later switch
+            // this backend to a delay-carrying channel without relabeling the
+            // KPI, the branch above starts applying and this one stops.
+            NS_TEST_ASSERT_MSG_LT(meanLat, floorSec,
+                                  "this backend has no air propagation, so the SAP latency must "
+                                  "sit below the one-way floor; a value above it would mean the "
+                                  "number silently acquired a delay the label does not admit");
+        }
+        NS_TEST_ASSERT_MSG_EQ(std::string(g_testBridge->GetSapLatencyProvenance()),
+                              airProp ? "measured-with-air-propagation"
+                                      : "measured-no-air-propagation",
+                              "the provenance label tracks the probed channel, so a CSV row "
+                              "carries the qualification with the number");
         NS_TEST_ASSERT_MSG_LT(meanLat, 1.0, "SAP latency within a physical horizon (<1 s)");
+
+        // 5. FAPI-1: TX_DATA.request carries the real transport blocks. The
+        // bridge used to emit only descriptors; the bytes themselves had no
+        // FAPI representation, so a translator to a real PHY would have had
+        // nothing to send.
+        NS_TEST_ASSERT_MSG_GT(g_testBridge->GetTxDataRequestCount(), 0u,
+                              "TX_DATA.request emitted from the real MAC SendMacPdu SAP call");
+        NS_TEST_ASSERT_MSG_GT(g_testBridge->GetTxDataBytes(), 100000u,
+                              "TX_DATA.request carries real PDU bytes in bulk, not a token PDU: "
+                              "an eMBB stream over 3 s moves hundreds of kilobytes");
+        // ns-3 assertions can be configured to continue past a failure, so the
+        // container is checked before it is indexed: a missing emitter must
+        // produce a clean FAIL, never a dereference of an empty vector.
+        const TxDataRequest& lastTx = g_testBridge->LastTxData();
+        NS_TEST_ASSERT_MSG_EQ(lastTx.pdus.empty(), false,
+                              "the last TX_DATA.request has a payload PDU");
+        if (!lastTx.pdus.empty())
+        {
+            NS_TEST_ASSERT_MSG_GT(lastTx.pdus.front().tbBytes.size(), 0u,
+                                  "TX_DATA payload is the real PDU copied out of the packet");
+        }
+
+        // 6. FAPI-1: RACH.indication fires on the real initial access. The
+        // decorator has always sat on ReceiveRachPreamble; it just forwarded.
+        NS_TEST_ASSERT_MSG_GT(g_testBridge->GetRachIndicationCount(), 0u,
+                              "RACH.indication emitted from the real PHY preamble reception; "
+                              "a UE that attached must have sent one");
+        NS_TEST_ASSERT_MSG_EQ(g_testBridge->LastRachIndication().preambles.empty(), false,
+                              "RACH.indication carries a preamble record");
+
+        // The UL_TTI counter must advance with the slots even when this
+        // downlink-only profile grants nothing, which is what distinguishes
+        // "no uplink was scheduled" from "the emitter is not wired".
+        NS_TEST_ASSERT_MSG_GT(g_testBridge->GetUlTtiRequestCount(), 100u,
+                              "the UL_TTI path is evaluated on every real slot allocation");
 
         Simulator::Destroy();
         g_testBridge = nullptr;
         g_testRs = nullptr;
         g_testUeRnti = 0;
+    }
+};
+
+
+/// FAPI-1: the uplink grant path. The downlink-only profile above exercises
+/// TX_DATA and RACH but never produces a UL DCI, so UL_TTI.request would stay
+/// at zero grants no matter how it were wired. This runs the same rig with
+/// uplink traffic enabled and asserts the grants appear and carry the real
+/// scheduler decision.
+class FapiUlTtiFromRealGrantsTest : public TestCase
+{
+  public:
+    FapiUlTtiFromRealGrantsTest()
+        : TestCase("FAPI-1: UL_TTI.request built from real mmwave uplink grants")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const double simTime = 3.0;
+
+        NodeContainer sat;
+        sat.Create(1);
+        Ptr<ConstantVelocityMobilityModel> satMob = CreateObject<ConstantVelocityMobilityModel>();
+        satMob->SetPosition(Vector(0.0, 0.0, 600e3));
+        satMob->SetVelocity(Vector(7560.0, 0.0, 0.0));
+        sat.Get(0)->AggregateObject(satMob);
+
+        NodeContainer ue;
+        ue.Create(1);
+        Ptr<ConstantPositionMobilityModel> ueMob = CreateObject<ConstantPositionMobilityModel>();
+        ueMob->SetPosition(Vector(0.0, 0.0, 0.0));
+        ue.Get(0)->AggregateObject(ueMob);
+
+        NtnRealStackHelper rs;
+        rs.SetSimTime(Seconds(simTime));
+        rs.SetUplink(true); // the difference from the test above
+        rs.Build(sat, ue);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(0.5), Seconds(simTime - 0.2));
+
+        Ptr<mmwave::MmWaveEnbNetDevice> enb =
+            DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
+        NS_TEST_ASSERT_MSG_NE((enb == nullptr), true, "mmwave enb device present");
+        Ptr<NtnFapiSapBridge> bridge = CreateObject<NtnFapiSapBridge>();
+        bridge->InstallEnb(enb);
+
+        Simulator::Stop(Seconds(simTime));
+        Simulator::Run();
+
+        const uint64_t grants = bridge->GetUlTtiWithGrantCount();
+        NS_TEST_ASSERT_MSG_GT(grants, 0u,
+                              "with uplink traffic the real scheduler issues UL DCIs, so "
+                              "UL_TTI.request must carry grants; zero here means the UL branch "
+                              "of the slot allocation is not being read");
+
+        const UlTtiRequest& last = bridge->LastUlTti();
+        NS_TEST_ASSERT_MSG_EQ(last.pduList.empty(), false, "the last UL_TTI carries a PDU");
+        if (!last.pduList.empty())
+        {
+            NS_TEST_ASSERT_MSG_EQ(last.nPdusOfEachType[1], last.pduList.size(),
+                                  "the PUSCH count must agree with the PDU list length");
+            NS_TEST_ASSERT_MSG_EQ(static_cast<int>(last.pduList.front().type),
+                                  static_cast<int>(UlTtiPdu::Type::kPusch),
+                                  "an uplink data grant becomes a PUSCH PDU");
+
+            // The PDU must carry the scheduler's real numbers, not defaults. A
+            // zero TB size or a zero RNTI would mean the DCI was not read.
+            const PuschPdu* pusch = std::get_if<PuschPdu>(&last.pduList.front().pdu);
+            NS_TEST_ASSERT_MSG_NE((pusch == nullptr), true, "the UL PDU is a PUSCH");
+            if (pusch)
+            {
+                NS_TEST_ASSERT_MSG_GT(pusch->tbSize, 0u,
+                                      "the PUSCH PDU carries the real granted TB size");
+                NS_TEST_ASSERT_MSG_GT(pusch->rnti, 0u, "the PUSCH PDU carries the real RNTI");
+                NS_TEST_ASSERT_MSG_GT(pusch->nrOfSymbols, 0u,
+                                      "the PUSCH PDU carries the real symbol allocation");
+                NS_TEST_ASSERT_MSG_LT(pusch->harqProcessId, kMaxHarqProcessesRel17,
+                                      "the PUSCH HARQ process id is within the Rel-17 range");
+            }
+        }
+
+        Simulator::Destroy();
+    }
+};
+
+/// FAPI-1 / RRC-4: the timing-advance field of RACH.indication is the RESIDUAL
+/// the gNB measures, not the round trip. TS 38.213 section 4.2.
+class FapiRachTimingAdvanceTest : public TestCase
+{
+  public:
+    FapiRachTimingAdvanceTest()
+        : TestCase("FAPI-1: RACH.indication timing advance is the residual, in T_C units")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<NtnFapiSapBridge> b = CreateObject<NtnFapiSapBridge>();
+
+        // 600 km straight up: one way 2.0018 ms, round trip 4.0036 ms.
+        const Time rtt = NanoSeconds(4003600);
+
+        // Un-compensated: the whole round trip is residual.
+        b->SetNtnTimingAdvance(rtt);
+        NS_TEST_ASSERT_MSG_EQ_TOL(b->GetResidualTimingAdvance().GetSeconds(), rtt.GetSeconds(),
+                                  1e-12, "with no pre-compensation the residual is the round trip");
+        // T_C = 1/(480e3*4096) s. 4.0036 ms / T_C = 7,870,193 units.
+        const uint32_t expectTc =
+            static_cast<uint32_t>(std::llround(rtt.GetSeconds() * 480e3 * 4096.0));
+        NS_TEST_ASSERT_MSG_EQ(b->GetResidualTaInTc(), expectTc,
+                              "the residual is reported in the T_C unit of TS 38.211 section 4.1");
+        NS_TEST_ASSERT_MSG_GT(expectTc, 1000000u,
+                              "an NTN round trip is millions of T_C, which is the point: it "
+                              "cannot fit the 12-bit terrestrial TA command");
+
+        // Fully pre-compensated: the preamble lands where the gNB expects it.
+        b->SetNtnTimingAdvance(rtt, rtt);
+        NS_TEST_ASSERT_MSG_EQ(b->GetResidualTaInTc(), 0u,
+                              "full pre-compensation leaves no residual advance to report");
+
+        // Over-compensation must clamp rather than wrap through unsigned.
+        b->SetNtnTimingAdvance(rtt, rtt + MilliSeconds(1));
+        NS_TEST_ASSERT_MSG_EQ(b->GetResidualTaInTc(), 0u,
+                              "over-compensation clamps at zero instead of wrapping");
+
+        // Half compensated: half the residual, which is the case that separates
+        // a real subtraction from returning one of the two inputs.
+        b->SetNtnTimingAdvance(rtt, NanoSeconds(rtt.GetNanoSeconds() / 2));
+        NS_TEST_ASSERT_MSG_EQ_TOL(b->GetResidualTimingAdvance().GetSeconds(),
+                                  rtt.GetSeconds() / 2.0, 1e-9,
+                                  "the residual tracks the pre-compensation actually applied");
     }
 };
 
@@ -366,6 +672,9 @@ class NtnFapiTestSuite : public TestSuite
         AddTestCase(new FapiDlTtiAssemblyTest, TestCase::Duration::QUICK);
         AddTestCase(new FapiUlIndicationShapesTest, TestCase::Duration::QUICK);
         AddTestCase(new FapiRealSapBridgeTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiUlTtiFromRealGrantsTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiRachTimingAdvanceTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiHarqIdIsPerUeTest, TestCase::Duration::QUICK);
     }
 };
 

@@ -165,7 +165,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-fapi-real-stack");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));
@@ -249,11 +252,23 @@ main(int argc, char* argv[])
         f << "dl_tti_with_data_count," << g_bridge->GetDlTtiWithDataCount() << ",count,fapi-sap\n";
         f << "crc_indication_count," << g_bridge->GetCrcIndicationCount() << ",count,fapi-sap\n";
         f << "matched_latency_count," << g_bridge->GetMatchedLatencyCount() << ",count,fapi-sap\n";
-        f << "sap_latency_mean_us," << g_bridge->GetMeanSapLatencySec() * 1e6 << ",us,measured\n";
-        f << "sap_latency_min_us," << g_bridge->GetMinSapLatencySec() * 1e6 << ",us,measured\n";
-        f << "sap_latency_max_us," << g_bridge->GetMaxSapLatencySec() * 1e6 << ",us,measured\n";
-        f << "sched_pipeline_mean_us," << g_bridge->GetMeanSchedPipelineSec() * 1e6
-          << ",us,measured\n";
+        // FAPI-2: the latency rows carry WHICH latency they are. On a channel
+        // with no propagation model these are the slot pipeline alone, and a
+        // row labelled plain "measured" invited them to be read as an NR-NTN
+        // turnaround. The label is probed from the live channel, not asserted.
+        const char* latProv = g_bridge->GetSapLatencyProvenance();
+        f << "sap_latency_mean_us," << g_bridge->GetMeanSapLatencySec() * 1e6 << ",us," << latProv
+          << "\n";
+        f << "sap_latency_min_us," << g_bridge->GetMinSapLatencySec() * 1e6 << ",us," << latProv
+          << "\n";
+        f << "sap_latency_max_us," << g_bridge->GetMaxSapLatencySec() * 1e6 << ",us," << latProv
+          << "\n";
+        f << "sched_pipeline_mean_us," << g_bridge->GetMeanSchedPipelineSec() * 1e6 << ",us,"
+          << latProv << "\n";
+        f << "air_propagation_present," << (g_bridge->HasAirPropagationDelay() ? 1 : 0)
+          << ",bool,probed-from-spectrum-channel\n";
+        f << "one_way_propagation_floor_us," << g_bridge->GetOneWayPropagationFloorSec() * 1e6
+          << ",us,derived-from-geometry\n";
         f.close();
         std::cout << "  wrote " << outputDir << "/fapi_sap.csv (SAP latency KPI)\n";
     }

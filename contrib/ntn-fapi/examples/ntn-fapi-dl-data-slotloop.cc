@@ -29,6 +29,7 @@
 
 
 #include "ns3/fapi-helpers.h"
+#include "ns3/ntn-fapi-sap-bridge.h"
 #include "ns3/fapi-messages.h"
 #include "ns3/fapi-pdu-types.h"
 
@@ -53,72 +54,17 @@ uint16_t g_sfn = 0, g_slot = 0;
 uint32_t g_harqId = 0;
 uint64_t g_tbSent = 0, g_tbOk = 0, g_tbRetx = 0;
 uint64_t g_bytesDelivered = 0;
+Ptr<fapi::NtnFapiSapBridge> g_bridge;
 bool g_pendingRetx = false;
 
-// Assemble the real per-slot DL scheduling/data messages from the module's own
-// integrated structs (DlTtiRequest + PdcchPdu + PdschPdu + TxDataRequest),
-// round-tripping the DMRS bitmap through the real fapi-helpers conversion. The
-// CRC/HARQ outcome comes from the measured PHY decode in FapiPhyRxTrace below.
-void
-SlotTick()
-{
-    // ---- L1/L2 scheduling: assemble a real DL_TTI.request (PDCCH + PDSCH) ----
-    DlTtiRequest req;
-    req.sfn = g_sfn;
-    req.slot = g_slot;
-    req.nPdusOfEachType[0] = 1; // PDCCH
-    req.nPdusOfEachType[1] = 1; // PDSCH
-    req.nPdusOfEachType[2] = 0;
-    req.nPdusOfEachType[3] = 0;
-    req.numGroups = 1;
+// FAPI-3: the DL_TTI.request / TX_DATA.request assembly that used to live here
+// was a free-running loop. It built the structs into locals that fell out of
+// scope, stepped its own g_sfn/g_slot counters on its own timer, and was
+// therefore uncorrelated with the SFN/slot the radio was actually running -
+// while printing its output next to genuinely measured SINR and TBLER, which
+// made it read as driven. NtnFapiSapBridge now supplies those messages off the
+// real MAC-PHY SAP calls, so the slot numbers are the radio's own.
 
-    DlTtiPdu pdcch;
-    pdcch.type = DlTtiPdu::Type::kPdcch;
-    PdcchPdu pdcchPdu{};
-    PdcchPdu::Dci dci{};
-    dci.rnti = g_rs->GetUeRnti(0);
-    dci.aggregationLevel = 4;
-    pdcchPdu.dciList.push_back(dci);
-    pdcch.pdu = pdcchPdu;
-    req.pduList.push_back(pdcch);
-
-    DlTtiPdu pdsch;
-    pdsch.type = DlTtiPdu::Type::kPdsch;
-    PdschPdu pdschPdu{};
-    pdschPdu.rnti = g_rs->GetUeRnti(0);
-    pdschPdu.numCodewords = 1;
-    pdschPdu.codewords[0].tbSize = g_tbBytes;
-    // Real DMRS bitmap round-trip via the module's own helpers (fapi-helpers.cc).
-    pdschPdu.dmrs.dmrsSymbPos = DmrsBitArrayToFapi({2, 11});
-    NS_ASSERT(DmrsFapiToBitArray(pdschPdu.dmrs.dmrsSymbPos).size() == 2);
-    pdsch.pdu = pdschPdu;
-    req.pduList.push_back(pdsch);
-
-    static_assert(GetMessageId<DlTtiRequest>() == kDlTtiRequest, "DL_TTI id");
-    NS_ASSERT(DlTtiRequest::kId == kDlTtiRequest);
-
-    // ---- L2 (MAC): TX_DATA.request carrying the real transport block ----
-    TxDataRequest tx;
-    tx.sfn = g_sfn;
-    tx.slot = g_slot;
-    TxDataRequest::PduPayload pdu;
-    pdu.pduIndex = 0;
-    pdu.cwIndex = 0;
-    pdu.tbBytes.assign(g_tbBytes, 0xAB);
-    tx.pdus.push_back(pdu);
-
-    if (++g_slot >= g_slotsPerSubframe * 10)
-    {
-        g_slot = 0;
-        g_sfn = (g_sfn + 1) % 1024;
-    }
-
-    const int64_t slotDurNs = static_cast<int64_t>(1000000.0 / g_slotsPerSubframe);
-    if (Simulator::Now().GetSeconds() + slotDurNs / 1e9 < g_simTime)
-    {
-        Simulator::Schedule(NanoSeconds(slotDurNs), &SlotTick);
-    }
-}
 
 // FAPI CRC.indication / RX_DATA.indication driven by the REAL per-TB decode the
 // mmwave error model already computed (RxPacketTraceParams::m_corrupt). Connected
@@ -133,6 +79,12 @@ FapiPhyRxTrace(mmwave::RxPacketTraceParams p)
     if (p.m_tbSize == 0 || (g_ueRnti != 0 && p.m_rnti != g_ueRnti))
     {
         return; // skip control TBs and other UEs (mirror DlRxTrace filtering)
+    }
+    if (g_bridge)
+    {
+        // Same real per-TB decode, into the bridge's own reverse path, so its
+        // RX_DATA/CRC counters and the example's accounting see one event.
+        g_bridge->OnPhyRx(p);
     }
     const bool crcOk = !p.m_corrupt; // real decode outcome, no RNG
     const double sinrDb = 10.0 * std::log10(std::max(p.m_sinr, 1e-12));
@@ -259,7 +211,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-fapi-dl-data-slotloop");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
@@ -274,7 +229,22 @@ main(int argc, char* argv[])
         "/NodeList/*/DeviceList/*/ComponentCarrierMap/*/MmWaveUePhy/DlSpectrumPhy/RxPacketTraceUe",
         MakeCallback(&FapiPhyRxTrace));
 
-    Simulator::Schedule(Seconds(1.0), &SlotTick);
+    // Install the FAPI SAP bridge on the live mmwave cell. From here every FAPI
+    // message this example reports has a real producer: SLOT.indication from
+    // the PHY's own slot tick, DL_TTI/UL_TTI from the scheduler's allocation,
+    // TX_DATA from the MAC PDU actually handed down.
+    Ptr<mmwave::MmWaveEnbNetDevice> fapiEnb =
+        DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(0));
+    if (fapiEnb)
+    {
+        g_bridge = CreateObject<fapi::NtnFapiSapBridge>();
+        g_bridge->InstallEnb(fapiEnb);
+        g_bridge->SetUeRnti(rs.GetUeRnti(0));
+    }
+    else
+    {
+        std::cout << "  NOTE: no mmwave gNB device, FAPI SAP bridge not installed\n";
+    }
 
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
@@ -293,6 +263,21 @@ main(int argc, char* argv[])
               << "  FAPI delivered:               " << (realRxBytes / 1000) << " KB  goodput="
               << goodputMbps << " Mbps\n"
               << "  -> CRC.indication driven by the MEASURED error model (real m_corrupt decode).\n";
+
+    if (g_bridge)
+    {
+        std::cout << "\n--- FAPI messages off the REAL MAC<->PHY SAP (no shadow loop) ---\n"
+                  << "  SLOT.indication:  " << g_bridge->GetSlotIndicationCount() << "\n"
+                  << "  DL_TTI.request:   " << g_bridge->GetDlTtiRequestCount() << " ("
+                  << g_bridge->GetDlTtiWithDataCount() << " carrying data)\n"
+                  << "  UL_TTI.request:   " << g_bridge->GetUlTtiRequestCount() << " ("
+                  << g_bridge->GetUlTtiWithGrantCount() << " carrying a grant)\n"
+                  << "  TX_DATA.request:  " << g_bridge->GetTxDataRequestCount() << " ("
+                  << g_bridge->GetTxDataBytes() / 1000 << " KB of real PDU bytes)\n"
+                  << "  RACH.indication:  " << g_bridge->GetRachIndicationCount() << "\n"
+                  << "  SAP latency mean: " << g_bridge->GetMeanSapLatencySec() * 1e6 << " us ("
+                  << g_bridge->GetSapLatencyProvenance() << ")\n";
+    }
 
     Simulator::Destroy();
     return 0;
