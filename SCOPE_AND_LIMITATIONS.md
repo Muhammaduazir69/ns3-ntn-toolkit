@@ -19,7 +19,7 @@ what closing it would require.**
 ---
 
 > **STATUS 2026-06-27 — A1 & A5(ii) largely CLOSED on the mmwave spine; A5(i)/A3/A4 unblocked by the nr integration.**
-> A1: the model now uses the **real TR 38.811 §6.6.2 σ_SF tables** (per scenario, elevation-interpolated), **CL=0 for LOS** (spec-correct), and a **Rician small-scale fading term** with the §6.7.2 elevation-dependent K-factor — verified executing on the measured plane. *Remaining:* the full multi-tap frequency-selective NTN-TDL (§6.9.2). A5(ii): the **TR 38.811 §6.4.1 J1-Airy satellite beam pattern** is implemented (`NtnSatBeamGainModel`, opt-in via `NtnRealStackHelper::SetSatelliteBeam`) and verified (0 dB boresight, −3.01 dB at the half-beamwidth). A2 (THz pointing) is wired into the measured path. **5G-LENA `nr` is now in the tree** (see A5), so A5(i)/A3/A4 are reachable on an nr spine.
+> A1: the model now uses the **real TR 38.811 §6.6.2 σ_SF tables** (per scenario, elevation-interpolated), **CL=0 for LOS** (spec-correct), and a **Rician small-scale fading term** with the §6.7.2 elevation-dependent K-factor. **NT-07 correction:** that term defaults to OFF and is not executing on the measured plane, deliberately: both radio backends already apply small-scale fading through the 3GPP phased-array spectrum model, and running the Rician process as well would multiply two independent fading realizations onto one link. Enable it only for a link with no 3GPP spectrum model in the path. Its normalization (unit mean power) and its elevation dependence are covered by `Tr38811FastFadingStatisticsTest`; before that they were asserted only by the comment above the code. *Remaining:* the full multi-tap frequency-selective NTN-TDL (§6.9.2). A5(ii): the **TR 38.811 §6.4.1 J1-Airy satellite beam pattern** is implemented (`NtnSatBeamGainModel`, opt-in via `NtnRealStackHelper::SetSatelliteBeam`) and verified (0 dB boresight, −3.01 dB at the half-beamwidth). **NT-07:** that setter had no callers anywhere in the tree. The pattern was still exercised on the measured plane by `ntn-tr38821-array-gain-calibration`, which constructs the model directly, but no scenario reached it through the helper, so no run assembled it into a helper-built propagation chain. `ntn-real-stack-smoke` now exposes `--satBeam`, `--beamwidthDeg` and `--beamCenterXKm`, and a fixed beam centre 300 km off the terminal costs a measured 11.07 dB (16.20 → 5.13 dB SINR) while a tracking beam costs 0 dB, which is the same reason a steered-beam calibration reports a constant offset. `NtnChannelExtrasReachTheChainTest` asserts the model is in the chain rather than merely constructible. `SetNtnScenario` had no callers either, so every run used the Suburban shadow-fading bins; it is now `--ntnScenario`. A2 (THz pointing) is wired into the measured path. **5G-LENA `nr` is now in the tree** (see A5), so A5(i)/A3/A4 are reachable on an nr spine.
 
 ## A1 — The measured channel carries TR 38.811 *large-scale* loss only (no fast fading)
 
@@ -125,6 +125,20 @@ what closing it would require.**
   `ntn-cho-real-stack`) runs the full CHO trigger set on the FR1 plane — 60 s pcho pass:
   measured SINR 23.4→15.6 dB tracking the 551→673 km slant, 1 RACH-less handover (cell 1→101
   at t=42 s, pre-computed TA). This concretely closes **A5(i)**.
+  - **Random access over the NTN round trip (RRC-4, 2026-08):** handovers remain RACH-less as
+    above, but the RAR window is no longer unexamined. `NtnRachWindow` (contrib/ntn-rrc) sizes
+    `ra-ResponseWindow` from the real service-link round trip, and
+    `NtnRealStackHelper::SetNtnRachWindow(true)` writes it onto every live `NrGnbMac` — the
+    value the UE receives via `GetRachConfig`, so it reaches the UE's own timeout. nr arms that
+    timeout at `slotPeriod × (6 + N)` from the preamble (TS 38.321 §5.1.4), which makes the
+    question purely arithmetic. **LEO-600 at 30 kHz needs N=4; nr's default of 3 buys 4.500 ms
+    against a 4.5036 ms requirement and misses by 3 µs** — so the default really does fail, and
+    it fails in a way that would read as an unexplained attach failure. **The cap is the real
+    limit:** the attribute is bounded at 10, so the same orbit at 60 kHz (N=12), LEO-1200
+    (N=12) and GEO (N=473) **cannot complete random access on this stack at all**. That is a
+    structural gap, not a tuning one: TR 38.821 §7.3 resolves it by offsetting the window
+    *start* with `ta-Common`, which nr v3.3 does not implement. The helper reports the
+    shortfall via `GetRachWindowVerdict()` rather than clamping silently.
   - **NTN gotcha for nr-spine modules:** the in-tree 3GPP UMi pathloss assumes a local-ENU
     frame; modules feeding ECEF (SGP4/TR 38.811) coordinates must override the BWP
     large-scale loss with `FriisPropagationLossModel` (3D slant-range, frame-independent) —
@@ -148,13 +162,78 @@ what closing it would require.**
   bind DRX (A3) and per-5QI QoS scheduling (A4) via nr's native support. The numerology ceiling
   (A5(i)) is closed and nr is now the default radio across the toolkit.
 
+## A6 — The air-interface propagation delay cannot be enabled at LEO altitudes
+
+`NtnRealStackHelper::SetAirInterfaceDelay(true)` puts a real
+`ConstantSpeedPropagationDelayModel` on the radio channel, so the service-link slant is borne
+by the air interface rather than folded into the backhaul. It exists, it is documented, and
+until 25 August 2026 it had **zero callers anywhere in the tree**: no example and no test had
+ever switched it on, so nothing would have noticed if it had stopped working.
+
+Switching it on shows why. Probed with one UE, a light periodic profile and SIB19 K_offset
+consumption enabled, on the vendored nr v3.3 stack:
+
+| Slant | Result | | Slant | Result |
+|---|---|---|---|---|
+| 50 km | works | | 300 km | **aborts** |
+| 200 km | works | | 350 km | works |
+| 250 km | works | | 400 km | works |
+| 500 km | works | | 600 km | **aborts** |
+
+The failures are `Cannot TX while RX` inside `nr-spectrum-phy`. Two things follow. First, the
+pattern is **not a threshold**: 300 km fails while 350 km and 500 km pass, so the delay is
+interacting with the TDD slot pattern and whether a geometry survives is not predictable from
+the slant alone. Second, LEO-600, the toolkit's own reference shell, is among the geometries
+that do not work, and a saturating downlink trips the same assertion even at a slant that
+otherwise passes.
+
+An earlier note on the setter claimed that consuming the K_offset unlocked this for a single UE.
+That was wrong, and it has been corrected in the header.
+
+**What this means in practice.** No shipped LEO scenario carries the slant on the air interface;
+every one folds it into the backhaul, where the measured end-to-end one-way delay is still
+physically correct. What is missing is the delay being borne by the air interface itself, which
+matters for HARQ timing, scheduler behaviour and anything sensitive to where in the stack the
+latency appears. A regression test now exercises the path at 350 km so the code does not rot,
+and that is the honest extent of the capability until the ns-3.48 migration brings a stack with
+real per-UE timing advance.
+
 ---
 
 ## One-line guidance for a manuscript
 
 Frame the toolkit as **"a real link-level NR data plane and real orbital/array physics, with
-an NTN large-scale channel on the measured plane"** — and state A1–A5 as explicit scope. The
+an NTN large-scale channel on the measured plane"** — and state A1–A6 as explicit scope. The
 genuinely-defensible headline claims are the measured KPI provenance (PHY-trace SINR/TBLER +
 in-band OWD/jitter/loss), the SGP4/Doppler/WGS-84 geometry, the THz/array physics (as an
 offline study), and the honest sim-health gating — not end-to-end 3GPP-NTN protocol/PHY
 conformance, enforced slicing/RIC control, Sionna-RT multipath, or a deep-learning RIC.
+
+---
+
+## A7 — No 3GPP Rel-19 AI/ML life-cycle management anywhere (AI-12)
+
+**Stated because it is absent, not because it is partial.** A grep across
+`contrib/ns3-ai-ntn` and `contrib/ntn-digital-twin` for the vocabulary of TR 38.843
+life-cycle management (`lcm`, `life-cycle`, `model_id`, `drift`, `38.843`, `Rel-19`)
+returns exactly one hit, and it is the English phrase "Typical lifecycle:" in a C++
+header describing object construction.
+
+The inference request carries `model_name`, `ue_id`, `nr_cgi`, `sim_time_s` and a
+tensor. It carries no **model identity** distinct from a display name, no
+**functionality identifier**, no **activation / deactivation / switching / fallback**,
+no **applicability conditions**, no **performance monitoring** or drift signal, and
+no **UE capability reporting** for AI/ML. None of that is stubbed or partial: none
+of it exists.
+
+**Not implemented here, deliberately.** A Rel-19 LCM framework is a feature, not a
+defect fix: it would mean a model registry, an identity and applicability scheme, a
+monitoring path with a drift metric, and a control surface to activate and fall back.
+Sketching a subset would produce exactly the shape this audit keeps finding, a
+standards-named field that no standard produced. What is owed today is that nobody
+reads the AI/ML support as covering it, which is what this section is for.
+
+**What does exist:** a Gymnasium/ns3-ai bridge with a version and schema handshake
+(AI-11), an ONNX/Triton-shaped inference transport, and offline SB3 and PyG
+sandboxes. The multi-agent trainers are single-agent PPO/SAC over N independent
+environment copies, not MAPPO/MASAC (AI-09).

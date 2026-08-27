@@ -1,15 +1,19 @@
 name: sim-health
+
+# WF-01 FIX (2026-08-25): this used to trigger only on `main`, which the working
+# branch is 208 commits ahead of, so the workflow had never executed against any
+# of this year's code. Every regression test added since then was unenforced.
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
-    branches: [main]
+    branches: ['**']
   workflow_dispatch:
 
 jobs:
   sim-health:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -25,30 +29,52 @@ jobs:
         working-directory: ns-3-dev
         run: ./ns3 configure --enable-examples --enable-tests --disable-werror
 
-      - name: Build core targets
+      - name: Build
         working-directory: ns-3-dev
         run: ./ns3 build
-            ntn-cho-leo-basic
-            ntn-cho-full-constellation
-            oran-ntn-full-scenario
-            thz-ntn-leo-ground
-            thz-ntn-isl
-            thz-ntn-beam-tracking
-            ntn-rrc-leo-pass
-            ntn-rrc-full-stack
-            ntn-rrc-from-tle
-            sagin-haps-leo-relay
-            sagin-uav-swarm
-            sagin-aeronautical
-            ntn-three-slice-leo-geo
-            ntn-v2x-rural-highway
-            ntn-observability-demo
 
-      - name: Run realism gates
+      # The regression suites are the gate that matters: each one pins a defect
+      # that reached a release once. Running them is what makes the fixes stick.
+      - name: NTN test suites
         working-directory: ns-3-dev
-        run: python3 tools/check_simulation_health.py --simTime=20 --out=sim_health_report.md
+        run: |
+          set -e
+          fail=0
+          for s in ntn-cho ntn-constellation ntn-fapi ntn-observability \
+                   ntn-oran-ai-flow-monitor ntn-oran-application \
+                   ntn-real-stack-helper ntn-rrc ntn-sagin ntn-sionna \
+                   ntn-slice ntn-spectrum-seam ntn-standards-validation \
+                   ntn-v2x oran-ntn oran-ntn-airan-inference \
+                   oran-ntn-multi-tier-ric oran-ntn-ws4 thz-ntn \
+                   three-gpp-ntn-propagation-loss-model; do
+            if ! ./test.py --no-build -s "$s" > "/tmp/$s.log" 2>&1; then
+              echo "::error::test suite $s FAILED"
+              tail -40 "/tmp/$s.log"
+              fail=1
+            else
+              echo "ok  $s"
+            fi
+          done
+          exit $fail
+
+      # WF-01: the previous gate step called tools/check_simulation_health.py,
+      # which reads metrics["packets_tx"] / ["packets_rx"] / ["tx_per_sim_sec"].
+      # None of those keys exist in the sim_health.csv schema the helper writes
+      # today (it emits app_tx_pkts / app_rx_pkts), so the step raised KeyError
+      # on its first row. check_protocol_fidelity.py parses the current schema.
+      # OBS-03: every measurement a shipped dashboard queries must have a real
+      # producer. Two of four dashboards used to query measurements nothing
+      # wrote, so they rendered empty forever and nothing said so.
+      - name: Dashboard producers
+        working-directory: ns-3-dev
+        run: python3 tools/check_dashboard_producers.py --repo .
+
+      - name: Realism gates
+        working-directory: ns-3-dev
+        run: python3 tools/check_protocol_fidelity.py --simTime=20 --out=sim_health_report.md
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: sim-health-report
           path: ns-3-dev/sim_health_report.md

@@ -134,11 +134,11 @@ Open research on 6G non-terrestrial networks is held back by **tool fragmentatio
 | NTN/O-RAN application layer | `NtnOranApplication` 5QI profiles + 24-byte wire payload header (5QI / S-NSSAI / seq / timestamp) |
 | KPM monitoring | `NtnOranAiFlowMonitor` — TS 28.552 / E2SM-KPM series, AI feature windows, anomaly events, CSV/XML/Influx/E2 export |
 | 3GPP NTN procedures implemented | TS 38.213 TA + §4.2 K_offset (SIB19-populated **and** consumed into the NR UL DCI→PUSCH gap) · TS 38.331 SIB19 + UE Location Report · TS 38.321 NTN-DRX + §5.22 PC5 sidelink Mode-2 (V2X) · TR 36.777 A2G · NTN HO triggers: Rel-17 CondEvents A4/T1/D1 + Rel-18 D2 + TR 38.821-studied elevation/TA |
-| Standards calibration | TR 38.821 Set-1 LEO-600 S-band link budget · orbital-theory test campaign · 36/36 fidelity + 12/12 standards gates |
+| Standards calibration | TR 38.821 Set-1 LEO-600 S-band link budget · orbital-theory test campaign · 36/36 fidelity + 15/15 standards gates |
 | 3GPP slicing | TS 23.501 + TS 22.261 default profiles, eMBB / URLLC / mMTC / V2X (S-NSSAI carried in-band) |
 | O-RAN xApps shipped | 16 (13 in `oran-ntn` + 3 NTN-aware in `flexric-bridge`) + ONNX Runtime xApp inference (optional) |
 | O-RAN RIC tiers | on-board RT-RIC (<10 ms enforced) · gateway / cloud Near-RT placement with E2 latency from live slant geometry |
-| O-RAN E2 wire | live FlexRIC SCTP/E2AP via Docker; CI-friendly TCP/JSON stub for the same xApp logic |
+| O-RAN E2 wire | in-simulator E2AP/KPM/RC over a PER-style codec, plus a TCP/JSON stub for the same xApp logic; the live FlexRIC SCTP path is scaffolded and not demonstrated (see the W8 roadmap note below) |
 | Regenerative payloads (Rel-19) | transparent (Rel-17 normative) / RU / RU+DU / full-gNB options · FH split model (Opt 2, 7.2a, 7.2b, 8) · role switching |
 | Reinforcement-learning bridge | Gymnasium 1.0 over patched ns3-ai (Py 3.13 + NumPy 2 ready); SB3 PPO + PyG GAT |
 | Channel models | TR 38.811 closed-form (default) · NVIDIA Sionna RT GPU ray-tracing (opt-in) |
@@ -265,7 +265,9 @@ maritime, IoT, dense-urban classes co-simulated over the same NTN cell.
 The bottom panel shows handover decisions per class; the top panel shows
 elevation/azimuth from the sub-satellite point. TTE-aware execution suppresses
 **100 % of ping-pong events** measured across 10 seeds × 66 satellites
-(Walker-Star, 1200 km, 53°).
+(780 km, 86.4° inclination, matching `tab:kpi` in the manuscript). The earlier
+"Walker-Star, 1200 km, 53°" here contradicted the paper and was internally
+inconsistent besides: a Walker-Star shell is near-polar, not 53°.
 
 ### 3 — Space O-RAN: 66-sat Walker-Star with dual Near-RT / Space RIC
 
@@ -274,7 +276,12 @@ elevation/azimuth from the sub-satellite point. TTE-aware execution suppresses
 </p>
 
 5 live xApps (HO prediction · CHO orchestrator · KPM aggregator · congestion ·
-conflict mgr) emit **85 074 actions in a 600 s run, 0 reported conflicts**.
+conflict mgr) emit **71 967 actions in a 600 s run, 0 reported conflicts**. That is
+the sum over the five xApps that were active in the committed run
+(`papers/sim_runs/oran-ntn/run1/xapp_metrics.csv`), and it counts E2 ROUTING
+acceptance rather than actuation. On that scenario the actuated count is zero,
+because serving-satellite selection is the scenario's own mobility model and not
+a controller decision; both numbers are now printed side by side (CVC-08).
 
 ### 4 — Module gallery (per-module animated demos)
 
@@ -298,7 +305,7 @@ conflict mgr) emit **85 074 actions in a 600 s run, 0 reported conflicts**.
 | O-RAN xApps showcase | NTN-CHO algorithm comparison | THz post-mortem |
 |---|---|---|
 | <img src="docs/oran_ntn_showcase.png" width="280"/> | <img src="docs/ntn_cho_showcase.png" width="280"/> | <img src="contrib/thz-ntn/docs/thz_ntn_post_v2.png" width="280"/> |
-| 13 xApps × 600 s · 85 074 actions, 0 conflicts | TTE-aware vs A3 vs threshold vs hysteresis, 10 seeds | Atm windows · UM-MIMO 128×128 · RIS · ISAC CRB |
+| 5 active xApps × 600 s · 71 967 routed actions, 0 conflicts | TTE-aware vs A3 vs threshold vs hysteresis, 10 seeds | Atm windows · UM-MIMO 128×128 · RIS · ISAC CRB |
 
 ## How this compares
 
@@ -316,7 +323,7 @@ other open distribution currently delivers.
 | 3GPP TS 38.321 NTN-DRX           | – | – | – | – | ● |
 | Rel-17 Conditional Handover (CHO) | – | – | – | partial | **TTE-aware** |
 | 5G NR PHY/MAC (TR 38.901 + 38.811) | – | – | partial | ● | ● |
-| O-RAN E2 wire (FlexRIC live)     | – | – | – | – | ● |
+| O-RAN E2 wire (FlexRIC live)     | – | – | – | – | scaffolded |
 | Network slicing (TS 23.501)      | – | – | – | partial | ● |
 | GPU ray-traced channel (Sionna RT) | – | – | – | – | ● |
 | RL bridge (Gymnasium 1.0 / SB3 / PyG) | – | – | – | – | ● |
@@ -341,7 +348,7 @@ is re-producible from a shipped reference scenario.
 Handover count           A3 baseline ████████████████████ 463 ± 48
                          TTE-aware   ██████ 135 ± 12               (-71 %)
 
-Ping-pong rate (%)       A3 baseline ███████████████████  57 %
+Ping-pong rate (%)       A3 baseline █████████████████    50.2 %
                          TTE-aware                          0 %    (Wilcoxon p < 0.005)
 ```
 
@@ -355,7 +362,9 @@ URLLC p99 (ms)           forced GEO  ██████████████�
 ### Sionna RT vs TR 38.811 closed-form (`ntn-sionna`, 30-step LEO pass)
 
 ```
-Max |Δ path-loss|        ▌ 0.002 dB   (well inside ±3 dB matched-PL gate)
+Max |Δ path-loss|        (retired: the probe-only sweep that produced the
+                         0.002 dB figure was replaced on 2026-06-24, and the
+                         ±3 dB check is a sanity print, not the headline)
 Steady-state RTT          ~9 ms       (per-step bridge round-trip)
 ```
 
@@ -522,10 +531,10 @@ Every contributed module ships with a numerical verification harness. Headline n
 | `ntn-slice` | 7 / 7 unit tests · URLLC p99 = **47.02 ms** (mode-skip ON) vs 295.52 ms (forced GEO, 6.3×) |
 | `ntn-v2x` | 5 / 5 unit tests · 100 vehicles × 5 min, 30 100 samples, jitter **0 ms** · V2X-LEO direct PL within 0.1 dB |
 | `flexric-bridge` | 7 / 7 tests · 30 k IND/s loopback, 0 % loss · CHO xApp **bit-identical** to in-memory oracle |
-| `ntn-sionna` | 3 C++ + 6 Py = 9 tests · 30-step LEO pass max \|Δ\| = **0.002 dB** vs TR 38.811 · steady-state RTT ~9 ms |
+| `ntn-sionna` | 3 C++ + 6 Py = 9 tests · steady-state RTT ~9 ms. The 0.002 dB path-loss figure is retired: the probe-only sweep behind it was replaced on 2026-06-24 and the ±3 dB check is a sanity print |
 | `ntn-digital-twin` | 6 / 6 tests · 144 / 144 iters, 0 errors · `/predict/handover` p99 = **29.9 ms** (16× under 500 ms gate) |
-| `ntn-cho` | 10-seed × 600-s × 66-sat Walker-Star: HOs **135 ± 12** vs A3 463 ± 48; ping-pong 57 % → **0 %**; Wilcoxon p < 0.005 |
-| `oran-ntn` | 600-s scenario, 5 live xApps: **85 074** actions, 0 reported conflicts |
+| `ntn-cho` | 10-seed × 600-s × 66-sat shell: HOs **135 ± 12** vs A3 463 ± 48; ping-pong 50.2 % → **0 %**; Wilcoxon p < 0.005 |
+| `oran-ntn` | 600-s scenario, 5 live xApps: **71 967** routed actions (0 actuated on that scenario), 0 reported conflicts |
 | `thz-ntn` | atm windows match ITU-R P.676/618; UM-MIMO ≤ 128×128 demonstrated; ISAC CRB tracked over LEO pass |
 | `ntn-traffic` | TR 38.821 Set-1 LEO-600 calibration: constant array-gain offset (σ < 1 dB), FSPL slope within 0.2 dB of theory; byte-exact KPM-vs-sink cross-check |
 | toolkit gates | `tools/check_protocol_fidelity.py` **36/36** · `tools/check_ntn_standards.py` **13/13** (orbital theory, Doppler envelope, TR 38.821 geometry, Table-style platform latency bands, 6 HO trigger classes incl. Rel-18 D2) |

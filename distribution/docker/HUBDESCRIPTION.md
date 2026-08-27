@@ -72,7 +72,7 @@ The `2.1.1` image is **~7.5 GB extracted** (`linux/amd64`); most of that is the 
 | 3GPP slicing | TS 23.501 + TS 22.261 default profiles (eMBB / URLLC / mMTC / V2X), S-NSSAI carried in-band |
 | O-RAN xApps shipped | 16 (13 in `oran-ntn` + 3 NTN-aware in `flexric-bridge`) + optional ONNX Runtime inference |
 | O-RAN RIC tiers | on-board RT-RIC (<10 ms enforced) · gateway / cloud placement, E2 latency from live geometry |
-| O-RAN E2 wire | live FlexRIC SCTP/E2AP via Docker; CI-friendly TCP/JSON stub for the same xApp logic |
+| O-RAN E2 wire | in-simulator E2AP/KPM/RC over a PER-style codec, plus a TCP/JSON stub for the same xApp logic; the live FlexRIC SCTP path is scaffolded and not demonstrated |
 | Regenerative payloads | transparent / RU / RU+DU / full-gNB · FH splits (Opt 2, 7.2a, 7.2b, 8) · role switching |
 | RL bridge | Gymnasium 1.0 over patched ns3-ai (Py 3.13 + NumPy 2 ready); SB3 PPO + PyG GAT |
 | Channel models | TR 38.811 closed-form (default) · NVIDIA Sionna RT GPU ray-tracing (opt-in) |
