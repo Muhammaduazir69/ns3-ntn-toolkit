@@ -13,7 +13,9 @@
 //
 // Payload is the serialised AiranInference protobuf. This matches what
 // `grpc++` puts on the wire for unary RPCs once the gRPC framing layer
-// is stripped, so flipping `Channel = GrpcInferenceChannel` later is a
+// is stripped. NOTE (AI-06): an earlier comment here described swapping in a
+// `GrpcInferenceChannel` as a one-line change. There is no such class anywhere
+// in the tree and no gRPC in this module; see inference-channel.h.
 // drop-in once the server speaks gRPC.
 
 #include "inference-channel.h"

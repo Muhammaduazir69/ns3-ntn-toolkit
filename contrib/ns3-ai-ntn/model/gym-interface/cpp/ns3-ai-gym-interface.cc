@@ -35,8 +35,44 @@
 #include <ns3/log.h>
 #include <ns3/simulator.h>
 
+#include <cstdio>
+
 namespace ns3
 {
+namespace
+{
+/// AI-11: the handshake's own version. Bump when the SHAPE of SimInitMsg /
+/// SimInitAck changes in a way an old peer cannot parse.
+constexpr const char* kNs3AiHandshakeVersion = "1";
+/// contrib/ns3-ai-ntn VERSION. Informational: a mismatch warns, it does not
+/// refuse, because two trees can differ harmlessly while the wire agrees.
+constexpr const char* kNs3AiModuleVersion = "1.0.0";
+
+/// Digest of the observation and action space descriptions.
+///
+/// Over the SERIALISED spaces, so it moves whenever the layout the two sides
+/// must agree on moves, and does not move for unrelated edits. FNV-1a is enough
+/// here: this detects an accidental mismatch, it is not a security boundary.
+std::string
+SchemaHashOf(const ns3_ai_gym::SimInitMsg& m)
+{
+    std::string blob;
+    m.obsspace().SerializeToString(&blob);
+    std::string act;
+    m.actspace().SerializeToString(&act);
+    blob += act;
+    uint64_t h = 1469598103934665603ULL;
+    for (unsigned char c : blob)
+    {
+        h ^= static_cast<uint64_t>(c);
+        h *= 1099511628211ULL;
+    }
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(h));
+    return std::string(buf);
+}
+} // namespace
+
 
 NS_LOG_COMPONENT_DEFINE("OpenGymInterface");
 NS_OBJECT_ENSURE_REGISTERED(OpenGymInterface);
@@ -100,6 +136,21 @@ OpenGymInterface::Init()
         simInitMsg.mutable_actspace()->CopyFrom(spaceDesc);
     }
 
+    // AI-11: state who we are and what layout we are sending.
+    //
+    // This message used to carry only the two spaces, so neither side ever
+    // checked it was talking to a compatible peer: a Python agent built against
+    // one observation layout and a C++ scenario built against another would
+    // connect, exchange bytes and produce silently meaningless numbers. The
+    // module has a VERSION and an NS3-VERSION and neither crossed the wire.
+    //
+    // The schema hash is over the SERIALISED space descriptions, so it changes
+    // whenever the observation or action layout changes, which is the thing that
+    // actually has to match.
+    simInitMsg.set_protocolversion(kNs3AiHandshakeVersion);
+    simInitMsg.set_moduleversion(kNs3AiModuleVersion);
+    simInitMsg.set_schemahash(SchemaHashOf(simInitMsg));
+
     // get the interface
     Ns3AiMsgInterfaceImpl<Ns3AiGymMsg, Ns3AiGymMsg>* msgInterface =
         Ns3AiMsgInterface::Get()->GetInterface<Ns3AiGymMsg, Ns3AiGymMsg>();
@@ -121,6 +172,52 @@ OpenGymInterface::Init()
     simInitAck.ParseFromArray(msgInterface->GetPy2CppStruct()->buffer,
                               msgInterface->GetPy2CppStruct()->size);
     msgInterface->CppRecvEnd();
+
+    // AI-11: check the peer before trusting anything it sends.
+    //
+    // An old peer sets none of these and is reported as "unknown" rather than
+    // rejected, so this is a compatibility check and not a version wall.
+    {
+        const std::string peerProto = simInitAck.protocolversion();
+        const std::string peerModule = simInitAck.moduleversion();
+        const std::string peerSchema = simInitAck.schemahash();
+        if (peerProto.empty() && peerModule.empty() && peerSchema.empty())
+        {
+            NS_LOG_WARN("ns3-ai handshake: the Python peer sent no version information. "
+                        "It predates AI-11, so nothing here has been checked: an observation "
+                        "layout mismatch will not be detected and will produce meaningless "
+                        "numbers rather than an error.");
+        }
+        else
+        {
+            if (peerProto != kNs3AiHandshakeVersion)
+            {
+                NS_ABORT_MSG("ns3-ai handshake: protocol version mismatch. "
+                             "This build speaks '" << kNs3AiHandshakeVersion
+                             << "', the Python peer speaks '" << peerProto << "'.");
+            }
+            if (!peerSchema.empty() && peerSchema != simInitMsg.schemahash())
+            {
+                NS_ABORT_MSG("ns3-ai handshake: observation/action SCHEMA mismatch. "
+                             "This scenario's spaces hash to '" << simInitMsg.schemahash()
+                             << "', the Python agent expects '" << peerSchema
+                             << "'. Running on would exchange bytes that mean different "
+                                "things on the two sides.");
+            }
+            if (peerModule != kNs3AiModuleVersion)
+            {
+                NS_LOG_WARN("ns3-ai handshake: module version differs (C++ '"
+                            << kNs3AiModuleVersion << "' vs Python '" << peerModule
+                            << "'). The protocol and schema match, so this is allowed, but "
+                               "the two sides were built from different trees.");
+            }
+            if (!simInitAck.compatible() && !simInitAck.incompatiblereason().empty())
+            {
+                NS_ABORT_MSG("ns3-ai handshake: the Python peer refused this connection: "
+                             << simInitAck.incompatiblereason());
+            }
+        }
+    }
 
     bool done = simInitAck.done();
     NS_LOG_DEBUG("Sim Init Ack: " << done);

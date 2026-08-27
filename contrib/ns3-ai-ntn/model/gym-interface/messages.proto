@@ -97,11 +97,31 @@ message SimInitMsg {
 //	uint64 wafShellProcessId = 2;
 	SpaceDescription obsSpace = 1;
 	SpaceDescription actSpace = 2;
+	// AI-11: version and schema handshake.
+	//
+	// This message carried only the two spaces, and SimInitAck carried only
+	// done/stopSimReq, so neither side ever checked that it was talking to a
+	// compatible peer. The module has a VERSION file and an NS3-VERSION and
+	// neither crossed the wire: a Python agent built against one observation
+	// layout and a C++ scenario built against another would connect, exchange
+	// bytes and produce silently meaningless numbers.
+	//
+	// Added as optional fields, so an old peer that does not set them still
+	// interoperates and simply reports "unknown" rather than failing.
+	string protocolVersion = 3;   // this handshake's own version, e.g. "1"
+	string moduleVersion = 4;     // contrib/ns3-ai-ntn VERSION
+	string schemaHash = 5;        // digest of the obs/act space description
 }
 
 message SimInitAck {
 	bool done = 1;
 	bool stopSimReq = 2;
+	// AI-11: the peer's side of the handshake, plus its verdict.
+	string protocolVersion = 3;
+	string moduleVersion = 4;
+	string schemaHash = 5;
+	bool compatible = 6;          // false => the initiator should refuse to run
+	string incompatibleReason = 7;
 }
 
 message EnvStateMsg {

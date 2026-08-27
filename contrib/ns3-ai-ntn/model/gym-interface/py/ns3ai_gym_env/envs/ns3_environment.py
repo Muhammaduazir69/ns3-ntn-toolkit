@@ -3,6 +3,26 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 import messages_pb2 as pb
+
+# AI-11: the ns3-ai handshake contract. These must match the C++ constants in
+# model/gym-interface/cpp/ns3-ai-gym-interface.cc.
+NS3AI_HANDSHAKE_VERSION = "1"
+NS3AI_MODULE_VERSION = "1.0.0"
+
+
+def _schema_hash(sim_init_msg) -> str:
+    """FNV-1a over the serialised obs space followed by the serialised act space.
+
+    Computed identically on both sides, so a mismatch means the two peers really
+    do disagree about the layout rather than about how the digest is taken. This
+    detects an accidental mismatch; it is not a security boundary.
+    """
+    blob = sim_init_msg.obsSpace.SerializeToString() + sim_init_msg.actSpace.SerializeToString()
+    h = 1469598103934665603
+    for c in blob:
+        h ^= c
+        h = (h * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return f"{h:016x}"
 import ns3ai_gym_msg_py as py_binding
 from ns3ai_utils import Experiment
 
@@ -127,9 +147,43 @@ class Ns3Env(gym.Env):
         self.action_space = self._create_space(simInitMsg.actSpace)
         self.observation_space = self._create_space(simInitMsg.obsSpace)
 
+        # AI-11: check the peer, and say who we are.
+        #
+        # This handshake used to carry only the two spaces one way and
+        # done/stopSimReq back, so neither side ever verified it was talking to
+        # a compatible peer. A Python agent built against one observation layout
+        # and a C++ scenario built against another would connect, exchange bytes
+        # and produce silently meaningless numbers.
+        #
+        # The schema hash is computed the same way the C++ side computes it:
+        # FNV-1a over the serialised obs space followed by the serialised act
+        # space, so it moves exactly when the layout the two sides must agree on
+        # moves.
+        peer_proto = simInitMsg.protocolVersion
+        peer_schema = simInitMsg.schemaHash
+        local_schema = _schema_hash(simInitMsg)
+        incompatible = ""
+        if not peer_proto and not peer_schema:
+            print("[ns3-ai] handshake: the C++ peer sent no version information. It predates "
+                  "AI-11, so nothing has been checked: a layout mismatch will not be detected "
+                  "and will produce meaningless numbers rather than an error.")
+        else:
+            if peer_proto != NS3AI_HANDSHAKE_VERSION:
+                incompatible = (f"protocol version mismatch: C++ speaks '{peer_proto}', "
+                                f"this agent speaks '{NS3AI_HANDSHAKE_VERSION}'")
+            elif peer_schema and peer_schema != local_schema:
+                incompatible = (f"observation/action schema mismatch: C++ sent '{peer_schema}', "
+                                f"this agent computes '{local_schema}' from the same spaces")
+
         reply = pb.SimInitAck()
         reply.done = True
         reply.stopSimReq = False
+        reply.protocolVersion = NS3AI_HANDSHAKE_VERSION
+        reply.moduleVersion = NS3AI_MODULE_VERSION
+        reply.schemaHash = local_schema
+        reply.compatible = not incompatible
+        if incompatible:
+            reply.incompatibleReason = incompatible
         reply_str = reply.SerializeToString()
         assert len(reply_str) <= py_binding.msg_buffer_size
 

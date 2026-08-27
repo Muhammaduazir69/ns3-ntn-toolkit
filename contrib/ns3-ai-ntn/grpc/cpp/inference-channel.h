@@ -18,14 +18,24 @@
 //                               where the inference engine runs in the
 //                               same process.
 //   * TcpInferenceChannel     — length-prefixed framing over a raw
-//                               TCP socket. Mirrors the wire format a
-//                               gRPC server would expose if you point
-//                               `grpc++` at the same .proto.
-//   * GrpcInferenceChannel    — real grpc++ stub, built only when
-//                               ENABLE_GRPC_INFERENCE is set at CMake
-//                               configure time. The header always
-//                               exists so callers don't break; the
-//                               .cc implementation is gated.
+//                               TCP socket, using this repo's own
+//                               encoder (airan-messages.*). It is NOT
+//                               gRPC and not protobuf on the wire.
+//
+// AI-06: this header used to advertise a third transport,
+// `GrpcInferenceChannel`, described as a "real grpc++ stub, built only when
+// ENABLE_GRPC_INFERENCE is set at CMake configure time". No such class exists.
+// The name appeared in exactly two comments, this one and one in
+// inference-channel-tcp.h; there is no declaration, no .cc, and
+// ENABLE_GRPC_INFERENCE appears nowhere in any CMakeLists or source. The
+// bundled grpc/proto/airan_inference.proto is not compiled either - the only
+// protobuf_generate blocks in CMakeLists.txt target
+// model/gym-interface/messages.proto.
+//
+// So: there is no gRPC in this module. The claim is removed rather than left
+// standing as a build flag a reader could go looking for. If a gRPC transport
+// is added later, it belongs here alongside a compiled .proto and a flag that
+// actually exists.
 
 #include <atomic>
 #include <cstdint>

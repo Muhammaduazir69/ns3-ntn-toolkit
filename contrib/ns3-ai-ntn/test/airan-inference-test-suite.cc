@@ -25,6 +25,7 @@
 #include "ns3/inference-channel-inproc.h"
 #include "ns3/inference-channel-tcp.h"
 #include "ns3/triton-model-config.h"
+#include <complex>
 
 #include "ns3/log.h"
 #include "ns3/simulator.h"
@@ -846,12 +847,181 @@ class AiranSimulatorWorkloadTest : public TestCase
 
 // ----------------------------------------------------------------------------
 
+
+/// AI-06: the precoder must be a function of the CHANNEL.
+///
+/// The mock computed cos/sin of `seed = req.request_id`, reading only
+/// csi.num_tx. Two consequences, both bad: the same channel produced a
+/// different beam on every call, and two completely different channels produced
+/// the same beam if the counters lined up. No CSI influenced any output
+/// anywhere in the toolkit, so a transposed or stale tensor was undetectable.
+class MockPrecoderIsAFunctionOfCsiTest : public TestCase
+{
+  public:
+    MockPrecoderIsAFunctionOfCsiTest()
+        : TestCase("AI-06: the mock precoder depends on the CSI, not the request counter")
+    {
+    }
+
+  private:
+    static oranntn::airan::CsiTensor MakeCsi(uint32_t nTx, uint32_t nRx, uint32_t nSc,
+                                            double phase)
+    {
+        oranntn::airan::CsiTensor csi;
+        csi.num_tx = nTx;
+        csi.num_rx = nRx;
+        csi.num_subcarriers = nSc;
+        csi.values.assign(csi.ExpectedSize(), 0.0f);
+        for (uint32_t sc = 0; sc < nSc; ++sc)
+        {
+            for (uint32_t rx = 0; rx < nRx; ++rx)
+            {
+                for (uint32_t tx = 0; tx < nTx; ++tx)
+                {
+                    const double a = phase + 0.7 * tx + 0.31 * rx + 0.03 * sc;
+                    const std::size_t o = csi.Index(sc, rx, tx);
+                    csi.values[o] = static_cast<float>(std::cos(a));
+                    csi.values[o + 1] = static_cast<float>(std::sin(a));
+                }
+            }
+        }
+        return csi;
+    }
+
+    static oranntn::airan::InferenceResponse Run(
+        const oranntn::airan::CsiTensor& csi, uint64_t requestId, uint32_t layers,
+        uint32_t expectedNumTx = 0)
+    {
+        auto handler = AiranMockRuntime::MakePrecoderHandler(layers, 0.4, expectedNumTx);
+        oranntn::airan::InferenceRequest req;
+        req.request_id = requestId;
+        req.csi = csi;
+        oranntn::airan::InferenceResponse out;
+        handler(req, out);
+        return out;
+    }
+
+    void DoRun() override
+    {
+        const uint32_t nTx = 4;
+        const auto csiA = MakeCsi(nTx, 2, 8, 0.0);
+        const auto csiB = MakeCsi(nTx, 2, 8, 1.1);
+
+        // 1. SAME channel, DIFFERENT request id -> same precoder.
+        //    This is the assertion the old kernel could never satisfy: its
+        //    entire output was a function of the counter.
+        const auto r1 = Run(csiA, 1, 2);
+        const auto r2 = Run(csiA, 99999, 2);
+        NS_TEST_ASSERT_MSG_EQ(r1.status, 0, "a valid tensor is accepted");
+        NS_TEST_ASSERT_MSG_EQ(r1.precoder.values.size(), r2.precoder.values.size(),
+                              "same shape");
+        double maxDiff = 0.0;
+        for (std::size_t i = 0; i < r1.precoder.values.size(); ++i)
+        {
+            maxDiff = std::max(maxDiff,
+                               std::abs(static_cast<double>(r1.precoder.values[i]) -
+                                        static_cast<double>(r2.precoder.values[i])));
+        }
+        NS_TEST_ASSERT_MSG_LT(maxDiff, 1e-9,
+                              "the same channel must give the same beam whatever the request "
+                              "counter says; a difference here means the counter is still in "
+                              "the kernel");
+
+        // 2. DIFFERENT channel, same request id -> different precoder.
+        const auto r3 = Run(csiB, 1, 2);
+        double maxChange = 0.0;
+        for (std::size_t i = 0; i < r1.precoder.values.size(); ++i)
+        {
+            maxChange = std::max(maxChange,
+                                 std::abs(static_cast<double>(r1.precoder.values[i]) -
+                                          static_cast<double>(r3.precoder.values[i])));
+        }
+        NS_TEST_ASSERT_MSG_GT(maxChange, 1e-3,
+                              "a different channel must give a different beam, or the CSI is "
+                              "still being ignored");
+
+        // 3. MRT property, checked against the closed form.
+        //    Single layer, single rx: w = conj(hbar)/||hbar||, so h . w is real
+        //    and equals ||hbar||. That is the definition of maximum-ratio
+        //    transmission and a beam that does not satisfy it is not one.
+        const auto csiS = MakeCsi(nTx, 1, 4, 0.4);
+        const auto rs = Run(csiS, 7, 1);
+        NS_TEST_ASSERT_MSG_EQ(rs.status, 0, "single-layer request accepted");
+
+        std::vector<std::complex<double>> hbar(nTx, {0.0, 0.0});
+        for (uint32_t sc = 0; sc < csiS.num_subcarriers; ++sc)
+        {
+            for (uint32_t tx = 0; tx < nTx; ++tx)
+            {
+                const std::size_t o = csiS.Index(sc, 0, tx);
+                hbar[tx] += std::complex<double>(csiS.values[o], csiS.values[o + 1]);
+            }
+        }
+        double hnorm = 0.0;
+        for (auto& v : hbar)
+        {
+            v /= static_cast<double>(csiS.num_subcarriers);
+            hnorm += std::norm(v);
+        }
+        hnorm = std::sqrt(hnorm);
+
+        std::complex<double> gain{0.0, 0.0};
+        double wnorm = 0.0;
+        for (uint32_t tx = 0; tx < nTx; ++tx)
+        {
+            const std::complex<double> w(rs.precoder.values[2 * tx],
+                                         rs.precoder.values[2 * tx + 1]);
+            gain += hbar[tx] * w;
+            wnorm += std::norm(w);
+        }
+        NS_TEST_ASSERT_MSG_EQ_TOL(std::sqrt(wnorm), 1.0, 1e-5,
+                                  "the precoder is unit norm, so it does not invent power");
+        NS_TEST_ASSERT_MSG_EQ_TOL(std::abs(gain), hnorm, 1e-5,
+                                  "MRT achieves the full channel norm as array gain; a lower "
+                                  "value means the weights are not matched to the channel");
+        NS_TEST_ASSERT_MSG_LT(std::abs(gain.imag()), 1e-5,
+                              "and the combined gain is real, which is what conjugating the "
+                              "channel buys");
+
+        // 4. A tensor that does not match its declared dimensions must be
+        //    REFUSED. Silently beamforming on a mis-shaped buffer is how a
+        //    layout error survives to the PHY.
+        auto bad = csiA;
+        bad.values.pop_back();
+        const auto rbad = Run(bad, 3, 2);
+        NS_TEST_ASSERT_MSG_NE(rbad.status, 0,
+                              "a CSI buffer whose size disagrees with num_tx/num_rx/num_sc is "
+                              "not usable and must be reported, not beamformed on");
+
+        // Transposing num_tx with num_subcarriers leaves the total element
+        // count unchanged, so a size check alone cannot see it. What catches it
+        // is the model's DECLARED input shape, which is what a Triton
+        // config.pbtxt carries and what a real deployment would enforce.
+        auto swapped = csiA;
+        std::swap(swapped.num_tx, swapped.num_subcarriers);
+        NS_TEST_ASSERT_MSG_EQ(swapped.values.size(), swapped.ExpectedSize(),
+                              "the transposed tensor is the same SIZE, which is precisely why "
+                              "a size check cannot catch it");
+        const auto rswapUnchecked = Run(swapped, 4, 2);
+        NS_TEST_ASSERT_MSG_EQ(rswapUnchecked.status, 0,
+                              "with no declared shape the transposition is accepted, and this "
+                              "is recorded rather than papered over");
+        const auto rswap = Run(swapped, 4, 2, /*expectedNumTx=*/nTx);
+        NS_TEST_ASSERT_MSG_NE(rswap.status, 0,
+                              "a model that declares its input shape rejects the transposition");
+        // And the declared shape must not reject the CORRECT tensor.
+        NS_TEST_ASSERT_MSG_EQ(Run(csiA, 5, 2, nTx).status, 0,
+                              "the declared shape accepts a conforming tensor");
+    }
+};
+
 class AiranInferenceTestSuite : public TestSuite
 {
   public:
     AiranInferenceTestSuite()
         : TestSuite("oran-ntn-airan-inference", Type::UNIT)
     {
+        AddTestCase(new MockPrecoderIsAFunctionOfCsiTest, TestCase::Duration::QUICK);
         AddTestCase(new TritonModelConfigParserTest(),
                      TestCase::Duration::QUICK);
         AddTestCase(new TritonModelConfigShippedFilesTest(),

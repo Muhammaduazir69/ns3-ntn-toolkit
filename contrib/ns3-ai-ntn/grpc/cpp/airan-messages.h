@@ -15,7 +15,10 @@
 // ns3-ai's gym interface, but using *generated* C++ stubs would
 // require running `protoc` against multiple .proto files in cmake.
 //
-// When ENABLE_GRPC_INFERENCE is wired in by a future commit, the
+// AI-06: an earlier note here promised that ENABLE_GRPC_INFERENCE would wire
+// this up to protobuf. That flag does not exist in any CMakeLists or source,
+// and grpc/proto/airan_inference.proto is not compiled by the build. This is
+// the toolkit's own encoder over raw TCP framing, and nothing more.
 // gRPC build will switch the codec to the real protoc-generated
 // classes; the high-level AiranInferenceClient / Server APIs that
 // callers see don't change.
@@ -88,6 +91,22 @@ constexpr uint16_t kBeamTopK = 43;
 
 } // namespace fid
 
+/// Channel state, as handed to an inference model.
+///
+/// AI-06: the element ORDER of `values` was never written down anywhere, which
+/// is a real gap and not a documentation nicety - a model cannot be fed a
+/// tensor whose layout is undefined, and the mock runtime sidestepped the
+/// question entirely by ignoring the data and deriving its output from the
+/// request counter. The layout is now part of the contract:
+///
+///   values is interleaved real/imaginary, indexed
+///     offset = 2 * ((sc * num_rx + rx) * num_tx + tx)
+///   i.e. subcarrier-major, then receive antenna, then transmit antenna, with
+///   H[sc][rx][tx] = values[offset] + j * values[offset + 1].
+///
+/// Size must therefore be 2 * num_subcarriers * num_rx * num_tx. A consumer
+/// that disagrees about this ordering produces a wrong beam, which is exactly
+/// the failure a layout contract exists to make visible.
 struct CsiTensor
 {
     std::vector<float> values;
@@ -95,6 +114,25 @@ struct CsiTensor
     uint32_t num_rx{0};
     uint32_t num_subcarriers{0};
     double doppler_hz{0.0};
+
+    /// Elements `values` must hold for the declared dimensions.
+    std::size_t ExpectedSize() const
+    {
+        return static_cast<std::size_t>(2) * num_subcarriers * num_rx * num_tx;
+    }
+    /// Whether `values` matches the declared dimensions.
+    bool LayoutValid() const
+    {
+        return num_tx > 0 && num_rx > 0 && num_subcarriers > 0 &&
+               values.size() == ExpectedSize();
+    }
+    /// Offset of H[sc][rx][tx] within `values`. No bounds check: callers hold
+    /// the loop bounds.
+    std::size_t Index(uint32_t sc, uint32_t rx, uint32_t tx) const
+    {
+        return static_cast<std::size_t>(2) *
+               ((static_cast<std::size_t>(sc) * num_rx + rx) * num_tx + tx);
+    }
 };
 
 struct RsrpVector
