@@ -1,20 +1,54 @@
-# oran-ntn
+<h1 align="center">oran-ntn</h1>
 
-> O-RAN over Non-Terrestrial Networks: a multi-tier RIC (RT / Near-RT / Space-RIC), E2/canonical-KPM telemetry, A1 policy, xApps with conflict management, cross-domain SMO analytics, and AI-native payload/fronthaul models for ns-3.43.
-> Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+<p align="center"><strong>Space O-RAN: E2 and A1 control loops that actuate a real radio, across on-board, gateway and cloud RIC placements</strong></p>
 
 <p align="center">
-  <img src="visualization/oran_ntn_architecture.png"
-       alt="oran-ntn architecture" width="900"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/O--RAN-E2AP%20%C2%B7%20KPM%20%C2%B7%20RC%20%C2%B7%20A1-purple.svg" alt="O-RAN E2AP KPM RC A1"/>
+  <img src="https://img.shields.io/badge/RIC-on--board%20%C2%B7%20gateway%20%C2%B7%20cloud-orange.svg" alt="three RIC tiers"/>
+  <img src="https://img.shields.io/badge/examples-11-informational.svg" alt="11 examples"/>
 </p>
 
-| | |
-|---|---|
-| ns-3 version | `release ns-3.43` |
-| License | GPL-2.0-only |
-| Maintainer | Muhammad Uzair, Independent Researcher (ORCID 0009-0002-4104-2680) |
-| Test suites | `oran-ntn`, `oran-ntn-multi-tier-ric`, `oran-ntn-ws4` |
-| Default scenario | `examples/oran-ntn-full-scenario.cc` |
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/oran-ntn/">Docs</a>
+</p>
+
+---
+
+Putting a RAN Intelligent Controller in space is an architecture question before it is an algorithm question: where the RIC sits decides how stale its view is when a decision lands. This module makes that question measurable. Three placements, on-board real-time, at the gateway, and in the cloud, each with an E2 latency taken from live slant geometry rather than a configured constant.
+
+The control loop is closed. E2SM-KPM indications carry measurements under TS 28.552 names off a real radio; E2SM-RC control actions actuate a real handover through the RRC; A1 policies distribute and are enforced. The metric that matters here is not how many decisions an xApp made but how many changed anything, so the helper records both, and a decision that named a cell with no radio behind it is reported as a decision rather than a handover.
+
+Also here: transparent and Rel-19 regenerative payload options with an on-board gNB that refuses to originate a handover it cannot serve, an on-board store-and-forward buffer for feeder outages, the WG3 conflict-mitigation taxonomy, and a FlexRIC bridge for wire-level E2AP. The in-simulation E2 transport is an ns-3 header with toolkit-internal type values, not ASN.1 APER over SCTP, and the module says so where it matters.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run "oran-ntn-full-scenario --simTime=600 --xapps=ho,beamhop,slice,doppler,tnntn"
+./ns3 run oran-ntn-ric-placement-ab
+./ns3 run "ntn-e2e-full-stack --duration=60 --numUes=8"
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b oran-ntn-v2 https://github.com/Muhammaduazir69/oran-ntn.git contrib/oran-ntn
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Overview
 
@@ -98,7 +132,7 @@ a scenario**. When no actuator is registered, the generic RC path honestly
 logs `actuated=false` (it never fakes success), so the shipped multi-xApp
 scenarios remain measure → decide → log unless a scenario opts in.
 
-## What's new — AI-native ORAN-NTN release (June 2026)
+## What changed in v2.5
 
 See [`CHANGELOG.md`](CHANGELOG.md) and the toolkit
 [`../../CHANGELOG.md`](../../CHANGELOG.md) for earlier releases (v2 realism
@@ -130,7 +164,7 @@ fixes, the original RIC/xApp framework).
   post-disaster emergency-communication flagship.
 - **Two new test suites**: `oran-ntn-multi-tier-ric` and `oran-ntn-ws4`.
 
-## What's new — twin↔sim loop, gym action leg & verified actuators (July 2026)
+## Earlier changes
 
 - **Digital-twin C++ consumer.** `OranNtnTwinPredictionConsumer`
   (`model/oran-ntn-twin-prediction-consumer.h`) closes the twin↔sim loop:
@@ -695,13 +729,25 @@ Run the test suites:
 
 For full prerequisites and toolkit-wide setup see [`../../INSTALL.md`](../../INSTALL.md).
 
-## License & author
+---
 
-GPL-2.0-only — see [`LICENSE`](LICENSE).
+## Standards implemented
 
-Muhammad Uzair, Independent Researcher (ORCID
-[0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)).
+O-RAN Alliance E2AP, E2SM-KPM, E2SM-RC, E2SM-CCC, A1 policy, WG2 non-real-time RIC and WG3 near-real-time RIC architecture and conflict mitigation. 3GPP TS 28.552 (performance measurements), TS 38.331 (reconfiguration with sync), TS 38.413 (NG), TS 38.423 (Xn), TR 38.821 (NTN architecture, transparent and regenerative payloads), TS 38.214 (CQI and MCS tables). ETSI EN 302 307-1 (DVB-S2 MODCOD).
 
-## Scope & limitations (toolkit boundaries)
+## Keywords
 
-**A4** — framework xApp E2SM-RC decisions are logged, not actuated; the only genuine measured->act->measured loop is the `oran-ntn-ric-controlled-traffic` beam example. See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.
+Space O-RAN, satellite O-RAN, RAN intelligent controller, RIC, near-real-time RIC, non-real-time RIC, xApp, rApp, E2 interface, E2AP, E2SM-KPM, E2SM-RC, A1 policy, FlexRIC, RIC placement, on-board processing, regenerative payload, transparent payload, Rel-19 NTN, store-and-forward, conflict mitigation, TS 28.552, key performance measurement, handover control, non-terrestrial network, ns-3.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

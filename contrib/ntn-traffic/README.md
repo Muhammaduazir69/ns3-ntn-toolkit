@@ -1,7 +1,47 @@
-# ntn-traffic
+<h1 align="center">ntn-traffic</h1>
 
-> The traffic + measurement backbone of the toolkit: an ORAN-NTN QoS-flow application suite with an in-band measurement header, an AI-native KPM flow monitor, and a helper that stands up a **real mmwave NR NTN cell** (SpectrumPhy + MAC + RLC/PDCP + RRC + EPC) under SGP4 satellite mobility — plus the classic 3GPP HTTP / NRTV / CBR traffic models.
-> Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+<p align="center"><strong>The real-stack spine: a full 5G NR NTN data plane under satellite mobility, with every KPI measured in band</strong></p>
+
+<p align="center">
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/3GPP-TR%2038.811%20%2F%2038.821-orange.svg" alt="3GPP TR 38.811 and TR 38.821"/>
+  <img src="https://img.shields.io/badge/backends-mmWave%20%2B%205G--LENA%20nr-purple.svg" alt="mmWave and 5G-LENA nr backends"/>
+  <img src="https://img.shields.io/badge/examples-12-informational.svg" alt="12 examples"/>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-traffic/">Docs</a>
+</p>
+
+---
+
+`NtnRealStackHelper` is the part of this toolkit that makes everything else measurable. It assembles a genuine NR cell, either the mmWave FR2 backend or 5G-LENA `nr` at FR1, and puts it under satellite mobility: a real SpectrumPhy, a real LDPC error model, real HARQ with an NTN-stretched process pool, real RLC and PDCP with timers relaxed to the slant round trip, a real RRC, and a real EPC with GTP tunnelling.
+
+What that buys you is provenance. Delay, jitter and loss come from an in-band application header carrying a sequence number and a transmit timestamp through the GTP tunnel, so they are properties of packets that crossed the air interface rather than quantities derived from geometry afterwards. Every scenario writes a health record that labels each KPI measured, modeled or configured, which means a reader can tell the difference without reading your code.
+
+The helper also owns the NTN physics the cell needs: TR 38.811 excess loss with the scenario shadow-fading tables, per-BWP loss chaining and power split, the satellite beam pattern, a spectrum seam that composes rather than replaces, and geometry-derived service-link, X2 and backhaul delays taken over the worst case across every gNB and UE pair rather than a single sample.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run ntn-real-stack-smoke
+./ns3 run "ntn-tr38821-calibration --outputDir=out/"
+./ns3 run ntn-oran-qos-flows
+```
+
+This module ships **only** inside the toolkit tree; there is no standalone
+repository for it. It is the spine the other modules' examples are built on,
+which is the reason it is not separable. `INSTALL.md` in this directory carries
+the full dependency list.
 
 ## Overview
 
@@ -13,7 +53,7 @@
 
 The module also retains NTN-oriented traffic generators with NTN-appropriate defaults: the **3GPP HTTP** model (over a satellite bent-pipe / regenerative link), the **NRTV** near-real-time video model over TCP/UDP, a CBR application, a legacy `TrafficTimeTag` for per-packet latency tracking (superseded by the in-band header timestamp), and the lightweight `NtnRealisticTrafficHelper` point-to-point data plane used by earlier examples.
 
-## What's new (June 2026 — AI-Native ORAN-NTN update)
+## What changed in v2.5
 
 See the toolkit [CHANGELOG](../../CHANGELOG.md).
 
@@ -199,10 +239,25 @@ The module builds as part of the ns3-ntn-toolkit tree:
 
 The module ships four test suites: `ntn-oran-application` (unit — payload-header packet round-trip, in-band measurement of a known link delay, sequence-gap loss against a real `RateErrorModel`, C&C telemetry round-trip with real mobility + battery state), `ntn-oran-ai-flow-monitor` (unit — KPM series vs. sink ground truth, a mid-run error burst showing up as KPM loss + anomaly event, multi-slice flow classification, XML/CSV/Influx exporter round-trips), `cbr-test` (unit), and `nrtv` (system). See [INSTALL](../../INSTALL.md) for full toolkit setup.
 
-## License & author
+---
 
-GPL-2.0-only. Muhammad Uzair, Independent Researcher.
+## Standards implemented
 
-## Scope & limitations (toolkit boundaries)
+3GPP TR 38.811 (NTN channel model, shadow-fading sigma tables, Rician K-factor, aperture), TR 38.821 (Set-1 LEO-600 and GEO reference parameters, handover interruption budget), TS 38.101-5 (NTN FR1 bands n255 and n256, channel bandwidths), TS 38.213 (K_offset, timing advance), TS 38.214 (CQI and MCS tables), TS 38.300, TS 38.321, TS 38.331, TS 38.423 (Xn), TS 28.552 (performance measurements), TR 38.901.
 
-**A1** — the measured channel carries the TR 38.811 *large-scale* terms only (no NTN-TDL/Rician fast fading). **A5** — the vendored mmwave PHY runs FR2 numerology (60 kHz SCS) at an S-band carrier and models the gNB as a terrestrial array, not an FR1-NTN waveform or a satellite reflector beam; the link-level AMC/MCS/LDPC-BLER chain on top is real. See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.
+## Keywords
+
+5G NR NTN, NR-NTN data plane, ns-3 satellite simulation, SpectrumPhy, LDPC error model, HARQ, RLC, PDCP, RRC, EPC, GTP tunnel, TR 38.811 channel model, TR 38.821 link budget, EIRP, satellite beam pattern, bandwidth part, BWP, MCS, CQI, measured SINR, one-way delay, jitter, throughput, 5G-LENA, mmWave, LEO satellite, non-terrestrial network.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

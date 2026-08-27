@@ -1,20 +1,53 @@
 <h1 align="center">ntn-slice</h1>
 
-<p align="center"><strong>3GPP Network Slicing for Non-Terrestrial Networks: eMBB / URLLC / mMTC / V2X with GEO Mode-Skip Routing</strong></p>
+<p align="center"><strong>Network slicing over NTN: eMBB, URLLC and mMTC with per-5QI bearers and SLA percentiles taken from a distribution</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/3GPP-TS%2023.501%20%2F%20TS%2022.261-orange.svg"/>
-  <img src="https://img.shields.io/badge/SST-eMBB%20%E2%80%A2%20URLLC%20%E2%80%A2%20mMTC%20%E2%80%A2%20V2X-purple.svg"/>
-  <img src="https://img.shields.io/badge/unit_tests-7%20PASS-success.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/3GPP-TS%2023.501%20%2F%2038.300-orange.svg" alt="3GPP TS 23.501 and TS 38.300"/>
+  <img src="https://img.shields.io/badge/slices-eMBB%20%C2%B7%20URLLC%20%C2%B7%20mMTC%20%C2%B7%20V2X-purple.svg" alt="four slice types"/>
+  <img src="https://img.shields.io/badge/examples-3-informational.svg" alt="3 examples"/>
 </p>
 
-> Per-slice PRB orchestration for LEO + GEO non-terrestrial networks: eMBB / URLLC / mMTC / V2X slices with TS 22.261 demand profiles, per-slice latency / reliability KPIs, and a GEO mode-skip policy that keeps URLLC traffic off the orbital latency floor.
->
-> Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-slice/">Docs</a>
+</p>
 
 ---
+
+A slice is only a slice if the radio treats it differently. This module maps S-NSSAI and 5QI onto dedicated EPS bearers with TFT filters on a real NR NTN cell, so a URLLC flow and an eMBB flow on the same satellite genuinely contend for different resources rather than sharing one pipe with different labels.
+
+The SLA reporting is where slicing simulations usually quietly fail, and it is worth being explicit about the failure mode: if every packet is stamped with the same scalar mean delay, then the p99 of that slice is its mean, and a reliability target of one in a hundred thousand is unobservable no matter how long you run. The sink here retains a bounded delay histogram, so the three slices report 12.50, 11.50 and 11.50 ms at p99 rather than each reporting its own average.
+
+A GEO mode-skip policy keeps latency-bound traffic off the orbital floor when a GEO hop would blow the budget.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run ntn-three-slice-leo-geo
+./ns3 run ntn-slice-demo
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b ntn-slice-v2 https://github.com/Muhammaduazir69/ntn-slice.git contrib/ntn-slice
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Overview
 
@@ -35,7 +68,7 @@ The orchestrator's `(observation, action)` shape matches the `SliceEnv` Gymnasiu
 
 The V2X SST enum value (SST 4) is defined, but no default V2X profile ships yet — only the three slices above have a default-profile factory.
 
-## What's new in v2
+## What changed in v2.5
 
 See the [CHANGELOG](CHANGELOG.md) for the full history.
 
@@ -131,21 +164,25 @@ The `ntn-slice` suite has 7 unit tests (S-NSSAI pack/unpack round-trip, selector
 
 See [INSTALL.md](INSTALL.md) for setup and dependencies. For the full toolkit, see [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
 
-## License & author
+---
 
-GPL-2.0-only — see [LICENSE](LICENSE).
+## Standards implemented
 
-Muhammad Uzair, Independent Researcher.
+3GPP TS 23.501 (network slicing, S-NSSAI, 5QI and the standardized QoS characteristics), TS 22.261 (service requirements and demand profiles), TS 38.300 (QoS flow to DRB mapping), TS 38.101-5 (NTN FR1 channel bandwidths, which constrain what a slice can be allocated), TR 38.821 (NTN latency budgets).
 
-```bibtex
-@misc{uzair2026ntnslice,
-  author = {Uzair, Muhammad},
-  title  = {ntn-slice: 3GPP Network Slicing with GEO Mode-Skip for Non-Terrestrial Networks},
-  year   = {2026},
-  url    = {https://github.com/Muhammaduazir69/ntn-slice}
-}
-```
+## Keywords
 
-## Scope & limitations (toolkit boundaries)
+network slicing, 5G slicing, S-NSSAI, 5QI, slice SLA, eMBB, URLLC, mMTC, V2X slice, QoS flow, dedicated bearer, TFT, PRB allocation, slice isolation, latency percentile, p99 latency, reliability target, GEO latency floor, satellite slicing, non-terrestrial network, ns-3.
 
-**A4** — the per-slice PRB orchestration is computed and logged but does **not** actuate the (slice-agnostic) mmwave scheduler; isolation is observed statistically, not enforced. See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

@@ -1,7 +1,46 @@
-# ntn-fapi
+<h1 align="center">ntn-fapi</h1>
 
-> SCF-222 FAPI L1↔L2 message **model** — C++ structs mirroring the DL_TTI / TX_DATA / RX_DATA / CRC.indication field names for NR-NTN.
-> Part of **ns3-ntn-toolkit** — [README](../../README.md) / [INSTALL](../../INSTALL.md).
+<p align="center"><strong>An SCF-222 FAPI MAC-PHY adapter on a live NR SAP, with a latency gate anchored to the link it runs on</strong></p>
+
+<p align="center">
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/SCF-FAPI%20222.10.02-orange.svg" alt="Small Cell Forum FAPI 222.10.02"/>
+  <img src="https://img.shields.io/badge/messages-P5%20%C2%B7%20P7-purple.svg" alt="P5 and P7 message sets"/>
+  <img src="https://img.shields.io/badge/examples-3-informational.svg" alt="3 examples"/>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-fapi/">Docs</a>
+</p>
+
+---
+
+FAPI is the interface between MAC and PHY that real base stations are built on, and the reason to model it in simulation is to ask what an NTN round trip does to a slot pipeline designed for a terrestrial one.
+
+The bridge decorates a live NR MAC-PHY service access point, so SLOT.indications fire at the radio's own cadence and DL_TTI.requests come from real downlink allocations rather than from a timer. HARQ state is keyed by frame, subframe, slot and RNTI, because keying by slot alone let two terminals in the same slot overwrite each other.
+
+One thing this module is careful to say rather than imply: the backend it decorates carries no propagation delay model, so the measured request-to-indication interval is a slot-pipeline turnaround and not an NR-NTN one. The gate asserts the mean stays *below* the geometric floor of the configured link while propagation is absent, so the number cannot silently acquire a delay its label does not admit, and the bridge reports that qualification alongside the value.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run ntn-fapi-real-stack
+./ns3 run ntn-fapi-leo-pass-slotloop
+```
+
+This module ships **only** inside the toolkit tree; there is no standalone
+repository for it. It decorates the NR MAC-PHY SAP that `ntn-traffic` builds,
+so it needs that spine rather than a bare ns-3. `INSTALL.md` in this directory
+carries the full dependency list.
 
 ## Overview
 
@@ -11,7 +50,7 @@ The message and PDU types carry **real transport-block bytes slot-by-slot over N
 
 The structs are intentionally free of algorithmic logic — the role of this module is to provide a stable, SCF-222-named C++ struct shape, plus a couple of conversion helpers, that other ns-3 modules can share (a wire/binary ABI for external PHYs would require adding real serialization, which this module does not yet do).
 
-## What's new in v2
+## What changed in v2.5
 
 See the toolkit [CHANGELOG](../../CHANGELOG.md).
 
@@ -77,6 +116,25 @@ Same FAPI data path, but the serving satellite is propagated from a **TLE** by `
 
 The `ntn-fapi` test suite (5 unit tests) covers SCF 222.10.02/.04 message-ID stability and names, Numerology→SCS mapping against TS 38.211 Table 4.2-1, DMRS bitmap round-trips, DL_TTI PDCCH+PDSCH PDU ordering, and the UL indication shapes (CRC/SRS/RACH). See [INSTALL](../../INSTALL.md) for full toolkit setup.
 
-## License & author
+---
 
-GPL-2.0-only. Muhammad Uzair, Independent Researcher.
+## Standards implemented
+
+Small Cell Forum FAPI 222.10.02 (P5 configuration and P7 slot-timing message sets, DL_TTI.request, TX_DATA.request, RX_DATA.indication, CRC.indication, SLOT.indication, RACH.indication). 3GPP TS 38.211 and TS 38.213 for the slot and frame timing the messages carry, TR 38.821 for the NTN delay budget the gate is anchored to.
+
+## Keywords
+
+FAPI, Small Cell Forum, SCF-222, MAC-PHY interface, L1 L2 split, DL_TTI, TX_DATA, CRC indication, slot indication, HARQ, functional split, open RAN fronthaul, slot pipeline latency, NR numerology, satellite base station, non-terrestrial network, ns-3.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

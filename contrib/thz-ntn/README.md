@@ -1,102 +1,54 @@
 <h1 align="center">thz-ntn</h1>
 
-<p align="center"><strong>Sub-THz / D-band non-terrestrial PHY for ns-3.43 — LEO-ground & ISL links, RIS, ultra-massive MIMO, ISAC, alpha-mu fading, NYUSIM-140 calibration, ITU-R P.676-13 gaseous absorption</strong></p>
-
-> ## Two examples now couple their physics to their packets, and the link does not close (audit WF-06)
->
-> `thz-ntn-leo-ground` and `thz-ntn-isl` computed a full link budget — FSPL, molecular absorption,
-> weather, scintillation, pointing — printed it to CSV, and then carried their packets over a
-> point-to-point star with a **hardcoded 15 ms delay and a `RateErrorModel` pinned at 0.0**. There
-> was no SpectrumPhy, no MAC, no SINR and no TBLER in the data path, so nothing the physics
-> computed could affect a single packet. The helper's coupling hook,
-> `UpdateUeLink(ueIndex, oneWayDelay, per)`, had **zero callers across all 94 example files**.
->
-> Both now apply it: the delay is the real slant range over *c*, and the error rate comes from the
-> SNR the budget just produced, mapped through the vendored SNS3 **DVB-S2 forward-link tables** —
-> a measured per-MODCOD curve rather than a sigmoid. (THz links do not use DVB-S2 MODCODs; it is a
-> stand-in for a THz-native waterfall and is labelled as one, but it has real thresholds, which a
-> PER of exactly zero did not.)
->
-> **The measured consequence is that these configurations do not close.** At the shipped defaults
-> the LEO-ground pass computes an SNR of **−18.3 to −15.1 dB** across its whole 60 s, so the PER is
-> 1.0 throughout and `rx/tx` goes from 1 to 0. That is the correct answer, and it was completely
-> hidden while every packet arrived regardless of the physics. The dominant term is the noise
-> bandwidth: `--bandwidth=10e9` puts the thermal floor at −174 + 100 dB. Measured sweep:
-> 10 GHz and 1 GHz do not close, **100 MHz does** (PER 0, `rx/tx` 1).
->
-> The defaults are left as they are rather than quietly narrowed — changing them to make the demo
-> deliver would manufacture a result. Both examples now print the verdict and name the knob.
-
-> ## Which results carry packets, and at what frequency (audit THZ-07)
->
-> This module has two kinds of example and they are not interchangeable.
->
-> **Above 100 GHz: link-budget analysis only, no packets.** `thz-ntn-leo-ground` (225 GHz),
-> `thz-ntn-demo` (300 GHz), `thz-ntn-isac`, `thz-ntn-um-mimo`, `thz-ntn-isl`,
-> `thz-ntn-ris-assisted` (all 300 GHz) and `thz-ntn-dband-constellation` (140 GHz) contain **no**
-> `InternetStackHelper`, `NetDeviceContainer`, `PointToPointHelper`, `FlowMonitor`, `OnOffHelper`
-> or `PacketSink` — verified by grep, zero occurrences in all seven. `thz-ntn-demo` has no
-> `Simulator::Run` at all. They compute SNR, capacity, absorption and beam geometry into CSV. Any
-> throughput they report is a Shannon bound, not a measured goodput.
->
-> **Packets: capped at 100 GHz.** Every example that actually carries traffic —
-> `thz-ntn-beam-tracking`, `thz-ntn-ris-relay-traffic`, `thz-ntn-ric-controlled-traffic`,
-> `thz-ntn-isac-coexist-traffic`, `thz-ntn-isl-traffic`, `thz-ntn-weather-traffic`,
-> `thz-ntn-leo-ground-downlink-traffic` — forces `freqGHz = 100.0`. That is not a choice: the
-> in-tree 3GPP spectrum model asserts `500 MHz ≤ f ≤ 100 GHz`
-> (`three-gpp-propagation-loss-model.cc:358`, and the same bound in `three-gpp-channel-model.cc`),
-> so the NR/mmwave bridge cannot be driven above it.
->
-> **THZ-07 UPDATE — there is now one.** `thz-ntn-native-300ghz-traffic` carries real IP traffic
-> at **300 GHz** by not using the 3GPP model at all: the propagation chain is
-> `FriisPropagationLossModel` → `ThzNtnPropagationLossModel` (free space plus this module's own
-> gaseous, weather, scintillation and pointing terms), neither of which has a frequency cap, and
-> `ThzNtnLinkErrorModel` puts that chain in the packet path — asking it per packet what the
-> received power is for the current geometry. Measured on the default run: 1.27 M packets,
-> 484.5 Mbps goodput, SNR falling 10.18 → 8.77 dB across the pass. The physics is load-bearing:
-> 25 mm/h of rain takes the SNR to **−32.8 dB and the PDR to 0%**, a 43 dB penalty.
->
-> **Honest scope:** that example is not a SpectrumPhy — no per-subcarrier processing, no MAC, no
-> HARQ, no scheduler. Read its throughput as a link-limited transport figure, not as an
-> NR-at-THz result. The paragraph below still describes every OTHER packet-carrying example in
-> this module, which remain capped at 100 GHz.
->
-> **Previously, and still true of the rest:** the module's headline band (200–400 GHz) has no example in which a packet is
-> ever transmitted, and every measured-plane THz result in this repo is a W-band result.**
-> Closing that needs a THz-native spectrum channel that bypasses `ThreeGppPropagationLossModel`;
-> it is not done, and the title above should be read with that in mind.
-
-> ## Small-scale fading: what is and is not modelled (audit BOTH-01)
->
-> **There is no TR 38.811 §6.9 NTN-TDL or CDL multipath in this module.** A grep for
-> `ntn-tdl|NtnTdl|CDL` across its model and helper sources returns only bibliography lines. The
-> small-scale processes that do exist are the ITU-R P.681-11 Lutz two-state model (environment-
-> keyed, **not** elevation-dependent), the alpha-mu model, and a hand-written four-tap snapshot
-> inside one example. None is parameterised by elevation angle.
->
-> Concretely, this module produces **no frequency-selective fading, no delay spread, and no
-> elevation-dependent Rician K-factor.** Any BLER or throughput number from it reflects a flatter,
-> smoother channel than a real NTN link. `SCOPE_AND_LIMITATIONS.md` A1 records that
-> `ntn-traffic`'s excess-loss chain *does* carry the §6.7.2 elevation-dependent K-factor; that
-> statement does **not** extend here, and this note exists because it previously was not repeated
-> anywhere a reader of this module would look.
->
-> The fix is an `NtnTdlSpectrumPropagationLossModel` carrying the Table 6.9.2-x tap powers and
-> delays with an elevation-interpolated K-factor, chainable through
-> `NtnRealStackHelper::AddExtraPropagationLoss`. It is not implemented.
+<p align="center"><strong>Sub-terahertz and terahertz non-terrestrial links, 100 GHz to 1 THz, on the ITU-R recommendations rather than fitted curves</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0--only-green.svg"/></a>
-  <img src="https://img.shields.io/badge/ITU--R-P.676--13-orange.svg"/>
-  <img src="https://img.shields.io/badge/UM--MIMO-up%20to%20128×128-purple.svg"/>
-  <img src="https://img.shields.io/badge/tests-38%2F38%20passing-success.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/band-100%20GHz%20%E2%80%93%201%20THz-success.svg" alt="100 GHz to 1 THz"/>
+  <img src="https://img.shields.io/badge/ITU--R-P.676%20%C2%B7%20P.618%20%C2%B7%20P.838%20%C2%B7%20P.840-orange.svg" alt="ITU-R P.676 P.618 P.838 P.840"/>
+  <img src="https://img.shields.io/badge/examples-18-informational.svg" alt="18 examples"/>
 </p>
 
-> 100 GHz – 1 THz NTN physics for ns-3: molecular-absorption-gated LEO-ground and inter-satellite links, RIS relays, ultra-massive MIMO, and ISAC.
-> Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit). See [INSTALL.md](INSTALL.md) and [CHANGELOG.md](CHANGELOG.md).
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/thz-ntn/">Docs</a>
+</p>
 
 ---
+
+Above 100 GHz the atmosphere stops being a detail. Molecular absorption, rain, fog and turbulence each move the link budget by tens of decibels, and a model that gets one of them wrong by a factor of two will produce a coverage map that looks plausible and is not.
+
+This module implements each from its recommendation and cites it: ITU-R P.676-13 line-by-line gaseous absorption integrated over a layered atmosphere, P.838-3 rain, P.840 cloud and fog, P.618-13 tropospheric scintillation with the elevation exponent the recommendation actually specifies, and a Tatarskii phase structure function for turbulence. Three of those replaced hand-invented terms that had been off by up to a factor of two at 300 GHz, or discontinuous by half across two kilohertz of frequency.
+
+On top of the atmosphere: ultra-massive MIMO, reconfigurable intelligent surfaces, integrated sensing and communication, beam tracking with pointing error, and alpha-mu fading. Each model reports its own provenance, so a run that calls the integrator below its validated elevation, or that used an unsourced term, says so rather than returning a confident number.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run "thz-ntn-demo --example=8"
+./ns3 run thz-ntn-leo-ground
+./ns3 run thz-ntn-isl
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b thz-ntn-v2 https://github.com/Muhammaduazir69/ns3-thz-ntn.git contrib/thz-ntn
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Overview
 
@@ -131,7 +83,7 @@ passes, **atmospheric transmission windows** (140 / 220 / 340 / 410 / 460 GHz), 
 **NYUSIM-140** calibration reference. The model is cross-validated against ITU-R
 P.676-13, P.618-13, and S. Paine's *am* atmospheric model.
 
-## What's new in v2
+## What changed in v2.5
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
@@ -472,26 +424,25 @@ by the (unbuilt) `thz-ntn-demo` dataset generator.
 
 For full setup and dependency notes see [INSTALL.md](INSTALL.md).
 
-## License & author
+---
 
-**GPL-2.0-only** — see [LICENSE](LICENSE).
+## Standards implemented
 
-**Muhammad Uzair**, Independent Researcher — `muhammaduzairr69@gmail.com`
-ORCID: [0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+ITU-R P.676-13 (gaseous attenuation by atmospheric gases), P.618-13 (propagation data for Earth-space paths), P.838-3 (specific attenuation model for rain), P.840 (attenuation due to clouds and fog), P.835-6 (reference standard atmospheres). 3GPP TR 38.811 and TR 38.821 for the NTN geometry, TR 38.901 for the terrestrial channel baseline.
 
-```bibtex
-@misc{uzair2026thzntn,
-  author = {Uzair, Muhammad},
-  title  = {thz-ntn: 100 GHz -- 1 THz Sub-THz/D-band NTN Physics Module for ns-3.43},
-  year   = {2026}
-}
-```
+## Keywords
 
-### Acknowledgements
+terahertz communication, THz, sub-THz, D-band, 6G terahertz, molecular absorption, ITU-R P.676, atmospheric attenuation, rain attenuation, ITU-R P.838, fog attenuation, tropospheric scintillation, ITU-R P.618, atmospheric turbulence, Tatarskii, pointing error, ultra-massive MIMO, UM-MIMO, reconfigurable intelligent surface, RIS, integrated sensing and communication, ISAC, beam tracking, inter-satellite link, LEO ground link, non-terrestrial network, ns-3.
 
-ns-3 core team · SNS3 maintainers · HITRAN team (Gordon et al. 2022, CFA Harvard) ·
-S. Paine's *am* atmospheric model (SAO) · ITU-R P.676 / P.618 / P.835 / P.838 / P.840.
+## Author
 
-## Scope & limitations (toolkit boundaries)
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
 
-**A2** — the THz array/beamforming/pointing physics is computed in the offline link-budget calculator; the *measured* `*-traffic` examples carry FSPL + atmosphere only (no pointing/beam-squint loss in the measured KPIs). See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Author: Muhammad Uzair
  *
- * HITRAN-based Molecular Absorption Model for THz-NTN Links
+ * ITU-R P.676-13 Molecular Absorption Model for THz-NTN Links
  *
  * Altitude-stratified molecular absorption model for terahertz non-terrestrial
  * network links.  Unlike terrestrial THz models (e.g. TeraSim), this model
@@ -13,7 +13,7 @@
  * layers spanning 0--100 km.
  *
  * Key features:
- *   - HITRAN-derived absorption line database (H2O + O2)
+ *   - ITU-R P.676-13 Annex 1 absorption line database (44 O2 + 35 H2O)
  *   - Van Vleck--Weisskopf line shape for individual resonance lines
  *   - Continuum absorption between resonance lines
  *   - Slant-path integration with Earth-curvature correction
@@ -24,7 +24,8 @@
  * References:
  *   [1] ITU-R P.835-6, "Reference standard atmospheres"
  *   [2] ITU-R P.676-13, "Attenuation by atmospheric gases and related effects"
- *   [3] HITRAN database, https://hitran.org
+ *   [3] HITRAN database, https://hitran.org (consulted; NOT the
+ *       implemented model, which is [2])
  *   [4] J. M. Jornet and I. F. Akyildiz, "Channel modeling and capacity
  *       analysis for electromagnetic wireless nanonetworks in the THz band,"
  *       IEEE Trans. Wireless Commun., vol. 10, no. 10, 2011.
@@ -45,7 +46,7 @@ namespace ns3
 
 /**
  * \ingroup thz-ntn
- * \brief HITRAN-based molecular absorption model for THz-NTN links
+ * \brief ITU-R P.676-13 molecular absorption model for THz-NTN links
  *
  * This class computes the molecular absorption loss along arbitrary
  * ground-to-satellite, satellite-to-ground, or inter-satellite links in

@@ -1,25 +1,53 @@
 <h1 align="center">ntn-v2x</h1>
 
-<p align="center"><strong>SUMO TraCI Bridge, NR PC5 Sidelink (Mode 2) and V2X-LEO Direct / Relay Channels for Vehicular and Maritime NTN Research</strong></p>
+<p align="center"><strong>Satellite-assisted V2X: NR sidelink PC5 Mode 2, J2735 basic safety messages, and relay decisions that gate real packets</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/SUMO-FCD%20replay%20(offline)-orange.svg"/>
-  <img src="https://img.shields.io/badge/PC5-NR%20sidelink%20Mode%202%20(TS%2038.321)-red.svg"/>
-  <img src="https://img.shields.io/badge/scenarios-rural--highway%20%E2%80%A2%20platoon--URLLC%20%E2%80%A2%20PC5--sidelink%20%E2%80%A2%20maritime-purple.svg"/>
-  <img src="https://img.shields.io/badge/unit_tests-7%20PASS-success.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/3GPP-TS%2038.885%20sidelink-orange.svg" alt="3GPP TS 38.885 sidelink"/>
+  <img src="https://img.shields.io/badge/messages-SAE%20J2735%20BSM-purple.svg" alt="SAE J2735 BSM"/>
+  <img src="https://img.shields.io/badge/examples-6-informational.svg" alt="6 examples"/>
 </p>
 
-> NTN-assisted V2X for rural and remote roads: SUMO-driven vehicle mobility, a direct-vs-satellite-relay decision per vehicle made on the **measured** SINR of a real mmwave NR LEO cell, and a URLLC platoon-control flagship with edge-AI placement — plus a 2-D maritime scenario.
->
-> Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-v2x/">Docs</a>
+</p>
 
 ---
 
-<p align="center">
-  <img src="docs/ntn_v2x_demo.gif" alt="module live demo" width="900"/>
-</p>
+Vehicles that leave terrestrial coverage are the obvious NTN use case and the easy one to fake, because the interesting number, packet reception ratio against distance, can be produced by a threshold without any packets.
+
+Here the sidelink carries real messages. Basic safety messages are encoded the way SAE J2735 encodes them, a 21-octet core with UPER offset-from-lower-bound integers and the standard's range clamps, which matters more than it sounds: DE_Elevation spans -4096 to 61439, a range wider than a signed 16-bit integer, so a naive cast turns a legal 6000 m altitude into -553.6 m.
+
+Relay decisions actuate. A runtime transmit gate lets a decision start and stop a flow mid-run, which ns-3 application start and stop times cannot, so a direct-versus-relay policy is observable as 28,892 packets from on-air terminals against 0 from gated ones rather than as a counter. Vehicles are real UEs carrying their own PHY measurements, so blockage varies per vehicle instead of by loop parity.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run "ntn-v2x-pc5-sidelink-bsm --numVehicles=20 --duration=4"
+./ns3 run ntn-v2x-rural-highway
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b ntn-v2x-v2 https://github.com/Muhammaduazir69/ntn-v2x.git contrib/ntn-v2x
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Overview
 
@@ -40,7 +68,7 @@ SUMO FCD CSV  ──►  SumoTraciBridge  ──SetPosition + SetVelocity──�
 [SUMO live]                                              [real mmwave NR LEO cell]
 ```
 
-## What's new (July 2026)
+## What changed in v2.5
 
 - **NR PC5 sidelink Mode 2 (`model/ntn-nr-sidelink.{h,cc}`)** — a direct-V2V safety layer with no gNB in the loop: `NtnSlResourcePool` + `NtnSlUeMac` (autonomous, sensing-based Mode-2 selection per TS 38.321 §5.22 over the TS 38.331 SL-ResourcePool) + `NtnSlChannel` (half-duplex, co-channel collisions, TS 38.885 PRR). A MAC / resource-pool abstraction — not a PSCCH/PSSCH PHY.
 - **New example `ntn-v2x-pc5-sidelink-bsm`** — vehicles broadcast SAE J2735 BSMs over PC5 and report PRR vs distance; PRR degrades gracefully as vehicle density saturates the pool.
@@ -63,7 +91,7 @@ SUMO FCD CSV  ──►  SumoTraciBridge  ──SetPosition + SetVelocity──�
 - **SAE J2735 BSM Part I header (`model/ntn-v2x-bsm-header.{h,cc}`)** — a real 23-byte BSMcoreData `Header` (msgCnt/id/secMark/lat/lon/elev/speed/heading), so a BSM carries genuine vehicle state.
 - Two new unit tests bring the suite to 7: a J2735 BSM header round-trip and `NtnSidelinkMode2Test` (Mode-2 selection, half-duplex, wide-pool vs 1-subchannel PRR).
 
-## What's new (June 2026)
+## Earlier changes
 
 See the [CHANGELOG](CHANGELOG.md) for the full history.
 
@@ -174,17 +202,25 @@ The `ntn-v2x` suite has 7 unit tests: trace-replay sync jitter under the 100 ms 
 
 See [INSTALL.md](INSTALL.md) for full setup, dependencies and build notes.
 
-## License & author
+---
 
-GPL-2.0-only — see [LICENSE](LICENSE).
+## Standards implemented
 
-Muhammad Uzair, Independent Researcher.
+3GPP TS 38.885 (NR V2X sidelink, Mode 2 resource allocation, PRR evaluation methodology), TR 37.885 (V2X evaluation methodology), TS 23.287 (V2X architecture). SAE J2735 (basic safety message, DE_Elevation, DE_Speed, UPER encoding). TR 38.811 and TR 38.821 for the satellite leg.
 
-```bibtex
-@misc{uzair2026ntnv2x,
-  author = {Uzair, Muhammad},
-  title  = {ntn-v2x: SUMO TraCI Bridge and V2X-LEO Channels for ns-3.43},
-  year   = {2026},
-  url    = {https://github.com/Muhammaduazir69/ntn-v2x}
-}
-```
+## Keywords
+
+V2X, vehicle-to-everything, NR sidelink, PC5, Mode 2 resource allocation, basic safety message, BSM, SAE J2735, UPER encoding, packet reception ratio, PRR, satellite V2X, LEO relay, rural highway coverage, SUMO, vehicular mobility, connected vehicles, non-terrestrial network, ns-3.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

@@ -1,5 +1,22 @@
 # Install & run — ns3-ai (modernised fork)
 
+<p align="center">
+  <a href="README.md">Module README</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
+</p>
+
+> **The fastest path is the container.** `docker pull uzairdocker69/ns3-ntn-toolkit:latest`
+> ships this module already built alongside the other thirteen and the vendored
+> stacks, so nothing below is needed to simply run the examples. Build from source
+> when you intend to change the module.
+
+---
+
 This guide installs the **fork** of `ns3-ai` that is patched for
 ns-3.43, Python 3.13, NumPy 2.0, and Gymnasium 1.0.
 
@@ -40,8 +57,8 @@ cd ns3-ntn-toolkit
 
 > GitLab mirror: `git clone -b ntn-integration-v2 https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit.git`
 > Or skip the build entirely with the Docker image (this fork preinstalled):
-> `docker pull uzairdocker69/ns3-ntn-toolkit:2.2.1` (or `:latest`), then
-> `docker run -it uzairdocker69/ns3-ntn-toolkit:2.2.1`.
+> `docker pull uzairdocker69/ns3-ntn-toolkit:latest` (or `:latest`), then
+> `docker run -it uzairdocker69/ns3-ntn-toolkit:latest`.
 
 ### 2b. (Optional) other contrib modules
 

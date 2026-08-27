@@ -1,34 +1,54 @@
 <h1 align="center">ntn-rrc</h1>
 
-<p align="center"><strong>3GPP Rel-17 NR-NTN RRC assistance information for ns-3.43: SIB19 ephemeris broadcast, timing advance, RAR-window sizing, pass-aware DRX, UE location reporting, and the TS 38.331 MeasurementReport message.</strong></p>
+<p align="center"><strong>NR-NTN control plane: SIB19 ephemeris that reaches the scheduler, payload-aware timing advance, and DRX that gates a real flow</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0--only-green.svg"/></a>
-  <img src="https://img.shields.io/badge/3GPP-TS%2038.213%20%2F%20TS%2038.331%20%2F%20TS%2038.321-orange.svg"/>
-  <img src="https://img.shields.io/badge/unit_tests-suite%20ntn--rrc-success.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/3GPP-TS%2038.331%20SIB19-orange.svg" alt="3GPP TS 38.331 SIB19"/>
+  <img src="https://img.shields.io/badge/timing-K__offset%20%C2%B7%20TA%20%C2%B7%20DRX-purple.svg" alt="K_offset timing advance DRX"/>
+  <img src="https://img.shields.io/badge/examples-5-informational.svg" alt="5 examples"/>
 </p>
 
-> **What this module is, precisely.** It supplies the NTN *assistance data* an NR-NTN cell
-> needs — ephemeris, timing advance, RAR-window sizing, DRX configuration, GNSS location
-> reporting — plus the TS 38.331 `MeasurementReport` message with TS 38.133 quantization. It is
-> **not** an RRC state machine: there is no `RRCSetup`, `RRCReconfiguration` or
-> `RRCReestablishment` here, and the vendored stacks run `UseIdealRrc=true`. The tagline used to
-> say "RRC procedures", which oversold it. The event machinery that decides *when* to report
-> (A3 offset, hysteresis, time-to-trigger, Rel-18 D2) lives in `ntn-cho`'s `NtnChoAlgorithm` and
-> is deliberately not duplicated here.
->
-> Until v2.5.0 the examples printed a line and incremented a counter when a measured SINR crossed
-> a threshold, and called it an RRC measurement report. It had no `measId`, no quantization and no
-> recipient. They now build a real `NtnMeasurementReport`, quantize to the TS 38.133 reporting
-> levels, and serialise and parse it through `NtnMeasReportCodec` before counting it — so what the
-> summary reports is a message that survived a wire round trip. Optional quantities that were
-> never measured are reported **absent** rather than as level 0, which would show the bottom of
-> the reporting range as a measurement.
-
-> Part of **ns3-ntn-toolkit** — see the [toolkit repository](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) for the full build, dependency, and module map, and [INSTALL.md](INSTALL.md) for this module's setup.
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-rrc/">Docs</a>
+</p>
 
 ---
+
+NR over a satellite works because three timing mechanisms absorb a round trip the terrestrial standard never anticipated: a broadcast K_offset that shifts the uplink grant, a timing advance that pre-compensates propagation, and a validity duration after which the terminal must resynchronize. Each is only useful if something downstream consumes it.
+
+This module makes them consume. The SIB19 broadcaster fires a sink on every refresh and the scheduler prefers the broadcast `cellSpecificKoffset` over any value it could re-derive, reprogramming its N2 delay live. Timing advance differs between transparent and regenerative payloads because the feeder leg is in the geometry: in the shipped test geometry the transparent case is 8.0 ms longer, which is exactly twice 1200 km over c. DRX gates a real flow rather than scaling a measured goodput afterwards.
+
+If that sounds like a low bar, it is worth saying that each of those three was a decision island before: computed, logged, and never read.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run ntn-rrc-real-stack
+./ns3 run ntn-rrc-leo-pass
+./ns3 run ntn-rrc-drx-data-traffic
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b ntn-rrc-v2 https://github.com/Muhammaduazir69/ntn-rrc.git contrib/ntn-rrc
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Overview
 
@@ -41,7 +61,7 @@ LEO non-terrestrial networks introduce one-way delays and Doppler trajectories t
 - **Pass-aware DRX** — NR connected-mode DRX state machine (`Active / OnDuration / ShortSleep / LongSleep`) extended with an NTN `AwaitingPass` deep-sleep state between visibility windows (TS 38.321 + TR 38.821 §6.3.4).
 - **UE location report** — GNSS-assisted reporting in periodic / event-triggered / on-demand modes, with closed-form ECEF↔WGS-84 conversion (TS 38.331 §5.7.4).
 
-## What's new
+## What changed in v2.5
 
 See [CHANGELOG.md](CHANGELOG.md) for this module's history.
 
@@ -171,12 +191,25 @@ The suite (`Type::UNIT`) covers the closed-form TA (transparent and regenerative
 
 For full setup notes (SNS3 / satellite-module dependency, the `ntn-traffic` / `ntn-cho` / `ntn-constellation` sibling modules used by the examples, toolkit layout) see [INSTALL.md](INSTALL.md).
 
-## License & author
+---
 
-GPL-2.0-only — see [LICENSE](LICENSE).
+## Standards implemented
 
-**Muhammad Uzair**, Independent Researcher.
+3GPP TS 38.331 (SIB19, cellSpecificKoffset, kmac, ul-SyncValidityDuration, epochTime, ephemeris broadcast), TS 38.213 section 4.2 (K_offset and timing advance), TS 38.211 section 4.1 (frame timing), TS 38.321 section 5.1.4 (random access and TA), TR 38.821 (transparent and regenerative payload timing budgets).
 
-## Scope & limitations (toolkit boundaries)
+## Keywords
 
-**A3** — the NTN DRX, Timing-Advance and SIB19 models are spec-faithful *oracles* not bound to the mmwave MAC/RRC: DRX does not gate PDCCH, TA does not set UL timing, and SIB19 is a TracedCallback (not a BCCH broadcast). `K_offset` is now *derived* from the common TA and populated into SIB19 (TS 38.213 §4.2), but consuming it in the scheduler's UL timing is the separate `ntn-traffic` `SetKOffsetConsumption()` hook — the mmwave MAC itself never reads it. See the toolkit-wide [`SCOPE_AND_LIMITATIONS.md`](../../SCOPE_AND_LIMITATIONS.md) for the authoritative statement of what is and is not modelled.
+NR-NTN RRC, SIB19, ephemeris broadcast, cellSpecificKoffset, K_offset, timing advance, TA, uplink synchronization, ul-SyncValidityDuration, DRX, discontinuous reception, transparent payload, regenerative payload, feeder link, service link, round-trip time compensation, satellite 5G, non-terrestrial network, ns-3.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

@@ -1,5 +1,22 @@
 # Install & run — ntn-traffic
 
+<p align="center">
+  <a href="README.md">Module README</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
+</p>
+
+> **The fastest path is the container.** `docker pull uzairdocker69/ns3-ntn-toolkit:latest`
+> ships this module already built alongside the other thirteen and the vendored
+> stacks, so nothing below is needed to simply run the examples. Build from source
+> when you intend to change the module.
+
+---
+
 `ntn-traffic` is an ns-3.43 contributed module — the traffic and measurement
 backbone of the toolkit. It provides **`NtnRealStackHelper`** (a real mmwave NR
 NTN cell: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC under SGP4 satellite
@@ -86,7 +103,7 @@ cd ns3-ntn-toolkit
 
 GitLab mirror: `https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit`.
 Or skip the build entirely with the prebuilt image
-`uzairdocker69/ns3-ntn-toolkit:2.2.1` (or `:latest`).
+`uzairdocker69/ns3-ntn-toolkit:latest`.
 
 ---
 

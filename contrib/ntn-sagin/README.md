@@ -1,20 +1,54 @@
-# ntn-sagin
+<h1 align="center">ntn-sagin</h1>
 
-> Space-Air-Ground Integrated Network for ns-3.43 — LEO space layer, an air layer of aircraft / HAPS / UAV swarms, and a ground layer of maritime, high-speed-train and ADS-B terminals, stitched together by a multi-layer / slice-aware router and carried over a real mmwave NR NTN cell. Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
+<p align="center"><strong>Space-air-ground integrated networking: ground, UAV, HAPS and LEO layers with a router that has to choose between them</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/3GPP-TR%2036.777%20v15.0.0-orange.svg"/>
-  <img src="https://img.shields.io/badge/scenarios-UMa--AV%20%E2%80%A2%20RMa--AV%20%E2%80%A2%20UMi--AV-purple.svg"/>
-  <img src="https://img.shields.io/badge/unit_tests-ntn--sagin-success.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/layers-ground%20%C2%B7%20UAV%20%C2%B7%20HAPS%20%C2%B7%20LEO-purple.svg" alt="four layers"/>
+  <img src="https://img.shields.io/badge/3GPP-TR%2036.777%20A2G-orange.svg" alt="3GPP TR 36.777 air-to-ground"/>
+  <img src="https://img.shields.io/badge/examples-13-informational.svg" alt="13 examples"/>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-sagin/">Docs</a>
 </p>
 
 ---
 
-<p align="center">
-  <img src="docs/ntn_sagin_demo.gif" alt="module live demo" width="900"/>
-</p>
+A space-air-ground integrated network is interesting exactly where the layers disagree: a UAV relay that is closer but capacity-limited, a HAPS that is stable but few, a LEO that is fast but leaving. This module gives each layer a real channel and makes the router pick between them from a pool rather than from a fixed index.
+
+The air-to-ground channel is TR 36.777, and it carries its own boundary: the recommendation is validated to 300 m of aerial height, so calls above that are recorded and reportable rather than silently extrapolated into a number that looks like the others. The chained excess-over-free-space loss is signed, which sounds pedantic until you notice that clamping it at zero turns the model into plain Friis at short line-of-sight range and rectifies the shadow-fading distribution, removing about 35 percent of draws at 1 km.
+
+Also here: store-and-forward across contact gaps, maritime AIS and aviation ADS-B mobility, and high-speed-train trajectories.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run sagin-a2g-real-stack
+./ns3 run sagin-uav-swarm
+./ns3 run sagin-flight-leo-e2
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b ntn-sagin-v2 https://github.com/Muhammaduazir69/ntn-sagin.git contrib/ntn-sagin
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Overview
 
@@ -47,7 +81,7 @@ ground UE  ──►  UAV-relay  ──►  HAPS (20 km)  ──►  LEO (550 km
   `NtnOranPayloadHeader` lets the `NtnOranSink` measure one-way delay, jitter, loss and goodput
   per flow — no closed-form KPI formulas, no `OnOffApplication`.
 
-## What's new (June 2026)
+## What changed in v2.5
 
 See the [CHANGELOG](CHANGELOG.md) for the full history.
 
@@ -93,7 +127,7 @@ Derived from `model/*.h` and `helper/*.h`.
 | `SaginSliceRouter` | `sagin-slice-router.h` | 5G QFI → S-NSSAI → `SliceProfile` mapping; computes a layer/hop choice (returns a `SaginHop` vector; installs no forwarding table) biased by latency budget + GEO allowance |
 | `SaginHelper` | `sagin-helper.h` | Factory façade: builds a ready-to-route 4-layer scene in one call |
 
-> ## Store-and-forward across contact gaps (audit SAGIN-2)
+> ## Store-and-forward across contact gaps 
 >
 > `SaginCustodyQueue` (`model/sagin-custody-queue.h`) holds traffic while the next hop is out
 > of contact and drains it, in arrival order, when the contact opens. Before it, a grep for
@@ -111,7 +145,7 @@ Derived from `model/*.h` and `helper/*.h`.
 > **Scope:** this is a custody queue, not a DTN stack. No RFC 5050 bundle format, no custody
 > signalling, no fragmentation, and it does not claim them.
 
-> ## Regenerative payload: routing label only (audit SAGIN-3)
+> ## Regenerative payload: routing label only 
 >
 > `RegenMode{bent_pipe, regen_du, regen_cu, regen_full}` in `contact-graph-router.h` is used
 > **purely as a transit filter** in `ShortestPath`. A repo-wide grep for `SetRegenMode`,
@@ -190,7 +224,7 @@ path every second and logs per-hop elevation/range, while the access hop (ground
 is a real mmwave NR cell carrying the TR 36.777 A2G channel — access SINR/TBLER/throughput are
 measured off the PHY trace.
 
-> **The route is a geometry trace, not an actuated path (audit SAGIN-6).** `Route()` is called
+> **The route is a geometry trace, not an actuated path .** `Route()` is called
 > every second and its result goes to the CSV and nowhere else. The real stack is a single
 > UAV-to-ground access cell whose behaviour does not depend on which relay layer was chosen, so
 > the route columns cannot be cross-checked against delivered traffic and no measured KPI here
@@ -402,21 +436,25 @@ output path; empty = off), `--czml` (Cesium CZML 3D output path; empty = off).
 
 For module setup (dependencies, enabling modules, environment), see [INSTALL.md](INSTALL.md). For the full toolkit, see [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
 
-## License & author
+---
 
-GPL-2.0-only — see [LICENSE](LICENSE).
+## Standards implemented
 
-**Muhammad Uzair**, Independent Researcher.
+3GPP TR 36.777 (unmanned aerial vehicle propagation, UMa-AV and RMa-AV line-of-sight probability and shadow fading, validated to 300 m), TR 38.811 and TR 38.821 (NTN layers and geometry), TS 28.552 (measurements exported to E2SM-KPM). ITU-R P.681-11 for the land mobile satellite channel.
 
-```bibtex
-@misc{uzair2026ntnsagin,
-  author = {Uzair, Muhammad},
-  title  = {ntn-sagin: Space-Air-Ground Integrated Network for 6G NTN Simulation},
-  year   = {2026},
-  url    = {https://github.com/Muhammaduazir69/ntn-sagin}
-}
-```
+## Keywords
 
-## Acknowledgements
+space-air-ground integrated network, SAGIN, HAPS, high-altitude platform, UAV communication, drone network, air-to-ground channel, TR 36.777, multi-layer routing, layer selection, store-and-forward, delay-tolerant networking, contact gap, maritime AIS, aviation ADS-B, high-speed train, satellite backhaul, non-terrestrial network, ns-3.
 
-3GPP RAN1 (TR 36.777 work item) · ns-3 mobility module · OpenSky Network ADS-B · NIST NetSimulyzer for downstream visualisation.
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

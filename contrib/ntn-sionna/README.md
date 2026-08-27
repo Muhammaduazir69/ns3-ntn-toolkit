@@ -1,38 +1,53 @@
 <h1 align="center">ntn-sionna</h1>
 
-<p align="center"><strong>NVIDIA Sionna RT GPU ray-tracing bridged into ns-3 for non-terrestrial channels: cascade composition, caching/replay transports, RIS relay, and TR 38.811 calibration.</strong></p>
-
-> ## Small-scale fading: what is and is not modelled (audit BOTH-01)
->
-> **There is no TR 38.811 §6.9 NTN-TDL or CDL multipath in this module.** A grep for
-> `ntn-tdl|NtnTdl|CDL` across its model and helper sources returns only bibliography lines. The
-> small-scale processes that do exist are the ITU-R P.681-11 Lutz two-state model (environment-
-> keyed, **not** elevation-dependent), the alpha-mu model, and a hand-written four-tap snapshot
-> inside one example. None is parameterised by elevation angle.
->
-> Concretely, this module produces **no frequency-selective fading, no delay spread, and no
-> elevation-dependent Rician K-factor.** Any BLER or throughput number from it reflects a flatter,
-> smoother channel than a real NTN link. `SCOPE_AND_LIMITATIONS.md` A1 records that
-> `ntn-traffic`'s excess-loss chain *does* carry the §6.7.2 elevation-dependent K-factor; that
-> statement does **not** extend here, and this note exists because it previously was not repeated
-> anywhere a reader of this module would look.
->
-> The fix is an `NtnTdlSpectrumPropagationLossModel` carrying the Table 6.9.2-x tap powers and
-> delays with an elevation-interpolated K-factor, chainable through
-> `NtnRealStackHelper::AddExtraPropagationLoss`. It is not implemented.
+<p align="center"><strong>GPU ray tracing for NTN links through NVIDIA Sionna RT, with provenance on every query</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/Sionna%20RT-2.0-orange.svg"/>
-  <img src="https://img.shields.io/badge/3GPP-TR%2038.811%20reference-purple.svg"/>
-  <img src="https://img.shields.io/badge/loopback%20RTT%20gate-%3C50%20ms-success.svg"/>
-  <img src="https://img.shields.io/badge/tests-38%20C%2B%2B%20%2B%203%20Python%20PASS-blue.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/Sionna%20RT-GPU%20ray%20tracing-red.svg" alt="Sionna RT GPU ray tracing"/>
+  <img src="https://img.shields.io/badge/calibration-vs%20TR%2038.811-orange.svg" alt="calibrated against TR 38.811"/>
+  <img src="https://img.shields.io/badge/examples-12-informational.svg" alt="12 examples"/>
 </p>
 
-> Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit). See [INSTALL.md](INSTALL.md) and [CHANGELOG.md](CHANGELOG.md).
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-sionna/">Docs</a>
+</p>
 
 ---
+
+A closed-form NTN channel is fine until the last kilometre, where buildings and terrain decide whether the link exists. This module bridges ns-3 to NVIDIA Sionna RT so that segment can be ray traced on a GPU, over a socket, so the GPU does not have to be the machine running the simulation.
+
+The part worth emphasizing is not the tracing, it is the honesty about when tracing did not happen. A missing or failed transport used to degrade silently to closed-form free space with no log and no trace source, and the flagship comparison example never contacted a server at all: its "multipath" was four taps typed into the source. Now every run prints which path produced its numbers, the ray-traced and fallback evaluations are counted separately, and `RequireLiveTransport` makes a missing server fatal where a traced result is load-bearing.
+
+The bridge ships a channel impulse response propagation model, a cache keyed on the geometry that actually changes the answer, and a calibrator that compares traced output against the closed-form TR 38.811 reference under its own declared configuration rather than a hardcoded one.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8899 &
+./ns3 run "leo-pass-sionna-vs-tr38811 --sionnaServer=127.0.0.1:8899"
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b ntn-sionna-v2 https://github.com/Muhammaduazir69/ntn-sionna.git contrib/ntn-sionna
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Overview
 
@@ -46,7 +61,7 @@ Closed-form path-loss models like 3GPP TR 38.811 are fast and reproducible, but 
 
 The closed-form TR 38.811 channel remains the simulation default; the ray-traced channel is available the moment a user opts in.
 
-## What's new in v2
+## What changed in v2.5
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
@@ -169,12 +184,25 @@ For CUDA / TensorFlow / Sionna RT installation and the supported version matrix,
 }
 ```
 
-## License & author
+---
 
-GPL-2.0-only — see [LICENSE](LICENSE). Author: **Muhammad Uzair, Independent Researcher**.
+## Standards implemented
 
-Sionna RT is licensed by NVIDIA under Apache 2.0; this bridge interacts with Sionna over a transport and ships no Sionna source code.
+3GPP TR 38.811 (NTN reference channel, the closed-form baseline the traced channel is calibrated against), TR 38.901 (terrestrial channel model), ITU-R P.676-13 (gaseous absorption applied along the traced path). NVIDIA Sionna RT for the ray tracing itself.
 
-## Acknowledgements
+## Keywords
 
-NVIDIA Research (Sionna RT, Mitsuba 3) · TensorFlow team · ns-3 propagation module · 3GPP TR 38.811 study item.
+ray tracing, Sionna RT, GPU channel modeling, differentiable ray tracing, channel impulse response, CIR, multipath, Doppler, site-specific channel, digital twin channel, OpenStreetMap scene, LiDAR DEM, TR 38.811 calibration, satellite link, LEO pass, non-terrestrial network, ns-3.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

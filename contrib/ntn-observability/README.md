@@ -1,21 +1,53 @@
 <h1 align="center">ntn-observability</h1>
 
-<p align="center"><strong>InfluxDB Sinks, NetSimulyzer Exporter, Repro Manifests and Pre-Built Grafana Dashboards for 6G NTN Simulation</strong></p>
+<p align="center"><strong>One scene recorder feeding NetSimulyzer, Cesium, InfluxDB and Grafana, with topology and a real time anchor</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/InfluxDB-2.7-orange.svg"/>
-  <img src="https://img.shields.io/badge/Grafana-10.4-purple.svg"/>
-  <img src="https://img.shields.io/badge/dashboards-4-success.svg"/>
-  <img src="https://img.shields.io/badge/unit_tests-10%20PASS-blue.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/sinks-NetSimulyzer%20%C2%B7%20CZML%20%C2%B7%20InfluxDB-purple.svg" alt="NetSimulyzer CZML InfluxDB"/>
+  <img src="https://img.shields.io/badge/metrics-TS%2028.552%20names-orange.svg" alt="TS 28.552 measurement names"/>
+  <img src="https://img.shields.io/badge/examples-3-informational.svg" alt="3 examples"/>
 </p>
 
-> Structured run manifests plus KPI / observability sinks for reproducible NTN experiments: line-protocol into InfluxDB v2, a streaming NetSimulyzer JSON exporter, and pre-built Grafana dashboards.
->
-> Part of **ns3-ntn-toolkit** — [toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-observability/">Docs</a>
+</p>
 
 ---
+
+Visualizing an orbital simulation is mostly a question of what you refuse to draw. A globe that shows satellites moving is easy; a globe that shows which satellite is actually serving which terminal, at a time that maps back to simulation time, is the one that can catch a bug.
+
+This module records the scene once and exports it four ways: NetSimulyzer JSON, CZML for a Cesium globe, InfluxDB line protocol, and CSV under TS 28.552 measurement names. Links travel with positions, so serving, feeder and inter-satellite edges appear rather than being inferred client-side. The time axis is anchored to a documented scene epoch instead of collapsing onto ingest time, and the sink reports which anchor it used.
+
+User-controlled labels are escaped on the way out, because a node name with a quote in it should not be able to corrupt a line-protocol stream. `tools/check_dashboard_producers.py` walks every shipped Grafana panel back through the metric schema to the code that emits it, and fails when a panel queries something nothing produces.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run ntn-observability-traffic
+./ns3 run ntn-observability-demo
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b ntn-observability-v2 https://github.com/Muhammaduazir69/ntn-observability.git contrib/ntn-observability
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Overview
 
@@ -34,7 +66,7 @@ ns-3 traces  ─┐
                     (JSON 1.0 schema)
 ```
 
-## What's new in v2
+## What changed in v2.5
 
 See the [CHANGELOG](CHANGELOG.md) for the full history.
 
@@ -133,17 +165,25 @@ Open Grafana at http://localhost:3000 (admin / admin) — the 4 NTN dashboards (
 
 See [INSTALL.md](INSTALL.md) for setup, dependencies and the Telegraf sidecar configuration that rewrites simulation-time stamps to ingest time. For the full toolkit, see [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
 
-## License & author
+---
 
-GPL-2.0-only — see [LICENSE](LICENSE).
+## Standards implemented
 
-Muhammad Uzair, Independent Researcher.
+3GPP TS 28.552 (5G performance measurements, the naming used for every exported series), TS 32.425. O-RAN E2SM-KPM measurement identities. CZML for time-dynamic geospatial scenes, InfluxDB line protocol, NetSimulyzer scene JSON.
 
-```bibtex
-@misc{uzair2026ntnobservability,
-  author = {Uzair, Muhammad},
-  title  = {ntn-observability: InfluxDB / Grafana / NetSimulyzer Pipeline for 6G NTN Simulation},
-  year   = {2026},
-  url    = {https://github.com/Muhammaduazir69/ntn-observability}
-}
-```
+## Keywords
+
+network observability, simulation telemetry, NetSimulyzer, Cesium, CZML, InfluxDB, Grafana dashboard, time series, TS 28.552, E2SM-KPM, KPI export, scene recorder, 3D visualization, satellite ground track, link topology, provenance, reproducibility manifest, non-terrestrial network, ns-3.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

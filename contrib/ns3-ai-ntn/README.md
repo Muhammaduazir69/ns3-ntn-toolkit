@@ -1,20 +1,55 @@
 <h1 align="center">ns3-ai-ntn</h1>
 
-<p align="center"><strong>Modernised ns3-ai fork for ns-3.43 + Python 3.13 + NumPy 2 + Gymnasium 1.0, extended with NTN RL environments and an AI-RAN inference contract</strong></p>
+<p align="center"><strong>Gymnasium 1.0 environments for NTN radio resource management, over a versioned shared-memory bridge</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/python-3.10–3.13-purple.svg"/>
-  <img src="https://img.shields.io/badge/numpy-2.0%2B-orange.svg"/>
-  <img src="https://img.shields.io/badge/gymnasium-1.0%2B-success.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/RL-Gymnasium%201.0-yellow.svg" alt="Gymnasium 1.0"/>
+  <img src="https://img.shields.io/badge/envs-handover%20%C2%B7%20beam%20%C2%B7%20slice%20%C2%B7%20power-purple.svg" alt="four environments"/>
+  <img src="https://img.shields.io/badge/bridge-versioned%20schema-orange.svg" alt="versioned schema"/>
 </p>
 
 <p align="center">
-  <img src="docs/architecture.png" alt="ns3-ai architecture" width="900"/>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ns3-ai-ntn/">Docs</a>
 </p>
 
 ---
+
+Reinforcement learning against a network simulator fails in two characteristic ways, and this fork addresses both. The first is that the agent is never actually stepped: registering a Gymnasium interface and never calling `Notify()` gives you a training loop that runs, converges, and learned nothing, because there was no `Notify()` call site anywhere in the tree. The second is that the reward is computed from state the action has not reached yet, which inverts it. Measured on the original code, a 5 to 15 dB improvement earned -15 while a 15 to 5 dB degradation earned -5, so the agent was paid ten units more to make the link worse.
+
+Both are fixed, and the fix for the second is structural: the transition is latched inside `GetObservation` rather than left to a post-action hook nobody called.
+
+The C++ and Python sides share a protobuf schema across shared memory, which is a contract that used to be unchecked. The handshake now carries a protocol version, a module version and an FNV-1a schema digest, so a mismatch is reported instead of misread as data.
+
+The bundled trainers are single-agent PPO and SAC over N independent environment copies, not MAPPO or MASAC: there is no centralized critic and no joint observation, and the agents cannot see or affect each other.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/ && python3 a-plus-b.py
+./ns3 run "oran-ntn-gym-handover-example --gym=1"
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b fix/ns3-43-compatibility-and-critical-bugs https://github.com/Muhammaduazir69/ns3-ai.git contrib/ns3-ai-ntn
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Why this fork
 
@@ -166,10 +201,25 @@ Original work:
 | oran-ntn | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) |
 | thz-ntn | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) |
 
+---
+
+## Standards implemented
+
+Gymnasium 1.0 environment API. 3GPP TS 28.552 for the measurements the observation space is built from, TS 38.331 for the handover action space, TR 38.821 for the NTN geometry the environments run over. Note that 3GPP TR 38.843 AI/ML lifecycle management is not implemented.
+
+## Keywords
+
+reinforcement learning, deep reinforcement learning, Gymnasium, ns3-ai, ns3-gym, shared memory bridge, PPO, SAC, radio resource management, handover selection, beam management, slice admission, power control, reward shaping, AI-native RAN, machine learning for networks, satellite RRM, non-terrestrial network, ns-3.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
 ## License
 
-GPL-2.0-only — see [LICENSE](LICENSE).
-
-## Acknowledgements
-
-Original ns3-ai authors (HUST DiAn group) · pybind11 maintainers · Boost.Interprocess.
+GPL-2.0-only, matching ns-3.

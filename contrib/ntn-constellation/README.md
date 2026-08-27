@@ -1,41 +1,53 @@
-# ntn-constellation
+<h1 align="center">ntn-constellation</h1>
 
-> ## Which propagator a scenario actually runs (audit TWIN-01 / CVC-12)
->
-> `Sgp4MobilityModel` carries two propagators and the class name only describes one of them.
-> **Ask `IsUsingSgp4()`**, not the class name, and not `IsValladoReady()` — that reports whether
-> the SGP4 state is *initialised* and stays true after you opt out.
->
-> | How the orbit was supplied | Propagator | Why |
-> |---|---|---|
-> | `SetTle(...)` — a real two-line element set | **SGP4** (Vallado `sgp4unit`) | A TLE carries SGP4 mean elements plus a drag term; propagating it any other way discards them. |
-> | `SetElements(...)` — Keplerian elements, e.g. every `WalkerConstellation::BuildDelta` shell | **Kepler + J2 secular** | There is no TLE, so there is nothing for SGP4 to initialise from. Feeding synthetic Keplerian elements to an SGP4 propagator would misuse its mean-element convention. |
->
-> Until v2.5.0 `m_useVallado` defaulted to **false**, so even `SetTle()` ran Kepler + J2 unless the
-> caller separately called `SetUseVallado(true)` — and nothing in the tree did. That is fixed: a
-> TLE now gets SGP4.
->
-> **What has not changed, and matters for any write-up:** roughly 76 of the shipped example files
-> build their orbits from Walker shells via `SetElements`, and those correctly run **Kepler + J2**.
-> Only about 4 drive a real TLE. So a blanket "SGP4" claim covering all scenarios is not supported
-> — the accurate statement is *SGP4 for TLE-driven scenarios, Kepler with J2 secular rates for
-> Walker-defined shells*. Measured divergence between the two for the ISS TLE over 45 minutes:
-> **5.2 to 11.0 km**, about a second of along-track lag.
-
-> Walker constellation generation, orbital propagation, contact-graph scheduling/routing, and a TR 38.821 + Starlink calibration corpus for ns-3 6G NTN research. Part of **ns3-ntn-toolkit** — [README](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) / [INSTALL](INSTALL.md).
+<p align="center"><strong>LEO mega-constellations from TLEs or orbital elements, with contact-graph routing across inter-satellite links</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/C%2B%2B%20propagator-Kepler%20%2B%20secular%20J2-orange.svg"/>
-  <img src="https://img.shields.io/badge/Python-sgp4%20%2B%20Skyfield-orange.svg"/>
-  <img src="https://img.shields.io/badge/presets-Starlink%20%E2%80%A2%20OneWeb%20%E2%80%A2%20Kuiper%20%E2%80%A2%20Iridium-purple.svg"/>
-  <img src="https://img.shields.io/badge/exporters-SNS3%20%E2%80%A2%20CesiumJS-success.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/propagation-SGP4%20%C2%B7%20Walker--Delta-orange.svg" alt="SGP4 and Walker-Delta"/>
+  <img src="https://img.shields.io/badge/presets-Starlink%20%C2%B7%20OneWeb%20%C2%B7%20Iridium-purple.svg" alt="constellation presets"/>
+  <img src="https://img.shields.io/badge/examples-4-informational.svg" alt="4 examples"/>
 </p>
 
 <p align="center">
-  <img src="docs/ntn_constellation_demo.gif" alt="module live demo" width="900"/>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-constellation/">Docs</a>
 </p>
+
+---
+
+Everything above this module needs to know where the satellites are, and the answer has to be the same answer at every layer. `ntn-constellation` generates a shell from two-line elements or from orbital elements, propagates it, and hands one consistent ephemeris to the radio, the handover logic, the routing and the visualization.
+
+On top of the geometry sits the network view: a contact graph over inter-satellite links with limb-clearance so a link that would cut through the atmosphere is not offered, scheduling across contact windows, and shortest-path routing with a BFS cross-check so a route the scheduler likes can be compared against a route nobody optimized.
+
+The free-space link budget is calibrated against the TR 38.821 corpus rather than against itself, which is a distinction with a history: the calibration test used to compare the reference corpus against a synthetic offset of itself and never touched the toolkit at all.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run ntn-constellation-demo
+./ns3 run "ntn-constellation-walker --shell=starlink-550"
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b ntn-constellation-v2 https://github.com/Muhammaduazir69/ntn-constellation.git contrib/ntn-constellation
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Overview
 
@@ -85,7 +97,7 @@ tool-side Python package (`ntn_constellation`) is different: it uses the real
 TLEs, ephemerides, and export files offline. So "SGP4" claims below apply to the
 Python side; the C++ side is Kepler+J2 for now.
 
-## What's new
+## What changed in v2.5
 
 See [CHANGELOG.md](CHANGELOG.md) for this module's changelog.
 
@@ -324,25 +336,25 @@ the toolkit's standards-validation campaign (in `ntn-cho`'s test suite).
 For prerequisites and per-module setup, see [INSTALL.md](INSTALL.md). For the full
 toolkit build, see the [toolkit repository](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
 
-## License & author
+---
 
-GPL-2.0-only — see [LICENSE](LICENSE).
+## Standards implemented
 
-**Muhammad Uzair**, Independent Researcher.
+3GPP TR 38.821 (NTN reference constellations, Set-1 and Set-2 parameters, free-space link budget), TR 38.811 (NTN geometry and elevation dependence). SGP4 and SDP4 orbital propagation per the standard Vallado formulation, CCSDS-style contact graph routing concepts.
 
-```bibtex
-@misc{uzair2026ntnconstellation,
-  author = {Uzair, Muhammad},
-  title  = {ntn-constellation: Walker Constellation Generation, SGP4 Propagation,
-            Contact-Graph Scheduling/Routing and a TR 38.821 Calibration Corpus
-            for 6G NTN Research},
-  year   = {2026},
-  url    = {https://github.com/Muhammaduazir69/ntn-constellation}
-}
-```
+## Keywords
 
-## Acknowledgements
+LEO constellation, mega-constellation, Walker-Delta, Walker-Star, SGP4, two-line element, TLE, orbital propagation, ephemeris, inter-satellite link, ISL, contact graph routing, contact plan, satellite topology, Starlink, OneWeb, Iridium, CelesTrak, satellite visibility, elevation angle, slant range, non-terrestrial network, ns-3.
 
-Brandon Rhodes (`sgp4`, Skyfield) · CelesTrak (Dr. T. S. Kelso) · Space-Track / 18th
-Space Defense Squadron · CesiumJS · pytroll (`pyorbital`) · ns-3 core team · SNS3
-maintainers.
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

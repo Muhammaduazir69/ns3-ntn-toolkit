@@ -1,5 +1,22 @@
 # Installing ntn-digital-twin
 
+<p align="center">
+  <a href="README.md">Module README</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
+</p>
+
+> **The fastest path is the container.** `docker pull uzairdocker69/ns3-ntn-toolkit:latest`
+> ships this module already built alongside the other thirteen and the vendored
+> stacks, so nothing below is needed to simply run the examples. Build from source
+> when you intend to change the module.
+
+---
+
 `ntn-digital-twin` is a Python package: a refresher loop plus a FastAPI
 prediction service for live LEO constellations. It is one module of the
 [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) (ns-3.43,
@@ -27,9 +44,9 @@ cd ntn-digital-twin
 > GitLab mirror: the umbrella toolkit (with this module under `contrib/`) is
 > mirrored at
 > [gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit](https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit),
-> and shipped as the Docker image `uzairdocker69/ns3-ntn-toolkit:2.2.1`
+> and shipped as the Docker image `uzairdocker69/ns3-ntn-toolkit:latest`
 > (or `:latest`) with this package preinstalled:
-> `docker run -it uzairdocker69/ns3-ntn-toolkit:2.2.1`.
+> `docker run -it uzairdocker69/ns3-ntn-toolkit:latest`.
 
 ## Install
 

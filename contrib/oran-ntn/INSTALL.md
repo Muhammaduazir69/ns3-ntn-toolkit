@@ -1,5 +1,22 @@
 # Install & run — oran-ntn
 
+<p align="center">
+  <a href="README.md">Module README</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
+</p>
+
+> **The fastest path is the container.** `docker pull uzairdocker69/ns3-ntn-toolkit:latest`
+> ships this module already built alongside the other thirteen and the vendored
+> stacks, so nothing below is needed to simply run the examples. Build from source
+> when you intend to change the module.
+
+---
+
 `oran-ntn` is an ns-3.43 contributed module that brings the O-RAN
 disaggregated RAN control architecture to non-terrestrial networks: a
 multi-tier RIC (real-time / Near-RT / on-board **Space-RIC**), E2AP-style

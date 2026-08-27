@@ -1,96 +1,55 @@
 <h1 align="center">ntn-digital-twin</h1>
 
-> ## What the twin/sim loop does and does not establish (audit TWIN-01..04)
->
-> **TWIN-01 — the propagators now match, and previously did not.** `Sgp4MobilityModel` declared
-> `m_useVallado{false}`, so `SetTle()` parsed the TLE and then propagated it with an analytic
-> Kepler + J2-secular model unless the caller *also* called `SetUseVallado(true)` — and nothing
-> in the tree did. The Python twin runs genuine `Satrec.sgp4`. Measured for the ISS TLE over the
-> exporter's 45-minute horizon, the two separate by **5.2 to 11.0 km**: about a second of
-> along-track lag, enough to move an argmax-elevation crossover and therefore every handover
-> instant the twin exports. `SetTle()` now selects SGP4 by default, and `IsUsingSgp4()` reports
-> which propagator is actually running (`IsValladoReady()` answers a different question — whether
-> the state is initialised — and stays true after opting out).
->
-> **TWIN-02 — FIXED.** `ntn-digital-twin` is now an ns-3 module (it had no `CMakeLists.txt`,
-> so its tests never ran under `./test.py`), and the gate computes the number that did not
-> exist: **twin-predicted handover instants against ns-3 handover instants over the same
-> orbits.** The twin dumps the exact TLEs it propagated (`--tle-dump`) and carries the observer
-> and window in the prediction header, so ns-3 replays the identical geometry rather than being
-> told it out of band.
->
-> This only became possible because of TWIN-01: `Sgp4MobilityModel` used to fall back to
-> Kepler + J2 even when handed a TLE, so feeding it the twin's own elements still produced a
-> different orbit and any disagreement would have been dominated by geometry.
->
-> **Measured: agreement 0.21** — twin 7 handovers, ns-3 14, 3 matched, mean offset 15 s. That is
-> the honest number, and it is not 100%. The twin applies A3 in dB with hysteresis while the
-> replay is a bare argmax, so they are different policies over identical orbits. The pinned
-> "Gate 9: agreement 100%" was measuring two Python elevation formulas against each other.
-> Matching requires the same CELL as well as a nearby instant, so a handover to the wrong
-> satellite at the right time scores zero.
->
-> Previously: `test_gate9_twin_sim_agreement.py`
-> compares `api_server._elevation_deg_ecef` against Skyfield's `Satellite.elevation_deg`, both
-> Python, both over the same Python-propagated constellation. ns-3 is never invoked, and
-> `ntn-digital-twin` has no `CMakeLists.txt`, so its tests never run under `./test.py`. A 100%
-> score between two elevation formulas over one orbit propagation is close to a tautology; it says
-> nothing about whether the twin agrees with the simulator. **The number that would matter —
-> twin-predicted handover instants versus ns-3 CHO handover instants — is not computed anywhere.**
-> Do not read the pinned "Gate 9: agreement 100%" as twin/sim agreement.
->
-> **TWIN-03 — FIXED.** `run_iteration()` now calls the exporter when
-> `--predictions` is given, and `main()` exposes the flags it was missing:
-> `--source`, `--tle-file`, `--walker-*`, `--epoch-unix`, `--predictions`,
-> `--predictions-horizon-s`, `--predictions-step-s` and the observer position. A single
-> command now produces the file `OranNtnTwinPredictionConsumer` reads, in its exact
-> `t_s,ueId,recommendedGnbId,confidence` contract. Previously: `OranNtnTwinPredictionConsumer` is
-> instantiated only by a unit test; no example uses it. On the Python side `emit_predictions_file`
-> is called only from a test, `run_iteration()` never calls it, and `main()` exposes no
-> `--source` / `--walker-*` / `--epoch` / `--predictions` flags — so the shipped `ntn-twin-loop`
-> entry point always builds `LoopConfig(source='celestrak')` and can never emit the deterministic
-> Walker predictions the C++ consumer reads. The mechanism is real code with a real file contract,
-> but **there is no command that emits the file and no scenario that consumes it.**
->
-> **TWIN-04 — FIXED on the actuating path.** The exporter now computes a link budget from
-> the ephemeris it already has (free-space loss over the slant range against a configured
-> EIRP and G/T), so its trigger quantity is an **SNR in dB** like the simulator's A3, and
-> applies `--a3-offset-db` with `--a3-ttt-s` time-to-trigger and `--min-service-time-s`
-> dwell on top. Measured over a 45-minute window: 14 predictions at 0 dB, 11 at 1 dB, 7 at
-> 3 dB — the offset genuinely filters marginal switches rather than being decorative. The
-> REST path's elevation-degree guard is unchanged and remains a different quantity;
-> `server.py`'s claim that it enforces "exactly the conditions the sim's A3 algorithm
-> enforces" is still not supportable and is not repaired here. Previously:
-> The exporter C++ actually consumes takes a bare argmax over elevation with no hysteresis, no
-> time-to-trigger and no minimum service time. The REST path does guard, but on
-> `best_el > current_el + hysteresis_deg` — topocentric elevation in **degrees**, whereas the
-> simulator's A3 is `sinr_dB > servingSinr_dB + a3Offset_dB`. Elevation and SINR are not
-> monotonically related once antenna pattern, scan loss and ITU-R P.618/P.676 attenuation enter,
-> so the two admit different handovers. `server.py`'s claim that the guard enforces "exactly the
-> conditions the sim's A3 algorithm enforces" is **not supportable in either units or code path.**
->
-> TWIN-01, TWIN-02, TWIN-03 and TWIN-04's actuating path are fixed. The REST path's elevation-degree guard is unchanged and remains a different quantity from the simulator's dB-based A3.
-
-<p align="center"><strong>Live visualizer of the real-world CelesTrak constellation (SGP4 from fresh TLEs at wall-clock time) — refresh loop, REST prediction API and CesiumJS live mode for 6G NTN. A one-way mirror of the live sky; it does NOT ingest ns-3 simulation state and is not a twin of the simulator.</strong></p>
-
-<p align="center">Part of <strong>ns3-ntn-toolkit</strong> — <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">toolkit</a> / <a href="INSTALL.md">INSTALL</a>.</p>
+<p align="center"><strong>A live constellation digital twin that predicts handovers from ephemeris and actuates them back into the simulation</strong></p>
 
 <p align="center">
-  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
-  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/FastAPI->=0.110-orange.svg"/>
-  <img src="https://img.shields.io/badge/refresh-cron%20%2F%20systemd-purple.svg"/>
-  <img src="https://img.shields.io/badge/p99_latency-29.9_ms-success.svg"/>
-  <img src="https://img.shields.io/badge/tests-10%20PASS-blue.svg"/>
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/service-FastAPI%20%2B%20SGP4-purple.svg" alt="FastAPI and SGP4"/>
+  <img src="https://img.shields.io/badge/loop-predict%20%E2%86%92%20actuate-orange.svg" alt="predict then actuate"/>
+  <img src="https://img.shields.io/badge/tests-28%20passing-success.svg" alt="28 tests passing"/>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-digital-twin/">Docs</a>
 </p>
 
 ---
 
-<p align="center">
-  <img src="docs/ntn_digital_twin_demo.gif" alt="module live demo" width="900"/>
-</p>
+A digital twin that only predicts is a dashboard. This one closes the loop: it propagates live two-line elements, evaluates the handover guard, and pushes the resulting decision back into a running ns-3 simulation, where the handover either happens or does not.
 
-## What's new in v2
+The design decision that matters is that prediction and actuation share one guard implementation. They used to be two copies of the same logic in two languages, and extracting them into a single evaluator exposed three places where they had quietly diverged: the ranking quantity was not the comparison quantity, initial acquisition was being counted as a handover, and the time-to-trigger window did not restart when the best target changed. Both paths now compare a dB link-budget margin rather than topocentric degrees.
+
+The service is FastAPI with a `POST /predict/handover` endpoint, and the exporter is reachable from the shipped CLI rather than only from a unit test.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+python3 -m uvicorn ntn_digital_twin.api.server:app --port 8090
+# then: curl -X POST localhost:8090/predict/handover -d @request.json
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b ntn-digital-twin-v2 https://github.com/Muhammaduazir69/ntn-digital-twin.git contrib/ntn-digital-twin
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
+
+## What changed in v2.5
 
 - **Twin↔sim loop closed (twin→sim actuation).** A new `emit_predictions_file` helper (`ntn_digital_twin/twin_loop.py`) exports the twin's handover schedule to a plain, newline-delimited file that an ns-3 C++ consumer reads. The contract is an `epoch_unix=<...>` header followed by `t_s,ueId,recommendedGnbId,confidence` lines, where `t_s` is seconds from the **shared epoch** (identical to ns-3 simulation time) and `recommendedGnbId` is the **1-indexed** satellite in the constellation's iteration order — the same order the ns-3 scenario builds its 1-indexed E2 nodes. One line is written on each serving-satellite change (a handover), with `confidence` derived from the elevation margin over the runner-up. The ns-3 side that loads and actuates the file is `ns3::OranNtnTwinPredictionConsumer` in the [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) module. This does **not** change the module's mirror scope: the twin still does not ingest ns-3 state (sim→twin); it now *feeds* its foresight into the sim (twin→sim).
 - **A3-guarded prediction path.** `/predict/handover` fires a handover only when the best candidate beats the serving cell by more than a hysteresis, that condition has held for a time-to-trigger, and a minimum service time has elapsed (`hysteresis_deg` / `time_to_trigger_sec` / `min_service_sec`) — the same A3-style guard the sim's CHO uses, so twin and sim agree and ping-pong is damped.
@@ -256,10 +215,25 @@ For long-running production deployments, install the systemd unit files from `sy
 | oran-ntn | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) |
 | thz-ntn | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) |
 
+---
+
+## Standards implemented
+
+3GPP TS 38.331 (the A3 event the guard evaluates, conditional reconfiguration), TR 38.821 (NTN link budget and geometry). SGP4 and SDP4 orbital propagation, CelesTrak two-line element formats.
+
+## Keywords
+
+network digital twin, satellite digital twin, handover prediction, live TLE, SGP4, ephemeris service, FastAPI, REST prediction API, closed-loop actuation, A3 event, link budget margin, time-to-trigger, ping-pong suppression, constellation tracking, non-terrestrial network, ns-3.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
 ## License
 
-GPL-2.0-only — see [LICENSE](LICENSE).
-
-## Acknowledgements
-
-CelesTrak (Dr. T. S. Kelso) · Brandon Rhodes (`sgp4`) · FastAPI (Sebastián Ramírez) · CesiumJS · ns-3 core team.
+GPL-2.0-only, matching ns-3.

@@ -1,15 +1,53 @@
-# ntn-cho
+<h1 align="center">ntn-cho</h1>
 
-> Time-to-Exit (TTE)-aware 3GPP Rel-17 Conditional Handover for LEO satellite NTN, in ns-3.43.
+<p align="center"><strong>Conditional handover for LEO: time-to-exit estimation and the full standardized NTN trigger set</strong></p>
 
-- ns-3 version: `release ns-3.43`
-- Version: `1.0.0`
-- License: GPL-2.0-only
-- Maintainer: Muhammad Uzair, Independent Researcher (ORCID 0009-0002-4104-2680)
+<p align="center">
+  <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
+  <img src="https://img.shields.io/badge/3GPP-TS%2038.331%20CondEvent-orange.svg" alt="3GPP TS 38.331 CondEvent"/>
+  <img src="https://img.shields.io/badge/triggers-A3%20%C2%B7%20D1%20%C2%B7%20D2%20%C2%B7%20T1%20%C2%B7%20elev%20%C2%B7%20TA-purple.svg" alt="six trigger classes"/>
+  <img src="https://img.shields.io/badge/examples-5-informational.svg" alt="5 examples"/>
+</p>
 
-See [INSTALL.md](INSTALL.md) for setup and the dependency list. This module
-is also distributed as part of the
-[ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
+<p align="center">
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-cho/">Docs</a>
+</p>
+
+---
+
+A LEO satellite is a cell that leaves. Terrestrial handover logic asks which neighbour looks best right now, which in orbit is a question that answers itself wrongly: the best-looking neighbour is often the one about to set. This module estimates **time to exit**, how long a candidate will still be serviceable, from real orbit propagation, and conditions the handover decision on it.
+
+The payoff is measurable and it is not subtle. Over ten seeds on a 780 km shell, a TTE-aware policy reaches 83.14% handover success on 134.6 handovers per run with no ping-pong at all, against an A3 RSRP baseline that spends 463.3 handovers to reach 69.16% with a 50.23% ping-pong rate. A location-based policy scores higher on raw success, 98.69%, and pays 57.07% ping-pong for it.
+
+The standardized trigger set is implemented rather than approximated: TS 38.331 CondEvent A3, D1 on a fixed reference location, T1 on its absolute broadcast epoch, and Rel-18 D2 on a moving ephemeris reference, plus the elevation and timing-advance mechanisms TR 38.821 studies. A trigger that fires moves a terminal onto a real cell whose SINR is then measured.
+
+## Quick start
+
+Inside the toolkit, where the module is already present and built:
+
+```bash
+./ns3 run "ntn-cho-real-stack --trigger=d2 --duration=60"
+./ns3 run "ntn-cho-full-constellation --algorithm=tte-aware --simTime=600"
+```
+
+Standalone, into an existing ns-3.43 tree:
+
+```bash
+git clone -b main https://github.com/Muhammaduazir69/ntn-cho-framework.git contrib/ntn-cho
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`INSTALL.md` in this directory carries the full dependency list. Most examples in
+this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
+toolkit tree is the path of least resistance.
 
 ## Dependencies
 
@@ -33,7 +71,7 @@ is also distributed as part of the
 
 *Honest scope of the signaling layer:* the module models CHO at the **decision/timing** level. The radio underneath runs the mmwave **ideal RRC** (`UseIdealRrc=true`, bearers set up synchronously) with **no** over-the-air conditional-reconfiguration PDU exchanged, and the RACH is **latency accounting** — the handover interruption is priced as `slant-RTT + processing` (`2·d/c` pre-compensation when RACH-less), **not** a real PRACH / Msg1–4 procedure. The trigger classes and counters (`GetMechanismStats()`) are exact and measured; the lower-layer handover *protocol* is abstracted. The core network is the LTE **EPC** (MME/SGW/PGW, S1-AP, real GTP-U), not a 5GC.
 
-## What's new
+## What changed in v2.5
 
 See the [CHANGELOG](CHANGELOG.md).
 
@@ -187,8 +225,25 @@ See [INSTALL.md](INSTALL.md) for full setup.
 }
 ```
 
-## License & author
+---
 
-GPL-2.0-only. See `LICENSE`.
+## Standards implemented
 
-Author: Muhammad Uzair, Independent Researcher (ORCID 0009-0002-4104-2680).
+3GPP TS 38.331 (conditional reconfiguration, CondEvent A3, A4, D1, D2, T1, SIB19), TS 38.300 (handover procedure), TS 38.133 (measurement reporting), TS 38.321 (random access), TR 38.821 (NTN mobility, handover interruption budget, Set-1 reference parameters), TS 38.423 (Xn handover preparation).
+
+## Keywords
+
+conditional handover, CHO, LEO satellite handover, time-to-exit, TTE, NTN mobility management, CondEventD2, CondEventT1, CondEventA3, moving reference location, ephemeris trigger, SGP4, orbit propagation, ping-pong handover, handover interruption time, RACH-less handover, Rel-17 NTN, Rel-18 NTN, ns-3, satellite communications.
+
+## Author
+
+**Muhammad Uzair**, Independent Researcher
+[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
+Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+
+## License
+
+GPL-2.0-only, matching ns-3.

@@ -1,5 +1,22 @@
 # Install & run — ntn-observability
 
+<p align="center">
+  <a href="README.md">Module README</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
+</p>
+
+> **The fastest path is the container.** `docker pull uzairdocker69/ns3-ntn-toolkit:latest`
+> ships this module already built alongside the other thirteen and the vendored
+> stacks, so nothing below is needed to simply run the examples. Build from source
+> when you intend to change the module.
+
+---
+
 `ntn-observability` is an ns-3.43 contributed module: InfluxDB sinks, a
 NetSimulyzer JSON exporter, reproducibility manifests, and pre-built Grafana
 dashboards. The recommended way to run it is inside the
@@ -76,7 +93,7 @@ git clone -b ntn-integration-v2 \
 # GitLab mirror: https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit
 ```
 
-Docker image (everything pre-built): `uzairdocker69/ns3-ntn-toolkit:2.2.1`
+Docker image (everything pre-built): `uzairdocker69/ns3-ntn-toolkit:latest`
 (or `:latest`).
 
 ### Standalone repo

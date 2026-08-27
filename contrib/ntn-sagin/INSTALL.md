@@ -1,5 +1,22 @@
 # Install & run — ntn-sagin
 
+<p align="center">
+  <a href="README.md">Module README</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/ntn-integration-v2/INSTALL.md">Toolkit install guide</a>
+  &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Docs site</a>
+</p>
+
+> **The fastest path is the container.** `docker pull uzairdocker69/ns3-ntn-toolkit:latest`
+> ships this module already built alongside the other thirteen and the vendored
+> stacks, so nothing below is needed to simply run the examples. Build from source
+> when you intend to change the module.
+
+---
+
 `ntn-sagin` is an ns-3.43 contributed module. The recommended way to run it is
 inside the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit)
 tree (branch `ntn-integration-v2`), where every dependency below is already
@@ -76,7 +93,7 @@ git clone -b ntn-integration-v2 https://github.com/Muhammaduazir69/ns3-ntn-toolk
 ```
 
 GitLab mirror: `https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit`.
-Docker: `uzairdocker69/ns3-ntn-toolkit:2.2.1` (or `:latest`).
+Docker: `uzairdocker69/ns3-ntn-toolkit:latest`.
 
 ### Standalone repo (into a vanilla ns-3.43 tree)
 
