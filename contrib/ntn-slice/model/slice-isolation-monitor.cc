@@ -58,6 +58,15 @@ SliceIsolationMonitor::RecordPacket(const Snssai& s, double latencyMs, bool deli
     PerSlice& ps = it->second;
     ps.latencyMsWindow.push_back(latencyMs);
     ps.deliveredWindow.push_back(delivered);
+    // SLICE-2: count every sample, not just the last m_window of them.
+    if (delivered)
+    {
+        ++ps.totalDelivered;
+    }
+    else
+    {
+        ++ps.totalLost;
+    }
     while (ps.latencyMsWindow.size() > m_window)
     {
         ps.latencyMsWindow.pop_front();
@@ -86,7 +95,14 @@ SliceIsolationMonitor::EvaluateSlice(const PerSlice& ps) const
         ev.observedLatencyP99Ms = lat[idx];
     }
     // loss rate
-    if (!ps.deliveredWindow.empty())
+    // SLICE-2: the loss rate is now cumulative. See the comment on
+    // totalDelivered: the windowed version reported insertion order, not loss.
+    const uint64_t seen = ps.totalDelivered + ps.totalLost;
+    if (seen > 0)
+    {
+        ev.observedLossRate = static_cast<double>(ps.totalLost) / static_cast<double>(seen);
+    }
+    else if (!ps.deliveredWindow.empty())
     {
         std::size_t lost = 0;
         for (bool d : ps.deliveredWindow)

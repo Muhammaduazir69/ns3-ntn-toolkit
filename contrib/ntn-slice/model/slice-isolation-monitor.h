@@ -73,6 +73,22 @@ class SliceIsolationMonitor : public Object
         SliceProfile profile;
         std::deque<double> latencyMsWindow;
         std::deque<bool> deliveredWindow;
+        /// SLICE-2: cumulative delivery counts.
+        ///
+        /// observedLossRate used to be computed over deliveredWindow, a 200-
+        /// sample FIFO that pops from the front. Both real-stack examples record
+        /// every DELIVERED packet first and every LOST packet afterwards, so on
+        /// any run with more than 200 deliveries the window held only the tail
+        /// of the input: with 200 or more losses it was 100 percent losses
+        /// whatever the true rate, and with fewer it read lost/200, a number set
+        /// by the window size rather than by the traffic. The reported loss rate
+        /// was an artifact of insertion order.
+        ///
+        /// A delivery ratio is a ratio over everything that was sent; only the
+        /// latency percentiles have a reason to be windowed, and those keep
+        /// their window.
+        uint64_t totalDelivered{0};
+        uint64_t totalLost{0};
     };
 
     BreachEvent EvaluateSlice(const PerSlice& ps) const;

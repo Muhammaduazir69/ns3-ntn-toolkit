@@ -57,6 +57,13 @@
 using namespace ns3;
 using namespace ns3::ntnslice;
 
+namespace
+{
+/// WF-04: set when any slice had no measured OWD samples and fell back to
+/// the closed form, so the summary can say the KPI is not fully measured.
+bool g_usedClosedFormLatency = false;
+} // namespace
+
 int
 main(int argc, char* argv[])
 {
@@ -127,8 +134,21 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-three-slice-leo-geo");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.SetBackhaulDelay(MilliSeconds(backhaulMs));
+    // SLICE-3. This example is named for its three slices and never created
+    // any: SetSlices() was missing, so nBwp collapsed to 1 and all three
+    // "slices" contended on one bandwidth part. Every per-slice KPI it reported
+    // was therefore a measurement of unsliced contention, and the isolation the
+    // example exists to show could not occur.
+    //
+    // The two sibling slice examples both call this; only this one did not. The
+    // 5QI values match theirs (eMBB 2, URLLC 82, mMTC 9, TS 23.501) so the three
+    // examples describe the same slice set.
+    rs.SetSlices({{"eMBB", 2}, {"URLLC", 82}, {"mMTC", 9}});
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
@@ -263,12 +283,67 @@ main(int argc, char* argv[])
             ntngeo::SlantRangeM(uePos, geoEcef) / 299792458.0 * 1e3 + backhaulMs;
         const double latencyMs = servedByGeo ? geoLatMs : leoLatMs;
 
-        // GAP M5 FIX: MEASURED delivered-packet COUNT off the in-band sink, not
-        // rxBytes/1400 (wrong for 128 B mMTC / 256 B URLLC).
+        // WF-04: replay the MEASURED one-way-delay distribution.
+        //
+        // The packet COUNT was already measured (GAP M5) and the losses too
+        // (GAP L3), but every one of those packets was then stamped with a
+        // single closed-form latencyMs - slant/c plus a backhaul constant. A
+        // p99 over N copies of one number is that number, so the URLLC
+        // percentile SLA could not be breached by a tail, only by the mean, and
+        // the KPI carried no queueing, scheduling or HARQ delay at all.
+        //
+        // GetSliceDelayHistogram() returns the pooled measured OWD for the
+        // slice's 5QI in 1 ms bins - it exists for exactly this and was not
+        // being called. The bins are replayed proportionally to this UE's
+        // delivered count so the per-UE weighting is preserved.
+        //
+        // The GEO leg stays modelled, and is labelled: the GEO "satellite" here
+        // is a static ECEF Vector, not a second gNB, so no packet ever flew that
+        // path and there is nothing measured to replay. What is added is the
+        // EXTRA propagation a GEO hop would cost over the LEO one - measured
+        // radio plus modelled geometry, rather than geometry alone.
+        const double geoExtraMs = servedByGeo ? (geoLatMs - leoLatMs) : 0.0;
+
         const uint64_t deliveredPkts = rs.GetUeRxPackets(ue);
-        for (uint64_t p = 0; p < deliveredPkts; ++p)
+        const auto hist = rs.GetSliceDelayHistogram(prof.snssai.sst == SliceSst::Urllc ? 82
+                                                    : (prof.snssai.sst == SliceSst::Embb ? 2 : 9));
+        uint64_t histTotal = 0;
+        for (const auto& [bin, count] : hist)
         {
-            stack.monitor->RecordPacket(s, latencyMs, true);
+            histTotal += count;
+        }
+        if (histTotal > 0)
+        {
+            uint64_t emitted = 0;
+            for (const auto& [bin, count] : hist)
+            {
+                // Proportional share of this UE's delivered packets.
+                uint64_t share = static_cast<uint64_t>(
+                    (static_cast<double>(count) / static_cast<double>(histTotal)) *
+                    static_cast<double>(deliveredPkts));
+                for (uint64_t p = 0; p < share; ++p)
+                {
+                    stack.monitor->RecordPacket(s, static_cast<double>(bin) + geoExtraMs, true);
+                    ++emitted;
+                }
+            }
+            // Rounding remainder goes to the modal bin so the delivered count
+            // is preserved exactly.
+            for (uint64_t p = emitted; p < deliveredPkts; ++p)
+            {
+                stack.monitor->RecordPacket(s, static_cast<double>(hist.front().first) + geoExtraMs,
+                                            true);
+            }
+        }
+        else
+        {
+            // No measured samples for this 5QI. Fall back to the closed form
+            // and SAY SO, rather than presenting geometry as a measurement.
+            g_usedClosedFormLatency = true;
+            for (uint64_t p = 0; p < deliveredPkts; ++p)
+            {
+                stack.monitor->RecordPacket(s, latencyMs, true);
+            }
         }
 
         // GAP L3 FIX: MEASURED sequence-gap losses, so reliabilityBreach comes
@@ -303,10 +378,19 @@ main(int argc, char* argv[])
               << "  measured LEO SINR  : " << rs.GetMeanDlSinrDb() << " dB\n"
               << "  measured LEO TBLER : " << rs.GetMeanDlTbler() << "\n"
               << "  urllcViaGeo=" << (routeUrllcViaGeo ? "true" : "false")
-              << "  max URLLC p99 latency: " << maxUrllcP99 << " ms (real geometry)\n"
+              << "  max URLLC p99 latency: " << maxUrllcP99 << (routeUrllcViaGeo
+                      ? " ms (MEASURED OWD distribution + modelled GEO propagation delta; the "
+                        "GEO 'satellite' is a static ECEF point, not a second gNB, so no packet "
+                        "flew that path)\n"
+                      : " ms (MEASURED one-way-delay distribution)\n")
               << "  latency breaches=" << totalLatencyBreach
               << "  reliability breaches=" << totalReliabilityBreach << "\n"
               << "  csv: " << csvPath << "\n";
+    if (g_usedClosedFormLatency)
+    {
+        std::cout << "  NOTE: at least one slice had no measured OWD samples and fell back to "
+                     "the closed form; its latency KPI is geometry, not a measurement\n";
+    }
     Simulator::Destroy();
     return 0;
 }

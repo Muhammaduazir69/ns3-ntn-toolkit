@@ -111,7 +111,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-slice-real-stack");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.SetBackhaulDelay(MilliSeconds(backhaulMs));
     // ---- GAP L1 FIX: request REAL per-slice BWP isolation --------------------
     // Previously this example never called SetSlices(), so all three "slices"
@@ -182,10 +185,27 @@ main(int argc, char* argv[])
         const double bwpSinr = rs.GetBwpMeanSinrDb(sliceBwp[s]);
         sliceSinrDb[s] = std::isnan(bwpSinr) ? 0.0 : bwpSinr;
 
-        // Delivered packets: real count, each with the slice's MEASURED mean OWD.
-        for (uint64_t p = 0; p < st.rxPackets; ++p)
+        // SLICE-1 FIX (2026-08-24): replay the MEASURED delay DISTRIBUTION, not
+        // the mean. Every delivered packet used to be stamped with st.meanOwdMs,
+        // so the monitor's p99 was the p99 of a constant and a percentile SLA
+        // could never breach however bad the tail was. The sink now retains a
+        // 1 ms-resolution histogram, so the samples fed here reproduce the real
+        // shape, quantized to the bin width.
         {
-            monitor.RecordPacket(profiles[s].snssai, st.meanOwdMs, /*delivered=*/true);
+            uint64_t replayed = 0;
+            for (const auto& [binMs, count] : rs.GetSliceDelayHistogram(sliceFiveQi[s]))
+            {
+                for (uint64_t k = 0; k < count; ++k)
+                {
+                    monitor.RecordPacket(profiles[s].snssai, binMs + 0.5, /*delivered=*/true);
+                    ++replayed;
+                }
+            }
+            // Anything the histogram overflowed is replayed at the measured max.
+            for (uint64_t k = replayed; k < st.rxPackets; ++k)
+            {
+                monitor.RecordPacket(profiles[s].snssai, st.maxOwdMs, /*delivered=*/true);
+            }
         }
         // Lost packets: real sequence-gap losses, marked NOT delivered so the
         // reliability breach can actually be triggered.

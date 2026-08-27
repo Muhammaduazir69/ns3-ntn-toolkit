@@ -102,7 +102,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-slice-isolation-traffic");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.SetBackhaulDelay(MilliSeconds(backhaulMs));
     // GAP L1 FIX: real per-slice BWP isolation (see ntn-slice-real-stack). The
     // three 5QIs each get their own BWP + QoS scheduler instead of contending on
@@ -151,9 +154,24 @@ main(int argc, char* argv[])
         sliceLost[s] = st.lostPackets;
         const double bwpSinr = rs.GetBwpMeanSinrDb(sliceBwp[s]);
         sliceSinr[s] = std::isnan(bwpSinr) ? 0.0 : bwpSinr;
-        for (uint64_t p = 0; p < st.rxPackets; ++p)
+        // SLICE-1 FIX (2026-08-24): replay the MEASURED delay DISTRIBUTION.
+        // Stamping every packet with st.meanOwdMs made the monitor's p99 the
+        // p99 of a constant, so a percentile SLA could never breach however
+        // bad the tail was.
         {
-            monitor.RecordPacket(profiles[s].snssai, st.meanOwdMs, /*delivered=*/true);
+            uint64_t replayed = 0;
+            for (const auto& [binMs, count] : rs.GetSliceDelayHistogram(sliceFiveQi[s]))
+            {
+                for (uint64_t k = 0; k < count; ++k)
+                {
+                    monitor.RecordPacket(profiles[s].snssai, binMs + 0.5, /*delivered=*/true);
+                    ++replayed;
+                }
+            }
+            for (uint64_t k = replayed; k < st.rxPackets; ++k)
+            {
+                monitor.RecordPacket(profiles[s].snssai, st.maxOwdMs, /*delivered=*/true);
+            }
         }
         for (uint64_t p = 0; p < st.lostPackets; ++p)
         {
