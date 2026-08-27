@@ -35,6 +35,12 @@
 
 using namespace ns3;
 
+// SAGIN-4: whether the RSRP written into the KPM rows came from the UE's own
+// RRC measurement report or was reconstructed. Set where the report is built,
+// read where the CSV row is written, so the provenance column cannot drift from
+// the value it describes.
+static bool g_rsrpMeasured = false;
+
 NS_LOG_COMPONENT_DEFINE("SaginFlightLeoE2");
 
 namespace
@@ -124,7 +130,45 @@ EmitKpm(Context* ctx, Time reportPeriod)
     r.isNtn = true;
     r.ueId = 1;
     r.sinr_dB = haveMeas ? measSinr : -100.0;
-    r.rsrp_dBm = r.sinr_dB - 95.0;
+
+    // SAGIN-4. RSRP, RSRQ and CQI were derived algebraically from the SINR -
+    // `sinr - 95`, an erfc-free RSRQ identity, and `sinr/2 + 7` - and written
+    // into an E2SM-KPM report beside a genuinely measured SINR, with nothing
+    // distinguishing them. A consumer reading the CSV or the KPM stream saw
+    // four measured radio quantities where there was one.
+    //
+    // `sinr - 95` is the same heuristic OBS-09 removed from the observability
+    // demo: it is neither an RSSI nor a TS 38.215 SS-RSRP, just an offset that
+    // lands in a plausible range.
+    //
+    // Prefer the UE's own reported RSRP where the backend produces one. It is
+    // the TS 38.331 measResultPCell value mapped by TS 38.133, quantized to
+    // 1 dB exactly as a real UE reports it.
+    const double reportedRsrp = ctx->rs->GetServingRsrpDbm();
+    g_rsrpMeasured = !std::isnan(reportedRsrp);
+    if (g_rsrpMeasured)
+    {
+        r.rsrp_dBm = reportedRsrp;
+    }
+    else
+    {
+        // No measurement report on this backend. Reconstruct per TS 38.215
+        // Sec. 5.1.1 - a PER-RESOURCE-ELEMENT power - rather than applying a
+        // fixed offset, and mark the row derived below.
+        double nfDb = ctx->rs->GetUeNoiseFigureDb();
+        if (std::isnan(nfDb))
+        {
+            nfDb = 5.0;
+        }
+        const double bwHz = ctx->rs->GetBandwidthHz();
+        const uint32_t re = ctx->rs->GetSignalResourceElements();
+        const double noiseDbm = -174.0 + nfDb + 10.0 * std::log10(bwHz);
+        r.rsrp_dBm = (re > 0) ? (r.sinr_dB + noiseDbm - 10.0 * std::log10(static_cast<double>(re)))
+                              : std::nan("");
+    }
+    // RSRQ and CQI remain ALGEBRAIC functions of the SINR. Neither is measured
+    // anywhere on this path, and inventing a source for them would be worse
+    // than saying so: the CSV now carries a provenance column that names them.
     const double sinrLin = std::pow(10.0, r.sinr_dB / 10.0);
     r.rsrq_dB = std::max(-19.5, std::min(-3.0, 10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
     r.cqi = static_cast<uint8_t>(std::clamp(r.sinr_dB / 2.0 + 7.0, 0.0, 15.0));
@@ -218,7 +262,10 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-flight-leo-e2");
     rs.SetCarrierFrequencyHz(kFreqHz);
-    rs.SetSatEirpDbm(satEirpDbm); // 80 dBm Ka-band budget — healthy for the nr LEO link too
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm); // 80 dBm Ka-band budget — healthy for the nr LEO link too
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
@@ -246,12 +293,15 @@ main(int argc, char* argv[])
 
     std::filesystem::create_directories(outputDir);
     std::ofstream kpmOut(outputDir + "/sagin-flight-leo-kpm.csv");
-    kpmOut << "t_s,gnbId,ueId,rsrp_dBm,meas_sinr_dB,cqi,elev_deg,doppler_Hz,prop_delay_ms,"
+    kpmOut << "t_s,gnbId,ueId,rsrp_dBm,rsrp_provenance,rsrq_provenance,cqi_provenance,"
+              "meas_sinr_dB,cqi,elev_deg,doppler_Hz,prop_delay_ms,"
               "meas_throughput_Mbps,sliceId\n";
     uint64_t indicationsDelivered = 0;
     e2->SetIndicationCallback([&kpmOut, &indicationsDelivered](E2Indication ind) {
         const E2KpmReport& r = ind.kpmReport;
         kpmOut << r.timestamp << "," << r.gnbId << "," << r.ueId << "," << r.rsrp_dBm << ","
+               << (g_rsrpMeasured ? "rrc-meas-report" : "derived-per-re")
+               << ",derived-from-sinr,derived-from-sinr,"
                << r.sinr_dB << "," << static_cast<unsigned>(r.cqi) << "," << r.elevation_deg << ","
                << r.doppler_Hz << "," << r.propagationDelay_ms << "," << r.throughput_Mbps << ","
                << static_cast<unsigned>(r.sliceId) << "\n";

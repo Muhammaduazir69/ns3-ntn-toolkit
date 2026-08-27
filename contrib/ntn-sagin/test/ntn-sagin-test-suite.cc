@@ -12,6 +12,7 @@
 #include "ns3/haps-trajectory-mobility-model.h"
 #include "ns3/haps-trajectory-trace.h"
 #include "ns3/multi-layer-router.h"
+#include "ns3/sagin-custody-queue.h"
 #include "ns3/data-rate.h"
 #include "ns3/error-model.h"
 #include "ns3/inet-socket-address.h"
@@ -49,6 +50,185 @@ using namespace ns3;
 
 namespace
 {
+
+/// SAGIN-8: the TR 36.777 aerial-vehicle band has an UPPER bound too.
+///
+/// Table B-1.1/B-1.2 fit these coefficients over 1.5 m to 300 m. PathLossDb
+/// guarded only the LOWER threshold, so a HAPS at 20 km, or a
+/// SaginA2gPropagationLossModel deriving h_UT as max(pa.z, pb.z) on an
+/// unconfigured link, evaluated 300 m coefficients two orders of magnitude
+/// outside the data behind them, silently.
+/// SAGIN-9: a populated layer must not be mandatory transit.
+///
+/// Route() walked layers 1..3 in order and `continue`d only when a layer was
+/// EMPTY, so if the UAV layer held any node at all the ground source had to
+/// transit it, however much better a direct ground-to-LEO link was. Once a hop
+/// was committed the choice was never revisited.
+class MultiLayerRouterSkipsPopulatedLayerTest : public TestCase
+{
+  public:
+    MultiLayerRouterSkipsPopulatedLayerTest()
+        : TestCase("SAGIN-9: a hop may skip a populated layer when a higher one scores better")
+    {
+    }
+
+  private:
+    static Ptr<ConstantPositionMobilityModel> At(double x, double y, double z)
+    {
+        Ptr<ConstantPositionMobilityModel> m = CreateObject<ConstantPositionMobilityModel>();
+        m->SetPosition(Vector(x, y, z));
+        return m;
+    }
+
+    /// The layer of each hop after the ground source.
+    static std::vector<uint8_t> LayerSeq(const std::vector<SaginHop>& path)
+    {
+        std::vector<uint8_t> out;
+        for (size_t i = 1; i < path.size(); ++i)
+        {
+            out.push_back(static_cast<uint8_t>(path[i].layer));
+        }
+        return out;
+    }
+
+    void DoRun() override
+    {
+        // A UAV far off to the side (low elevation from the source) and a
+        // satellite almost overhead. A router that must transit the UAV layer
+        // takes the poor hop; one that may skip goes straight up.
+        auto src = At(0.0, 0.0, 0.0);
+        auto uav = At(400e3, 0.0, 2e3);     // ~0.3 deg elevation: a bad first hop
+        auto sat = At(0.0, 0.0, 600e3);     // straight overhead
+
+        Ptr<MultiLayerRouter> forced = CreateObject<MultiLayerRouter>();
+        forced->AddNode(SaginLayer::Uav, uav);
+        forced->AddNode(SaginLayer::Leo, sat);
+        NS_TEST_ASSERT_MSG_EQ(forced->GetAllowLayerSkip(), false,
+                              "layer skipping must default off; enabling it changes the path "
+                              "every existing SAGIN scenario takes");
+        const auto forcedPath = forced->Route(src);
+        const auto forcedSeq = LayerSeq(forcedPath);
+        NS_TEST_ASSERT_MSG_GT(forcedSeq.size(), 0u, "the forced route must reach something");
+        NS_TEST_ASSERT_MSG_EQ(forcedSeq[0], static_cast<uint8_t>(SaginLayer::Uav),
+                              "with skipping off the first hop must be the UAV layer, however "
+                              "bad that hop is; that is the behaviour being preserved");
+
+        Ptr<MultiLayerRouter> free = CreateObject<MultiLayerRouter>();
+        free->AddNode(SaginLayer::Uav, uav);
+        free->AddNode(SaginLayer::Leo, sat);
+        free->SetAllowLayerSkip(true);
+        const auto freePath = free->Route(src);
+        const auto freeSeq = LayerSeq(freePath);
+        NS_TEST_ASSERT_MSG_GT(freeSeq.size(), 0u, "the free route must reach something");
+        NS_TEST_ASSERT_MSG_EQ(freeSeq[0], static_cast<uint8_t>(SaginLayer::Leo),
+                              "with skipping on the first hop must be the overhead satellite, "
+                              "not a UAV 400 km off to the side");
+
+        // The two must actually DIFFER here, or the geometry does not separate
+        // them and neither assertion means anything.
+        NS_TEST_ASSERT_MSG_EQ((forcedSeq == freeSeq), false,
+                              "the two policies must produce different paths on this geometry");
+
+        // The path must still CLIMB: a skipped layer must not be revisited, or
+        // a route could oscillate between layers.
+        for (size_t i = 1; i < freeSeq.size(); ++i)
+        {
+            NS_TEST_ASSERT_MSG_GT(freeSeq[i], freeSeq[i - 1],
+                                  "layers must strictly increase along the path");
+        }
+
+        // And where the layers do NOT conflict, both policies must agree, or
+        // the flag would change every route rather than the ones it should.
+        auto uavGood = At(0.0, 0.0, 20e3); // overhead UAV: a fine first hop
+        Ptr<MultiLayerRouter> a = CreateObject<MultiLayerRouter>();
+        a->AddNode(SaginLayer::Uav, uavGood);
+        Ptr<MultiLayerRouter> b = CreateObject<MultiLayerRouter>();
+        b->AddNode(SaginLayer::Uav, uavGood);
+        b->SetAllowLayerSkip(true);
+        NS_TEST_ASSERT_MSG_EQ((LayerSeq(a->Route(src)) == LayerSeq(b->Route(src))), true,
+                              "with only one layer populated the two policies must agree");
+    }
+};
+
+class A2gValidatedHeightBandTest : public TestCase
+{
+  public:
+    A2gValidatedHeightBandTest()
+        : TestCase("SAGIN-8: TR 36.777 declares when a height leaves its validation band")
+    {
+    }
+
+    void DoRun() override
+    {
+        // Inside the band: a normal prediction, not flagged.
+        const double inside =
+            A2gChannelTr36777::PathLossDb(A2gScenario::UMa_AV, A2gLink::LOS, 1000.0, 2.0, 100.0);
+        NS_TEST_ASSERT_MSG_EQ(A2gChannelTr36777::WasLastCallAboveValidatedHeight(), false,
+                              "100 m is inside the 1.5-300 m band and must not be flagged");
+        NS_TEST_ASSERT_MSG_GT(inside, 0.0, "and must return a real path loss");
+
+        // At the boundary: still inside.
+        A2gChannelTr36777::PathLossDb(A2gScenario::UMa_AV, A2gLink::LOS, 1000.0, 2.0,
+                                      A2gChannelTr36777::kMaxValidatedHeightM);
+        NS_TEST_ASSERT_MSG_EQ(A2gChannelTr36777::WasLastCallAboveValidatedHeight(), false,
+                              "the boundary itself is within the band");
+
+        // A HAPS at 20 km: outside, and it must SAY so.
+        const double haps =
+            A2gChannelTr36777::PathLossDb(A2gScenario::UMa_AV, A2gLink::LOS, 20000.0, 2.0, 20000.0);
+        NS_TEST_ASSERT_MSG_EQ(A2gChannelTr36777::WasLastCallAboveValidatedHeight(), true,
+                              "20 km is far outside the aerial-vehicle band and the caller must "
+                              "be able to tell an extrapolation from a prediction");
+
+        // What the extrapolation actually gives, per scenario, is the reason the
+        // flag is needed rather than a nicety.
+        //
+        // UMa_AV's LOS coefficients are {28.0, 22.0} with NO height term at
+        // all, so a 20 km link gets literally the 300 m answer: a plausible
+        // number, constant in altitude, with nothing on its face to show it
+        // came from outside the fitted range. Only the flag distinguishes them.
+        const double at300 =
+            A2gChannelTr36777::PathLossDb(A2gScenario::UMa_AV, A2gLink::LOS, 20000.0, 2.0, 300.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(haps, at300, 1e-9,
+                                  "UMa_AV has height-independent LOS coefficients, so the 20 km "
+                                  "answer IS the 300 m answer; that is precisely why the caller "
+                                  "needs to be told the height left the band");
+
+        // UMi_AV, by contrast, carries a log10(h) slope term, so extrapolating
+        // past the band keeps bending the distance exponent with no data behind
+        // it. Both failure modes are silent without the flag.
+        const double umiIn =
+            A2gChannelTr36777::PathLossDb(A2gScenario::UMi_AV, A2gLink::LOS, 20000.0, 2.0, 300.0);
+        NS_TEST_ASSERT_MSG_EQ(A2gChannelTr36777::WasLastCallAboveValidatedHeight(), false,
+                              "300 m is in band for UMi_AV too");
+        const double umiOut =
+            A2gChannelTr36777::PathLossDb(A2gScenario::UMi_AV, A2gLink::LOS, 20000.0, 2.0, 20000.0);
+        NS_TEST_ASSERT_MSG_EQ(A2gChannelTr36777::WasLastCallAboveValidatedHeight(), true,
+                              "and 20 km is not");
+        NS_TEST_ASSERT_MSG_NE(umiIn, umiOut,
+                              "UMi_AV's slope depends on log10(h), so past the band it keeps "
+                              "extrapolating a fitted term with no data behind it");
+
+        // The flag must be per-call, not sticky, or it is useless after the
+        // first out-of-band sample.
+        A2gChannelTr36777::PathLossDb(A2gScenario::UMa_AV, A2gLink::LOS, 1000.0, 2.0, 50.0);
+        NS_TEST_ASSERT_MSG_EQ(A2gChannelTr36777::WasLastCallAboveValidatedHeight(), false,
+                              "the flag must reset on the next in-band call");
+
+        // Below the lower threshold the ground model takes over, and that is not
+        // an extrapolation either. Ordered deliberately: set the flag with an
+        // out-of-band call FIRST, so the ground path has to clear it. Calling
+        // it while the flag is already false asserts nothing.
+        A2gChannelTr36777::PathLossDb(A2gScenario::UMa_AV, A2gLink::LOS, 20000.0, 2.0, 20000.0);
+        NS_TEST_ASSERT_MSG_EQ(A2gChannelTr36777::WasLastCallAboveValidatedHeight(), true,
+                              "precondition: the flag is set going into the ground-model call");
+        A2gChannelTr36777::PathLossDb(A2gScenario::UMa_AV, A2gLink::LOS, 1000.0, 2.0, 5.0);
+        NS_TEST_ASSERT_MSG_EQ(A2gChannelTr36777::WasLastCallAboveValidatedHeight(), false,
+                              "the ground-model delegation below the threshold must clear the "
+                              "flag; leaving it stale reports a ground link as an out-of-band "
+                              "extrapolation");
+    }
+};
 
 class HapsAltitudeStableTest : public TestCase
 {
@@ -1838,8 +2018,13 @@ class A2gStochasticFadingTest : public TestCase
         // Free-space reference exactly as the model computes it, and the two
         // discrete rx values the fading-OFF model must land on.
         const double fspl = 20.0 * std::log10(d3d) + 20.0 * std::log10(2e9) - 147.55;
-        const double rxLosExpect = 30.0 - std::max(0.0, losDet - fspl);
-        const double rxNlosExpect = 30.0 - std::max(0.0, nlosDet - fspl);
+        // SAGIN-5: the excess is SIGNED. This used to carry a
+        // `std::max(0.0, ...)` mirroring the clamp that finding removed from
+        // the model. It passed only because the excess happens to be positive
+        // at this 2 km geometry, so it was a stale expectation waiting to
+        // wrongly certify a re-introduced clamp at any shorter range.
+        const double rxLosExpect = 30.0 - (losDet - fspl);
+        const double rxNlosExpect = 30.0 - (nlosDet - fspl);
 
         // (2) Stochastic LOS mix (shadow fading OFF): with fading disabled the
         //     received power collapses onto EXACTLY the two deterministic values
@@ -2119,12 +2304,398 @@ class RouterGatesDataPlaneTest : public TestCase
     }
 };
 
+/// SAGIN-5: the chained A2G loss must equal TR 36.777, including where TR 36.777
+/// predicts LESS loss than free space.
+///
+/// SaginA2gPropagationLossModel charges only the EXCESS over free space, so the
+/// base Friis term plus this model composes to the TR 36.777 path loss. That
+/// invariant was broken by a std::max(0.0, ...) clamp on the excess: the chained
+/// net became max(FSPL, PL_TR36777 + sf).
+///
+/// Deterministically the clamp bites at short range, where UMa-AV LOS is below
+/// free space. Statistically it is worse: shadow fading is added before the
+/// clamp, so negative fading draws are clipped and the distribution is
+/// RECTIFIED rather than shifted, raising the mean and shrinking the variance.
+class SaginA2gSignedExcessTest : public TestCase
+{
+  public:
+    SaginA2gSignedExcessTest()
+        : TestCase("SAGIN-5 - chained A2G loss equals TR 36.777 even when it is below free space")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // 2 GHz, UMa-AV LOS, 100 m: TR 36.777 gives 28.0 + 22*log10(100) +
+        // 20*log10(2) = 78.02 dB, while FSPL is 78.47 dB. The excess is
+        // NEGATIVE, which is exactly the case the clamp erased.
+        const double fcGHz = 2.0;
+        const double d3d = 100.0;
+        const double hUt = 50.0; // above the UMa-AV height threshold
+
+        const double tr36777 =
+            A2gChannelTr36777::PathLossDb(A2gScenario::UMa_AV, A2gLink::LOS, d3d, fcGHz, hUt);
+        const double fspl =
+            20.0 * std::log10(d3d) + 20.0 * std::log10(fcGHz * 1e9) - 147.55;
+
+        NS_TEST_ASSERT_MSG_LT(tr36777, fspl,
+                              "this test only means something where TR 36.777 sits BELOW free "
+                              "space; if that is no longer true at 100 m, pick another geometry "
+                              "rather than deleting the check");
+
+        // The model must be willing to report a negative excess. A clamp shows
+        // up here as an excess of exactly zero.
+        auto model = CreateObject<SaginA2gPropagationLossModel>();
+        model->SetScenario(A2gScenario::UMa_AV);
+        model->SetFrequencyGHz(fcGHz);
+        model->SetLink(A2gLink::LOS);
+        model->SetUavAltitudeM(hUt);
+        // Isolate the deterministic term; the attribute name is the model's own.
+        model->SetAttribute("ApplyShadowFading", BooleanValue(false));
+
+        auto a = CreateObject<ConstantPositionMobilityModel>();
+        a->SetPosition(Vector(0.0, 0.0, hUt));
+        auto b = CreateObject<ConstantPositionMobilityModel>();
+        b->SetPosition(Vector(std::sqrt(d3d * d3d - hUt * hUt), 0.0, 0.0));
+
+        (void)model->CalcRxPower(0.0, a, b);
+        const double excess = model->GetLastExcessDb();
+
+        NS_TEST_ASSERT_MSG_LT(excess, 0.0,
+                              "the excess must be NEGATIVE here; zero means the signed excess is "
+                              "being clamped, which silently replaces TR 36.777 with free space "
+                              "and rectifies the shadow-fading distribution");
+        Simulator::Destroy();
+    }
+};
+
+
+/// SAGIN-2: the router must be able to see a saturated link.
+///
+/// No capacity, queue occupancy or congestion term existed in any SAGIN routing
+/// decision. The default scorer returned c.elevationDeg and nothing else, and
+/// SaginHopCandidate carried no load field at all, so a router would steer
+/// every slice onto the same satellite however full its ISL was - which is the
+/// central question these modules exist to study. The P2P ISLs in
+/// sagin-sgp4-routed-traffic carry a default DropTail queue, so traffic could
+/// be dropped on the very link the router called shortest.
+class SaginCongestionAwareRoutingTest : public TestCase
+{
+  public:
+    SaginCongestionAwareRoutingTest()
+        : TestCase("SAGIN-2: routing sees link capacity and queue occupancy")
+    {
+    }
+
+  private:
+    static Ptr<ConstantPositionMobilityModel> At(double x, double y, double z)
+    {
+        Ptr<ConstantPositionMobilityModel> m = CreateObject<ConstantPositionMobilityModel>();
+        m->SetPosition(Vector{x, y, z});
+        return m;
+    }
+
+    void DoRun() override
+    {
+        // Two LEO candidates. The HIGHER-elevation one is the congested one, so
+        // elevation alone and elevation-plus-load give different answers - which
+        // is the only way to tell whether load is being consulted at all.
+        Ptr<ConstantPositionMobilityModel> ue = At(0.0, 0.0, 0.0);
+        Ptr<ConstantPositionMobilityModel> leoHighBusy = At(0.0, 0.0, 600e3);
+        Ptr<ConstantPositionMobilityModel> leoLowIdle = At(300e3, 0.0, 600e3);
+
+        auto build = [&]() {
+            Ptr<MultiLayerRouter> r = CreateObject<MultiLayerRouter>();
+            r->AddNode(SaginLayer::Leo, leoHighBusy);
+            r->AddNode(SaginLayer::Leo, leoLowIdle);
+            return r;
+        };
+
+        // ---- Baseline: no load source, elevation wins ----
+        Ptr<MultiLayerRouter> plain = build();
+        auto p0 = plain->Route(ue);
+        Ptr<MobilityModel> chosen0;
+        for (const auto& h : p0)
+        {
+            if (h.layer == SaginLayer::Leo)
+            {
+                chosen0 = h.node;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ((chosen0 == leoHighBusy), true,
+                              "with no load information the overhead satellite wins on elevation");
+
+        // ---- Congestion-aware, with the overhead satellite nearly full ----
+        Ptr<MultiLayerRouter> aware = build();
+        aware->SetLinkLoadSource(
+            [&](Ptr<MobilityModel>, Ptr<MobilityModel> node, double& cap, double& occ) {
+                cap = 50e6;
+                occ = (node == leoHighBusy) ? 0.90 : 0.05;
+                return true;
+            });
+        aware->SetCongestionAware(true);
+        auto p1 = aware->Route(ue);
+        Ptr<MobilityModel> chosen1;
+        for (const auto& h : p1)
+        {
+            if (h.layer == SaginLayer::Leo)
+            {
+                chosen1 = h.node;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ((chosen1 == leoLowIdle), true,
+                              "a 90%-full link must lose to an idle one even though its elevation "
+                              "is higher; picking the congested satellite here is exactly the "
+                              "behaviour a load-blind router produces");
+
+        // ---- Unknown load must NOT be scored as idle ----
+        // This is the subtle half: a source that declines to answer has to leave
+        // the decision on elevation, not hand the candidate a free pass.
+        Ptr<MultiLayerRouter> unknown = build();
+        unknown->SetLinkLoadSource(
+            [](Ptr<MobilityModel>, Ptr<MobilityModel>, double&, double&) { return false; });
+        unknown->SetCongestionAware(true);
+        auto p2 = unknown->Route(ue);
+        Ptr<MobilityModel> chosen2;
+        for (const auto& h : p2)
+        {
+            if (h.layer == SaginLayer::Leo)
+            {
+                chosen2 = h.node;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ((chosen2 == leoHighBusy), true,
+                              "with the load source declining, the decision falls back to "
+                              "elevation rather than treating the unknown link as empty");
+
+        // ---- A link at the cutoff is rejected outright ----
+        Ptr<MultiLayerRouter> full = build();
+        full->SetLinkLoadSource(
+            [&](Ptr<MobilityModel>, Ptr<MobilityModel> node, double& cap, double& occ) {
+                cap = 50e6;
+                occ = (node == leoHighBusy) ? 0.99 : 0.05;
+                return true;
+            });
+        full->SetCongestionAware(true, 1.0, 0.95);
+        auto p3 = full->Route(ue);
+        Ptr<MobilityModel> chosen3;
+        for (const auto& h : p3)
+        {
+            if (h.layer == SaginLayer::Leo)
+            {
+                chosen3 = h.node;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ((chosen3 == leoLowIdle), true, "the saturated link is not chosen");
+        NS_TEST_ASSERT_MSG_GT(full->GetCongestionRejections(), 0u,
+                              "and the rejection is COUNTED, so a scenario can tell 'the router "
+                              "avoided a full link' from 'the router never saw one'");
+
+        // ---- Congestion-awareness off must restore the old behaviour ----
+        Ptr<MultiLayerRouter> off = build();
+        off->SetLinkLoadSource(
+            [&](Ptr<MobilityModel>, Ptr<MobilityModel> node, double& cap, double& occ) {
+                cap = 50e6;
+                occ = (node == leoHighBusy) ? 0.99 : 0.05;
+                return true;
+            });
+        off->SetCongestionAware(false);
+        auto p4 = off->Route(ue);
+        Ptr<MobilityModel> chosen4;
+        for (const auto& h : p4)
+        {
+            if (h.layer == SaginLayer::Leo)
+            {
+                chosen4 = h.node;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ((chosen4 == leoHighBusy), true,
+                              "with the feature off the router is max-elevation again, so "
+                              "existing scenarios keep their behaviour");
+    }
+};
+
+
+/// SAGIN-2 (store-and-forward): custody across a contact gap.
+///
+/// A grep for queue, congestion, buffer, store-and-forward, DTN or bundle
+/// across ntn-sagin and ntn-constellation returned nothing relevant. Contact
+/// graph routing exists in the space community precisely BECAUSE contacts are
+/// intermittent - a node takes custody while the next hop is out of contact and
+/// forwards when it opens. Without that, a disconnected-operation scenario
+/// cannot be run at all: a router that finds no path simply drops.
+class SaginCustodyQueueTest : public TestCase
+{
+  public:
+    SaginCustodyQueueTest()
+        : TestCase("SAGIN-2: custody queue holds across a contact gap and drains in order")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace ns3::ntnsagin;
+
+        std::vector<uint32_t> delivered;
+        auto sink = [&delivered](Ptr<Packet> p) {
+            delivered.push_back(p->GetSize());
+            return true;
+        };
+
+        Ptr<SaginCustodyQueue> q = CreateObject<SaginCustodyQueue>();
+        q->SetForwardCallback(sink);
+        q->SetCapacityBytes(10000);
+        q->SetLifetime(Seconds(100));
+
+        // ---- Contact DOWN: everything is held, nothing is lost ----
+        q->SetContactUp(false);
+        for (uint32_t i = 1; i <= 5; ++i)
+        {
+            NS_TEST_ASSERT_MSG_EQ(q->Offer(Create<Packet>(100 * i)), true,
+                                  "an offer during a contact gap must be taken into custody, "
+                                  "not dropped; dropping here is what happens today with no "
+                                  "custody queue at all");
+        }
+        NS_TEST_ASSERT_MSG_EQ(q->GetInCustody(), 5u, "all five are held");
+        NS_TEST_ASSERT_MSG_EQ(delivered.empty(), true, "and none delivered while down");
+        NS_TEST_ASSERT_MSG_EQ(q->GetBytesInCustody(), 1500u, "byte accounting tracks the hold");
+
+        // ---- Contact UP: drains in ARRIVAL order ----
+        q->SetContactUp(true);
+        NS_TEST_ASSERT_MSG_EQ(delivered.size(), 5u, "opening the contact drains the backlog");
+        NS_TEST_ASSERT_MSG_EQ(q->GetInCustody(), 0u, "and empties custody");
+        NS_TEST_ASSERT_MSG_EQ(q->GetForwardedFromCustody(), 5u, "counted as custody deliveries");
+        // Guarded: ns-3 assertions can be configured to continue past a
+        // failure, and indexing an empty vector turns a failure into UB.
+        if (delivered.size() == 5)
+        {
+            for (uint32_t i = 0; i < 5; ++i)
+            {
+                NS_TEST_ASSERT_MSG_EQ(delivered[i], 100 * (i + 1),
+                                      "the drain must preserve arrival order; reordering a "
+                                      "stream across a contact gap is a different failure from "
+                                      "losing it");
+            }
+        }
+
+        // ---- While UP, a packet goes straight through ----
+        delivered.clear();
+        NS_TEST_ASSERT_MSG_EQ(q->Offer(Create<Packet>(77)), true, "accepted");
+        NS_TEST_ASSERT_MSG_EQ(delivered.size(), 1u, "forwarded immediately");
+        NS_TEST_ASSERT_MSG_EQ(q->GetForwardedImmediately(), 1u,
+                              "and counted separately from custody deliveries, so a scenario "
+                              "can say what the store-and-forward actually bought");
+
+        // ---- A refusing forwarder must NOT lose custody ----
+        Ptr<SaginCustodyQueue> q2 = CreateObject<SaginCustodyQueue>();
+        q2->SetForwardCallback([](Ptr<Packet>) { return false; });
+        q2->SetContactUp(true);
+        q2->Offer(Create<Packet>(200));
+        NS_TEST_ASSERT_MSG_EQ(q2->GetInCustody(), 1u,
+                              "a hop that could not take the packet has not taken it; the packet "
+                              "stays in custody rather than being counted as delivered");
+        NS_TEST_ASSERT_MSG_EQ(q2->GetForwardedImmediately(), 0u, "and nothing was forwarded");
+
+        // ---- Capacity: the OLDEST is dropped, and it is counted ----
+        // Distinct sizes, so WHICH item was evicted is observable. Equal
+        // sizes would leave the counts identical whether the oldest or the
+        // newest was dropped, and the test would prove nothing about the
+        // policy.
+        delivered.clear();
+        Ptr<SaginCustodyQueue> q3 = CreateObject<SaginCustodyQueue>();
+        q3->SetForwardCallback(sink);
+        q3->SetCapacityBytes(180);
+        q3->SetContactUp(false);
+        q3->Offer(Create<Packet>(50)); // A
+        q3->Offer(Create<Packet>(60)); // B
+        q3->Offer(Create<Packet>(70)); // C -> 180, full
+        q3->Offer(Create<Packet>(80)); // D -> evicts A then B, leaving C,D
+        NS_TEST_ASSERT_MSG_GT(q3->GetDroppedForSpace(), 0u,
+                              "overflow must be COUNTED, not silent - a custody queue that "
+                              "quietly loses traffic is worse than none");
+        q3->SetContactUp(true);
+        NS_TEST_ASSERT_MSG_EQ(delivered.size(), 2u, "two survive the eviction");
+        if (delivered.size() == 2)
+        {
+            NS_TEST_ASSERT_MSG_EQ(delivered[0], 70u,
+                                  "the OLDEST items are evicted, so C survives and is delivered "
+                                  "first. Dropping the newest instead would leave A here, and "
+                                  "with equal packet sizes the two policies are "
+                                  "indistinguishable - which is why the sizes differ");
+            NS_TEST_ASSERT_MSG_EQ(delivered[1], 80u, "followed by D");
+        }
+
+        Simulator::Destroy();
+    }
+};
+
+/// SAGIN-2: custody has a lifetime, and expiry is reported.
+class SaginCustodyExpiryTest : public TestCase
+{
+  public:
+    SaginCustodyExpiryTest()
+        : TestCase("SAGIN-2: custody items expire on their lifetime and are counted")
+    {
+    }
+
+  private:
+    Ptr<ns3::ntnsagin::SaginCustodyQueue> m_q;
+    uint32_t m_delivered{0};
+
+    void OfferOne()
+    {
+        m_q->Offer(Create<Packet>(100));
+    }
+
+    void OpenContact()
+    {
+        m_q->SetContactUp(true);
+    }
+
+    void DoRun() override
+    {
+        using namespace ns3::ntnsagin;
+        m_q = CreateObject<SaginCustodyQueue>();
+        m_q->SetForwardCallback([this](Ptr<Packet>) {
+            ++m_delivered;
+            return true;
+        });
+        m_q->SetLifetime(Seconds(10));
+        m_q->SetContactUp(false);
+
+        // One packet early, one late. The contact opens after the first has
+        // outlived its custody lifetime, so exactly one should survive.
+        Simulator::Schedule(Seconds(1.0), &SaginCustodyExpiryTest::OfferOne, this);
+        Simulator::Schedule(Seconds(25.0), &SaginCustodyExpiryTest::OfferOne, this);
+        Simulator::Schedule(Seconds(30.0), &SaginCustodyExpiryTest::OpenContact, this);
+        Simulator::Stop(Seconds(40.0));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(m_q->GetExpired(), 1u,
+                              "the packet held for 29 s against a 10 s lifetime must expire, and "
+                              "the expiry must be counted rather than the packet silently "
+                              "vanishing from the accounting");
+        NS_TEST_ASSERT_MSG_EQ(m_delivered, 1u,
+                              "the packet offered 5 s before the contact opened is still within "
+                              "its lifetime and must be delivered");
+        NS_TEST_ASSERT_MSG_GT(m_q->GetMaxCustodyDelay().GetSeconds(), 4.0,
+                              "and the delivered item's custody delay is reported, which is the "
+                              "cost store-and-forward trades against the loss it avoids");
+        Simulator::Destroy();
+    }
+};
+
 class NtnSaginTestSuite : public TestSuite
 {
   public:
     NtnSaginTestSuite()
         : TestSuite("ntn-sagin", Type::UNIT)
     {
+        AddTestCase(new SaginCongestionAwareRoutingTest, TestCase::Duration::QUICK);
+        AddTestCase(new SaginCustodyQueueTest, TestCase::Duration::QUICK);
+        AddTestCase(new SaginCustodyExpiryTest, TestCase::Duration::QUICK);
         AddTestCase(new HapsAltitudeStableTest, TestCase::Duration::QUICK);
         AddTestCase(new UavPatrolReturnsToStartTest, TestCase::Duration::QUICK);
         AddTestCase(new A2gPathLossSpotCheckTest, TestCase::Duration::QUICK);
@@ -2166,6 +2737,10 @@ class NtnSaginTestSuite : public TestSuite
         AddTestCase(new HapsTrajectoryMalformedTest, TestCase::Duration::QUICK);
         AddTestCase(new HapsTrajectoryInterpolationTest, TestCase::Duration::QUICK);
         AddTestCase(new HapsTrajectoryMobilitySimulatorTest, TestCase::Duration::QUICK);
+        AddTestCase(new SaginA2gSignedExcessTest, TestCase::Duration::QUICK);
+        AddTestCase(new MultiLayerRouterSkipsPopulatedLayerTest,
+                    TestCase::Duration::QUICK);
+        AddTestCase(new A2gValidatedHeightBandTest, TestCase::Duration::QUICK);
     }
 };
 

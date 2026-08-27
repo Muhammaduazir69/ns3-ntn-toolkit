@@ -36,6 +36,11 @@ namespace
 // 20*log10(fc), so 20*log10(40*pi*fc/3) = 32.44 + 20*log10(fc).
 constexpr double k40Pi3Db = 32.44;
 
+/// SAGIN-8: set by PathLossDb when the height leaves the validation band.
+/// File-scope because PathLossDb is static and stateless by design; this is
+/// diagnostic only and never feeds the returned value.
+bool g_lastAboveValidatedHeight = false;
+
 // Lower height threshold of the aerial-vehicle band (TR 36.777 Table B-1.1/2).
 double
 AerialHeightThreshold(A2gScenario s)
@@ -170,6 +175,12 @@ GroundPathLossDb(A2gScenario s, A2gLink link, double d3dM, double fcGHz, double 
 
 } // namespace
 
+bool
+A2gChannelTr36777::WasLastCallAboveValidatedHeight()
+{
+    return g_lastAboveValidatedHeight;
+}
+
 double
 A2gChannelTr36777::PathLossDb(A2gScenario scenario, A2gLink link,
                               double d3dM, double fcGHz, double hUtM)
@@ -187,7 +198,30 @@ A2gChannelTr36777::PathLossDb(A2gScenario scenario, A2gLink link,
     // ground model (do NOT clamp height into the AV coefficients).
     if (hUtM <= AerialHeightThreshold(scenario))
     {
+        g_lastAboveValidatedHeight = false;
         return GroundPathLossDb(scenario, link, d3dM, fcGHz, hUtM);
+    }
+
+    // SAGIN-8: the upper bound of the validation band was never checked.
+    //
+    // TR 36.777 Table B-1.1/B-1.2 fit these coefficients over 1.5 m to 300 m.
+    // The model guarded only the LOWER threshold, so a HAPS at 20 km, or a
+    // SaginA2gPropagationLossModel that derives h_UT as max(pa.z, pb.z) on an
+    // unconfigured link, evaluated 300 m coefficients two orders of magnitude
+    // outside the data behind them - silently, with no warning and no way for
+    // the caller to tell a prediction from an extrapolation.
+    //
+    // The result is NOT clamped. Clamping would return the 300 m answer for a
+    // 20 km link, which is a different wrong number wearing a guard. The
+    // extrapolation is returned and declared, so a caller can refuse it.
+    g_lastAboveValidatedHeight = (hUtM > kMaxValidatedHeightM);
+    if (g_lastAboveValidatedHeight)
+    {
+        NS_LOG_WARN("h_UT=" << hUtM << " m is above the TR 36.777 aerial-vehicle validation "
+                    << "band (" << A2gChannelTr36777::kMaxValidatedHeightM << " m); the returned path "
+                    << "loss is an EXTRAPOLATION of coefficients fitted to 1.5-300 m, not a "
+                    << "TR 36.777 prediction. No HAPS-band channel exists in this module; see "
+                    << "WasLastCallAboveValidatedHeight().");
     }
 
     const double fcTermDb = 20.0 * std::log10(fcGHz);

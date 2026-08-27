@@ -161,8 +161,30 @@ SaginA2gPropagationLossModel::DoCalcRxPower(double txPowerDbm,
     const double fsplDb = 20.0 * std::log10(d3d) + 20.0 * std::log10(fcHz) - 147.55;
 
     // Charge only the excess over free space so the chained net == TR 36.777.
+    //
+    // SAGIN-5 FIX (2026-08-25): the excess is SIGNED and must stay so.
+    //
+    // This used to read `std::max(0.0, totalPlDb - fsplDb)`, which breaks the
+    // invariant stated in the line above it: with the clamp the chained net is
+    // max(FSPL, PL_TR36777 + sf), not PL_TR36777 + sf. Two consequences, the
+    // second much worse than the first.
+    //
+    // Deterministically, TR 36.777 predicts LESS loss than free space at short
+    // range: UMa-AV LOS at 2 GHz and 100 m is 78.02 dB against an FSPL of
+    // 78.47 dB, so the excess is -0.45 dB and the clamp discards it.
+    //
+    // Statistically, the shadow fading st.sfDb is added BEFORE the clamp, so
+    // every negative fading draw larger than the deterministic excess is
+    // clipped to zero. The fading distribution is rectified rather than
+    // shifted: at 2 GHz with sigma = 4 dB that removes about 35 % of draws at
+    // 1 km and 55 % at 100 m, raising the mean loss and shrinking its variance.
+    // A one-sided "Gaussian" shadow fading is not shadow fading.
+    //
+    // ns-3 chains propagation loss models by passing rxPower forward, so a
+    // negative loss is simply a gain and composes correctly with the base
+    // Friis term.
     m_lastLossDb = totalPlDb;
-    m_lastExcessDb = std::max(0.0, totalPlDb - fsplDb);
+    m_lastExcessDb = totalPlDb - fsplDb;
     return txPowerDbm - m_lastExcessDb;
 }
 

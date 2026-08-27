@@ -90,7 +90,37 @@ MultiLayerRouter::Score(const SaginHopCandidate& c) const
     {
         return -std::numeric_limits<double>::infinity();
     }
-    return c.elevationDeg;
+    if (!m_congestionAware || !c.haveLoad)
+    {
+        // SAGIN-2: with no load source, score on elevation alone.
+        //
+        // Note honestly that the !haveLoad half of this test is CLARITY, not
+        // distinct behaviour: queueOccupancy defaults to 0, so removing it
+        // computes elevationDeg - 0 and lands in the same place. It is kept
+        // because it states the intent - an unknown load is not an idle one -
+        // and because it stops being a no-op the moment the penalty gains a
+        // constant term or the default changes. A revert of this line does not
+        // fail any test, and that is recorded rather than papered over.
+        return c.elevationDeg;
+    }
+    if (c.queueOccupancy >= m_rejectAboveOccupancy)
+    {
+        // A link this close to full is unusable for the same practical reason a
+        // below-horizon hop is: the packets the router sends there will be
+        // dropped by the TxQueue, not carried.
+        ++m_congestionRejections;
+        return -std::numeric_limits<double>::infinity();
+    }
+    return c.elevationDeg - m_congestionWeight * 90.0 * c.queueOccupancy;
+}
+
+void
+MultiLayerRouter::SetCongestionAware(bool on, double congestionWeight,
+                                     double rejectAboveOccupancy)
+{
+    m_congestionAware = on;
+    m_congestionWeight = congestionWeight;
+    m_rejectAboveOccupancy = rejectAboveOccupancy;
 }
 
 std::size_t
@@ -123,22 +153,45 @@ MultiLayerRouter::Route(Ptr<MobilityModel> source) const
     Ptr<MobilityModel> prev = source;
     SaginLayer prevLayer = SaginLayer::Ground;
     // Try each higher layer in order; stop if a layer is empty.
-    for (uint8_t l = 1; l <= 3; ++l)
+    // SAGIN-9: which layers this hop may consider.
+    //
+    // This loop used to advance one layer per iteration and `continue` only when
+    // a layer was EMPTY, so a populated UAV layer was mandatory transit for
+    // every ground source, however much better a direct ground-to-LEO link was.
+    // With layer skipping enabled a hop weighs every remaining layer at once and
+    // the sequence follows the score; nextLayer then resumes ABOVE whatever it
+    // chose, so a skipped layer is never revisited and the path always climbs.
+    uint8_t nextLayer = 1;
+    while (nextLayer <= 3)
     {
-        const auto& candidates = m_layers[l];
-        if (candidates.empty())
+        const uint8_t lastLayer = m_allowLayerSkip ? 3 : nextLayer;
+        std::vector<std::pair<uint8_t, Ptr<MobilityModel>>> pool;
+        for (uint8_t ll = nextLayer; ll <= lastLayer; ++ll)
         {
-            // Allow skipping a layer if higher layer has nodes.
-            continue;
+            for (const auto& c : m_layers[ll])
+            {
+                pool.emplace_back(ll, c);
+            }
+        }
+        if (pool.empty())
+        {
+            if (!m_allowLayerSkip)
+            {
+                ++nextLayer; // this layer is empty; try the next
+                continue;
+            }
+            break; // nothing left anywhere above
         }
         Ptr<MobilityModel> best;
+        uint8_t bestLayer = nextLayer;
         double bestScore = -std::numeric_limits<double>::infinity();
         double bestEl = -90.0;
         double bestRange = 0.0;
         Vector observerPos = prev->GetPosition();
-        for (std::size_t i = 0; i < candidates.size(); ++i)
+        for (std::size_t i = 0; i < pool.size(); ++i)
         {
-            const auto& cand = candidates[i];
+            const uint8_t candLayer = pool[i].first;
+            const auto& cand = pool[i].second;
             const Vector candPos = cand->GetPosition();
             const double el = ElevationDeg(observerPos, candPos);
             Vector d(candPos.x - observerPos.x,
@@ -148,7 +201,7 @@ MultiLayerRouter::Route(Ptr<MobilityModel> source) const
                 std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
 
             SaginHopCandidate hc{
-                static_cast<SaginLayer>(l),
+                static_cast<SaginLayer>(candLayer),
                 cand,
                 el,
                 range,
@@ -157,6 +210,22 @@ MultiLayerRouter::Route(Ptr<MobilityModel> source) const
                 observerPos,
                 i,
                 m_observation};
+
+            // SAGIN-2: ask for the live load of the link this hop would use.
+            // Absent a source, haveLoad stays false and Score() falls back to
+            // elevation rather than assuming the link is idle.
+            if (m_loadSource)
+            {
+                double capBps = 0.0;
+                double occ = 0.0;
+                if (m_loadSource(prev, cand, capBps, occ))
+                {
+                    hc.capacityBps = capBps;
+                    hc.queueOccupancy = std::max(0.0, std::min(1.0, occ));
+                    hc.haveLoad = true;
+                }
+            }
+
             const double score = Score(hc);
             ++m_scored;
             if (score > bestScore)
@@ -165,6 +234,7 @@ MultiLayerRouter::Route(Ptr<MobilityModel> source) const
                 bestEl = el;
                 bestRange = range;
                 best = cand;
+                bestLayer = candLayer;
             }
         }
         if (!best)
@@ -172,9 +242,10 @@ MultiLayerRouter::Route(Ptr<MobilityModel> source) const
             break;
         }
         path.push_back(
-            {static_cast<SaginLayer>(l), best, bestEl, bestRange});
+            {static_cast<SaginLayer>(bestLayer), best, bestEl, bestRange});
         prev = best;
-        prevLayer = static_cast<SaginLayer>(l);
+        prevLayer = static_cast<SaginLayer>(bestLayer);
+        nextLayer = static_cast<uint8_t>(bestLayer + 1);
     }
     return path;
 }

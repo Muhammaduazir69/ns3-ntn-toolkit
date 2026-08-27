@@ -91,6 +91,9 @@ struct SpaceLink
     uint32_t ifA = 0, ifB = 0;     // interface indices of this link
     Ptr<RateErrorModel> emA, emB;  // receive error models (both directions)
     Ptr<PointToPointChannel> chan; // for dynamic propagation delay
+    // SAGIN-1: the endpoints' mobility, so the link can re-read its own
+    // geometry instead of keeping whatever the contact-up event carried.
+    Ptr<MobilityModel> mobA, mobB;
     bool up = false;
 };
 
@@ -122,6 +125,46 @@ double g_minSnrDb = 6.0; // decode threshold for the binary link-budget gate
 // its budget (clean decode at these SNRs) or is unusable. No sigmoid PER —
 // partial-loss radio behaviour belongs to the real-stack (mmwave) examples;
 // this example's contribution is real contact-driven ROUTING.
+// SAGIN-1: set a link's propagation delay and binary budget from a range.
+// Both the contact-up event and the periodic refresh go through here so the
+// two cannot drift apart.
+void
+SetLinkFromRange(SpaceLink& l, double rangeM)
+{
+    const double sinr = g_eirpDbm - FsplDb(rangeM, g_freqHz) - g_noiseDbm;
+    const bool budgetCloses = sinr >= g_minSnrDb;
+    l.chan->SetAttribute("Delay", TimeValue(Seconds(rangeM / kC)));
+    l.emA->SetRate(budgetCloses ? 0.0 : 1.0);
+    l.emB->SetRate(budgetCloses ? 0.0 : 1.0);
+}
+
+// SAGIN-1: follow the geometry of a contact that is already up.
+//
+// ContactGraphScheduler used to emit on visibility TRANSITIONS only, so the
+// delay and the link budget were taken from the range at contact-up and stayed
+// pinned for the whole pass. At the shipped defaults (550 km, 20 degree
+// elevation floor) the GSL slant sweeps from about 550 km at zenith to about
+// 1075 km at the floor, so the frozen figure is wrong by up to ~1.8 ms one way,
+// and this example's headline output is a measured one-way delay. The same
+// frozen range fed the binary budget, so a link that closed at zenith stayed
+// closed all the way down to the horizon and never degraded.
+//
+// The scheduler now republishes the live range on every tick, so this takes its
+// geometry from exactly the same source the transition events use rather than
+// recomputing distances here. The sibling sagin-multihop-traffic.cc already
+// refreshed correctly, so before this the two examples silently disagreed about
+// the same physics.
+void
+OnContactUpdate(ContactEvent ev)
+{
+    auto it = g_links.find(Canon(ev.node_a, ev.node_b));
+    if (it == g_links.end() || !it->second.up)
+    {
+        return;
+    }
+    SetLinkFromRange(it->second, ev.range_m);
+}
+
 void
 ApplyContact(ContactEvent ev)
 {
@@ -136,13 +179,9 @@ ApplyContact(ContactEvent ev)
 
     if (ev.up)
     {
-        const double sinr = g_eirpDbm - FsplDb(ev.range_m, g_freqHz) - g_noiseDbm;
-        const bool budgetCloses = sinr >= g_minSnrDb;
         l.ipA->SetUp(l.ifA);
         l.ipB->SetUp(l.ifB);
-        l.chan->SetAttribute("Delay", TimeValue(Seconds(ev.range_m / kC)));
-        l.emA->SetRate(budgetCloses ? 0.0 : 1.0);
-        l.emB->SetRate(budgetCloses ? 0.0 : 1.0);
+        SetLinkFromRange(l, ev.range_m);
     }
     else
     {
@@ -160,6 +199,15 @@ Report(double simSeconds)
 {
     const double now = Simulator::Now().GetSeconds();
     ContactGraphRouter::WeightedPath wp = g_router->ShortestPathWeighted(kGs1, kGs2);
+    // SAGIN-7: the path packets ACTUALLY take.
+    //
+    // Forwarding here is Ipv4GlobalRoutingHelper::RecomputeRoutingTables(),
+    // which minimises HOP COUNT over whichever interfaces ApplyContact brought
+    // up. Nothing feeds the Dijkstra result into the forwarding tables, so the
+    // "path=" column below was a model recommendation printed beside a goodput
+    // the data plane produced by a different rule, with no way to tell whether
+    // the two agreed.
+    ContactGraphRouter::WeightedPath hp = g_router->ShortestPathHops(kGs1, kGs2);
 
     std::string pathStr;
     if (wp.path.empty())
@@ -191,8 +239,25 @@ Report(double simSeconds)
     const double latMs =
         wp.path.empty() ? 0.0 : (wp.total_weight / kC) * 1e3; // range-sum -> 1-way ms
 
-    std::printf("  t=%6.1f  edges=%2zu  path=%-18s  pathLatency=%6.2f ms  goodput=%7.3f Mbps\n",
-                now, g_router->NumEdges(), pathStr.c_str(), latMs, mbps);
+    // SAGIN-7: do the two rules pick the same route?
+    const bool sameRoute = (wp.path == hp.path);
+    const double hopLatMs =
+        hp.path.empty() ? 0.0 : (hp.total_weight / kC) * 1e3;
+    std::printf("  t=%6.1f  edges=%2zu  path=%-18s  pathLatency=%6.2f ms  goodput=%7.3f Mbps"
+                "  forwarding=%s\n",
+                now, g_router->NumEdges(), pathStr.c_str(), latMs, mbps,
+                wp.path.empty()  ? "n/a"
+                : sameRoute      ? "AGREES (hop-count route is the same)"
+                                 : "DIFFERS from the printed path");
+    if (!wp.path.empty() && !sameRoute)
+    {
+        std::printf("    NOTE (SAGIN-7): packets follow the minimum-HOP route "
+                    "(%zu hops, %.2f ms) while the contact-graph model recommends "
+                    "%zu hops at %.2f ms. The goodput above was produced by the hop-count "
+                    "route, not by the path printed beside it.\n",
+                    hp.path.size() ? hp.path.size() - 1 : 0, hopLatMs,
+                    wp.path.size() ? wp.path.size() - 1 : 0, latMs);
+    }
 
     if (now + 1.0 < simSeconds)
     {
@@ -241,6 +306,8 @@ MakeSpaceLink(uint32_t idA,
 
     l.ipA = a->GetObject<Ipv4>();
     l.ipB = b->GetObject<Ipv4>();
+    l.mobA = a->GetObject<MobilityModel>();
+    l.mobB = b->GetObject<MobilityModel>();
     l.ifA = ifc.Get(0).second;
     l.ifB = ifc.Get(1).second;
     // Start DOWN; the first contact-up event brings the link in.
@@ -396,6 +463,9 @@ main(int argc, char* argv[])
     // Drive the data plane from the contact graph.
     sched->m_contactUp.ConnectWithoutContext(MakeCallback(&ApplyContact));
     sched->m_contactDown.ConnectWithoutContext(MakeCallback(&ApplyContact));
+    // SAGIN-1: transitions bring links in and out; updates keep the delay and
+    // the budget of an established link tracking the pass.
+    sched->m_contactUpdate.ConnectWithoutContext(MakeCallback(&OnContactUpdate));
 
     std::printf("# sagin-sgp4-routed-traffic (Roadmap §4.4.4/§4.4.5)\n");
     std::printf("#   sim=%.0fs alt=%.0fkm incl=%.0f lead=%.0fs minElev=%.0f load=%.1fMbps\n",

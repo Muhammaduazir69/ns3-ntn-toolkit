@@ -54,6 +54,19 @@ class A2gChannelTr36777 : public Object
      *
      * Formulas: TR 36.777 v15.0.0 §6.2 (table 6.2-1).
      */
+    /// SAGIN-8: upper height of the TR 36.777 aerial-vehicle validation band.
+    ///
+    /// Table B-1.1/B-1.2 fit the AV coefficients over 1.5 m to 300 m. The model
+    /// guarded only the LOWER bound, so a HAPS at 20 km or a satellite silently
+    /// evaluated 300 m coefficients an order of magnitude outside the data they
+    /// were fitted to, with no warning and no way for the caller to notice.
+    static constexpr double kMaxValidatedHeightM = 300.0;
+
+    /// True if the most recent PathLossDb() call was made above
+    /// kMaxValidatedHeightM, i.e. the result is an extrapolation rather than a
+    /// TR 36.777 prediction.
+    static bool WasLastCallAboveValidatedHeight();
+
     static double PathLossDb(A2gScenario scenario, A2gLink link,
                              double d3dM, double fcGHz, double hUtM);
 

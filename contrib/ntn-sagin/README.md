@@ -89,9 +89,61 @@ Derived from `model/*.h` and `helper/*.h`.
 | *(trace)* | `hst-trace.h` | HST position/speed trace feed |
 | `A2gChannelTr36777` | `a2g-channel-tr36777.h` | TR 36.777 v15.0.0 path loss (LOS + NLOS floor) and LOS probability for UMa-AV / RMa-AV / UMi-AV |
 | `SaginA2gPropagationLossModel` | `sagin-a2g-propagation-loss-model.h` | The TR 36.777 A2G model as a real ns-3 `PropagationLossModel`; chained onto a real mmwave NR spectrum channel it attenuates actual packets (returns the excess over free space to avoid double-counting) |
-| `MultiLayerRouter` | `multi-layer-router.h` | Greedy max-elevation Ground→UAV→HAPS→LEO **path computation** (returns a `SaginHop` vector; installs no forwarding table); pluggable `SaginScoreCallback` for RL/external scoring |
+| `MultiLayerRouter` | `multi-layer-router.h` | Greedy max-elevation Ground→UAV→HAPS→LEO **path computation** (returns a `SaginHop` vector; installs no forwarding table); pluggable `SaginScoreCallback` for RL/external scoring. **Optionally congestion-aware** (`SetLinkLoadSource` + `SetCongestionAware`, audit SAGIN-2): candidates carry link capacity and TxQueue occupancy, a filling link is penalised in the score, and one at or above the cutoff is rejected the same way a below-horizon hop is. **Default OFF**, and a link whose load is unknown is scored on elevation rather than assumed idle. Without it the router cannot see a saturated ISL at all and will steer every slice onto the same satellite. |
 | `SaginSliceRouter` | `sagin-slice-router.h` | 5G QFI → S-NSSAI → `SliceProfile` mapping; computes a layer/hop choice (returns a `SaginHop` vector; installs no forwarding table) biased by latency budget + GEO allowance |
 | `SaginHelper` | `sagin-helper.h` | Factory façade: builds a ready-to-route 4-layer scene in one call |
+
+> ## Store-and-forward across contact gaps (audit SAGIN-2)
+>
+> `SaginCustodyQueue` (`model/sagin-custody-queue.h`) holds traffic while the next hop is out
+> of contact and drains it, in arrival order, when the contact opens. Before it, a grep for
+> queue, congestion, buffer, store-and-forward, DTN or bundle across this module and
+> `ntn-constellation` returned nothing relevant — so a router that found no path simply dropped,
+> and **disconnected-operation scenarios, the main reason contact-graph routing exists in the
+> space community, could not be run at all.**
+>
+> It reports what the store-and-forward bought: `GetForwardedImmediately()` against
+> `GetForwardedFromCustody()`, plus `GetExpired()`, `GetDroppedForSpace()` and
+> `GetMaxCustodyDelay()` — the latency cost traded against the loss avoided. Overflow evicts the
+> **oldest** item (closest to expiry anyway) and counts it; a forwarder that refuses a packet
+> keeps custody rather than having it counted as delivered.
+>
+> **Scope:** this is a custody queue, not a DTN stack. No RFC 5050 bundle format, no custody
+> signalling, no fragmentation, and it does not claim them.
+
+> ## Regenerative payload: routing label only (audit SAGIN-3)
+>
+> `RegenMode{bent_pipe, regen_du, regen_cu, regen_full}` in `contact-graph-router.h` is used
+> **purely as a transit filter** in `ShortestPath`. A repo-wide grep for `SetRegenMode`,
+> `regen_du` or `regen_full` outside that file and its own unit test returns nothing — no
+> `ntn-sagin` or `ntn-v2x` code ever sets it. Greps for `Xn` / `XnAP` across both modules return
+> zero hits, and in `sagin-sgp4-routed-traffic` the satellite nodes get only
+> `InternetStackHelper` + P2P devices: they are plain IP routers, not gNBs.
+>
+> **SAGIN-3 UPDATE — the Xn procedure now exists.** `NtnXnapHeader` and `NtnXnHandover` (in
+> `ntn-constellation`) implement the TS 38.300 §9.2.3 sequence between two regenerative
+> satellites: HANDOVER REQUEST → HANDOVER REQUEST ACKNOWLEDGE → SN STATUS TRANSFER → UE CONTEXT
+> RELEASE, carrying the paired NG-RAN node UE XnAP IDs, the target NR CGI and the PDCP SN/HFN
+> that SN Status Transfer exists to move. Every leg crosses the ISL, so the procedure costs four
+> one-way traversals — 20.01 ms at 1500 km of separation, measured. `RegenMode` now selects
+> BEHAVIOUR and not just Dijkstra transit: a bent-pipe payload has no on-board gNB, so it
+> refuses to originate an Xn handover and answers HANDOVER PREPARATION FAILURE to any it
+> receives rather than going silent.
+>
+> **Still not modelled:** PHY/MAC/PDCP/RRC re-origination on the satellite as part of *this*
+> path (`NtnRealStackHelper` does build a real `NrGnbNetDevice` on the satellite under
+> `PayloadOption::FullGnb`, but the two are not yet wired together), and the wire format is an
+> ns-3 Header with toolkit-internal message-type values, **not** ASN.1 APER with TS 38.423
+> procedure codes — an asn1c peer would not decode it. Previously: There is no PHY/MAC/PDCP/RRC re-origination, no
+> on-board scheduling, and no inter-satellite mobility signalling (Xn Handover Request, SN Status
+> Transfer, path switch). **A regenerative-payload handover study cannot be run in this toolkit
+> today**, and the enum should not be read as evidence that it can. Treat the ISL path as
+> **transparent payload only**.
+>
+> Closing it is staged work: instantiate a real `NrGnbNetDevice` on the satellite for
+> `regen_du`/`regen_full`, carry the ISL as a transport bearer between them, add a minimal XnAP
+> message set over that ISL, and have `SetRegenMode` select which stack is built rather than only
+> filtering the Dijkstra transit set. None of that is done.
 
 ## Examples
 
@@ -133,10 +185,22 @@ split, village coverage and cell SINR / throughput / one-way delay; `sim_health.
 
 ### sagin-haps-leo-relay
 
-Ground-UE → UAV-relay → HAPS → LEO multi-layer route. The `MultiLayerRouter` selects the layered
+Ground-UE → UAV-relay → HAPS → LEO multi-layer route. The `MultiLayerRouter` computes the layered
 path every second and logs per-hop elevation/range, while the access hop (ground UE ↔ UAV relay)
 is a real mmwave NR cell carrying the TR 36.777 A2G channel — access SINR/TBLER/throughput are
 measured off the PHY trace.
+
+> **The route is a geometry trace, not an actuated path (audit SAGIN-6).** `Route()` is called
+> every second and its result goes to the CSV and nowhere else. The real stack is a single
+> UAV-to-ground access cell whose behaviour does not depend on which relay layer was chosen, so
+> the route columns cannot be cross-checked against delivered traffic and no measured KPI here
+> validates the routing decision. Earlier prose said the router "selects the path", which reads
+> as actuation. Read these columns as *what was visible, where, second by second*.
+>
+> For a route that is actuated, use **`sagin-multihop-traffic`**: it gates a P2P leg per candidate
+> LEO (`ApplyRoute` → `SetGatedLink` → `RecomputeRoutingTables`), so its route column can be
+> validated against per-leg `MacRx` bytes. `sagin-aeronautical` has the same geometry-only shape
+> as this one.
 
 ```bash
 ./ns3 run "sagin-haps-leo-relay --simTime=30 --csv=sagin.csv"

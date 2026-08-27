@@ -8,6 +8,26 @@
  * Helper). The MultiLayerRouter still selects the access layer and logs the
  * per-hop elevation/range geometry, but the radio KPIs (SINR/TBLER/throughput)
  * are now MEASURED off the mmwave PHY trace — no closed-form SINR, no P2P star.
+ *
+ * WHAT THE ROUTER DOES HERE, AND WHAT IT DOES NOT (audit SAGIN-6).
+ *
+ * MultiLayerRouter::Route() is called once a second and its result is written
+ * to the CSV. That is ALL it does in this example: the route is not actuated
+ * onto any data plane. The real stack built below is a single UAV-to-ground
+ * access cell, and its behaviour does not depend on which relay layer the
+ * router picked - so the CSV's route columns cannot be cross-checked against
+ * delivered traffic, and no measured KPI here validates the routing decision.
+ *
+ * Read the route columns as a GEOMETRY TRACE: which layer was visible, at what
+ * elevation and range, second by second. That is genuinely useful and it is
+ * what this example is for. It is not a demonstration that traffic followed
+ * the chosen path.
+ *
+ * The actuation pattern exists in this same module: sagin-multihop-traffic.cc
+ * gates a P2P leg per candidate LEO (ApplyRoute -> SetGatedLink ->
+ * RecomputeRoutingTables) so its route column CAN be validated against per-leg
+ * MacRx bytes. Use that example when the question is whether the router steers
+ * traffic; use this one when the question is what the sky looked like.
  */
 #include "ns3/command-line.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
@@ -133,7 +153,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-aeronautical");
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
