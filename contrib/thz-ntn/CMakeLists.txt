@@ -2,6 +2,7 @@ set(source_files
     # Phase 1: Foundation - Channel models and spectrum
     model/thz-ntn-molecular-absorption.cc
     model/thz-ntn-propagation-loss-model.cc
+    model/thz-ntn-link-error-model.cc
     # 4.3.1 — HITRAN-2024 LUT loader (Roadmap §4.3.1)
     model/thz-ntn-hitran-lut.cc
     # 4.3.2 — ITU-R P.618/676/838/681 wrappers (Roadmap §4.3.2)
@@ -51,6 +52,7 @@ set(header_files
     # Phase 1: Foundation - Channel models and spectrum
     model/thz-ntn-molecular-absorption.h
     model/thz-ntn-propagation-loss-model.h
+    model/thz-ntn-link-error-model.h
     # 4.3.1 — HITRAN-2024 LUT loader (Roadmap §4.3.1)
     model/thz-ntn-hitran-lut.h
     # 4.3.2 — ITU-R P.618/676/838/681 wrappers (Roadmap §4.3.2)

@@ -275,25 +275,30 @@ Itu676AbsorptionModel::GetTypeId()
     return tid;
 }
 
-Itu676AbsorptionModel::Itu676AbsorptionModel() = default;
+Itu676AbsorptionModel::Itu676AbsorptionModel()
+    : m_abs(CreateObject<ThzNtnMolecularAbsorption>())
+{
+    // SIONNA-05: one spectral model for the lifetime of this object. Building
+    // it per query re-ran the 79-line table and the layer profile on every
+    // packet.
+}
 
 double
 Itu676AbsorptionModel::SpecificAttenuationDbKm(double freqHz,
                                                  double altKm) const
 {
-    Ptr<ThzNtnMolecularAbsorption> abs =
-        CreateObject<ThzNtnMolecularAbsorption>();
-    const double trans = abs->GetTransmittance(freqHz, 1000.0, altKm);
+    const double trans = m_abs->GetTransmittance(freqHz, 1000.0, altKm);
     return -10.0 * std::log10(std::max(trans, 1e-30));
 }
 
 double
 Itu676AbsorptionModel::SlantPathAttenuationDb(double freqHz,
-                                                double elevationDeg) const
+                                                double elevationDeg,
+                                                double groundAltKm) const
 {
-    Ptr<ThzNtnMolecularAbsorption> abs =
-        CreateObject<ThzNtnMolecularAbsorption>();
-    return abs->ComputeSlantPathAbsorption(freqHz, elevationDeg, 0.0, 100.0);
+    // SIONNA-05: integrate from the station's own altitude, per P.676-13
+    // Annex 1 section 2.2, rather than always from sea level.
+    return m_abs->ComputeSlantPathAbsorption(freqHz, elevationDeg, groundAltKm, 100.0);
 }
 
 // ---------------------------------------------------------------------------

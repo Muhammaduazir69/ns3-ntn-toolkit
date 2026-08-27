@@ -287,3 +287,29 @@ build_lib_example(
     ${libmmwave}
     ${liblte}
 )
+
+build_lib_example(
+  NAME thz-ntn-altitude-relay
+  SOURCE_FILES thz-ntn-altitude-relay.cc
+  LIBRARIES_TO_LINK
+    ${libthz-ntn}
+    ${libcore}
+)
+
+# THZ-07: real IP packets at TRUE THz (default 300 GHz), on a propagation chain
+# with no 3GPP 100 GHz assertion in it. Every other packet-carrying example in
+# this module is capped at 100 GHz by three-gpp-propagation-loss-model.cc:358.
+build_lib_example(
+  NAME thz-ntn-native-300ghz-traffic
+  SOURCE_FILES thz-ntn-native-300ghz-traffic.cc
+  LIBRARIES_TO_LINK
+    ${libthz-ntn}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libpropagation}
+    ${libpoint-to-point}
+    ${libinternet}
+    ${libapplications}
+    ${libflow-monitor}
+)

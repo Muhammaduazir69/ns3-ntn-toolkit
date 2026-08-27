@@ -7,7 +7,11 @@
  * Author: Muhammad Uzair <uk5595985@gmail.com>
  */
 
+#include "thz-ntn-itu-recommendations.h"
+
 #include "thz-ntn-weather-attenuation.h"
+
+#include <sstream>
 
 #include <ns3/boolean.h>
 #include <ns3/double.h>
@@ -202,56 +206,25 @@ ThzNtnWeatherAttenuation::InterpolateRainCoefficients(double freqGHz,
 {
     NS_LOG_FUNCTION(this << freqGHz);
 
-    // Clamp frequency to table range
-    if (freqGHz <= m_rainCoeffTable.front().freqGHz)
-    {
-        k = (m_rainCoeffTable.front().kH + m_rainCoeffTable.front().kV) / 2.0;
-        alpha = (m_rainCoeffTable.front().alphaH + m_rainCoeffTable.front().alphaV) / 2.0;
-        return;
-    }
-    if (freqGHz >= m_rainCoeffTable.back().freqGHz)
-    {
-        k = (m_rainCoeffTable.back().kH + m_rainCoeffTable.back().kV) / 2.0;
-        alpha = (m_rainCoeffTable.back().alphaH + m_rainCoeffTable.back().alphaV) / 2.0;
-        return;
-    }
-
-    // Find bracketing entries and interpolate in log-log domain for k,
-    // linear interpolation for alpha (standard ITU-R P.838 procedure).
-    for (size_t i = 0; i < m_rainCoeffTable.size() - 1; ++i)
-    {
-        if (freqGHz >= m_rainCoeffTable[i].freqGHz &&
-            freqGHz < m_rainCoeffTable[i + 1].freqGHz)
-        {
-            double f1 = m_rainCoeffTable[i].freqGHz;
-            double f2 = m_rainCoeffTable[i + 1].freqGHz;
-
-            // Average H and V polarization (circular polarization typical for NTN)
-            double k1 = (m_rainCoeffTable[i].kH + m_rainCoeffTable[i].kV) / 2.0;
-            double k2 = (m_rainCoeffTable[i + 1].kH + m_rainCoeffTable[i + 1].kV) / 2.0;
-            double a1 = (m_rainCoeffTable[i].alphaH + m_rainCoeffTable[i].alphaV) / 2.0;
-            double a2 =
-                (m_rainCoeffTable[i + 1].alphaH + m_rainCoeffTable[i + 1].alphaV) / 2.0;
-
-            // Log-log interpolation for k
-            double logF = std::log10(freqGHz);
-            double logF1 = std::log10(f1);
-            double logF2 = std::log10(f2);
-            double frac = (logF - logF1) / (logF2 - logF1);
-
-            double logK1 = std::log10(k1);
-            double logK2 = std::log10(k2);
-            k = std::pow(10.0, logK1 + frac * (logK2 - logK1));
-
-            // Linear interpolation for alpha
-            alpha = a1 + frac * (a2 - a1);
-            return;
-        }
-    }
-
-    // Fallback (should not reach here)
-    k = (m_rainCoeffTable.back().kH + m_rainCoeffTable.back().kV) / 2.0;
-    alpha = (m_rainCoeffTable.back().alphaH + m_rainCoeffTable.back().alphaV) / 2.0;
+    // THZ-03 FIX (2026-08-25): delegate to ITU-R P.838-3.
+    //
+    // This used to interpolate a hand-tabulated k/alpha table whose rows above
+    // 100 GHz were labelled "Mie extension" and carried no source. They were
+    // not merely unsourced, they were wrong: at 300 GHz the table gave
+    // k = 2.73 where P.838-3 gives 1.6286, and at 500 GHz 3.20 against 1.5418,
+    // so rain attenuation on the packet path was overstated by 1.7 to 2 times
+    // across the entire band the module exists to study. The 100 GHz row
+    // matched the spec exactly, which is what made the invented rows above it
+    // look like a continuation of real data.
+    //
+    // The closed form was already implemented in this same module, in
+    // Itu838RainModel, and is valid to 1000 GHz - the discarded table's own
+    // comment said so on the last real row. Averaging H and V approximates the
+    // circular polarization typical of an NTN service link.
+    const double freqHz = freqGHz * 1e9;
+    const auto ka = itu::Itu838RainModel::GetKAlpha(freqHz, itu::Polarization::circular);
+    k = ka.first;
+    alpha = ka.second;
 }
 
 double
@@ -386,38 +359,46 @@ ThzNtnWeatherAttenuation::ComputeKl(double freqGHz, double temperature_K) const
 
     double theta = 300.0 / temperature_K - 1.0;
 
+    // THZ-04 FIX (2026-08-25): ITU-R P.840 double-Debye, with no frequency
+    // branch.
+    //
+    // This used to switch the intermediate permittivity at exactly 100 GHz:
+    //
+    //     if (freqGHz > 100.0) epsilon_1 = (epsilon_s - epsilon_inf) * 0.1 + epsilon_inf;
+    //     else                 epsilon_1 = epsilon_inf;
+    //
+    // The 0.1 had no source, and the branch made the specific attenuation
+    // coefficient jump 50.8 percent across 2 kHz of frequency at the boundary -
+    // a step change in a physical quantity that is continuous in reality, sitting
+    // right in the middle of the band this module exists to study. The
+    // high-frequency permittivity was also computed as 0.0671 * epsilon_s rather
+    // than taken from the recommendation.
+    //
+    // P.840 specifies the two-relaxation form with FIXED intermediate and
+    // high-frequency permittivities, which is continuous by construction: there
+    // is nothing to blend and no boundary to cross.
+    constexpr double kEpsilon1 = 5.48; //!< P.840 intermediate permittivity
+    constexpr double kEpsilon2 = 3.51; //!< P.840 high-frequency permittivity
+
     // Static permittivity of water (ITU-R P.840)
     double epsilon_s = 77.66 + 103.3 * theta;
-
-    // High-frequency permittivity
-    double epsilon_inf = 0.0671 * epsilon_s;
+    double epsilon_inf = kEpsilon2;
+    double epsilon_1 = kEpsilon1;
 
     // Principal relaxation frequency in GHz (ITU-R P.840)
     double fp = 20.20 - 146.4 * theta + 316.0 * theta * theta;
 
-    // Secondary relaxation frequency in GHz (double-Debye model for THz accuracy)
+    // Secondary relaxation frequency in GHz (ITU-R P.840)
     double fs = 39.8 * fp;
-
-    // Intermediate permittivity for double-Debye
-    double epsilon_1 = 0.0;
-    if (freqGHz > 100.0)
-    {
-        // Use double-Debye model for THz frequencies
-        epsilon_1 = (epsilon_s - epsilon_inf) * 0.1 + epsilon_inf;
-    }
-    else
-    {
-        epsilon_1 = epsilon_inf;
-    }
 
     // Complex permittivity components (double-Debye)
     double f = freqGHz;
     double term1_denom = 1.0 + (f / fp) * (f / fp);
     double term2_denom = 1.0 + (f / fs) * (f / fs);
 
-    double epsilon_real = epsilon_inf +
+    double epsilon_real = kEpsilon2 +
                           (epsilon_s - epsilon_1) / term1_denom +
-                          (epsilon_1 - epsilon_inf) / term2_denom;
+                          (epsilon_1 - kEpsilon2) / term2_denom;
 
     double epsilon_imag = (f / fp) * (epsilon_s - epsilon_1) / term1_denom +
                           (f / fs) * (epsilon_1 - epsilon_inf) / term2_denom;
@@ -528,18 +509,32 @@ ThzNtnWeatherAttenuation::ComputeSnowAttenuation_dB(double freqHz,
     // Reference frequency for normalization
     const double fRef = 100.0; // GHz
 
+    // THZ-10: these coefficients have NO standard behind them.
+    //
+    // Neither the f^2 * S wet-snow form and its 0.4 dB/km anchor, nor the
+    // f^1.6 * S^0.72 dry-snow form and its 0.1 dB/km anchor, is taken from an
+    // ITU-R Recommendation or any cited measurement campaign. They were written
+    // as an "empirical coefficient" with no source, and they enter the packet
+    // path through ThzNtnPropagationLossModel. ITU-R publishes rain (P.838) and
+    // gaseous (P.676) specific attenuation; it does not publish an equivalent
+    // for snow or dust at these frequencies, and inventing one silently is the
+    // fabrication this campaign exists to find.
+    //
+    // They are kept because a scenario that wants a snow term needs something,
+    // and deleting the feature would be its own kind of dishonesty. What
+    // changes is that the model now DECLARES them as unsourced estimates rather
+    // than presenting them alongside the P.838 rain term as though they carried
+    // the same authority. See IsUnsourcedEstimate() and the provenance string.
+    m_usedUnsourcedTerm = true;
     if (isWet)
     {
-        // Wet snow: gamma ~ f^2 * S
-        // Empirical coefficient for wet snow attenuation at THz
-        // At 100 GHz, wet snow ~0.4 dB/km per mm/h
+        // Wet snow: gamma ~ f^2 * S. Unsourced; see the note above.
         double coeff = 0.4 / (fRef * fRef);
         gammaSnow = coeff * freqGHz * freqGHz * snowRate_mm_h;
     }
     else
     {
-        // Dry snow: gamma ~ f^1.6 * S^0.72
-        // At 100 GHz, dry snow ~0.1 dB/km per mm/h^0.72
+        // Dry snow: gamma ~ f^1.6 * S^0.72. Unsourced; see the note above.
         double coeff = 0.1 / std::pow(fRef, 1.6);
         gammaSnow = coeff * std::pow(freqGHz, 1.6) * std::pow(snowRate_mm_h, 0.72);
     }
@@ -598,7 +593,15 @@ ThzNtnWeatherAttenuation::ComputeDustAttenuation_dB(double freqHz,
     //
     // gamma_dust = C * (f/f_ref)^beta / V_km   (dB/km)
     //
-    // At 10 GHz, V=1 km: gamma ~ 0.5 dB/km (empirical baseline)
+    // THZ-10: unsourced, exactly as the snow terms above.
+    //
+    // The 0.5 dB/km anchor at 10 GHz and V = 1 km, and the beta = 1.2
+    // frequency exponent described as "typical value for desert sand storms",
+    // carry no citation anywhere in this file or in doc/VALIDATION.md. This
+    // term reaches the packet path, so it is declared rather than presented
+    // beside the P.838 rain term as if it had the same standing.
+    m_usedUnsourcedTerm = true;
+    // At 10 GHz, V=1 km: gamma ~ 0.5 dB/km (UNSOURCED empirical baseline)
     const double fRef = 10.0;   // GHz reference frequency
     const double beta = 1.2;    // frequency scaling exponent
     const double C = 0.5;       // empirical coefficient (dB/km) at f_ref, V=1km
@@ -616,6 +619,28 @@ ThzNtnWeatherAttenuation::ComputeDustAttenuation_dB(double freqHz,
                             << ", A=" << attenuation << " dB");
 
     return attenuation;
+}
+
+std::string
+ThzNtnWeatherAttenuation::ProvenanceNote() const
+{
+    // THZ-10: say which terms carry a standard and which do not.
+    std::ostringstream os;
+    os << "[thz-weather/provenance] rain=ITU-R P.838 gas=ITU-R P.676";
+    if (m_enableSnow || m_enableDust)
+    {
+        os << " snow/dust=UNSOURCED (empirical coefficients with no ITU-R "
+              "Recommendation or cited campaign behind them)";
+    }
+    else
+    {
+        os << " snow/dust=disabled";
+    }
+    if (m_usedUnsourcedTerm)
+    {
+        os << "  -> an unsourced term CONTRIBUTED to the loss returned by this model";
+    }
+    return os.str();
 }
 
 double

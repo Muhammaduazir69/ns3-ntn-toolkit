@@ -113,7 +113,10 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("thz-ntn-real-stack");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
 
     // Re-home the THz physics as a real channel plug-in on the mmwave channel.

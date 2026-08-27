@@ -195,20 +195,27 @@ ThzNtnScintillation::ComputeApertureAveragingFactor(double freqHz,
         sinEl = 0.01;
     }
 
-    // Effective turbulent layer height for Fresnel zone calculation
+    // THZ-05 FIX (2026-08-25): use the recommendation's effective path length
+    // and averaging argument rather than a Fresnel-zone ratio.
+    //
+    // P.618-13 step 6 defines the effective path length through the turbulent
+    // layer as
+    //     L = 2 h_L / (sqrt(sin^2(theta) + 2.35e-4) + sin(theta))
+    // and step 7 the aperture-averaging argument as
+    //     x = 1.22 D_eff^2 f_GHz / L
+    // The code previously formed x as pi * D_eff / sqrt(lambda h_L / sin theta),
+    // a Fresnel-zone heuristic with a different elevation dependence, so the
+    // aperture term deviated from the spec in the same direction as the
+    // elevation exponent did and the two errors compounded at low elevation.
     double hL = m_turbulentLayerHeight; // m
-
-    // Fresnel zone size
-    double fresnelSize = std::sqrt(lambda * hL / sinEl);
-
-    if (fresnelSize < 1.0e-6)
+    const double L = 2.0 * hL / (std::sqrt(sinEl * sinEl + 2.35e-4) + sinEl);
+    if (L < 1.0e-6)
     {
         return 1.0;
     }
-
-    // Argument x = pi * Deff / fresnelSize
-    // (ratio of antenna diameter to Fresnel zone)
-    double x = M_PI * Deff / fresnelSize;
+    const double freqGHzLocal = freqHz / 1e9;
+    double x = 1.22 * Deff * Deff * freqGHzLocal / L;
+    (void)lambda; // wavelength is no longer needed in the spec form
 
     if (x < 1.0e-4)
     {
@@ -245,8 +252,7 @@ ThzNtnScintillation::ComputeApertureAveragingFactor(double freqHz,
     }
 
     NS_LOG_DEBUG("Aperture avg: D=" << m_antennaDiameter << " m, Deff=" << Deff
-                                    << " m, Fresnel=" << fresnelSize
-                                    << " m, x=" << x << ", g=" << g);
+                                    << " m, L=" << L << " m, x=" << x << ", g=" << g);
 
     return g;
 }
@@ -383,7 +389,13 @@ ThzNtnScintillation::ComputeAmplitudeScintillation_dB(double freqHz,
     {
         sinEl = 0.01;
     }
-    double elevScaling = std::pow(sinEl, -11.0 / 12.0);
+    // THZ-05 FIX (2026-08-25): ITU-R P.618-13 step 8 scales the scintillation
+    // standard deviation by (sin theta)^-1.2, not (sin theta)^(-11/12). The
+    // 11/12 exponent is the one P.618 uses for the FREQUENCY term, applied here
+    // to elevation by mistake. At the 10-degree cell edge the spec factor is
+    // 8.18 and the old one was 4.98, so scintillation was under-predicted by
+    // 39 percent exactly where the path is longest and the fading worst.
+    double elevScaling = std::pow(sinEl, -1.2);
 
     // Aperture averaging factor
     double g = ComputeApertureAveragingFactor(freqHz, elevationDeg);
@@ -413,39 +425,42 @@ ThzNtnScintillation::ComputePhaseScintillation_rad(double freqHz,
         return 0.0;
     }
 
-    // Phase scintillation from the Tatarskii spectrum:
+    // THZ-09: phase variance from the Tatarskii/von Karman result, with the
+    // outer-scale factor that was missing.
     //
-    //   sigma_phi^2 = 2.91 * k^2 * integral(Cn2) * L_0^(5/3) * csc(theta)
+    // What the code used to compute was
     //
-    // where k = 2*pi*f/c is the wavenumber.
+    //     sigma_phi^2 = 2.91 * k^2 * integral(Cn2 dz)
     //
-    // However, the Tatarskii result for phase variance over path of length L is:
-    //   sigma_phi^2 = 1.0 * k^2 * integral_Cn2_dz
+    // and that is not a variance, it is not even dimensionless. 2.91 k^2
+    // integral(Cn2 dz) is the COEFFICIENT of the phase structure function,
     //
-    // Using the standard weak-turbulence result (Rytov variance analog for phase):
-    //   sigma_phi = sqrt(2.91 * k^2 * integrated_Cn2)
+    //     D_phi(r) = 2.91 * k^2 * r^(5/3) * integral(Cn2 dz),
+    //
+    // which becomes dimensionless only once the separation r^(5/3) is applied:
+    // k^2 is m^-2, integral(Cn2 dz) is m^(-2/3) * m = m^(1/3), and r^(5/3) is
+    // m^(5/3). Without it the result carried units of m^(-5/3) and was ~33x too
+    // small at a 100 m outer scale, which the previous comment half-admitted
+    // ("we just use the basic Tatarskii result") without saying it made the
+    // number wrong rather than approximate.
+    //
+    // For Kolmogorov turbulence the phase variance diverges; a finite outer
+    // scale is what makes it exist. Taking the structure function to saturate
+    // at the outer scale, D_phi(r) -> 2*sigma_phi^2 as the phase decorrelates,
+    // gives
+    //
+    //     sigma_phi^2 = D_phi(L_0) / 2 = 1.455 * k^2 * L_0^(5/3) * integral(Cn2 dz)
+    //
+    // which is dimensionless as it must be, and scales the way the physics
+    // says: as k^2 (so as f^2), linearly in the integrated turbulence, and as
+    // L_0^(5/3).
+    const double c = 299792458.0;
+    const double k = 2.0 * M_PI * freqHz / c; // wavenumber (1/m)
 
-    double c = 3.0e8;
-    double k = 2.0 * M_PI * freqHz / c; // wavenumber (1/m)
+    const double intCn2 = ComputeIntegratedCn2(elevationDeg);
 
-    double intCn2 = ComputeIntegratedCn2(elevationDeg);
-
-    // Phase variance
-    double phaseVariance = 2.91 * k * k * intCn2;
-
-    // Apply outer-scale correction (von Karman spectrum reduces variance
-    // compared to Kolmogorov for large-scale cutoff):
-    // Correction factor ~ (2*pi/L_0)^(-5/3) when L_0 is finite.
-    // For typical L_0 = 100 m, this is a modest reduction.
-    // We use the von Karman correction: multiply by (1 + (2*pi*l_inner/L_0)^2)^(-1/6)
-    // For simplicity, apply a factor based on L_0:
-    [[maybe_unused]] double kappa0 = 2.0 * M_PI / m_outerScale; // outer scale wavenumber
-    // The correction makes the phase variance finite even for zero inner scale
-    // We approximate: sigma_phi^2 = 2.91 * k^2 * intCn2 * L_0^(5/3) correction
-    // Using the relationship: for von Karman, the integral converges and the
-    // factor is approximately (L_0 / (2*pi))^(5/3) * Gamma(5/6) / Gamma(11/6)
-    // For practical purposes, the numerical integration already captures the path;
-    // we just use the basic Tatarskii result.
+    const double outerScalePow = std::pow(m_outerScale, 5.0 / 3.0);
+    const double phaseVariance = 0.5 * 2.91 * k * k * outerScalePow * intCn2;
 
     double sigmaPhase = std::sqrt(std::abs(phaseVariance));
 
@@ -494,8 +509,19 @@ ThzNtnScintillation::GetScintillationSample_dB(double freqHz,
     double fc = ComputeCornerFrequency();
     double tauC = 1.0 / (2.0 * M_PI * fc);
 
-    // Sampling period
-    double Ts = m_samplingPeriod.GetSeconds();
+    // THZ-06 FIX (2026-08-25): advance the process on SIMULATED TIME, not per
+    // call.
+    //
+    // Ts used to be a fixed attribute and Simulator::Now() was never read
+    // anywhere in this file, so the AR(1) correlation depended on how often the
+    // model happened to be invoked. A scenario sending twice as many packets
+    // got a process that decorrelated twice as fast, which makes a fading
+    // time series a function of the traffic load rather than of the
+    // atmosphere. Same defect class as the P.681 one already corrected.
+    const Time now = Simulator::Now();
+    double Ts = (m_lastSampleTime < now) ? (now - m_lastSampleTime).GetSeconds()
+                                         : m_samplingPeriod.GetSeconds();
+    m_lastSampleTime = now;
 
     // AR(1) coefficient
     double rho = std::exp(-Ts / tauC);

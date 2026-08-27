@@ -2,6 +2,89 @@
 
 <p align="center"><strong>Sub-THz / D-band non-terrestrial PHY for ns-3.43 — LEO-ground & ISL links, RIS, ultra-massive MIMO, ISAC, alpha-mu fading, NYUSIM-140 calibration, ITU-R P.676-13 gaseous absorption</strong></p>
 
+> ## Two examples now couple their physics to their packets, and the link does not close (audit WF-06)
+>
+> `thz-ntn-leo-ground` and `thz-ntn-isl` computed a full link budget — FSPL, molecular absorption,
+> weather, scintillation, pointing — printed it to CSV, and then carried their packets over a
+> point-to-point star with a **hardcoded 15 ms delay and a `RateErrorModel` pinned at 0.0**. There
+> was no SpectrumPhy, no MAC, no SINR and no TBLER in the data path, so nothing the physics
+> computed could affect a single packet. The helper's coupling hook,
+> `UpdateUeLink(ueIndex, oneWayDelay, per)`, had **zero callers across all 94 example files**.
+>
+> Both now apply it: the delay is the real slant range over *c*, and the error rate comes from the
+> SNR the budget just produced, mapped through the vendored SNS3 **DVB-S2 forward-link tables** —
+> a measured per-MODCOD curve rather than a sigmoid. (THz links do not use DVB-S2 MODCODs; it is a
+> stand-in for a THz-native waterfall and is labelled as one, but it has real thresholds, which a
+> PER of exactly zero did not.)
+>
+> **The measured consequence is that these configurations do not close.** At the shipped defaults
+> the LEO-ground pass computes an SNR of **−18.3 to −15.1 dB** across its whole 60 s, so the PER is
+> 1.0 throughout and `rx/tx` goes from 1 to 0. That is the correct answer, and it was completely
+> hidden while every packet arrived regardless of the physics. The dominant term is the noise
+> bandwidth: `--bandwidth=10e9` puts the thermal floor at −174 + 100 dB. Measured sweep:
+> 10 GHz and 1 GHz do not close, **100 MHz does** (PER 0, `rx/tx` 1).
+>
+> The defaults are left as they are rather than quietly narrowed — changing them to make the demo
+> deliver would manufacture a result. Both examples now print the verdict and name the knob.
+
+> ## Which results carry packets, and at what frequency (audit THZ-07)
+>
+> This module has two kinds of example and they are not interchangeable.
+>
+> **Above 100 GHz: link-budget analysis only, no packets.** `thz-ntn-leo-ground` (225 GHz),
+> `thz-ntn-demo` (300 GHz), `thz-ntn-isac`, `thz-ntn-um-mimo`, `thz-ntn-isl`,
+> `thz-ntn-ris-assisted` (all 300 GHz) and `thz-ntn-dband-constellation` (140 GHz) contain **no**
+> `InternetStackHelper`, `NetDeviceContainer`, `PointToPointHelper`, `FlowMonitor`, `OnOffHelper`
+> or `PacketSink` — verified by grep, zero occurrences in all seven. `thz-ntn-demo` has no
+> `Simulator::Run` at all. They compute SNR, capacity, absorption and beam geometry into CSV. Any
+> throughput they report is a Shannon bound, not a measured goodput.
+>
+> **Packets: capped at 100 GHz.** Every example that actually carries traffic —
+> `thz-ntn-beam-tracking`, `thz-ntn-ris-relay-traffic`, `thz-ntn-ric-controlled-traffic`,
+> `thz-ntn-isac-coexist-traffic`, `thz-ntn-isl-traffic`, `thz-ntn-weather-traffic`,
+> `thz-ntn-leo-ground-downlink-traffic` — forces `freqGHz = 100.0`. That is not a choice: the
+> in-tree 3GPP spectrum model asserts `500 MHz ≤ f ≤ 100 GHz`
+> (`three-gpp-propagation-loss-model.cc:358`, and the same bound in `three-gpp-channel-model.cc`),
+> so the NR/mmwave bridge cannot be driven above it.
+>
+> **THZ-07 UPDATE — there is now one.** `thz-ntn-native-300ghz-traffic` carries real IP traffic
+> at **300 GHz** by not using the 3GPP model at all: the propagation chain is
+> `FriisPropagationLossModel` → `ThzNtnPropagationLossModel` (free space plus this module's own
+> gaseous, weather, scintillation and pointing terms), neither of which has a frequency cap, and
+> `ThzNtnLinkErrorModel` puts that chain in the packet path — asking it per packet what the
+> received power is for the current geometry. Measured on the default run: 1.27 M packets,
+> 484.5 Mbps goodput, SNR falling 10.18 → 8.77 dB across the pass. The physics is load-bearing:
+> 25 mm/h of rain takes the SNR to **−32.8 dB and the PDR to 0%**, a 43 dB penalty.
+>
+> **Honest scope:** that example is not a SpectrumPhy — no per-subcarrier processing, no MAC, no
+> HARQ, no scheduler. Read its throughput as a link-limited transport figure, not as an
+> NR-at-THz result. The paragraph below still describes every OTHER packet-carrying example in
+> this module, which remain capped at 100 GHz.
+>
+> **Previously, and still true of the rest:** the module's headline band (200–400 GHz) has no example in which a packet is
+> ever transmitted, and every measured-plane THz result in this repo is a W-band result.**
+> Closing that needs a THz-native spectrum channel that bypasses `ThreeGppPropagationLossModel`;
+> it is not done, and the title above should be read with that in mind.
+
+> ## Small-scale fading: what is and is not modelled (audit BOTH-01)
+>
+> **There is no TR 38.811 §6.9 NTN-TDL or CDL multipath in this module.** A grep for
+> `ntn-tdl|NtnTdl|CDL` across its model and helper sources returns only bibliography lines. The
+> small-scale processes that do exist are the ITU-R P.681-11 Lutz two-state model (environment-
+> keyed, **not** elevation-dependent), the alpha-mu model, and a hand-written four-tap snapshot
+> inside one example. None is parameterised by elevation angle.
+>
+> Concretely, this module produces **no frequency-selective fading, no delay spread, and no
+> elevation-dependent Rician K-factor.** Any BLER or throughput number from it reflects a flatter,
+> smoother channel than a real NTN link. `SCOPE_AND_LIMITATIONS.md` A1 records that
+> `ntn-traffic`'s excess-loss chain *does* carry the §6.7.2 elevation-dependent K-factor; that
+> statement does **not** extend here, and this note exists because it previously was not repeated
+> anywhere a reader of this module would look.
+>
+> The fix is an `NtnTdlSpectrumPropagationLossModel` carrying the Table 6.9.2-x tap powers and
+> delays with an elevation-interpolated K-factor, chainable through
+> `NtnRealStackHelper::AddExtraPropagationLoss`. It is not implemented.
+
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0--only-green.svg"/></a>
@@ -22,7 +105,7 @@
 
 - **Free-space path loss** (`ThzNtnFreeSpaceLoss`) with correct frequency/distance scaling
 - **Molecular absorption** from the **ITU-R P.676-13 Annex 1** line-by-line model
-  (`ThzNtnMolecularAbsorption`) over an ITU-R P.835 stratified atmosphere.
+  (`ThzNtnMolecularAbsorption`) over the ITU-R P.835-6 Section 1.1 reference atmosphere.
   The in-process line database is the full P.676-13 set (**44 O2 lines from
   Table 1 + 35 H2O lines from Table 2**) with the standard resonant line shape
   and the dry/Debye continuum; it supersedes the earlier hand-scaled "HITRAN"
@@ -103,7 +186,7 @@ Derived from `model/*.h`:
 | Class / file | Role |
 |---|---|
 | `ThzNtnSpectrum` (`thz-ntn-spectrum`) | Atmospheric transmission windows + THz band classification; `ComputeTransmittance`, `GetStandardWindows`, `GetBestWindow` |
-| `ThzNtnMolecularAbsorption` (`thz-ntn-molecular-absorption`) | ITU-R P.676-13 Annex 1 line-by-line gaseous absorption (44 O2 + 35 H2O lines) over P.835 layers |
+| `ThzNtnMolecularAbsorption` (`thz-ntn-molecular-absorption`) | ITU-R P.676-13 Annex 1 line-by-line gaseous absorption (44 O2 + 35 H2O lines) over the ITU-R P.835-6 Section 1.1 reference atmosphere |
 | `HitranLut` (`thz-ntn-hitran-lut`, namespace `ns3::thzntn`) | Bundled specific-attenuation lookup table (`data/hitran2024-lut-subthz.csv`, legacy filename) — an exact grid sample of the ITU-R P.676-13 kernel, regenerated by `tools/p676-lut-gen.py` (see Overview) |
 | `Itu838RainModel`, `Itu618LossModel`, `Itu676AbsorptionModel`, `Itu681LmsModel` (`thz-ntn-itu-recommendations`) | ITU-R P.838-3 / P.618-13 / P.676-13 / P.681-11 reference implementations |
 | `ThzNtnAlphaMuFading` (`thz-ntn-alpha-mu-fading`) | alpha-mu small-scale fading distribution |

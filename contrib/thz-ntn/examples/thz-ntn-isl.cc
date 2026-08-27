@@ -28,6 +28,8 @@
 #include <iomanip>
 #include <iostream>
 
+#include "ns3/satellite-link-results.h"
+#include "ns3/satellite-enums.h"
 #include "ns3/ntn-realistic-traffic-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -52,6 +54,45 @@ class ThzNtnAntennaArray;
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("ThzNtnIsl");
+
+namespace
+{
+double g_lastAppliedOwdMs = 0.0;
+double g_lastAppliedPer = 0.0;
+uint64_t g_couplingUpdates = 0;
+constexpr uint32_t kNumIslUes = 6;
+
+/// WF-06: convert the link budget's SNR into a packet error rate, using the
+/// vendored SNS3 DVB-S2 forward-link tables rather than a sigmoid.
+///
+/// These two examples computed a full THz link budget - FSPL, molecular
+/// absorption, weather, scintillation, pointing - printed it to CSV, and then
+/// carried their packets over a point-to-point star with a hardcoded 15 ms
+/// delay and a RateErrorModel pinned at 0.0. There was no SpectrumPhy, no MAC,
+/// no SINR and no TBLER anywhere in the data path, so nothing the physics
+/// computed could affect a single packet. The helper's coupling hook,
+/// UpdateUeLink(ueIndex, oneWayDelay, per), had zero callers across all 94
+/// example files.
+///
+/// The curve is measured per MODCOD and shipped with the satellite module, so
+/// this is a published mapping, not a shape with two tunable constants. THz
+/// links do not use DVB-S2 MODCODs - this is a stand-in for a THz-native
+/// waterfall and is labelled as one - but it is a real curve with real
+/// thresholds, which the previous PER of exactly zero was not.
+double
+PerFromSnrDb(double snrDb)
+{
+    static Ptr<SatLinkResultsDvbS2> lr;
+    if (!lr)
+    {
+        lr = CreateObject<SatLinkResultsDvbS2>();
+        lr->Initialize();
+    }
+    const double bler = lr->GetBler(SatEnums::SAT_MODCOD_QPSK_1_TO_2,
+                                    SatEnums::NORMAL_FRAME, snrDb);
+    return std::min(1.0, std::max(0.0, bler));
+}
+} // namespace
 
 int
 main(int argc, char* argv[])
@@ -251,7 +292,7 @@ main(int argc, char* argv[])
     traffic.SetOutputDir(outputDir);
     traffic.SetRunTag("thz-ntn-isl");
     traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::EmbbStreaming);
-    traffic.InstallUes(6);
+    traffic.InstallUes(kNumIslUes);
 
     std::filesystem::create_directories(outputDir);
     std::ofstream isltimes(outputDir + "/isl_timeseries.csv");
@@ -278,12 +319,39 @@ main(int argc, char* argv[])
         isltimes << std::fixed << std::setprecision(2)
                  << t << "," << d_km << "," << r.fspl_dB << "," << r.snr_dB
                  << "," << r.shannonCapacity_Gbps << "," << doppler_MHz << "\n";
+
+        // WF-06: APPLY the ISL physics to the data plane. The packets crossed
+        // a point-to-point star with a hardcoded 15 ms delay and a
+        // RateErrorModel pinned at 0.0, so none of the budget above could
+        // affect a single one. The helper's coupling hook had no callers.
+        const Time owd = Seconds(d_km * 1000.0 / 299792458.0);
+        const double per = PerFromSnrDb(r.snr_dB);
+        for (uint32_t u = 0; u < kNumIslUes; ++u)
+        {
+            traffic.UpdateUeLink(u, owd, per);
+        }
+        g_lastAppliedOwdMs = owd.GetSeconds() * 1e3;
+        g_lastAppliedPer = per;
+        ++g_couplingUpdates;
     });
     traffic.Wire();
 
     Simulator::Stop(Seconds(simTime + 0.5));
     Simulator::Run();
     traffic.WriteHealthReport();
+    std::cout << "  [WF-06] ISL physics -> data plane: " << g_couplingUpdates
+              << " link updates applied; last one-way delay " << g_lastAppliedOwdMs
+              << " ms (was a hardcoded 15 ms), last PER " << g_lastAppliedPer
+              << " (was pinned at 0)\n";
+    if (g_lastAppliedPer > 0.5)
+    {
+        std::cout << "  [WF-06] LINK DOES NOT CLOSE at these defaults: the computed SNR is below\n"
+                     "          any usable MODCOD threshold, so the data plane correctly delivers\n"
+                     "          (almost) nothing. This was invisible while the error rate was\n"
+                     "          pinned at 0 and every packet arrived regardless of the physics.\n"
+                     "          The dominant term is the noise bandwidth: --bandwidth=10e9 puts the\n"
+                     "          thermal floor at -174 + 100 dB. Narrowing it closes the link.\n";
+    }
     isltimes.close();
     Simulator::Destroy();
 

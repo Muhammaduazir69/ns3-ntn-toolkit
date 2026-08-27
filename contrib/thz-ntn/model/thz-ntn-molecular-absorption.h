@@ -9,7 +9,7 @@
  * Altitude-stratified molecular absorption model for terahertz non-terrestrial
  * network links.  Unlike terrestrial THz models (e.g. TeraSim), this model
  * accounts for the vertical structure of the atmosphere by integrating
- * absorption along slant paths through six ITU-R P.835 standard atmosphere
+ * absorption along slant paths through the ITU-R P.835 reference atmosphere
  * layers spanning 0--100 km.
  *
  * Key features:
@@ -49,11 +49,12 @@ namespace ns3
  *
  * This class computes the molecular absorption loss along arbitrary
  * ground-to-satellite, satellite-to-ground, or inter-satellite links in
- * the terahertz band.  The atmosphere is divided into six altitude layers
- * following the ITU-R P.835 standard atmosphere model, each characterised
- * by representative temperature, pressure, and water-vapour density values.
+ * the terahertz band.  The path is divided into quadrature slabs, and the
+ * temperature, pressure and water-vapour density at every quadrature point
+ * come from the ITU-R P.835-6 Section 1.1 mean annual global reference
+ * atmosphere, evaluated in closed form (see GetAtmosphericConditions).
  *
- * For each layer the absorption coefficient is computed from the full
+ * At each quadrature point the absorption coefficient is computed from the full
  * ITU-R P.676-13 Annex 1 line-by-line model (44 oxygen + 35 water-vapour
  * lines with the standard line shape and the Debye/dry continuum).  The
  * total absorption is obtained
@@ -70,6 +71,36 @@ class ThzNtnMolecularAbsorption : public Object
      * \brief Get the TypeId for this class.
      * \return the ns-3 TypeId
      */
+    /**
+     * \brief State of the ITU-R P.835 reference atmosphere at an altitude.
+     *
+     * THZ-01. Evaluates Recommendation ITU-R P.835-6 Section 1.1, the mean
+     * annual global reference atmosphere, in closed form: the seven
+     * piecewise-linear temperature segments, the hydrostatic pressure solution
+     * on those same segments, and the 2 km scale-height water-vapour
+     * exponential with the 2e-6 mixing-ratio floor. Heights are converted to
+     * geopotential first, as the recommendation requires.
+     *
+     * Public because it IS the standards claim this module makes. It was
+     * private, so nothing could check that the profile matched the
+     * recommendation the header named, and for a long time it did not: the
+     * implementation was six isothermal layers whose pressure and humidity
+     * restarted from each layer's base value, giving a 13.5 percent pressure
+     * step at 2 km, an eight-fold humidity step at 10 km, no lapse rate
+     * anywhere, and a water-vapour column of 17.55 kg/m2 against the reference
+     * 15.0.
+     *
+     * \param altitude_km  geometric altitude above mean sea level, km
+     * \param[out] tempK       temperature in K
+     * \param[out] pressureHPa total pressure in hPa
+     * \param[out] humidity    water-vapour density in g/m^3, after any
+     *                          configured humidity-profile scaling
+     */
+    void GetAtmosphericConditions(double altitude_km,
+                                  double& tempK,
+                                  double& pressureHPa,
+                                  double& humidity) const;
+
     static TypeId GetTypeId();
 
     ThzNtnMolecularAbsorption();
@@ -130,6 +161,22 @@ class ThzNtnMolecularAbsorption : public Object
      * \param satAlt_km    altitude of the space endpoint in km
      * \return total absorption loss in dB along the slant path
      */
+    /// THZ-11: the elevation below which the slant integrator substitutes a
+    /// different geometry than the one asked for.
+    ///
+    /// The layer integrator divides by sin(theta) and goes singular at the
+    /// horizon, so it floors the elevation. That is a defensible numerical
+    /// guard; doing it silently is not. A caller requesting 2 degrees was
+    /// answered with the attenuation at 5 degrees and had no way to tell.
+    static constexpr double kMinIntegratorElevationDeg = 5.0;
+
+    /// True if the most recent ComputeSlantPathAbsorption() call had its
+    /// elevation floored, i.e. the returned attenuation is for
+    /// kMinIntegratorElevationDeg and not for the angle requested.
+    bool WasLastElevationClamped() const { return m_lastElevationClamped; }
+    /// The elevation actually integrated on the most recent call, in degrees.
+    double GetLastIntegratedElevationDeg() const { return m_lastIntegratedElevDeg; }
+
     double ComputeSlantPathAbsorption(double freqHz,
                                       double elevationDeg,
                                       double groundAlt_km,
@@ -191,6 +238,30 @@ class ThzNtnMolecularAbsorption : public Object
     /// else "in-process".
     std::string GetHitranReleaseTag() const;
 
+    // ---- THZ-12: the "Hitran" names above are LEGACY, and no HITRAN data is
+    // used anywhere in this module. -------------------------------------------
+    //
+    // The bundled table `data/hitran2024-lut-subthz.csv` opens with
+    // `# release: ITU-R-P.676-13`, `# generated by tools/p676-lut-gen.py` and
+    // `# model: ITU-R P.676-13 Annex 1 line-by-line`. It is generated from the
+    // ITU recommendation's own line catalogue, not from a HITRAN .par file, and
+    // no external HITRAN download is needed or consulted. The module README
+    // says so, and a unit test asserts the tag is `ITU-R-P.676-13` with the
+    // message "not HITRAN".
+    //
+    // The symbol names are kept so existing callers and any external user of
+    // this header keep compiling; renaming 112 occurrences across a module to
+    // fix a label would be churn with a real breakage risk and no functional
+    // gain. What was missing is that nothing said so AT THE API, where a reader
+    // forms the belief. These aliases are the names to use in new code, and the
+    // loader is honest about what it accepts: any tag the file declares.
+    bool LoadAtmosphericLut(const std::string& path) { return LoadHitran2024Lut(path); }
+    bool IsAtmosphericLutLoaded() const { return IsHitranLutLoaded(); }
+    /// The release tag DECLARED BY THE LOADED FILE. It is data, not a claim
+    /// this module makes: a caller who loads a table tagged "HITRAN-2024" gets
+    /// that string back, which is exactly what the loader round-trip tests do.
+    std::string GetLutReleaseTag() const { return GetHitranReleaseTag(); }
+
   protected:
     void DoDispose() override;
 
@@ -230,7 +301,11 @@ class ThzNtnMolecularAbsorption : public Object
     };
 
     /**
-     * \brief Initialise the atmospheric layer table (ITU-R P.835).
+     * \brief Initialise the integration slab boundaries.
+     *
+     * THZ-01: these are quadrature boundaries only. The thermodynamic state at
+     * any altitude comes from GetAtmosphericConditions, which evaluates
+     * ITU-R P.835-6 Section 1.1 in closed form.
      */
     void InitAtmosphericLayers();
 
@@ -239,19 +314,7 @@ class ThzNtnMolecularAbsorption : public Object
      */
     void InitAbsorptionLines();
 
-    /**
-     * \brief Get the atmospheric conditions at a given altitude by
-     *        interpolating or selecting the appropriate layer.
-     *
-     * \param altitude_km altitude in km
-     * \param[out] tempK       temperature in K
-     * \param[out] pressureHPa pressure in hPa
-     * \param[out] humidity    water-vapour density in g/m^3
-     */
-    void GetAtmosphericConditions(double altitude_km,
-                                  double& tempK,
-                                  double& pressureHPa,
-                                  double& humidity) const;
+
 
     /**
      * \brief Apply humidity profile scaling to the base layer humidity.
@@ -271,6 +334,10 @@ class ThzNtnMolecularAbsorption : public Object
     std::vector<AbsorptionLine> m_lines;     //!< absorption line database
 
     // 4.3.1 — HITRAN-2024 LUT path. When loaded, the SLANT-PATH integration
+    /// THZ-11 bookkeeping: mutable because the compute path is const.
+    mutable bool m_lastElevationClamped{false};
+    mutable double m_lastIntegratedElevDeg{0.0};
+
     // (ComputeSlantPathAbsorption) and GetTransmittance consult `m_lut` for the
     // per-sub-layer specific attenuation (dB/km). The single-point
     // ComputeAbsorptionCoefficient remains the Van Vleck–Weisskopf kernel and is

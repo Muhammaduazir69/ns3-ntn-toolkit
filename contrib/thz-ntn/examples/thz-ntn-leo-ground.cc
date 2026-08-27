@@ -28,6 +28,8 @@
 #include <iomanip>
 #include <iostream>
 
+#include "ns3/satellite-link-results.h"
+#include "ns3/satellite-enums.h"
 #include "ns3/ntn-realistic-traffic-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -77,6 +79,48 @@ ComputeSlantRange(double elevDeg, double altKm)
                         - std::sin(elevRad));
     return d_km * 1000.0; // return in metres
 }
+
+namespace
+{
+double g_lastAppliedOwdMs = 0.0;
+double g_lastAppliedPer = 0.0;
+uint64_t g_couplingUpdates = 0;
+constexpr uint32_t kNumThzUes = 8;
+double g_perSum = 0.0;
+double g_perMin = 1e9;
+double g_perMax = -1e9;
+
+/// WF-06: convert the link budget's SNR into a packet error rate, using the
+/// vendored SNS3 DVB-S2 forward-link tables rather than a sigmoid.
+///
+/// These two examples computed a full THz link budget - FSPL, molecular
+/// absorption, weather, scintillation, pointing - printed it to CSV, and then
+/// carried their packets over a point-to-point star with a hardcoded 15 ms
+/// delay and a RateErrorModel pinned at 0.0. There was no SpectrumPhy, no MAC,
+/// no SINR and no TBLER anywhere in the data path, so nothing the physics
+/// computed could affect a single packet. The helper's coupling hook,
+/// UpdateUeLink(ueIndex, oneWayDelay, per), had zero callers across all 94
+/// example files.
+///
+/// The curve is measured per MODCOD and shipped with the satellite module, so
+/// this is a published mapping, not a shape with two tunable constants. THz
+/// links do not use DVB-S2 MODCODs - this is a stand-in for a THz-native
+/// waterfall and is labelled as one - but it is a real curve with real
+/// thresholds, which the previous PER of exactly zero was not.
+double
+PerFromSnrDb(double snrDb)
+{
+    static Ptr<SatLinkResultsDvbS2> lr;
+    if (!lr)
+    {
+        lr = CreateObject<SatLinkResultsDvbS2>();
+        lr->Initialize();
+    }
+    const double bler = lr->GetBler(SatEnums::SAT_MODCOD_QPSK_1_TO_2,
+                                    SatEnums::NORMAL_FRAME, snrDb);
+    return std::min(1.0, std::max(0.0, bler));
+}
+} // namespace
 
 int
 main(int argc, char* argv[])
@@ -290,7 +334,7 @@ main(int argc, char* argv[])
     traffic.SetOutputDir(outputDir);
     traffic.SetRunTag("thz-ntn-leo-ground");
     traffic.SetProfile(NtnRealisticTrafficHelper::TrafficProfile::EmbbStreaming);
-    traffic.InstallUes(8);
+    traffic.InstallUes(kNumThzUes);
 
     std::filesystem::create_directories(outputDir);
     std::ofstream passCsv(outputDir + "/pass_timeseries.csv");
@@ -319,11 +363,50 @@ main(int argc, char* argv[])
                 << r.weatherLoss_dB << "," << r.scintillationLoss_dB << ","
                 << r.pointingLoss_dB << "," << r.totalPathLoss_dB << ","
                 << r.snr_dB << "," << r.shannonCapacity_Gbps << "\n";
+
+        // WF-06: APPLY the physics to the data plane.
+        //
+        // Everything above was computed and printed. The packets meanwhile
+        // crossed a point-to-point star with a hardcoded 15 ms delay and a
+        // RateErrorModel pinned at 0.0, so a run in a rainstorm at 5 degrees
+        // elevation delivered exactly what a clear zenith pass did. The helper
+        // has had the coupling hook all along and nothing called it.
+        //
+        // The delay is the real slant range over c, replacing the constant. The
+        // error rate comes from the SNR this budget just produced.
+        const Time owd = Seconds(range_m / 299792458.0);
+        const double per = PerFromSnrDb(r.snr_dB);
+        // Every UE shares this satellite link, so every UE gets the update.
+        // Updating only index 0 left the other seven on the hardcoded 15 ms
+        // and PER 0, which is why rx/tx stayed at 1.
+        for (uint32_t u = 0; u < kNumThzUes; ++u)
+        {
+            traffic.UpdateUeLink(u, owd, per);
+        }
+        g_lastAppliedOwdMs = owd.GetSeconds() * 1e3;
+        g_lastAppliedPer = per;
+        ++g_couplingUpdates;
+        g_perSum += per;
+        g_perMin = std::min(g_perMin, per);
+        g_perMax = std::max(g_perMax, per);
     });
     traffic.Wire();
     Simulator::Stop(Seconds(simTime + 0.5));
     Simulator::Run();
     traffic.WriteHealthReport();
+    std::cout << "  [WF-06] THz physics -> data plane: " << g_couplingUpdates
+              << " link updates applied; last one-way delay " << g_lastAppliedOwdMs
+              << " ms (was a hardcoded 15 ms), last PER " << g_lastAppliedPer
+              << " (was pinned at 0); PER over the pass min=" << g_perMin << " max=" << g_perMax << " mean=" << (g_couplingUpdates ? g_perSum/g_couplingUpdates : 0.0) << "\n";
+    if (g_lastAppliedPer > 0.5)
+    {
+        std::cout << "  [WF-06] LINK DOES NOT CLOSE at these defaults: the computed SNR is below\n"
+                     "          any usable MODCOD threshold, so the data plane correctly delivers\n"
+                     "          (almost) nothing. This was invisible while the error rate was\n"
+                     "          pinned at 0 and every packet arrived regardless of the physics.\n"
+                     "          The dominant term is the noise bandwidth: --bandwidth=10e9 puts the\n"
+                     "          thermal floor at -174 + 100 dB. Narrowing it closes the link.\n";
+    }
     passCsv.close();
     Simulator::Destroy();
 

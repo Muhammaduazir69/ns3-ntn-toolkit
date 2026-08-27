@@ -42,6 +42,8 @@
 //                    the land mobile-satellite service"
 //   inigodelportillo/ITU-Rpy 0.4.0  https://github.com/inigodelportillo/ITU-Rpy
 
+#include "thz-ntn-molecular-absorption.h"
+
 #include <ns3/nstime.h>
 #include <ns3/object.h>
 #include <ns3/random-variable-stream.h>
@@ -180,10 +182,29 @@ class Itu676AbsorptionModel : public Object
     /// Specific gaseous attenuation in dB/km at given (freq, altitude).
     double SpecificAttenuationDbKm(double freqHz, double altKm) const;
 
-    /// Total zenith gaseous attenuation in dB integrated 0..100 km along
-    /// a slant path at `elevationDeg`. Same units as ITU-Rpy's
-    /// `gaseous_attenuation_slant_path`.
-    double SlantPathAttenuationDb(double freqHz, double elevationDeg) const;
+    /// Total gaseous attenuation in dB along a slant path from a station at
+    /// \p groundAltKm up to 100 km, at \p elevationDeg. Same units as
+    /// ITU-Rpy's `gaseous_attenuation_slant_path`.
+    ///
+    /// SIONNA-05: the station altitude used to be hardcoded to 0.0 here, so a
+    /// mountain-top station was charged the full sea-level gaseous column even
+    /// when the caller had configured its altitude. Near 100 GHz roughly half
+    /// the attenuation lives in the lowest few kilometres, so this is not a
+    /// small correction. It also made the cascade self-inconsistent, since the
+    /// rain term did honour the configured altitude. P.676-13 Annex 1
+    /// section 2.2 integrates from the station height, which is what the
+    /// parameter restores.
+    double SlantPathAttenuationDb(double freqHz,
+                                  double elevationDeg,
+                                  double groundAltKm = 0.0) const;
+
+  private:
+    /// SIONNA-05: built once. Each of these methods used to CreateObject a
+    /// fresh ThzNtnMolecularAbsorption per call, re-running InitAbsorptionLines
+    /// (79 lines) and InitAtmosphericLayers every time. That runs once per
+    /// packet inside NtnSionnaCascadeChannel::DoCalcRxPower, which is a hard
+    /// scale limit at constellation size.
+    Ptr<ThzNtnMolecularAbsorption> m_abs;
 };
 
 /**

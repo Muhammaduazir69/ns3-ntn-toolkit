@@ -125,7 +125,10 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("thz-ntn-isl-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    rs.SetSatEirpDbm(islEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(islEirpDbm);
     rs.SetBackhaulDelay(MilliSeconds(1)); // on-board switch, not a ground feeder
     rs.Build(satA, satB); // sat A is the gNB end, sat B the UE end of the ISL
 

@@ -145,6 +145,21 @@ class ThzNtnWeatherAttenuation : public Object
      * \param isWet        true for wet snow, false for dry snow.
      * \return snow attenuation in dB.
      */
+    /**
+     * \brief THZ-10: true if any attenuation returned since the last reset came
+     *        from a term with no standard or citation behind it.
+     *
+     * The rain term follows ITU-R P.838 and the gaseous term P.676. The snow and
+     * dust terms follow nothing: their coefficients and exponents were written
+     * as "empirical" with no source, and they enter the packet path through
+     * ThzNtnPropagationLossModel alongside the sourced terms, where a reader has
+     * no way to tell them apart.
+     */
+    bool UsedUnsourcedTerm() const { return m_usedUnsourcedTerm; }
+    void ResetProvenance() { m_usedUnsourcedTerm = false; }
+    /// One line naming which weather terms are standards-based and which are not.
+    std::string ProvenanceNote() const;
+
     double ComputeSnowAttenuation_dB(double freqHz,
                                      double elevationDeg,
                                      double snowRate_mm_h,
@@ -362,6 +377,8 @@ class ThzNtnWeatherAttenuation : public Object
     double m_snowRate;             ///< snow rate in mm/h (liquid-water equivalent)
     bool m_wetSnow;                ///< true if wet snow
     double m_dustVisibility;       ///< dust storm visibility in km
+    /// THZ-10: set by any unsourced term (snow, dust) that contributed.
+    mutable bool m_usedUnsourcedTerm{false};
     bool m_enableRain;             ///< flag to enable rain attenuation
     bool m_enableFog;              ///< flag to enable fog/cloud attenuation
     bool m_enableSnow;             ///< flag to enable snow attenuation

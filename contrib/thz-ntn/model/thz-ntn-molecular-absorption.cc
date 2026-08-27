@@ -128,15 +128,37 @@ ThzNtnMolecularAbsorption::InitAtmosphericLayers()
     NS_LOG_FUNCTION(this);
 
     m_layers.clear();
-    m_layers.reserve(6);
 
-    //               altLow  altHigh  T (K)    P (hPa)  H2O (g/m3)
-    m_layers.push_back({0.0,   2.0,   288.15,  1013.25, 7.5});    // Layer 0: boundary layer
-    m_layers.push_back({2.0,   5.0,   275.0,   800.0,   4.0});    // Layer 1: lower troposphere
-    m_layers.push_back({5.0,   10.0,  255.0,   550.0,   1.0});    // Layer 2: upper troposphere
-    m_layers.push_back({10.0,  20.0,  220.0,   250.0,   0.01});   // Layer 3: tropopause / lower strat.
-    m_layers.push_back({20.0,  50.0,  250.0,   50.0,    0.001});  // Layer 4: stratosphere
-    m_layers.push_back({50.0,  100.0, 260.0,   0.5,     0.0});    // Layer 5: mesosphere
+    // THZ-01. These are INTEGRATION SLAB BOUNDARIES, nothing more. The state
+    // variables at any altitude come from GetAtmosphericConditions, which
+    // evaluates the ITU-R P.835 reference profile in closed form.
+    //
+    // What used to be here was a six-entry table of per-layer constant
+    // temperature, base pressure and base humidity, and GetAtmosphericConditions
+    // restarted an exponential from each layer's base value. That produced a
+    // profile that was not P.835 and was not physical either: pressure jumped
+    // 13.5 percent across the 2 km boundary, water-vapour density jumped by a
+    // factor of eight across 10 km, temperature was flat inside each layer
+    // despite a comment claiming a lapse rate, and the integrated water-vapour
+    // column came to 17.55 kg/m2 against the P.835 reference 15.0. Both the
+    // header and the module README described it as "the ITU-R P.835 standard
+    // atmosphere". The line-by-line kernel was correct and was being evaluated
+    // on a fabricated atmosphere.
+    //
+    // The slabs are dense near the ground because that is where the gradients
+    // and most of the absorbing mass are, and coarse aloft where little is
+    // left. Slab boundaries no longer carry physical values, so a boundary in
+    // the wrong place costs accuracy, not correctness.
+    const double kBoundsKm[] = {0.0,  0.5,  1.0,  2.0,  3.0,  5.0,  7.0,
+                                10.0, 15.0, 20.0, 30.0, 50.0, 70.0, 100.0};
+    const size_t n = sizeof(kBoundsKm) / sizeof(kBoundsKm[0]);
+    m_layers.reserve(n - 1);
+    for (size_t i = 0; i + 1 < n; ++i)
+    {
+        // The temperature/pressure/humidity fields are retained only so the
+        // struct stays source-compatible; nothing reads them.
+        m_layers.push_back({kBoundsKm[i], kBoundsKm[i + 1], 0.0, 0.0, 0.0});
+    }
 
     NS_LOG_DEBUG("Initialised " << m_layers.size() << " atmospheric layers");
 }
@@ -292,40 +314,122 @@ ThzNtnMolecularAbsorption::GetAtmosphericConditions(double altitude_km,
     }
 
     // Find the enclosing layer and interpolate within it
-    for (const auto& layer : m_layers)
+    // THZ-01: ITU-R P.835-6 Section 1.1, the mean annual global reference
+    // atmosphere, evaluated in closed form.
+    //
+    // P.835 is written in GEOPOTENTIAL height, so convert first. Using the
+    // geometric height directly overstates the altitude of every level above
+    // the boundary layer.
+    const double h = std::max(altitude_km, 0.0);
+    const double hp = (6356.766 * h) / (6356.766 + h); // geopotential km
+
+    // Temperature: seven piecewise-linear segments. The lapse rates are the
+    // defining feature of the profile and the previous implementation had none
+    // of them: T was constant inside each of its six layers.
+    if (hp <= 11.0)
     {
-        if (altitude_km >= layer.altLow_km && altitude_km < layer.altHigh_km)
-        {
-            // Linear interpolation within the layer (edges are layer-mean
-            // values, so the interpolation is a refinement, not a necessity)
-            [[maybe_unused]] double frac = (altitude_km - layer.altLow_km)
-                          / (layer.altHigh_km - layer.altLow_km);
-
-            // Temperature: simple lapse-rate approximation within layer
-            // (decrease with altitude in troposphere, increase in stratosphere)
-            tempK = layer.temperature_K;
-
-            // Pressure: exponential decay within layer
-            // Scale factor: pressure halves roughly every 5.5 km
-            double scaleHeight = 5.5; // km, rough average
-            pressureHPa = layer.pressure_hPa
-                          * std::exp(-(altitude_km - layer.altLow_km) / scaleHeight);
-
-            // Water vapour: exponential decay within layer
-            double humidityScale = 2.0; // km, H2O scale height
-            double baseHumidity = layer.humidity_gm3
-                                  * std::exp(-(altitude_km - layer.altLow_km) / humidityScale);
-
-            // Apply profile-dependent scaling
-            humidity = ApplyHumidityProfile(baseHumidity, altitude_km);
-            return;
-        }
+        tempK = 288.15 - 6.5 * hp;
+    }
+    else if (hp <= 20.0)
+    {
+        tempK = 216.65;
+    }
+    else if (hp <= 32.0)
+    {
+        tempK = 216.65 + (hp - 20.0);
+    }
+    else if (hp <= 47.0)
+    {
+        tempK = 228.65 + 2.8 * (hp - 32.0);
+    }
+    else if (hp <= 51.0)
+    {
+        tempK = 270.65;
+    }
+    else if (hp <= 71.0)
+    {
+        tempK = 270.65 - 2.8 * (hp - 51.0);
+    }
+    else if (hp <= 84.852)
+    {
+        tempK = 214.65 - 2.0 * (hp - 71.0);
+    }
+    else
+    {
+        // Above the 84.852 km geopotential level (86 km geometric) P.835
+        // Section 1.2 switches to a different set of expressions. Almost no
+        // absorbing mass remains there - the pressure is under 4e-3 hPa - so
+        // hold the top-of-segment value rather than import formulas whose
+        // contribution is below the numerical noise of the integral. This is
+        // an explicit truncation, not an approximation dressed up as the
+        // recommendation.
+        tempK = 186.946;
     }
 
-    // Fallback: below sea level (should not happen)
-    tempK = 288.15;
-    pressureHPa = 1013.25;
-    humidity = ApplyHumidityProfile(7.5, altitude_km);
+    // Pressure: the hydrostatic solution on those same segments, so it is
+    // continuous everywhere by construction. The previous implementation
+    // restarted an exponential from each layer's base pressure, which is why
+    // it stepped 13.5 percent across the 2 km boundary - a discontinuity in a
+    // state variable, which no atmosphere has.
+    if (hp <= 11.0)
+    {
+        pressureHPa = 1013.25 * std::pow(288.15 / (288.15 - 6.5 * hp), -34.1632 / 6.5);
+    }
+    else if (hp <= 20.0)
+    {
+        pressureHPa = 226.3226 * std::exp(-34.1632 * (hp - 11.0) / 216.65);
+    }
+    else if (hp <= 32.0)
+    {
+        pressureHPa = 54.74980 * std::pow(216.65 / (216.65 + (hp - 20.0)), 34.1632);
+    }
+    else if (hp <= 47.0)
+    {
+        pressureHPa =
+            8.680422 * std::pow(228.65 / (228.65 + 2.8 * (hp - 32.0)), 34.1632 / 2.8);
+    }
+    else if (hp <= 51.0)
+    {
+        pressureHPa = 1.109106 * std::exp(-34.1632 * (hp - 47.0) / 270.65);
+    }
+    else if (hp <= 71.0)
+    {
+        pressureHPa =
+            0.6694167 * std::pow(270.65 / (270.65 - 2.8 * (hp - 51.0)), -34.1632 / 2.8);
+    }
+    else if (hp <= 84.852)
+    {
+        pressureHPa =
+            0.03956649 * std::pow(214.65 / (214.65 - 2.0 * (hp - 71.0)), -34.1632 / 2.0);
+    }
+    else
+    {
+        pressureHPa = 0.003743;
+    }
+
+    // Water vapour: P.835 Section 1.1 specifies a single exponential with a
+    // 2 km scale height from a 7.5 g/m3 surface density, which integrates to
+    // the 15 kg/m2 reference column. The old per-layer restart gave 17.55, a
+    // 17 percent excess, and an eight-fold discontinuity at 10 km.
+    double rho = 7.5 * std::exp(-h / 2.0);
+
+    // P.835 Section 1.1 also floors the MIXING RATIO at 2e-6, so above the
+    // altitude where the exponential falls below that, the mixing ratio rather
+    // than the density is held constant. Mixing ratio (mass of water vapour
+    // per unit mass of dry air) from density and pressure:
+    //   e = rho T / 216.7   [hPa]   and   mr = 0.622 e / (P - e).
+    const double e = rho * tempK / 216.7;
+    const double denom = pressureHPa - e;
+    const double mr = (denom > 0.0) ? (0.622 * e / denom) : 0.0;
+    constexpr double kMinMixingRatio = 2.0e-6;
+    if (mr < kMinMixingRatio && pressureHPa > 0.0)
+    {
+        // Invert the same relations at the floor value.
+        const double eFloor = kMinMixingRatio * pressureHPa / (0.622 + kMinMixingRatio);
+        rho = eFloor * 216.7 / tempK;
+    }
+
+    humidity = ApplyHumidityProfile(rho, altitude_km);
 }
 
 // ---------------------------------------------------------------------------
@@ -575,10 +679,29 @@ ThzNtnMolecularAbsorption::ComputeSlantPathAbsorption(double freqHz,
     // Cap the upper integration limit at 100 km (top of atmosphere)
     double hTop = std::min(hHigh, 100.0);
 
-    // Elevation angle in radians
+    // Elevation angle in radians.
+    //
+    // THZ-11: the integrator divides by sin(theta) and goes singular at the
+    // horizon, so the elevation is floored. That guard is fine; hiding it was
+    // not. A request at 2 degrees used to be answered with the 5 degree
+    // attenuation, silently, with no warning and no way for the caller to
+    // detect the substitution - and sub-THz slant loss is steepest exactly
+    // there, so the substitution is largest where it matters most. The floor is
+    // now recorded and warned about.
     double thetaRad = elevationDeg * DEG_TO_RAD;
-    // Minimum elevation angle to avoid numerical singularity
-    thetaRad = std::max(thetaRad, 5.0 * DEG_TO_RAD);
+    const double thetaFloorRad = kMinIntegratorElevationDeg * DEG_TO_RAD;
+    m_lastElevationClamped = (thetaRad < thetaFloorRad);
+    if (m_lastElevationClamped)
+    {
+        NS_LOG_WARN("THZ-11: requested elevation " << elevationDeg
+                    << " deg is below the integrator floor of "
+                    << kMinIntegratorElevationDeg
+                    << " deg; returning the attenuation AT THE FLOOR, which "
+                       "understates the true slant loss. Check "
+                       "WasLastElevationClamped().");
+        thetaRad = thetaFloorRad;
+    }
+    m_lastIntegratedElevDeg = thetaRad / DEG_TO_RAD;
     double cosTheta = std::cos(thetaRad);
 
     double R_E = EARTH_RADIUS_KM;
@@ -613,8 +736,11 @@ ThzNtnMolecularAbsorption::ComputeSlantPathAbsorption(double freqHz,
             double sinThetaEff;
             if (sinThetaArg <= 0.0)
             {
-                // Below the tangent height: should not happen for elevations > 0
-                sinThetaEff = std::sin(5.0 * DEG_TO_RAD);
+                // Below the tangent height: cannot happen once the elevation
+                // is floored above, but keep the substitution consistent with
+                // that floor rather than introducing a third magic angle.
+                sinThetaEff = std::sin(kMinIntegratorElevationDeg * DEG_TO_RAD);
+                m_lastElevationClamped = true;
             }
             else
             {

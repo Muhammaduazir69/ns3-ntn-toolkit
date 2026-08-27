@@ -269,6 +269,10 @@ class ThzNtnScintillation : public Object
     double m_antennaDiameter;            ///< antenna diameter in meters
     double m_relativeHumidity;           ///< relative humidity in %
     Time m_samplingPeriod;               ///< sampling period for time series
+    /// THZ-06: last time the AR(1) process was advanced, so its correlation
+    /// follows simulated time rather than the call rate. SamplingPeriod is
+    /// now only the seed used for the very first sample.
+    Time m_lastSampleTime{Seconds(0)};
     double m_outerScale;                 ///< outer scale of turbulence L_0 in m
     double m_turbulentLayerHeight;       ///< effective turbulent layer height in m
 
