@@ -16,6 +16,8 @@
 #include "ns3/lte-ue-rrc.h"
 #include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mmwave-ue-net-device.h"
+#include "ns3/ntn-repro-manifest.h"
+#include "ns3/rng-seed-manager.h"
 #include "ns3/ipv4-static-routing-helper.h"
 #include "ns3/ipv4.h"
 #include "ns3/log.h"
@@ -53,6 +55,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -154,10 +157,41 @@ NtnRealStackHelper::ConfigureNtnRlcRrcTimers()
     const double statusMs = std::max(10.0, rttMs + 5.0);
     // RRC connection (T300) must survive the setup round trip over the slant.
     const double t300Ms = std::max(100.0, 8.0 * rttMs);
-    Config::SetDefault("ns3::LteRlcAm::PollRetransmitTimer", TimeValue(MilliSeconds(pollMs)));
-    Config::SetDefault("ns3::LteRlcAm::ReorderingTimer", TimeValue(MilliSeconds(reorderMs)));
-    Config::SetDefault("ns3::LteRlcAm::StatusProhibitTimer", TimeValue(MilliSeconds(statusMs)));
-    Config::SetDefault("ns3::LteUeRrc::T300", TimeValue(MilliSeconds(t300Ms)));
+    // WF-13: write BOTH families, because the two backends use different
+    // classes and this relaxation was dead on the default one.
+    //
+    // The four keys below were LTE-only: ns3::LteRlcAm and ns3::LteUeRrc. The
+    // mmwave backend uses those classes, so the relaxation worked there. The nr
+    // backend uses ns3::NrRlcAm and ns3::NrUeRrc, and BuildNrRadio never called
+    // this function at all, so on the DEFAULT backend the terrestrial 20/10/10
+    // ms timers stood over a LEO slant whose feedback RTT is 8-26 ms - exactly
+    // the spurious-retransmission and RLF condition the relaxation exists to
+    // prevent.
+    //
+    // Config::SetDefault aborts on an unknown path, so each key is set through
+    // a guarded helper that skips a class this build does not have rather than
+    // killing a scenario that never needed it.
+    auto setIfPresent = [](const std::string& path, const TimeValue& v) {
+        // A TypeId that is not registered means that stack is not in this
+        // build; nothing to relax there.
+        const std::string cls = path.substr(0, path.rfind("::"));
+        TypeId tid;
+        // LookupByNameFailSafe writes through its out-parameter, so it needs a
+        // real TypeId; passing nullptr dereferences it.
+        if (!TypeId::LookupByNameFailSafe(cls, &tid))
+        {
+            return;
+        }
+        Config::SetDefault(path, v);
+    };
+    setIfPresent("ns3::LteRlcAm::PollRetransmitTimer", TimeValue(MilliSeconds(pollMs)));
+    setIfPresent("ns3::LteRlcAm::ReorderingTimer", TimeValue(MilliSeconds(reorderMs)));
+    setIfPresent("ns3::LteRlcAm::StatusProhibitTimer", TimeValue(MilliSeconds(statusMs)));
+    setIfPresent("ns3::LteUeRrc::T300", TimeValue(MilliSeconds(t300Ms)));
+    setIfPresent("ns3::NrRlcAm::PollRetransmitTimer", TimeValue(MilliSeconds(pollMs)));
+    setIfPresent("ns3::NrRlcAm::ReorderingTimer", TimeValue(MilliSeconds(reorderMs)));
+    setIfPresent("ns3::NrRlcAm::StatusProhibitTimer", TimeValue(MilliSeconds(statusMs)));
+    setIfPresent("ns3::NrUeRrc::T300", TimeValue(MilliSeconds(t300Ms)));
     NS_LOG_INFO("NTN RLC/RRC timers: rtt=" << rttMs << " ms -> poll=" << pollMs
                                            << " reorder=" << reorderMs << " status=" << statusMs
                                            << " T300=" << t300Ms << " ms");
@@ -238,6 +272,11 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
                     "NtnRealStackHelper: need >=1 gNB and >=1 UE");
     m_gnb = gnbNodes;
     m_ue = ueNodes;
+
+    // NT-02: a declared EIRP density is converted against the bandwidth that is
+    // actually configured at Build time, so SetBandwidthHz() may be called
+    // before or after SetSatEirpDensityDbwMhz().
+    ResolveEirpDensity();
 
     // Wall-clock measurement starts here, NOT in InstallTraffic: scenarios
     // that install flows only via InstallOranFlow() previously left
@@ -385,6 +424,8 @@ NtnRealStackHelper::BuildMmwaveRadio()
     // OWD-floor health gate.
     if (m_backhaulCh)
     {
+        // NT-04: and keep it tracking the geometry for the rest of the run.
+        Simulator::Schedule(m_backhaulRefresh, &NtnRealStackHelper::RefreshBackhaulFold, this);
         const Time service = ComputeServiceLinkDelay();
         if (service > Seconds(0))
         {
@@ -394,6 +435,56 @@ NtnRealStackHelper::BuildMmwaveRadio()
                         << "interface remains zero-delay on this backend)");
         }
     }
+}
+
+NtnRealStackHelper::NtnFr1Band
+NtnRealStackHelper::ClassifyNtnFr1(double carrierHz, double bandwidthHz)
+{
+    NtnFr1Band b;
+    if (carrierHz > 7.125e9)
+    {
+        return b; // above FR1 the NTN band tables do not apply
+    }
+
+    // TS 38.101-5 Table 5.2-1. The names were previously swapped here: the
+    // 2170-2200 MHz block was labelled n255. It is n256. The frequencies and
+    // block widths were right, so nothing physical changes with the rename -
+    // but a provenance row naming the wrong band is a citation a reviewer can
+    // check in one lookup.
+    const bool n255Dl = (carrierHz >= 1525.0e6 && carrierHz <= 1559.0e6);
+    const bool n255Ul = (carrierHz >= 1626.5e6 && carrierHz <= 1660.5e6);
+    const bool n256Dl = (carrierHz >= 2170.0e6 && carrierHz <= 2200.0e6);
+    const bool n256Ul = (carrierHz >= 1980.0e6 && carrierHz <= 2010.0e6);
+
+    if (n255Dl || n255Ul)
+    {
+        b.name = "n255";
+        b.carrierInDownlink = n255Dl;
+        b.carrierInUplink = n255Ul;
+        b.blockWidthHz = 34.0e6;
+        // Table 5.3.5-1: n255 supports 5 and 10 MHz.
+        b.bandwidthSupported = (std::abs(bandwidthHz - 5.0e6) < 1.0 ||
+                                std::abs(bandwidthHz - 10.0e6) < 1.0);
+    }
+    else if (n256Dl || n256Ul)
+    {
+        b.name = "n256";
+        b.carrierInDownlink = n256Dl;
+        b.carrierInUplink = n256Ul;
+        b.blockWidthHz = 30.0e6;
+        // Table 5.3.5-1: n256 supports 5, 10, 15 and 20 MHz.
+        b.bandwidthSupported = (std::abs(bandwidthHz - 5.0e6) < 1.0 ||
+                                std::abs(bandwidthHz - 10.0e6) < 1.0 ||
+                                std::abs(bandwidthHz - 15.0e6) < 1.0 ||
+                                std::abs(bandwidthHz - 20.0e6) < 1.0);
+    }
+
+    // A downlink carrier must sit in a downlink block. The helper's own
+    // historical default, 2.0 GHz, sits in n256's UPLINK block and was used as
+    // the downlink carrier, so it can never be conformant however the channel
+    // is sized.
+    b.conformant = b.carrierInDownlink && b.bandwidthSupported;
+    return b;
 }
 
 void
@@ -429,6 +520,17 @@ NtnRealStackHelper::ApplyNtnChannelExtras()
 void
 NtnRealStackHelper::BuildNrRadio()
 {
+    // WF-13: relax the RLC-AM / RRC timers on THIS backend too.
+    //
+    // ConfigureNtnRlcRrcTimers() was called only from BuildMmwaveRadio(), so on
+    // the nr backend - which is the default for most scenarios - the
+    // terrestrial 20/10/10 ms RLC-AM timers and the 100 ms T300 stood over a
+    // LEO slant whose feedback round trip is 8-26 ms. That is exactly the
+    // spurious-retransmission and RLF condition the relaxation exists to
+    // prevent, and it was absent from the path most runs take. Must precede the
+    // device installation below so the objects read the new defaults.
+    ConfigureNtnRlcRrcTimers();
+
     // ===== 5G-LENA (nr) FR1 NTN backend (closes A5(i)) =====
     // Mirrors the validated NtnNrStackHelper recipe: a single operational band ->
     // 1 CC -> 1 FR1 BWP at m_freqHz/m_bwHz, FR1 numerology m_numerology, ideal
@@ -495,9 +597,21 @@ NtnRealStackHelper::BuildNrRadio()
                                                    BandwidthPartInfo::UMi_StreetCanyon);
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
 
-    // Quasi-static channel, no shadowing -> clean link over the slant.
-    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod", TimeValue(MilliSeconds(0)));
-    m_nr->SetChannelConditionModelAttribute("UpdatePeriod", TimeValue(MilliSeconds(0)));
+    // NT-08. ThreeGppChannelModel gates cluster regeneration on
+    // `!m_updatePeriod.IsZero()`, so pinning this to 0 froze the channel matrix
+    // at t=0 for the entire run. The spectrum model does compute a per-cluster
+    // Doppler phase from relative velocity, but with the geometry never
+    // regenerated that phase never evolves - and a comment in
+    // ntn-tr38811-excess-loss-model credited the 3GPP model with applying
+    // "small-scale fading with Doppler on the same link" on that basis.
+    //
+    // Now configurable. The default stays 0 so no existing run changes cost or
+    // results without being asked, and a scenario that wants an evolving
+    // channel sets a period on the order of the coherence time.
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod",
+                       TimeValue(m_channelUpdatePeriod));
+    m_nr->SetChannelConditionModelAttribute("UpdatePeriod",
+                                            TimeValue(m_channelUpdatePeriod));
     m_nr->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
     // Friis large-scale loss on EVERY BWP (frame-independent, valid at LEO
@@ -702,18 +816,70 @@ NtnRealStackHelper::BuildNrRadio()
     uint32_t baseN2 = 0;
     if (m_kOffsetConsumption)
     {
-        m_consumedKOffsetSlots = ComputeKOffsetSlots();
+        // RRC-1: prefer the value the network BROADCAST over a local
+        // re-derivation, so the scheduler and SIB19 cannot disagree.
+        m_consumedKOffsetSlots =
+            (m_broadcastKOffsetSlots > 0) ? m_broadcastKOffsetSlots : ComputeKOffsetSlots();
         // Read the stack's default N2Delay so we ADD to it, not clobber it.
         UintegerValue n2v;
         m_nr->GetGnbPhy(m_enbDevs.Get(0), 0)->GetAttribute("N2Delay", n2v);
         baseN2 = static_cast<uint32_t>(n2v.Get());
+        m_baseN2Delay = baseN2;
         NS_LOG_INFO("NtnRealStackHelper: consuming SIB19 K_offset = "
                     << m_consumedKOffsetSlots << " slots (numerology " << m_numerology
                     << ", RTT " << (2.0 * ComputeServiceLinkDelay().GetSeconds() * 1e3)
                     << " ms); N2Delay " << baseN2 << " -> " << (baseN2 + m_consumedKOffsetSlots));
     }
+    // RRC-4: size the RAR window for the real geometry before the cells start
+    // serving. NrGnbMac hands raResponseWindowSize to the UE in its RACH
+    // configuration (NrGnbMac::GetRachConfig -> NrUeCmacSapProvider), so
+    // writing it here is what actually reaches the UE's timeout.
+    m_rachVerdict = NtnRachWindowVerdict{};
+    if (m_ntnRachWindow)
+    {
+        const Time rtt = Seconds(2.0 * ComputeServiceLinkDelay().GetSeconds());
+        const Time slot = NtnRachWindow::SlotPeriodForNumerology(m_numerology);
+        m_rachVerdict = NtnRachWindow::Evaluate(rtt, slot);
+        if (m_rachVerdict.fits)
+        {
+            NS_LOG_INFO("NtnRealStackHelper: RAR window sized for "
+                        << rtt.GetMilliSeconds() << " ms round trip -> "
+                        << "RaResponseWindowSize=" << +m_rachVerdict.appliedWindowSize
+                        << " (" << m_rachVerdict.configuredWindow.GetMilliSeconds() << " ms)");
+        }
+        else
+        {
+            // Do not pretend. The stack cannot express this window, so access
+            // will fail no matter what is written, and saying so here is the
+            // difference between a documented limit and a mystery.
+            NS_LOG_WARN("NtnRealStackHelper: this geometry needs a RAR window of "
+                        << m_rachVerdict.requiredWindow.GetMilliSeconds()
+                        << " ms (RaResponseWindowSize=" << m_rachVerdict.requiredWindowSize
+                        << ") but nr caps the attribute at "
+                        << +NtnRachWindow::kNrWindowSizeMax << ", buying only "
+                        << m_rachVerdict.configuredWindow.GetMilliSeconds()
+                        << " ms. Random access CANNOT complete on this stack at this "
+                        << "geometry; shortfall "
+                        << m_rachVerdict.shortfall.GetMilliSeconds() << " ms. TR 38.821 "
+                        << "section 7.3 resolves this by offsetting the window start with "
+                        << "ta-Common, which nr v3.3 does not implement.");
+        }
+    }
+
     for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
     {
+        if (m_ntnRachWindow && m_rachVerdict.appliedWindowSize > 0)
+        {
+            for (uint8_t b = 0; b < nBwp; ++b)
+            {
+                Ptr<NrGnbMac> gm = NrHelper::GetGnbMac(m_enbDevs.Get(i), b);
+                if (gm)
+                {
+                    gm->SetAttribute("RaResponseWindowSize",
+                                     UintegerValue(m_rachVerdict.appliedWindowSize));
+                }
+            }
+        }
         for (uint8_t b = 0; b < nBwp; ++b)
         {
             m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
@@ -849,13 +1015,27 @@ NtnRealStackHelper::BuildNrRadio()
         // real inter-satellite geometry: either a direct ISL (range/c) or, for a
         // transparent payload, the ground loop via both feeder links.
         // TR 38.821 §8.3 counts this leg in the HO interruption budget.
+        //
+        // NT-01 FIX (2026-08-24): this used to call
+        //   Config::SetDefault("ns3::NrNoBackhaulEpcHelper::X2LinkDelay", ...)
+        // which is a no-op here. X2LinkDelay is a *member* attribute
+        // (MakeTimeAccessor(&NrNoBackhaulEpcHelper::m_x2LinkDelay)) read once
+        // during ConstructSelf, and m_nrEpc was already constructed several
+        // hundred lines above. AddX2Interface then read the stale member, so
+        // the log below printed the geometric delay while the wire stayed at
+        // 0 s and every handover still prepared instantaneously. Setting the
+        // attribute on the live object is what actually reaches the channel.
         const Time x2Delay = ComputeX2LinkDelay();
-        Config::SetDefault("ns3::NrNoBackhaulEpcHelper::X2LinkDelay", TimeValue(x2Delay));
+        NS_ASSERT_MSG(m_nrEpc, "X2 setup requires the nr EPC helper");
+        m_nrEpc->SetAttribute("X2LinkDelay", TimeValue(x2Delay));
         NS_LOG_INFO("NtnRealStackHelper X2 (inter-satellite) one-way delay: "
                     << x2Delay.GetMilliSeconds() << " ms");
         m_nr->AddX2Interface(m_gnb);
         Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/HandoverEndOk",
                         MakeCallback(&NtnRealStackHelper::NrHandoverEndOk, this));
+        // CHO-6: neighbour RSRP from the UE's own RRC measurement reports.
+        Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/RecvMeasurementReport",
+                        MakeCallback(&NtnRealStackHelper::NrMeasurementReport, this));
     }
 
     // ---- Measured-KPI PHY sink: DL SINR/TBLER from the UE NrSpectrumPhy ----
@@ -877,6 +1057,8 @@ NtnRealStackHelper::BuildNrRadio()
     // and the OWD-floor health gate stays meaningful. Mirrors the mmwave path.
     if (!m_airIfaceDelayActive && m_backhaulCh)
     {
+        // NT-04: and keep it tracking the geometry for the rest of the run.
+        Simulator::Schedule(m_backhaulRefresh, &NtnRealStackHelper::RefreshBackhaulFold, this);
         const Time service = ComputeServiceLinkDelay();
         if (service > Seconds(0))
         {
@@ -892,6 +1074,29 @@ NtnRealStackHelper::BuildNrRadio()
                                                   << m_numerology
                                                   << ", air-interface delay="
                                                   << (m_airIfaceDelayActive ? "REAL" : "on-backhaul"));
+}
+
+Ptr<PropagationLossModel>
+NtnRealStackHelper::GetBaseLossHead() const
+{
+    return m_nrBaseLossPerBwp.empty() ? nullptr : m_nrBaseLossPerBwp[0];
+}
+
+std::vector<std::string>
+NtnRealStackHelper::GetExtraPropagationLossChain() const
+{
+    std::vector<std::string> names;
+    if (!m_built || m_nrBaseLossPerBwp.empty() || !m_nrBaseLossPerBwp[0])
+    {
+        return names;
+    }
+    // The head is the Friis loss the backend installed; report only what was
+    // chained after it, which is exactly what AddExtraPropagationLoss appends.
+    for (Ptr<PropagationLossModel> m = m_nrBaseLossPerBwp[0]->GetNext(); m; m = m->GetNext())
+    {
+        names.push_back(m->GetInstanceTypeId().GetName());
+    }
+    return names;
 }
 
 void
@@ -1149,6 +1354,40 @@ NtnRealStackHelper::GetUeLostPackets(uint32_t ueIndex) const
     return lost;
 }
 
+std::vector<std::pair<uint32_t, uint64_t>>
+NtnRealStackHelper::GetSliceDelayHistogram(uint8_t fiveQi) const
+{
+    std::vector<uint64_t> pooled(NtnOranSink::FlowStats::kDelayBins, 0u);
+    for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
+    {
+        Ptr<NtnOranSink> sink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
+        if (!sink)
+        {
+            continue;
+        }
+        for (const auto& [key, fs] : sink->GetFlowStats())
+        {
+            if (fs.fiveQi != fiveQi || fs.delayHistMs.empty())
+            {
+                continue;
+            }
+            for (uint32_t b = 0; b < NtnOranSink::FlowStats::kDelayBins; ++b)
+            {
+                pooled[b] += fs.delayHistMs[b];
+            }
+        }
+    }
+    std::vector<std::pair<uint32_t, uint64_t>> out;
+    for (uint32_t b = 0; b < NtnOranSink::FlowStats::kDelayBins; ++b)
+    {
+        if (pooled[b] > 0)
+        {
+            out.emplace_back(b, pooled[b]);
+        }
+    }
+    return out;
+}
+
 NtnRealStackHelper::SliceMeasuredStats
 NtnRealStackHelper::GetSliceMeasuredStats(uint8_t fiveQi) const
 {
@@ -1159,6 +1398,10 @@ NtnRealStackHelper::GetSliceMeasuredStats(uint8_t fiveQi) const
     SliceMeasuredStats out;
     double sumDelayMs = 0.0;
     double thrMbps = 0.0;
+    // SLICE-1: pool the per-flow delay histograms so the percentiles describe
+    // the slice, not one flow within it.
+    std::vector<uint64_t> pooledHist(NtnOranSink::FlowStats::kDelayBins, 0u);
+    uint64_t pooledOverflow = 0;
     for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
     {
         Ptr<NtnOranSink> sink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
@@ -1178,9 +1421,40 @@ NtnRealStackHelper::GetSliceMeasuredStats(uint8_t fiveQi) const
             sumDelayMs += fs.sumDelayMs;
             out.maxOwdMs = std::max(out.maxOwdMs, fs.maxDelayMs);
             thrMbps += fs.ThroughputMbps();
+            if (!fs.delayHistMs.empty())
+            {
+                for (uint32_t b = 0; b < NtnOranSink::FlowStats::kDelayBins; ++b)
+                {
+                    pooledHist[b] += fs.delayHistMs[b];
+                }
+            }
+            pooledOverflow += fs.delayOverflow;
         }
     }
     out.meanOwdMs = (out.rxPackets > 0) ? sumDelayMs / out.rxPackets : 0.0;
+
+    // SLICE-1: percentiles from the pooled histogram.
+    auto pct = [&](double q) -> double {
+        if (out.rxPackets == 0)
+        {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        const uint64_t target = static_cast<uint64_t>(q * static_cast<double>(out.rxPackets));
+        uint64_t cum = 0;
+        for (uint32_t b = 0; b < NtnOranSink::FlowStats::kDelayBins; ++b)
+        {
+            cum += pooledHist[b];
+            if (cum >= target)
+            {
+                return b + 0.5;
+            }
+        }
+        return (pooledOverflow > 0) ? out.maxOwdMs
+                                    : static_cast<double>(NtnOranSink::FlowStats::kDelayBins);
+    };
+    out.p50OwdMs = pct(0.50);
+    out.p95OwdMs = pct(0.95);
+    out.p99OwdMs = pct(0.99);
     const uint64_t expected = out.rxPackets + out.lostPackets;
     out.lossRatio = (expected > 0) ? static_cast<double>(out.lostPackets) / expected : 0.0;
     out.thrMbps = thrMbps;
@@ -1190,6 +1464,9 @@ NtnRealStackHelper::GetSliceMeasuredStats(uint8_t fiveQi) const
 void
 NtnRealStackHelper::InstallTraffic(TrafficProfile profile, Time start, Time stop)
 {
+    // NT-12: remember the window so throughput is measured over it.
+    m_trafficStart = start;
+    m_trafficStop = stop;
     NS_ABORT_MSG_IF(!m_built, "InstallTraffic before Build()");
 
     for (uint32_t u = 0; u < m_ue.GetN(); ++u)
@@ -1389,6 +1666,29 @@ NtnRealStackHelper::GetGnbCellId(uint32_t gnbIndex) const
     return enb ? enb->GetCellId() : 0;
 }
 
+
+void
+NtnRealStackHelper::RecordHandoverRefusal(const char* reason)
+{
+    // WF-11: the honesty channel must survive the release build.
+    //
+    // Every one of these refusal paths used to be an NS_LOG_WARN and nothing
+    // else. The shipped build sets NS3_LOG=OFF (and NS3_ASSERT=OFF), so those
+    // warnings are compiled out entirely: a decision module could ask for a
+    // handover, be refused for a structural reason - wrong backend, no X2, one
+    // gNB - and the run would say nothing at all. "Never silently accept" is
+    // only true if the refusal is audible, and in the profile users actually
+    // build it was not.
+    //
+    // The counter and the reason are members, so they reach sim_health.csv and
+    // an accessor regardless of how the tree was configured. The NS_LOG_WARN is
+    // kept for the debug build, where it carries more context.
+    ++m_handoverRefusals;
+    m_lastHandoverRefusal = reason ? reason : "";
+    NS_LOG_WARN("TriggerHandover NOT actuated: " << m_lastHandoverRefusal);
+}
+
+
 bool
 NtnRealStackHelper::TriggerHandover(uint32_t ueIndex, uint16_t targetCellId, Time when)
 {
@@ -1397,36 +1697,33 @@ NtnRealStackHelper::TriggerHandover(uint32_t ueIndex, uint16_t targetCellId, Tim
     // (that silent-success pattern is exactly what this fix exists to kill).
     if (!m_built)
     {
-        NS_LOG_WARN("TriggerHandover before Build() — ignored");
+        RecordHandoverRefusal("before Build()");
         return false;
     }
     if (m_backend != RadioBackend::Nr)
     {
-        NS_LOG_WARN("TriggerHandover requires the nr backend (SetRadioBackend(Nr)); the vendored "
-                    "mmwave path has no equivalent X2 handover request — not actuated");
+        RecordHandoverRefusal("mmwave backend has no X2 handover request");
         return false;
     }
     if (!m_handover)
     {
-        NS_LOG_WARN("TriggerHandover called but handover was never enabled (SetHandover(true) "
-                    "before Build() stands up the X2) — not actuated");
+        RecordHandoverRefusal("handover never enabled (SetHandover)");
         return false;
     }
     if (m_enbDevs.GetN() < 2)
     {
-        NS_LOG_WARN("TriggerHandover needs >= 2 gNBs (have " << m_enbDevs.GetN()
-                                                             << ") — not actuated");
+        RecordHandoverRefusal("fewer than 2 gNBs");
         return false;
     }
     if (ueIndex >= m_ueDevs.GetN())
     {
-        NS_LOG_WARN("TriggerHandover: UE index " << ueIndex << " out of range — not actuated");
+        RecordHandoverRefusal("UE index out of range");
         return false;
     }
     const uint16_t servingCell = GetUeServingCellId(ueIndex);
     if (servingCell == 0)
     {
-        NS_LOG_WARN("TriggerHandover: UE " << ueIndex << " is not attached yet — not actuated");
+        RecordHandoverRefusal("UE not attached yet");
         return false;
     }
     if (servingCell == targetCellId)
@@ -1479,6 +1776,21 @@ NtnRealStackHelper::TriggerHandover(uint32_t ueIndex, uint16_t targetCellId, Tim
 }
 
 Time
+NtnRealStackHelper::ComputeFeederLinkDelay() const
+{
+    // CVC-14: the satellite-to-gateway leg, from the same live mobility models
+    // SetFeederGeometry() already drives the backhaul fold with. Returns zero
+    // when the geometry was never wired, so a caller can tell "no feeder
+    // modelled" from "a very short one" instead of silently getting 0 ms.
+    constexpr double kC = 299792458.0;
+    if (!m_feederSat || !m_feederGw)
+    {
+        return Seconds(0);
+    }
+    return Seconds(m_feederSat->GetDistanceFrom(m_feederGw) / kC);
+}
+
+Time
 NtnRealStackHelper::ComputeServiceLinkDelay() const
 {
     // GAP S2: one-way UE<->satellite (service link) propagation.
@@ -1488,13 +1800,63 @@ NtnRealStackHelper::ComputeServiceLinkDelay() const
     {
         return Seconds(0);
     }
-    Ptr<MobilityModel> gm = m_gnb.Get(0)->GetObject<MobilityModel>();
-    Ptr<MobilityModel> um = m_ue.Get(0)->GetObject<MobilityModel>();
-    if (!gm || !um)
+    // NT-04: average over every gNB x UE pair rather than sampling index 0.
+    // A single pair made the folded delay a property of one terminal, so a
+    // scenario with terminals spread across a beam gave them all the slant of
+    // whichever happened to be first.
+    double sumM = 0.0;
+    uint32_t pairs = 0;
+    for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
+    {
+        Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
+        if (!gm)
+        {
+            continue;
+        }
+        for (uint32_t u = 0; u < m_ue.GetN(); ++u)
+        {
+            Ptr<MobilityModel> um = m_ue.Get(u)->GetObject<MobilityModel>();
+            if (!um)
+            {
+                continue;
+            }
+            sumM += gm->GetDistanceFrom(um);
+            ++pairs;
+        }
+    }
+    if (pairs == 0)
     {
         return Seconds(0);
     }
-    return Seconds(gm->GetDistanceFrom(um) / kC);
+    return Seconds((sumM / pairs) / kC);
+}
+
+void
+NtnRealStackHelper::RefreshBackhaulFold()
+{
+    // NT-04. The service-link delay folded into the backhaul was computed once,
+    // at Build(), from the geometry at t=0, and never revisited. Over a LEO pass
+    // the slant sweeps from a few hundred to a couple of thousand kilometres, so
+    // a delay pinned at the first instant is wrong by several milliseconds for
+    // the entire run - and the application one-way delay the toolkit reports as
+    // measured inherits exactly that error.
+    //
+    // This is the same defect SAGIN-1 had in the contact graph: a quantity taken
+    // once at the start of a pass and treated as constant. Refresh it on a timer
+    // for as long as the fold is the mechanism in use.
+    //
+    // When the real air interface carries the delay (SetAirInterfaceDelay) there
+    // is nothing to fold and this does not run.
+    if (m_airIfaceDelayActive || !m_backhaulCh)
+    {
+        return;
+    }
+    const Time service = ComputeServiceLinkDelay();
+    if (service > Seconds(0))
+    {
+        m_backhaulCh->SetAttribute("Delay", TimeValue(m_backhaulDelay + service));
+    }
+    Simulator::Schedule(m_backhaulRefresh, &NtnRealStackHelper::RefreshBackhaulFold, this);
 }
 
 uint32_t
@@ -1509,6 +1871,36 @@ NtnRealStackHelper::GetGnbN2Delay(uint32_t gnbIdx, uint8_t bwp) const
     return static_cast<uint32_t>(v.Get());
 }
 
+void
+NtnRealStackHelper::SetBroadcastKOffsetSlots(uint32_t slots)
+{
+    m_broadcastKOffsetSlots = slots;
+    if (!m_built || !m_kOffsetConsumption || m_backend != RadioBackend::Nr || slots == 0)
+    {
+        return;
+    }
+    // Already running: reprogram the live gNB PHYs so a SIB19 refresh mid-pass
+    // actually changes how the network schedules, instead of the broadcast
+    // value and the scheduler drifting apart for the rest of the run.
+    if (slots == m_consumedKOffsetSlots)
+    {
+        return;
+    }
+    m_consumedKOffsetSlots = slots;
+    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        for (uint8_t b = 0; b < nBwp; ++b)
+        {
+            m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
+                ->SetAttribute("N2Delay", UintegerValue(m_baseN2Delay + slots));
+        }
+    }
+    NS_LOG_INFO("NtnRealStackHelper: SIB19 refresh -> K_offset "
+                << slots << " slots; N2Delay " << m_baseN2Delay << " -> "
+                << (m_baseN2Delay + slots));
+}
+
 uint32_t
 NtnRealStackHelper::ComputeKOffsetSlots() const
 {
@@ -1516,8 +1908,21 @@ NtnRealStackHelper::ComputeKOffsetSlots() const
     // link ROUND TRIP so a UL grant issued now is transmitted only after the DL
     // has propagated and been decoded. Matches the SIB19 cellSpecificKoffset
     // derivation (ceil(RTT / slot) + 1). Slot = 1 ms / 2^numerology.
-    const Time oneWay = ComputeServiceLinkDelay();
-    const double rttS = 2.0 * oneWay.GetSeconds();
+    // NT-11: the cell-specific K_offset must cover the cell's WORST round trip,
+    // not its average one.
+    //
+    // This used ComputeServiceLinkDelay(), which averages over every gNB-UE
+    // pair. An average under-provisions the farthest terminal by construction,
+    // and under-provisioning K_offset produces exactly the failure it exists to
+    // prevent: the delayed downlink lands inside the slot the UE believes is
+    // its uplink and the stack trips "Cannot TX while RX". A value that is too
+    // large only costs latency; one that is too small breaks the link, so the
+    // asymmetry says to bound rather than to average.
+    constexpr double kC = 299792458.0;
+    const double worstSlantM = WorstCaseSlantM();
+    const double oneWayS = (worstSlantM > 0.0) ? (worstSlantM / kC)
+                                               : ComputeServiceLinkDelay().GetSeconds();
+    const double rttS = 2.0 * oneWayS;
     const double slotS = 1.0e-3 / std::pow(2.0, static_cast<double>(m_numerology));
     if (slotS <= 0.0)
     {
@@ -1814,6 +2219,190 @@ NtnRealStackHelper::GetUeRnti(uint32_t ueIndex) const
 }
 
 Time
+NtnRealStackHelper::GetAppliedX2LinkDelay() const
+{
+    if (!m_nrEpc)
+    {
+        return Time(0);
+    }
+    TimeValue tv;
+    m_nrEpc->GetAttribute("X2LinkDelay", tv);
+    return tv.Get();
+}
+
+double
+NtnRealStackHelper::GetNeighbourRsrpDbm(uint16_t cellId) const
+{
+    auto it = m_neighbourRsrpDbm.find(cellId);
+    return (it == m_neighbourRsrpDbm.end()) ? std::numeric_limits<double>::quiet_NaN()
+                                            : it->second;
+}
+
+double
+NtnRealStackHelper::GetServingRsrpDbm() const
+{
+    return m_servingRsrpDbm;
+}
+
+double
+NtnRealStackHelper::GetUeNoiseFigureDb() const
+{
+    // OBS-09: read the figure off the live PHY instead of assuming it. Both
+    // backends expose the same attribute name on the UE PHY, and a scenario
+    // that changes it must not silently bias anything derived from it.
+    if (m_ueDevs.GetN() == 0)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    DoubleValue nf;
+    if (m_backend == RadioBackend::Nr && m_nr)
+    {
+        m_nr->GetUePhy(m_ueDevs.Get(0), 0)->GetAttribute("NoiseFigure", nf);
+        return nf.Get();
+    }
+    if (m_backend == RadioBackend::Mmwave)
+    {
+        Ptr<MmWaveUeNetDevice> ue = m_ueDevs.Get(0)->GetObject<MmWaveUeNetDevice>();
+        if (ue && ue->GetPhy())
+        {
+            ue->GetPhy()->GetAttribute("NoiseFigure", nf);
+            return nf.Get();
+        }
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+uint32_t
+NtnRealStackHelper::GetSignalResourceElements() const
+{
+    // OBS-09. SS-RSRP is defined per resource element (TS 38.215 Sec. 5.1.1),
+    // so anything reconstructed from a wideband SINR has to be divided by the
+    // number of REs the SINR was averaged over.
+    //
+    // SCS follows the backend's numerology: the mmwave path runs numerology 2
+    // (60 kHz) and the nr path runs the configured FR1 numerology.
+    if (m_bwHz <= 0.0)
+    {
+        return 0;
+    }
+    const uint16_t mu = (m_backend == RadioBackend::Mmwave) ? 2 : m_numerology;
+    const double scsHz = 15.0e3 * std::pow(2.0, static_cast<double>(mu));
+    const double rb = std::floor(m_bwHz / (12.0 * scsHz));
+    if (rb < 1.0)
+    {
+        return 0;
+    }
+    return static_cast<uint32_t>(rb) * 12u;
+}
+
+void
+NtnRealStackHelper::NrMeasurementReport(std::string /*ctx*/,
+                                        uint64_t /*imsi*/,
+                                        uint16_t /*cellId*/,
+                                        uint16_t /*rnti*/,
+                                        NrRrcSap::MeasurementReport report)
+{
+    // CHO-6: harvest the NEIGHBOUR measurements a UE actually reports, which is
+    // the only standards-defined source of candidate-cell quality. TS 38.133
+    // maps the reported RSRP index to dBm as RSRP = index - 156 over the range
+    // 0..127, so index 0 is -156 dBm and 127 is -29 dBm.
+    ++m_measReportCount;
+    // OBS-09: the serving cell reports on every measurement report, whether or
+    // not neighbours are present, so harvest it before the neighbour guard.
+    // TS 38.331 measResultPCell carries the same TS 38.133 index encoding as
+    // the neighbour entries.
+    m_servingRsrpDbm = static_cast<double>(report.measResults.measResultPCell.rsrpResult) - 156.0;
+    if (!report.measResults.haveMeasResultNeighCells)
+    {
+        return;
+    }
+    for (const auto& n : report.measResults.measResultListEutra)
+    {
+        if (!n.haveRsrpResult)
+        {
+            continue;
+        }
+        m_neighbourRsrpDbm[n.physCellId] = static_cast<double>(n.rsrpResult) - 156.0;
+    }
+}
+
+int
+NtnRealStackHelper::EvaluateEirpGate(double& budgetOut, double& toleranceOut) const
+{
+    // NT-02. Establish the budget the run is supposed to respect, in order of
+    // decreasing directness:
+    //   1. an explicit SetEirpBudgetDbm() from the scenario;
+    //   2. the total EIRP the scenario declared via SetSatEirpTotalDbm() or
+    //      SetSatEirpDensityDbwMhz() (the gate then catches an array-gain
+    //      double-count, which is the defect that motivated it);
+    //   3. for an S-band NTN carrier, the TR 38.821 Set-1 density over the
+    //      configured bandwidth.
+    // If none applies the gate reports "not asserted" rather than a silent pass.
+    // A scenario that explicitly declared CONDUCTED power is exempt: it is not
+    // claiming to model a standardized satellite payload at all.
+    toleranceOut = m_eirpToleranceDb;
+
+    if (std::isfinite(m_eirpBudgetDbm))
+    {
+        budgetOut = m_eirpBudgetDbm;
+    }
+    else if (std::isfinite(m_eirpTotalDbm))
+    {
+        budgetOut = m_eirpTotalDbm;
+    }
+    else if (!m_eirpDeclaredConducted && m_freqHz > 1.0e9 && m_freqHz <= 7.125e9 &&
+             m_bwHz > 0.0)
+    {
+        const double bwMhz = m_bwHz / 1e6;
+        budgetOut = kTr38821Set1SBandEirpDensityDbwMhz + 10.0 * std::log10(bwMhz) + 30.0;
+    }
+    else
+    {
+        budgetOut = std::numeric_limits<double>::quiet_NaN();
+        return -1;
+    }
+
+    const double eff = GetEffectiveEirpDbm();
+    if (!std::isfinite(eff) || !std::isfinite(budgetOut))
+    {
+        return -1;
+    }
+    // One-sided: being under budget is a scenario choice, being over it is the
+    // double-count this gate exists to catch.
+    return (eff <= budgetOut + toleranceOut) ? 1 : 0;
+}
+
+int
+NtnRealStackHelper::EvaluateEirpPlausibility(double& referenceDbm, double& excessDb) const
+{
+    // WF-08 gate 3. Independent of what the scenario declared: the reference is
+    // the standard's, so a hotter declaration cannot move it.
+    referenceDbm = std::numeric_limits<double>::quiet_NaN();
+    excessDb = std::numeric_limits<double>::quiet_NaN();
+
+    if (m_eirpDeclaredConducted)
+    {
+        return -1; // not claiming to model a standardized payload
+    }
+    if (!(m_freqHz > 1.0e9 && m_freqHz <= 7.125e9) || m_bwHz <= 0.0)
+    {
+        return -1; // TR 38.821 Set-1 is an S-band FR1 reference
+    }
+
+    const double bwMhz = m_bwHz / 1e6;
+    referenceDbm = kTr38821Set1SBandEirpDensityDbwMhz + 10.0 * std::log10(bwMhz) + 30.0;
+    const double eff = GetEffectiveEirpDbm();
+    if (!std::isfinite(eff) || !std::isfinite(referenceDbm))
+    {
+        return -1;
+    }
+    excessDb = eff - referenceDbm;
+    // One-sided, like the budget gate: a quieter satellite is a scenario
+    // choice, a louder one is a claim the standard does not support.
+    return (excessDb <= m_eirpPlausibilityTolDb) ? 1 : 0;
+}
+
+Time
 NtnRealStackHelper::ComputeX2LinkDelay() const
 {
     // S8: one-way inter-gNB (inter-satellite) delay from the live geometry.
@@ -1822,24 +2411,55 @@ NtnRealStackHelper::ComputeX2LinkDelay() const
     //  - Transparent payload: both "gNBs" are on the ground behind their feeder
     //    links, so the X2 loop is 2 x feeder slant / c plus the core hop.
     // Falls back to m_backhaulDelay when the geometry is unavailable.
+    //
+    // NT-01 FIX (2026-08-24): AddX2Interface() stands up a full mesh over every
+    // gNB pair, but nr exposes X2LinkDelay as a single scalar attribute shared
+    // by every X2 channel, so a genuinely per-pair delay is not expressible
+    // without patching nr. Sampling only the (0,1) pair, as this did, made the
+    // mesh delay an accident of node ordering. Average over all pairs instead:
+    // that is the representative value the scalar attribute can actually carry,
+    // and it is stable under reordering. Per-pair delay is tracked as a future
+    // nr patch (see rd-audit-2026-08-24/GAP_REGISTER.md, NT-01).
     if (m_gnb.GetN() < 2)
     {
         return m_backhaulDelay;
     }
-    Ptr<MobilityModel> a = m_gnb.Get(0)->GetObject<MobilityModel>();
-    Ptr<MobilityModel> b = m_gnb.Get(1)->GetObject<MobilityModel>();
-    if (!a || !b)
+    if (m_payload != PayloadOption::FullGnb)
+    {
+        // Transparent: both "gNBs" sit on the ground behind their feeder links,
+        // so the inter-gNB path goes down one feeder and up the other. The
+        // geometry of the space segment does not enter.
+        return m_backhaulDelay + m_backhaulDelay;
+    }
+
+    // Regenerative (Rel-19): the Xn/X2 rides a direct ISL, so the delay is the
+    // inter-satellite range over c, averaged across the mesh.
+    constexpr double c = 299792458.0;
+    double sumRangeM = 0.0;
+    uint32_t pairs = 0;
+    for (uint32_t i = 0; i < m_gnb.GetN(); ++i)
+    {
+        Ptr<MobilityModel> a = m_gnb.Get(i)->GetObject<MobilityModel>();
+        if (!a)
+        {
+            continue;
+        }
+        for (uint32_t j = i + 1; j < m_gnb.GetN(); ++j)
+        {
+            Ptr<MobilityModel> b = m_gnb.Get(j)->GetObject<MobilityModel>();
+            if (!b)
+            {
+                continue;
+            }
+            sumRangeM += a->GetDistanceFrom(b);
+            ++pairs;
+        }
+    }
+    if (pairs == 0)
     {
         return m_backhaulDelay;
     }
-    const double islRangeM = a->GetDistanceFrom(b);
-    const double c = 299792458.0;
-    if (m_payload == PayloadOption::FullGnb)
-    {
-        return Seconds(islRangeM / c);
-    }
-    // Transparent: the inter-gNB path goes down one feeder and up the other.
-    return m_backhaulDelay + m_backhaulDelay;
+    return Seconds((sumRangeM / pairs) / c);
 }
 
 bool
@@ -1897,21 +2517,37 @@ NtnRealStackHelper::ComputeOwdFloorMs() const
     // configured backhaul. Using the altitude rather than the instantaneous
     // slant keeps this a true lower bound for every geometry in the run, so the
     // gate never false-fails as the satellite rises and sets.
+    // NT-11: the LOWEST satellite in the deployment, not satellite 0.
+    //
+    // This is a lower bound on the one-way delay, and a bound sampled from one
+    // arbitrary node is not a bound. In a mixed-altitude shell, if node 0
+    // happens to be the highest satellite the floor comes out too large and the
+    // gate FALSE-FAILS a run whose traffic was served by a lower one. The
+    // minimum altitude is the only value that is a true floor for every
+    // geometry in the run.
     if (m_gnb.GetN() == 0)
     {
         return 0.0;
     }
-    Ptr<MobilityModel> gm = m_gnb.Get(0)->GetObject<MobilityModel>();
-    if (!gm)
-    {
-        return 0.0;
-    }
-    const Vector p = gm->GetPosition();
-    const double r = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-    // ECEF (|r| ~ Earth radius + altitude) vs a local/ENU frame (z = altitude).
     const double kEarthR = 6371000.0;
-    double altM = (r > 6.0e6) ? (r - kEarthR) : p.z;
-    if (altM <= 0.0 || !std::isfinite(altM))
+    double altM = std::numeric_limits<double>::infinity();
+    for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
+    {
+        Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
+        if (!gm)
+        {
+            continue;
+        }
+        const Vector p = gm->GetPosition();
+        const double r = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+        // ECEF (|r| ~ Earth radius + altitude) vs a local/ENU frame (z = altitude).
+        const double a = (r > 6.0e6) ? (r - kEarthR) : p.z;
+        if (a > 0.0 && std::isfinite(a))
+        {
+            altM = std::min(altM, a);
+        }
+    }
+    if (!std::isfinite(altM) || altM <= 0.0)
     {
         return 0.0;
     }
@@ -2048,7 +2684,19 @@ NtnRealStackHelper::Collect()
             dlRxBytes += sink->GetTotalRx();
         }
     }
+    // NT-12: divide by the window traffic was actually OFFERED in, not by the
+    // whole simulation.
+    //
+    // Callers routinely start at 1.0 s and stop at simTime-0.5, so a 10 s run
+    // had an 8.5 s emission window and this divided by 10: a 15 percent
+    // understatement that grows as the guard bands grow. The per-flow path
+    // already did it correctly, over each flow's measured lifetime, so the two
+    // accessors disagreed about the same run.
     double activeS = std::max(1e-6, m_simTime.GetSeconds());
+    if (m_trafficStop > m_trafficStart)
+    {
+        activeS = std::max(1e-6, (m_trafficStop - m_trafficStart).GetSeconds());
+    }
     m_rxThroughputMbps = (dlRxBytes * 8.0) / activeS / 1e6;
     // m_appTxPackets / m_appRxPackets are accumulated live by the app traces.
     m_meanDelayMs = delaySamples ? sumDelayMs / delaySamples : 0.0;
@@ -2192,8 +2840,30 @@ NtnRealStackHelper::WriteHealthReport()
         gateOwdFloor = (m_meanDelayMs >= owdFloorMs);
     }
 
+    // NT-02: EIRP budget gate. -1 (not asserted) does not fail the run.
+    double eirpBudgetPre = 0.0;
+    double eirpTolPre = 0.0;
+    const int eirpGatePre = EvaluateEirpGate(eirpBudgetPre, eirpTolPre);
+    const bool gateEirp = !m_gates.requireEirpBudget || (eirpGatePre != 0);
+
+    // NT-05. Give the application-KPI rows floors they can actually fail on.
+    // They previously wrote pass=1 unconditionally with a "-" floor, so a run
+    // that delivered nothing still reported a healthy sim_health.csv.
+    // Only assert delivery when the scenario actually sent something: a run with
+    // no traffic has no delivery ratio to judge.
+    const double deliveryRatio =
+        (m_appTxPackets > 0)
+            ? (static_cast<double>(m_appRxPackets) / static_cast<double>(m_appTxPackets))
+            : -1.0;
+    const bool gateDelivery = (m_gates.minAppDeliveryRatio <= 0.0) || (deliveryRatio < 0.0) ||
+                              (deliveryRatio >= m_gates.minAppDeliveryRatio);
+    const double corruptFrac = GetDlCorruptFraction();
+    const bool gateCorrupt = (m_gates.maxDlCorruptFraction >= 1.0) ||
+                             !std::isfinite(corruptFrac) ||
+                             (corruptFrac <= m_gates.maxDlCorruptFraction);
+
     bool allOk = gateStackDepth && gateThroughput && gateProvenance && gateErrorModel &&
-                 channelInPath && gateOwdFloor;
+                 channelInPath && gateOwdFloor && gateEirp && gateDelivery && gateCorrupt;
 
     // Label the air interface by the ACTUAL carrier, not a hardcoded "fr1": a THz
     // example at 100 GHz on the Nr data plane must not report "nr-fr1-ntn". FR1 is
@@ -2202,7 +2872,62 @@ NtnRealStackHelper::WriteHealthReport()
     const char* frTag = (m_freqHz <= 7.125e9)   ? "fr1"
                         : (m_freqHz <= 71.0e9)   ? "fr2"
                                                  : "thz";
-    const std::string airTag = std::string(backendTag) + "-" + frTag + "-ntn";
+    // NT-09. The "-ntn" suffix asserted a 3GPP NTN band on any carrier under
+    // 7.125 GHz, which is a claim about the CHANNEL, not just the frequency
+    // range. TS 38.101-5 defines the NTN FR1 bands narrowly: n255 pairs
+    // 1980-2010 MHz uplink with 2170-2200 MHz downlink, and n256 pairs
+    // 1626.5-1660.5 with 1525-1559. The helper's own default carrier, 2.0 GHz,
+    // sits in n255's UPLINK block and is used as the downlink carrier, and its
+    // default 30 MHz was documented as "the TS 38.101-5 NTN-FR1 maximum channel
+    // bandwidth" when 30 MHz is the total WIDTH of the n255 downlink block, not
+    // a channel bandwidth that fits inside it alongside guard bands.
+    //
+    // Rather than silently relabel physics, the tag now states what is true.
+    // A run whose carrier does not fall in an NTN downlink block, or whose
+    // channel cannot fit inside that block, is tagged "-ntnband-nonconformant"
+    // and the row's pass flag reports it, so nothing downstream can read an
+    // NTN band conformance claim off a run that does not have one.
+    // SLICE-4 / NT-09. Classified against the real TS 38.101-5 tables rather
+    // than an inline approximation, so the tag names the band correctly and
+    // checks the channel against that band's supported set instead of merely
+    // against the block width.
+    const NtnFr1Band band = ClassifyNtnFr1(m_freqHz, m_bwHz);
+    bool ntnBandOk = true;
+    std::string bandTag;
+    if (frTag == std::string("fr1"))
+    {
+        ntnBandOk = band.conformant;
+        if (!ntnBandOk)
+        {
+            // Say WHICH way it fails. "non-conformant" alone leaves the reader
+            // to guess between a carrier in the wrong half of the band and a
+            // channel width that does not exist.
+            if (band.name == std::string("none"))
+            {
+                bandTag = "-ntnband-none";
+            }
+            else if (!band.carrierInDownlink)
+            {
+                bandTag = std::string("-") + band.name + "-uplinkcarrier";
+            }
+            else
+            {
+                bandTag = std::string("-") + band.name + "-bwunsupported";
+            }
+        }
+        else
+        {
+            bandTag = std::string("-ntn-") + band.name;
+        }
+    }
+    else
+    {
+        // Above FR1 the NTN band tables do not apply; do not assert
+        // conformance either way.
+        bandTag = "";
+    }
+
+    const std::string airTag = std::string(backendTag) + "-" + frTag + bandTag;
 
     std::error_code ec;
     std::filesystem::create_directories(m_outputDir, ec);
@@ -2210,9 +2935,24 @@ NtnRealStackHelper::WriteHealthReport()
     out << "metric,value,floor,pass,provenance\n";
     out << "sim_time_s," << m_simTime.GetSeconds() << "," << m_simTime.GetSeconds()
         << ",1,config\n";
-    out << "wall_clock_s," << wallSec << ",-,1,measured\n";
-    out << "air_interface," << airTag << ",-,1,config\n";
-    out << "carrier_hz," << m_freqHz << ",-,1,config\n";
+    out << "wall_clock_s," << wallSec << ",-,-,measured\n";
+    out << "air_interface," << airTag << ",-," << (ntnBandOk ? 1 : 0) << ",config\n";
+    out << "carrier_hz," << m_freqHz << ",-,-,config\n";
+    // WF-11: refusals reach the health file, so they are visible in the
+    // release build where NS_LOG_WARN is compiled out. pass=0 when a decision
+    // module asked for a handover the stack could not perform.
+    out << "handover_refusals," << m_handoverRefusals << ",0,"
+        << (m_handoverRefusals == 0 ? 1 : 0) << ",measured"
+        << (m_handoverRefusals ? (" (last: " + m_lastHandoverRefusal + ")") : std::string())
+        << "\n";
+    // Informational, not gated: air_interface above already carries the single
+    // pass/fail verdict for band conformance. Three failing rows for one issue
+    // would dilute the gate rather than sharpen it.
+    out << "channel_bw_hz," << m_bwHz << ",-,-,ts38101-5-table-5.3.5-1"
+        << (band.bandwidthSupported ? "" : " (UNSUPPORTED for this band)") << "\n";
+    out << "ntn_fr1_band," << band.name << ",-,-,ts38101-5-table-5.2-1"
+        << (band.carrierInDownlink ? " (downlink)" : " (carrier NOT in the downlink block)")
+        << "\n";
     out << "channel_in_path," << (channelInPath ? 1 : 0) << ",1,"
         << (channelInPath ? 1 : 0) << ",topology\n";
     out << "phy_rx_tb," << m_phyRxTb << "," << m_gates.minPhyRxTb << ","
@@ -2221,25 +2961,138 @@ NtnRealStackHelper::WriteHealthReport()
         << (gateProvenance ? 1 : 0) << ",phy-trace\n";
     out << "dl_tbler_mean," << m_dlTblerMean << ",-," << (gateErrorModel ? 1 : 0)
         << ",phy-trace\n";
-    out << "dl_corrupt_frac," << GetDlCorruptFraction() << ",-,1,phy-trace\n";
+    out << "dl_corrupt_frac," << corruptFrac << "," << m_gates.maxDlCorruptFraction << ","
+        << (gateCorrupt ? 1 : 0) << ",phy-trace\n";
     out << "rx_throughput_mbps," << m_rxThroughputMbps << "," << m_gates.minRxThroughputMbps
         << "," << (gateThroughput ? 1 : 0) << ",packetsink\n";
     double delivery = (m_appTxPackets > 0)
                           ? static_cast<double>(m_appRxPackets) / m_appTxPackets
                           : 0.0;
-    out << "app_delivery_ratio," << delivery << ",-,1,app-trace\n";
+    out << "app_delivery_ratio," << delivery << "," << m_gates.minAppDeliveryRatio << ","
+        << (gateDelivery ? 1 : 0) << ",app-trace\n";
     // S9: real floor + real pass flag (was: floor "-", pass hard-coded 1).
     out << "app_owd_ms," << m_meanDelayMs << "," << owdFloorMs << "," << (gateOwdFloor ? 1 : 0)
         << ",inband-timestamp\n";
-    out << "app_jitter_ms," << m_meanJitterMs << ",-,1,inband-timestamp\n";
-    out << "app_loss_ratio," << m_appLossRatio << ",-,1,inband-seq\n";
-    out << "effective_eirp_dbm," << GetEffectiveEirpDbm() << ",-,1,derived\n";
-    out << "app_tx_pkts," << m_appTxPackets << ",-,1,app-trace\n";
-    out << "app_rx_pkts," << m_appRxPackets << ",-,1,app-trace\n";
-    out << "ues," << m_ue.GetN() << ",-,1,config\n";
-    out << "gnbs," << m_gnb.GetN() << ",-,1,config\n";
-    out << "run_tag," << m_runTag << ",-,1,config\n";
+    // NT-05: these are reported quantities, not gates. Writing pass=1 on a row
+    // with no floor asserted health that was never checked; "-" says plainly
+    // that nothing is being judged. app_loss_ratio is the complement of the
+    // gated delivery ratio above, so gating it twice would double-count.
+    // CVC-07: say WHERE the service-link flight time lives.
+    //
+    // The end-to-end user-plane OWD above is physically right on every path,
+    // but the 1.8 ms one-way flight to a 550 km satellite is carried on the
+    // BACKHAUL leg by default, not by the air interface, because a real
+    // per-distance air delay SIGABRTs the nr stack until K_offset and Timing
+    // Advance exist (see the comment at BuildNrRadio). That is a defensible
+    // treatment and it is not the same thing as modelling the delay on the air
+    // interface. A reader of this artifact had no way to tell which they had,
+    // and the manuscript criticizes a comparator on exactly that axis, so the
+    // distinction belongs in the file rather than in the source.
+    {
+        const Time svc = ComputeServiceLinkDelay();
+        out << "service_link_delay_ms," << svc.GetSeconds() * 1e3 << ",-,-,"
+            << (m_airIfaceDelayActive ? "air-interface (real per-distance propagation)"
+                                      : "folded-onto-backhaul (air interface is zero-delay)")
+            << "\n";
+    }
+    out << "app_jitter_ms," << m_meanJitterMs << ",-,-,inband-timestamp\n";
+    out << "app_loss_ratio," << m_appLossRatio << ",-,-,inband-seq\n";
+    // NT-02: real budget + real pass flag (was: floor "-", pass hard-coded 1,
+    // which made a 20 dB link-budget error invisible to every gate).
+    double eirpBudget = 0.0;
+    double eirpTol = 0.0;
+    const int eirpGate = EvaluateEirpGate(eirpBudget, eirpTol);
+    if (eirpGate < 0)
+    {
+        out << "effective_eirp_dbm," << GetEffectiveEirpDbm()
+            << ",not-asserted,-,derived\n";
+    }
+    else
+    {
+        out << "effective_eirp_dbm," << GetEffectiveEirpDbm() << "," << (eirpBudget + eirpTol)
+            << "," << eirpGate << ",derived\n";
+    }
+    // WF-08 gate 3: plausibility against the STANDARD, reported separately from
+    // the budget gate above. The budget gate cannot catch an implausible
+    // declaration, because declaring a hotter satellite moves the budget too.
+    {
+        double eirpRef = 0.0;
+        double eirpExcess = 0.0;
+        const int plaus = EvaluateEirpPlausibility(eirpRef, eirpExcess);
+        if (plaus < 0)
+        {
+            out << "eirp_vs_tr38821_set1_db,not-asserted,-,-,ts38821-table-6.1.1.1-1\n";
+        }
+        else
+        {
+            out << "eirp_vs_tr38821_set1_db," << eirpExcess << ","
+                << m_eirpPlausibilityTolDb << "," << plaus
+                << ",ts38821-table-6.1.1.1-1\n";
+        }
+    }
+
+    // NT-05: counts and configuration are facts about the run, not assertions
+    // about its health.
+    out << "app_tx_pkts," << m_appTxPackets << ",-,-,app-trace\n";
+    out << "app_rx_pkts," << m_appRxPackets << ",-,-,app-trace\n";
+    out << "ues," << m_ue.GetN() << ",-,-,config\n";
+    out << "gnbs," << m_gnb.GetN() << ",-,-,config\n";
+    out << "run_tag," << m_runTag << ",-,-,config\n";
     out.close();
+
+    // ---- OBS-07: reproducibility manifest, written for EVERY real-stack run --
+    //
+    // The manifest was a decision island: one example out of roughly 87 wrote
+    // one, and the single manifest the repo shipped had an empty git SHA, an
+    // empty TLE epoch, no NORAD ids and empty sionna/hitran/itu fields, even
+    // though the producing example held the values it could have supplied. A
+    // provenance record that exists for one scenario and is blank when it does
+    // exist cannot do the job it was added for.
+    //
+    // Writing it here means every example built on this helper gets one beside
+    // its sim_health.csv without opting in. Fields the helper genuinely knows
+    // are filled; ones it does not are left to the scenario rather than
+    // guessed.
+    {
+        ntnobs::NtnReproManifest manifest;
+        // OBS-07: TLE provenance. SetTleEpoch and AddNoradId had no
+        // production callers anywhere, so the one manifest the repo shipped
+        // recorded an empty epoch and an empty NORAD list even though the
+        // producing scenario held both. Reading it off the satellites directly
+        // would make this helper depend on ntn-constellation, which closes a
+        // build cycle, so the scenario declares it through
+        // SetTleProvenance() and the helper carries it into the manifest.
+        if (!m_tleEpochUtc.empty())
+        {
+            manifest.SetTleEpoch(m_tleEpochUtc);
+        }
+        for (uint32_t id : m_noradIds)
+        {
+            manifest.AddNoradId(id);
+        }
+        manifest.SetScenarioName(m_runTag.empty() ? "ntn-real-stack" : m_runTag)
+            .SetScenarioDuration(Simulator::Now().GetSeconds())
+            .SetRng(RngSeedManager::GetSeed(), RngSeedManager::GetRun())
+            .AddExtra("radio_backend",
+                      (m_backend == RadioBackend::Nr) ? "nr" : "mmwave")
+            .AddExtra("carrier_hz", std::to_string(m_freqHz))
+            .AddExtra("bandwidth_hz", std::to_string(m_bwHz))
+            .AddExtra("numerology", std::to_string(m_numerology))
+            .AddExtra("gnbs", std::to_string(m_gnb.GetN()))
+            .AddExtra("ues", std::to_string(m_ue.GetN()))
+            .AddExtra("sat_eirp_dbm", std::to_string(m_satEirpDbm))
+            .AddExtra("effective_eirp_dbm", std::to_string(GetEffectiveEirpDbm()))
+            .AddExtra("mean_dl_sinr_db",
+                      std::isnan(m_dlSinrDbMean) ? std::string("nan")
+                                                 : std::to_string(m_dlSinrDbMean))
+            .AddExtra("mean_dl_tbler", std::to_string(m_dlTblerMean))
+            .AddExtra("phy_rx_tb", std::to_string(m_phyRxTb))
+            .AddExtra("air_interface", airTag);
+        if (!manifest.WriteJson(m_outputDir + "/repro-manifest.json"))
+        {
+            NS_LOG_WARN("could not write " << m_outputDir << "/repro-manifest.json");
+        }
+    }
 
     std::cout << "[sim_health/honest] air=" << airTag << " fc=" << (m_freqHz / 1e9) << "GHz | phy_rx_tb="
               << m_phyRxTb << " (floor " << m_gates.minPhyRxTb << ") | dl_sinr="
@@ -2247,6 +3100,8 @@ NtnRealStackHelper::WriteHealthReport()
               << m_dlTblerMean << " | corrupt=" << GetDlCorruptFraction() << " | thr="
               << m_rxThroughputMbps << "Mbps | delay=" << m_meanDelayMs << "ms -> "
               << (allOk ? "PASS" : "FAIL") << "\n";
+
+    m_lastGateVerdict = allOk;
 
     if (m_strictGates && !allOk)
     {

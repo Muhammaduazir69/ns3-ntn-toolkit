@@ -6,6 +6,7 @@
 
 #include "ntn-sat-beam-gain-model.h"
 
+#include "ns3/boolean.h"
 #include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/mobility-model.h"
@@ -37,11 +38,19 @@ NtnSatBeamGainModel::GetTypeId()
                           MakeDoubleAccessor(&NtnSatBeamGainModel::m_beamwidth3dBDeg),
                           MakeDoubleChecker<double>(1e-3))
             .AddAttribute("PeakGainDbi",
-                          "Boresight peak gain (dBi), informational only — NOT added "
-                          "on the mmwave spine (the array already supplies it).",
+                          "Boresight peak gain (dBi). Applied ONLY when ApplyPeakGain "
+                          "is true; on the mmwave spine the array already supplies it, "
+                          "so the default path adds the roll-off alone.",
                           DoubleValue(30.0),
                           MakeDoubleAccessor(&NtnSatBeamGainModel::m_peakGainDbi),
                           MakeDoubleChecker<double>())
+            .AddAttribute("ApplyPeakGain",
+                          "Apply PeakGainDbi on top of the off-boresight roll-off, so "
+                          "the model yields the ABSOLUTE pattern G(theta). Default "
+                          "false — every pre-existing scenario keeps roll-off only.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&NtnSatBeamGainModel::m_applyPeakGain),
+                          MakeBooleanChecker())
             .AddAttribute("RolloffFloorDb",
                           "Deepest applied off-boresight roll-off (dB).",
                           DoubleValue(-40.0),
@@ -62,6 +71,35 @@ void
 NtnSatBeamGainModel::SetBeamCenter(Ptr<MobilityModel> c)
 {
     m_beamCenter = c;
+    // Historical contract: a null beam centre means "track the rx UE".
+    m_boresightMode = c ? BoresightMode::FixedPoint : BoresightMode::TrackUe;
+}
+
+void
+NtnSatBeamGainModel::SetBoresightFixedPoint(Vector point)
+{
+    m_beamCenter = nullptr;
+    m_boresightPoint = point;
+    m_boresightMode = BoresightMode::FixedPoint;
+}
+
+void
+NtnSatBeamGainModel::SetBoresightFixed(Vector direction)
+{
+    const double n = std::sqrt(direction.x * direction.x + direction.y * direction.y +
+                               direction.z * direction.z);
+    // Normalise so the caller may pass any magnitude (and so the degenerate-
+    // geometry guard in DoCalcRxPower only trips on a genuinely null vector).
+    m_boresightDir = (n > 1e-12) ? Vector(direction.x / n, direction.y / n, direction.z / n)
+                                 : Vector(0.0, 0.0, 0.0);
+    m_boresightMode = BoresightMode::FixedDirection;
+}
+
+void
+NtnSatBeamGainModel::SetBoresightNadir(Vector geocentre)
+{
+    m_geocentre = geocentre;
+    m_boresightMode = BoresightMode::Nadir;
 }
 
 double
@@ -100,6 +138,42 @@ NtnSatBeamGainModel::BesselJ1(double x)
 }
 
 double
+NtnSatBeamGainModel::RolloffDbAtThetaRad(double thetaRad) const
+{
+    // TR 38.811 §6.4.1: G(theta)/Gmax = 4 |J1(u)/u|^2 with u = k a sin(theta).
+    // k a is pinned by the configured 3 dB beamwidth: the half-power crossing of
+    // 4|J1(u)/u|^2 is u = 1.6163 (kHalfPowerX), which must occur at the HALF
+    // beamwidth theta_3dB/2, hence u = 1.6163 * sin(theta) / sin(theta_3dB/2).
+    const double theta3dBHalf = 0.5 * m_beamwidth3dBDeg * M_PI / 180.0;
+    const double sinHalf = std::sin(theta3dBHalf);
+    const double t = std::abs(thetaRad);
+    if (t <= 1e-9 || sinHalf <= 1e-12)
+    {
+        return 0.0; // boresight: exactly 0 dB roll-off
+    }
+    const double u = kHalfPowerX * std::sin(t) / sinHalf;
+    if (u <= 1e-6)
+    {
+        return 0.0;
+    }
+    const double j1 = BesselJ1(u);
+    const double g = 4.0 * (j1 / u) * (j1 / u); // G/Gmax in [0,1]
+    const double rolloffDb = 10.0 * std::log10(std::max(g, 1e-9));
+    // Clamp: never a gain (<= 0 dB) and never deeper than the configured floor
+    // (the Airy nulls are singular; a real feed/aperture has a finite floor).
+    return std::max(m_rolloffFloorDb, std::min(0.0, rolloffDb));
+}
+
+double
+NtnSatBeamGainModel::GainDbAtThetaDeg(double thetaDeg) const
+{
+    // Pure closed form — touches no simulation state, so a reviewer can diff the
+    // measured plane against it sample by sample.
+    return RolloffDbAtThetaRad(thetaDeg * M_PI / 180.0) +
+           (m_applyPeakGain ? m_peakGainDbi : 0.0);
+}
+
+double
 NtnSatBeamGainModel::DoCalcRxPower(double txPowerDbm,
                                    Ptr<MobilityModel> a,
                                    Ptr<MobilityModel> b) const
@@ -112,46 +186,55 @@ NtnSatBeamGainModel::DoCalcRxPower(double txPowerDbm,
     const Vector sat = (ra >= rb) ? pa : pb;
     const Vector ue = (ra >= rb) ? pb : pa;
 
-    // Boresight direction from the satellite: fixed beam centre if set, else
-    // track the UE (theta = 0).
-    Vector bore = ue;
-    if (m_beamCenter)
-    {
-        bore = m_beamCenter->GetPosition();
-    }
-    const Vector dBore(bore.x - sat.x, bore.y - sat.y, bore.z - sat.z);
+    // Boresight direction from the satellite. See BoresightMode in the header:
+    // only the steered/tracking default forces theta = 0; every fixed-boresight
+    // mode lets the UE traverse the lobe, which is where the pattern's angle
+    // dependence actually shows up in the measured plane.
     const Vector dUe(ue.x - sat.x, ue.y - sat.y, ue.z - sat.z);
+    Vector dBore = dUe;
+    switch (m_boresightMode)
+    {
+    case BoresightMode::FixedPoint: {
+        const Vector bore = m_beamCenter ? m_beamCenter->GetPosition() : m_boresightPoint;
+        dBore = Vector(bore.x - sat.x, bore.y - sat.y, bore.z - sat.z);
+        break;
+    }
+    case BoresightMode::FixedDirection:
+        dBore = m_boresightDir;
+        break;
+    case BoresightMode::Nadir:
+        dBore = Vector(m_geocentre.x - sat.x, m_geocentre.y - sat.y, m_geocentre.z - sat.z);
+        break;
+    case BoresightMode::TrackUe:
+    default:
+        break; // dBore == dUe -> theta = 0
+    }
     const double nB = std::sqrt(dBore.x * dBore.x + dBore.y * dBore.y + dBore.z * dBore.z);
     const double nU = std::sqrt(dUe.x * dUe.x + dUe.y * dUe.y + dUe.z * dUe.z);
-    if (nB < 1.0 || nU < 1.0)
+    // Degenerate geometry (co-located nodes / null boresight): behave as
+    // boresight. dBore is a metric displacement in every mode except
+    // FixedDirection, where SetBoresightFixed() normalises it to unit length,
+    // so only a genuinely null vector trips this.
+    if (nB < 1e-9 || nU < 1.0)
     {
         m_lastThetaDeg = 0.0;
         m_lastRolloffDb = 0.0;
-        return txPowerDbm;
+        return txPowerDbm + (m_applyPeakGain ? m_peakGainDbi : 0.0);
     }
     double cosT = (dBore.x * dUe.x + dBore.y * dUe.y + dBore.z * dUe.z) / (nB * nU);
     cosT = std::max(-1.0, std::min(1.0, cosT));
     const double theta = std::acos(cosT); // off-boresight angle (rad)
     m_lastThetaDeg = theta * 180.0 / M_PI;
 
-    const double theta3dBHalf = 0.5 * m_beamwidth3dBDeg * M_PI / 180.0;
-    const double sinHalf = std::sin(theta3dBHalf);
-    double rolloffDb = 0.0;
-    if (theta > 1e-9 && sinHalf > 1e-12)
-    {
-        const double x = kHalfPowerX * std::sin(theta) / sinHalf;
-        if (x > 1e-6)
-        {
-            const double j1 = BesselJ1(x);
-            const double g = 4.0 * (j1 / x) * (j1 / x); // G/Gmax in [0,1]
-            rolloffDb = 10.0 * std::log10(std::max(g, 1e-9));
-            rolloffDb = std::max(m_rolloffFloorDb, std::min(0.0, rolloffDb));
-        }
-    }
+    const double rolloffDb = RolloffDbAtThetaRad(theta);
     m_lastRolloffDb = rolloffDb;
-    NS_LOG_DEBUG("theta=" << m_lastThetaDeg << "deg rolloff=" << rolloffDb << "dB");
+    // The absolute peak is added only on request (default off: the radio's array
+    // already supplies it — see the header's no-double-count note).
+    const double peakDb = m_applyPeakGain ? m_peakGainDbi : 0.0;
+    NS_LOG_DEBUG("theta=" << m_lastThetaDeg << "deg rolloff=" << rolloffDb << "dB peak="
+                          << peakDb << "dB");
     // Roll-off is a (<=0) gain term: add it to rx power (= a loss off-boresight).
-    return txPowerDbm + rolloffDb;
+    return txPowerDbm + rolloffDb + peakDb;
 }
 
 int64_t

@@ -117,8 +117,44 @@ build_lib_example(
 )
 
 build_lib_example(
+  NAME ntn-scalability-load-regimes
+  SOURCE_FILES ntn-scalability-load-regimes.cc
+  LIBRARIES_TO_LINK
+    ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libnr}
+    ${libmmwave}
+    ${liblte}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+    ${libnetwork}
+    ${libcore}
+)
+
+build_lib_example(
   NAME ntn-tr38821-calibration
   SOURCE_FILES ntn-tr38821-calibration.cc
+  LIBRARIES_TO_LINK
+    ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libspectrum}
+    ${libpropagation}
+    ${libinternet}
+    ${libapplications}
+    ${libmmwave}
+    ${liblte}
+)
+
+build_lib_example(
+  NAME ntn-tr38821-array-gain-calibration
+  SOURCE_FILES ntn-tr38821-array-gain-calibration.cc
   LIBRARIES_TO_LINK
     ${libntn-traffic}
     ${libntn-cho}

@@ -23,6 +23,7 @@ set(source_files
     model/ntn-spectrum-seam-model.cc
     model/ntn-static-extra-loss-model.cc
     model/ntn-tr38811-excess-loss-model.cc
+    model/ntn-tdl-spectrum-loss-model.cc
     model/three-gpp-http-satellite-client.cc
     stats/application-stats-helper.cc
     stats/application-stats-delay-helper.cc
@@ -57,6 +58,7 @@ set(header_files
     model/ntn-spectrum-seam-model.h
     model/ntn-static-extra-loss-model.h
     model/ntn-tr38811-excess-loss-model.h
+    model/ntn-tdl-spectrum-loss-model.h
     model/three-gpp-http-satellite-client.h
     stats/application-stats-helper.h
     stats/application-stats-delay-helper.h
@@ -90,5 +92,8 @@ build_lib(
     ${libnr}
     ${liblte}
     ${libpoint-to-point}
+    ${libntn-observability}
+    ${libntn-rrc}
+
   TEST_SOURCES ${test_sources}
 )

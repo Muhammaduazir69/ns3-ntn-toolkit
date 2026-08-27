@@ -72,6 +72,21 @@ class NtnOranApplication : public Application
     typedef Callback<void, Buffer::Iterator, uint32_t> PayloadBuilder;
     void SetPayloadBuilder(PayloadBuilder cb) { m_payloadBuilder = cb; }
 
+    /// Runtime transmit gate.
+    ///
+    /// Suppresses transmission while leaving the flow scheduled, so a control
+    /// decision can take a terminal off the air and put it back without
+    /// destroying and rebuilding the application. ns-3's start/stop times are
+    /// not usable for this: an Application that has been stopped cannot be
+    /// restarted cleanly mid-run.
+    ///
+    /// The sequence number is NOT advanced while gated, so the receiver's
+    /// sequence-gap loss counts the packets that were genuinely dropped by the
+    /// channel and does not also charge the terminal for the ones the control
+    /// plane deliberately never sent.
+    void SetTransmitEnabled(bool enabled) { m_txEnabled = enabled; }
+    bool GetTransmitEnabled() const { return m_txEnabled; }
+
     uint32_t GetTxPackets() const { return m_seq; }
     uint64_t GetTxBytes() const { return m_txBytes; }
 
@@ -108,6 +123,7 @@ class NtnOranApplication : public Application
     Ptr<Socket> m_socket;
     EventId m_sendEvent;
     uint32_t m_seq{0};
+    bool m_txEnabled{true}; ///< runtime transmit gate (SetTransmitEnabled)
     uint64_t m_txBytes{0};
     Time m_resolvedPeriod{Seconds(0)};
     Ptr<ExponentialRandomVariable> m_expVar;

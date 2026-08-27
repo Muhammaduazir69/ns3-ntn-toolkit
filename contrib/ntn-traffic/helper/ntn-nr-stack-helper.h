@@ -110,6 +110,10 @@ class NtnNrStackHelper
     double GetScsKhz() const { return 15.0 * (1u << m_numerology); }
     /// Satellite (gNB) EIRP scalar written verbatim into NrGnbPhy::TxPower (dBm).
     void SetSatEirpDbm(double p) { m_satEirpDbm = p; }
+    /// NT-02: same value, named for what it is (power at the array input, with
+    /// the UPA gain added on top by the antenna model). Kept so scenarios read
+    /// unambiguously alongside NtnRealStackHelper.
+    void SetSatConductedPowerDbm(double p) { m_satEirpDbm = p; }
     double GetSatEirpDbm() const { return m_satEirpDbm; }
     void SetUeTxPowerDbm(double p) { m_ueTxDbm = p; }
     /// Feeder + core one-way delay on the PGW<->remote-host backhaul.

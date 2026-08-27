@@ -85,6 +85,17 @@ Calibrates the toolkit's measured radio against the official 3GPP **TR 38.821 Se
 - **Outputs:** a per-sample table (slant range, TR CNR, measured SINR, offset) and a final `CALIBRATED`/`FAIL` verdict on stdout; `sim_health.csv` in `--outputDir`. Exit code is non-zero on a failed gate, so it doubles as a CI check.
 - **Key args:** `--simSeconds`, `--outputDir`.
 
+### ntn-tr38821-array-gain-calibration
+
+Companion experiment to the calibration above, answering the obvious question about its constant offset: **is the satellite array gain angle-dependent, or was a constant substituted for a function?** It is angle-dependent — `NtnSatBeamGainModel` implements the **TR 38.811 Sec. 6.4.1** normalized circular-aperture (Airy) pattern *G*(θ)/*G*<sub>max</sub> = 4|*J*<sub>1</sub>(*u*)/*u*|², with *u* pinned by the TR 38.821 Set-1 LEO-600 S-band 3 dB beamwidth (4.4127°). The original calibration simply never exercises it, because it runs a *steered* spot beam whose boresight tracks the terminal (θ ≡ 0 ⇒ 0 dB pattern contribution). This example runs the same LEO-600 pass twice, changing only where the beam points: **regime A** steered (θ ≈ 0, constant residual — this *is* the published offset) and **regime B** with the boresight pinned (default: a fixed ground cell centre offset along the ground track; `--boresightMode=nadir` for a body-fixed nadir beam), so the UE traverses the mainlobe, the first null and the sidelobes. Because both regimes sample identical geometry at identical instants, the *paired* difference `[residual_B − residual_A] − G_analytic(θ)` cancels FSPL, the TR 38.811 excess-loss terms and the constant array-gain offset alike, leaving only the angular term.
+
+```sh
+./ns3 run "ntn-tr38821-array-gain-calibration --simSeconds=120"
+```
+
+- **Outputs:** `array_gain_calibration.csv` (per sample, both regimes: `regime, boresight, t_s, elevation_deg, slant_km, theta_offboresight_deg, tr_cnr_db, measured_cnr_db, residual_db, analytic_pattern_db, model_theta_deg, model_rolloff_db, paired_pattern_err_db`) and `array_gain_summary.csv` (per regime: sample count, θ range, residual mean/σ/range, and for regime B the max/RMS pattern-fidelity error) in `--outputDir` (default `ntn-tr38821-array-gain-output`), plus a stdout summary and three gates (steered θ ≡ 0; regime B sweeps > half the 3 dB beamwidth; paired pattern RMS error < `--patternTolDb`). The `analytic_pattern_db` column is `NtnSatBeamGainModel::GainDbAtThetaDeg(θ)` — a pure closed form, recomputable from the pattern equation alone.
+- **Key args:** `--simSeconds`, `--samplePeriodS`, `--beamwidthDeg`, `--rolloffFloorDb`, `--boresightMode` (`point`\|`nadir`\|`direction`), `--boresightOffsetKm`, `--excessLoss`, `--patternTolDb`, `--outputDir`.
+
 ### ntn-real-stack-smoke
 
 Minimal validation of `NtnRealStackHelper`: a single LEO gNB (SGP4 Walker serving satellite) over a handful of TR 38.811-mobility ground UEs, eMBB streaming over the real radio, measured SINR/TBLER/throughput reported via the health gates.

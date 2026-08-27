@@ -266,6 +266,14 @@ NtnOranApplication::ScheduleNext()
 void
 NtnOranApplication::SendOne(uint32_t bytes)
 {
+    // Runtime gate: stay scheduled but emit nothing. Returning before the
+    // header is built also leaves m_seq untouched, so the receiver does not
+    // record a sequence gap for packets the control plane chose not to send.
+    if (!m_txEnabled)
+    {
+        ScheduleNext();
+        return;
+    }
     NtnOranPayloadHeader hdr;
     hdr.SetPayloadType(m_payloadType);
     hdr.SetSeq(m_seq++);

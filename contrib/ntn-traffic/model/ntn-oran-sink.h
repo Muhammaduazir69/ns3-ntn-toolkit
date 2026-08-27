@@ -27,6 +27,9 @@
 #include <set>
 #include <tuple>
 
+
+#include <limits>
+#include <vector>
 namespace ns3
 {
 
@@ -69,6 +72,61 @@ class NtnOranSink : public Application
         double lastTransitMs{0};
         Time firstRx{Seconds(0)};
         Time lastRx{Seconds(0)};
+
+        /// SLICE-1: bounded one-way-delay histogram, 1 ms bins from 0 to
+        /// kDelayBins-1 ms plus an overflow counter. Without it the sink kept
+        /// only sums, so a caller wanting a latency PERCENTILE had nothing to
+        /// work from and the slice examples stamped every packet with the mean:
+        /// the reported p99 was the p99 of a constant, and no percentile SLA
+        /// could ever breach. A histogram is deterministic and bounded, unlike
+        /// retaining every sample.
+        static constexpr uint32_t kDelayBins = 4096;
+        std::vector<uint32_t> delayHistMs;  ///< lazily sized to kDelayBins
+        uint64_t delayOverflow{0};          ///< samples at or beyond kDelayBins ms
+
+        void RecordDelaySample(double delayMs)
+        {
+            if (delayHistMs.empty())
+            {
+                delayHistMs.assign(kDelayBins, 0u);
+            }
+            if (delayMs < 0.0)
+            {
+                delayMs = 0.0;
+            }
+            const uint32_t bin = static_cast<uint32_t>(delayMs);
+            if (bin < kDelayBins)
+            {
+                delayHistMs[bin]++;
+            }
+            else
+            {
+                delayOverflow++;
+            }
+        }
+
+        /// Delay at quantile \p q in [0,1], in ms, from the histogram. Returns
+        /// the bin midpoint, so resolution is 1 ms. NaN when no samples.
+        double DelayPercentileMs(double q) const
+        {
+            const uint64_t total = rxPackets;
+            if (total == 0 || delayHistMs.empty())
+            {
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            const uint64_t target =
+                static_cast<uint64_t>(q * static_cast<double>(total));
+            uint64_t cum = 0;
+            for (uint32_t b = 0; b < kDelayBins; ++b)
+            {
+                cum += delayHistMs[b];
+                if (cum >= target)
+                {
+                    return b + 0.5;
+                }
+            }
+            return kDelayBins + 0.5; // everything remaining is in the overflow
+        }
 
         double MeanDelayMs() const { return rxPackets ? sumDelayMs / rxPackets : 0.0; }
         /// Lost = expected (from seq span) minus received.

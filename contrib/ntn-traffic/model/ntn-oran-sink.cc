@@ -209,6 +209,7 @@ NtnOranSink::HandleRead(Ptr<Socket> socket)
             (now.GetNanoSeconds() - static_cast<int64_t>(hdr.GetTxTimestampNs())) / 1e6;
         fs.sumDelayMs += delayMs;
         fs.maxDelayMs = std::max(fs.maxDelayMs, delayMs);
+        fs.RecordDelaySample(delayMs); // SLICE-1: retain the distribution, not just the sum
         // RFC 3550 interarrival jitter: J += (|D| - J) / 16, with D the
         // change in transit time between consecutive packets.
         if (fs.rxPackets > 1)

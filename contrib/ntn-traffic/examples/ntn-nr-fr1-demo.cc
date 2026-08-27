@@ -85,7 +85,10 @@ main(int argc, char* argv[])
     nr.SetCarrierFrequencyHz(freqGhz * 1e9);
     nr.SetBandwidthHz(bwMhz * 1e6);
     nr.SetNumerology(numerology);
-    nr.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    nr.SetSatConductedPowerDbm(satEirpDbm);
     nr.SetUeTxPowerDbm(23.0);
     nr.SetBackhaulDelay(MilliSeconds(5));
 

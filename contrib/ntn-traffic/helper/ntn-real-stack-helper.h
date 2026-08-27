@@ -52,9 +52,16 @@
 #include "ns3/net-device-container.h"
 #include "ns3/node-container.h"
 #include "ns3/nstime.h"
+#include "ns3/ntn-rach-window.h"
 #include "ns3/ptr.h"
 
+// CHO-6: the neighbour-RSRP sink takes NrRrcSap::MeasurementReport by value,
+// which the nr RecvMeasurementReport trace signature fixes, so this one nr
+// header is needed here rather than forward-declared like the rest.
+#include "ns3/nr-rrc-sap.h"
+
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -155,6 +162,27 @@ class NtnRealStackHelper
         /// satellite-altitude/c + backhaul. Catches a zero-delay air interface
         /// (gap S2). Disable only for non-satellite topologies.
         bool requireOwdFloor = true;
+        /// The effective radiated EIRP must respect the declared budget: either
+        /// the total the scenario asked for, or TR 38.821 Set-1 for an S-band
+        /// NTN carrier. Catches the array-gain double-count (NT-02), where a
+        /// standard's EIRP figure is fed into the CONDUCTED-power setter and the
+        /// antenna adds its gain on top. Where no budget can be established the
+        /// gate reports "not asserted" rather than passing silently.
+        bool requireEirpBudget = true;
+        /// NT-05. Minimum fraction of transmitted application packets that must
+        /// arrive. Zero disables the gate.
+        ///
+        /// app_delivery_ratio, app_loss_ratio, app_jitter_ms and
+        /// dl_corrupt_frac all wrote a hardcoded pass=1 with a "-" floor, so
+        /// they read as gates in a file called sim_health.csv while being
+        /// incapable of failing. A run that delivered nothing reported
+        /// app_delivery_ratio=0 and passed. These give the delivery side a real
+        /// floor; a scenario that legitimately expects heavy loss should lower
+        /// it and say so rather than leave a gate that cannot fire.
+        double minAppDeliveryRatio = 0.10;
+        /// NT-05: maximum tolerable measured DL transport-block corruption.
+        /// 1.0 disables the gate.
+        double maxDlCorruptFraction = 0.95;
     };
 
     NtnRealStackHelper();
@@ -168,11 +196,28 @@ class NtnRealStackHelper
     void SetRadioBackend(RadioBackend b) { m_backend = b; }
 
     /// S2: request a REAL ConstantSpeedPropagationDelayModel on the radio
-    /// channel (nr backend). DEFAULT OFF — see m_airIfaceDelayRequested: the
-    /// vendored nr v3.3 lacks NTN K_offset/TA and will abort with 'Cannot TX
-    /// while RX' on any uplink traffic, or assert on multi-UE UL alignment.
-    /// When off (the default) the service-link slant is carried on the backhaul
-    /// so the measured end-to-end OWD is still physically correct.
+    /// channel (nr backend). DEFAULT OFF.
+    ///
+    /// WF-03 (measured 2026-08-25): this does NOT work at LEO altitudes on the
+    /// vendored nr v3.3 stack, and the earlier claim here that consuming the
+    /// SIB19 K_offset unlocked it for a single UE was wrong. Probed with one UE,
+    /// a downlink-dominant profile and K_offset consumption enabled:
+    ///
+    ///     50 km OK    200 km OK    250 km OK    300 km ABORT
+    ///    350 km OK    400 km OK    500 km OK    600 km ABORT
+    ///
+    /// The failures are 'Cannot TX while RX' inside nr-spectrum-phy. Note the
+    /// pattern is not a threshold: 300 km fails while 350 km and 500 km pass.
+    /// The delay interacts with the TDD slot pattern, so whether a given
+    /// geometry survives is not predictable from the slant alone, and LEO-600,
+    /// the toolkit's own reference shell, is among the ones that do not.
+    ///
+    /// Treat this as EXPLORATORY. It is exercised by a test at a geometry known
+    /// to work, so the code path does not rot, but no shipped LEO scenario can
+    /// use it until the ns-3.48 migration brings a stack with real per-UE timing
+    /// advance. When off (the default) the service-link slant is carried on the
+    /// backhaul, so the measured end-to-end OWD is still physically correct;
+    /// what is missing is the delay being borne by the air interface itself.
     void SetAirInterfaceDelay(bool enable) { m_airIfaceDelayRequested = enable; }
 
     /// R1/R3 CONSUMPTION: consume the SIB19 cell-specific K_offset in the nr
@@ -185,10 +230,53 @@ class NtnRealStackHelper
     /// half-duplex conflict; per-UE Timing Advance (multi-UE UL arrival
     /// alignment, TS 38.213 §4.2) is a separate mechanism still absent in nr v3.3.
     void SetKOffsetConsumption(bool enable) { m_kOffsetConsumption = enable; }
+
+    /// RRC-4: size the random-access response window for the cell geometry.
+    ///
+    /// The nr UE MAC gives up on a RAR after slotPeriod * (6 + N) from the
+    /// instant it sends the preamble (NrUeMac::SendRaPreamble, TS 38.321
+    /// section 5.1.4). Over a terrestrial cell the flight time is negligible
+    /// against that; over an NTN cell it is the whole story, and a window that
+    /// expires while the response is still in the air makes access fail for a
+    /// reason that has nothing to do with the radio.
+    ///
+    /// When enabled, N is computed from the real service-link round trip and
+    /// the configured numerology and written to every gNB MAC's
+    /// RaResponseWindowSize, which is the value the UE receives in its RACH
+    /// configuration. TR 38.821 section 7.3.
+    ///
+    /// DEFAULT OFF, so existing scenarios keep the stack's own value. Note the
+    /// attribute is capped at 10 by nr's own checker: for geometries beyond
+    /// LEO the required window cannot be expressed at all, and
+    /// GetRachWindowVerdict() reports the shortfall rather than clamping
+    /// silently.
+    void SetNtnRachWindow(bool enable) { m_ntnRachWindow = enable; }
+    bool GetNtnRachWindow() const { return m_ntnRachWindow; }
+    /// The verdict computed at Build() when SetNtnRachWindow(true). Zeroed
+    /// otherwise.
+    const NtnRachWindowVerdict& GetRachWindowVerdict() const { return m_rachVerdict; }
     bool GetKOffsetConsumption() const { return m_kOffsetConsumption; }
     /// The K_offset (in nr slots) actually applied to N2Delay after Build();
     /// 0 when consumption is off. Derived from the service-link round trip.
     uint32_t GetConsumedKOffsetSlots() const { return m_consumedKOffsetSlots; }
+
+    /// RRC-1: supply the K_offset the network actually BROADCAST in SIB19, so
+    /// the scheduler uses the value a UE would read rather than an independent
+    /// re-derivation.
+    ///
+    /// The helper used to compute its own K_offset from its own geometry while
+    /// the SIB19 broadcaster computed one from the timing-advance model's
+    /// geometry and numerology. Nothing read the broadcast field, so the two
+    /// could drift apart without any test noticing, and the network would then
+    /// schedule against a value it had never advertised. When a broadcaster is
+    /// wired through NtnSib19Broadcaster::SetKOffsetSink() this becomes the
+    /// single source of truth. Reprograms N2Delay immediately when called after
+    /// Build(), so a refresh mid-pass takes effect.
+    void SetBroadcastKOffsetSlots(uint32_t slots);
+
+    /// The broadcast K_offset in force, or 0 when none was supplied and the
+    /// local derivation is being used.
+    uint32_t GetBroadcastKOffsetSlots() const { return m_broadcastKOffsetSlots; }
     /// Compute the K_offset in slots from the current geometry and numerology
     /// (ceil(RTT / slot) + 1), matching the SIB19 cellSpecificKoffset derivation.
     uint32_t ComputeKOffsetSlots() const;
@@ -203,6 +291,40 @@ class NtnRealStackHelper
     void SetNumerology(uint16_t n) { m_numerology = n; }
     uint16_t GetNumerology() const { return m_numerology; }
     void SetCarrierFrequencyHz(double f) { m_freqHz = f; }
+    /// TS 38.101-5 NTN FR1 band conformance (SLICE-4 / NT-09).
+    ///
+    /// Table 5.2-1 defines exactly two FR1 NTN bands, and the pairing is the
+    /// part that is easy to get backwards:
+    ///   n255 (L-band): UL 1626.5-1660.5 MHz, DL 1525-1559 MHz (34 MHz block)
+    ///   n256 (S-band): UL 1980-2010 MHz,     DL 2170-2200 MHz (30 MHz block)
+    /// Table 5.3.5-1 then lists which channel bandwidths each band supports:
+    /// n255 allows 5 and 10 MHz; n256 allows 5, 10, 15 and 20 MHz. Nothing
+    /// wider is defined for either, so a 30 MHz NTN FR1 channel does not
+    /// exist regardless of carrier.
+    struct NtnFr1Band
+    {
+        const char* name{"none"};  //!< "n255", "n256", or "none"
+        bool carrierInDownlink{false}; //!< carrier sits in the band's DL block
+        bool carrierInUplink{false};   //!< carrier sits in the band's UL block
+        double blockWidthHz{0.0};      //!< width of the DL block
+        bool bandwidthSupported{false}; //!< bw is in the band's Table 5.3.5-1 set
+        bool conformant{false};         //!< DL carrier AND supported bandwidth
+    };
+
+    /// Classify a carrier/bandwidth pair against TS 38.101-5. Static and pure,
+    /// so scenarios and tests can check a configuration without building one.
+    static NtnFr1Band ClassifyNtnFr1(double carrierHz, double bandwidthHz);
+
+    /// The classification of the configuration this helper will build.
+    NtnFr1Band GetNtnFr1Band() const { return ClassifyNtnFr1(m_freqHz, m_bwHz); }
+
+    /// Set the channel bandwidth.
+    ///
+    /// SLICE-4: TS 38.101-5 Table 5.3.5-1 lists the channel bandwidths each
+    /// NTN FR1 band supports, and 30 MHz is not among them for either band.
+    /// A value outside the supported set is accepted (scenarios may explore
+    /// deliberately) but warned about at Build(), and the sim_health
+    /// air_interface tag reports the run as non-conformant.
     void SetBandwidthHz(double b) { m_bwHz = b; }
     double GetBandwidthHz() const { return m_bwHz; }
     double GetCarrierFrequencyHz() const { return m_freqHz; }
@@ -227,17 +349,95 @@ class NtnRealStackHelper
     {
         m_satEirpDbm = eirpDbm - ArrayGainDb();
         m_eirpTotalDbm = eirpDbm;
+        m_eirpDeclaredConducted = false;
     }
 
     /// TR 38.821 Set-1 style EIRP DENSITY (dBW/MHz). Converts to a total EIRP
     /// over the configured bandwidth then back-computes conducted power:
     ///   EIRP_dBm = density_dBW/MHz + 10log10(BW_MHz) + 30
     /// Set the bandwidth (SetBandwidthHz) before calling.
+    /// The density is STORED and converted during Build(), not at call time, so
+    /// it does not matter whether the scenario sets the bandwidth before or
+    /// after this call. (Converting eagerly silently used the default 30 MHz
+    /// whenever SetBandwidthHz came later, which is most examples.)
     void SetSatEirpDensityDbwMhz(double densityDbwPerMhz)
     {
-        const double bwMhz = m_bwHz / 1e6;
-        SetSatEirpTotalDbm(densityDbwPerMhz + 10.0 * std::log10(std::max(bwMhz, 1e-9)) + 30.0);
+        m_eirpDensityDbwMhz = densityDbwPerMhz;
+        m_eirpDeclaredConducted = false;
+        ResolveEirpDensity();
     }
+
+    /// Convert a stored EIRP density to a total EIRP against the CURRENT
+    /// bandwidth. Idempotent; called again from Build().
+    void ResolveEirpDensity()
+    {
+        if (!std::isfinite(m_eirpDensityDbwMhz))
+        {
+            return;
+        }
+        const double bwMhz = m_bwHz / 1e6;
+        SetSatEirpTotalDbm(m_eirpDensityDbwMhz +
+                           10.0 * std::log10(std::max(bwMhz, 1e-9)) + 30.0);
+    }
+
+    /// Explicit CONDUCTED power at the array input, in dBm.
+    ///
+    /// Semantically identical to SetSatEirpDbm() but named for what it is, so a
+    /// scenario that genuinely means conducted power (a short-range air-to-ground
+    /// gNB, say) reads unambiguously and is not swept up by the EIRP migration.
+    /// Prefer this over SetSatEirpDbm() for any non-satellite transmitter.
+    void SetSatConductedPowerDbm(double dbm)
+    {
+        m_satEirpDbm = dbm;
+        m_eirpTotalDbm = std::numeric_limits<double>::quiet_NaN();
+        m_eirpDeclaredConducted = true;
+    }
+
+    /// Declare the EIRP budget the run is supposed to respect, in dBm, with a
+    /// tolerance. Drives the `effective_eirp_dbm` health gate.
+    ///
+    /// NT-02: before this existed the health report wrote the effective EIRP with
+    /// floor "-" and pass hard-coded to 1, so a link budget 20 dB above any
+    /// TR 38.821 figure could not be detected by any gate, and was not.
+    void SetEirpBudgetDbm(double budgetDbm, double toleranceDb = 3.0)
+    {
+        m_eirpBudgetDbm = budgetDbm;
+        m_eirpToleranceDb = toleranceDb;
+    }
+
+    /// TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the S-band
+    /// LEO-600 reference payload, in dBW/MHz.
+    static constexpr double kTr38821Set1SBandEirpDensityDbwMhz = 34.0;
+
+    /// Evaluate the EIRP gate.
+    /// \return 1 pass, 0 fail, -1 not asserted (no budget could be established).
+    /// \param budgetOut the budget compared against, when the result is 0 or 1.
+    /// \param toleranceOut the tolerance applied.
+    int EvaluateEirpGate(double& budgetOut, double& toleranceOut) const;
+
+    /**
+     * \brief Is the DECLARED payload plausible against TR 38.821? (WF-08 gate 3)
+     *
+     * EvaluateEirpGate compares the effective EIRP against the budget the
+     * SCENARIO declared, which catches an array-gain double-count - the defect
+     * it was written for - but cannot catch an implausible declaration, because
+     * declaring a hotter satellite moves the budget with it. A run declared 20
+     * dB above the TR 38.821 Set-1 density passes that gate, which is not what
+     * a reader takes "plausible-EIRP gate" to mean.
+     *
+     * This asks the separate question: does the effective EIRP sit within a
+     * stated tolerance of the Set-1 reference (34 dBW/MHz over the configured
+     * bandwidth, TR 38.821 Table 6.1.1.1-1)?
+     *
+     * \param[out] referenceDbm the Set-1 reference for this bandwidth.
+     * \param[out] excessDb how far above it the run sits (negative = below).
+     * \return 1 plausible, 0 implausible, -1 not applicable (not an S-band NTN
+     *         carrier, or the scenario declared conducted power and is not
+     *         claiming to model a standardized payload).
+     */
+    int EvaluateEirpPlausibility(double& referenceDbm, double& excessDb) const;
+    /// Tolerance (dB) above the TR 38.821 Set-1 reference still called plausible.
+    void SetEirpPlausibilityToleranceDb(double db) { m_eirpPlausibilityTolDb = db; }
 
     /// UPA array gain (dB) implied by the configured gNB antenna panel.
     double ArrayGainDb() const
@@ -255,6 +455,12 @@ class NtnRealStackHelper
     /// feeder loop for a transparent one. Used to configure X2LinkDelay so
     /// handover preparation is not instantaneous between orbiting gNBs.
     Time ComputeX2LinkDelay() const;
+
+    /// NT-01: the X2 delay actually programmed onto the live EPC helper, read
+    /// back from the object rather than recomputed. Returns Time(0) when no X2
+    /// was stood up. Exists so a test can prove the value reached the wire; the
+    /// original defect logged the right number while the channel stayed at 0 s.
+    Time GetAppliedX2LinkDelay() const;
 
     // ---- P1: actuation bridge for decision modules (CHO / RIC / xApps) -----
     /// Execute a REAL handover of UE \p ueIndex to \p targetCellId over X2/Xn.
@@ -291,6 +497,20 @@ class NtnRealStackHelper
     /// nr backend carries it on the air interface instead.
     Time ComputeServiceLinkDelay() const;
 
+    /**
+     * \brief CVC-14: one-way feeder-link (satellite to gateway) propagation
+     *        delay over the LIVE geometry, or zero if SetFeederGeometry() was
+     *        never wired.
+     *
+     * The flagship RIC scenario set its E2 node's FeederLinkDelay to a constant
+     * MilliSeconds(4) with a "~1200 km" comment, so the control-loop latency it
+     * published had **zero variance across all 58 samples**: mean, median, p95,
+     * p99, min and max were the same number. A loop latency that cannot move is
+     * not a measurement of a loop. This gives a scenario the geometry-derived
+     * value instead, re-evaluable as the satellite moves.
+     */
+    Time ComputeFeederLinkDelay() const;
+
     /// S9 / gate 1: theoretical minimum app one-way delay (ms) for this
     /// topology = satellite altitude / c (a UE directly under the sub-satellite
     /// point — no geometry can beat it) + the configured backhaul. Returns 0 if
@@ -317,6 +537,9 @@ class NtnRealStackHelper
     /// TR 38.811 scenario for the excess-loss model: 0=DenseUrban, 1=Urban,
     /// 2=Suburban (default), 3=Rural. Call before Build().
     void SetNtnScenario(uint8_t s) { m_ntnScenario = s; }
+    /// NT-07: the scenario Build() actually chained, so a caller can tell a
+    /// setter that took effect from one that was never called.
+    uint8_t GetNtnScenario() const { return m_ntnScenario; }
     /// Enable the TR 38.811 §6.4.1 satellite beam pattern (off-boresight
     /// roll-off only; the radio array supplies the peak gain) — gap A5(ii).
     /// \p beamwidthDeg = 3 dB beamwidth (default 4.4127, TR 38.821 Set-1 LEO-600
@@ -326,6 +549,7 @@ class NtnRealStackHelper
                           Ptr<MobilityModel> beamCenter = nullptr);
     void SetUeTxPowerDbm(double p) { m_ueTxDbm = p; }
     void SetBackhaulDelay(Time t) { m_backhaulDelay = t; } ///< feeder+core one-way delay
+    Time GetBackhaulDelay() const { return m_backhaulDelay; }
     void SetPayloadOption(PayloadOption p) { m_payload = p; }
     PayloadOption GetPayloadOption() const { return m_payload; }
     /// One-way user-plane extra delay of the current payload option at the
@@ -363,7 +587,50 @@ class NtnRealStackHelper
     void SetRlcAmEnabled(bool a) { m_rlcAm = a; }
     void SetUplink(bool u) { m_uplink = u; }
     void SetGates(HealthGates g) { m_gates = g; }
+
+    /// NT-08: how often the 3GPP spatial channel regenerates its clusters.
+    ///
+    /// The helper pinned this to 0, and ThreeGppChannelModel gates regeneration
+    /// on `!m_updatePeriod.IsZero()`, so the channel matrix was drawn once at
+    /// t=0 and frozen for the whole run. The per-cluster Doppler phase the
+    /// spectrum model computes from relative velocity therefore never evolved,
+    /// while a comment in ntn-tr38811-excess-loss-model credited the 3GPP model
+    /// with applying "small-scale fading with Doppler on the same link". At
+    /// 7.5 km/s that is not a small omission: the geometry that sets the
+    /// cluster angles turns over completely during a pass.
+    ///
+    /// Zero keeps the old frozen behaviour. Regeneration is the expensive path
+    /// in this model, so the default stays 0 and a scenario opts in rather than
+    /// every existing run silently changing cost and results.
+    ///
+    /// Note what this does NOT do: there is still no carrier-frequency-offset
+    /// term on the received waveform. Doppler here is the channel's own
+    /// geometric evolution, not a residual CFO after pre-compensation.
+    void SetChannelUpdatePeriod(Time p) { m_channelUpdatePeriod = p; }
+    Time GetChannelUpdatePeriod() const { return m_channelUpdatePeriod; }
+    /// WF-07: make a failed fidelity gate abort the run instead of printing.
+    ///
+    /// This had ZERO callers anywhere in the tree, so every gate the helper
+    /// evaluates - stack depth, throughput, SINR provenance, error model,
+    /// channel-in-path, the speed-of-light OWD floor, the EIRP budget, delivery
+    /// and corruption - could only ever print FAIL and continue. A gate that
+    /// cannot stop anything is a log line.
+    ///
+    /// Left defaulting to false so an existing scenario is not turned into a
+    /// hard failure without being asked, but examples now expose it and CI
+    /// turns it on: a gate has to be exercised somewhere or it rots.
+    ///
+    /// Note what this does NOT gate. The TS 38.101-5 band-conformance flag
+    /// (NT-09) is deliberately outside the fatal set: it is a labelling claim
+    /// about the channel, not evidence the physics is wrong, and the toolkit's
+    /// own default carrier is nonconformant. Folding it in would abort every
+    /// shipped example for a reason unrelated to fidelity.
     void SetStrictGates(bool s) { m_strictGates = s; }
+    bool GetStrictGates() const { return m_strictGates; }
+
+    /// WF-07: the verdict of the last WriteHealthReport, so a scenario or a
+    /// test can act on it without parsing the CSV back.
+    bool GetLastGateVerdict() const { return m_lastGateVerdict; }
 
     // =====================================================================
     // NR deep-integration infrastructure (2026-07). All OFF by default, so
@@ -436,11 +703,26 @@ class NtnRealStackHelper
         uint64_t lostPackets{0};
         double meanOwdMs{0.0};
         double maxOwdMs{0.0};
+        /// SLICE-1: real percentiles of the measured one-way-delay distribution,
+        /// 1 ms resolution. NaN when the slice received nothing. A latency SLA
+        /// stated as a percentile is meaningless without these: the examples
+        /// used to stamp every packet with meanOwdMs, so p99 == mean by
+        /// construction and no percentile bound could ever breach.
+        double p50OwdMs{0.0};
+        double p95OwdMs{0.0};
+        double p99OwdMs{0.0};
         double lossRatio{0.0};
         double thrMbps{0.0};
         uint32_t flows{0};
     };
     SliceMeasuredStats GetSliceMeasuredStats(uint8_t fiveQi) const;
+
+    /// SLICE-1: the pooled one-way-delay histogram for a slice, as
+    /// (delay_ms_bin_lower_edge, packet_count) pairs with 1 ms bins. Empty bins
+    /// are omitted. Lets a caller replay the measured DISTRIBUTION into an SLA
+    /// monitor instead of stamping every packet with the mean, which made any
+    /// percentile bound unbreachable.
+    std::vector<std::pair<uint32_t, uint64_t>> GetSliceDelayHistogram(uint8_t fiveQi) const;
 
     // ---- Enabler A: multi-gNB inter-satellite handover ------------------
     /// Enable real NR inter-cell handover across the gNBs passed to Build()
@@ -448,6 +730,14 @@ class NtnRealStackHelper
     /// interfaces so a UE re-selects a real neighbour cell on measured RSRP,
     /// replacing free-space-scaled candidate SINR. Call before Build().
     void SetHandover(bool enable, double hysteresisDb = 3.0, Time ttt = MilliSeconds(256));
+
+    /// WF-11: how many TriggerHandover calls were REFUSED, and why the last one
+    /// was. These are members rather than log lines because the shipped build
+    /// compiles NS3_LOG out, which silenced every "not actuated" warning the
+    /// spine emits. Non-zero here means a decision module asked for a handover
+    /// the stack could not perform.
+    uint64_t GetHandoverRefusals() const { return m_handoverRefusals; }
+    const std::string& GetLastHandoverRefusal() const { return m_lastHandoverRefusal; }
     /// Number of successfully completed NR handovers observed this run.
     /// P1: handovers REQUESTED through TriggerHandover(). Compare with
     /// GetHandoverCount() (completions reported by the RRC HandoverEndOk
@@ -485,6 +775,11 @@ class NtnRealStackHelper
 
     /// Install downlink (and optionally uplink) traffic over the radio link.
     void InstallTraffic(TrafficProfile profile, Time start, Time stop);
+    /// NT-12: the emission window the last InstallTraffic() call requested.
+    /// Throughput is bytes over the time traffic was actually offered, not over
+    /// the whole simulation.
+    Time GetTrafficStart() const { return m_trafficStart; }
+    Time GetTrafficStop() const { return m_trafficStop; }
 
     /**
      * \brief Install one explicit NtnOranApplication QoS flow (DL: remote host
@@ -508,6 +803,23 @@ class NtnRealStackHelper
      *        Build().
      */
     void AddExtraPropagationLoss(Ptr<PropagationLossModel> loss);
+
+    /// NT-07: the TypeId names of every propagation-loss model chained AFTER the
+    /// Friis head on BWP 0, in chain order.
+    ///
+    /// Three TR 38.811 features (the excess-loss scenario, the 6.4.1 beam
+    /// pattern, the Rician term) were reachable only through setters that no
+    /// scenario called, so they were documented as delivered while never
+    /// executing in any run. Whether a model is IN the chain was not observable
+    /// from outside the helper, which is why the gap survived: a test could
+    /// assert the setter had been called but not that it had any effect.
+    /// Returns an empty vector before Build().
+    std::vector<std::string> GetExtraPropagationLossChain() const;
+
+    /// NT-07: the head of the BWP-0 propagation-loss chain (the backend's Friis
+    /// loss), so a caller can walk GetNext() and inspect what was chained onto
+    /// it. Null before Build().
+    Ptr<PropagationLossModel> GetBaseLossHead() const;
 
     /// Schedule a user callback on the real event queue (e.g. CHO/KPM tick).
     void RegisterPeriodicCallback(Time period, std::function<void(Time)> cb);
@@ -545,6 +857,11 @@ class NtnRealStackHelper
     /// Aggregate FlowMonitor + PHY-sink samples into the measured KPI set.
     void Collect();
 
+    /// Write sim_health.csv and, beside it, the run's reproducibility manifest.
+    ///
+    /// OBS-07: the manifest lives here because 65 of the 67 real-stack examples
+    /// already call this, so attaching it takes provenance coverage from a
+    /// single example to essentially all of them without any of them opting in.
     void WriteHealthReport();
 
     // ---- Measured KPI accessors (for module logic + reporting) -----------
@@ -552,6 +869,13 @@ class NtnRealStackHelper
     double GetMeanDlTbler() const { return m_dlTblerMean; }
     double GetDlCorruptFraction() const;
     uint64_t GetPhyRxTb() const { return m_phyRxTb; }
+    /// LIVE count of decoded DL transport blocks, updated by the PHY trace on
+    /// every TB. GetPhyRxTb() above is only populated by Collect() at
+    /// end-of-run, so it reads 0 for the whole simulation — use THIS one for
+    /// freshness gating inside a RegisterPeriodicCallback during a run (e.g.
+    /// "did the PHY decode anything since the previous tick, or am I about to
+    /// record a stale latched SINR?").
+    uint64_t GetPhyRxTbLive() const { return m_dlGlobal.n; }
     double GetRxThroughputMbps() const { return m_rxThroughputMbps; }
     /// Measured mean one-way delay (ms) from in-band NtnOranPayloadHeader
     /// timestamps across all DL sinks (radio + GTP + backhaul, real path).
@@ -562,6 +886,94 @@ class NtnRealStackHelper
     double GetAppLossRatio() const { return m_appLossRatio; }
     /// Measured mean DL SINR (dB) for a given cellId, or NaN if no samples.
     double GetCellMeanSinrDb(uint16_t cellId) const;
+
+    /// CHO-6: the most recent NEIGHBOUR RSRP the UE reported for \p cellId, in
+    /// dBm, or NaN if that cell has not been reported.
+    ///
+    /// A UE only produces data-plane trace samples for its SERVING cell, so
+    /// GetCellMeanSinrDb() has nothing for a candidate the UE has not attached
+    /// to. Scenarios worked around that by extrapolating candidate quality from
+    /// the serving cell's own SINR by a Friis range ratio, which carries the
+    /// serving cell's fortunes into every candidate: when the serving link
+    /// degrades, every candidate degrades with it and none can ever look
+    /// better, so the handover the scenario exists to study cannot trigger.
+    ///
+    /// This exposes what the standard actually provides for neighbour
+    /// evaluation: the RSRP the UE measured and reported in its RRC measurement
+    /// report (TS 38.331 measResults), converted from the reported index to dBm
+    /// by the TS 38.133 mapping.
+    double GetNeighbourRsrpDbm(uint16_t cellId) const;
+
+    /// Number of measurement reports received across all cells. Zero means the
+    /// UE has not reported any neighbour yet.
+    uint32_t GetMeasurementReportCount() const { return m_measReportCount; }
+
+    /// OBS-09: the SERVING-cell RSRP the UE reported, in dBm, or NaN if no
+    /// measurement report has arrived yet.
+    ///
+    /// This is the only genuinely measured RSRP the stack can produce. It is
+    /// the TS 38.331 measResultPCell value, converted from the reported index
+    /// by the TS 38.133 mapping (RSRP_dBm = index - 156), so it is quantized to
+    /// 1 dB exactly as a real UE would report it. Exporters should prefer this
+    /// over any closed-form reconstruction and label it provenance=measured.
+    ///
+    /// Available on the nr backend only: the mmwave backend runs ideal RRC and
+    /// never emits a measurement report.
+    double GetServingRsrpDbm() const;
+
+    /// NT-04: how often the folded service-link delay is re-evaluated.
+    ///
+    /// The fold compensates for the air interface carrying no propagation delay
+    /// on the vendored stack. It was computed once at Build() and never again,
+    /// so it described the geometry at t=0 for the whole run. Default 1 s;
+    /// set larger to trade fidelity for speed, or Seconds(0) to freeze it.
+    void SetBackhaulRefresh(Time period) { m_backhaulRefresh = period; }
+    Time GetBackhaulRefresh() const { return m_backhaulRefresh; }
+
+    /// NT-04: the P2P channel the service-link delay is folded into, so a test
+    /// or a scenario can read back what the fold actually applied.
+    Ptr<Object> GetBackhaulChannel() const { return m_backhaulCh; }
+
+    /// OBS-07: declare which orbital elements this run was built from.
+    ///
+    /// The helper writes a reproducibility manifest beside sim_health.csv for
+    /// every run, but it cannot read the TLE provenance itself: doing so would
+    /// make ntn-traffic depend on ntn-constellation and close a build cycle. A
+    /// scenario that propagates real satellites should call this so the
+    /// manifest records the epoch and catalogue numbers the run actually used.
+    ///
+    /// \param epochUtc ISO-8601 UTC epoch of the element set, e.g.
+    ///                 "2026-01-01T00:00:00Z"
+    /// \param noradIds catalogue numbers of the satellites propagated
+    void SetTleProvenance(const std::string& epochUtc, const std::vector<uint32_t>& noradIds)
+    {
+        m_tleEpochUtc = epochUtc;
+        m_noradIds = noradIds;
+    }
+
+    /// OBS-09: the UE PHY's configured noise figure in dB, read from the live
+    /// PHY object rather than assumed.
+    ///
+    /// Returns NaN before Build(). Exporters that reconstruct a power from a
+    /// measured SINR need this; hardcoding a nominal value silently biases the
+    /// result whenever a scenario changes the attribute.
+    double GetUeNoiseFigureDb() const;
+
+    /// OBS-09: number of resource elements the measured SINR is averaged over,
+    /// i.e. 12 subcarriers times the transmission bandwidth in resource blocks.
+    ///
+    /// Returns 0 before Build(). The conversion that matters is
+    ///   RSRP [dBm] = RSSI_total [dBm] - 10 log10 (GetSignalResourceElements())
+    /// because TS 38.215 Sec. 5.1.1 defines SS-RSRP as a PER-RESOURCE-ELEMENT
+    /// power while a SINR-plus-noise-floor reconstruction recovers the TOTAL
+    /// in-band power. Omitting the term overstates RSRP by ~28 dB on a 20 MHz
+    /// FR1 carrier, which is the defect this accessor exists to prevent.
+    ///
+    /// The RB count is floor(bandwidth / (12 x SCS)); it ignores the guard
+    /// bands of the TS 38.101 transmission-bandwidth-configuration table, so it
+    /// is an upper bound on N_RB and the derived RSRP is correspondingly a
+    /// slight lower bound. Prefer GetServingRsrpDbm() where it is available.
+    uint32_t GetSignalResourceElements() const;
 
     // ---- Per-UE measured state (for CHO / RIC / slice logic) --------------
     /// Current RNTI assigned to the UE at index \p ueIndex (0 if not attached).
@@ -612,6 +1024,7 @@ class NtnRealStackHelper
     Ptr<Node> GetRemoteHost() const { return m_remoteHost; }
 
   private:
+    void RecordHandoverRefusal(const char* reason);
     // Create the ORAN AI flow monitor (idempotent) and wire the PHY source.
     void EnsureOranMonitor();
     // Attach every helper-installed source/sink not yet attached to the monitor.
@@ -678,13 +1091,56 @@ class NtnRealStackHelper
     std::string m_outputDir{"."};
     std::string m_runTag{"run"};
     double m_freqHz{2.0e9};       // S-band carrier; mmWave-NR FR2 numerology (60 kHz SCS), not a 3GPP NR-NTN FR1 band/numerology
-    // GAP M10 FIX: 30 MHz is the TS 38.101-5 NTN-FR1 maximum channel bandwidth
-    // (n255/n256). The old 50 MHz default was not a legal NTN-FR1 channel and,
-    // at numerology 1, could not be tiled into 3 slice BWPs (the Cc/BWP band
-    // math asserts). 30 MHz -> 3 x 10 MHz BWPs, one per slice.
+    // NT-09. The comment that stood here said "30 MHz is the TS 38.101-5
+    // NTN-FR1 maximum channel bandwidth (n255/n256)". That is wrong, and the
+    // error is worth stating precisely because it also appears in the
+    // manuscript's simulation-parameter table. 30 MHz is the total WIDTH of the
+    // n255 downlink block (2170-2200 MHz); it is not a channel bandwidth that
+    // can sit inside that block, since a channel needs guard bands on both
+    // sides of it.
+    //
+    // The default is left at 30 MHz rather than changed, because changing it
+    // moves every measured number the toolkit has published. What changed is
+    // that the run no longer CLAIMS NTN band conformance it does not have:
+    // WriteHealthReport tags a nonconformant channel as such and fails that
+    // row. A scenario that needs a conformant channel should set a carrier in
+    // 2170-2200 MHz (n255 DL) or 1525-1559 MHz (n256 DL) and a bandwidth that
+    // fits inside it.
+    //
+    // The tiling constraint the old comment records is still real: at
+    // numerology 1 the Cc/BWP band math asserts unless the channel divides into
+    // the configured slice BWPs, and 30 MHz gives 3 x 10 MHz.
+    /// SLICE-4, and the reason this is still 30 MHz.
+    ///
+    /// 30 MHz is NOT a TS 38.101-5 channel bandwidth for any NTN FR1 band. It
+    /// is the WIDTH of the n256 downlink block (2170-2200 MHz), and the two
+    /// were confused. The conformant value is 20 MHz, the widest n256 defines.
+    ///
+    /// Changing it was tried and reverted. At 20 MHz, ntn-cho-full-constellation
+    /// aborts at t=36.2 s with nr's half-duplex assertion "Cannot TX while RX"
+    /// (nr-spectrum-phy.cc:711); at 30 MHz the same run completes. It is not the
+    /// carrier: 20 MHz at 2185 MHz, which is fully conformant, aborts the same
+    /// way. K_offset consumption, the documented unlock for that assertion, is
+    /// already enabled in that example. The narrower channel carries the same
+    /// saturating eMBB load in fewer resource blocks, so more slots are
+    /// occupied and a UL grant is likelier to collide with a DL transmission -
+    /// the same TDD-pattern fragility SetAirInterfaceDelay's comment describes
+    /// as "not a threshold" and not predictable from the geometry.
+    ///
+    /// Shipping a crash in a flagship example to fix a label is a bad trade, so
+    /// the default stays and the non-conformance is REPORTED instead: the
+    /// sim_health air_interface tag reads n256-uplinkcarrier, channel_bw_hz
+    /// carries pass=0, and GetNtnFr1Band() says so programmatically. Closing
+    /// this properly means fixing the half-duplex fragility, not renumbering
+    /// the default.
     double m_bwHz{30.0e6};
     double m_satEirpDbm{55.0};    // gNB conducted Tx power (UPA array gain added separately), Friis budget -> ~15-20 dB SINR
     double m_eirpTotalDbm{std::numeric_limits<double>::quiet_NaN()}; // S7: intended total EIRP if set via SetSatEirpTotalDbm/Density
+    double m_eirpDensityDbwMhz{std::numeric_limits<double>::quiet_NaN()}; // NT-02: deferred density
+    double m_eirpBudgetDbm{std::numeric_limits<double>::quiet_NaN()}; // NT-02: declared gate budget
+    double m_eirpToleranceDb{3.0};
+    double m_eirpPlausibilityTolDb{6.0};                                    // NT-02: gate tolerance
+    bool m_eirpDeclaredConducted{false}; // NT-02: caller explicitly meant conducted power
     double m_ueTxDbm{33.0};
     bool m_tr38811{true};         // chain TR 38.811 excess loss on the measured plane (G1)
     uint8_t m_ntnScenario{2};     // 0 DenseUrban,1 Urban,2 Suburban,3 Rural
@@ -708,7 +1164,9 @@ class NtnRealStackHelper
     bool m_nrNativeTraces{false};                 // D: EnableTraces() native stat files
     Scheduler m_scheduler{Scheduler::TdmaRR};     // C: NR MAC scheduler
     std::vector<SliceSpec> m_slices;              // C: per-slice BWPs (empty = 1 BWP)
-    bool m_handover{false};                       // A: NR inter-cell handover
+    bool m_handover{false};
+    uint64_t m_handoverRefusals{0};
+    std::string m_lastHandoverRefusal;                       // A: NR inter-cell handover
     double m_hoHystDb{3.0};
     Time m_hoTtt{MilliSeconds(256)};
     bool m_mimo{false};                           // B: real NR MIMO
@@ -744,6 +1202,27 @@ class NtnRealStackHelper
     // Measured-KPI sink state
     SinrAccum m_dlGlobal;
     std::map<uint16_t, SinrAccum> m_dlPerCell;
+    /// CHO-6: latest reported neighbour RSRP in dBm, keyed by physical cell id.
+    std::map<uint16_t, double> m_neighbourRsrpDbm;
+    /// NT-04: periodic re-evaluation of the folded service-link delay.
+    void RefreshBackhaulFold();
+    Time m_backhaulRefresh{Seconds(1.0)};
+    /// NT-08: 3GPP cluster regeneration period; 0 = frozen at t=0.
+    Time m_channelUpdatePeriod{MilliSeconds(0)};
+    /// WF-07: verdict of the last health report.
+    bool m_lastGateVerdict{true};
+    /// OBS-07: TLE provenance declared by the scenario, for the manifest.
+    std::string m_tleEpochUtc;
+    std::vector<uint32_t> m_noradIds;
+    /// OBS-09: latest reported SERVING-cell RSRP in dBm (NaN until reported).
+    double m_servingRsrpDbm{std::numeric_limits<double>::quiet_NaN()};
+    /// CHO-6: sink for the nr RRC RecvMeasurementReport trace.
+    void NrMeasurementReport(std::string ctx,
+                             uint64_t imsi,
+                             uint16_t cellId,
+                             uint16_t rnti,
+                             NrRrcSap::MeasurementReport report);
+    uint32_t m_measReportCount{0};
     /// S3: per-UE accumulators are keyed by (cellId,RNTI), NOT by bare RNTI.
     /// RNTIs are allocated per cell and restart at each gNB, so a bare-RNTI key
     /// silently blends UEs served by different satellites in EVERY multi-gNB run
@@ -764,6 +1243,8 @@ class NtnRealStackHelper
     /// (vendored stacks without NTN Timing Advance cannot align multi-UE UL
     /// under a per-distance delay). Read by ComputePayloadExtraDelay to avoid
     /// double-counting the slant.
+    Time m_trafficStart{Seconds(0)}; //!< NT-12: emission window start
+    Time m_trafficStop{Seconds(0)};  //!< NT-12: emission window stop
     bool m_airIfaceDelayActive{false};
     /// S2 / R1-R3: opt-in request for a REAL propagation delay on the radio
     /// channel. OFF by default: the vendored 5G-LENA v3.3 has no NTN K_offset
@@ -776,8 +1257,12 @@ class NtnRealStackHelper
     /// R1/R3: opt-in consumption of the SIB19 K_offset in the nr UL scheduler
     /// timing (applied as extra NrGnbPhy::N2Delay slots). OFF by default.
     bool m_kOffsetConsumption{false};
+    bool m_ntnRachWindow{false};
+    NtnRachWindowVerdict m_rachVerdict{};
     /// K_offset (nr slots) applied to N2Delay in Build(); 0 when consumption off.
     uint32_t m_consumedKOffsetSlots{0};
+    uint32_t m_broadcastKOffsetSlots{0}; ///< RRC-1: SIB19-sourced K_offset (0 = none)
+    uint32_t m_baseN2Delay{0};           ///< RRC-1: stack default, for live reprogramming
     uint32_t m_hoCount{0};                      // A: completed NR handovers
     uint32_t m_hoRequested{0};                  // P1: handovers REQUESTED via TriggerHandover
     std::vector<Ptr<NrHandoverAlgorithm>> m_hoAlgos; // A: per-gNB A3 algos (kept alive)

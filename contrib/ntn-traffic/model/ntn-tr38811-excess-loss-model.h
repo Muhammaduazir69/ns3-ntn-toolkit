@@ -61,7 +61,16 @@ class Ntn38811ExcessLossModel : public PropagationLossModel
     ~Ntn38811ExcessLossModel() override;
 
     void SetScenario(NtnScenario s) { m_scenario = s; }
+    NtnScenario GetScenario() const { return m_scenario; }
     void SetCarrierFrequencyHz(double f) { m_freqHz = f; }
+
+    /// TR 38.811 Table 6.6.2-x S-band LOS shadow-fading sigma (dB) at elevDeg.
+    /// Public because it is the quantity the deployment scenario actually
+    /// selects (clutter is 0 dB in LOS per 6.6.2), so it is how a caller or a
+    /// test can tell one scenario from another.
+    double ShadowSigmaDb(double elevDeg) const;
+    /// TR 38.811 Table 6.7.2-Xa S-band LOS Rician K mean (dB) at elevDeg.
+    double RicianKdB(double elevDeg) const;
 
   private:
     double DoCalcRxPower(double txPowerDbm,
@@ -78,11 +87,6 @@ class Ntn38811ExcessLossModel : public PropagationLossModel
     /// Linear-interpolate a per-scenario, elevation-indexed (10..90 deg, 10-deg
     /// step) TR 38.811 S-band LOS table at the given elevation.
     double InterpByElevation(const double (&table)[9], double elevDeg) const;
-    /// TR 38.811 Table 6.6.2-x S-band LOS shadow-fading sigma (dB) at elevDeg.
-    double ShadowSigmaDb(double elevDeg) const;
-    /// TR 38.811 Table 6.7.2-Xa S-band LOS Rician K mean (dB) at elevDeg.
-    double RicianKdB(double elevDeg) const;
-
     NtnScenario m_scenario{Suburban};
     double m_freqHz{2.0e9};        ///< carrier (selects the P.676 gas band)
     bool m_enableShadowFading{true};
@@ -90,11 +94,21 @@ class Ntn38811ExcessLossModel : public PropagationLossModel
     /// Rician small-scale fading (TR 38.811 §6.7/6.9).
     ///
     /// GAP S6: defaults to FALSE. Both radio backends keep the 3GPP phased-array
-    /// spectrum model, which ALREADY applies small-scale fading (with Doppler)
-    /// on the same link. Running this Rician process as well multiplied two
-    /// independent fast-fading realisations onto one link — the measured SINR
-    /// scatter was an artifact, not physics. Enable only for a link with no 3GPP
-    /// spectrum model in the path.
+    /// spectrum model, which already applies small-scale fading on the same
+    /// link. Running this Rician process as well multiplied two independent
+    /// fast-fading realisations onto one link - the measured SINR scatter was an
+    /// artifact, not physics. Enable only for a link with no 3GPP spectrum model
+    /// in the path.
+    ///
+    /// NT-08: the words "with Doppler" used to appear here and they were not
+    /// earned. The spectrum model computes a per-cluster Doppler phase from
+    /// relative velocity, but NtnRealStackHelper pinned
+    /// ThreeGppChannelModel::UpdatePeriod to 0 and the model gates cluster
+    /// regeneration on that being non-zero, so the geometry never evolved and
+    /// neither did the phase. The period is configurable now
+    /// (NtnRealStackHelper::SetChannelUpdatePeriod) and still defaults to 0, so
+    /// unless a scenario sets it the channel remains frozen at t=0. There is
+    /// also no carrier-frequency-offset term on the received waveform at all.
     bool m_enableFastFading{false};
     Ptr<NormalRandomVariable> m_sfRng;    ///< shadow fading N(0,1)
     Ptr<NormalRandomVariable> m_scintRng; ///< scintillation N(0,1)
@@ -114,6 +128,12 @@ class Ntn38811ExcessLossModel : public PropagationLossModel
     struct LargeScaleState
     {
         double shadowDb{0.0};
+        /// NT-10: unit-variance AR(1) state behind shadowDb. Kept separate from
+        /// shadowDb because the marginal sigma is elevation-dependent: holding a
+        /// unit-variance process and scaling it at read time keeps the marginal
+        /// variance exactly sigma(elev)^2 as the geometry moves, which blending
+        /// the dB value directly would not.
+        double sfUnit{0.0};
         double scintDb{0.0};
         Vector lastPos{0, 0, 0}; ///< ground-node position at the last SF draw
         double lastElevDeg{0.0};

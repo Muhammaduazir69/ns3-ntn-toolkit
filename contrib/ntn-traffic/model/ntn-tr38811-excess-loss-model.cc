@@ -66,9 +66,12 @@ Ntn38811ExcessLossModel::GetTypeId()
                           "Apply TR 38.811 §6.7/6.9 Rician small-scale fading "
                           "(elevation-dependent K-factor). DEFAULT OFF (gap S6): both radio "
                           "backends keep the 3GPP phased-array spectrum model, which already "
-                          "applies small-scale fading with Doppler on the same link — enabling "
-                          "this too multiplies two independent fast-fading processes onto one "
-                          "link. Enable only when no 3GPP spectrum model is in the path.",
+                          "applies small-scale fading on the same link - enabling this too "
+                          "multiplies two independent fast-fading processes onto one link. "
+                          "Enable only when no 3GPP spectrum model is in the path. NT-08: this "
+                          "text used to say 'with Doppler'; the channel is frozen at t=0 unless "
+                          "NtnRealStackHelper::SetChannelUpdatePeriod is set, so no Doppler "
+                          "process runs by default.",
                           BooleanValue(false),
                           MakeBooleanAccessor(&Ntn38811ExcessLossModel::m_enableFastFading),
                           MakeBooleanChecker())
@@ -242,19 +245,50 @@ Ntn38811ExcessLossModel::DoCalcRxPower(double txPowerDbm,
     const double moved = std::sqrt(std::pow(groundPos.x - st.lastPos.x, 2) +
                                    std::pow(groundPos.y - st.lastPos.y, 2) +
                                    std::pow(groundPos.z - st.lastPos.z, 2));
-    const bool sfStale = !st.valid || (moved > m_sfCorrDistanceM) ||
-                         (std::fabs(elevDeg - st.lastElevDeg) > m_sfCorrElevDeg);
+    const double elevMoved = std::fabs(elevDeg - st.lastElevDeg);
 
     // --- Shadow fading: log-normal, sigma from TR 38.811 Table 6.6.2-x S-band
-    //     LOS (per scenario, interpolated by elevation). Zero-mean. ---
-    if (m_enableShadowFading && sfStale)
+    //     LOS (per scenario, interpolated by elevation). Zero-mean.
+    //
+    // NT-10: this used to hold one sample until a threshold was crossed and then
+    // draw a fully INDEPENDENT replacement, which put a discontinuity inside a
+    // single transport block - a measured +1.205 -> -2.496 dB, a 3.7 dB step -
+    // where TR 38.811 6.6.2 describes a spatially correlated process. A study
+    // that keys on the SINR derivative (A3 hysteresis, time-to-trigger tuning)
+    // reads that step as physics.
+    //
+    // It is now the AR(1) recursion ns-3's own 3GPP model uses
+    // (ThreeGppPropagationLossModel::GetShadowing):
+    //     new = rho*old + sqrt(1 - rho^2)*N(0,1),   rho = exp(-d/d_corr)
+    // generalized to the two things that decorrelate an NTN link. Displacement
+    // alone never decorrelates a LEO pass for a static terminal, because the
+    // geometry changes at the satellite end; so elevation change enters as its
+    // own decorrelation driver and the two add in the exponent. With one driver
+    // held still this reduces exactly to the terrestrial form.
+    //
+    // The state is unit-variance and sigma is applied at read time, so the
+    // marginal variance stays sigma(elev)^2 as sigma moves with elevation.
+    if (m_enableShadowFading)
     {
-        st.shadowDb = ShadowSigmaDb(elevDeg) * m_sfRng->GetValue();
+        if (!st.valid)
+        {
+            st.sfUnit = m_sfRng->GetValue();
+            st.valid = true;
+        }
+        else
+        {
+            const double dCorr = std::max(m_sfCorrDistanceM, 1e-9);
+            const double eCorr = std::max(m_sfCorrElevDeg, 1e-9);
+            const double x = moved / dCorr + elevMoved / eCorr;
+            const double rho = std::exp(-x);
+            st.sfUnit = rho * st.sfUnit +
+                        std::sqrt(std::max(0.0, 1.0 - rho * rho)) * m_sfRng->GetValue();
+        }
+        st.shadowDb = ShadowSigmaDb(elevDeg) * st.sfUnit;
         st.lastPos = groundPos;
         st.lastElevDeg = elevDeg;
-        st.valid = true;
     }
-    else if (!m_enableShadowFading)
+    else
     {
         st.shadowDb = 0.0;
     }

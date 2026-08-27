@@ -133,7 +133,14 @@ main(int argc, char* argv[])
     rs.SetRunTag("ntn-tr38821-calibration");
     rs.SetCarrierFrequencyHz(kFreqHz);
     rs.SetBandwidthHz(kBwHz);
-    rs.SetSatEirpDbm(kEirpDbw + 30.0); // dBW -> dBm
+    // NT-02 FIX (2026-08-24): kEirpDbw is the TR 38.821 Set-1 TOTAL EIRP, and
+    // the closed-form reference above uses it as such. Passing it to the
+    // CONDUCTED-power setter made the simulator radiate it PLUS the array
+    // gain, so the run sat ~18 dB above the very standard it calibrates
+    // against, and the excess was then reported as "the array gain the closed
+    // form does not carry". Declaring the density makes the radiated EIRP
+    // equal kEirpDbw, so measured and reference are on the same budget.
+    rs.SetSatEirpDensityDbwMhz(34.0); // TR 38.821 Set-1 S-band DL
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
@@ -220,7 +227,15 @@ main(int argc, char* argv[])
     const double slopeTol = std::min(3.0, std::max(1.0, 2.0 * slopeSe));
     const bool slopeOk = std::abs(measDelta - trDelta) < slopeTol;
 
-    std::printf("# === calibration ===  samples=%zu offset_mean=%.2f dB (array gain) "
+    // NT-02: the offset used to be labeled "array gain", which was true only
+    // because the run radiated the Set-1 EIRP plus the array gain on top. With
+    // the EIRP declared as a density the array gain is inside the budget, and
+    // what remains is the residual between the measured SINR and a closed form
+    // that assumes a 0 dBi handheld antenna (kGtDbK) where the simulator gives
+    // the UE a real receive array. Naming it honestly matters: this line is the
+    // toolkit's own calibration verdict.
+    std::printf("# === calibration ===  samples=%zu offset_mean=%.2f dB "
+                "(residual vs closed form: UE receive array + implementation margin) "
                 "offset_std=%.2f dB  meas_delta=%.2f tr_delta=%.2f (tol=%.2f)  -> %s\n",
                 offsets.size(), mean, stddev, measDelta, trDelta, slopeTol,
                 (trackOk && slopeOk) ? "CALIBRATED" : "FAIL");

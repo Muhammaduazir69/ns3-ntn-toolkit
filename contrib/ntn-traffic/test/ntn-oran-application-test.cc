@@ -325,6 +325,83 @@ class NtnOranVersionErrorTest : public TestCase
     }
 };
 
+/// V2X-2: the runtime transmit gate must actually stop packets, and must not
+/// charge the receiver for the ones it deliberately never sent.
+///
+/// Control decisions in this toolkit repeatedly computed an outcome and then
+/// incremented a counter, leaving the data plane untouched. Gating an
+/// application is the primitive that lets such a decision act. ns-3's start and
+/// stop times cannot serve: an Application that has been stopped cannot be
+/// cleanly restarted mid-run, so a decision that reverses has nothing to undo.
+class NtnOranTransmitGateTest : public TestCase
+{
+  public:
+    NtnOranTransmitGateTest()
+        : TestCase("V2X-2 - SetTransmitEnabled stops packets and preserves sequence continuity")
+    {
+    }
+
+  private:
+    Ptr<NtnOranApplication> m_app;
+
+    void Gate(bool on)
+    {
+        m_app->SetTransmitEnabled(on);
+    }
+
+    void DoRun() override
+    {
+        P2pRig rig("5ms", "100Mbps");
+        const uint16_t port = 4009;
+
+        Ptr<NtnOranSink> sink = CreateObject<NtnOranSink>();
+        sink->SetAttribute("Local", AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+        rig.nodes.Get(1)->AddApplication(sink);
+        sink->SetStartTime(Seconds(0.0));
+
+        m_app = CreateObject<NtnOranApplication>();
+        m_app->SetRemote(InetSocketAddress(rig.ifaces.GetAddress(1), port));
+        m_app->SetProfile(NtnOranApplication::URLLC_PERIODIC);
+        m_app->SetFlowIdentity(82, 1, 0x000001, 9, 1);
+        rig.nodes.Get(0)->AddApplication(m_app);
+        m_app->SetStartTime(Seconds(1.0));
+        m_app->SetStopTime(Seconds(31.0));
+
+        NS_TEST_ASSERT_MSG_EQ(m_app->GetTransmitEnabled(), true,
+                              "transmission must be enabled by default so nothing changes for "
+                              "callers that never gate");
+
+        // On for 10 s, off for 10 s, on again for 10 s.
+        Simulator::Schedule(Seconds(11.0), &NtnOranTransmitGateTest::Gate, this, false);
+        Simulator::Schedule(Seconds(21.0), &NtnOranTransmitGateTest::Gate, this, true);
+        Simulator::Stop(Seconds(32.0));
+        Simulator::Run();
+
+        const uint64_t rx = sink->GetRxPackets();
+        NS_TEST_ASSERT_MSG_GT(rx, 0u, "packets must flow while the gate is open");
+
+        // Two open windows of 10 s against three windows of 10 s: roughly two
+        // thirds of an ungated run. The bound is loose because the point is
+        // that the gate BITES, not that it bites to a precise packet.
+        const double period = 0.010; // URLLC_PERIODIC cadence
+        const double ungated = 30.0 / period;
+        NS_TEST_ASSERT_MSG_LT(static_cast<double>(rx), 0.85 * ungated,
+                              "a gate closed for a third of the run must visibly reduce "
+                              "delivery; if this passes at full count the gate did nothing");
+        NS_TEST_ASSERT_MSG_GT(static_cast<double>(rx), 0.45 * ungated,
+                              "the gate must not suppress the open windows too");
+
+        // The receiver must not see the gated interval as loss: the sequence
+        // number does not advance while gated, so a sequence-gap loss estimate
+        // counts only what the channel actually dropped.
+        NS_TEST_ASSERT_MSG_LT(sink->GetLossRatio(), 0.05,
+                              "gated packets must NOT be reported as lost: the terminal did not "
+                              "send them, so charging the link for them would misattribute a "
+                              "control decision as a radio failure");
+        Simulator::Destroy();
+    }
+};
+
 class NtnOranApplicationTestSuite : public TestSuite
 {
   public:
@@ -336,6 +413,7 @@ class NtnOranApplicationTestSuite : public TestSuite
         AddTestCase(new NtnOranRealLossTest, Duration::QUICK);
         AddTestCase(new NtnCncTelemetryTest, Duration::QUICK);
         AddTestCase(new NtnOranVersionErrorTest, Duration::QUICK);
+        AddTestCase(new NtnOranTransmitGateTest, Duration::QUICK);
     }
 };
 
