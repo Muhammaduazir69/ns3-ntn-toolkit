@@ -5,6 +5,8 @@
  */
 #include "ntn-tr38811-mobility-model.h"
 
+#include "ns3/geocentric-constant-position-mobility-model.h"
+
 #include "ns3/log.h"
 #include "ns3/simulator.h"
 
@@ -195,7 +197,7 @@ TypeId
 NtnTr38811MobilityModel::GetTypeId()
 {
     static TypeId tid = TypeId("ns3::NtnTr38811MobilityModel")
-                            .SetParent<MobilityModel>()
+                            .SetParent<GeocentricConstantPositionMobilityModel>()
                             .SetGroupName("NtnCho")
                             .AddConstructor<NtnTr38811MobilityModel>();
     return tid;
@@ -249,6 +251,32 @@ NtnTr38811MobilityModel::DoGetVelocity() const
 {
     Advance();
     return ntngeo::EnuVelocityToEcef(m_ue.lat, m_ue.lon, m_ue.vEast, m_ue.vNorth, m_ue.vUp);
+}
+
+// NT-03: geographic view of the live terminal state.
+//
+// ThreeGppChannelModel requires BOTH endpoints to cast to
+// GeocentricConstantPositionMobilityModel before it will evaluate a TR 38.811
+// NTN scenario, and it reads GetGeographicPosition().z to tell a terminal from
+// a satellite (50 km threshold) and GetGeocentricPosition() to form the
+// elevation angle that keys the cluster tables. Both are recomputed from the
+// model's own motion state, which advances lazily to Simulator::Now(), so the
+// channel sees where the terminal actually is rather than a stored constant.
+Vector
+NtnTr38811MobilityModel::DoGetGeographicPosition() const
+{
+    double latDeg = 0.0;
+    double lonDeg = 0.0;
+    double altM = 0.0;
+    GetGeodetic(latDeg, lonDeg, altM);
+    return Vector(latDeg, lonDeg, altM);
+}
+
+Vector
+NtnTr38811MobilityModel::DoGetGeocentricPosition() const
+{
+    // DoGetPosition() already IS the geocentric (ECEF) position for this model.
+    return DoGetPosition();
 }
 
 void

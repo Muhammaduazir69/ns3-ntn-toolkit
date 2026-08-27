@@ -22,6 +22,12 @@
 #include "ns3/network-module.h"
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
+#include "ns3/ntn-orbit-predictor.h"
+
+#include <ns3/satellite-antenna-gain-pattern-container.h>
+#include <ns3/satellite-constant-position-mobility-model.h>
+#include <ns3/satellite-env-variables.h>
+#include <ns3/singleton.h>
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 
@@ -42,6 +48,7 @@ namespace
 {
 Ptr<NtnChoAlgorithm> g_cho;
 NtnRealStackHelper* g_rs = nullptr;
+std::FILE* g_choTrace = nullptr; // per-tick decision trace (cho_decision_trace.csv)
 Ptr<MobilityModel> g_servMob;
 Ptr<MobilityModel> g_candMob;
 Ptr<NtnTr38811MobilityModel> g_ueMob;
@@ -87,6 +94,19 @@ ChoTick()
     g_cho->EvaluateConditions();
 
     uint16_t chosen = g_cho->SelectBestCandidate();
+
+    // Per-tick decision trace. Without this the example could report
+    // "CHO decisions=0" with no way to tell whether the trigger never fired,
+    // the candidate never became attractive, or the geometry never allowed it.
+    // That opacity is how the six-trigger conformance gate stayed green while
+    // measuring nothing (see rd-audit-2026-08-24, CVC-03).
+    if (g_choTrace)
+    {
+        std::fprintf(g_choTrace,
+                     "%.1f,%u,%u,%.3f,%.3f,%.2f,%.2f,%.1f,%.1f,%u\n",
+                     Simulator::Now().GetSeconds(), g_servingCellId, g_candCellId, servSinr,
+                     candSinr, servElev, candElev, servSlant / 1e3, candSlant / 1e3, chosen);
+    }
     if (chosen == 0)
     {
         // TTE-aware fallback before the estimator admits: better-predicted
@@ -218,7 +238,12 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-handover-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
+    // S-band LEO reference payload. Declared as a DENSITY so the helper
+    // back-computes conducted power against the array gain instead of the
+    // antenna being counted twice.
+    rs.SetSatEirpDensityDbwMhz(
+        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
     // ACTUATED handover: hand BOTH satellites to the radio helper as gNBs and
     // arm the real NR A3-RSRP + X2 handover, so a UE physically moves to the
     // neighbour cell on measured RSRP (not just a decision-model counter). The
@@ -238,6 +263,44 @@ main(int argc, char* argv[])
     choHelper->SetCarrierFrequency(freqGHz * 1e9);
     choHelper->SetSatelliteTxPower(satEirpDbm);
     choHelper->SetTteMinimum(Seconds(tteMinSec));
+
+    // CHO-5 FIX (2026-08-24): stand up the orbit predictor and TTE estimator.
+    // Without them every predictor-dependent trigger (d1, t1, tte-aware, pcho,
+    // d2) returned early from its condition check and could not fire, so the
+    // handovers this scenario recorded for those modes came from the fallback
+    // rule below rather than from the trigger it named.
+    {
+        NodeContainer auxSats;
+        auxSats.Create(2);
+        Ptr<SatConstantPositionMobilityModel> auxServ =
+            CreateObject<SatConstantPositionMobilityModel>();
+        Ptr<SatConstantPositionMobilityModel> auxCand =
+            CreateObject<SatConstantPositionMobilityModel>();
+        auxSats.Get(0)->AggregateObject(auxServ);
+        auxSats.Get(1)->AggregateObject(auxCand);
+
+        Singleton<SatEnvVariables>::Get()->DoInitialize();
+        Singleton<SatEnvVariables>::Get()->SetOutputVariables("ntn-cho-handover-traffic", "", true);
+        Ptr<SatAntennaGainPatternContainer> agp = CreateObject<SatAntennaGainPatternContainer>(
+            2,
+            Singleton<SatEnvVariables>::Get()->LocateDataDirectory() +
+                "/scenarios/geo-33E/antennapatterns");
+        agp->ConfigureBeamsMobility(0, auxServ);
+        agp->ConfigureBeamsMobility(1, auxCand);
+
+        choHelper->SetupConstellation(auxSats, agp);
+        Ptr<NtnOrbitPredictor> orbit = choHelper->GetOrbitPredictor();
+        if (orbit)
+        {
+            orbit->SetKinematicsSource(0, serv);
+            orbit->SetKinematicsSource(1, cand);
+            orbit->SetGeometricBeam(/*peakGainDbi=*/30.0, /*beamwidth3dbDeg=*/4.4127);
+            orbit->SetSteeredBeam(true);
+            NS_ABORT_MSG_IF(orbit->CountFrozenSatellites() > 0,
+                            "CHO predictor still has stationary satellites");
+        }
+    }
+
     g_cho = choHelper->CreateChoAlgorithm();
 
     NtnChoAlgorithm::ChoConfig cfg = g_cho->GetConfig();
@@ -292,12 +355,55 @@ main(int argc, char* argv[])
     g_cho->Configure(cfg);
 
     // Radio-agnostic serving cell id (mmwave or nr gNB under the hood).
-    g_servingCellId = rs.GetServingCellId();
-    g_candCellId = g_servingCellId + 100;
+    //
+    // CVC-03 FIX (2026-08-24). The candidate id used to be
+    // `g_servingCellId + 100`, a synthetic number naming no gNB in the
+    // simulation, and no execution callback was registered. So every trigger
+    // mode "executed" handovers that moved nothing: the only cell changes the
+    // radio performed came from the vendored A3-RSRP algorithm, identically for
+    // all six trigger settings, which made the six-trigger conformance gate
+    // unable to tell them apart. Both satellites are already real gNBs here
+    // (servSat + candSat, built through rs.Build with SetHandover enabled), so
+    // resolving the second cell id and wiring the callback is all that was
+    // missing. This mirrors ntn-cho-real-stack.cc.
+    g_servingCellId = rs.GetGnbCellId(0);
+    g_candCellId = rs.GetGnbCellId(1);
+    NS_ABORT_MSG_IF(g_candCellId == 0 || g_candCellId == g_servingCellId,
+                    "CHO needs two distinct real cells; got serving="
+                        << g_servingCellId << " candidate=" << g_candCellId);
     g_serving = g_servingCellId;
     g_cho->SetServingCell(g_servingCellId);
     g_cho->AddCandidateCell(g_servingCellId, 0, 0);
     g_cho->AddCandidateCell(g_candCellId, 1, 0);
+
+    // Turn the CHO decision into a real TS 38.331 reconfiguration-with-sync
+    // over X2, and let the RRC (not the model) decide whether it succeeded.
+    g_cho->SetHandoverExecutionCallback(MakeCallback(+[](uint16_t /*from*/, uint16_t to) {
+        if (!g_rs->TriggerHandover(0, to))
+        {
+            g_cho->NotifyHandoverComplete(to, false);
+        }
+    }));
+    Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/HandoverEndOk",
+                    MakeCallback(+[](std::string /*ctx*/, uint64_t /*imsi*/, uint16_t cellId,
+                                     uint16_t /*rnti*/) {
+                        if (g_cho)
+                        {
+                            g_cho->NotifyHandoverComplete(cellId, true);
+                        }
+                    }));
+
+    {
+        const std::string tracePath = outputDir + "/cho_decision_trace.csv";
+        g_choTrace = std::fopen(tracePath.c_str(), "w");
+        if (g_choTrace)
+        {
+            std::fprintf(g_choTrace,
+                         "t_s,serving_cell,candidate_cell,serving_sinr_db,candidate_sinr_db,"
+                         "serving_elev_deg,candidate_elev_deg,serving_slant_km,candidate_slant_km,"
+                         "cho_selected_cell\n");
+        }
+    }
 
     Simulator::Schedule(Seconds(1.0), &ChoTick);
 
@@ -305,6 +411,11 @@ main(int argc, char* argv[])
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
+    if (g_choTrace)
+    {
+        std::fclose(g_choTrace);
+        g_choTrace = nullptr;
+    }
 
     const auto st = g_cho->GetMechanismStats();
     const uint32_t actuatedHo = rs.GetHandoverCount();

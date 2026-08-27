@@ -87,6 +87,15 @@ class NtnChoAlgorithm : public Object
          * of the full RRC reconfiguration (t304-scale). Refs: 3GPP Rel-19 NR
          * mobility WI (conditional LTM); Ericsson Technology Review, "Reducing
          * handover interruption with L1/L2-Triggered Mobility".
+         *
+         * SCOPE (audit CHO-12), because "MAC-CE-style fast cell switch" reads
+         * as a MAC-layer mechanism and is not one. There is no MAC CE, no TCI
+         * state and no L1 measurement period distinct from the per-second SINR
+         * samples the other triggers use. What differs between LTM and classic
+         * CHO in this module is which constant is added to the interruption
+         * accounting - ltmSwitchDelay instead of choExecutionDelay - and which
+         * counter is incremented. The admission logic is real; the execution is
+         * latency bookkeeping.
          */
         TRIGGER_LTM_CONDITIONAL,
         /**
@@ -154,6 +163,27 @@ class NtnChoAlgorithm : public Object
 
         // ---- Rel-19 conditional LTM (TRIGGER_LTM_CONDITIONAL) ----
         uint8_t ltmL1FilterK = 4;             //!< L1 moving-average window (reports)
+        /**
+         * CHO-12: the L1 measurement PERIOD, distinct from the report cadence.
+         *
+         * The L1 filter used to advance on every UpdateMeasurement call, i.e.
+         * on exactly the per-second SINR samples every other trigger consumes -
+         * so "L1-filtered low-latency measurements" and the L3-rate
+         * measurements were the same samples under two names, and there was no
+         * L1 measurement period at all. Rel-19 LTM rests on L1 reporting being
+         * FASTER than the L3 cadence; without a separate period there is
+         * nothing faster about it.
+         *
+         * When non-zero, the L1 filter advances at most once per period and
+         * ignores reports arriving inside it, so a scenario feeding
+         * measurements at one rate and configuring another can show the two
+         * cadences are genuinely different. GetL1SampleCount() against
+         * GetMeasurementReportCount() makes that observable.
+         *
+         * Zero (the default) preserves the previous behaviour: every report
+         * advances the filter.
+         */
+        Time ltmL1MeasurementPeriod = Seconds(0);
         double ltmHysteresis_dB = 1.0;        //!< L1 SINR hysteresis over serving
         uint8_t ltmConsecutiveReports = 2;    //!< consecutive L1 reports to trigger
         Time ltmSwitchDelay = MilliSeconds(25); //!< MAC-CE cell-switch latency
@@ -162,10 +192,36 @@ class NtnChoAlgorithm : public Object
         Time predictionHorizon = Seconds(8.0);  //!< SINR forecast horizon
         uint8_t predictionMinSamples = 4;       //!< min history for a forecast
         Time minPredictedTos = Seconds(5.0);    //!< min predicted time-of-stay
+        /// CHO-14: dwell before TRIGGER_TIME_BASED will admit a candidate.
+        ///
+        /// This is a POLICY trigger, not a 3GPP event: it hands over once the
+        /// UE has been on its serving beam for this long and a candidate meets
+        /// the quality threshold. The standardized time condition is
+        /// TRIGGER_TIME_T1 (TS 38.331 condEventT1), which is a separate arm.
+        Time beamDwellThreshold = Seconds(10.0);
+        /// CHO-14: margin a candidate must beat the serving beam by before the
+        /// dwell trigger admits it. A dwell timer with no margin churns the UE
+        /// around a ring of equally poor beams each time it expires.
+        double beamDwellHysteresis_dB = 1.0;
         double pchoHysteresis_dB = 1.0;         //!< predicted best-server margin
 
         // ---- Standardized NTN triggers (TIME_T1 / ELEVATION / TA) ----
-        Time t1WindowDuration = Seconds(10.0); //!< CondEventT1 window before serving TTE
+        Time t1WindowDuration = Seconds(10.0); //!< CondEventT1 window duration
+        /**
+         * CHO-16: the ABSOLUTE epoch TS 38.331 condEventT1 actually keys on.
+         *
+         * CondEventT1 enters while the UE's own time lies inside
+         * [t1-Threshold, t1-Threshold + duration], where t1-Threshold is an
+         * absolute epoch broadcast in the conditional reconfiguration. What
+         * this class implemented under that name was a SERVING-CELL
+         * time-to-exit test: ephemeris-derived, useful, and not condEventT1.
+         *
+         * Set this to a non-zero epoch to evaluate the standardized condition.
+         * Left at zero (the default) the trigger keeps the time-to-exit
+         * behaviour every committed result was measured with, and warns once
+         * that it is running a non-standard condition under a 3GPP name.
+         */
+        Time t1ThresholdEpoch = Seconds(0.0);
         double elevationMinDeg = 10.0;         //!< serving-elevation handover floor
         double elevationHystDeg = 2.0;         //!< candidate must clear floor + hyst
         double orbitAltitudeKm = 550.0;        //!< shell altitude for elevation from slant
@@ -199,13 +255,46 @@ class NtnChoAlgorithm : public Object
         /**
          * Fallback NTN RACH duration when no slant range is known for the
          * target. When the target's slant range IS known, the RACH cost is
-         * computed slant-dependently as 2*slant/c + rachProcessingDelay
-         * instead of this constant (a fixed 80 ms misprices the RACH across
-         * a LEO pass where the slant RTT varies by several ms).
+         * computed slant-dependently instead of using this constant (a fixed
+         * 80 ms misprices the RACH across a LEO pass where the slant RTT
+         * varies by several ms).
          */
         Time rachDuration = MilliSeconds(80);
         Time rachProcessingDelay = MilliSeconds(20); //!< gNB/UE RACH processing on top of slant RTT
         Time choExecutionDelay = MilliSeconds(50); //!< RRC reconfig execution time
+
+        /**
+         * Number of one-way air-interface traversals the random-access
+         * procedure costs.
+         *
+         * CHO-10. The slant-dependent RACH cost used to be 2*slant/c, i.e. a
+         * SINGLE round trip, for a procedure that is four messages long. The
+         * TS 38.321 section 5.1 contention-based four-step procedure is
+         *
+         *   msg1  preamble              UE  -> gNB   one way
+         *   msg2  random-access response gNB -> UE   one way
+         *   msg3  scheduled transmission UE  -> gNB   one way
+         *   msg4  contention resolution  gNB -> UE   one way
+         *
+         * so it costs FOUR one-way traversals, or two slant round trips, plus
+         * the RAR window and processing. Charging one round trip under-counted
+         * every NTN handover by a full slant RTT: about 10 ms at a 1500 km
+         * slant, which is the same order as the interruption being reported.
+         *
+         * Set to 2 for the two-step (msgA/msgB) procedure of the same clause.
+         * Any other value is accepted so a study can price a variant, but the
+         * count is written into the mechanism stats so a result always records
+         * which procedure it assumed.
+         */
+        uint8_t rachOneWayTraversals = 4;
+        /**
+         * Random-access response window (TS 38.321 section 5.1.4,
+         * ra-ResponseWindow). The UE monitors for msg2 across this window, so
+         * it is part of the interruption whether or not the response arrives
+         * early. Kept separate from rachProcessingDelay so the two can be
+         * reported and varied independently.
+         */
+        Time rachResponseWindow = MilliSeconds(10);
     };
 
     /**
@@ -217,9 +306,25 @@ class NtnChoAlgorithm : public Object
         uint32_t pchoTriggers = 0;       //!< trajectory-predicted handovers
         uint32_t rachLessExecutions = 0; //!< handovers executed without RACH
         uint32_t rachExecutions = 0;     //!< handovers paying the full RACH
+        /**
+         * CHO-10: the one-way traversal count used to price the last RACH, so
+         * a result records which random-access procedure it assumed rather
+         * than leaving it implicit in a configuration that is not exported.
+         */
+        uint8_t lastRachTraversals = 0;
+        /// CHO-10: the propagation share of the last RACH, in ms.
+        double lastRachPropagationMs = 0.0;
         double lastInterruptionMs = 0.0; //!< interruption of the last handover
         double totalInterruptionMs = 0.0;//!< cumulative interruption
-        double lastPreCompTaUs = 0.0;    //!< last ephemeris-pre-computed TA (us)
+        /// Last ephemeris-pre-computed TA (us).
+        ///
+        /// CHO-12: this used to be written here and read only by example print
+        /// statements - no code path fed it to a UE MAC or to N_TA, so
+        /// "RACH-less" changed a counter and an interruption total and nothing
+        /// about uplink transmit timing. SetPreCompensationSink now forwards it
+        /// to a consumer on every RACH-less execution, so the value can be
+        /// applied where timing advance actually lives.
+        double lastPreCompTaUs = 0.0;
         uint32_t handoverFailures = 0;   //!< H2: real failures (T304 expiry / RRC failure).
                                          //!< Was structurally impossible before: T304 was
                                          //!< cancelled in the same call that armed it.
@@ -243,7 +348,30 @@ class NtnChoAlgorithm : public Object
         Time a4MetSince = Seconds(-1.0);  //!< When the A4 quality condition was first met (-1 = not met)
 
         // ---- Rel-19 conditional LTM state ----
-        double l1Filtered_dB = -100.0;    //!< L1 moving-average SINR
+        /**
+         * CHO-12: what the D2 moving reference resolves to for this candidate.
+         *
+         * The only reference was the candidate's GROUND beam centre, so every
+         * CondEventD2 evaluation was a ground-cell handover however the
+         * scenario was framed, and a satellite-to-satellite CHO - the Rel-19
+         * NTN-NTN case for Earth-moving cells - could not be expressed at all.
+         *
+         * SatelliteEphemeris resolves the reference to the TARGET SATELLITE's
+         * own propagated position instead. For a spaceborne terminal, or an
+         * inter-satellite handover, that is the distance the D2 thresholds are
+         * about; the ground beam centre is a different quantity that happens to
+         * be derived from the same ephemeris.
+         */
+        enum class ReferenceKind : uint8_t
+        {
+            GroundBeamCentre = 0, //!< default, unchanged behaviour
+            SatelliteEphemeris,   //!< NTN-NTN: the target satellite itself
+        };
+        ReferenceKind referenceKind = ReferenceKind::GroundBeamCentre;
+
+        double l1Filtered_dB = -100.0;
+        /// CHO-12: when the L1 filter last advanced for this candidate.
+        Time lastL1Sample{};              //!< when the L1 filter last advanced
         uint8_t l1AboveCount = 0;         //!< consecutive L1 reports above thresh
 
         // ---- Trajectory-predictive CHO state ----
@@ -331,10 +459,36 @@ class NtnChoAlgorithm : public Object
      */
     void UpdateCandidateSlantRange(uint16_t cellId, double slantRangeM);
 
+    /// CHO-4: true when the serving cell's own geometry is known, i.e. the
+    /// standardized triggers that compare candidate against serving can run.
+    bool HaveServingState() const { return m_haveServingState; }
+
+    /// CHO-5: true when \p t cannot evaluate without an orbit predictor and a
+    /// TTE estimator. Selecting such a trigger without calling
+    /// NtnChoHelper::SetupConstellation() leaves it permanently unable to fire.
+    static bool TriggerNeedsOrbitPredictor(TriggerType t);
+    /// CHO-5: true when \p t cannot evaluate without a time-to-exit estimator.
+    /**
+     * \brief Whether the trigger's condition is evaluated from a time-to-exit.
+     *
+     * CHO-16 caveat: TRIGGER_TIME_T1 answers true here because its default
+     * (non-standard) arm runs on a time-to-exit. Configured with a non-zero
+     * ChoConfig::t1ThresholdEpoch it evaluates the TS 38.331 absolute-epoch
+     * window instead and needs no estimator, which EvaluateConditions()
+     * accounts for at the guard.
+     */
+    static bool TriggerNeedsTteEstimator(TriggerType t);
+
     /**
      * \brief Counters/latencies of the novel mechanisms (LTM/PCHO/RACH-less).
      */
     MechanismStats GetMechanismStats() const;
+
+    /// CHO-12: L1 filter advances, and total measurement reports consumed.
+    /// Equal counts mean the L1 cadence is the report cadence - which is what
+    /// "no distinct L1 measurement period" looks like from outside.
+    uint64_t GetL1SampleCount() const { return m_l1Samples; }
+    uint64_t GetMeasurementReportCount() const { return m_measReports; }
 
     /**
      * \brief Start condition monitoring
@@ -371,7 +525,72 @@ class NtnChoAlgorithm : public Object
      *
      * \return Cell ID of best candidate (0 if none available)
      */
+    /**
+     * Sentinel returned by the selectors when no candidate qualifies.
+     *
+     * SelectBestCandidate, SelectBaselineA3 and SelectBaselineLocationOnly are
+     * public and all three return this when nothing is admissible, so a caller
+     * has to be able to name it. It was private, which left every caller
+     * comparing against a bare 0.
+     */
+    static constexpr uint16_t INVALID_CELL_ID = 0;
+
     uint16_t SelectBestCandidate() const;
+
+    /**
+     * \brief Test-only seam: set the admission state a candidate would have
+     *        reached through EvaluateConditions.
+     *
+     * CHO-9. SelectBestCandidate admits on `admitted && d1Met && sinr >=
+     * qualityThreshold && tte >= tteMinimum`, and the first three of those are
+     * produced by the trigger machinery from live geometry. A unit test of the
+     * SELECTION rule cannot get there without standing up an orbit predictor
+     * and a TTE estimator, which is why the test that carried this module's
+     * name asserted object construction instead and left the ranking, the
+     * quality filter, the TTE-minimum filter and the epsilon tie-break with no
+     * coverage at all.
+     *
+     * This sets that state directly so the selection rule can be exercised on
+     * hand-computed inputs. It deliberately does not touch SINR: use
+     * UpdateMeasurement for that, so a test still goes through the normal path
+     * for the quantity the normal path owns.
+     *
+     * Not for scenario use. Calling this outside a test makes the selector act
+     * on a TTE nothing measured.
+     *
+     * \param cellId   candidate to modify
+     * \param tte      time-to-exit to attribute to it
+     * \param admitted whether the trigger admitted it
+     * \param d1Met    whether its D1 geometric condition holds
+     */
+    void SetCandidateStateForTest(uint16_t cellId, Time tte, bool admitted, bool d1Met);
+
+    /// CHO-12: mark a candidate as NTN-NTN, so its D2 moving reference is the
+    /// target SATELLITE's ephemeris rather than its ground beam centre.
+    /// \return false if the cell is not a registered candidate.
+    bool SetCandidateReferenceIsSatellite(uint16_t cellId, bool isSatellite);
+    /// What a candidate's D2 reference currently resolves to.
+    bool GetCandidateReferenceIsSatellite(uint16_t cellId) const;
+    /// Test seam: the D2 moving-reference distance for a candidate, so the
+    /// reference KIND can be checked without standing up a full D2 evaluation.
+    double DistanceToMovingReferenceForTest(uint16_t cellId) const;
+
+    /**
+     * \brief Consumer for the pre-compensated timing advance (CHO-12).
+     *
+     * Fired on every RACH-less execution with the target's round-trip
+     * propagation and the amount the UE pre-compensates - which, when
+     * pre-compensation is applied from ephemeris and GNSS (TS 38.821 section
+     * 6.3.3), are the same value, leaving no residual for the gNB to correct.
+     *
+     * Point this at something that owns timing advance -
+     * NtnFapiSapBridge::SetNtnTimingAdvance is the consumer in this tree - and
+     * the decision stops being bookkeeping: the residual TA reported in the
+     * FAPI RACH.indication drops to zero when RACH-less is on and is the whole
+     * round trip when it is off.
+     */
+    typedef Callback<void, Time, Time> PreCompensationSink;
+    void SetPreCompensationSink(PreCompensationSink cb) { m_preCompSink = cb; }
 
     /**
      * \brief Select using baseline A3 algorithm (for comparison)
@@ -485,6 +704,23 @@ class NtnChoAlgorithm : public Object
     ChoConfig m_config;                                //!< Configuration
     std::map<uint16_t, CandidateInfo> m_candidates;    //!< cellId -> CandidateInfo
     uint16_t m_servingCellId;                          //!< Current serving cell
+    /// CHO-14: when the UE attached to m_servingCellId, for the dwell trigger.
+    Time m_servingSince{Seconds(0)};
+    /// CHO-16: warn once when T1 runs the non-standard fallback.
+    mutable bool m_t1FallbackWarned{false};
+    /// CHO-4: the serving cell's own geometry, kept OUTSIDE m_candidates.
+    ///
+    /// Rel-17 CHO keeps prepared candidates across an execution, and the cell
+    /// just moved to is no longer a candidate, so NotifyHandoverComplete
+    /// correctly erases it from the candidate map. But four standardized
+    /// triggers (T1, elevation, timing-advance, D2) read the SERVING cell's
+    /// satId/beamId/slantRange out of that same map to compare against a
+    /// candidate. After the first successful handover the lookup missed and
+    /// every one of them returned early, so they were permanently dead for the
+    /// rest of the run while still being reported as the active trigger.
+    CandidateInfo m_servingState;
+    bool m_haveServingState{false};
+    bool m_predicateCheckDone{false}; ///< CHO-5: one-shot trigger/predictor sanity check
     GeoCoordinate m_uePosition;                        //!< Latest UE position
     Vector m_ueVelocity;                               //!< UE velocity
 
@@ -504,7 +740,10 @@ class NtnChoAlgorithm : public Object
     // ---- Novel 6G mechanism state (LTM / PCHO / RACH-less) ----
     double m_servingSinr_dB{-100.0};   //!< latest MEASURED serving SINR
     std::vector<std::pair<double, double>> m_servingSinrHistory; //!< (t_s, sinr)
-    MechanismStats m_mechStats;        //!< novel-mechanism counters
+    MechanismStats m_mechStats;
+    uint64_t m_l1Samples{0};
+    uint64_t m_measReports{0};
+    PreCompensationSink m_preCompSink;        //!< novel-mechanism counters
 
     /**
      * \brief Linear-trend forecast of a SINR history at +horizon seconds
@@ -518,9 +757,14 @@ class NtnChoAlgorithm : public Object
     void EvaluateLtmConditional(CandidateInfo& cand);
     /// Standardized NTN trigger classes (TIME_T1 / ELEVATION / TIMING_ADVANCE).
     void EvaluateStandardNtnTrigger(CandidateInfo& cand);
+    /// CHO-14: TRIGGER_TIME_BASED. Admit once the UE has dwelt on its serving
+    /// beam for Config::beamDwellThreshold and the candidate is usable.
+    void EvaluateBeamDwell(CandidateInfo& cand);
     /// Elevation (deg) from an ephemeris/GNSS slant range at the configured
     /// shell altitude (spherical-Earth relation); NaN if range is invalid.
     double ElevationFromSlantDeg(double slantRangeM) const;
+    /// CHO-4: the serving cell's geometry, wherever it currently lives.
+    const CandidateInfo* ServingState() const;
 
     /// Evaluate the trajectory-predictive (PCHO) admission for one candidate.
     void EvaluateTrajectoryPredictive(CandidateInfo& cand);
@@ -552,7 +796,6 @@ class NtnChoAlgorithm : public Object
     bool m_enableMultiBandCho;             //!< Enable Ka+THz dual candidate sets
     double m_thzBeamwidth_deg;             //!< THz beam 3dB beamwidth for TTE calc (default 0.5 deg)
 
-    static constexpr uint16_t INVALID_CELL_ID = 0;
 };
 
 } // namespace ns3

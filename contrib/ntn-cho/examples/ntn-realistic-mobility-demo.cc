@@ -166,7 +166,10 @@ main(int argc, char** argv)
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-realistic-mobility-demo");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(servSat, g_ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(1.0),
                       Seconds(simTime - 0.5));

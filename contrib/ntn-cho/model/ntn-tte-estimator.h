@@ -47,6 +47,11 @@ namespace ns3
  *
  * This is the core algorithmic novelty of the TTE-aware CHO framework.
  */
+// CHO-15: ComputeThzBeamTte() and ComputeThzEffectiveCoverage_km() were
+// declared here and are gone. They were private with no caller but each other,
+// duplicating NtnChoAlgorithm::ComputeThzBeamTte(), and the dead copy used
+// satVelocity * cos(nadir) for the ground-track speed where the live one
+// correctly uses v_orb * R_e / r.
 class NtnTteEstimator : public Object
 {
   public:
@@ -168,7 +173,13 @@ class NtnTteEstimator : public Object
      * \param tBad First time when beam dropped below threshold
      * \return Precise exit time offset from now
      */
+    /// CHO-13: takes the UE VELOCITY as well, because the binary refinement
+    /// must project the terminal to each probe instant exactly as the coarse
+    /// search does. It used to receive only a fixed position, so it froze a UE
+    /// the coarse search was moving and refined against a geometry that never
+    /// existed.
     Time FindBeamExitTime(GeoCoordinate uePos,
+                          Vector ueVelocity,
                           uint32_t satId,
                           uint32_t beamId,
                           double threshold_dB,
@@ -196,33 +207,19 @@ class NtnTteEstimator : public Object
                                     Vector velocity,
                                     Time dt) const;
 
-    /**
-     * \brief Compute TTE for a THz narrow beam based on geometric coverage
-     *
-     * \param satAlt_km Satellite altitude in km
-     * \param satVelocity_km_s Satellite orbital velocity in km/s
-     * \param beamwidth_deg THz beam 3dB beamwidth in degrees
-     * \param pointingError_deg Current pointing error in degrees
-     * \param elevationDeg Elevation angle from UE to satellite in degrees
-     * \return TTE in seconds
-     */
-    double ComputeThzBeamTte(double satAlt_km,
-                              double satVelocity_km_s,
-                              double beamwidth_deg,
-                              double pointingError_deg,
-                              double elevationDeg) const;
+  public:
+    /// CHO-13: test seam for the frame conversion. The projection is private,
+    /// so the ECEF-read-as-north/east bug could only be observed several layers
+    /// up through a TTE result, where a wrong DIRECTION looks like a wrong
+    /// number and reads as tuning rather than a defect.
+    GeoCoordinate ProjectUePositionForTest(GeoCoordinate uePos, Vector velocity, Time dt) const
+    {
+        return ProjectUePosition(uePos, velocity, dt);
+    }
 
-    /**
-     * \brief Compute effective THz beam coverage diameter on ground
-     *
-     * \param satAlt_km Satellite altitude in km
-     * \param beamwidth_deg THz beam 3dB beamwidth in degrees
-     * \param pointingError_deg Current pointing error in degrees
-     * \return Effective coverage diameter in km
-     */
-    double ComputeThzEffectiveCoverage_km(double satAlt_km,
-                                           double beamwidth_deg,
-                                           double pointingError_deg) const;
+  private:
+
+
 
     Ptr<NtnOrbitPredictor> m_orbitPredictor;   //!< Orbit prediction engine
     Time m_predictionStep;                      //!< Coarse search step (default 1s)

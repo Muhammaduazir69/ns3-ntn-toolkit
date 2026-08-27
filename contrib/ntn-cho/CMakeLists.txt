@@ -58,6 +58,7 @@ build_lib(
     ${libinternet}
     ${libapplications}
     ${libpoint-to-point}
+    ${libntn-rrc}
     ${ntn_cho_optional_libs}
   TEST_SOURCES ${test_sources}
 )

@@ -38,6 +38,12 @@
 #include "ns3/network-module.h"
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
+#include "ns3/ntn-orbit-predictor.h"
+
+#include <ns3/satellite-antenna-gain-pattern-container.h>
+#include <ns3/satellite-constant-position-mobility-model.h>
+#include <ns3/satellite-env-variables.h>
+#include <ns3/singleton.h>
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-scene-recorder.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
@@ -290,7 +296,10 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-real-stack");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     // Stand up the X2 between the two satellites so a handover can be executed.
     // The A3 algorithm this also installs is the vendored *baseline*; the CHO
     // decision below drives handovers explicitly via TriggerHandover, and
@@ -309,6 +318,51 @@ main(int argc, char* argv[])
     choHelper->SetCarrierFrequency(freqGhz * 1e9);
     choHelper->SetSatelliteTxPower(satEirpDbm);
     choHelper->SetTteMinimum(Seconds(tteMinSec));
+
+    // CHO-5 FIX (2026-08-24): stand up the orbit predictor and TTE estimator.
+    //
+    // This example never called SetupConstellation(), so the helper handed the
+    // algorithm a null predictor and a null estimator. Every predictor-dependent
+    // trigger (d1, t1, tte-aware, pcho, d2) then returned early from its
+    // condition check and could not fire for the whole run, while the summary
+    // still named it as the mechanism under test. The DEFAULT trigger here is
+    // pcho, so the example's out-of-the-box configuration was measuring nothing.
+    {
+        NodeContainer auxSats;
+        auxSats.Create(2);
+        Ptr<SatConstantPositionMobilityModel> auxServ =
+            CreateObject<SatConstantPositionMobilityModel>();
+        Ptr<SatConstantPositionMobilityModel> auxCand =
+            CreateObject<SatConstantPositionMobilityModel>();
+        auxSats.Get(0)->AggregateObject(auxServ);
+        auxSats.Get(1)->AggregateObject(auxCand);
+
+        Singleton<SatEnvVariables>::Get()->DoInitialize();
+        Singleton<SatEnvVariables>::Get()->SetOutputVariables("ntn-cho-real-stack", "", true);
+        Ptr<SatAntennaGainPatternContainer> agp = CreateObject<SatAntennaGainPatternContainer>(
+            2,
+            Singleton<SatEnvVariables>::Get()->LocateDataDirectory() +
+                "/scenarios/geo-33E/antennapatterns");
+        agp->ConfigureBeamsMobility(0, auxServ);
+        agp->ConfigureBeamsMobility(1, auxCand);
+
+        choHelper->SetupConstellation(auxSats, agp);
+        Ptr<NtnOrbitPredictor> orbit = choHelper->GetOrbitPredictor();
+        if (orbit)
+        {
+            // The aux SatMobilityModels exist only because the pattern
+            // container demands that type; the kinematics come from the REAL
+            // satellites this scenario flies, and the beam is the analytic
+            // steered one, coherent at LEO where the GEO pattern grid is not.
+            orbit->SetKinematicsSource(0, serv);
+            orbit->SetKinematicsSource(1, cand);
+            orbit->SetGeometricBeam(/*peakGainDbi=*/30.0, /*beamwidth3dbDeg=*/4.4127);
+            orbit->SetSteeredBeam(true);
+            NS_ABORT_MSG_IF(orbit->CountFrozenSatellites() > 0,
+                            "CHO predictor still has stationary satellites");
+        }
+    }
+
     g_cho = choHelper->CreateChoAlgorithm();
 
     NtnChoAlgorithm::ChoConfig cfg = g_cho->GetConfig();

@@ -181,8 +181,25 @@ NtnChoAlgorithm::UpdateMeasurement(uint16_t cellId, double sinr_dB, double gain_
         cand.sinr_dB = sinr_dB;
         cand.gain_dB = gain_dB;
         cand.lastUpdate = Simulator::Now();
+        ++m_measReports;
 
         // ---- Rel-19 LTM: L1 moving-average filter over the last K reports ----
+        // CHO-12: gate the L1 filter on its own measurement period. Without
+        // this it advanced on every report, so the "L1" measurement and the
+        // report cadence were the same thing.
+        const Time now = Simulator::Now();
+        const bool l1Due = (m_config.ltmL1MeasurementPeriod <= Time()) ||
+                           (cand.lastL1Sample == Time()) ||
+                           ((now - cand.lastL1Sample) >= m_config.ltmL1MeasurementPeriod);
+        if (!l1Due)
+        {
+            // Inside the L1 period: the report is consumed by the other
+            // triggers but does not advance the L1 filter.
+            goto l1_done;
+        }
+        cand.lastL1Sample = now;
+        ++m_l1Samples;
+        {
         const uint8_t k = std::max<uint8_t>(1, m_config.ltmL1FilterK);
         if (cand.l1Filtered_dB <= -99.0)
         {
@@ -193,6 +210,8 @@ NtnChoAlgorithm::UpdateMeasurement(uint16_t cellId, double sinr_dB, double gain_
             const double alpha = 1.0 / static_cast<double>(k);
             cand.l1Filtered_dB = (1.0 - alpha) * cand.l1Filtered_dB + alpha * sinr_dB;
         }
+        }
+    l1_done:;
 
         // ---- PCHO: bounded SINR history for the trajectory forecast ----
         cand.sinrHistory.emplace_back(Simulator::Now().GetSeconds(), sinr_dB);
@@ -204,6 +223,13 @@ NtnChoAlgorithm::UpdateMeasurement(uint16_t cellId, double sinr_dB, double gain_
     if (cellId == m_servingCellId)
     {
         UpdateServingMeasurement(sinr_dB);
+        // CHO-4: keep the persistent serving record current even once the cell
+        // has left the candidate map.
+        m_servingState.cellId = cellId;
+        m_servingState.sinr_dB = sinr_dB;
+        m_servingState.gain_dB = gain_dB;
+        m_servingState.lastUpdate = Simulator::Now();
+        m_haveServingState = true;
     }
 }
 
@@ -218,10 +244,82 @@ NtnChoAlgorithm::UpdateServingMeasurement(double sinr_dB)
     }
 }
 
+bool
+NtnChoAlgorithm::TriggerNeedsOrbitPredictor(TriggerType t)
+{
+    // CHO-5: triggers whose condition dereferences the orbit predictor, via
+    // DistanceToMovingReference (the D-events' moving reference point).
+    switch (t)
+    {
+    case TRIGGER_LOCATION_D1:
+    case TRIGGER_DISTANCE_D2:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool
+NtnChoAlgorithm::TriggerNeedsTteEstimator(TriggerType t)
+{
+    // CHO-5: triggers whose condition needs a time-to-exit. These are separate
+    // requirements: D2 needs the orbit predictor but no TTE, while T1 needs the
+    // estimator. Demanding both for every one of them would reject a scenario
+    // that is correctly configured for the trigger it selected.
+    switch (t)
+    {
+    case TRIGGER_TTE_AWARE:
+    case TRIGGER_TIME_T1:
+    case TRIGGER_TRAJECTORY_PREDICTIVE:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void
 NtnChoAlgorithm::SetServingCell(uint16_t cellId)
 {
+    // CHO-14: stamp the attach time so the dwell trigger has a reference. A
+    // re-assertion of the SAME cell does not restart the dwell, or a periodic
+    // caller refreshing the serving cell would hold the timer at zero forever.
+    if (cellId != m_servingCellId)
+    {
+        m_servingSince = Simulator::Now();
+    }
     m_servingCellId = cellId;
+    // CHO-4: seed the serving geometry from the candidate map if the cell is
+    // already known there, so the standardized triggers have something to
+    // compare against from the first tick rather than only after a handover.
+    auto it = m_candidates.find(cellId);
+    if (it != m_candidates.end())
+    {
+        m_servingState = it->second;
+        // Only claim the record is usable once it actually carries geometry.
+        // Seeding an empty one and marking it valid would make ServingState()
+        // prefer stale zeros over the live candidate entry, which is the same
+        // class of bug as the one this member exists to fix.
+        m_haveServingState = (m_servingState.slantRangeM > 0.0);
+    }
+    else if (m_servingState.cellId != cellId)
+    {
+        m_servingState = CandidateInfo{};
+        m_servingState.cellId = cellId;
+        m_haveServingState = false;
+    }
+}
+
+const NtnChoAlgorithm::CandidateInfo*
+NtnChoAlgorithm::ServingState() const
+{
+    // CHO-4: prefer the persistent serving record; fall back to the candidate
+    // map for the pre-handover case where the serving cell is still listed.
+    if (m_haveServingState && m_servingState.cellId == m_servingCellId)
+    {
+        return &m_servingState;
+    }
+    auto it = m_candidates.find(m_servingCellId);
+    return (it != m_candidates.end()) ? &it->second : nullptr;
 }
 
 void
@@ -231,6 +329,14 @@ NtnChoAlgorithm::UpdateCandidateSlantRange(uint16_t cellId, double slantRangeM)
     if (it != m_candidates.end())
     {
         it->second.slantRangeM = slantRangeM;
+    }
+    if (cellId == m_servingCellId)
+    {
+        // CHO-4: the elevation and timing-advance triggers need the SERVING
+        // slant range, which is no longer in the candidate map after a handover.
+        m_servingState.cellId = cellId;
+        m_servingState.slantRangeM = slantRangeM;
+        m_haveServingState = true;
     }
 }
 
@@ -293,6 +399,47 @@ NtnChoAlgorithm::ElevationFromSlantDeg(double slantRangeM) const
 }
 
 void
+NtnChoAlgorithm::EvaluateBeamDwell(CandidateInfo& cand)
+{
+    // CHO-14: a beam-dwell POLICY trigger, not a 3GPP event.
+    //
+    // The enum has always been documented as "Timer-based beam dwell trigger"
+    // and carries no 3GPP citation, so this implements exactly that and nothing
+    // more: once the UE has been attached to its serving beam for
+    // beamDwellThreshold, admit any candidate that is actually usable. The
+    // standardized time condition is TRIGGER_TIME_T1 (TS 38.331 condEventT1),
+    // handled separately; conflating the two would put a 3GPP label on a policy.
+    //
+    // Quality is still required. A dwell timer alone would hand a UE onto a
+    // candidate worse than the beam it is leaving, which is not a handover
+    // policy, it is a timer.
+    cand.admitted = false;
+
+    if (m_servingCellId == INVALID_CELL_ID)
+    {
+        // Nothing to dwell on yet; initial acquisition is not a handover.
+        return;
+    }
+
+    const Time dwell = Simulator::Now() - m_servingSince;
+    if (dwell < m_config.beamDwellThreshold)
+    {
+        return;
+    }
+
+    const bool usable = (cand.sinr_dB >= m_config.qualityThreshold_dB);
+    // And it must be better than staying, or the trigger churns the UE around a
+    // ring of equally poor beams every time the timer expires.
+    const bool better = !m_haveServingState ||
+                        (cand.sinr_dB > m_servingState.sinr_dB + m_config.beamDwellHysteresis_dB);
+    cand.admitted = usable && better;
+
+    NS_LOG_DEBUG("beam-dwell: cell " << cand.cellId << " dwell=" << dwell.GetSeconds()
+                 << "s thr=" << m_config.beamDwellThreshold.GetSeconds()
+                 << "s sinr=" << cand.sinr_dB << " admitted=" << cand.admitted);
+}
+
+void
 NtnChoAlgorithm::EvaluateStandardNtnTrigger(CandidateInfo& cand)
 {
     cand.admitted = false;
@@ -320,33 +467,59 @@ NtnChoAlgorithm::EvaluateStandardNtnTrigger(CandidateInfo& cand)
     switch (m_config.triggerType)
     {
     case TRIGGER_TIME_T1: {
-        // CondEventT1: the ephemeris-scheduled window opens when the SERVING
-        // cell's remaining time-of-service drops inside t1WindowDuration.
+        // CHO-16: the standardized condition, when the scenario supplies its
+        // epoch.
+        //
+        // TS 38.331 condEventT1 enters while the UE's own time lies inside
+        // [t1-Threshold, t1-Threshold + duration], with t1-Threshold an
+        // ABSOLUTE epoch broadcast in the conditional reconfiguration. What
+        // this arm implemented under that name was a serving-cell
+        // time-to-exit test - ephemeris-derived and useful, but a different
+        // condition wearing a 3GPP label.
+        if (m_config.t1ThresholdEpoch > Seconds(0))
+        {
+            const Time now = Simulator::Now();
+            cand.admitted = (now >= m_config.t1ThresholdEpoch &&
+                             now < m_config.t1ThresholdEpoch + m_config.t1WindowDuration);
+            break;
+        }
+
+        // Fallback: the time-to-exit behaviour every committed result was
+        // measured with. Warned about once, because running it under the
+        // condEventT1 name is exactly what the finding is about.
+        if (!m_t1FallbackWarned)
+        {
+            m_t1FallbackWarned = true;
+            NS_LOG_WARN("CHO-16: TRIGGER_TIME_T1 is running the serving time-to-exit "
+                        "condition, not TS 38.331 condEventT1. Set ChoConfig::"
+                        "t1ThresholdEpoch to a non-zero absolute epoch for the "
+                        "standardized condition.");
+        }
         if (!m_tteEstimator)
         {
             return;
         }
-        auto servingIt = m_candidates.find(m_servingCellId);
-        if (servingIt == m_candidates.end())
+        const CandidateInfo* servingIt = ServingState();
+        if (!servingIt)
         {
             return;
         }
         const auto servingTte = m_tteEstimator->ComputeTte(m_uePosition,
                                                            m_ueVelocity,
-                                                           servingIt->second.satId,
-                                                           servingIt->second.beamId,
+                                                           servingIt->satId,
+                                                           servingIt->beamId,
                                                            m_config.gainThreshold_dB);
         cand.admitted = (servingTte.tte > Seconds(0) &&
                          servingTte.tte <= m_config.t1WindowDuration);
         break;
     }
     case TRIGGER_ELEVATION: {
-        auto servingIt = m_candidates.find(m_servingCellId);
-        if (servingIt == m_candidates.end())
+        const CandidateInfo* servingIt = ServingState();
+        if (!servingIt)
         {
             return;
         }
-        const double servingElev = ElevationFromSlantDeg(servingIt->second.slantRangeM);
+        const double servingElev = ElevationFromSlantDeg(servingIt->slantRangeM);
         const double candElev = ElevationFromSlantDeg(cand.slantRangeM);
         cand.admitted = (!std::isnan(servingElev) && !std::isnan(candElev) &&
                          servingElev < m_config.elevationMinDeg &&
@@ -354,13 +527,12 @@ NtnChoAlgorithm::EvaluateStandardNtnTrigger(CandidateInfo& cand)
         break;
     }
     case TRIGGER_TIMING_ADVANCE: {
-        auto servingIt = m_candidates.find(m_servingCellId);
-        if (servingIt == m_candidates.end() || cand.slantRangeM <= 0.0 ||
-            servingIt->second.slantRangeM <= 0.0)
+        const CandidateInfo* servingIt = ServingState();
+        if (!servingIt || cand.slantRangeM <= 0.0 || servingIt->slantRangeM <= 0.0)
         {
             return;
         }
-        const Time taServing = Seconds(2.0 * servingIt->second.slantRangeM / kC);
+        const Time taServing = Seconds(2.0 * servingIt->slantRangeM / kC);
         const Time taCand = Seconds(2.0 * cand.slantRangeM / kC);
         cand.admitted = (taServing > m_config.taServingMax) ||
                         (taServing - taCand >= m_config.taAdvantage);
@@ -370,12 +542,12 @@ NtnChoAlgorithm::EvaluateStandardNtnTrigger(CandidateInfo& cand)
         // Rel-18 CondEventD2 (TS 38.331 §5.5.4.15a): both reference
         // locations MOVE with the satellites (live ephemeris beam centers).
         // Entering condition: Ml1 - Hys > Thresh1 AND Ml2 + Hys < Thresh2.
-        auto servingIt = m_candidates.find(m_servingCellId);
-        if (servingIt == m_candidates.end())
+        const CandidateInfo* servingIt = ServingState();
+        if (!servingIt)
         {
             return;
         }
-        const double dServing = DistanceToMovingReference(servingIt->second);
+        const double dServing = DistanceToMovingReference(*servingIt);
         const double dCand = DistanceToMovingReference(cand);
         if (dServing < 0.0 || dCand < 0.0)
         {
@@ -520,6 +692,39 @@ NtnChoAlgorithm::EvaluateConditions()
 {
     NS_LOG_FUNCTION(this);
 
+    // CHO-5: refuse to run a trigger that cannot possibly fire.
+    //
+    // Several triggers need an orbit predictor or a TTE estimator, which arrive
+    // through NtnChoHelper::SetupConstellation(). A scenario that selects one of
+    // them without calling it gets an algorithm whose condition checks all
+    // return early: the trigger is silently dead for the whole run while the
+    // scenario reports it as the mechanism under test. That is how a
+    // conformance check can stay green while measuring nothing. Fail loudly
+    // once, at the first evaluation, rather than produce a confident zero.
+    if (!m_predicateCheckDone)
+    {
+        m_predicateCheckDone = true;
+        NS_ABORT_MSG_IF(TriggerNeedsOrbitPredictor(m_config.triggerType) && !m_orbitPredictor,
+                        "CHO trigger " << static_cast<uint32_t>(m_config.triggerType)
+                                       << " evaluates a moving reference point and needs an "
+                                          "orbit predictor, which was not supplied. Call "
+                                          "NtnChoHelper::SetupConstellation() before "
+                                          "CreateChoAlgorithm(). Continuing would leave the "
+                                          "trigger permanently unable to fire while still "
+                                          "being reported as active.");
+        // CHO-16: T1 driven by its standardized absolute epoch reads the
+        // clock, not the ephemeris, so it does not need the estimator.
+        const bool t1RunsOnTheClock = (m_config.triggerType == TRIGGER_TIME_T1 &&
+                                       m_config.t1ThresholdEpoch > Seconds(0));
+        NS_ABORT_MSG_IF(TriggerNeedsTteEstimator(m_config.triggerType) && !t1RunsOnTheClock &&
+                            !m_tteEstimator,
+                        "CHO trigger " << static_cast<uint32_t>(m_config.triggerType)
+                                       << " needs a time-to-exit estimator, which was not "
+                                          "supplied. Call NtnChoHelper::SetupConstellation() "
+                                          "before CreateChoAlgorithm(), or select a trigger "
+                                          "that runs on measurements alone.");
+    }
+
     for (auto& [cellId, cand] : m_candidates)
     {
         // The serving cell is tracked for hysteresis/outage prediction but is
@@ -544,6 +749,24 @@ NtnChoAlgorithm::EvaluateConditions()
         if (m_config.triggerType == TRIGGER_TRAJECTORY_PREDICTIVE)
         {
             EvaluateTrajectoryPredictive(cand);
+            m_candidateEvalTrace(cellId, cand.sinr_dB, cand.tte, cand.admitted);
+            if (cand.admitted && !m_admitCallback.IsNull())
+            {
+                m_admitCallback(cellId, cand.sinr_dB, cand.tte);
+            }
+            continue;
+        }
+        // CHO-14: the beam-dwell trigger had no dispatch arm at all.
+        //
+        // TRIGGER_TIME_BASED matched none of the branches here, fell through to
+        // the D1 path, and then matched none of the four arms there either, so
+        // cand.admitted was never set true and SelectBestCandidate - which
+        // requires admitted - returned INVALID_CELL_ID forever. A configured
+        // trigger that can never fire is worse than an absent one: the scenario
+        // runs, reports no handovers, and looks like a mobility result.
+        if (m_config.triggerType == TRIGGER_TIME_BASED)
+        {
+            EvaluateBeamDwell(cand);
             m_candidateEvalTrace(cellId, cand.sinr_dB, cand.tte, cand.admitted);
             if (cand.admitted && !m_admitCallback.IsNull())
             {
@@ -657,6 +880,23 @@ NtnChoAlgorithm::SelectBestCandidate() const
     // ================================================================
 
     // ---- Novel 6G triggers have their own selection rules ----
+    // CHO-14: the dwell trigger needs one too. The default rule below admits on
+    // `admitted && d1Met && ...`, and the dwell trigger does not use D1 at all,
+    // so a candidate it admitted would still be refused here and the trigger
+    // would remain unable to fire even with its evaluation arm in place.
+    if (m_config.triggerType == TRIGGER_TIME_BASED)
+    {
+        // Best available beam among those the dwell trigger admitted.
+        const CandidateInfo* bestDwell = nullptr;
+        for (const auto& [cellId, info] : m_candidates)
+        {
+            if (info.admitted && (!bestDwell || info.sinr_dB > bestDwell->sinr_dB))
+            {
+                bestDwell = &info;
+            }
+        }
+        return bestDwell ? bestDwell->cellId : INVALID_CELL_ID;
+    }
     if (m_config.triggerType == TRIGGER_LTM_CONDITIONAL)
     {
         // LTM: fastest-quality cell — max L1-filtered SINR among admitted.
@@ -749,6 +989,19 @@ NtnChoAlgorithm::SelectBestCandidate() const
     return best->cellId;
 }
 
+void
+NtnChoAlgorithm::SetCandidateStateForTest(uint16_t cellId, Time tte, bool admitted, bool d1Met)
+{
+    auto it = m_candidates.find(cellId);
+    if (it == m_candidates.end())
+    {
+        return;
+    }
+    it->second.tte = tte;
+    it->second.admitted = admitted;
+    it->second.d1Met = d1Met;
+}
+
 uint16_t
 NtnChoAlgorithm::SelectBaselineA3(double servingSinr_dB) const
 {
@@ -834,26 +1087,63 @@ NtnChoAlgorithm::ExecuteHandover(uint16_t targetCellId)
     {
         m_mechStats.lastPreCompTaUs =
             2.0 * targetIt->second.slantRangeM / 299792458.0 * 1e6; // round-trip TA
+        // CHO-10: a RACH-less execution crosses the air interface zero times
+        // for random access, which is the whole point of pre-compensating the
+        // TA from ephemeris and GNSS (TS 38.821 section 6.3.3).
+        m_mechStats.lastRachTraversals = 0;
+        m_mechStats.lastRachPropagationMs = 0.0;
         ++m_mechStats.rachLessExecutions;
+        // CHO-12: hand the pre-compensation to whoever owns timing advance.
+        // Without this the value stopped in a stats struct and RACH-less
+        // changed no transmit timing anywhere.
+        if (!m_preCompSink.IsNull())
+        {
+            const Time rtt = MicroSeconds(static_cast<int64_t>(m_mechStats.lastPreCompTaUs));
+            // Fully pre-compensated: the UE applies the whole round trip, so
+            // the gNB measures no residual. That is what skipping the RACH
+            // rests on.
+            m_preCompSink(rtt, rtt);
+        }
     }
     else
     {
-        // Slant-dependent RACH cost: the 4-step RACH pays at least one slant
-        // round-trip plus processing; the constant rachDuration misprices it
-        // across a LEO pass (slant RTT varies by several ms). Fall back to
-        // the constant only when the target's slant range is unknown.
+        // CHO-10. Slant-dependent RACH cost. This used to charge 2*slant/c,
+        // a single round trip, for a four-message procedure. TS 38.321
+        // section 5.1 contention-based random access is msg1 preamble, msg2
+        // random-access response, msg3 scheduled transmission and msg4
+        // contention resolution: four one-way traversals, or two slant round
+        // trips, plus the RAR window and processing. One round trip
+        // under-counted every handover by a full slant RTT, roughly 10 ms at
+        // 1500 km, which is the same order as the interruption being reported.
+        //
+        // Fall back to the constant only when the target's slant is unknown.
         if (haveSlant)
         {
-            const double rachMs =
-                2.0 * targetIt->second.slantRangeM / 299792458.0 * 1e3 +
-                m_config.rachProcessingDelay.GetMilliSeconds();
+            const double oneWayMs = targetIt->second.slantRangeM / 299792458.0 * 1e3;
+            const double propMs =
+                static_cast<double>(m_config.rachOneWayTraversals) * oneWayMs;
+            const double rachMs = propMs +
+                                  m_config.rachResponseWindow.GetMilliSeconds() +
+                                  m_config.rachProcessingDelay.GetMilliSeconds();
             interruptionMs += rachMs;
+            m_mechStats.lastRachTraversals = m_config.rachOneWayTraversals;
+            m_mechStats.lastRachPropagationMs = propMs;
         }
         else
         {
             interruptionMs += m_config.rachDuration.GetMilliSeconds();
+            m_mechStats.lastRachTraversals = 0;
+            m_mechStats.lastRachPropagationMs = 0.0;
         }
         ++m_mechStats.rachExecutions;
+        // CHO-12: the un-compensated case, reported so a consumer sees the
+        // difference. The UE applies nothing, so the whole round trip is
+        // residual - which is precisely why the RACH has to be paid.
+        if (!m_preCompSink.IsNull() && haveSlant)
+        {
+            const double rttUs = 2.0 * targetIt->second.slantRangeM / 299792458.0 * 1e6;
+            m_preCompSink(MicroSeconds(static_cast<int64_t>(rttUs)), Time());
+        }
     }
     if (isLtm)
     {
@@ -945,6 +1235,17 @@ NtnChoAlgorithm::NotifyHandoverComplete(uint16_t cellId, bool success)
     // event. Rel-17 CHO keeps prepared candidates across an execution
     // (attemptCondReconfig), so drop only the cell we just moved TO (it is now
     // the serving cell, not a candidate) and keep the rest armed.
+    // CHO-4: capture the new serving cell's geometry BEFORE dropping it from
+    // the candidate map, so the triggers that compare against serving keep
+    // working for the rest of the run.
+    {
+        auto newServing = m_candidates.find(cellId);
+        if (newServing != m_candidates.end())
+        {
+            m_servingState = newServing->second;
+            m_haveServingState = true;
+        }
+    }
     m_candidates.erase(cellId);
     TransitionState(CHO_IDLE);
 }
@@ -1027,13 +1328,59 @@ NtnChoAlgorithm::DistanceToMovingReference(const CandidateInfo& cand) const
     {
         return -1.0;
     }
-    auto snap = m_orbitPredictor->GetBeamSnapshot(cand.satId, cand.beamId, m_uePosition);
+    // CHO-12: NTN-NTN candidates reference the target SATELLITE, not its
+    // ground beam centre. Resolving through the beam snapshot for a
+    // satellite-to-satellite handover measures the wrong distance entirely -
+    // it is the UE's offset from a ground footprint, which for a spaceborne
+    // terminal is not the quantity the D2 thresholds are about.
+    GeoCoordinate reference;
+    if (cand.referenceKind == CandidateInfo::ReferenceKind::SatelliteEphemeris)
+    {
+        if (!m_orbitPredictor->ResolveSatPosition(cand.satId, reference))
+        {
+            return -1.0; // unknown satellite: say so rather than fall back
+        }
+    }
+    else
+    {
+        reference = m_orbitPredictor->GetBeamSnapshot(cand.satId, cand.beamId, m_uePosition)
+                        .beamCenter;
+    }
     const Vector ueCart = m_uePosition.ToVector();
-    const Vector refCart = snap.beamCenter.ToVector();
+    const Vector refCart = reference.ToVector();
     const double dx = ueCart.x - refCart.x;
     const double dy = ueCart.y - refCart.y;
     const double dz = ueCart.z - refCart.z;
     return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+double
+NtnChoAlgorithm::DistanceToMovingReferenceForTest(uint16_t cellId) const
+{
+    auto it = m_candidates.find(cellId);
+    return it == m_candidates.end() ? -1.0 : DistanceToMovingReference(it->second);
+}
+
+bool
+NtnChoAlgorithm::SetCandidateReferenceIsSatellite(uint16_t cellId, bool isSatellite)
+{
+    auto it = m_candidates.find(cellId);
+    if (it == m_candidates.end())
+    {
+        return false;
+    }
+    it->second.referenceKind = isSatellite
+                                   ? CandidateInfo::ReferenceKind::SatelliteEphemeris
+                                   : CandidateInfo::ReferenceKind::GroundBeamCentre;
+    return true;
+}
+
+bool
+NtnChoAlgorithm::GetCandidateReferenceIsSatellite(uint16_t cellId) const
+{
+    auto it = m_candidates.find(cellId);
+    return it != m_candidates.end() &&
+           it->second.referenceKind == CandidateInfo::ReferenceKind::SatelliteEphemeris;
 }
 
 void

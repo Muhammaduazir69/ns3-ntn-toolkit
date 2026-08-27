@@ -208,7 +208,14 @@ class NtnChoHelper : public Object
 
   private:
     // Internal callback handlers for trace collection
+  public:
+    /// CHO-17: public so the trace-row shape can be tested. This is the
+    /// execution half of the handover trace; the outcome half is
+    /// RecordHandoverOutcome(), and the two used to write incompatible rows
+    /// into one file under a single header.
     void OnHandoverExecuted(uint16_t source, uint16_t target, Time tos);
+
+  private:
     void OnHandoverOutcome(uint16_t cellId, bool success, std::string reason);
     void OnTteComputed(uint32_t satId, uint32_t beamId, Time tte, double gain);
 

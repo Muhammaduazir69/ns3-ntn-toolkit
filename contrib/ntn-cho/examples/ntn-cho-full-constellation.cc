@@ -83,6 +83,9 @@ namespace
 {
 // ---- Globals for the per-second CHO/measurement tick on the real queue ----
 NtnRealStackHelper* g_rs = nullptr;
+// CHO-3: handover outcomes as reported by the RRC, not asserted by the model.
+// GetHandoverCount() counts NrGnbRrc HandoverEndOk completions.
+uint32_t g_hoCompletionsSeen = 0;
 Ptr<NtnChoAlgorithm> g_cho;
 Ptr<NtnChoHelper> g_choHelper;
 Ptr<NtnOrbitPredictor> g_orbit;
@@ -94,6 +97,7 @@ Ptr<Sgp4MobilityModel> g_servSat;
 
 std::string g_algorithm = "tte-aware";
 double g_qualityTh = -3.0;
+double g_leoAltM = 780000.0; // CHO-2b: shell altitude, for the elevation-derived gain threshold
 double g_tteMinimum = 20.0;
 double g_simTime = 120.0;
 double g_dt = 1.0;
@@ -211,8 +215,43 @@ ChoTick()
         const Vector cPos = g_candSats[k]->GetPosition();
         const double candElev = ntngeo::ElevationDeg(u, cPos);
         const double candSlant = ntngeo::SlantRangeM(u, cPos);
-        const double candSinr =
-            servSinr + 20.0 * std::log10(servSlant / std::max(1.0, candSlant));
+        // CHO-6 FIX (2026-08-24): use the candidate cell's OWN measured SINR
+        // when the radio has one.
+        //
+        // This used to be a Friis extrapolation from the serving cell,
+        // servSinr + 20*log10(servSlant/candSlant), which was the only option
+        // while the candidates had no radio at all. It carries the serving
+        // cell's fortunes into every candidate: when the serving link degrades
+        // late in a pass, every candidate is scaled down with it and none can
+        // ever look better, so the handover the scenario exists to study cannot
+        // trigger. The candidates are real gNBs now, so ask the measured plane
+        // and keep the extrapolation only as the fallback for a cell the UE has
+        // not yet measured.
+        // Order of preference: the candidate's own measured SINR if the UE has
+        // ever been served by it, then the neighbour RSRP the UE actually
+        // reported for it (TS 38.331 measResults, which is what a real network
+        // ranks candidates on), then the Friis extrapolation as a last resort.
+        const double measuredCandSinr = g_rs->GetCellMeanSinrDb(g_candCellIds[k]);
+        const double reportedRsrp = g_rs->GetNeighbourRsrpDbm(g_candCellIds[k]);
+        double candSinr;
+        if (!std::isnan(measuredCandSinr))
+        {
+            candSinr = measuredCandSinr;
+        }
+        else if (!std::isnan(reportedRsrp))
+        {
+            // Reported RSRP is an absolute power, not an SINR. Referencing it
+            // to the serving cell's own reported RSRP gives the RELATIVE
+            // advantage of the candidate, which is exactly what an A3-style
+            // comparison needs, and applying that offset to the measured
+            // serving SINR keeps the result on the SINR scale the triggers use.
+            const double servRsrp = g_rs->GetNeighbourRsrpDbm(g_servingCellId);
+            candSinr = std::isnan(servRsrp) ? servSinr : servSinr + (reportedRsrp - servRsrp);
+        }
+        else
+        {
+            candSinr = servSinr + 20.0 * std::log10(servSlant / std::max(1.0, candSlant));
+        }
         const double candGain = std::max(-20.0, (candElev - 45.0) / 5.0);
         g_cho->UpdateMeasurement(g_candCellIds[k], candSinr, candGain);
         g_cho->UpdateCandidateSlantRange(g_candCellIds[k], candSlant);
@@ -248,11 +287,30 @@ ChoTick()
     std::map<uint16_t, double> tteByCell;
     if (decisionTick && g_tte && !beamInfos.empty())
     {
-        // Auxiliary TTE oracle runs at the fixed geo-33E reference position
-        // (well-posed pattern geometry); see kAuxRefPos. Offline/auxiliary
-        // only — NOT a headline geometry/SINR source.
-        auto tteResults = g_tte->ComputeBatchTte(kAuxRefPos, Vector(0, 0, 0), beamInfos,
-                                                 g_qualityTh);
+        // CHO-2 FIX (2026-08-24): compute the time-to-exit for the REAL
+        // terminal, not for a fixed reference point.
+        //
+        // This used to run at kAuxRefPos, a stationary coordinate chosen so the
+        // GEO-authored antenna patterns would be well posed. With those
+        // patterns replaced by the analytic beam above, that point is simply
+        // somewhere the serving satellite does not illuminate, so every
+        // time-to-exit was zero: the oracle reported the exit time of a
+        // terminal that was never in the beam. Use the UE's own position and
+        // velocity, which is what a time-to-exit is defined against.
+        double ueLatT = 0.0;
+        double ueLonT = 0.0;
+        double ueAltT = 0.0;
+        g_ueModels[0]->GetGeodetic(ueLatT, ueLonT, ueAltT);
+        const GeoCoordinate ueGeoNow(ueLatT, ueLonT, ueAltT);
+        // CHO-2b: the threshold must be on the quantity the search examines,
+        // which is antenna gain. g_qualityTh is a SINR threshold (default
+        // -3 dB); against a 26 to 29 dB steered-beam gain it can never be
+        // crossed, so every time-to-exit saturated at the prediction horizon.
+        // Derive it from the TR 38.821 10-degree cell edge instead.
+        const double tteGainTh =
+            g_orbit->GainThresholdForMinElevationDb(/*minElevDeg=*/10.0, g_leoAltM);
+        auto tteResults = g_tte->ComputeBatchTte(ueGeoNow, g_ueModels[0]->GetVelocity(),
+                                                 beamInfos, tteGainTh);
         for (const auto& r : tteResults)
         {
             tteByCell[r.cellId] = r.tte.GetSeconds();
@@ -341,7 +399,19 @@ ChoTick()
         ++g_totalHos;
         g_cho->ExecuteHandover(chosen);
         const auto st = g_cho->GetMechanismStats();
-        const bool success = true; // real state machine executed the HO
+        // CHO-3 FIX (2026-08-24): ask the radio whether the handover happened.
+        //
+        // This used to read `const bool success = true; // real state machine
+        // executed the HO`, so g_failedHos could never increment and the
+        // reported success rate was 100 percent by construction, whatever the
+        // link did. The candidates are real gNBs now, the CHO decision drives a
+        // genuine reconfiguration-with-sync through TriggerHandover, and the
+        // outcome is the radio's word: the RRC confirms completion through
+        // HandoverEndOk, which is what g_rrcConfirmed counts.
+        const bool requested = g_rs->TriggerHandover(0, chosen);
+        const uint32_t completions = g_rs->GetHandoverCount();
+        const bool success = requested && (completions > g_hoCompletionsSeen);
+        g_hoCompletionsSeen = completions;
         const double tos = (g_lastHoTime >= 0.0) ? (t - g_lastHoTime) : t;
         const bool isPP =
             (g_lastHoTime >= 0.0 && chosen == g_lastSourceCell && tos < 10.0);
@@ -538,6 +608,13 @@ main(int argc, char* argv[])
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     uint32_t numCandidates = 2;
     uint32_t satsPerPlane = 80;
+    // Reproducibility (OJCOMS revision): the Monte-Carlo campaign behind the
+    // paper's CHO KPI table used a 6 x 11 = 66-satellite Walker shell at
+    // 86.4 deg. Those two degrees of freedom were previously hard-coded, so the
+    // campaign could not be rebuilt from the committed code. Defaults preserve
+    // the current single-plane behavior; pass the flags to reproduce the paper.
+    uint32_t numPlanes = 1;
+    double inclinationDeg = 53.0;
     double tteMinSec = 3.0;
     std::string outputDir = "ntn-cho-output";
     uint32_t rngRun = 1;
@@ -562,6 +639,8 @@ main(int argc, char* argv[])
     cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("numCandidates", "Candidate satellite cells", numCandidates);
     cmd.AddValue("satsPerPlane", "Walker in-plane satellites (spacing)", satsPerPlane);
+    cmd.AddValue("numPlanes", "Walker orbital planes", numPlanes);
+    cmd.AddValue("inclinationDeg", "Walker inclination (deg)", inclinationDeg);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("rngRun", "RNG run", rngRun);
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON trace output path (empty = off)", netSimOut);
@@ -587,6 +666,7 @@ main(int argc, char* argv[])
 
     g_algorithm = algorithm;
     g_qualityTh = qualityTh;
+    g_leoAltM = altitudeKm * 1000.0;
     g_tteMinimum = tteMinimum;
     g_simTime = simTime;
     g_d1Threshold = d1Threshold;
@@ -612,12 +692,21 @@ main(int argc, char* argv[])
     // ---- Real Walker-Delta orbits (Kepler+J2-secular; Vallado SGP4 via
     //      SetUseVallado): serving + candidate shell ----
     WalkerConfig wcfg;
-    wcfg.num_planes = 1;
+    wcfg.num_planes = numPlanes;
     wcfg.total_sats = satsPerPlane;
     wcfg.altitude_km = altitudeKm;
-    wcfg.inclination_deg = 53.0;
+    wcfg.inclination_deg = inclinationDeg;
     wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01
     const auto elements = WalkerConstellation::BuildDelta(wcfg);
+    // BuildDelta returns an EMPTY vector when the shell is not expressible (the
+    // total is not divisible by the plane count, or either is zero). Indexing it
+    // below then segfaults, which is what happens if --satsPerPlane is read as a
+    // per-plane count rather than the shell total. Fail with a usable message.
+    NS_ABORT_MSG_IF(elements.empty(),
+                    "Walker shell not expressible: total_sats="
+                        << wcfg.total_sats << " is not divisible by num_planes="
+                        << wcfg.num_planes
+                        << ". Note that --satsPerPlane sets the SHELL TOTAL (T in T/P/F).");
 
     g_servSat = CreateObject<Sgp4MobilityModel>();
     g_servSat->SetElements(elements[0]);
@@ -628,6 +717,12 @@ main(int argc, char* argv[])
     servSatNode.Get(0)->AggregateObject(g_servSat);
 
     // Candidate cells = in-plane neighbours (genuinely approaching/receding).
+    //
+    // CHO-3 FIX (2026-08-24): the candidates are REAL gNBs now. They used to be
+    // bare mobility models with no Node, no NetDevice and no PHY, so a handover
+    // to one of them could not actuate anything. That is why the outcome below
+    // was written as `const bool success = true`: there was no radio to ask.
+    NodeContainer candSatNodes;
     for (uint32_t k = 0; k < numCandidates; ++k)
     {
         const uint32_t idx = 1 + k; // neighbours after the serving sat
@@ -635,6 +730,10 @@ main(int argc, char* argv[])
         c->SetElements(elements[idx % satsPerPlane]);
         g_candSats.push_back(c);
         g_candSatIds.push_back(idx);
+
+        Ptr<Node> cn = CreateObject<Node>();
+        cn->AggregateObject(c);
+        candSatNodes.Add(cn);
     }
 
     // ---- TR 38.811 UEs under the serving sat's t=0 sub-point ----
@@ -659,8 +758,27 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-full-constellation_" + algorithm);
     rs.SetCarrierFrequencyHz(carrierFreqGhz * 1e9);
-    rs.SetSatEirpDbm(satTxPower);
-    rs.Build(servSatNode, ueNodes);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satTxPower);
+    // CHO-3: hand every satellite to the radio helper so the candidates are
+    // genuine neighbour cells and a CHO decision can drive a real X2
+    // reconfiguration-with-sync whose success the RRC reports.
+    NodeContainer gnbSats;
+    gnbSats.Add(servSatNode.Get(0));
+    for (uint32_t k = 0; k < candSatNodes.GetN(); ++k)
+    {
+        gnbSats.Add(candSatNodes.Get(k));
+    }
+    rs.SetHandover(true, /*hysteresisDb=*/6.0, MilliSeconds(1024));
+    // With several real cells the vendored nr v3.3 scheduler will otherwise hit
+    // "Cannot TX while RX": its uplink grant falls due before the downlink has
+    // finished propagating over the slant. Consuming the SIB19 K_offset pushes
+    // the grant past the round trip, which is exactly what TS 38.213 4.2
+    // defines it for.
+    rs.SetKOffsetConsumption(true);
+    rs.Build(gnbSats, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(1.0),
                       Seconds(simTime - 0.5));
     rs.EnableAiFlowMonitor(outputDir + "/ntn-cho-full-constellation");
@@ -740,6 +858,42 @@ main(int argc, char* argv[])
         g_choHelper->SetupConstellation(auxSats, agp);
         g_orbit = g_choHelper->GetOrbitPredictor();
         g_tte = g_choHelper->GetTteEstimator();
+
+        // CHO-2 FIX (2026-08-24): the aux satellites above are STATIONARY GEO
+        // stand-ins, needed only because the geo-33E antenna patterns are
+        // authored for a GEO sub-point and the pattern container demands an
+        // SNS3 SatMobilityModel, which the toolkit's own SGP4 model is not.
+        // They report zero velocity, so every forward propagation returned the
+        // present position: the time-to-exit was a constant for every candidate
+        // at every tick, and the "TTE oracle" predicted nothing at all while
+        // the scenario reported its output as a prediction.
+        //
+        // Register the REAL, moving satellites as the kinematics source. Beam
+        // geometry still comes from the GEO-referenced patterns; only position
+        // and velocity now come from the orbits the scenario actually flies.
+        if (g_orbit)
+        {
+            g_orbit->SetKinematicsSource(0, g_servSat);
+            for (size_t k = 0; k < g_candSats.size(); ++k)
+            {
+                g_orbit->SetKinematicsSource(static_cast<uint32_t>(k + 1), g_candSats[k]);
+            }
+            // The geo-33E pattern grid is authored for a GEO sub-point, so
+            // evaluating it at a LEO position returns NaN and floors every gain.
+            // Use the analytic TR 38.811 6.4.1 beam instead, which is coherent
+            // at this altitude. Peak gain and beamwidth are the TR 38.821 Set-1
+            // S-band figures the rest of the toolkit calibrates against.
+            g_orbit->SetGeometricBeam(/*peakGainDbi=*/30.0, /*beamwidth3dbDeg=*/4.4127);
+            // The service beam tracks the terminal, as everywhere else in the
+            // toolkit, so exit is driven by scan loss toward the horizon.
+            g_orbit->SetSteeredBeam(true);
+
+            const uint32_t frozen = g_orbit->CountFrozenSatellites();
+            NS_ABORT_MSG_IF(frozen > 0,
+                            "TTE oracle still has " << frozen
+                                                    << " satellite(s) with zero velocity; every "
+                                                       "time-to-exit they produce is a constant");
+        }
         g_cho->SetOrbitPredictor(g_orbit);
         g_cho->SetTteEstimator(g_tte);
         auxReady = (g_orbit != nullptr && g_tte != nullptr);
@@ -793,7 +947,14 @@ main(int argc, char* argv[])
     g_cho->AddCandidateCell(g_servingCellId, /*satId=*/0, servBeamId);
     for (size_t k = 0; k < g_candSats.size(); ++k)
     {
-        const uint16_t cid = g_servingCellId + 100 + static_cast<uint16_t>(k);
+        // CHO-3 FIX (2026-08-24): the REAL cell id of the candidate gNB, not
+        // `servingCellId + 100 + k`. That synthetic id named no cell in the
+        // simulation, so a handover to it could never be actuated and the
+        // outcome had to be asserted rather than observed. The candidates are
+        // real gNBs now, so ask the radio helper what they are called.
+        const uint16_t cid = g_rs->GetGnbCellId(static_cast<uint32_t>(k + 1));
+        NS_ABORT_MSG_IF(cid == 0 || cid == g_servingCellId,
+                        "candidate " << k << " has no distinct real cell id");
         g_candCellIds.push_back(cid);
         // CHO candidate satId = aux predictor satId (k+1) so the algorithm's
         // D1/D2/elevation predictor lookups resolve to a valid aux beam.

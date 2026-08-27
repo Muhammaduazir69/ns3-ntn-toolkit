@@ -169,9 +169,18 @@ NtnTteEstimator::ComputeTte(GeoCoordinate uePosition,
     {
         // Beam covers UE for the entire prediction window
         result.tte = m_maxPredictionWindow;
-        result.exitGain_dB = m_orbitPredictor->ComputeBeamGain(
-            satId, beamId,
-            ProjectUePosition(uePosition, ueVelocity, m_maxPredictionWindow));
+        // CHO-1 (residual): this projected the UE to the horizon but evaluated
+        // the gain with ComputeBeamGain, which places the satellite at
+        // Simulator::Now(). The terminal moved and the satellite did not, which
+        // is the frozen-satellite defect corrected elsewhere in this file and
+        // missed here. GetBeamSnapshotAtTime advances both.
+        result.exitGain_dB =
+            m_orbitPredictor
+                ->GetBeamSnapshotAtTime(
+                    satId, beamId,
+                    ProjectUePosition(uePosition, ueVelocity, m_maxPredictionWindow),
+                    m_maxPredictionWindow)
+                .gainAtUe_dB;
         result.isValid = true;
         NS_LOG_DEBUG("No exit within prediction window. TTE >= "
                      << m_maxPredictionWindow.GetSeconds() << "s");
@@ -180,7 +189,8 @@ NtnTteEstimator::ComputeTte(GeoCoordinate uePosition,
     }
 
     // Step 2: Binary search for precise exit time between tGood and tBad
-    Time preciseExit = FindBeamExitTime(uePosition, satId, beamId, gainThreshold_dB, tGood, tBad);
+    Time preciseExit =
+        FindBeamExitTime(uePosition, ueVelocity, satId, beamId, gainThreshold_dB, tGood, tBad);
 
     result.tte = preciseExit;
     result.exitGain_dB = gainThreshold_dB; // By definition at the exit point
@@ -304,6 +314,7 @@ NtnTteEstimator::ComputeTteDistance(GeoCoordinate uePosition,
 
 Time
 NtnTteEstimator::FindBeamExitTime(GeoCoordinate uePos,
+                                   Vector ueVelocity,
                                    uint32_t satId,
                                    uint32_t beamId,
                                    double threshold_dB,
@@ -328,7 +339,13 @@ NtnTteEstimator::FindBeamExitTime(GeoCoordinate uePos,
         // crossed the threshold and the refinement collapsed to the upper
         // bracket (tBad), silently returning the coarse-grid granularity instead
         // of a refined exit time. Evaluating at tMid makes the search real.
-        double gain = m_orbitPredictor->GetBeamSnapshotAtTime(satId, beamId, uePos, tMid).gainAtUe_dB;
+        // CHO-13: project the UE to tMid too. Propagating only the satellite
+        // refined against a geometry that never existed: the coarse search had
+        // the terminal moving, the refinement had it standing still, and the
+        // bracket the refinement was handed came from the moving search.
+        const GeoCoordinate ueAtMid = ProjectUePosition(uePos, ueVelocity, tMid);
+        double gain =
+            m_orbitPredictor->GetBeamSnapshotAtTime(satId, beamId, ueAtMid, tMid).gainAtUe_dB;
 
         if (gain >= threshold_dB)
         {
@@ -391,90 +408,62 @@ NtnTteEstimator::ProjectUePosition(GeoCoordinate uePos, Vector velocity, Time dt
         return uePos; // Static UE
     }
 
-    double dtSec = dt.GetSeconds();
+    const double dtSec = dt.GetSeconds();
 
-    // Approximate: convert velocity (m/s) to lat/lon displacement
-    // At the equator, 1 degree latitude ~ 111,320 m
-    // 1 degree longitude ~ 111,320 * cos(latitude) m
-    double latRad = uePos.GetLatitude() * M_PI / 180.0;
-    double metersPerDegLat = 111320.0;
-    double metersPerDegLon = 111320.0 * std::cos(latRad);
+    // CHO-13: the velocity arrives in ECEF, so it must be rotated into the
+    // local horizon before it can be read as north/east rates.
+    //
+    // This used to do `dLat = velocity.x*dt/111320` and
+    // `dLon = velocity.y*dt/(111320*cos(lat))`, i.e. it treated the vector's x
+    // as a NORTHWARD rate and y as an EASTWARD one. Every caller supplies ECEF:
+    // NtnTr38811MobilityModel reports ECEF, and NtnChoAlgorithm stores whatever
+    // StartMonitoring was handed into m_ueVelocity. In ECEF, x and y are axes
+    // through the Greenwich meridian and 90 degrees east of it, so the old
+    // mapping was only correct for a UE at (0, 0) heading a very specific way,
+    // and elsewhere it moved the projected UE in the wrong direction entirely.
+    //
+    // ECEF -> ENU at the UE's geodetic position; the same rotation used
+    // elsewhere in the toolkit.
+    const double latRad = uePos.GetLatitude() * M_PI / 180.0;
+    const double lonRad = uePos.GetLongitude() * M_PI / 180.0;
+    const double sinLat = std::sin(latRad);
+    const double cosLat = std::cos(latRad);
+    const double sinLon = std::sin(lonRad);
+    const double cosLon = std::cos(lonRad);
 
-    double dLat = (velocity.x * dtSec) / metersPerDegLat;
-    double dLon = (velocity.y * dtSec) / metersPerDegLon;
+    const double vEast = -sinLon * velocity.x + cosLon * velocity.y;
+    const double vNorth = -sinLat * cosLon * velocity.x - sinLat * sinLon * velocity.y +
+                          cosLat * velocity.z;
+    const double vUp = cosLat * cosLon * velocity.x + cosLat * sinLon * velocity.y +
+                       sinLat * velocity.z;
+
+    const double metersPerDegLat = 111320.0;
+    // Guard the pole, where a metre east is an unbounded number of degrees.
+    const double metersPerDegLon = 111320.0 * std::max(1e-6, cosLat);
+
+    const double dLat = (vNorth * dtSec) / metersPerDegLat;
+    const double dLon = (vEast * dtSec) / metersPerDegLon;
+    const double dAlt = vUp * dtSec;
 
     return GeoCoordinate(uePos.GetLatitude() + dLat,
                          uePos.GetLongitude() + dLon,
-                         uePos.GetAltitude());
+                         uePos.GetAltitude() + dAlt);
 }
 
-double
-NtnTteEstimator::ComputeThzBeamTte(double satAlt_km,
-                                    double satVelocity_km_s,
-                                    double beamwidth_deg,
-                                    double pointingError_deg,
-                                    double elevationDeg) const
-{
-    NS_LOG_FUNCTION(this << satAlt_km << satVelocity_km_s << beamwidth_deg
-                         << pointingError_deg << elevationDeg);
+// CHO-15: the dead duplicate THz TTE pair used to live here.
+//
+// ComputeThzBeamTte() and ComputeThzEffectiveCoverage_km() were private, and
+// the only call to either was the first calling the second. Nothing outside
+// this file ever reached them. The live implementation is
+// NtnChoAlgorithm::ComputeThzBeamTte(), which is what every scenario actually
+// runs.
+//
+// They are deleted rather than wired up, because the dead copy was also the
+// WRONG one: it took the ground-track speed as satVelocity * cos(nadir), which
+// is the line-of-sight projection of the orbital velocity and not the speed of
+// the sub-satellite point. The live version uses v_orb * R_e / r, the correct
+// ground-track relation. Keeping two implementations of one quantity is how
+// they drift; keeping the incorrect one as a spare is worse.
 
-    // Effective coverage diameter accounting for pointing error
-    double effectiveDiameter_km = ComputeThzEffectiveCoverage_km(
-        satAlt_km, beamwidth_deg, pointingError_deg);
-
-    if (effectiveDiameter_km <= 0.0)
-    {
-        NS_LOG_DEBUG("THz effective coverage is zero, TTE=0");
-        return 0.0;
-    }
-
-    // Ground track velocity component
-    // elevation_from_nadir = 90 - elevationDeg
-    double nadirAngleRad = (90.0 - elevationDeg) * M_PI / 180.0;
-    double groundTrackVelocity_km_s = satVelocity_km_s * std::cos(nadirAngleRad);
-
-    if (groundTrackVelocity_km_s <= 0.0)
-    {
-        NS_LOG_DEBUG("Ground track velocity is zero, TTE=maxWindow");
-        return m_maxPredictionWindow.GetSeconds();
-    }
-
-    double tte_s = effectiveDiameter_km / groundTrackVelocity_km_s;
-
-    NS_LOG_INFO("THz beam TTE: alt=" << satAlt_km << " km, beamwidth=" << beamwidth_deg
-                << " deg, pointErr=" << pointingError_deg << " deg, elev=" << elevationDeg
-                << " deg -> coverage=" << effectiveDiameter_km << " km, v_ground="
-                << groundTrackVelocity_km_s << " km/s, TTE=" << tte_s << " s");
-    return tte_s;
-}
-
-double
-NtnTteEstimator::ComputeThzEffectiveCoverage_km(double satAlt_km,
-                                                  double beamwidth_deg,
-                                                  double pointingError_deg) const
-{
-    NS_LOG_FUNCTION(this << satAlt_km << beamwidth_deg << pointingError_deg);
-
-    static constexpr double DEG_TO_RAD = M_PI / 180.0;
-
-    // Coverage radius = altitude * tan(beamwidth/2)
-    double halfBeamRad = (beamwidth_deg / 2.0) * DEG_TO_RAD;
-    double radius_km = satAlt_km * std::tan(halfBeamRad);
-
-    // Reduce by pointing error factor
-    double errorFactor = 1.0 - pointingError_deg / beamwidth_deg;
-    if (errorFactor < 0.0)
-    {
-        errorFactor = 0.0;
-    }
-
-    double effectiveRadius_km = radius_km * errorFactor;
-    double effectiveDiameter_km = 2.0 * effectiveRadius_km;
-
-    NS_LOG_DEBUG("THz effective coverage: radius=" << radius_km << " km"
-                 << ", errorFactor=" << errorFactor
-                 << ", effective diameter=" << effectiveDiameter_km << " km");
-    return effectiveDiameter_km;
-}
 
 } // namespace ns3

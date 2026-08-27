@@ -32,6 +32,7 @@
 #ifndef NTN_TR38811_MOBILITY_MODEL_H
 #define NTN_TR38811_MOBILITY_MODEL_H
 
+#include "ns3/geocentric-constant-position-mobility-model.h"
 #include "ns3/mobility-model.h"
 #include "ns3/node-container.h"
 #include "ns3/nstime.h"
@@ -122,7 +123,13 @@ class NtnEnuProjectionMobilityModel : public MobilityModel
  * \brief 3GPP TR 38.811 §6.1.1.1 UE-class mobility as a real ns-3
  *        MobilityModel (ECEF frame, SGP4-compatible).
  */
-class NtnTr38811MobilityModel : public MobilityModel
+/// NT-03: derives from GeocentricConstantPositionMobilityModel for the same
+/// reason Sgp4MobilityModel does. ThreeGppChannelModel requires BOTH endpoints
+/// of a link to cast to that type before it will evaluate any TR 38.811 NTN
+/// scenario, so a geocentric satellite talking to a plain-MobilityModel terminal
+/// still aborts. The terminal keeps its own TR 38.811 motion; only the
+/// geographic view is added.
+class NtnTr38811MobilityModel : public GeocentricConstantPositionMobilityModel
 {
   public:
     static TypeId GetTypeId();
@@ -147,6 +154,11 @@ class NtnTr38811MobilityModel : public MobilityModel
     Vector DoGetPosition() const override;
     void DoSetPosition(const Vector& position) override;
     Vector DoGetVelocity() const override;
+
+    // NT-03: geographic view of the live terminal state, built from the model's
+    // own GetGeodetic rather than the constant the base class would store.
+    Vector DoGetGeographicPosition() const override;
+    Vector DoGetGeocentricPosition() const override;
 
     /// Advance the TR 38.811 motion state from m_lastUpdate to Simulator::Now().
     void Advance() const;

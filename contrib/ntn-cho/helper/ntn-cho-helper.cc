@@ -134,7 +134,23 @@ NtnChoHelper::EnableTraces(std::string outputDir)
     m_outputDir = outputDir;
 
     m_hoTraceFile.open(outputDir + "/ntn-cho-handovers.csv");
-    m_hoTraceFile << "Time_s,SourceCell,TargetCell,TimeOfStay_s,Success,Reason" << std::endl;
+    // CHO-17: one header, two writers, three different row shapes.
+    //
+    // The header declared six columns. RecordHandoverOutcome() wrote four
+    // (time, cellId, success, reason) and OnHandoverExecuted() wrote a
+    // different four (time, source, target, timeOfStay), interleaved into the
+    // same stream. Column 2 therefore meant "the cell an outcome refers to" on
+    // some rows and "the source cell of an executed handover" on others, and
+    // no row ever had six fields. Any reader parsing this file by column index
+    // got silent nonsense.
+    //
+    // Both events are kept, because they are genuinely different events: one
+    // records that a handover EXECUTED, the other that an attempt SUCCEEDED or
+    // FAILED and why. An Event column distinguishes them and every row now
+    // fills all seven columns, with "-" where a field does not apply to that
+    // event rather than a shifted row.
+    m_hoTraceFile << "Time_s,Event,SourceCell,TargetCell,TimeOfStay_s,Success,Reason"
+                  << std::endl;
 
     m_measurementTraceFile.open(outputDir + "/ntn-cho-measurements.csv");
     m_measurementTraceFile << "Time_s,SatId,BeamId,RSRP_dBm,SINR_dB,Elevation_deg,Range_km"
@@ -150,6 +166,31 @@ NtnChoHelper::RecordHandover(uint16_t sourceCellId, uint16_t targetCellId, Time 
     m_kpis.totalHandovers++;
     m_tosValues.push_back(timeOfStay);
 }
+
+namespace
+{
+/// CHO-17: a reason string containing a comma or a quote would split the row.
+/// RFC 4180 quoting, applied only when needed.
+std::string
+CsvEscape(const std::string& in)
+{
+    if (in.find_first_of(",\"\n\r") == std::string::npos)
+    {
+        return in;
+    }
+    std::string out = "\"";
+    for (char c : in)
+    {
+        if (c == '"')
+        {
+            out += '"';
+        }
+        out += c;
+    }
+    out += '"';
+    return out;
+}
+} // namespace
 
 void
 NtnChoHelper::RecordHandoverOutcome(uint16_t cellId, bool success, std::string reason)
@@ -169,11 +210,17 @@ NtnChoHelper::RecordHandoverOutcome(uint16_t cellId, bool success, std::string r
 
     if (m_tracesEnabled && m_hoTraceFile.is_open())
     {
+        // CHO-17: an outcome has no source/target pair and no time-of-stay;
+        // those columns are marked absent rather than left off, which is what
+        // shifted every following field.
         m_hoTraceFile << std::fixed << std::setprecision(3)
                       << Simulator::Now().GetSeconds() << ","
-                      << cellId << ","
+                      << "outcome,"
+                      << "-,"                       // SourceCell: not applicable
+                      << cellId << ","              // TargetCell: the cell this outcome is about
+                      << "-,"                       // TimeOfStay_s: not applicable
                       << (success ? "1" : "0") << ","
-                      << reason << std::endl;
+                      << CsvEscape(reason) << std::endl;
     }
 }
 
@@ -308,9 +355,15 @@ NtnChoHelper::OnHandoverExecuted(uint16_t source, uint16_t target, Time tos)
     RecordHandover(source, target, tos);
     if (m_tracesEnabled && m_hoTraceFile.is_open())
     {
-        m_hoTraceFile << Simulator::Now().GetSeconds() << ","
+        // CHO-17: an execution has no success/reason yet; the outcome row that
+        // follows carries those.
+        m_hoTraceFile << std::fixed << std::setprecision(3)
+                      << Simulator::Now().GetSeconds() << ","
+                      << "executed,"
                       << source << "," << target << ","
-                      << tos.GetSeconds() << std::endl;
+                      << tos.GetSeconds() << ","
+                      << "-,"                       // Success: reported by the outcome row
+                      << "-" << std::endl;          // Reason: likewise
     }
 }
 

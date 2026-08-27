@@ -42,6 +42,94 @@ namespace ns3
 class NtnOrbitPredictor : public Object
 {
   public:
+    /// CHO-1: two-body forward propagation of an ECEF state over \p dtS
+    /// seconds, accounting for the Earth's rotation.
+    ///
+    /// Replaces the first-order r + v*dt extrapolation this class used, whose
+    /// error reaches ~51 km at a 120 s horizon on a LEO shell, larger than a
+    /// service-beam footprint. Lifts the ECEF velocity into an inertial frame,
+    /// rotates the position about the orbit normal, and rotates back through
+    /// the Earth's turn. Exact for a circular orbit; the residual against real
+    /// SGP4 is the eccentricity and J2 term. Public and static so it can be
+    /// validated directly against an analytic orbit.
+    static Vector PropagateTwoBodyEcef(const Vector& rEcef, const Vector& vEcef, double dtS);
+
+    /// CHO-2: supply the real kinematics for a satellite.
+    ///
+    /// Initialize() takes SNS3 SatMobilityModel objects because the antenna
+    /// gain-pattern container needs them, but the toolkit's own SGP4 model
+    /// (ntncon::Sgp4MobilityModel) derives from plain ns3::MobilityModel and
+    /// cannot be passed there. Scenarios worked around that by handing the
+    /// predictor stationary GEO stand-ins, which report zero velocity: every
+    /// forward propagation then returned the present position, so the
+    /// time-to-exit was a constant for every candidate at every tick and the
+    /// "prediction" predicted nothing.
+    ///
+    /// Register the real moving model here and the predictor uses it for
+    /// position and velocity, keeping the SatMobilityModel only for beam
+    /// geometry. Velocity is what makes a prediction possible, so a source with
+    /// none is refused rather than silently accepted.
+    void SetKinematicsSource(uint32_t satId, Ptr<MobilityModel> mob);
+
+    /// CHO-2: use an analytic TR 38.811 Section 6.4.1 aperture beam instead of
+    /// the SNS3 antenna-gain-pattern grid.
+    ///
+    /// The shipped pattern sets are authored for a GEO sub-point. Evaluating
+    /// them at a LEO satellite position puts the terminal outside the sampled
+    /// grid, so the pattern returns NaN, the gain floors at -100 dB and every
+    /// predicted time-to-exit collapses to zero. That is not a beam model of a
+    /// LEO cell, it is a lookup miss. This computes the gain from the actual
+    /// off-nadir angle instead, which is coherent at any altitude.
+    ///
+    /// \param peakGainDbi boresight gain
+    /// \param beamwidth3dbDeg full 3 dB beamwidth
+    void SetGeometricBeam(double peakGainDbi, double beamwidth3dbDeg);
+
+    /// CHO-2: model the service beam as STEERED at the terminal rather than
+    /// fixed at nadir.
+    ///
+    /// A LEO service beam tracks its terminal, which is exactly why the
+    /// toolkit's own array-gain calibration measures an off-boresight angle of
+    /// zero for the steered case. Under a nadir-fixed beam the terminal sits
+    /// outside a few-degree footprint almost immediately and the time-to-exit
+    /// is zero everywhere, which describes the model rather than the network.
+    /// Steered, the gain falls through phased-array SCAN LOSS as the satellite
+    /// works its way toward the horizon, so beam exit becomes the
+    /// elevation-driven event it physically is.
+    ///
+    /// \param scanLossExponent cos^n scan-loss law; 1.2 is the usual planar-array value.
+    void SetSteeredBeam(bool steered, double scanLossExponent = 1.2);
+
+    /// CHO-2b: the beam gain, in dB, that corresponds to a terminal at
+    /// \p minElevDeg elevation seeing a satellite at \p satAltM.
+    ///
+    /// A time-to-exit needs a threshold on the quantity it searches, which is
+    /// antenna gain. Scenarios were passing their SINR quality threshold
+    /// instead, a different quantity on a different scale: against a 26 to
+    /// 29 dB steered-beam gain a -3 dB "threshold" can never be crossed, so
+    /// every time-to-exit saturated at the prediction horizon. Deriving the
+    /// threshold from the minimum usable elevation keeps it on the right scale
+    /// and ties it to a documented figure (TR 38.821 uses a 10 degree cell
+    /// edge) rather than to a number tuned until the output looked reasonable.
+    double GainThresholdForMinElevationDb(double minElevDeg, double satAltM) const;
+
+    /// True when the analytic beam is in use rather than the pattern grid.
+    bool UsingGeometricBeam() const { return m_geometricBeam; }
+
+    /// Configured boresight gain, in dBi. The analytic beam reports gain
+    /// RELATIVE to boresight, matching the SNS3 pattern convention, so this is
+    /// the figure to add when an absolute value is wanted.
+    double GetBeamPeakGainDbi() const { return m_beamPeakGainDbi; }
+
+    /// True when \p satId has a kinematics source reporting non-zero velocity,
+    /// i.e. forward propagation can actually move it.
+    bool HasUsableKinematics(uint32_t satId) const;
+
+    /// Number of registered satellites that cannot be propagated because they
+    /// report zero velocity. Non-zero means any TTE derived from this predictor
+    /// is a constant.
+    uint32_t CountFrozenSatellites() const;
+
     /**
      * \brief Information about a satellite beam at a point in time
      */
@@ -191,6 +279,19 @@ class NtnOrbitPredictor : public Object
      * \brief Get satellite mobility model
      */
     Ptr<SatMobilityModel> GetSatelliteMobility(uint32_t satId) const;
+    /// CHO-2: analytic TR 38.811 6.4.1 beam gain, used when SetGeometricBeam() was called.
+    double GeometricBeamGainDb(const GeoCoordinate& uePosition, const GeoCoordinate& satPosition) const;
+    /// CHO-2 follow-up: resolve a satellite position from the kinematics source
+    /// if one is registered, else from a SatMobilityModel. False when neither
+    /// knows the satellite, so callers decline instead of dereferencing null.
+    bool ResolveSatPosition(uint32_t satId, GeoCoordinate& out) const;
+    /// CHO-2: real kinematics per satellite, when supplied.
+    std::map<uint32_t, Ptr<MobilityModel>> m_kinematics;
+    bool m_geometricBeam{false};      ///< CHO-2: analytic beam instead of the pattern grid
+    double m_beamPeakGainDbi{30.0};   ///< CHO-2: boresight gain when analytic
+    double m_beam3dbDeg{4.4127};      ///< CHO-2: full 3 dB beamwidth when analytic
+    bool m_steeredBeam{false};        ///< CHO-2: boresight tracks the terminal
+    double m_scanLossExp{1.2};        ///< CHO-2: cos^n scan-loss exponent
 
   protected:
     void DoDispose() override;
