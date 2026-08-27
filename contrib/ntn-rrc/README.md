@@ -1,6 +1,6 @@
 <h1 align="center">ntn-rrc</h1>
 
-<p align="center"><strong>3GPP Rel-17 NR-NTN RRC procedures for ns-3.43: SIB19 ephemeris broadcast, timing advance, pass-aware DRX, and UE location reporting.</strong></p>
+<p align="center"><strong>3GPP Rel-17 NR-NTN RRC assistance information for ns-3.43: SIB19 ephemeris broadcast, timing advance, RAR-window sizing, pass-aware DRX, UE location reporting, and the TS 38.331 MeasurementReport message.</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg"/></a>
@@ -8,6 +8,23 @@
   <img src="https://img.shields.io/badge/3GPP-TS%2038.213%20%2F%20TS%2038.331%20%2F%20TS%2038.321-orange.svg"/>
   <img src="https://img.shields.io/badge/unit_tests-suite%20ntn--rrc-success.svg"/>
 </p>
+
+> **What this module is, precisely.** It supplies the NTN *assistance data* an NR-NTN cell
+> needs — ephemeris, timing advance, RAR-window sizing, DRX configuration, GNSS location
+> reporting — plus the TS 38.331 `MeasurementReport` message with TS 38.133 quantization. It is
+> **not** an RRC state machine: there is no `RRCSetup`, `RRCReconfiguration` or
+> `RRCReestablishment` here, and the vendored stacks run `UseIdealRrc=true`. The tagline used to
+> say "RRC procedures", which oversold it. The event machinery that decides *when* to report
+> (A3 offset, hysteresis, time-to-trigger, Rel-18 D2) lives in `ntn-cho`'s `NtnChoAlgorithm` and
+> is deliberately not duplicated here.
+>
+> Until v2.5.0 the examples printed a line and incremented a counter when a measured SINR crossed
+> a threshold, and called it an RRC measurement report. It had no `measId`, no quantization and no
+> recipient. They now build a real `NtnMeasurementReport`, quantize to the TS 38.133 reporting
+> levels, and serialise and parse it through `NtnMeasReportCodec` before counting it — so what the
+> summary reports is a message that survived a wire round trip. Optional quantities that were
+> never measured are reported **absent** rather than as level 0, which would show the bottom of
+> the reporting range as a measurement.
 
 > Part of **ns3-ntn-toolkit** — see the [toolkit repository](https://github.com/Muhammaduazir69/ns3-ntn-toolkit) for the full build, dependency, and module map, and [INSTALL.md](INSTALL.md) for this module's setup.
 

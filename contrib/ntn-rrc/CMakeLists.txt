@@ -1,5 +1,7 @@
 set(source_files
     model/ntn-timing-advance.cc
+    model/ntn-rach-window.cc
+    model/ntn-meas-report.cc
     model/ntn-sib19.cc
     model/ntn-ue-location-report.cc
     model/ntn-drx.cc
@@ -9,6 +11,8 @@ set(source_files
 set(header_files
     model/ntn-rrc-types.h
     model/ntn-timing-advance.h
+    model/ntn-rach-window.h
+    model/ntn-meas-report.h
     model/ntn-sib19.h
     model/ntn-ue-location-report.h
     model/ntn-drx.h

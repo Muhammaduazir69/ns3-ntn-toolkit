@@ -6,6 +6,8 @@
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/log.h"
 #include "ns3/ntn-drx.h"
+#include "ns3/ntn-meas-report.h"
+#include "ns3/ntn-rach-window.h"
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
@@ -13,6 +15,7 @@
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 
+#include <cstring>
 #include <cmath>
 
 using namespace ns3;
@@ -329,6 +332,270 @@ class Sib19CodecRejectsTruncatedTest : public TestCase
 /// GAP R3 (CI gate 14, population half): SIB19 must broadcast a NON-ZERO
 /// cellSpecificKoffset / kMac derived from the common TA, covering the cell
 /// round trip (TS 38.213 §4.2). Before the fix these were hard 0 on the wire.
+/// RRC-2: the timing advance must depend on the payload mode.
+///
+/// m_payloadMode was stored and never read: ComputeTotalTa/ComputeCommonTa
+/// returned the service-link round trip unconditionally, because the class had
+/// no gateway geometry. A transparent (bent-pipe) LEO cell was therefore
+/// compensated for the service leg alone, when the uplink actually traverses
+/// the feeder link to the ground gNB as well.
+class TimingAdvancePayloadModeTest : public TestCase
+{
+  public:
+    TimingAdvancePayloadModeTest()
+        : TestCase("RRC-2 - transparent TA includes the feeder leg, regenerative does not")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        constexpr double c = 299792458.0;
+        const double serviceM = 600e3;  // UE straight below the satellite
+        const double feederM = 1200e3;  // gateway well off to the side
+
+        Ptr<ConstantVelocityMobilityModel> sat = CreateObject<ConstantVelocityMobilityModel>();
+        sat->SetPosition(Vector{0.0, 0.0, serviceM});
+        sat->SetVelocity(Vector{0.0, 0.0, 0.0});
+        auto ue = MakeStaticMob(Vector{0, 0, 0});
+        // Gateway placed so the satellite-gateway range is exactly feederM.
+        const double gx = std::sqrt(feederM * feederM - serviceM * serviceM);
+        auto gw = MakeStaticMob(Vector{gx, 0, 0});
+
+        // Transparent WITHOUT a gateway: unchanged behaviour, and the class says
+        // so rather than silently returning a short value.
+        {
+            NtnRrcHelper helper;
+            helper.SetPayloadMode(PayloadMode::Transparent);
+            helper.SetReferencePosition(Vector{0, 0, 0});
+            Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ue, sat);
+            NS_TEST_ASSERT_MSG_EQ(ta->FeederGeometryMissing(), true,
+                                  "a transparent payload with no gateway must report that its "
+                                  "feeder geometry is missing");
+            NS_TEST_ASSERT_MSG_LT(std::abs(ta->ComputeTotalTa().GetSeconds() -
+                                           2.0 * serviceM / c),
+                                  1e-9,
+                                  "without gateway geometry the TA falls back to service-only");
+        }
+
+        // Transparent WITH a gateway: both legs.
+        {
+            NtnRrcHelper helper;
+            helper.SetPayloadMode(PayloadMode::Transparent);
+            helper.SetReferencePosition(Vector{0, 0, 0});
+            Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ue, sat);
+            ta->SetGatewayMobility(gw);
+            NS_TEST_ASSERT_MSG_EQ(ta->FeederGeometryMissing(), false,
+                                  "gateway supplied, so nothing is missing");
+            const double expected = 2.0 * (serviceM + feederM) / c;
+            NS_TEST_ASSERT_MSG_LT(std::abs(ta->ComputeTotalTa().GetSeconds() - expected), 1e-9,
+                                  "transparent TA must cover BOTH the service and feeder legs; "
+                                  "service-only here is the RRC-2 defect");
+        }
+
+        // Regenerative: the gNB is on board, so the feeder leg is not in the
+        // timing loop even when a gateway is known.
+        {
+            NtnRrcHelper helper;
+            helper.SetPayloadMode(PayloadMode::RegenerativeFull);
+            helper.SetReferencePosition(Vector{0, 0, 0});
+            Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ue, sat);
+            ta->SetGatewayMobility(gw);
+            const double expected = 2.0 * serviceM / c;
+            NS_TEST_ASSERT_MSG_LT(std::abs(ta->ComputeTotalTa().GetSeconds() - expected), 1e-9,
+                                  "a full on-board gNB terminates the uplink at the satellite, "
+                                  "so the feeder leg must NOT be added");
+        }
+        Simulator::Destroy();
+    }
+};
+
+/// RRC-1: the broadcast K_offset must reach a consumer.
+///
+/// cellSpecificKoffset was written to the wire and read by nothing; the NR
+/// scheduler re-derived its own value from its own geometry and numerology, so
+/// the network could schedule against a number it had never advertised.
+class Sib19KOffsetSinkTest : public TestCase
+{
+  public:
+    Sib19KOffsetSinkTest()
+        : TestCase("RRC-1 - broadcast K_offset is delivered to a scheduler sink")
+    {
+    }
+
+  private:
+    uint32_t m_delivered{0};
+    uint32_t m_calls{0};
+
+    void OnKOffset(uint32_t slots)
+    {
+        m_delivered = slots;
+        m_calls++;
+    }
+
+    void DoRun() override
+    {
+        Ptr<ConstantVelocityMobilityModel> sat = CreateObject<ConstantVelocityMobilityModel>();
+        sat->SetPosition(Vector{0.0, 0.0, 600e3});
+        sat->SetVelocity(Vector{0.0, 0.0, 0.0});
+
+        NtnRrcHelper helper;
+        helper.SetPayloadMode(PayloadMode::Transparent);
+        helper.SetReferencePosition(Vector{0, 0, 0});
+        Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(MakeStaticMob(Vector{0, 0, 0}), sat);
+
+        Ptr<NtnSib19Broadcaster> bc = CreateObject<NtnSib19Broadcaster>();
+        bc->SetSatelliteMobility(sat);
+        bc->SetTimingAdvance(ta);
+        bc->SetReferencePosition(Vector{0, 0, 0});
+        bc->SetCellId(7);
+        bc->SetNumerology(1);
+        bc->SetPeriod(MilliSeconds(160));
+        bc->SetKOffsetSink(MakeCallback(&Sib19KOffsetSinkTest::OnKOffset, this));
+        bc->Start();
+        Simulator::Stop(MilliSeconds(400));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_GT(m_calls, 0u,
+                              "the sink must fire on every SIB19 refresh; zero calls means the "
+                              "broadcast K_offset still reaches nobody (the RRC-1 defect)");
+        NS_TEST_ASSERT_MSG_EQ(m_delivered, bc->GetLatest().cellSpecificKoffset,
+                              "the delivered value must be exactly what was broadcast, so the "
+                              "scheduler and SIB19 cannot disagree");
+        Simulator::Destroy();
+    }
+};
+
+/// RRC-6: SIB19 must fill the fields it declares, and must stay inside the
+/// TS 38.331 ranges for the ones it fills.
+///
+/// `taCommonDriftVariation` and `ulSyncValidity` were declared and never
+/// written, so every broadcast carried 0.0 and the 900 s struct default, which
+/// is the MAXIMUM validity the standard allows: a LEO cell was telling every UE
+/// its timing block stayed good for fifteen minutes. And `kMac` was assigned the
+/// same number as `cellSpecificKoffset` with no clamp, although TS 38.331 gives
+/// them different ranges (1..1023 and 1..512), so a GEO geometry produced values
+/// that cannot be encoded at all.
+class Sib19FieldsPopulatedAndInRangeTest : public TestCase
+{
+  public:
+    Sib19FieldsPopulatedAndInRangeTest()
+        : TestCase("RRC-6: SIB19 fills driftVariation/ulSyncValidity and clamps K_offset/kMac "
+                   "to their TS 38.331 ranges")
+    {
+    }
+
+  private:
+    /// \param crossRangeM downrange offset of the satellite from the UE. At
+    ///        zenith the velocity is perpendicular to the line of sight and the
+    ///        range rate is genuinely zero, so a drift test must be taken
+    ///        OFF-zenith or it measures nothing.
+    static Sib19Content Broadcast(double altM, double satVxMps, uint8_t numerology,
+                                  double crossRangeM = 0.0)
+    {
+        Ptr<ConstantVelocityMobilityModel> sat = CreateObject<ConstantVelocityMobilityModel>();
+        sat->SetPosition(Vector{crossRangeM, 0.0, altM});
+        sat->SetVelocity(Vector{satVxMps, 0.0, 0.0});
+
+        NtnRrcHelper helper;
+        helper.SetPayloadMode(PayloadMode::Transparent);
+        helper.SetReferencePosition(Vector{0, 0, 0});
+        Ptr<NtnTimingAdvance> ta =
+            helper.InstallTimingAdvance(MakeStaticMob(Vector{0, 0, 0}), sat);
+
+        Ptr<NtnSib19Broadcaster> bc = CreateObject<NtnSib19Broadcaster>();
+        bc->SetSatelliteMobility(sat);
+        bc->SetTimingAdvance(ta);
+        bc->SetReferencePosition(Vector{0, 0, 0});
+        bc->SetCellId(7);
+        bc->SetNumerology(numerology);
+        bc->SetPeriod(MilliSeconds(160));
+        bc->Start();
+        Simulator::Stop(MilliSeconds(10));
+        Simulator::Run();
+        const Sib19Content out = bc->GetLatest();
+        Simulator::Destroy();
+        return out;
+    }
+
+    void DoRun() override
+    {
+        // ---- LEO, moving: both derived fields must be real numbers ---------
+        // 500 km downrange and receding at 7.56 km/s: a real range rate, unlike
+        // the zenith pass where the velocity is perpendicular to the line of
+        // sight and the drift is correctly zero.
+        const Sib19Content leo = Broadcast(600e3, 7560.0, 1, 500e3);
+
+        NS_TEST_ASSERT_MSG_NE(leo.taCommonDriftVariation, 0.0,
+                              "ta-CommonDriftVariant must be populated; a satellite moving at "
+                              "7.56 km/s has a non-zero second derivative of TA");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(leo.taCommonDriftVariation), true,
+                              "and it must be finite");
+
+        // ulSyncValidity must be shorter than the 900 s maximum for a LEO pass,
+        // and must be a member of the TS 38.331 enumerated set.
+        NS_TEST_ASSERT_MSG_LT(leo.ulSyncValidity.GetSeconds(), 900.0,
+                              "a LEO cell must not broadcast the 900 s maximum validity; that "
+                              "was the struct default, not a derived value");
+        NS_TEST_ASSERT_MSG_GT(leo.ulSyncValidity.GetSeconds(), 0.0, "and must be positive");
+        {
+            static const double kEnum[] = {5, 10, 15, 20, 25, 30, 35, 40,
+                                           45, 50, 55, 60, 120, 180, 240, 900};
+            bool inSet = false;
+            for (double v : kEnum)
+            {
+                if (std::fabs(leo.ulSyncValidity.GetSeconds() - v) < 1e-9)
+                {
+                    inSet = true;
+                }
+            }
+            NS_TEST_ASSERT_MSG_EQ(inSet, true,
+                                  "ul-SyncValidityDuration is ENUMERATED in TS 38.331; "
+                                  "an arbitrary real is not encodable (got "
+                                      << leo.ulSyncValidity.GetSeconds() << " s)");
+        }
+
+        // A STATIONARY satellite has no drift, so the validity must fall back to
+        // the maximum rather than dividing by zero.
+        const Sib19Content still = Broadcast(600e3, 0.0, 1, 500e3);
+        NS_TEST_ASSERT_MSG_EQ_TOL(still.ulSyncValidity.GetSeconds(), 900.0, 1e-9,
+                                  "with no drift the block stays valid for the maximum");
+        // And a satellite at zenith has no RANGE rate however fast it moves,
+        // which is physics rather than a defect: the velocity is perpendicular
+        // to the line of sight.
+        const Sib19Content zenith = Broadcast(600e3, 7560.0, 1, 0.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(zenith.ulSyncValidity.GetSeconds(), 900.0, 1e-9,
+                                  "at zenith the range rate is zero and the validity is the "
+                                  "maximum, correctly");
+
+        // ---- GEO: the ranges must be respected ----------------------------
+        // 35786 km one way is a 238.8 ms round trip; at numerology 1 that is
+        // 478 slots, which fits K_offset but is close to kMac's ceiling. Push
+        // to numerology 3 (0.125 ms slots) to exceed both.
+        const Sib19Content geo = Broadcast(35786e3, 0.0, 3, 0.0);
+        NS_TEST_ASSERT_MSG_LT(geo.cellSpecificKoffset, 1024u,
+                              "cellSpecificKoffset-r17 is INTEGER (1..1023); "
+                              << geo.cellSpecificKoffset << " cannot be encoded");
+        NS_TEST_ASSERT_MSG_GT(geo.cellSpecificKoffset, 0u, "and must be at least 1");
+        NS_TEST_ASSERT_MSG_LT(geo.kMac, 513u,
+                              "kmac-r17 is INTEGER (1..512); " << geo.kMac
+                                  << " cannot be encoded. kMac has the SMALLER range and must "
+                                     "not simply inherit K_offset's value");
+        NS_TEST_ASSERT_MSG_GT(geo.kMac, 0u, "and must be at least 1");
+        // At this geometry the raw requirement exceeds both ceilings, so the two
+        // fields must actually DIFFER. If they match, kMac is still being
+        // assigned K_offset's number.
+        NS_TEST_ASSERT_MSG_NE(geo.kMac, geo.cellSpecificKoffset,
+                              "at a geometry past both ceilings the clamps differ, so the two "
+                              "fields must differ too");
+
+        // ---- LEO still fits, so the clamp must not be firing everywhere ----
+        NS_TEST_ASSERT_MSG_EQ(leo.kMac, leo.cellSpecificKoffset,
+                              "at LEO both fit their ranges and should agree; if they differ "
+                              "here the clamp is engaging when it should not");
+    }
+};
+
 class Sib19KOffsetPopulatedTest : public TestCase
 {
   public:
@@ -724,6 +991,243 @@ class DrxInvalidConfigTest : public TestCase
     }
 };
 
+
+/// RRC-4: the RAR window against real NTN geometries.
+///
+/// NtnTimingAdvance's header has always said that without pre-compensation
+/// "RACH preambles arrive far outside their reception window", and nothing in
+/// the toolkit checked it. This does the arithmetic the claim rests on: the nr
+/// UE MAC arms its timeout at slotPeriod * (6 + N) from the preamble (TS 38.321
+/// section 5.1.4), so whether access can complete at all is decided by whether
+/// that window covers the round trip.
+class NtnRachWindowGeometryTest : public TestCase
+{
+  public:
+    NtnRachWindowGeometryTest()
+        : TestCase("RRC-4: RAR window sizing against LEO and GEO round trips")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // TS 38.211 Table 4.2-1.
+        NS_TEST_ASSERT_MSG_EQ(NtnRachWindow::SlotPeriodForNumerology(0).GetNanoSeconds(), 1000000,
+                              "mu=0 (15 kHz) is a 1 ms slot");
+        NS_TEST_ASSERT_MSG_EQ(NtnRachWindow::SlotPeriodForNumerology(1).GetNanoSeconds(), 500000,
+                              "mu=1 (30 kHz) is a 500 us slot");
+        NS_TEST_ASSERT_MSG_EQ(NtnRachWindow::SlotPeriodForNumerology(2).GetNanoSeconds(), 250000,
+                              "mu=2 (60 kHz) is a 250 us slot");
+
+        const Time slot1 = NtnRachWindow::SlotPeriodForNumerology(1);
+        const Time slot2 = NtnRachWindow::SlotPeriodForNumerology(2);
+
+        // ---- LEO-600, 30 kHz. The interesting case: it only just fails. ----
+        const Time rttLeo = NtnRachWindow::RoundTripForSlantRange(600e3);
+        NS_TEST_ASSERT_MSG_EQ_TOL(rttLeo.GetSeconds(), 2.0 * 600e3 / 299792458.0, 1e-9,
+                                  "round trip is twice the slant over c");
+
+        NtnRachWindowVerdict leo = NtnRachWindow::Evaluate(rttLeo, slot1);
+        // 4.0036 ms round trip + one slot of gNB turnaround = 4.5036 ms.
+        NS_TEST_ASSERT_MSG_EQ_TOL(leo.requiredWindow.GetSeconds(), rttLeo.GetSeconds() + 500e-6,
+                                  1e-9, "the window must cover the flight plus the turnaround");
+        NS_TEST_ASSERT_MSG_EQ(leo.requiredWindowSize, 4u,
+                              "LEO-600 at 30 kHz needs N=4; nr's default of 3 buys 4.500 ms "
+                              "against a 4.5036 ms requirement, so it misses by 3 microseconds. "
+                              "That margin is the whole point: the failure is not dramatic, it "
+                              "is arithmetic, and it would look like an unexplained attach "
+                              "failure in a run");
+        NS_TEST_ASSERT_MSG_EQ(leo.fits, true, "N=4 is inside nr's [2,10] range");
+        NS_TEST_ASSERT_MSG_EQ(leo.appliedWindowSize, 4, "so it is applied unchanged");
+        NS_TEST_ASSERT_MSG_EQ(leo.shortfall.IsZero(), true, "and leaves no shortfall");
+        NS_TEST_ASSERT_MSG_GT(leo.configuredWindow.GetSeconds(), leo.requiredWindow.GetSeconds(),
+                              "the applied window actually covers the requirement");
+
+        // The default really is short. This is the assertion that makes the
+        // fix a fix rather than a preference.
+        const Time defaultWindow = slot1 * (NtnRachWindow::kNrWindowBaseSlots + 3);
+        NS_TEST_ASSERT_MSG_LT(defaultWindow.GetSeconds(), leo.requiredWindow.GetSeconds(),
+                              "nr's default RaResponseWindowSize of 3 does NOT cover LEO-600");
+
+        // ---- LEO-600 at 60 kHz: halving the slot halves the window. ----
+        NtnRachWindowVerdict leo60 = NtnRachWindow::Evaluate(rttLeo, slot2);
+        NS_TEST_ASSERT_MSG_EQ(leo60.fits, false,
+                              "the same orbit at 60 kHz needs N=12, beyond nr's cap of 10: the "
+                              "window is counted in slots, so a shorter slot buys less time for "
+                              "the same numeric setting");
+        NS_TEST_ASSERT_MSG_EQ(leo60.appliedWindowSize, NtnRachWindow::kNrWindowSizeMax,
+                              "the applied value clamps at the maximum");
+        NS_TEST_ASSERT_MSG_GT(leo60.shortfall.GetSeconds(), 0.0,
+                              "and the shortfall is reported rather than hidden by the clamp");
+
+        // ---- GEO: not close, and the number should say so. ----
+        const Time rttGeo = NtnRachWindow::RoundTripForSlantRange(35786e3);
+        NtnRachWindowVerdict geo = NtnRachWindow::Evaluate(rttGeo, slot1);
+        NS_TEST_ASSERT_MSG_EQ(geo.fits, false, "GEO cannot fit nr's RAR window");
+        NS_TEST_ASSERT_MSG_GT(geo.requiredWindowSize, 400u,
+                              "GEO needs N in the hundreds against a cap of 10, so this is a "
+                              "structural limit of the stack and not a tuning question. TR 38.821 "
+                              "section 7.3 solves it by offsetting the window START with "
+                              "ta-Common, which nr v3.3 does not implement");
+        NS_TEST_ASSERT_MSG_GT(geo.shortfall.GetMilliSeconds(), 200,
+                              "the shortfall is the better part of the round trip");
+
+        // A longer round trip can never need a smaller window.
+        NS_TEST_ASSERT_MSG_GT(geo.requiredWindowSize, leo.requiredWindowSize,
+                              "the requirement is monotone in the round trip");
+
+        // Degenerate inputs must not produce a confident answer.
+        NtnRachWindowVerdict none = NtnRachWindow::Evaluate(rttLeo, Time());
+        NS_TEST_ASSERT_MSG_EQ(none.requiredWindowSize, 0u,
+                              "with no numerology there is no window to report");
+    }
+};
+
+
+/// RRC-5: TS 38.133 reporting levels. A MeasurementReport carries level
+/// indices, not the floating-point dB a simulator happens to hold, and a
+/// consumer that reads back an unquantized value is reading something the air
+/// interface cannot express.
+class NtnMeasQuantizationTest : public TestCase
+{
+  public:
+    NtnMeasQuantizationTest()
+        : TestCase("RRC-5: measurement quantities quantize per TS 38.133")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // ---- RSRP: TS 38.133 Table 10.1.6.1-1, 1 dB steps from -156 dBm ----
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-156.0), 0,
+                              "-156 dBm is the bottom of the RSRP reporting range");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-100.0), 56,
+                              "RSRP_LEV = dBm + 156, so -100 dBm is level 56");
+        NS_TEST_ASSERT_MSG_EQ_TOL(NtnMeasQuantity::LevelToRsrpDbm(56), -100.0, 1e-9,
+                                  "and the inverse returns the dBm");
+        // Saturation, not wraparound. A UE deep in a fade must not report the
+        // best possible signal.
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-200.0), 0,
+                              "below the range saturates at 0, it does not wrap to 127");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(+50.0), NtnMeasQuantity::kLevelMax,
+                              "above the range saturates at 127");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(std::nan("")), 0,
+                              "an unmeasured quantity must not become a confident level");
+
+        // ---- RSRQ: Table 10.1.11.1-1, 0.5 dB steps from -43 dB ----
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrqToLevel(-43.0), 0, "RSRQ floor");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrqToLevel(-20.0), 46,
+                              "RSRQ_LEV = (dB + 43) * 2");
+        NS_TEST_ASSERT_MSG_EQ_TOL(NtnMeasQuantity::LevelToRsrqDb(46), -20.0, 1e-9, "RSRQ inverse");
+
+        // ---- SINR: Table 10.1.16.1-1, 0.5 dB steps from -23 dB ----
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::SinrToLevel(-23.0), 0, "SINR floor");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::SinrToLevel(14.0), 74,
+                              "SINR_LEV = (dB + 23) * 2, so 14 dB is level 74");
+        NS_TEST_ASSERT_MSG_EQ_TOL(NtnMeasQuantity::LevelToSinrDb(74), 14.0, 1e-9, "SINR inverse");
+
+        // The step size must actually be a step: two values inside one 0.5 dB
+        // bin land on the same level, and the next bin does not.
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::SinrToLevel(14.1),
+                              NtnMeasQuantity::SinrToLevel(14.0),
+                              "0.4 dB apart is inside one SINR bin");
+        NS_TEST_ASSERT_MSG_NE(NtnMeasQuantity::SinrToLevel(14.6),
+                              NtnMeasQuantity::SinrToLevel(14.0),
+                              "0.6 dB apart crosses a bin boundary; equal levels here would mean "
+                              "the quantization step is wrong");
+    }
+};
+
+/// RRC-5: the MeasurementReport survives a wire round trip, and a malformed
+/// buffer is refused rather than half-parsed.
+class NtnMeasReportCodecTest : public TestCase
+{
+  public:
+    NtnMeasReportCodecTest()
+        : TestCase("RRC-5: MeasurementReport round-trips and rejects malformed input")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        NtnMeasurementReport tx;
+        tx.measId = 7;
+        tx.servingCell.physCellId = 41;
+        tx.servingCell.rsrpLevel = NtnMeasQuantity::RsrpToLevel(-98.5);
+        tx.servingCell.haveRsrp = true;
+        tx.servingCell.sinrLevel = NtnMeasQuantity::SinrToLevel(11.5);
+        tx.servingCell.haveSinr = true;
+        // RSRQ deliberately absent: an optional field left out must come back
+        // out, not come back as level 0 "measured".
+        tx.servingTimingAdvance = MicroSeconds(4271);
+        tx.servingSlantRangeM = 640123.5;
+        for (uint16_t i = 0; i < 3; ++i)
+        {
+            NtnMeasResultNr n;
+            n.physCellId = static_cast<uint16_t>(100 + i);
+            n.rsrpLevel = NtnMeasQuantity::RsrpToLevel(-105.0 - i);
+            n.haveRsrp = true;
+            tx.neighbours.push_back(n);
+        }
+
+        uint8_t buf[256];
+        const std::size_t n = NtnMeasReportCodec::Serialise(tx, buf, sizeof(buf));
+        NS_TEST_ASSERT_MSG_EQ(n, NtnMeasReportCodec::SerialisedBytes(3),
+                              "the encoded size must match the advertised size");
+
+        NtnMeasurementReport rx;
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasReportCodec::Parse(buf, n, rx), true, "parse succeeds");
+        NS_TEST_ASSERT_MSG_EQ(rx.measId, tx.measId, "measId survives");
+        NS_TEST_ASSERT_MSG_EQ(rx.servingCell.physCellId, 41, "serving PCI survives");
+        NS_TEST_ASSERT_MSG_EQ(rx.servingCell.rsrpLevel, tx.servingCell.rsrpLevel,
+                              "the RSRP LEVEL survives, not a re-derived dB");
+        NS_TEST_ASSERT_MSG_EQ(rx.servingCell.haveRsrp, true, "present stays present");
+        NS_TEST_ASSERT_MSG_EQ(rx.servingCell.haveRsrq, false,
+                              "an omitted optional quantity must stay omitted; coming back as "
+                              "level 0 would report -43 dB as a measurement");
+        NS_TEST_ASSERT_MSG_EQ(rx.servingTimingAdvance, tx.servingTimingAdvance, "TA survives");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rx.servingSlantRangeM, tx.servingSlantRangeM, 1e-6,
+                                  "slant range survives");
+        NS_TEST_ASSERT_MSG_EQ(rx.neighbours.size(), 3u, "all neighbours survive");
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            NS_TEST_ASSERT_MSG_EQ(rx.neighbours[i].physCellId, tx.neighbours[i].physCellId,
+                                  "neighbour PCI survives in order");
+            NS_TEST_ASSERT_MSG_EQ(rx.neighbours[i].rsrpLevel, tx.neighbours[i].rsrpLevel,
+                                  "neighbour RSRP level survives");
+        }
+
+        // Truncation must be refused, not half-parsed into a plausible report.
+        NtnMeasurementReport junk;
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasReportCodec::Parse(buf, n - 1, junk), false,
+                              "a buffer one byte short is refused");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasReportCodec::Parse(buf, 3, junk), false,
+                              "a buffer shorter than the fixed part is refused");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasReportCodec::Parse(nullptr, n, junk), false,
+                              "a null buffer is refused");
+
+        // TS 38.331 caps measResultNeighCells at 8.
+        NtnMeasurementReport tooMany = tx;
+        tooMany.neighbours.resize(NtnMeasurementReport::kMaxNeighbours + 1);
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasReportCodec::Serialise(tooMany, buf, sizeof(buf)), 0u,
+                              "more than 8 neighbours is not encodable");
+        // A count byte beyond the cap must be rejected on parse too, not
+        // trusted into an over-long resize.
+        uint8_t evil[256];
+        std::memcpy(evil, buf, n);
+        evil[1] = 200;
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasReportCodec::Parse(evil, n, junk), false,
+                              "a neighbour count beyond the cap is rejected");
+
+        // A short output buffer must write nothing rather than a partial report.
+        uint8_t tiny[8];
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasReportCodec::Serialise(tx, tiny, sizeof(tiny)), 0u,
+                              "an undersized output buffer yields no bytes");
+    }
+};
+
 class NtnRrcTestSuite : public TestSuite
 {
   public:
@@ -735,6 +1239,9 @@ class NtnRrcTestSuite : public TestSuite
         AddTestCase(new NtnTimingAdvance38821ReferenceTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvanceCommonAndUeSpecificTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvanceDriftRateTest, TestCase::Duration::QUICK);
+        AddTestCase(new NtnRachWindowGeometryTest, TestCase::Duration::QUICK);
+        AddTestCase(new NtnMeasQuantizationTest, TestCase::Duration::QUICK);
+        AddTestCase(new NtnMeasReportCodecTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvanceRegenerativeDriftRateTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19CodecRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19CodecRejectsTruncatedTest, TestCase::Duration::QUICK);
@@ -748,6 +1255,9 @@ class NtnRrcTestSuite : public TestSuite
         AddTestCase(new DrxPassAwareTest, TestCase::Duration::QUICK);
         AddTestCase(new DrxInvalidConfigTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19KOffsetPopulatedTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19FieldsPopulatedAndInRangeTest, TestCase::Duration::QUICK);
+        AddTestCase(new TimingAdvancePayloadModeTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19KOffsetSinkTest, TestCase::Duration::QUICK);
     }
 };
 

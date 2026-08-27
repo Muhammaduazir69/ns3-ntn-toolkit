@@ -139,8 +139,20 @@ class NtnSib19Broadcaster : public Object
     /// Stop the periodic loop without destroying the object.
     void Stop();
 
+
+    /// RRC-1: register a consumer for cellSpecificKoffset.
+    ///
+    /// The field was populated on the wire and read by nothing: the NR
+    /// scheduler independently re-derived its own K_offset from its own
+    /// geometry and numerology. The two could disagree without any test
+    /// noticing, leaving the network scheduling against a value it had never
+    /// broadcast. Wire this to NtnRealStackHelper::SetBroadcastKOffsetSlots()
+    /// to make SIB19 the single source of truth.
+    void SetKOffsetSink(Callback<void, uint32_t> sink) { m_kOffsetSink = sink; }
+
   protected:
     void DoDispose() override;
+
 
   private:
     void DoBroadcast();
@@ -159,6 +171,9 @@ class NtnSib19Broadcaster : public Object
     std::vector<uint8_t> m_latestBytes;
 
     TracedCallback<const Sib19Content&> m_broadcastTrace;
+    /// RRC-1: consumer for the broadcast K_offset. Fired on every refresh so the
+    /// scheduler can adopt the value the network actually advertised.
+    Callback<void, uint32_t> m_kOffsetSink;
 };
 
 } // namespace ntnrrc

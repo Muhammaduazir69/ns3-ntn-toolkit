@@ -28,6 +28,7 @@
 
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-sib19.h"
+#include "ns3/ntn-meas-report.h"
 #include "ns3/ntn-timing-advance.h"
 
 #include "ns3/ipv4.h"
@@ -56,6 +57,8 @@ std::ofstream g_csv;
 double g_simTime = 20.0;
 double g_measThreshDb = 14.0;
 uint32_t g_measReports = 0;
+uint64_t g_measReportBytes = 0;
+uint16_t g_servingPci = 1;
 uint32_t g_sib19Refresh = 0;
 bool g_belowThresh = false;
 
@@ -118,17 +121,70 @@ Sample()
         }
     }
 
+    // RRC-5: a real TS 38.331 MeasurementReport, not a printf.
+    //
+    // What used to be here incremented a counter and logged a line when the
+    // measured SINR crossed a threshold. It had no measId, no quantization and
+    // no recipient, yet it was labelled "RRC measurement report" and counted in
+    // the summary - which in a results table reads as TS 38.331 signalling.
+    //
+    // The report below is built, quantized to the TS 38.133 reporting levels,
+    // serialised through NtnMeasReportCodec and parsed back, so what the
+    // example counts is a message that survived a wire round trip. The
+    // threshold crossing stays as the reporting trigger; the event machinery
+    // proper (A3 offset, hysteresis, time-to-trigger) lives in NtnChoAlgorithm
+    // and is not duplicated here.
     const double sinr = g_rs->GetUeRecentSinrDb(0);
     if (!std::isnan(sinr))
     {
         const bool below = sinr < g_measThreshDb;
         if (below && !g_belowThresh)
         {
-            ++g_measReports;
-            std::printf("  %6.1fs  RRC measurement report: serving SINR meas=%.1f dB "
-                        "< %.1f dB (slant %.0f km, TA=%lld us)\n",
-                        t, sinr, g_measThreshDb, slantKm,
-                        static_cast<long long>(total.GetMicroSeconds()));
+            NtnMeasurementReport rep;
+            rep.measId = 1; // TS 38.331 MeasId, 1..64
+            rep.servingCell.physCellId = g_servingPci;
+            rep.servingCell.sinrLevel = NtnMeasQuantity::SinrToLevel(sinr);
+            rep.servingCell.haveSinr = true;
+            const double rsrp = g_rs->GetServingRsrpDbm();
+            if (!std::isnan(rsrp))
+            {
+                rep.servingCell.rsrpLevel = NtnMeasQuantity::RsrpToLevel(rsrp);
+                rep.servingCell.haveRsrp = true;
+            }
+            rep.servingTimingAdvance = total;
+            rep.servingSlantRangeM = slantKm * 1000.0;
+
+            uint8_t buf[NtnMeasurementReport::kMaxNeighbours * 8 + 32];
+            const std::size_t n = NtnMeasReportCodec::Serialise(rep, buf, sizeof(buf));
+            NtnMeasurementReport decoded;
+            const bool ok = n > 0 && NtnMeasReportCodec::Parse(buf, n, decoded);
+            if (ok)
+            {
+                ++g_measReports;
+                g_measReportBytes += n;
+                // Print RSRP only when the report actually carries it. TS 38.331
+                // makes each quantity optional, and printing a level for an
+                // absent one would show -156 dBm - the bottom of the reporting
+                // range - as though it had been measured.
+                char rsrpTxt[48];
+                if (decoded.servingCell.haveRsrp)
+                {
+                    std::snprintf(rsrpTxt, sizeof(rsrpTxt), "RSRP_LEV=%u (%.0f dBm)",
+                                  decoded.servingCell.rsrpLevel,
+                                  NtnMeasQuantity::LevelToRsrpDbm(decoded.servingCell.rsrpLevel));
+                }
+                else
+                {
+                    std::snprintf(rsrpTxt, sizeof(rsrpTxt), "RSRP absent");
+                }
+                std::printf("  %6.1fs  TS 38.331 MeasurementReport measId=%u pci=%u "
+                            "SINR_LEV=%u (%.1f dB) %s %zu B (slant %.0f km, TA=%lld us)\n",
+                            t, decoded.measId, decoded.servingCell.physCellId,
+                            decoded.servingCell.sinrLevel,
+                            NtnMeasQuantity::LevelToSinrDb(decoded.servingCell.sinrLevel),
+                            rsrpTxt, n, slantKm,
+                            static_cast<long long>(total.GetMicroSeconds()));
+            }
         }
         g_belowThresh = below;
     }
@@ -227,7 +283,10 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-rrc-real-stack");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: declared as CONDUCTED power at the array input. This carrier has
+    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
+    // reports "not asserted" rather than certifying an uncalibrated budget.
+    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));

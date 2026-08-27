@@ -281,10 +281,89 @@ NtnSib19Broadcaster::RefreshNow()
         // numerology.
         const double slotS = 1.0e-3 / std::pow(2.0, static_cast<double>(m_numerology));
         const double rttS = m_ta->ComputeCommonTa().GetSeconds();
-        const uint32_t koff =
+        uint32_t koff =
             static_cast<uint32_t>(std::ceil(rttS / slotS)) + 1;
+
+        // RRC-6: TS 38.331 bounds these fields, and the code emitted values
+        // outside them.
+        //
+        //   cellSpecificKoffset-r17  INTEGER (1..1023)
+        //   kmac-r17                 INTEGER (1..512)
+        //
+        // A GEO geometry (about 541 ms round trip) at numerology 1 needs 1083
+        // slots: past the K_offset ceiling and more than double the kMac one.
+        // The old code assigned that number to both fields unclamped, so the
+        // broadcast carried values that cannot be encoded in the ASN.1 the
+        // struct is named for. Clamping is the honest behaviour, and saying so
+        // is the other half: a clamped K_offset no longer covers the round trip,
+        // which is a real limitation of the numerology at that geometry rather
+        // than something to hide.
+        constexpr uint32_t kMaxKoffset = 1023; // TS 38.331 cellSpecificKoffset-r17
+        constexpr uint32_t kMaxKmac = 512;     // TS 38.331 kmac-r17
+        if (koff < 1)
+        {
+            koff = 1;
+        }
+        if (koff > kMaxKoffset)
+        {
+            NS_LOG_WARN("SIB19 cell " << m_cellId << ": K_offset " << koff
+                        << " slots exceeds the TS 38.331 ceiling of " << kMaxKoffset
+                        << " at numerology " << static_cast<uint32_t>(m_numerology)
+                        << "; clamping. The broadcast offset no longer covers the "
+                        << rttS * 1e3 << " ms round trip, which this numerology cannot "
+                           "express at this geometry.");
+            koff = kMaxKoffset;
+        }
         m_latest.cellSpecificKoffset = koff;
-        m_latest.kMac = koff;
+        // kMac has a lower ceiling than K_offset, so it needs its own clamp
+        // rather than inheriting the same number.
+        m_latest.kMac = std::min(koff, kMaxKmac);
+        if (koff > kMaxKmac)
+        {
+            NS_LOG_WARN("SIB19 cell " << m_cellId << ": kMac clamped to " << kMaxKmac
+                        << " (K_offset is " << koff << "); TS 38.331 gives kMac the smaller "
+                           "range and the two are not interchangeable.");
+        }
+
+        // RRC-6: these two were declared and never written, so every broadcast
+        // carried 0.0 and the 900 s struct default.
+        //
+        // ta-CommonDriftVariant-r17 is the rate of change of the drift rate. A
+        // UE extrapolating its timing between broadcasts uses a straight line
+        // without it, which is worst at the closest approach of a LEO pass where
+        // the drift reverses sign fastest.
+        m_latest.taCommonDriftVariation = m_ta->ComputeTaDriftVariation();
+
+        // ul-SyncValidityDuration-r17 is how long the UE may keep using this
+        // block. TS 38.331 gives it an enumerated set; 900 s is its MAXIMUM,
+        // so leaving the struct default meant every cell, LEO included,
+        // broadcast the longest validity the standard allows. Derive it from
+        // how fast this geometry actually invalidates: the time for the common
+        // TA to drift by one slot, capped to the enumerated set.
+        {
+            const double drift = std::fabs(m_latest.taCommonDriftRate);
+            double validS = 900.0;
+            if (drift > 0.0)
+            {
+                validS = slotS / drift;
+            }
+            static const double kEnum[] = {5, 10, 15, 20, 25, 30, 35, 40,
+                                           45, 50, 55, 60, 120, 180, 240, 900};
+            double chosen = kEnum[0];
+            for (double v : kEnum)
+            {
+                if (v <= validS)
+                {
+                    chosen = v;
+                }
+            }
+            m_latest.ulSyncValidity = Seconds(chosen);
+        }
+        // RRC-1: hand the broadcast value to whoever schedules with it.
+        if (!m_kOffsetSink.IsNull())
+        {
+            m_kOffsetSink(koff);
+        }
     }
 
     m_latestBytes.assign(Sib19Codec::kSerialisedBytes, 0);

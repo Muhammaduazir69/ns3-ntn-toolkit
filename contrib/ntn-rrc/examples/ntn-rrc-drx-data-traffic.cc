@@ -19,6 +19,7 @@
  *
  * Quick test:  --simSeconds=20 --numUes=4
  */
+#include "ns3/ntn-oran-application.h"
 #include "ns3/command-line.h"
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
@@ -51,6 +52,10 @@ NtnRealStackHelper* g_rs = nullptr;
 Ptr<NtnTimingAdvance> g_ta;
 Ptr<NtnSib19Broadcaster> g_sib19;
 Ptr<NtnDrxStateMachine> g_drx;
+// RRC-3: the downlink flow DRX actually gates, and the gate's own state.
+ApplicationContainer g_dlFlow;
+bool g_dlGateOpen = true;
+uint32_t g_drxGateChanges = 0;
 bool g_drxEnabled = true;
 double g_simTime = 20.0;
 uint64_t g_lastRxBytes = 0;
@@ -88,6 +93,36 @@ DrxPoll()
         g_drx->NotifyDataActivity();
     }
     g_lastRxBytes = rx;
+    // RRC-3: APPLY the DRX state to the data plane.
+    //
+    // IsAwake() had no caller outside this module's own test, so the run was
+    // byte-for-byte identical with --drxOn and --drxOff and the example
+    // reported an "effective goodput" obtained by multiplying the measured
+    // goodput by the awake fraction afterwards. That is arithmetic on a result,
+    // not a simulated effect: nothing was ever gated, so nothing could differ.
+    //
+    // A gNB does not transmit to a sleeping terminal, so suppressing the
+    // downlink flow while the state machine reports asleep is the faithful
+    // model. The goodput reduction is then MEASURED at the sink.
+    if (g_drxEnabled)
+    {
+        const bool awake = g_drx->IsAwake();
+        if (awake != g_dlGateOpen)
+        {
+            for (uint32_t i = 0; i < g_dlFlow.GetN(); ++i)
+            {
+                Ptr<NtnOranApplication> app =
+                    DynamicCast<NtnOranApplication>(g_dlFlow.Get(i));
+                if (app)
+                {
+                    app->SetTransmitEnabled(awake);
+                }
+            }
+            g_dlGateOpen = awake;
+            ++g_drxGateChanges;
+        }
+    }
+
     Simulator::Schedule(MilliSeconds(g_drxPollMs), &DrxPoll);
 }
 
@@ -189,8 +224,24 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-rrc-drx-data-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    rs.SetSatEirpDbm(satEirpDbm);
+    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
+    // S-band LEO reference payload. Declared as a DENSITY so the helper
+    // back-computes conducted power against the array gain instead of the
+    // antenna being counted twice.
+    rs.SetSatEirpDensityDbwMhz(
+        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
     rs.Build(satNodes, ueNodes);
+    // RRC-3 FIX (2026-08-25): install the downlink flow explicitly so the DRX
+    // state machine can gate it. With the bouquet installed in bulk there were
+    // no handles, which is part of why DRX could only be reported rather than
+    // applied.
+    g_dlFlow = rs.InstallOranFlow(/*ueIdx=*/0,
+                                  /*fiveQi=*/9,
+                                  /*sst=*/1,
+                                  /*sd=*/0x000001,
+                                  NtnOranApplication::CBR_SATURATING,
+                                  Seconds(1.0),
+                                  Seconds(simSeconds - 0.5));
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("ntn-rrc-drx-data-traffic"); // WS2 KPM series (TS 28.552 names)
@@ -287,7 +338,15 @@ main(int argc, char* argv[])
         f << "time_long_sleep_s," << longS << ",s,drx-state-machine\n";
         f << "time_awaiting_pass_s," << awaitS << ",s,drx-state-machine\n";
         f << "measured_goodput_mbps," << measGoodput << ",Mbps,packetsink\n";
-        f << "drx_effective_goodput_mbps," << measGoodput * awakeFrac << ",Mbps,derived\n";
+        // RRC-3: the goodput DRX actually produced, straight from the sink.
+        // This used to be `measGoodput * awakeFrac`: the measured goodput of an
+        // ungated run multiplied by the awake fraction afterwards. That is
+        // arithmetic on a result, not a simulated effect - nothing was gated,
+        // so nothing could differ between --drxOn and --drxOff. The flow is now
+        // suppressed while the state machine reports asleep, so the reduction
+        // is measured rather than asserted.
+        f << "drx_measured_goodput_mbps," << measGoodput << ",Mbps,packetsink\n";
+        f << "drx_gate_transitions," << g_drxGateChanges << ",count,measured\n";
         f.close();
         std::printf("# wrote %s/drx_metrics.csv (duty cycle %.1f%%, power-saving %.1f%%)\n",
                     outputDir.c_str(), 100.0 * awakeFrac, 100.0 * powerSaving);

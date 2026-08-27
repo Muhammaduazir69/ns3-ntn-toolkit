@@ -57,6 +57,24 @@ class NtnTimingAdvance : public Object
     void SetReferencePosition(const Vector& earthFixedRefPosition);
     void SetPayloadMode(PayloadMode mode);
 
+    /// RRC-2: the satellite-to-gateway feeder endpoint.
+    ///
+    /// In Transparent (bent-pipe) mode the gNB is on the ground, so the uplink
+    /// traverses the feeder link as well as the service link and the timing
+    /// advance must cover both. Without this the class had no gateway geometry
+    /// and returned the service-link round trip for every payload mode, which
+    /// made m_payloadMode dead and under-compensated a transparent LEO cell by
+    /// the feeder round trip (TR 38.821 Table 4.2-2 gives ~41.77 ms total for
+    /// LEO-600 transparent against ~4 ms service-only).
+    void SetGatewayMobility(Ptr<MobilityModel> gw);
+
+    /// True when the configured payload mode needs a feeder leg that has not
+    /// been supplied, i.e. the returned TA is knowingly short.
+    bool FeederGeometryMissing() const
+    {
+        return m_payloadMode == PayloadMode::Transparent && !m_gw;
+    }
+
     /// Total TA: round-trip service-link delay (2*d/c) for both payload modes.
     Time ComputeTotalTa() const;
     /// Common TA referenced to `m_referencePos` — the value broadcast in SIB19.
@@ -67,10 +85,26 @@ class NtnTimingAdvance : public Object
     /// the satellite is receding from the UE.
     double ComputeTaDriftRate(Time eps = MilliSeconds(10)) const;
 
+    /**
+     * \brief RRC-6: second derivative of TA_common, in (s/s)/s.
+     *
+     * SIB19's ta-CommonDriftVariant-r17 is the RATE OF CHANGE of the drift
+     * rate. Without it a UE extrapolating its timing between broadcasts uses a
+     * straight line, which is exactly wrong near the closest approach of a LEO
+     * pass, where the drift rate reverses sign fastest. The field was declared
+     * and never populated, so every broadcast carried 0.
+     *
+     * Central difference on ComputeTaDriftRate over +/- eps, computed against
+     * projected positions without advancing the global clock.
+     */
+    double ComputeTaDriftVariation(Time eps = MilliSeconds(10)) const;
+
     /// Slant range in metres from `m_ue` to `m_sat` at the current sim time.
     double GetSlantRangeMetres() const;
     /// Same, but to the reference position (used for TA_common).
     double GetReferenceRangeMetres() const;
+    /// RRC-2: satellite-to-gateway range, zero unless Transparent with a gateway set.
+    double GetFeederRangeMetres() const;
 
     /// Speed of light in vacuum (m/s) — exposed so tests can sanity-check.
     static constexpr double kSpeedOfLight = 299792458.0;
@@ -78,6 +112,7 @@ class NtnTimingAdvance : public Object
   private:
     Ptr<MobilityModel> m_ue;
     Ptr<MobilityModel> m_sat;
+    Ptr<MobilityModel> m_gw; ///< RRC-2: feeder/gateway endpoint (Transparent mode)
     Vector m_referencePos{0.0, 0.0, 0.0};
     PayloadMode m_payloadMode{PayloadMode::Transparent};
 
