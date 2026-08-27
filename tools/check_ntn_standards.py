@@ -97,9 +97,15 @@ def main():
     # sent more than one session off re-deriving closures that were already
     # recorded, so the reconciliation runs as a gate rather than by hand.
     r = run("python3 tools/check_gap_register.py --quiet")
-    check("gap-register", r.returncode == 0,
-          (r.stdout.strip().splitlines() or ["no output"])[-1]
-          .replace("[gap-register] ", ""))
+    note = (r.stdout.strip().splitlines() or ["no output"])[-1].replace("[gap-register] ", "")
+    if note.startswith("SKIP"):
+        # The engineering records this gate reconciles are kept out of the public
+        # tree, so a clone will not have them. Say skipped rather than passed: a
+        # gate that reports PASS when it never ran is the exact habit the gate
+        # exists to catch.
+        print(f"[standards] SKIP  gap-register  {note}")
+    else:
+        check("gap-register", r.returncode == 0, note)
 
     # 3. Table-3 latency bands
     r = run("./ns3 run ntn-platform-latency-validation")
