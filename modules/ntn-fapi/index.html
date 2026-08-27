@@ -6,19 +6,19 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="thz-ntn is an ITU-R P.676-13 grounded 100 GHz to 1 THz terahertz channel for ns-3 non-terrestrial networks, with UM-MIMO, RIS, ISAC, and ITU-R atmospheric models.">
+        <meta name="description" content="An SCF-222 FAPI P5 and P7 adapter that decorates a live NR MAC-PHY service access point in ns-3, with per-UE HARQ state and a slot-pipeline latency gate anchored to the geometry of the link it runs on.">
       
       
         <meta name="author" content="Muhammad Uzair">
       
       
-        <link rel="canonical" href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/thz-ntn/">
+        <link rel="canonical" href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-fapi/">
       
       
-        <link rel="prev" href="../ntn-slice/">
+        <link rel="prev" href="../ntn-rrc/">
       
       
-        <link rel="next" href="../ntn-sionna/">
+        <link rel="next" href="../ntn-slice/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>thz-ntn - Sub-THz / D-band Physics for Satellite NTN - ns3-ntn-toolkit</title>
+        <title>ntn-fapi - Small Cell Forum FAPI MAC-PHY interface over a satellite link in ns-3 - ns3-ntn-toolkit</title>
       
     
     
@@ -76,16 +76,16 @@
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="ns3-ntn-toolkit">
-  <meta property="og:title" content="thz-ntn · ns3-ntn-toolkit">
-  <meta property="og:description" content="thz-ntn is an ITU-R P.676-13 grounded 100 GHz to 1 THz terahertz channel for ns-3 non-terrestrial networks, with UM-MIMO, RIS, ISAC, and ITU-R atmospheric models.">
-  <meta property="og:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/thz-ntn.png">
-  <meta property="og:url" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/thz-ntn/">
+  <meta property="og:title" content="ntn-fapi · ns3-ntn-toolkit">
+  <meta property="og:description" content="An SCF-222 FAPI P5 and P7 adapter that decorates a live NR MAC-PHY service access point in ns-3, with per-UE HARQ state and a slot-pipeline latency gate anchored to the geometry of the link it runs on.">
+  <meta property="og:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/ntn-fapi.png">
+  <meta property="og:url" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-fapi/">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="thz-ntn · ns3-ntn-toolkit">
-  <meta name="twitter:description" content="thz-ntn is an ITU-R P.676-13 grounded 100 GHz to 1 THz terahertz channel for ns-3 non-terrestrial networks, with UM-MIMO, RIS, ISAC, and ITU-R atmospheric models.">
-  <meta name="twitter:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/thz-ntn.png">
+  <meta name="twitter:title" content="ntn-fapi · ns3-ntn-toolkit">
+  <meta name="twitter:description" content="An SCF-222 FAPI P5 and P7 adapter that decorates a live NR MAC-PHY service access point in ns-3, with per-UE HARQ state and a slot-pipeline latency gate anchored to the geometry of the link it runs on.">
+  <meta name="twitter:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/ntn-fapi.png">
 
   <!-- Keywords / robots -->
   <meta name="robots" content="index, follow, max-image-preview:large">
@@ -104,7 +104,7 @@
     "softwareVersion": "2.2.0",
     "license": "https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html",
     "url": "https://muhammaduazir69.github.io/ns3-ntn-toolkit/",
-    "image": "https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/thz-ntn.png",
+    "image": "https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/ntn-fapi.png",
     "downloadUrl": "https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit",
     "codeRepository": "https://github.com/Muhammaduazir69/ns3-ntn-toolkit",
     "keywords": "ns-3, non-terrestrial networks, 6G, LEO, O-RAN, terahertz, SGP4, NTN simulation",
@@ -135,7 +135,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#thz-ntn-100-ghz-1-thz-physics-for-ntn" class="md-skip">
+        <a href="#ntn-fapi" class="md-skip">
           Skip to content
         </a>
       
@@ -168,7 +168,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              thz-ntn - Sub-THz / D-band Physics for Satellite NTN
+              ntn-fapi - Small Cell Forum FAPI MAC-PHY interface over a satellite link in ns-3
             
           </span>
         </div>
@@ -788,8 +788,10 @@
                 
   
   
+    
   
   
+  
     
     
       
@@ -815,13 +817,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3" checked>
         
           
           <label class="md-nav__link" for="__nav_4_3" id="__nav_4_3_label" tabindex="">
@@ -842,7 +842,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -941,10 +941,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../ntn-fapi/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ntn-fapi
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -960,6 +987,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-simulates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it simulates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#standards-and-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standards and references
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use cases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting it
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1005,8 +1107,6 @@
                 
   
   
-    
-  
   
   
     
@@ -1028,11 +1128,13 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4_4" >
         
           
           <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="">
@@ -1053,7 +1155,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1068,37 +1170,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    thz-ntn
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../thz-ntn/" class="md-nav__link">
         
   
   
@@ -1114,103 +1189,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#gallery" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Gallery
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-it-simulates" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What it simulates
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#standards-references" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standards &amp; references
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#use-cases" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Use cases
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run it
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#reference-paper" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Reference paper
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#source" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Source
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1718,17 +1696,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#gallery" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Gallery
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#what-it-simulates" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1740,10 +1707,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#standards-references" class="md-nav__link">
+  <a href="#standards-and-references" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Standards &amp; references
+        Standards and references
       
     </span>
   </a>
@@ -1762,10 +1729,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#run-it" class="md-nav__link">
+  <a href="#examples" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Run it
+        Examples
       
     </span>
   </a>
@@ -1773,21 +1740,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reference-paper" class="md-nav__link">
+  <a href="#getting-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reference paper
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#source" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Source
+        Getting it
       
     </span>
   </a>
@@ -1814,79 +1770,61 @@
   
 
 
-<h1 id="thz-ntn-100-ghz-1-thz-physics-for-ntn">thz-ntn - 100 GHz – 1 THz physics for NTN<a class="headerlink" href="#thz-ntn-100-ghz-1-thz-physics-for-ntn" title="Permanent link">&para;</a></h1>
-<h2 id="gallery">Gallery<a class="headerlink" href="#gallery" title="Permanent link">&para;</a></h2>
-<div class="showcase-grid">
-<figure>
-  <img alt="EKF beam tracking holding a sub-THz link through a LEO pass" loading="lazy" src="../../media/thz_beam_tracking.gif" />
-<br />
-<figcaption>EKF beam tracking holding a sub-THz link through a LEO pass</figcaption>
-</figure>
-<figure>
-  <img alt="RIS phase sweep across the 100 GHz–1 THz band" loading="lazy" src="../../media/thz_ris_sweep.gif" />
-<br />
-<figcaption>RIS phase sweep across the 100 GHz–1 THz band</figcaption>
-</figure>
-<figure>
-  <img alt="thz-ntn module architecture" loading="lazy" src="../../media/arch_thz_ntn.png" />
-<br />
-<figcaption>thz-ntn module architecture</figcaption>
-</figure>
-</div>
-<p><strong>thz-ntn is the ns3-ntn-toolkit module that provides a physics-grounded 100 GHz to 1 THz (D-band and sub-THz) PHY layer for non-terrestrial links, cascading free-space path loss, ITU-R P.676-13 line-by-line molecular absorption, ITU-R weather and scintillation, alpha-mu fading, pointing error, and hardware impairments into a single composite channel.</strong> On top of that channel it adds ultra-massive MIMO arrays, reconfigurable intelligent surfaces, an ISAC sensing subsystem, and an EKF beam tracker, and re-homes the atmospheric loss as a real ns-3 <code>PropagationLossModel</code> so it attenuates actual packets on a live mmwave NR NTN spectrum channel and shows up in measured SINR / TBLER / goodput.</p>
+<h1 id="ntn-fapi">ntn-fapi<a class="headerlink" href="#ntn-fapi" title="Permanent link">&para;</a></h1>
+<p><strong>ntn-fapi is the ns3-ntn-toolkit module that puts a Small Cell Forum FAPI MAC-PHY interface on a running NR non-terrestrial cell, so the L1 and L2 message flow a real base station uses can be studied under an orbital round trip.</strong></p>
 <div class="ntn-purpose">
-<p><strong>Why it matters.</strong> Terahertz and sub-THz NTN links live or die on molecular absorption, beam squint, and pointing stability, effects that closed-form path-loss models simply omit. thz-ntn is a physics-grounded sub-THz module for open ns-3: its channel is cross-validated against ITU-R P.676-13, P.618-13, and S. Paine's <em>am</em> atmospheric model, its scaling laws (radar range^4 SNR, RIS 20·log10(N) gain, UM-MIMO 10·log10(N) gain with 1/sqrt(N) beamwidth narrowing) are verified numerically correct, and its atmospheric loss is a chainable channel plug-in that attenuates real packets rather than a standalone spreadsheet.</p>
+<p><strong>Why it matters.</strong> FAPI is the boundary real hardware is split along, and it is where a functional-split decision for a satellite payload actually bites: whether the MAC sits on the spacecraft or on the ground changes which of these messages has to cross a slant link. Modeling the interface in simulation makes that a measurable question rather than an architectural preference.</p>
 </div>
 <h2 id="what-it-simulates">What it simulates<a class="headerlink" href="#what-it-simulates" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Composite THz channel cascade.</strong> Free-space path loss (<code>ThzNtnFreeSpaceLoss</code>) with correct frequency/distance scaling; ITU-R P.676-13 Annex 1 line-by-line molecular absorption (<code>ThzNtnMolecularAbsorption</code>, the full 44 oxygen lines of Table 1 and 35 water-vapour lines of Table 2) over an ITU-R P.835 stratified atmosphere; weather attenuation (rain/fog/snow) per ITU-R P.838 / P.840; ITU-R P.618 scintillation (amplitude and phase, AR(1) time series); alpha-mu small-scale fading; composite pointing error (vibration, J2 perturbation, atmospheric refraction, tracking latency); and hardware impairments (PA, phase noise, ADC SQNR, I/Q imbalance).</li>
-<li><strong>Real channel plug-in.</strong> <code>ThzNtnPropagationLossModel</code> re-homes the gaseous-absorption and weather calculators as an ns-3 <code>PropagationLossModel</code>, chained onto a real mmwave NR NTN spectrum channel via <code>NtnRealStackHelper::AddExtraPropagationLoss</code>, so the atmospheric loss attenuates actual packets carried by <code>NtnOranApplication</code> QoS flows and measured at <code>NtnOranSink</code>.</li>
-<li><strong>Atmospheric transmission windows.</strong> <code>ThzNtnSpectrum</code> classifies THz bands and exposes standard windows (140 / 220 / 340 / 410 / 460 GHz); <code>peakTransmittance</code> and <code>maxZenithAttenuation_dB</code> are distinct multiplicative inputs to <code>ComputeTransmittance</code>, not inverses of each other.</li>
-<li><strong>Ultra-massive MIMO.</strong> <code>ThzNtnAntennaArray</code> / <code>ThzNtnBeamforming</code> build UPA / UCA / Cassegrain arrays (up to 128×128) with DFT codebooks and wideband beam-squint analysis (<code>ComputeBeamSquintLoss_dB</code>).</li>
-<li><strong>RIS.</strong> <code>ThzNtnRis</code> / <code>ThzNtnRisController</code> model space / aerial / ground reconfigurable intelligent surfaces with N^2 scaling and phase-quantisation loss, plus an O-RAN-style <code>ThzNtnRisServiceModel</code> and <code>ThzNtnRisXapp</code> for closed-loop control.</li>
-<li><strong>ISAC.</strong> <code>ThzNtnIsac</code> / <code>ThzNtnIsacProcessor</code> / <code>ThzNtnIsacScheduler</code> provide integrated sensing and communication for space-debris CRLB ranging, with comm/sense sub-band scheduling.</li>
-<li><strong>Beam tracking.</strong> <code>ThzNtnBeamTracking</code> offers EKF and position-based satellite-ephemeris beam tracking; in the measured-radio path the EKF prediction error maps through the array 3-dB beamwidth to a pointing loss applied as a live channel reconfiguration.</li>
-<li><strong>ISL and waveforms.</strong> <code>ThzNtnIslChannel</code> / <code>ThzNtnIslLink</code> inter-satellite link channel and link budget; <code>ThzNtnWaveform</code> selects among 5 candidates (OFDM / DFT-s-OFDM / OTFS / AFDM / SC-FDE). NYUSIM-140 calibration is provided by <code>ThzNtnNyusimReference</code> / <code>ThzNtnNyusimCalibrator</code>.</li>
-<li><strong>Real-radio examples.</strong> Run a full mmwave NR NTN cell (SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) with SGP4/Walker satellite mobility and TR 38.811 ground terminals; the carrier is capped at 100 GHz (sub-THz / W-band) by the 3GPP spectrum model, with higher-band studies kept in the analytic link-budget examples. Each writes an honest <code>sim_health.csv</code> and enables the toolkit AI flow monitor.</li>
+<li><strong>A decorated live SAP.</strong> The bridge wraps the NR MAC-PHY service access point rather than running beside it, so <code>SLOT.indication</code> fires at the radio's own cadence and every <code>DL_TTI.request</code> comes from a real downlink allocation with the radio's own SFN and slot number.</li>
+<li><strong>The P7 slot-timing message set.</strong> <code>DL_TTI.request</code>, <code>TX_DATA.request</code>, <code>RX_DATA.indication</code>, <code>CRC.indication</code> and <code>SLOT.indication</code>, with the CRC outcome drawn from the measured transport block error rate rather than a configured constant.</li>
+<li><strong>Per-UE HARQ state.</strong> Keyed by frame, subframe, slot and RNTI, because keying by slot alone lets two terminals scheduled in the same slot overwrite each other's process state.</li>
+<li><strong>A latency figure with its qualification attached.</strong> The measured request-to-indication interval is a slot-pipeline turnaround, not an NR-NTN turnaround, because the backend the bridge decorates carries no propagation delay model. The bridge reports that qualification with the number, and the gate asserts the mean stays below the geometric floor of the configured link while propagation is absent, so the figure cannot silently acquire a delay its label does not admit.</li>
 </ul>
-<h2 id="standards-references">Standards &amp; references<a class="headerlink" href="#standards-references" title="Permanent link">&para;</a></h2>
+<h2 id="standards-and-references">Standards and references<a class="headerlink" href="#standards-and-references" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>ITU-R P.676-13.</strong> The gaseous model is the recommendation's Annex 1 line-by-line formulation, 44 oxygen lines and 35 water-vapour lines quoted from Tables 1 and 2. Earlier releases of this module attributed it to ITU-R P.676-13 with a 23-line database, which was wrong in both the source and the line count; the attribution is corrected here and in the manuscript.</li>
-<li><strong>ITU-R.</strong> P.676 (oxygen + water vapour gaseous attenuation), P.618 (rain attenuation and scintillation), P.835 (reference standard atmosphere), P.838 (rain specific attenuation), P.840 (fog/cloud), and P.681 (land mobile satellite). The channel is cross-validated against ITU-R P.676-13 and P.618-13.</li>
-<li><strong>Reference models.</strong> S. Paine's <em>am</em> atmospheric model (SAO) and the NYUSIM-140 GHz channel as a calibration reference.</li>
-<li><strong>3GPP.</strong> TR 38.811 ground-terminal mobility and the 3GPP NR spectrum model (100 GHz carrier cap) on the measured-radio path; <code>NtnOranApplication</code> flows carry in-band 5QI / S-NSSAI headers.</li>
-<li><strong>O-RAN.</strong> A RIS service model and xApp enabling O-RAN-style closed-loop RIS control over the toolkit's E2/KPM path.</li>
+<li><strong>Small Cell Forum FAPI 222.10.02</strong> - the P5 configuration and P7 slot-timing message sets and their field semantics.</li>
+<li><strong>3GPP TS 38.211</strong> section 4.1 - frame and slot timing the messages carry.</li>
+<li><strong>3GPP TS 38.213</strong> - K_offset and timing advance, which are what an NTN split has to absorb.</li>
+<li><strong>3GPP TR 38.821</strong> - the NTN delay budget the latency gate is anchored to.</li>
 </ul>
 <h2 id="use-cases">Use cases<a class="headerlink" href="#use-cases" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Molecular-absorption-gated downlink.</strong> Quantify how P.676-13 gaseous absorption plus rain degrade a measured sub-THz downlink, toggling rain mid-run to watch the link respond (<code>thz-ntn-real-stack</code>, <code>thz-ntn-weather-traffic</code>).</li>
-<li><strong>RIS link recovery.</strong> Recover a blocked THz link mid-simulation by engaging a RIS relay as a live channel event on the real cell (<code>thz-ntn-ris-relay-traffic</code>).</li>
-<li><strong>EKF beam tracking through a pass.</strong> Hold a sub-THz link across a real SGP4 pass and compare EKF against position-based tracking on the measured link (<code>thz-ntn-beam-tracking</code>).</li>
-<li><strong>ISAC coexistence.</strong> Study comm/sense coexistence as the ISAC scheduler partitions the sub-band grid from COMM_ONLY to SENSING_ONLY and gates measured goodput (<code>thz-ntn-isac-coexist-traffic</code>).</li>
-<li><strong>Inter-satellite links.</strong> Evaluate a real mmwave NR ISL between cross-plane SGP4 satellites of a Starlink-class shell alongside the analytic ISL budget (<code>thz-ntn-isl-traffic</code>).</li>
-<li><strong>Closed-loop thz-ntn × oran-ntn.</strong> Drive a ground RIS from an xApp reacting to KPM read off the measured DL SINR, recovering goodput after an urban-canyon blockage (<code>thz-ntn-ric-controlled-traffic</code>).</li>
-<li><strong>UM-MIMO and RIS scaling laws.</strong> Sweep array size and RIS element count to read worst-case beam-squint loss and N^2 RIS gain (<code>thz-ntn-um-mimo</code>, <code>thz-ntn-ris-assisted</code>).</li>
+<li><strong>Functional-split studies for satellite payloads.</strong> Which FAPI messages tolerate a slant link and which do not.</li>
+<li><strong>Slot-pipeline characterization.</strong> How the MAC-to-PHY turnaround behaves under NTN-stretched HARQ and relaxed timers.</li>
+<li><strong>Interface conformance.</strong> Exercising the SCF-222 ABI against a live scheduler rather than against a hand-assembled message stream.</li>
 </ul>
-<h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Flagship channel-plugin demo: P.676-13 absorption + rain on the real mmwave channel</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>./ns3<span class="w"> </span>run<span class="w"> </span><span class="s2">&quot;thz-ntn-real-stack --duration=16 --freqGhz=100 --rainMmH=25&quot;</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># EKF vs position-based beam tracking, closed over the real radio</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>./ns3<span class="w"> </span>run<span class="w"> </span><span class="s2">&quot;thz-ntn-beam-tracking --trackingMode=EKF --updateRate=10&quot;</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Closed-loop RIS recovery driven by an O-RAN xApp on measured SINR</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>./ns3<span class="w"> </span>run<span class="w"> </span><span class="s2">&quot;thz-ntn-ric-controlled-traffic --simSeconds=40 --xapp=1&quot;</span>
+<h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Example</th>
+<th>What it shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ntn-fapi-real-stack</code></td>
+<td>The bridge on a live mmWave NR NTN cell, with the measured SAP latency and its provenance</td>
+</tr>
+<tr>
+<td><code>ntn-fapi-dl-data-slotloop</code></td>
+<td>Per-slot <code>TX_DATA.request</code> to <code>CRC.indication</code> with HARQ retransmission under a descending elevation</td>
+</tr>
+<tr>
+<td><code>ntn-fapi-leo-pass-slotloop</code></td>
+<td>The same over a real SGP4 LEO pass from a two-line element</td>
+</tr>
+</tbody>
+</table>
+<p>The cross-check that these are driven rather than free-running is in the output: <code>TX_DATA.request</code> equals the health record's <code>phy_rx_tb</code> exactly, which a self-scheduled loop could not do.</p>
+<h2 id="getting-it">Getting it<a class="headerlink" href="#getting-it" title="Permanent link">&para;</a></h2>
+<p><code>ntn-fapi</code> ships only inside the toolkit tree, because it decorates the NR SAP that <code>ntn-traffic</code> builds.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>uzairdocker69/ns3-ntn-toolkit:latest<span class="w"> </span>bash
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>./ns3<span class="w"> </span>run<span class="w"> </span>ntn-fapi-real-stack
 </span></code></pre></div>
-<p>Test suite: <code>./test.py --suite=thz-ntn</code> (38 unit tests, including ITU-R reference cross-validation and the verified scaling laws).</p>
-<h2 id="reference-paper">Reference paper<a class="headerlink" href="#reference-paper" title="Permanent link">&para;</a></h2>
-<blockquote>
-<p>Muhammad Uzair. <em>Sub-THz Non-Terrestrial Networks: Physics, RIS, and ISAC.</em> IEEE Transactions on Terahertz Science and Technology (under review).</p>
-</blockquote>
-<p>See <a href="../../papers/">Papers</a> for the arXiv preprint.</p>
-<h2 id="source">Source<a class="headerlink" href="#source" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/blob/main/ns-3-dev/contrib/thz-ntn/README.md">README</a></li>
-</ul>
+<p>See the <a href="../../getting-started/">getting started guide</a> for a source build.</p>
 
 
 

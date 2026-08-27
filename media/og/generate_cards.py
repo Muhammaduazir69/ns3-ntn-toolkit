@@ -18,8 +18,8 @@ FONT_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 PAGES = [
     ("home", "ns3-ntn-toolkit", "Open-source ns-3 toolkit for 6G non-terrestrial networks"),
     ("getting-started", "Getting started", "Build the complete ns-3 NTN simulation stack in minutes"),
-    ("architecture", "Architecture", "How 13 integrated ns-3 modules compose the NTN stack"),
-    ("modules", "Modules", "13 integrated ns-3 modules for satellite networks"),
+    ("architecture", "Architecture", "How fourteen ns-3 modules compose the 6G NTN stack"),
+    ("modules", "Modules", "Fourteen integrated ns-3 modules for satellite networks"),
     ("ntn-constellation", "ntn-constellation", "SGP4 LEO/MEO/GEO orbits + Walker mega-constellations"),
     ("ntn-rrc", "ntn-rrc", "3GPP Rel-17/18 NR-NTN control plane: SIB19, TA, DRX"),
     ("ntn-observability", "ntn-observability", "Measured-KPI observability: InfluxDB, Grafana, NetSimulyzer"),
@@ -27,15 +27,17 @@ PAGES = [
     ("ntn-sagin", "ntn-sagin", "Space-air-ground: HAPS, UAV, aviation, maritime mobility"),
     ("ntn-slice", "ntn-slice", "5G network slicing over NTN (eMBB / URLLC / mMTC)"),
     ("ntn-v2x", "ntn-v2x", "Vehicle-to-everything over LEO satellites"),
-    ("oran-ntn", "oran-ntn + FlexRIC", "O-RAN Near-RT RIC + real E2AP/SCTP for satellite networks"),
+    ("oran-ntn", "oran-ntn", "Space O-RAN: E2 and A1 loops that actuate a real radio"),
     ("ntn-sionna", "ntn-sionna", "NVIDIA Sionna RT ray-traced channels bridged into ns-3"),
     ("ntn-digital-twin", "ntn-digital-twin", "Live constellation digital twin + prediction API"),
     ("ntn-cho", "ntn-cho", "Rel-17/18 conditional handover for LEO (full trigger set)"),
-    ("thz-ntn", "thz-ntn", "100 GHz-1 THz physics: HITRAN, ITU-R, RIS, ISAC, beam tracking"),
+    ("thz-ntn", "thz-ntn", "100 GHz-1 THz on the ITU-R recommendations: RIS, ISAC, beams"),
     ("satellite", "satellite (SNS3)", "DVB-S2/RCS2 + SatSGP4 satellite base reused by the toolkit"),
     ("papers", "Papers", "Peer-reviewed publications built on ns3-ntn-toolkit"),
     ("community", "Community", "Contribute to the open-source ns-3 NTN toolkit"),
     ("cite", "Cite", "How to cite ns3-ntn-toolkit in your research"),
+    ("ntn-traffic", "ntn-traffic", "The real NR NTN data plane: every KPI measured in band"),
+    ("ntn-fapi", "ntn-fapi", "SCF-222 FAPI MAC-PHY interface over a satellite link"),
 ]
 
 

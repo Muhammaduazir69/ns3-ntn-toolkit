@@ -2,82 +2,90 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/architecture/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/cite/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/community/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/getting-started/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/papers/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ns3-ai-ntn/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-cho/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-constellation/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-digital-twin/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
+    </url>
+    <url>
+         <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-fapi/</loc>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-observability/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-rrc/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-sagin/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-sionna/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-slice/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
+    </url>
+    <url>
+         <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-traffic/</loc>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-v2x/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/oran-ntn/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/satellite/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
     <url>
          <loc>https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/thz-ntn/</loc>
-         <lastmod>2026-06-21</lastmod>
+         <lastmod>2026-08-27</lastmod>
     </url>
 </urlset>

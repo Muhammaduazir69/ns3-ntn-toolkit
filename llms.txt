@@ -1,37 +1,106 @@
 # ns3-ntn-toolkit
 
-> ns3-ntn-toolkit is the open-source ns-3.43 simulation toolkit for 5G/6G
-> non-terrestrial networks (NTN). It is the only ns-3 distribution that
-> simulates 3GPP Release-17/18/19 NTN end-to-end — from SGP4 LEO ephemerides
-> and TR 38.811 channels, through Rel-17 conditional handover and an O-RAN
-> Near-RT RIC with xApps, to NVIDIA Sionna ray tracing and sub-THz (100 GHz–1
-> THz) physics — at mega-constellation scale, with measured (not formula)
-> SINR/throughput/BLER KPIs.
+> ns3-ntn-toolkit is an open-source ns-3.43 simulation platform for 5G and 6G
+> non-terrestrial networks (NTN). It carries fourteen custom modules and three
+> vendored upstream stacks in one tree, so that a LEO satellite's SGP4 position
+> drives a real 5G NR spectrum PHY, a handover decision rides a real Xn interface
+> with a real propagation delay, and every reported KPI came off a packet that
+> crossed the air interface. Its distinguishing property is that the decision
+> plane and the measurement plane are the same plane.
 
-Author: Muhammad Uzair (Independent Researcher, ORCID 0009-0002-4104-2680).
+Author: Muhammad Uzair, Independent Researcher, ORCID 0009-0002-4104-2680.
 License: GPL-2.0-only. Built on ns-3.43.
 
-## What it is (one line)
-An ns-3 based LEO/MEO/GEO satellite + 5G NR-NTN + O-RAN network simulator for
-researchers building 6G non-terrestrial networks.
+## What it is, in one line
+
+An ns-3 based LEO, MEO and GEO satellite plus 5G NR-NTN plus O-RAN network
+simulator for researchers building 6G non-terrestrial networks.
 
 ## Who it is for
-Researchers and engineers working on: NTN, LEO satellite networks, 5G/6G NR-NTN,
-O-RAN over satellite, conditional handover, satellite mega-constellations,
-terahertz/sub-THz links, SAGIN, V2X-over-LEO, network slicing, and AI/ML for
-non-terrestrial radio access networks.
+
+Researchers and engineers working on non-terrestrial networks, LEO satellite
+constellations, 5G and 6G NR-NTN, satellite O-RAN and RIC placement, conditional
+handover and mobility management, mega-constellation scale simulation,
+terahertz and sub-terahertz links, space-air-ground integrated networks,
+V2X over satellite, network slicing, and reinforcement learning for satellite
+radio resource management.
 
 ## Key capabilities
-- SGP4/SDP4 orbit propagation of real Starlink, OneWeb, Kuiper, Iridium NEXT TLEs; Walker-Delta/Star generators.
-- 3GPP TR 38.811 / TR 38.821 NTN channel models; Rel-17 SIB19, Timing Advance pre-compensation, GNSS UE location, NTN DRX.
-- Rel-17/18 conditional handover (CHO) with TTE-aware, location (D1), time (T1), TA, elevation, and Rel-18 D2 triggers.
-- O-RAN Near-RT RIC + Space RIC, E2AP/E2SM ASN.1-PER over real SCTP, FlexRIC bridge, multiple xApps, measured TS 28.552 KPM.
-- Sub-THz (100 GHz–1 THz) physics: HITRAN molecular absorption, ITU-R P.676/618, RIS, ISAC, EKF beam tracking.
-- NVIDIA Sionna RT ray-traced channels; real mmwave NR data plane; per-packet C/N0->BLER error models.
-- SAGIN (satellite-air-ground), V2X-over-LEO, network slicing, observability (InfluxDB/Grafana/NetSimulyzer), digital twin.
-- 3D visualization: NetSimulyzer JSON + Cesium globe (CZML) + live streaming; ns3-ai shared-memory RL bridge.
+
+- SGP4 and SDP4 orbital propagation of real Starlink, OneWeb, Kuiper and
+  Iridium NEXT two-line elements, plus Walker-Delta and Walker-Star generators,
+  contact-graph routing over inter-satellite links with limb clearance.
+- A real 5G NR data plane under satellite mobility: SpectrumPhy, LDPC error
+  model, HARQ with an NTN-stretched process pool, RLC, PDCP, RRC, EPC and GTP,
+  on either the mmWave FR2 backend or 5G-LENA nr at FR1.
+- 3GPP TR 38.811 and TR 38.821 NTN channel modeling and link budget, calibrated
+  against the Set-1 LEO-600 reference parameters with separate offset and
+  elevation-slope gates.
+- Conditional handover for LEO with time-to-exit estimation from real orbit
+  propagation, and the standardized trigger set: TS 38.331 CondEvent A3, D1 on a
+  fixed reference location, T1 on its absolute broadcast epoch, Rel-18 D2 on a
+  moving ephemeris reference, plus elevation and timing-advance mechanisms.
+- NR-NTN control plane: SIB19 with cellSpecificKoffset consumed by the
+  scheduler, timing advance that differs between transparent and regenerative
+  payloads because the feeder leg is in the geometry, and DRX that gates a flow.
+- Space O-RAN: E2AP termination, E2SM-KPM under TS 28.552 names, E2SM-RC control
+  actions that actuate a real handover, A1 policy distribution, three RIC
+  placements (on-board real-time, gateway, cloud) whose E2 latency comes from
+  live slant geometry, Release 19 regenerative payload options, the WG3 conflict
+  taxonomy, and a FlexRIC bridge for the wire-level path. The in-simulation E2
+  transport is an ns-3 header with toolkit-internal type values, not ASN.1 APER
+  over SCTP.
+- Sub-terahertz and terahertz physics from 100 GHz to 1 THz on the ITU-R
+  recommendations: P.676-13 line-by-line gaseous absorption over a layered
+  atmosphere, P.618-13 tropospheric scintillation, P.838-3 rain, P.840 cloud and
+  fog, Tatarskii turbulence, pointing error, ultra-massive MIMO, RIS and ISAC.
+- NVIDIA Sionna RT GPU ray tracing over a socket, with provenance on every query
+  so a run states whether it was ray traced or fell back to free space.
+- Space-air-ground integrated networking with ground, UAV, HAPS and LEO layers,
+  a TR 36.777 air-to-ground channel that declares its 300 m validated-height
+  boundary, and store-and-forward across contact gaps.
+- Network slicing with eMBB, URLLC and mMTC over per-5QI dedicated bearers and
+  SLA percentiles taken from a delay histogram rather than a mean.
+- Satellite-assisted V2X with NR sidelink PC5 Mode 2 and SAE J2735 basic safety
+  messages encoded per the standard, including its UPER offset-from-lower-bound
+  integers.
+- SCF-222 FAPI MAC-PHY adapter on a live NR service access point.
+- Observability: one scene recorder feeding NetSimulyzer, Cesium CZML, InfluxDB
+  line protocol and Grafana, with link topology and a documented time anchor.
+- A FastAPI network digital twin that predicts handovers from live ephemeris and
+  actuates them back into a running simulation, sharing one guard with the
+  exporter.
+- Gymnasium 1.0 environments for handover selection, beam management, slice
+  admission and power control, over a shared-memory bridge with a versioned
+  schema. The bundled trainers are single-agent PPO and SAC over N independent
+  environment copies, not MAPPO or MASAC.
+
+## Measured results carried in the repository
+
+- Conditional handover, ten seeds on a 780 km shell: a time-to-exit-aware policy
+  reaches 83.14 percent handover success on 134.6 handovers per run with zero
+  ping-pong, against an A3 RSRP baseline at 463.3 handovers, 69.16 percent
+  success and a 50.23 percent ping-pong rate. A location-based policy reaches
+  98.69 percent success at 57.07 percent ping-pong.
+- O-RAN xApp routing: 7,738 near-real-time decisions producing 71,967 actuated
+  actions across five active xApps, with the control loop measured end to end.
+
+## How claims are kept checkable
+
+- Every scenario writes sim_health.csv labelling each KPI measured, modeled or
+  configured, so a number derived from an equation cannot be printed as if it
+  came from a packet.
+- tools/check_ntn_standards.py runs sixteen gates covering the TR 38.821 link
+  budget, orbital geometry, the published latency bands and all five NTN
+  handover trigger classes.
+- tools/check_doc_claims.py fails when a document makes a capability claim the
+  code contradicts or quotes a number the committed data does not carry.
+- SCOPE_AND_LIMITATIONS.md is the authoritative statement of what the toolkit
+  does not model, including the absence of Release 19 AI/ML lifecycle
+  management and the multi-tap NTN-TDL.
 
 ## Get it
+
 - GitHub: https://github.com/Muhammaduazir69/ns3-ntn-toolkit
 - GitLab: https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit
 - Docker: docker pull uzairdocker69/ns3-ntn-toolkit:latest
@@ -39,6 +108,7 @@ non-terrestrial radio access networks.
 - Docs: https://muhammaduazir69.github.io/ns3-ntn-toolkit/
 
 ## Documentation
+
 - Getting started: https://muhammaduazir69.github.io/ns3-ntn-toolkit/getting-started/
 - Architecture: https://muhammaduazir69.github.io/ns3-ntn-toolkit/architecture/
 - Modules: https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/
