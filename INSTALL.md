@@ -1,289 +1,318 @@
-# Install & run — ns3-ntn-toolkit
+# Install and run: ns3-ntn-toolkit
 
-This guide walks you through getting `ns3-ntn-toolkit` from a fresh checkout to a working multi-module simulation.
+From a fresh machine to a running 6G non-terrestrial network simulation. Three
+paths, in increasing order of effort and control:
+
+| Path | Time | Use it when |
+|---|---|---|
+| [Docker](#1-docker-the-fastest-path) | 5 minutes | You want to run a scenario, reproduce a result, or try the toolkit out |
+| [Source build](#2-source-build) | 30 to 60 minutes | You are going to modify a module or write a new scenario |
+| [Single module](#3-installing-one-module-into-an-existing-ns-3-tree) | 10 minutes | You already have an ns-3 tree and want one capability from this one |
 
 ---
 
-## 1. System requirements
+## 1. Docker, the fastest path
+
+The published image carries a fully built tree: ns-3.43, all fourteen custom
+modules, the SNS3 `satellite` stack, the mmWave and 5G-LENA `nr` NR stacks, the
+Python tooling and the digital-twin server. Nothing to compile.
+
+```bash
+docker pull uzairdocker69/ns3-ntn-toolkit:latest
+
+# Run a scenario and keep its output
+docker run --rm -v "$PWD/out:/out" uzairdocker69/ns3-ntn-toolkit:latest \
+  ./ns3 run "ntn-cho-real-stack --trigger=d2 --duration=60 --outputDir=/out"
+
+# Or work inside the built tree
+docker run --rm -it -v "$PWD/out:/out" uzairdocker69/ns3-ntn-toolkit:latest bash
+```
+
+This is also the **reproducible path**. The SNS3 `satellite` tree is a
+compile-time dependency that this repository does not vendor, so a clone plus a
+build is not a single reproducible step, while the image is.
+
+Version-pinned tags are published alongside `latest`. Pin one in any paper or
+artifact statement rather than citing `latest`, which moves.
+
+---
+
+## 2. Source build
+
+### 2.1 System requirements
 
 | Component | Version |
 |---|---|
-| OS | Linux (Ubuntu 22.04+ / Fedora 39+ recommended) |
-| C++ compiler | gcc ≥ 11 or clang ≥ 14 |
-| CMake | ≥ 3.24 |
-| Python | ≥ 3.10 (3.13 supported) |
-| Boost | ≥ 1.74 (interprocess) |
-| Disk | **≥ 20 GB** after build (toolkit + SNS3 satellite data + build tree + outputs) |
-| RAM | 8 GB build, 4 GB runtime |
+| OS | Linux. Ubuntu 22.04 or later, Fedora 39 or later |
+| C++ compiler | gcc 11 or newer, or clang 14 or newer |
+| CMake | 3.24 or newer |
+| Python | 3.10 or newer, tested through 3.13 |
+| Boost | 1.74 or newer, for interprocess |
+| Disk | 20 GB after a build, including the SNS3 TLE corpus and outputs |
+| RAM | 8 GB to build, 4 GB to run |
 
-### Distro packages (Ubuntu 22.04)
+An NVIDIA GPU is optional and only needed for `ntn-sionna` ray tracing. Every
+other module runs on CPU.
+
+### 2.2 Toolchain
+
+Ubuntu and Debian:
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential cmake ninja-build git python3 python3-pip \
     libboost-all-dev libgsl-dev libxml2-dev libsqlite3-dev libpcap-dev \
-    pybind11-dev libprotobuf-dev protobuf-compiler \
-    g++-11 gcc-11
+    libeigen3-dev pybind11-dev libprotobuf-dev protobuf-compiler
 ```
 
-(`pybind11-dev` and the protobuf packages are needed by the `ns3-ai-ntn`
-bridge; everything else is the standard ns-3 toolchain.)
+`libeigen3-dev` is needed by the NR MIMO path, and `pybind11-dev` plus the
+protobuf packages by the `ns3-ai-ntn` shared-memory bridge. Everything else is
+the standard ns-3 toolchain.
 
-### Python deps (only needed if you'll use the RL bridge or rebuild figures)
+Python packages, only if you will use the reinforcement-learning bridge, the
+digital twin or the figure pipeline:
 
 ```bash
-pip install "numpy>=2.0" "gymnasium>=1.0" "torch>=2.0" matplotlib pandas
+pip install "numpy>=2.0" "gymnasium>=1.0" "torch>=2.0" \
+            matplotlib pandas fastapi uvicorn sgp4
 ```
 
----
-
-## 2. Clone the toolkit
+### 2.3 Clone
 
 ```bash
-git clone https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
+git clone --branch ntn-integration-v2 \
+  https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git
 cd ns3-ntn-toolkit
 ```
 
-Branch **`ntn-integration-v2`** is the current release line. It contains the
-patched LTE and mmWave modules, the vendored **NetSimulyzer v1.0.13** 3D
-visualization module, and **all 14 custom NTN contrib modules** (see the
-[Module guide](#12-module-guide--all-modules) below). The GitLab mirror is
-<https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit> (same branch).
+`ntn-integration-v2` is the current release line. The GitLab mirror carries the
+same branch: <https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit>.
 
-> Prefer not to build from source? A prebuilt image ships everything:
-> `docker pull uzairdocker69/ns3-ntn-toolkit:2.2.1` (also `:latest`).
+### 2.4 Add the SNS3 `satellite` module, which is required
 
----
-
-## 3. Pull the upstream `satellite` module (REQUIRED)
-
-The SNS3 satellite module is **not bundled** because of its size (~3.7 GB
-with TLE data). You must clone it under `contrib/`:
+The SNS3 satellite module is not bundled, because its TLE and antenna-pattern
+corpus is around 3.7 GB. Clone it into `contrib/`:
 
 ```bash
-cd contrib/
-git clone https://github.com/sns3/sns3-satellite.git satellite
-cd ..
+git clone https://github.com/sns3/sns3-satellite.git contrib/satellite
 ```
 
-Without this, `ntn-cho`, `oran-ntn`, and `thz-ntn` will silently fail to register.
+Without it, `ntn-cho`, `ntn-constellation`, `oran-ntn` and `thz-ntn` will not
+register, and the build will simply not contain them rather than failing loudly.
 
----
-
-## 4. (Optional) clone the standalone module repos
-
-Every custom module is **already inside this toolkit's `contrib/`** — you do
-not need this step to build. But 12 of the 14 modules also live in their own
-standalone repos under <https://github.com/Muhammaduazir69> if you want fresher
-commits or to contribute upstream. **Each has its own current branch** — always
-clone with the explicit `-b <branch>` below:
-
-| Module | Standalone repo | Current branch |
-|---|---|---|
-| `ntn-cho` | `ntn-cho-framework` | `main` |
-| `oran-ntn` | `oran-ntn` | `oran-ntn-v2` |
-| `thz-ntn` | `ns3-thz-ntn` | `thz-ntn-v2` |
-| `ns3-ai-ntn` | `ns3-ai` | `fix/ns3-43-compatibility-and-critical-bugs` |
-| `ntn-constellation` | `ntn-constellation` | `ntn-constellation-v2` |
-| `ntn-rrc` | `ntn-rrc` | `ntn-rrc-v2` |
-| `ntn-observability` | `ntn-observability` | `ntn-observability-v2` |
-| `ntn-sagin` | `ntn-sagin` | `ntn-sagin-v2` |
-| `ntn-slice` | `ntn-slice` | `ntn-slice-v2` |
-| `ntn-v2x` | `ntn-v2x` | `ntn-v2x-v2` |
-| `ntn-sionna` | `ntn-sionna` | `ntn-sionna-v2` |
-| `ntn-digital-twin` | `ntn-digital-twin` | `ntn-digital-twin-v2` |
-| `ntn-fapi` | — (bundled-only) | — |
-| `ntn-traffic` | — (bundled-only) | — |
-
-For example, to pull a fresh `oran-ntn` on its current branch:
-
-```bash
-cd contrib/
-git clone -b oran-ntn-v2 https://github.com/Muhammaduazir69/oran-ntn.git oran-ntn-fresh
-git clone -b ntn-constellation-v2 https://github.com/Muhammaduazir69/ntn-constellation.git nc-fresh
-git clone -b fix/ns3-43-compatibility-and-critical-bugs \
-  https://github.com/Muhammaduazir69/ns3-ai.git ai-fresh
-cd ..
-```
-
-`ntn-traffic` and `ntn-fapi` ship **only** inside this toolkit tree (no
-standalone repo).
-
----
-
-## 5. Configure & build
+### 2.5 Configure and build
 
 ```bash
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```
 
-Verify all modules registered:
+Confirm the modules registered:
 
 ```bash
-./ns3 show profile | grep -E 'ntn-cho|oran-ntn|thz-ntn|ai|satellite|mmwave'
+./ns3 show profile | grep -E 'ntn-|oran-ntn|thz-ntn|satellite|mmwave|nr'
 ```
 
-Expected: all six lines present.
-
-> ⚠ If you see only `thz-ntn` (or any single module) due to a stale build cache:
-> `./ns3 configure --enable-modules='' --enable-tests --enable-examples`
-> An empty `--enable-modules=''` re-enables all autoloaded modules.
-
----
-
-## 6. Run the integrated example
+If a stale build cache filters modules out, force a clean module set. An empty
+`--enable-modules=''` re-enables every autoloaded module:
 
 ```bash
-./ns3 run "ntn-e2e-full-stack --duration=60 --numUes=8 --altitude=600 --outputDir=/tmp/e2e"
+./ns3 configure --enable-modules='' --enable-tests --enable-examples
 ```
 
-`ntn-e2e-full-stack` is the cross-module integration flagship: **one** real
-mmWave NR NTN cell under SGP4 mobility whose **measured** PHY SINR
-simultaneously feeds the O-RAN E2SM-KPM flow monitor, the Near-RT RIC xApps,
-and the in-band QoS sink — exercising `ntn-traffic`, `oran-ntn`,
-`ntn-constellation`, and the `mmwave` / `satellite` stack in one binary.
-
-Output lands in `--outputDir`: `sim_health.csv` (the realism gate),
-`kpm_dataset.csv` / `kpm_canonical.csv` (E2SM-KPM canonical names),
-`action_log.csv`, `xapp_metrics.csv`, `measured_kpi_log.csv`.
-
----
-
-## 7. Run a per-module example
-
-| Module | Command |
-|---|---|
-| `ntn-cho` | `./ns3 run "ntn-cho-full-constellation --algorithm=tte-aware --simTime=600"` |
-| `ntn-cho` (trigger classes) | `./ns3 run "ntn-cho-handover-traffic --trigger=t1"` (a3 / d1 / t1 / elevation / ta) |
-| `oran-ntn` | `./ns3 run "oran-ntn-full-scenario --simTime=600 --xapps=ho,beamhop,slice,doppler,tnntn"` |
-| `oran-ntn` (RIC placement A/B) | `./ns3 run "oran-ntn-ric-placement-ab"` |
-| `ntn-traffic` | `./ns3 run "ntn-oran-qos-flows"` — 4 5QI flows + C&C on a real NR NTN cell |
-| `ntn-traffic` (calibration) | `./ns3 run "ntn-tr38821-calibration"` — TR 38.821 Set-1 LEO-600 gate |
-| `thz-ntn` | `./ns3 run "thz-ntn-demo --example=8"` |
-| `ntn-v2x` (PC5 sidelink) | `./ns3 run "ntn-v2x-pc5-sidelink-bsm --numVehicles=20 --numSubchannels=5 --duration=4"` — NR PC5 Mode-2 J2735 BSM broadcast, PRR vs distance (TS 38.885) |
-| `ns3-ai-ntn` | `cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/ && python3 a-plus-b.py` |
-
-Per-module run details: see each module's own `README.md`.
-
----
-
-## 8. Run the repo-wide validation gates
-
-Two aggregate gates assert that every example runs on a measured radio and
-that the radio matches 3GPP study-case numbers:
+### 2.6 First run
 
 ```bash
-python3 tools/check_protocol_fidelity.py    # measured-KPI fidelity gate — asserts every
-                                            # registered example runs on a real radio plane
-                                            # (sim_health.csv provenance, not synthetic data)
-python3 tools/check_ntn_standards.py        # 3GPP conformance gate — TR 38.821 link-budget
-                                            # calibration, Table-3 platform latency bands,
-                                            # and the NTN handover trigger classes
+./ns3 run ntn-real-stack-smoke
 ```
 
-Both exit non-zero on any failure, so they are CI-friendly.
+That builds one NR NTN cell under satellite mobility, runs traffic across it, and
+writes a health record. If it prints measured SINR and a nonzero throughput, the
+tree is working.
+
+Then the cross-module flagship:
+
+```bash
+./ns3 run "ntn-e2e-full-stack --duration=60 --numUes=8 --altitude=600 --outputDir=out/"
+```
+
+One real NR NTN cell under SGP4 mobility whose measured PHY SINR feeds the O-RAN
+E2SM-KPM flow monitor, the near-real-time RIC xApps and the in-band QoS sink at
+the same time, exercising `ntn-traffic`, `oran-ntn`, `ntn-constellation` and the
+vendored `mmwave` and `satellite` stacks in one binary.
 
 ---
 
-## 9. Run the test suites
+## 3. Installing one module into an existing ns-3 tree
+
+Twelve of the fourteen modules are also published standalone. Drop one into your
+own `contrib/` and reconfigure. Each carries its own `README.md` and `INSTALL.md`
+listing what else it needs.
+
+| Module | Standalone repository | Branch |
+|---|---|---|
+| `ntn-cho` | `Muhammaduazir69/ntn-cho-framework` | `main` |
+| `oran-ntn` | `Muhammaduazir69/oran-ntn` | `oran-ntn-v2` |
+| `thz-ntn` | `Muhammaduazir69/ns3-thz-ntn` | `thz-ntn-v2` |
+| `ntn-constellation` | `Muhammaduazir69/ntn-constellation` | `ntn-constellation-v2` |
+| `ntn-rrc` | `Muhammaduazir69/ntn-rrc` | `ntn-rrc-v2` |
+| `ntn-sagin` | `Muhammaduazir69/ntn-sagin` | `ntn-sagin-v2` |
+| `ntn-sionna` | `Muhammaduazir69/ntn-sionna` | `ntn-sionna-v2` |
+| `ntn-slice` | `Muhammaduazir69/ntn-slice` | `ntn-slice-v2` |
+| `ntn-v2x` | `Muhammaduazir69/ntn-v2x` | `ntn-v2x-v2` |
+| `ntn-observability` | `Muhammaduazir69/ntn-observability` | `ntn-observability-v2` |
+| `ntn-digital-twin` | `Muhammaduazir69/ntn-digital-twin` | `ntn-digital-twin-v2` |
+| `ns3-ai-ntn` | `Muhammaduazir69/ns3-ai` | `fix/ns3-43-compatibility-and-critical-bugs` |
+| `ntn-fapi` | bundled only | |
+| `ntn-traffic` | bundled only | |
+
+Each repository is mirrored on GitLab under
+<https://gitlab.com/ns3-ntn-toolkit>.
+
+```bash
+git clone -b oran-ntn-v2 \
+  https://github.com/Muhammaduazir69/oran-ntn.git contrib/oran-ntn
+./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 build
+```
+
+`ntn-traffic` and `ntn-fapi` ship only inside this toolkit tree. `ntn-traffic` in
+particular is the spine most other modules' examples build on, so a standalone
+module usually needs this toolkit rather than a bare ns-3.
+
+---
+
+## 4. Verifying the install
+
+### 4.1 The standards gates
+
+```bash
+python3 tools/check_ntn_standards.py
+```
+
+Sixteen gates: the TR 38.821 Set-1 LEO-600 link-budget calibration, orbital
+geometry, the published platform-latency bands, all five NTN handover trigger
+classes, and the documentation-claim checks. It exits nonzero on any failure, so
+it works as a CI step.
+
+```bash
+python3 tools/check_protocol_fidelity.py    # every example runs on a measured radio plane
+python3 tools/check_doc_claims.py           # no document claims what the code contradicts
+python3 tools/check_dashboard_producers.py  # every dashboard panel traces back to a producer
+```
+
+### 4.2 The test suites
 
 ```bash
 ./test.py -s ntn-cho
 ./test.py -s oran-ntn
-./test.py -s oran-ntn-multi-tier-ric
-./test.py -s oran-ntn-ws4
-./test.py -s ntn-oran-application
-./test.py -s ntn-oran-ai-flow-monitor
-./test.py -s ntn-standards-validation
 ./test.py -s thz-ntn
+./test.py -s ntn-constellation
+./test.py -s ntn-standards-validation
 ```
 
-(`./test.py` with no arguments runs everything, including the upstream ns-3
-suites — expect a long run.)
+`./test.py` with no arguments runs everything including the upstream ns-3 suites,
+which takes a long time.
 
 ---
 
-## 10. Common issues
+## 5. Per-module examples
 
-**`SatMobilityModel not found`**
-You skipped step 3 (SNS3 satellite clone). It's required.
+| Module | Try this |
+|---|---|
+| `ntn-cho` | `./ns3 run "ntn-cho-real-stack --trigger=d2 --duration=60"` |
+| `ntn-cho` | `./ns3 run "ntn-cho-full-constellation --algorithm=tte-aware --simTime=600"` |
+| `oran-ntn` | `./ns3 run "oran-ntn-full-scenario --simTime=600 --xapps=ho,beamhop,slice,doppler,tnntn"` |
+| `oran-ntn` | `./ns3 run oran-ntn-ric-placement-ab` |
+| `ntn-traffic` | `./ns3 run ntn-tr38821-calibration` |
+| `ntn-traffic` | `./ns3 run ntn-oran-qos-flows` |
+| `ntn-rrc` | `./ns3 run ntn-rrc-real-stack` |
+| `thz-ntn` | `./ns3 run "thz-ntn-demo --example=8"` |
+| `ntn-v2x` | `./ns3 run "ntn-v2x-pc5-sidelink-bsm --numVehicles=20 --duration=4"` |
+| `ntn-sagin` | `./ns3 run sagin-a2g-real-stack` |
+| `ntn-sionna` | `./ns3 run "leo-pass-sionna-vs-tr38811 --sionnaServer=127.0.0.1:8899"` |
+| `ntn-fapi` | `./ns3 run ntn-fapi-real-stack` |
+| `ns3-ai-ntn` | `cd contrib/ns3-ai-ntn/examples/a-plus-b/use-gym/ && python3 a-plus-b.py` |
 
-**`MmWaveAmc not found`**
-mmWave isn't built. Verify `contrib/mmwave/` exists and re-configure.
-
-**ns3-ai `ImportError: dynamic module does not define module export function`**
-LTO bug — make sure you're on the modernised fork (this toolkit's bundled `contrib/ns3-ai-ntn/` is already on the right branch).
-
-**Build cache filtering modules**
-Run a clean configure: `./ns3 configure --enable-modules=''`.
-
-**`MmWaveComponentCarrierConf already defined`**
-You have two copies of mmWave. Delete one.
+Every example writes a standardized bundle to `--outputDir`: `sim_health.csv`
+with a provenance label on every row, the per-example KPI CSVs, and where the
+module exports telemetry, an E2SM-KPM series under TS 28.552 names.
 
 ---
 
-## 11. Constellation TLE data
+## 6. Optional components
 
-The `satellite/data/constellations/` folder ships with real TLE for:
-- Iridium-NEXT (66 satellites, 780 km, 86.4°)
-- Starlink shell-1 (1 584 satellites, 550 km, 53°)
-- Kuiper-1 (1 156 satellites, 590 km, 33°)
+### 6.1 GPU ray tracing with Sionna RT
 
-Refresh against current operational TLE:
+`ntn-sionna` talks to a Sionna RT server over a socket, so the GPU does not have
+to be on the same machine as the simulation.
 
 ```bash
-cd contrib/satellite/data/constellations/
-./refresh_tle.sh
+pip install sionna
+python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8899
+./ns3 run "leo-pass-sionna-vs-tr38811 --sionnaServer=127.0.0.1:8899"
 ```
 
----
+Without a reachable server the bridge falls back to the closed-form TR 38.811
+model, warns once, and every run prints which path produced its numbers. If a
+traced result is load-bearing for your experiment, set `RequireLiveTransport` so
+a missing server aborts instead of silently substituting free space.
 
-## 12. Module guide — all modules
+### 6.2 Telemetry: InfluxDB, Grafana, NetSimulyzer, Cesium
 
-The toolkit ships **14 custom NTN modules** plus 4 vendored/patched upstream
-modules. Every custom module has its own `INSTALL.md` (build + dependencies +
-how to run its examples) and `README.md` (design + capabilities) in
-`contrib/<module>/`. Branches are the standalone-repo branches from
-[section 4](#4-optional-clone-the-standalone-module-repos).
+`ntn-observability` writes InfluxDB line protocol, NetSimulyzer JSON and CZML for
+a Cesium globe from one scene recorder. The shipped Grafana dashboards are under
+`contrib/ntn-observability/dashboards/`, and `tools/check_dashboard_producers.py`
+verifies that every panel traces back to code that actually emits its measurement.
 
-### Custom NTN modules
+### 6.3 The digital twin service
 
-| Module | What it does | Per-module guide |
-|---|---|---|
-| **ntn-cho** | TTE-aware Rel-17/18 conditional handover for LEO NTN (full D1/D2/T1 + A3/elevation/TA trigger set) | [INSTALL](contrib/ntn-cho/INSTALL.md) · [README](contrib/ntn-cho/README.md) |
-| **oran-ntn** | O-RAN Near-RT + Space RIC, 16 xApps, real E2AP/E2SM over SCTP, KPM/RC/CCC/Ephemeris service models | [INSTALL](contrib/oran-ntn/INSTALL.md) · [README](contrib/oran-ntn/README.md) |
-| **thz-ntn** | 100 GHz–1 THz physics: ITU-R P.676-13 line-by-line absorption, UM-MIMO, RIS, ISAC, beam tracking | [INSTALL](contrib/thz-ntn/INSTALL.md) · [README](contrib/thz-ntn/README.md) |
-| **ntn-constellation** | Vallado SGP4 Walker mega-constellations, live CelesTrak/Space-Track TLE, C/N0→BLER link, contact-graph routing | [INSTALL](contrib/ntn-constellation/INSTALL.md) · [README](contrib/ntn-constellation/README.md) |
-| **ntn-rrc** | NR-NTN control plane: SIB19 ephemeris over the air, timing advance, NTN-DRX | [INSTALL](contrib/ntn-rrc/INSTALL.md) · [README](contrib/ntn-rrc/README.md) |
-| **ntn-sagin** | Space-air-ground integration: HAPS, UAV, maritime (AIS), aviation (ADS-B), high-speed-train mobility + multi-layer routing | [INSTALL](contrib/ntn-sagin/INSTALL.md) · [README](contrib/ntn-sagin/README.md) |
-| **ntn-sionna** | NVIDIA Sionna RT ray-traced channel bridged into ns-3 (cascade channel, calibration vs TR 38.811) | [INSTALL](contrib/ntn-sionna/INSTALL.md) · [README](contrib/ntn-sionna/README.md) |
-| **ntn-slice** | 5G network slicing over NTN (eMBB / URLLC / mMTC) with 5QI/S-NSSAI selection and an orchestrator xApp | [INSTALL](contrib/ntn-slice/INSTALL.md) · [README](contrib/ntn-slice/README.md) |
-| **ntn-v2x** | Vehicle-to-everything over LEO: SUMO/AIS trace replay, `V2xLeoRelay` routing, maritime mobility | [INSTALL](contrib/ntn-v2x/INSTALL.md) · [README](contrib/ntn-v2x/README.md) |
-| **ntn-observability** | Measured-KPI observability: InfluxDB/Grafana, NetSimulyzer JSON, Cesium CZML, `NtnSceneRecorder`, repro manifest | [INSTALL](contrib/ntn-observability/INSTALL.md) · [README](contrib/ntn-observability/README.md) |
-| **ntn-digital-twin** | Live constellation digital twin + FastAPI prediction service (TLE→SGP4→geometry) | [INSTALL](contrib/ntn-digital-twin/INSTALL.md) · [README](contrib/ntn-digital-twin/README.md) |
-| **ns3-ai-ntn** | ns3-ai RL/gym shared-memory bridge (modernised fork). *The bundled NTN RL envs are clearly-labeled synthetic policy-search placeholders — they do not boot ns-3.* | [INSTALL](contrib/ns3-ai-ntn/INSTALL.md) · [README](contrib/ns3-ai-ntn/README.md) |
-| **ntn-fapi** | 3GPP SCF-222 FAPI P5/P7 L1↔L2 message ABI (bundled-only) | [INSTALL](contrib/ntn-fapi/INSTALL.md) · [README](contrib/ntn-fapi/README.md) |
-| **ntn-traffic** | `NtnRealStackHelper` (real mmWave NR NTN cell) + `NtnOranApplication`/`Sink` + 3GPP CBR/NRTV/HTTP traffic. **Required by most other modules' examples.** (bundled-only) | [INSTALL](contrib/ntn-traffic/INSTALL.md) · [README](contrib/ntn-traffic/README.md) |
+```bash
+pip install fastapi uvicorn sgp4
+python3 -m uvicorn ntn_digital_twin.api.server:app --port 8000
+```
 
-### Vendored / patched upstream modules (bundled in `contrib/`)
+Predicts handovers from live ephemeris and can actuate them back into a running
+simulation. Prediction and actuation share one guard implementation, so they
+cannot drift apart.
 
-| Module | Role | Source |
-|---|---|---|
-| `mmwave` | 5G NR mmWave PHY/MAC (patched for NTN); the real radio under `NtnRealStackHelper` | nyuwireless-unipd/ns3-mmwave |
-| `nr` | 5G-LENA NR (CTTC) — FR1 numerology (15/30 kHz), BWP, TR 38.821-calibratable PHY; integrated for the FR1-NTN migration path (`git clone --branch 5g-lena-v3.3.y https://gitlab.com/cttc-lena/nr.git contrib/nr`). One ns-3.43 compat patch: `#undef MIN_NO_CC/MAX_NO_CC` guard in `nr-common.h`. | cttc-lena/nr |
-| `satellite` | SNS3 — SatSGP4 mobility, DVB-S2/RCS2, antenna patterns, TLE corpus | sns3/sns3-satellite (**clone separately**, see [§3](#3-pull-the-upstream-satellite-module-required)) |
-| `netsimulyzer` | NetSimulyzer v1.0.13 — 3D scene visualization sink (now bundled in-tree) | usnistgov/NetSimulyzer-ns3-module |
-| `magister-stats` | Statistics framework used by SNS3 and the observability exporters | Magister / SNS3 |
+### 6.4 Constellation TLE data
 
-> Every example writes a standardized output bundle to `<example>-output/`:
-> `sim_health.csv` (the realism gate — every KPI carries a `provenance` tag),
-> `<example>_kpm_series.csv` (O-RAN E2SM-KPM canonical names), plus per-module
-> CSV/GeoJSON. See `STANDARDS_CONFORMANCE_AUDIT_2026-06-24.md` for the
-> standards mapping.
+The SNS3 corpus under `contrib/satellite/data/constellations/` ships real
+two-line elements for Iridium-NEXT (66 satellites, 780 km, 86.4 degrees),
+Starlink shell 1 (1,584 satellites, 550 km, 53 degrees) and Kuiper 1
+(1,156 satellites, 590 km, 33 degrees).
+
+```bash
+cd contrib/satellite/data/constellations/ && ./refresh_tle.sh
+```
+
+`ntn-constellation` can also pull live elements from CelesTrak.
 
 ---
 
-## 13. Citing
+## 7. Troubleshooting
 
-See the [README](README.md#cite-this-work) for the BibTeX entry.
+| Symptom | Cause and fix |
+|---|---|
+| `SatMobilityModel not found` | The SNS3 `satellite` clone in [2.4](#24-add-the-sns3-satellite-module-which-is-required) was skipped. It is required. |
+| A module is missing from `./ns3 show profile` | A stale build cache filtered it. Run `./ns3 configure --enable-modules=''`. |
+| `MmWaveAmc not found` | `contrib/mmwave/` is absent or was not configured. Reconfigure. |
+| `MmWaveComponentCarrierConf already defined` | Two copies of mmWave are in `contrib/`. Delete one. |
+| Eigen or MIMO build errors under `nr` | `libeigen3-dev` is missing. Install it and reconfigure. |
+| ns3-ai `ImportError: dynamic module does not define module export function` | An LTO issue in the upstream ns3-ai. The bundled `contrib/ns3-ai-ntn/` fork already carries the fix; make sure you are not shadowing it with an upstream clone. |
+| A Sionna example prints free-space numbers | No server was reachable. See [6.1](#61-gpu-ray-tracing-with-sionna-rt); the run says so in its provenance line. |
+| A scenario prints zeros for a KPI | Check `sim_health.csv` in the output directory. Its provenance column says whether the value was measured, modeled or configured. |
+
+---
+
+## 8. Where to go next
+
+- **[README.md](README.md)** for what each module does and the measured results
+- **[SCOPE_AND_LIMITATIONS.md](SCOPE_AND_LIMITATIONS.md)** for what the toolkit
+  deliberately does not model, which is worth reading before you design an
+  experiment around it
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** for adding a module or a scenario
+- `contrib/<module>/README.md` and `contrib/<module>/INSTALL.md` for per-module
+  detail
+- The [documentation site](https://muhammaduazir69.github.io/ns3-ntn-toolkit/)

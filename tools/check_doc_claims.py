@@ -75,7 +75,7 @@ DOC_GLOBS = [
 # A number with a source of truth can be checked. These are.
 NUMERIC_CLAIMS = [
     # (file, must-contain, why)
-    ("ns-3-dev/README.md", "71 967",
+    ("ns-3-dev/README.md", "71,967",
      "xapp_metrics.csv sums to 71,967 routed actions across 5 active xApps"),
     ("ns-3-dev/README.md", "50.2",
      "mc_table.csv gives a3 ping-pong 50.23%; 57.07% is the LOCATION baseline"),
@@ -83,7 +83,7 @@ NUMERIC_CLAIMS = [
      "the 10-seed campaign shell, matching tab:kpi in the manuscript"),
 ]
 STALE_CLAIMS = [
-    ("ns-3-dev/README.md", "85 074",
+    ("ns-3-dev/README.md", "85,074",
      "superseded action count; the committed CSV sums to 71,967"),
     ("ns-3-dev/README.md", "12/12 standards gates",
      "the standards checker runs more gates than that; count them rather than "
@@ -105,6 +105,19 @@ CAVEATED_TERMS = [
     ("MAPPO", ("not ", "single-agent", "independent")),
     ("MASAC", ("not ", "single-agent", "independent")),
 ]
+
+
+_GROUP_SEP = re.compile(r"(?<=\d)[\u202f\u00a0\u2009 ](?=\d\d\d\b)")
+
+
+def _normalize_digit_groups(text: str) -> str:
+    """Treat 71,967 / 71 967 / 71\u202f967 as the same number.
+
+    A thousands separator is typography, not data. Matching on the literal
+    bytes made the gate fail a README that stated the right value with a comma,
+    which trains a reader to edit the gate rather than the claim.
+    """
+    return _GROUP_SEP.sub(",", text)
 
 
 def check_caveated_terms() -> list:
@@ -132,13 +145,14 @@ def check_numeric_claims() -> list:
         p = ROOT / rel
         if not p.exists():
             continue
-        if needle not in p.read_text(encoding="utf-8", errors="replace"):
+        if needle not in _normalize_digit_groups(
+                p.read_text(encoding="utf-8", errors="replace")):
             out.append(f"{rel}: expected to state '{needle}' ({why}) and does not")
     for rel, needle, why in STALE_CLAIMS:
         p = ROOT / rel
         if not p.exists():
             continue
-        text = p.read_text(encoding="utf-8", errors="replace")
+        text = _normalize_digit_groups(p.read_text(encoding="utf-8", errors="replace"))
         for lineno, line in enumerate(text.splitlines(), 1):
             # A line that quotes the stale value while explaining that it IS
             # stale is fine; that is how the correction is documented.
@@ -155,7 +169,7 @@ def main() -> int:
         if not p.exists():
             continue
         checked += 1
-        text = p.read_text(encoding="utf-8", errors="replace")
+        text = _normalize_digit_groups(p.read_text(encoding="utf-8", errors="replace"))
         for lineno, line in enumerate(text.splitlines(), 1):
             for pattern, why, instead in BANNED:
                 if re.search(pattern, line):

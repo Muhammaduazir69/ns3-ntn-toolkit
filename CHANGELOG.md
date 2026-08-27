@@ -180,5 +180,5 @@ so the contrib modules compose each other's APIs over a real ns-3 data plane.
 - ORAN `conflict_log` is legitimately empty for the shipped xApp mix (the active
   xApps contend on disjoint resource keys).
 
-See `CSV_REALISM_FIXES_2026-05.md` for the full column-by-column audit and
-`EXAMPLE_AUDIT_2026-05.md` for the example-execution audit.
+See the v2 release notes below for the column-by-column summary and
+the per-module CHANGELOG entries for the example-execution results.

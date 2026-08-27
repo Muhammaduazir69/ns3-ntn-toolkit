@@ -2,11 +2,11 @@
 **Date:** 2026-06-27  **Author:** Muhammad Uzair, Independent Researcher
 
 This is the authoritative statement of what the toolkit **does** and **does not**
-model at the architecture level. It complements two companion documents:
-- `TOOLKIT_STANDARDS_ACCURACY_JUDGMENT_2026-06-27.md` — the full layer-by-layer
-  accuracy judgment (genuinely-accurate core · 6 fixed correctness bugs · relabeled
-  overclaims · these boundaries).
-- `STANDARDS_VALIDATION_GAP_ANALYSIS_2026-06-26.md` — the channel/HARQ/timer fixes (G1–G19).
+model at the architecture level. It is the public record of the boundaries; the
+layer-by-layer accuracy judgments and the channel, HARQ and timer fix logs that
+produced them are internal engineering notes and are not published with the
+toolkit. Anything a reader needs in order to judge a result is stated here rather
+than left to a citation of a document they cannot open.
 
 The items below (A1–A5) are **architectural boundaries**, not bugs: the underlying
 models are real and correct in isolation, but they are either computed *outside* the

@@ -1,0 +1,45 @@
+cff-version: 1.2.0
+message: "If you use this toolkit in your research, please cite it as below."
+title: "ns3-ntn-toolkit: a pre-integrated ns-3 simulation platform for 6G non-terrestrial networks"
+abstract: >-
+  A fork of ns-3.43 carrying fourteen custom modules for 6G non-terrestrial
+  network research: LEO satellite constellation generation and contact-graph
+  routing, 3GPP NR-NTN protocol stacks with conditional handover and SIB19
+  timing, satellite O-RAN with E2 and A1 control loops, sub-terahertz and
+  terahertz link modeling, GPU ray tracing through Sionna RT, space-air-ground
+  integrated networking, network slicing, satellite-assisted V2X, a network
+  digital twin, and Gymnasium environments for reinforcement learning. The
+  decision plane and the measurement plane are the same plane: a handover a
+  trigger fires moves a terminal onto a cell whose SINR is then measured.
+type: software
+authors:
+  - family-names: Uzair
+    given-names: Muhammad
+    orcid: "https://orcid.org/0009-0002-4104-2680"
+    email: muhammaduzairr69@gmail.com
+    affiliation: "Independent Researcher"
+repository-code: "https://github.com/Muhammaduazir69/ns3-ntn-toolkit"
+url: "https://muhammaduazir69.github.io/ns3-ntn-toolkit/"
+license: GPL-2.0-only
+version: "2.5.0"
+date-released: "2026-08-27"
+keywords:
+  - 6G
+  - non-terrestrial networks
+  - NTN
+  - ns-3
+  - LEO satellite constellation
+  - satellite communications
+  - 3GPP NR-NTN
+  - conditional handover
+  - O-RAN
+  - RAN intelligent controller
+  - terahertz communication
+  - Sionna RT
+  - ray tracing
+  - digital twin
+  - reinforcement learning
+  - network slicing
+  - space-air-ground integrated network
+  - V2X
+  - network simulation
