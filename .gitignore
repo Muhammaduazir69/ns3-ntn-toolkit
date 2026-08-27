@@ -130,3 +130,55 @@ protocol_fidelity_report.md
 /ntn-observability-traffic.lp
 *_kpm_series.csv
 *_kpm_series.lp
+*-replay.bin
+test-ntn-repro-manifest/
+test-ntn-backhaul-fold/
+test-ntn-band-nonconf/
+test-ntn-band-conf/
+test-ntn-band-wide/
+test-ntn-gate-pass/
+test-ntn-gate-fail/
+test-ntn-chan-frozen/
+test-ntn-chan-evolve/
+test-ntn-budget-oracle/
+test-ntn-strict-pass/
+test-ntn-strict-fail/
+# Test scratch directories added by the 2026-08-26 audit-fix campaign. These
+# follow the pattern above: the suite writes its artifacts into the working
+# directory, so each new case that checks a written file leaves one behind.
+test-cho17-csv/
+test-cvc07-delay-treatment/
+test-cvc08-xapp-metrics/
+test-nt12-window/
+test-ntn-airiface-delay/
+# Vendored nr/mmwave per-run trace dumps. The list above already covers several
+# of these by name; the rest appear whenever an nr example runs from the source
+# root and are pure run output.
+Nr*Stats*.txt
+Nr*Trace*.txt
+Dl*Sinr.txt
+DlPathlossTrace.txt
+Rxed*Trace.txt
+Txed*Trace.txt
+hexagonal-topology.gnuplot
+test1.db
+
+# Internal engineering records: audits, gap registers, roadmaps and fix plans.
+# These are the working notes a release is built from, not documentation of the
+# released toolkit. What the toolkit does, how to install it and where its
+# boundaries lie belong in README.md, INSTALL.md, SCOPE_AND_LIMITATIONS.md and
+# docs/. Keeping the notes local keeps those four honest and readable.
+/audit/
+/Roadmap/
+/rd-audit-*/
+/standards-gap-audit-*/
+/*AUDIT*.md
+/*ROADMAP*.md
+/*_PLAN.md
+/*PLAN_*.md
+/*ASSESSMENT*.md
+/*JUDGMENT*.md
+/*GAP_ANALYSIS*.md
+/*SWEEP_REPORT*.md
+/CSV_REALISM_FIXES_*.md
+/REALISM_*.md
