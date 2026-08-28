@@ -1,0 +1,19 @@
+# GitLab Pages for the ns3-ntn-toolkit documentation site.
+#
+# This branch carries the site already built by MkDocs Material, the same tree
+# GitHub Pages serves. There is nothing to compile here: the job copies the
+# branch into public/ and hands it to Pages, so the two hosts serve byte-identical
+# output and a difference between them is always a deploy problem rather than a
+# build difference.
+
+pages:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - mkdir -p public
+    - cp -r $(ls -A | grep -vE '^(\.git|\.gitlab-ci\.yml|public)$') public/
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == "gh-pages"
