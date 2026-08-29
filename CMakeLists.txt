@@ -148,6 +148,18 @@ if(${NS3_CCACHE})
   endif()
 endif()
 
+# Substitute `ns3/traffic-module.h` to `ns3/ntn-traffic-module.h`
+# Since `ns3-ntn-toolkit` uses 'ntn-traffic' instead of 'traffic'
+# in module and file names
+execute_process(
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/add-ntn-suffix.sh
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  RESULT_VARIABLE ntn_suffix_rc
+)
+if(NOT ntn_suffix_rc EQUAL 0)
+  message(WARNING "add-ntn-suffix.sh exited with code ${ntn_suffix_rc}")
+endif()
+
 # ##############################################################################
 # Process options                     #
 # ##############################################################################
