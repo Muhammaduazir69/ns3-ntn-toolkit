@@ -440,12 +440,20 @@ NtnInfluxSink::SendUdp(const std::string& payload)
 {
     if (m_udpSocketFd < 0)
     {
-        m_udpSocketFd = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, IPPROTO_UDP);
+        #if defined(__APPLE__)
+          m_udpSocketFd = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        #else
+          m_udpSocketFd = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, IPPROTO_UDP);
+        #endif
         if (m_udpSocketFd < 0)
         {
             NS_LOG_WARN("UDP socket() failed: " << std::strerror(errno));
             return;
         }
+        #if defined(__APPLE__)
+          int flags = ::fcntl(m_udpSocketFd, F_GETFL, 0);
+          ::fcntl(m_udpSocketFd, F_GETFL, flags | O_NONBLOCK);
+        #endif
     }
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
