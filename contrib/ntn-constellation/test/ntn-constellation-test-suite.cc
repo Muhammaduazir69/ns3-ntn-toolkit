@@ -2020,6 +2020,70 @@ class CalibrationHarnessStarlinkTest : public TestCase
  * Reference: Vallado, Crawford, Hujsak, Kelso, "Revisiting Spacetrack Report #3"
  * (AIAA 2006-6753), tcppver.out for catalog 5 at tsince = 0 min.
  */
+/**
+ * \brief The SGP4-vs-Kepler separation on a REAL LEO orbit is a fixed ~12 km
+ *        offset present at epoch, not a drift that accumulates over the run.
+ *
+ * SCOPE A8 quoted "roughly 5 to 11 km over a 45-minute horizon" from an
+ * ISS-class TLE, and the suite's only other divergence check uses catalog 00005,
+ * whose eccentricity is 0.186 and which is not a LEO circular orbit. Measured
+ * across eight cached Starlink TLEs the separation is 11.98 to 12.01 km AT
+ * EPOCH and 11.68 to 12.09 km after 45 minutes: larger than documented, and
+ * essentially flat rather than growing, because the Kepler path treats the TLE's
+ * mean elements as osculating while SGP4 applies short-period corrections at
+ * epoch. Shortening a run does not shrink this error.
+ */
+class Sgp4VsKeplerLeoOffsetTest : public TestCase
+{
+  public:
+    Sgp4VsKeplerLeoOffsetTest()
+        : TestCase("SGP4 vs Kepler+J2 on a real LEO TLE is a fixed ~12 km epoch offset")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        TleRecord tle;
+        tle.name = "STARLINK-1008";
+        tle.line1 = "1 44714U 19074B   26123.17227886  .00020924  00000+0  42423-3 0  9990";
+        tle.line2 = "2 44714  53.1551 283.4608 0000949  19.5923 340.5121 15.46371711357247";
+
+        Ptr<Sgp4MobilityModel> sgp4 = CreateObject<Sgp4MobilityModel>();
+        sgp4->SetUseVallado(true);
+        NS_TEST_ASSERT_MSG_EQ(sgp4->SetTle(tle), true, "TLE must parse");
+        NS_TEST_ASSERT_MSG_EQ(sgp4->IsUsingSgp4(), true, "subject must be on Vallado SGP4");
+
+        Ptr<Sgp4MobilityModel> kep = CreateObject<Sgp4MobilityModel>();
+        NS_TEST_ASSERT_MSG_EQ(kep->SetTle(tle), true, "TLE must parse");
+        kep->SetUseVallado(false);
+        NS_TEST_ASSERT_MSG_EQ(kep->IsUsingSgp4(), false, "reference must be on Kepler+J2");
+
+        const Vector a0 = sgp4->GetEciPosition();
+        const Vector b0 = kep->GetEciPosition();
+        const double sep0 = std::sqrt(std::pow(a0.x - b0.x, 2) + std::pow(a0.y - b0.y, 2) +
+                                      std::pow(a0.z - b0.z, 2)) / 1000.0;
+        NS_TEST_ASSERT_MSG_EQ_TOL(sep0, 12.0, 1.0,
+                                  "the two propagators differ by about 12 km AT EPOCH on a real "
+                                  "LEO TLE; a near-zero value would mean the Kepler path is "
+                                  "silently running SGP4");
+
+        Simulator::Schedule(Seconds(45.0 * 60.0), [sgp4, kep, this]() {
+            const Vector a = sgp4->GetEciPosition();
+            const Vector b = kep->GetEciPosition();
+            const double d = std::sqrt(std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) +
+                                       std::pow(a.z - b.z, 2)) / 1000.0;
+            NS_TEST_ASSERT_MSG_EQ_TOL(d, 12.0, 1.5,
+                                      "and still about 12 km after 45 minutes, so the discrepancy "
+                                      "does not accumulate over the horizon and a shorter run does "
+                                      "not avoid it");
+        });
+        Simulator::Stop(Seconds(45.0 * 60.0 + 1.0));
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
 class Sgp4ValladoVerificationTest : public TestCase
 {
   public:
@@ -2612,6 +2676,7 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new NtnVisibilityIndexExactTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnXnHandoverProcedureTestCase, TestCase::Duration::QUICK);
         AddTestCase(new Sgp4ValladoVerificationTest, Duration::QUICK);
+        AddTestCase(new Sgp4VsKeplerLeoOffsetTest, Duration::QUICK);
         AddTestCase(new SatLinkErrorModelBlerTest, Duration::QUICK);
         AddTestCase(new TleParseChecksumTest, Duration::QUICK);
         AddTestCase(new TleStreamParseTest, Duration::QUICK);

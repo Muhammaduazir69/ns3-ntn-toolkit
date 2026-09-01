@@ -566,10 +566,31 @@ analytic. The class name says SGP4 and the captions used to as well, which is th
 part that was wrong. Both propagators are real orbital mechanics and neither is a
 placeholder, but they are not the same model and should not be described as one.
 
-**Effect on results.** Measured over a 45-minute horizon on an ISS-class TLE the
-two separate by roughly 5 to 11 km, which at orbital speed is about a second of
-along-track lag. That is enough to shift an argmax-elevation crossover, so
-handover instants move; it is far too small to matter for a link budget.
+**Effect on results.** Re-measured 2026-09-02 across eight real Starlink LEO TLEs
+from the cached Celestrak set, propagating the same TLE both ways:
+
+| horizon | SGP4 vs Kepler+J2 separation |
+|---|---|
+| t = 0 (epoch) | 11.977 to 12.006 km |
+| t = 45 min | 11.683 to 12.091 km |
+
+The number this used to give, 5 to 11 km, understated it, and the phrasing
+"separate over a 45-minute horizon" described the wrong shape. The separation is
+**already about 12 km at epoch** and is essentially unchanged 45 minutes later.
+It is a fixed offset, not an accumulating drift: the Kepler+J2 path treats the
+TLE's mean elements as osculating, while SGP4 applies its short-period periodic
+corrections at epoch, and that difference is present from the first sample.
+
+The consequence for a reader is the opposite of what the old wording implied.
+Shortening the simulated horizon does NOT reduce the discrepancy, so a 45-minute
+run is no safer than a 90-minute one on this axis. Twelve km is about 1.5 seconds
+of along-track lag at LEO speed, enough to move an argmax-elevation crossover and
+therefore a handover instant, and still far too small to matter for a link budget.
+
+The earlier figure was quoted for "an ISS-class TLE" and the test suite's
+divergence check uses catalog 00005, whose eccentricity is 0.186 and which is not
+a LEO circular orbit at all. The numbers above are from the orbit class the
+toolkit actually simulates.
 
 **What a paper may claim.** That the toolkit propagates real TLEs with Vallado
 SGP4, if the scenario loads a TLE. For a generated Walker shell, say Kepler with
