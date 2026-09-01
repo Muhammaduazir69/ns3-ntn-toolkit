@@ -602,7 +602,8 @@ main(int argc, char* argv[])
     double d1Threshold = 50000;
     double qualityTh = -3.0;
     double tteMinimum = 20.0;
-    double carrierFreqGhz = 2.0;
+    double carrierFreqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
     double satTxPower = -1.0; // sentinel: backend-appropriate default chosen below
     double altitudeKm = 780.0;
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)

@@ -77,7 +77,8 @@ main(int argc, char** argv)
     uint32_t numUes = 4; // mixed TR 38.811 classes on the real radio PHY
     uint32_t rngRun = 1;
     double altitudeKm = 550.0;
-    double freqGhz = 2.0;
+    double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     CommandLine cmd;

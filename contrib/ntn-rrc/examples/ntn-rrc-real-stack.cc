@@ -209,7 +209,8 @@ main(int argc, char* argv[])
     double altitudeKm = 550.0;
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
-    double freqGhz = 2.0;
+    double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
     bool transparent = true;
     std::string outputDir = "ntn-rrc-real-stack-output";
 

@@ -61,7 +61,8 @@ main(int argc, char* argv[])
     double uavAltM = 100.0;
     double gnbTxDbm = -7.0; // aerial-platform gNB Tx power; tuned so the short A2G
                             // range lands in a realistic SINR band (error model active)
-    double freqGhz = 2.0;
+    double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
     std::string linkStr = "NLOS";
     std::string scenarioStr = "UMa_AV";
     std::string outputDir = "sagin-a2g-real-stack-output";

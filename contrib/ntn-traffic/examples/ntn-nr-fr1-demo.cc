@@ -34,7 +34,8 @@ main(int argc, char* argv[])
     double altitudeKm = 600.0;  // LEO altitude
     uint16_t numerology = 1;    // 0 = 15 kHz, 1 = 30 kHz FR1
     double satEirpDbm = 70.0;   // satellite EIRP scalar (gNB TxPower)
-    double freqGhz = 2.0;       // S-band
+    double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
     double bwMhz = 20.0;        // NTN-FR1 max
     std::string outputDir = "./";
 

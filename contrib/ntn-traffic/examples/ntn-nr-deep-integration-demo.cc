@@ -48,8 +48,10 @@ main(int argc, char* argv[])
     uint32_t numUes = 6;       // ground UEs (2 per slice for MixedBouquet)
     double altitudeKm = 600.0; // LEO altitude
     double satEirpDbm = 70.0;
-    double freqGhz = 2.0;      // S-band
-    double bwMhz = 30.0;       // 30 MHz -> 3 x 10 MHz BWPs (one per slice)
+    double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
+    double bwMhz = 20.0; // TS 38.101-5 Table 5.3.5-1: n256 allows 5/10/15/20 MHz.
+                            // 30 MHz is the BLOCK width, not a legal channel.
     std::string outputDir = "./nr-deep-demo/";
     bool slices = true; // Enabler C on/off (diagnostic: isolate multi-BWP)
 

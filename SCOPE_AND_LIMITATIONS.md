@@ -21,6 +21,43 @@ what closing it would require.**
 > **STATUS 2026-06-27 — A1 & A5(ii) largely CLOSED on the mmwave spine; A5(i)/A3/A4 unblocked by the nr integration.**
 > A1: the model now uses the **real TR 38.811 §6.6.2 σ_SF tables** (per scenario, elevation-interpolated), **CL=0 for LOS** (spec-correct), and a **Rician small-scale fading term** with the §6.7.2 elevation-dependent K-factor. **NT-07 correction:** that term defaults to OFF and is not executing on the measured plane, deliberately: both radio backends already apply small-scale fading through the 3GPP phased-array spectrum model, and running the Rician process as well would multiply two independent fading realizations onto one link. Enable it only for a link with no 3GPP spectrum model in the path. Its normalization (unit mean power) and its elevation dependence are covered by `Tr38811FastFadingStatisticsTest`; before that they were asserted only by the comment above the code. *Remaining:* the full multi-tap frequency-selective NTN-TDL (§6.9.2). A5(ii): the **TR 38.811 §6.4.1 J1-Airy satellite beam pattern** is implemented (`NtnSatBeamGainModel`, opt-in via `NtnRealStackHelper::SetSatelliteBeam`) and verified (0 dB boresight, −3.01 dB at the half-beamwidth). **NT-07:** that setter had no callers anywhere in the tree. The pattern was still exercised on the measured plane by `ntn-tr38821-array-gain-calibration`, which constructs the model directly, but no scenario reached it through the helper, so no run assembled it into a helper-built propagation chain. `ntn-real-stack-smoke` now exposes `--satBeam`, `--beamwidthDeg` and `--beamCenterXKm`, and a fixed beam centre 300 km off the terminal costs a measured 11.07 dB (16.20 → 5.13 dB SINR) while a tracking beam costs 0 dB, which is the same reason a steered-beam calibration reports a constant offset. `NtnChannelExtrasReachTheChainTest` asserts the model is in the chain rather than merely constructible. `SetNtnScenario` had no callers either, so every run used the Suburban shadow-fading bins; it is now `--ntnScenario`. A2 (THz pointing) is wired into the measured path. **5G-LENA `nr` is now in the tree** (see A5), so A5(i)/A3/A4 are reachable on an nr spine.
 
+## A12 — The S-band scenarios now sit inside a legal n256 downlink channel
+
+**What was wrong.** The helper defaulted to a 2.0 GHz carrier in a 30 MHz channel,
+and roughly forty examples inherited or restated it. Neither value is legal for a
+downlink. TS 38.101-5 Table 5.2-1 puts n256's **uplink** at 1980-2010 MHz and its
+**downlink** at 2170-2200 MHz, so 2.0 GHz is an uplink frequency being used as the
+downlink carrier. Table 5.3.5-1 allows 5, 10, 15 and 20 MHz channels on n256;
+30 MHz is the width of the *block*, not a permitted channel.
+
+Every run said so in its own health record, `air_interface` with `pass=0`, which is
+how it was found. It had been reported honestly and left unfixed, across about
+forty-five examples, which is not a corner case.
+
+**Fixed.** The helper now defaults to **2185 MHz**, the centre of the n256 downlink
+block, in a **20 MHz** channel, the widest legal one. Fourteen examples carrying a
+hardcoded 2.0 GHz and four carrying 30 or 50 MHz were moved with it. The health tag
+changes from `nr-fr1-n256-uplinkcarrier` to `nr-fr1-ntn-n256` and `pass` goes to 1.
+
+**What it cost, measured** on `ntn-real-stack-smoke` at 60 s with 4 UEs:
+
+| carrier | channel | DL SINR | throughput | conformant |
+|---|---|---:|---:|---|
+| 2.0 GHz | 30 MHz | 30.39 dB | 20.00 Mbps | no |
+| 2.185 GHz | 30 MHz | 29.11 dB | 20.00 Mbps | no |
+| **2.185 GHz** | **20 MHz** | **31.21 dB** | **20.00 Mbps** | **yes** |
+
+Moving the carrier up costs 1.28 dB, which is the extra free-space loss and nothing
+else. Narrowing the channel to a legal width returns more than that, because the
+noise floor falls faster than the bandwidth is lost. Application throughput does
+not move at all, being offered-load limited. Conformance was therefore close to
+free here, which is the main reason it should have been done sooner.
+
+**Consequence for existing results.** Any figure measured before 2026-09-01 was
+taken at 2.0 GHz in a 30 MHz channel and is not band-conformant. Numbers move by
+about a decibel, in the favourable direction, and need re-running before they can
+be described as NTN FR1 results.
+
 ## A11 — The published Monte Carlo campaign is no longer affordable as configured
 
 `papers/sim_runs/run_mc_sweep.sh` runs four algorithms across ten seeds, 600 s of

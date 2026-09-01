@@ -135,8 +135,10 @@ struct SimParams
     double satEirpDbm = -1.0;      // sentinel: backend default chosen after parse
                                    // (mmwave 55 / nr 70); shared by measured
                                    // cells and the budget
-    double freqGhz = 2.0;          // S-band (3GPP NR-NTN FR1)
-    double bwMhz = 50.0;
+    double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
+    double bwMhz = 20.0; // TS 38.101-5 Table 5.3.5-1: n256 allows 5/10/15/20 MHz.
+                          // 50 MHz is not a legal NTN FR1 channel.
     std::string radio = "nr";      // radio backend: nr (FR1) or mmwave
     std::string outputDir = "oran-ntn-output";
     std::string conflictStrategy = "priority";

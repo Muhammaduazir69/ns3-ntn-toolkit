@@ -49,7 +49,8 @@ main(int argc, char* argv[])
     uint32_t numUes = 1;
     double altitudeKm = 600.0; // LEO altitude
     double satEirpDbm = 70.0;
-    double freqGhz = 2.0; // S-band
+    double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
     double bwMhz = 10.0;  // single BWP — isolate the handover machinery
     // Hysteresis + a longer time-to-trigger deliberately damp post-handover
     // ping-pong: right after a handover the new serving cell's RSRP filter is

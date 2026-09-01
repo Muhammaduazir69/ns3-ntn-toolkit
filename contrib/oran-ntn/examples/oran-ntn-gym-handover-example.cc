@@ -69,7 +69,8 @@ main(int argc, char* argv[])
     uint32_t numUes = 2;
     uint32_t numSats = 3; // serving + 2 candidates
     double altitudeKm = 600.0;
-    double freqGhz = 2.0;
+    double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
     double minElevDeg = 10.0;
     bool gym = false; // --gym=1 opens the Python RL peer; default steps in-process
     std::string outputDir = "oran-ntn-gym-handover-output";

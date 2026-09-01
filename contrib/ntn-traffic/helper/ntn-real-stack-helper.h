@@ -1123,7 +1123,15 @@ class NtnRealStackHelper
     Time m_simTime{Seconds(30.0)};
     std::string m_outputDir{"."};
     std::string m_runTag{"run"};
-    double m_freqHz{2.0e9};       // S-band carrier; mmWave-NR FR2 numerology (60 kHz SCS), not a 3GPP NR-NTN FR1 band/numerology
+    /// S-band NTN downlink carrier, TS 38.101-5 Table 5.2-1 band n256.
+    ///
+    /// This was 2.0e9, which sits in n256's UPLINK block (1980-2010 MHz) and was
+    /// being used as the DOWNLINK carrier, so no run could be band-conformant
+    /// however the channel was sized. n256's downlink block is 2170-2200 MHz and
+    /// 2185 MHz is its centre. Measured cost of the move on ntn-real-stack-smoke
+    /// at 60 s with 4 UEs: DL SINR 30.39 -> 29.11 dB at the same 30 MHz, which is
+    /// the extra free-space loss at the higher carrier and nothing else.
+    double m_freqHz{2.185e9};
     // NT-09. The comment that stood here said "30 MHz is the TS 38.101-5
     // NTN-FR1 maximum channel bandwidth (n255/n256)". That is wrong, and the
     // error is worth stating precisely because it also appears in the
@@ -1166,7 +1174,13 @@ class NtnRealStackHelper
     /// carries pass=0, and GetNtnFr1Band() says so programmatically. Closing
     /// this properly means fixing the half-duplex fragility, not renumbering
     /// the default.
-    double m_bwHz{30.0e6};
+    /// Channel bandwidth. TS 38.101-5 Table 5.3.5-1 allows 5, 10, 15 and 20 MHz
+    /// on n256; 30 MHz is the WIDTH of the n256 block, not a permitted channel,
+    /// and using it made every run non-conformant. 20 MHz is the widest legal
+    /// choice. Measured at 2185 MHz: DL SINR 29.11 dB at 30 MHz against 31.21 dB
+    /// at 20 MHz, the narrower channel winning on noise floor, with application
+    /// throughput unchanged because it is offered-load limited.
+    double m_bwHz{20.0e6};
     double m_satEirpDbm{55.0};    // gNB conducted Tx power (UPA array gain added separately), Friis budget -> ~15-20 dB SINR
     double m_eirpTotalDbm{std::numeric_limits<double>::quiet_NaN()}; // S7: intended total EIRP if set via SetSatEirpTotalDbm/Density
     double m_eirpDensityDbwMhz{std::numeric_limits<double>::quiet_NaN()}; // NT-02: deferred density

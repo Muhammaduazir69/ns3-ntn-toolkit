@@ -115,7 +115,8 @@ main(int argc, char* argv[])
     uint32_t numUes = 4;
     double altitudeKm = 550.0;
     double satEirpDbm = 70.0; // healthy nr (FR1 Friis) LEO downlink
-    double freqGhz = 2.0;
+    double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
+                              // which is n256 UPLINK and never conformant as a DL carrier.
     double platformSpeed = 0.0; // 0 = use the REAL SGP4 ephemeris velocity
     std::string radio = "nr";   // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-sionna-cir-real-stack-output";
