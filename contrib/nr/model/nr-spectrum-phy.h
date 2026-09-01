@@ -499,6 +499,16 @@ class NrSpectrumPhy : public SpectrumPhy
      */
     uint64_t GetSrsDropCount() const { return m_srsDroppedHalfDuplex; }
 
+    /**
+     * \brief Downlink control transmissions dropped because the half-duplex
+     *        node was receiving at the time (NTN patch).
+     *
+     * A lost downlink control message costs the UE a grant or an
+     * acknowledgement, which is a different kind of damage from a lost SRS, so
+     * it is counted apart from the uplink figure.
+     */
+    uint64_t GetDlCtrlDropCount() const { return m_dlCtrlDroppedHalfDuplex; }
+
   private:
     /// NTN patch: half-duplex uplink-control drops, see GetUlCtrlDropCount().
     uint64_t m_ulCtrlDroppedHalfDuplex{0};
@@ -506,6 +516,8 @@ class NrSpectrumPhy : public SpectrumPhy
     uint64_t m_dataDroppedHalfDuplex{0};
     /// NTN patch: SRS receptions dropped, see GetSrsDropCount().
     uint64_t m_srsDroppedHalfDuplex{0};
+    /// NTN patch: downlink-control drops, see GetDlCtrlDropCount().
+    uint64_t m_dlCtrlDroppedHalfDuplex{0};
 
     std::vector<MimoSinrChunk>
         m_mimoSinrPerceived; //!< received SINR values during data reception for TB decoding, to

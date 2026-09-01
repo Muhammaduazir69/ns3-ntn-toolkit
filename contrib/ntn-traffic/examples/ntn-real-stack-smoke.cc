@@ -29,6 +29,7 @@ main(int argc, char* argv[])
     bool strictGates = false;
     double simTime = 10.0;
     double channelUpdateMs = -1.0; // -1 = leave the helper default
+    bool airDelay = false; // put the slant on the air interface, not the backhaul
 
     uint32_t numUes = 4;
     double altKm = 600.0;
@@ -59,6 +60,11 @@ main(int argc, char* argv[])
                  "cluster geometry at t=0 for the whole run; -1 keeps the helper "
                  "default.",
                  channelUpdateMs);
+    cmd.AddValue("airDelay",
+                 "Put the service-link slant on the AIR INTERFACE via a real "
+                 "ConstantSpeedPropagationDelayModel, instead of folding it into "
+                 "the backhaul. See SCOPE_AND_LIMITATIONS.md A6.",
+                 airDelay);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altKm", "Satellite altitude [km]", altKm);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power [dBm]; -1 = backend default", satEirpDbm);
@@ -130,6 +136,7 @@ main(int argc, char* argv[])
     {
         rs.SetChannelUpdatePeriod(MilliSeconds(static_cast<uint64_t>(channelUpdateMs)));
     }
+    rs.SetAirInterfaceDelay(airDelay);
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
     rs.SetBandwidthHz(bwMhz * 1e6);
     // NT-02: declared as CONDUCTED power at the array input. This carrier has

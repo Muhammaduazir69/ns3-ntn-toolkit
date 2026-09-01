@@ -326,6 +326,23 @@ the slant alone. Second, LEO-600, the toolkit's own reference shell, is among th
 that do not work, and a saturating downlink trips the same assertion even at a slant that
 otherwise passes.
 
+**Retested 2026-09-01, and the boundary stands.** The `Cannot TX while RX` aborts
+in that table are the same fault as A9, and A9's fix converts three of them into
+counted drops. That was enough for `ntn-cho-full-constellation` and not enough
+here. With the air-interface delay on, the abort moves to a fourth site and then
+to its mirror, `Cannot RX UL CTRL while TX`, which is deliberately NOT patched:
+past that point the state machine is being forced rather than corrected.
+
+The 1200 km run is the reason to stop. It completes, exit code 0, and reports
+`dl_sinr_db` 0, `app_owd_ms` 0 and **606 dropped downlink control messages**. A
+hollow run that looks like a success. It is visible only because A9 added the drop
+counters, which is the case for having them, and it is exactly why forcing the
+remaining sites would be the wrong kind of fix: it would turn a crash into a
+plausible-looking result.
+
+`ntn-real-stack-smoke --airDelay=1 --altKm=<km>` reproduces all of this, so the
+boundary is checkable rather than asserted.
+
 An earlier note on the setter claimed that consuming the K_offset unlocked this for a single UE.
 That was wrong, and it has been corrected in the header.
 

@@ -3046,6 +3046,7 @@ NtnRealStackHelper::WriteHealthReport()
         uint64_t ctrlDrops = 0;
         uint64_t dataDrops = 0;
         uint64_t srsDrops = 0;
+        uint64_t dlCtrlDrops = 0;
         const uint8_t nBwpHealth = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
         for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
         {
@@ -3056,6 +3057,7 @@ NtnRealStackHelper::WriteHealthReport()
                     ctrlDrops += sp->GetUlCtrlDropCount();
                     dataDrops += sp->GetDataDropCount();
                     srsDrops += sp->GetSrsDropCount();
+                    dlCtrlDrops += sp->GetDlCtrlDropCount();
                 }
             }
         }
@@ -3068,12 +3070,14 @@ NtnRealStackHelper::WriteHealthReport()
                     ctrlDrops += sp->GetUlCtrlDropCount();
                     dataDrops += sp->GetDataDropCount();
                     srsDrops += sp->GetSrsDropCount();
+                    dlCtrlDrops += sp->GetDlCtrlDropCount();
                 }
             }
         }
         out << "halfduplex_ulctrl_drops," << ctrlDrops << ",-,-,measured\n";
         out << "halfduplex_data_drops," << dataDrops << ",-,-,measured\n";
         out << "halfduplex_srs_rx_drops," << srsDrops << ",-,-,measured\n";
+        out << "halfduplex_dlctrl_drops," << dlCtrlDrops << ",-,-,measured\n";
     }
     out << "carrier_hz," << m_freqHz << ",-,-,config\n";
     // WF-11: refusals reach the health file, so they are visible in the

@@ -670,7 +670,22 @@ NrSpectrumPhy::StartTxDlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
     case RX_UL_CTRL:
         /* no break*/
     case RX_UL_SRS:
-        NS_FATAL_ERROR("Cannot TX while RX.");
+        // NTN patch, same rule as the other transmit paths. A TDD gNB cannot
+        // send downlink control while it is receiving on the same carrier; the
+        // modelled outcome is that it does not send, not that the simulation
+        // stops.
+        //
+        // This is the site that blocked boundary A6: enabling a real
+        // ConstantSpeedPropagationDelayModel on the air interface, so the
+        // service-link slant is borne by the radio rather than folded into the
+        // backhaul, made the downlink control of one slot overlap the uplink
+        // reception of another once the slant exceeded a few hundred kilometres.
+        //
+        // Counted separately from uplink control, because a lost downlink
+        // control message costs the UE a grant or an acknowledgement and that is
+        // a different kind of damage from a lost SRS.
+        ++m_dlCtrlDroppedHalfDuplex;
+        NS_LOG_WARN("Dropping DL CTRL: half-duplex node is receiving (state " << m_state << ")");
         break;
     case TX:
         NS_FATAL_ERROR("Cannot TX while already TX.");
