@@ -467,8 +467,27 @@ counters, which is the case for having them, and it is exactly why forcing the
 remaining sites would be the wrong kind of fix: it would turn a crash into a
 plausible-looking result.
 
+**Fifth attempt, 2026-09-01, and this one is the decisive evidence.** The
+receive-side mirror was patched too: the two `case TX:` arms in `StartRxUlCtrl` and
+the SRS reception path, where a transmitting half-duplex node is asked to receive.
+That is as physically defensible as the transmit-side drops, and the arms that
+concern simultaneous receptions were deliberately left alone, since the function's
+own comment notes a gNB can receive from several UEs at once.
+
+With it, 300 km finally carries traffic: 34,370 transport blocks at 36.77 dB. And
+the application one-way delay is **7779 ms** on a link whose true delay is about
+1.2 ms, with 1086 dropped receptions corrupting it. 600 km and 1200 km still carry
+nothing at all.
+
+So the patch turns an honest abort into a run that reports a healthy-looking SINR
+alongside a delay wrong by three orders of magnitude. That is worse than the crash
+it replaces, and it is the reason the change was reverted rather than kept. The
+`app_owd_ms` row is what exposed it, which is the argument for provenance rows on
+quantities nobody expects to have to check.
+
 `ntn-real-stack-smoke --airDelay=1 --altKm=<km>` reproduces all of this, so the
-boundary is checkable rather than asserted.
+boundary is checkable rather than asserted. Five attempts, all measured, all
+recorded. A6 stands.
 
 An earlier note on the setter claimed that consuming the K_offset unlocked this for a single UE.
 That was wrong, and it has been corrected in the header.
