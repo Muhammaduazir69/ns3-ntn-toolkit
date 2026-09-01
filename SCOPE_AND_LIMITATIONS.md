@@ -21,6 +21,38 @@ what closing it would require.**
 > **STATUS 2026-06-27 — A1 & A5(ii) largely CLOSED on the mmwave spine; A5(i)/A3/A4 unblocked by the nr integration.**
 > A1: the model now uses the **real TR 38.811 §6.6.2 σ_SF tables** (per scenario, elevation-interpolated), **CL=0 for LOS** (spec-correct), and a **Rician small-scale fading term** with the §6.7.2 elevation-dependent K-factor. **NT-07 correction:** that term defaults to OFF and is not executing on the measured plane, deliberately: both radio backends already apply small-scale fading through the 3GPP phased-array spectrum model, and running the Rician process as well would multiply two independent fading realizations onto one link. Enable it only for a link with no 3GPP spectrum model in the path. Its normalization (unit mean power) and its elevation dependence are covered by `Tr38811FastFadingStatisticsTest`; before that they were asserted only by the comment above the code. *Remaining:* the full multi-tap frequency-selective NTN-TDL (§6.9.2). A5(ii): the **TR 38.811 §6.4.1 J1-Airy satellite beam pattern** is implemented (`NtnSatBeamGainModel`, opt-in via `NtnRealStackHelper::SetSatelliteBeam`) and verified (0 dB boresight, −3.01 dB at the half-beamwidth). **NT-07:** that setter had no callers anywhere in the tree. The pattern was still exercised on the measured plane by `ntn-tr38821-array-gain-calibration`, which constructs the model directly, but no scenario reached it through the helper, so no run assembled it into a helper-built propagation chain. `ntn-real-stack-smoke` now exposes `--satBeam`, `--beamwidthDeg` and `--beamCenterXKm`, and a fixed beam centre 300 km off the terminal costs a measured 11.07 dB (16.20 → 5.13 dB SINR) while a tracking beam costs 0 dB, which is the same reason a steered-beam calibration reports a constant offset. `NtnChannelExtrasReachTheChainTest` asserts the model is in the chain rather than merely constructible. `SetNtnScenario` had no callers either, so every run used the Suburban shadow-fading bins; it is now `--ntnScenario`. A2 (THz pointing) is wired into the measured path. **5G-LENA `nr` is now in the tree** (see A5), so A5(i)/A3/A4 are reachable on an nr spine.
 
+## A8 — Most shipped scenarios propagate with Kepler + J2, not SGP4
+
+**What is bounded.** `Sgp4MobilityModel` has two propagation paths and picks one
+from how it was initialised. Given a two-line element it runs the full Vallado
+SGP4, drag and B* included. Given Keplerian elements it runs a Kepler propagator
+with J2 secular rates instead, because a generated shell has no TLE for SGP4 to
+consume.
+
+**Why it matters.** The Walker-Delta and Walker-Star generators seed shells from
+orbital elements, so scenarios built on them are on the Kepler + J2 path. Counted
+over the examples that instantiate the model, **4 of 78 run SGP4**; the rest are
+analytic. The class name says SGP4 and the captions used to as well, which is the
+part that was wrong. Both propagators are real orbital mechanics and neither is a
+placeholder, but they are not the same model and should not be described as one.
+
+**Effect on results.** Measured over a 45-minute horizon on an ISS-class TLE the
+two separate by roughly 5 to 11 km, which at orbital speed is about a second of
+along-track lag. That is enough to shift an argmax-elevation crossover, so
+handover instants move; it is far too small to matter for a link budget.
+
+**What a paper may claim.** That the toolkit propagates real TLEs with Vallado
+SGP4, if the scenario loads a TLE. For a generated Walker shell, say Kepler with
+J2 secular rates. `Sgp4MobilityModel::GetPropagatorName()` returns
+`sgp4-vallado` or `kepler-j2` so a run can state which it used, and
+`GetSgp4FallbackCount()` is non-zero if the SGP4 path failed mid-run and
+degraded silently, which the optimized build otherwise would not report.
+
+**What closing it would require.** Synthesising a conforming TLE from the
+generated elements and feeding SGP4, which the constellation README already
+claims the presets can do. That is a real change to the geometry every scenario
+sees, so it belongs behind a flag and a re-run, not a silent default flip.
+
 ## A1 — The measured channel carries TR 38.811 *large-scale* loss only (no fast fading)
 
 - **Bounded:** the G1 `Ntn38811ExcessLossModel` adds elevation-dependent gaseous

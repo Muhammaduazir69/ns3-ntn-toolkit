@@ -1208,7 +1208,26 @@ class NtnRealStackHelper
     void RefreshBackhaulFold();
     Time m_backhaulRefresh{Seconds(1.0)};
     /// NT-08: 3GPP cluster regeneration period; 0 = frozen at t=0.
-    Time m_channelUpdatePeriod{MilliSeconds(0)};
+    /// NT-08. Spatial-channel regeneration period.
+    ///
+    /// This defaults to the SAME 100 ms that IdealBeamformingHelper uses for
+    /// BeamformingPeriodicity, and the match is the point rather than a
+    /// coincidence. The beamforming vector is recomputed from the satellite's
+    /// real position on that cadence; if the channel matrix it multiplies is
+    /// not regenerated on the same cadence, the beam points where the satellite
+    /// is now while the frozen clusters still arrive from where it was at t=0.
+    /// Over a LEO pass that mismatch grows without bound.
+    ///
+    /// It used to default to 0, which ThreeGppChannelModel reads as "never
+    /// regenerate". Measured on ntn-real-stack-smoke over a 60 s pass with four
+    /// UEs, that cost 17.5 dB of DL SINR (10.32 against 27.83 dB) and raised
+    /// TBLER roughly a hundredfold (0.122 against 0.0012). It was not a
+    /// performance trade either: the frozen run took 40 s of wall clock against
+    /// 31 s, because the depressed SINR drove HARQ retransmissions.
+    ///
+    /// Anything non-zero from 10 ms to 2 s lands within 0.6 dB, so the value is
+    /// not delicate. What matters is that regeneration happens at all.
+    Time m_channelUpdatePeriod{MilliSeconds(100)};
     /// WF-07: verdict of the last health report.
     bool m_lastGateVerdict{true};
     /// OBS-07: TLE provenance declared by the scenario, for the manifest.

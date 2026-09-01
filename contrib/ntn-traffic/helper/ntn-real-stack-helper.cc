@@ -309,6 +309,23 @@ NtnRealStackHelper::BuildMmwaveRadio()
     // ---- NTN-ize the NR air interface via Config defaults (read at CreateObject
     //      time inside MmWaveHelper::DoInitialize) -------------------------------
     // NB: mmwave registers its TypeIds WITHOUT the mmwave:: namespace.
+    // NT-08, mmwave half. BuildNrRadio set the spatial-channel regeneration
+    // period; this path never did, so an mmwave run inherited ns-3's own
+    // ThreeGppChannelModel default of 0 and froze its channel matrix at t=0.
+    //
+    // Measured, the consequence here is small: 15.63 dB against 14.95 dB of DL
+    // SINR on the smoke scenario, which is the opposite sign and a fortieth of
+    // the size of the NR backend's 17.5 dB. That asymmetry is the interesting
+    // part and it is not luck. The NR spine recomputes its beam from real
+    // geometry every 100 ms, so a frozen channel leaves the beam pointing at a
+    // satellite the clusters no longer describe; mmwave derives its beam from
+    // the channel matrix itself, so freezing both kept the two halves mutually
+    // consistent and the error largely cancelled. The period is set here so the
+    // two backends are configured alike rather than because this one was badly
+    // wrong. The TR 38.821 calibration, which defaults to this backend, moves
+    // within its own tolerance and its gate still passes.
+    Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod",
+                       TimeValue(m_channelUpdatePeriod));
     Config::SetDefault("ns3::MmWavePhyMacCommon::CenterFreq", DoubleValue(m_freqHz));
     Config::SetDefault("ns3::MmWavePhyMacCommon::Bandwidth", DoubleValue(m_bwHz));
     Config::SetDefault("ns3::MmWaveEnbPhy::TxPower", DoubleValue(m_satEirpDbm));
@@ -605,9 +622,12 @@ NtnRealStackHelper::BuildNrRadio()
     // ntn-tr38811-excess-loss-model credited the 3GPP model with applying
     // "small-scale fading with Doppler on the same link" on that basis.
     //
-    // Now configurable. The default stays 0 so no existing run changes cost or
-    // results without being asked, and a scenario that wants an evolving
-    // channel sets a period on the order of the coherence time.
+    // The default is now 100 ms, matching IdealBeamformingHelper's own
+    // BeamformingPeriodicity. Leaving it at 0 to protect existing numbers, which
+    // is what this comment used to say, meant every existing number was produced
+    // by a beam that tracked the satellite against a channel matrix that did
+    // not: 17.5 dB of DL SINR on the smoke scenario, and a hundredfold TBLER.
+    // A scenario that genuinely wants a frozen channel can still ask for 0.
     Config::SetDefault("ns3::ThreeGppChannelModel::UpdatePeriod",
                        TimeValue(m_channelUpdatePeriod));
     m_nr->SetChannelConditionModelAttribute("UpdatePeriod",

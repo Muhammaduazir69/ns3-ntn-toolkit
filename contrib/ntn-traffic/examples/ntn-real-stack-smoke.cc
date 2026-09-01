@@ -28,6 +28,8 @@ main(int argc, char* argv[])
 {
     bool strictGates = false;
     double simTime = 10.0;
+    double channelUpdateMs = -1.0; // -1 = leave the helper default
+
     uint32_t numUes = 4;
     double altKm = 600.0;
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
@@ -52,6 +54,11 @@ main(int argc, char* argv[])
                  "evaluates could only ever warn.",
                  strictGates);
     cmd.AddValue("simTime", "Simulation time [s]", simTime);
+    cmd.AddValue("channelUpdateMs",
+                 "3GPP spatial-channel regeneration period [ms]. 0 freezes the "
+                 "cluster geometry at t=0 for the whole run; -1 keeps the helper "
+                 "default.",
+                 channelUpdateMs);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altKm", "Satellite altitude [km]", altKm);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power [dBm]; -1 = backend default", satEirpDbm);
@@ -119,6 +126,10 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTime));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("smoke");
+    if (channelUpdateMs >= 0.0)
+    {
+        rs.SetChannelUpdatePeriod(MilliSeconds(static_cast<uint64_t>(channelUpdateMs)));
+    }
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
     rs.SetBandwidthHz(bwMhz * 1e6);
     // NT-02: declared as CONDUCTED power at the array input. This carrier has

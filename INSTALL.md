@@ -136,7 +136,7 @@ Then the cross-module flagship:
 ./ns3 run "ntn-e2e-full-stack --duration=60 --numUes=8 --altitude=600 --outputDir=out/"
 ```
 
-One real NR NTN cell under SGP4 mobility whose measured PHY SINR feeds the O-RAN
+One real NR NTN cell under satellite mobility whose measured PHY SINR feeds the O-RAN
 E2SM-KPM flow monitor, the near-real-time RIC xApps and the in-band QoS sink at
 the same time, exercising `ntn-traffic`, `oran-ntn`, `ntn-constellation` and the
 vendored `mmwave` and `satellite` stacks in one binary.

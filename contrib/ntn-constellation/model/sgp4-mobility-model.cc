@@ -212,6 +212,7 @@ Sgp4MobilityModel::Propagate(double unix_s, Vector& pos_eci, Vector& vel_eci)
     // ---- Full Vallado SGP4 path (drag/B* included) ----
     if (m_useVallado && m_vallado && m_vallado->ready)
     {
+        ++m_sgp4Calls;
         const double tsince_min = (UnixToJulian(unix_s) - m_vallado->rec.jdsatepoch) * 1440.0;
         double r[3];
         double v[3];
@@ -223,6 +224,10 @@ Sgp4MobilityModel::Propagate(double unix_s, Vector& pos_eci, Vector& vel_eci)
             vel_eci = Vector(v[0] * 1000.0, v[1] * 1000.0, v[2] * 1000.0);
             return;
         }
+        // CVC-12: count it. NS_LOG_WARN is compiled out of the optimized
+        // build, so this was a silent degradation: a run could stop being SGP4
+        // partway through a pass and still describe itself as SGP4.
+        ++m_sgp4Fallbacks;
         NS_LOG_WARN("sgp4 propagation failed (error " << m_vallado->rec.error
                                                       << "); falling back to Kepler+J2");
     }
@@ -445,5 +450,14 @@ Sgp4MobilityModel::DoGetGeocentricPosition() const
     return DoGetPosition();
 }
 
+std::string
+Sgp4MobilityModel::GetPropagatorName() const
+{
+    // Delegate rather than re-derive: IsUsingSgp4() already owns this decision,
+    // and two copies of it would be free to drift apart.
+    return IsUsingSgp4() ? "sgp4-vallado" : "kepler-j2";
+}
+
 } // namespace ntncon
+
 } // namespace ns3

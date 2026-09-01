@@ -52,7 +52,7 @@ expects a terrestrial gNB to be sitting still.
 
 This toolkit is that assembly, done once and kept honest. It is a fork of
 **ns-3.43** carrying **14 custom modules** and three vendored upstreams, wired so
-that a satellite's SGP4 position drives a real NR spectrum PHY, a real handover
+that a satellite's propagated position drives a real NR spectrum PHY, a real handover
 decision rides a real Xn interface with a real propagation delay, and every KPI a
 scenario prints came off a packet that actually crossed the air interface.
 
@@ -80,7 +80,7 @@ server.
 ```bash
 docker pull uzairdocker69/ns3-ntn-toolkit:latest
 
-# A LEO conditional-handover pass with a real NR cell under SGP4 mobility
+# A LEO conditional-handover pass with a real NR cell under satellite mobility
 docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
   ./ns3 run "ntn-cho-real-stack --trigger=d2 --simSeconds=60"
 
@@ -113,7 +113,7 @@ it can be dropped into an existing ns-3 tree on its own.
 
 | Module | What it gives you |
 |---|---|
-| **[`ntn-constellation`](contrib/ntn-constellation)** | SGP4 and Walker-Delta constellation generation from TLEs or orbital elements, contact-graph routing and scheduling across inter-satellite links, limb-clearance geometry, and shipped presets for Starlink-class, OneWeb-class and Iridium-class shells. Calibrated against the TR 38.821 free-space corpus. |
+| **[`ntn-constellation`](contrib/ntn-constellation)** | Orbital propagation from TLEs (Vallado SGP4) or from orbital elements (Kepler with J2 secular rates), Walker-Delta and Walker-Star shell generation, contact-graph routing and scheduling across inter-satellite links, limb-clearance geometry, and shipped presets for Starlink-class, OneWeb-class and Iridium-class shells. Calibrated against the TR 38.821 free-space corpus. |
 | **[`ntn-sagin`](contrib/ntn-sagin)** | Space-air-ground integrated networking: ground, UAV, HAPS and LEO layers with a multi-layer router, TR 36.777 air-to-ground propagation with a declared validated-height boundary, and store-and-forward across contact gaps. |
 | **[`ntn-v2x`](contrib/ntn-v2x)** | Satellite-assisted vehicle-to-everything: NR sidelink PC5 Mode 2, SAE J2735 basic safety messages encoded the way the standard encodes them, SUMO trace ingestion, and a runtime transmit gate so a relay decision can actually gate a flow. |
 
