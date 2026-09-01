@@ -26,7 +26,9 @@ A LEO satellite is a cell that leaves. Terrestrial handover logic asks which nei
 
 The payoff is measurable and it is not subtle. Over ten seeds on a 780 km shell, a TTE-aware policy reaches 83.14% handover success on 134.6 handovers per run with no ping-pong at all, against an A3 RSRP baseline that spends 463.3 handovers to reach 69.16% with a 50.23% ping-pong rate. A location-based policy scores higher on raw success, 98.69%, and pays 57.07% ping-pong for it.
 
-The standardized trigger set is implemented rather than approximated: TS 38.331 CondEvent A3, D1 on a fixed reference location, T1 on its absolute broadcast epoch, and Rel-18 D2 on a moving ephemeris reference, plus the elevation and timing-advance mechanisms TR 38.821 studies. A trigger that fires moves a terminal onto a real cell whose SINR is then measured.
+The standardized trigger set is implemented rather than approximated: TS 38.331 CondEvent A3, D1 on a fixed reference location, T1 on its absolute broadcast epoch, and Rel-18 D2 on a moving ephemeris reference, plus the elevation and timing-advance mechanisms TR 38.821 studies. Each evaluates its own condition against live geometry, and they fire at different times because the conditions are different: on the shipped two-cell pass, D2 and TA at 8 s, D1 at 69 s, A3 at 81 s, T1 at 125 s, and elevation at 248 s, when the serving satellite finally reaches the 10 degree floor.
+
+What a firing trigger does *not* always do is perform the cell change. `ntn-cho-handover-traffic` reports trigger-decided and fallback-decided handovers separately, and on that pass five of the six classes fire without deciding a handover, because the vendored NR A3-RSRP and X2 machinery underneath has already moved the terminal by the time they trip. Only D2 decided one. The counts are reported apart rather than summed so that the CHO layer is never credited with a cell change the radio would have made on its own.
 
 ## Quick start
 
