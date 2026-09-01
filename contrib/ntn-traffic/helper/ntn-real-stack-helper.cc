@@ -3157,8 +3157,22 @@ NtnRealStackHelper::WriteHealthReport()
         << ",inband-timestamp\n";
     // NT-05: these are reported quantities, not gates. Writing pass=1 on a row
     // with no floor asserted health that was never checked; "-" says plainly
-    // that nothing is being judged. app_loss_ratio is the complement of the
-    // gated delivery ratio above, so gating it twice would double-count.
+    // that nothing is being judged.
+    //
+    // app_loss_ratio is NOT the complement of the delivery ratio above, though
+    // this comment claimed it was and used that as the reason for leaving it
+    // ungated. They have different denominators. Delivery is rx/tx over every
+    // packet the application sent. Loss is gaps/(rx+gaps) from in-band sequence
+    // numbers at the sink, so a packet that never arrives at all after the last
+    // one that did leaves no gap to detect and is absent from BOTH terms.
+    // The residual is the tail still in flight, or dropped, when the run stops.
+    //
+    // Measured over the example sweep, delivery + loss lands at 0.9369 on
+    // thz-ntn-real-stack, 0.8956 on thz-ntn-isac-coexist-traffic and 0.6455 on
+    // sagin-a2g-real-stack, against the 1.0 the old claim required. The two rows
+    // answer different questions and the gap between them is informative: it
+    // sizes the tail. Gating loss separately would not double-count, but it
+    // would need its own floor rather than inheriting the delivery gate's.
     // CVC-07: say WHERE the service-link flight time lives.
     //
     // The end-to-end user-plane OWD above is physically right on every path,
