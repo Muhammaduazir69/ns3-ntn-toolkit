@@ -22,7 +22,7 @@
 
 ---
 
-`NtnRealStackHelper` is the part of this toolkit that makes everything else measurable. It assembles a genuine NR cell, either the mmWave FR2 backend or 5G-LENA `nr` at FR1, and puts it under satellite mobility: a real SpectrumPhy, a real LDPC error model, real HARQ with an NTN-stretched process pool, real RLC and PDCP with timers relaxed to the slant round trip, a real RRC, and a real EPC with GTP tunnelling.
+`NtnRealStackHelper` is the part of this toolkit that makes everything else measurable. It assembles a genuine NR cell, either the mmWave FR2 backend or 5G-LENA `nr` at FR1, and puts it under satellite mobility: a real SpectrumPhy, a real LDPC error model, real RLC and PDCP with timers relaxed to the slant round trip, a real RRC, and a real EPC with GTP tunnelling. HARQ with an NTN-stretched process pool is available and **off by default**, as section 1 below already said and this sentence used to contradict: one shipped example calls `SetHarqEnabled`, two call `SetNtnHarqProfile`, and `SetRlcAmEnabled` has no callers at all, so every shipped run carries RLC UM rather than AM.
 
 What that buys you is provenance. Delay, jitter and loss come from an in-band application header carrying a sequence number and a transmit timestamp through the GTP tunnel, so they are properties of packets that crossed the air interface rather than quantities derived from geometry afterwards. Every scenario writes a health record that labels each KPI measured, modeled or configured, which means a reader can tell the difference without reading your code.
 
@@ -173,7 +173,7 @@ Exercises the four **NR deep-integration enablers** the toolkit adds to `NtnReal
 ./ns3 run "ntn-nr-deep-integration-demo --slices=0" # isolate single-BWP
 ```
 
-- **Outputs:** a measured four-enabler summary on stdout (mean DL SINR / TBLER / MCS / MIMO rank / PRB, per-slice per-BWP SINR / TB counts, handover count) and the native NR PDCP/RLC/MAC/PHY stat files (`NrDlMacStats.txt`, `NrDl*RlcStats*`, `NrDl*PdcpStats*`, `RxPacketTrace.txt`) in the working directory.
+- **Outputs:** a measured four-enabler summary on stdout (mean DL SINR / TBLER / MCS / MIMO rank / PRB, per-slice per-BWP SINR / TB counts, handover count) and the native NR PDCP/RLC/MAC/PHY stat files (`NrDlMacStats.txt`, `NrDl*RlcStats*`, `NrDl*PdcpStats*`, `RxPacketTrace.txt`) under `--outputDir`. They used to land in the process working directory, because `NrPhyRxTrace` keeps its results folder in a static that defaults to empty and nothing set it.
 - **Key args:** `--slices` (per-slice BWPs / Enabler C, def true), `--simTime` (s, def 10), `--numUes` (def 6), `--altitudeKm` (def 600), `--satEirpDbm` (def 70), `--bwMhz` (def 30 → 3 × 10 MHz BWPs), `--outputDir` (def `./nr-deep-demo/`).
 - **Note:** the handover count is **0** here by design — the neighbour satellite sits only 20 km to the side over a short sim, so both slant ranges hug 600 km and the RSRP hysteresis is never crossed. For a *firing* handover on a realistic pass, see **ntn-nr-handover-pass** below.
 

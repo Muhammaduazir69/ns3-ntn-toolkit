@@ -75,6 +75,36 @@ taken at 2.0 GHz in a 30 MHz channel and is not band-conformant. Numbers move by
 about a decibel, in the favourable direction, and need re-running before they can
 be described as NTN FR1 results.
 
+## A17 — Several advertised stack features are available but off by default
+
+`NtnRealStackHelper` carries the features the documentation lists, and most of
+them are opt-in. Counted over the NTN example sources (186 `.cc` files across the
+twelve modules; the sweep runs the 94 that are built):
+
+| capability | setter | examples using it |
+|---|---|---|
+| RLC AM | `SetRlcAmEnabled` | **0** |
+| HARQ | `SetHarqEnabled` | 1 |
+| MIMO | `SetMimo` | 1 |
+| uplink traffic | `SetUplink` | 1 |
+| satellite beam pattern | `SetSatelliteBeam` | 2 |
+| NTN-stretched HARQ pool | `SetNtnHarqProfile` | 2 |
+| K_offset consumption | `SetKOffsetConsumption` | 2 |
+| strict health gates | `SetStrictGates` | 2 |
+| handover | `SetHandover` | 8 |
+
+None of this is a defect: an opt-in feature is a legitimate design, and the
+per-run state is recorded in `sim_health.csv` for the ones that change the
+measured plane. It matters because prose that lists what a stack *contains*
+reads as a description of what the shipped scenarios *do*. The `ntn-traffic`
+README said "real HARQ with an NTN-stretched process pool" in its overview and
+"HARQ off by default" one section later, in the same document.
+
+The practical consequence worth stating: **every shipped run carries RLC UM, not
+AM**, on both backends, because `SetRlcAmEnabled` has no callers. A study that
+needs acknowledged-mode retransmission behaviour has to turn it on, and none of
+the committed results were produced with it.
+
 ## A16 — The band-conformance gate covers the FR1 spine, not the whole tree
 
 `tools/check_band_conformance.py` runs six scenarios. Its verdict line used to
