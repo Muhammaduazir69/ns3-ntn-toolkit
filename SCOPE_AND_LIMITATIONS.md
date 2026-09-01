@@ -75,6 +75,37 @@ taken at 2.0 GHz in a 30 MHz channel and is not band-conformant. Numbers move by
 about a decibel, in the favourable direction, and need re-running before they can
 be described as NTN FR1 results.
 
+## A15 — `dl_sinr_db` is a decibel-domain mean, and it is only safe on a tight distribution
+
+The reported mean SINR is the arithmetic mean of the per-transport-block SINRs
+*in decibels*, which is the geometric mean of the linear values, taken with a
+1e-12 floor at -120 dB. When the sample set is bimodal, the floored samples
+dominate and the number stops describing the link the decoder saw.
+
+Found by checking measured throughput against the Shannon bound of the reported
+SINR across the whole example sweep. One scenario violates it:
+`thz-ntn-isac-coexist-traffic` delivers 4.27 Mbps over 20 MHz at a reported
+-85.19 dB, where the bound is essentially zero. Its linear-domain mean is
++35.70 dB, a 121 dB difference, and that value is consistent with the rest of the
+record: 8613 blocks decoded, 78.5 percent block error, 4.27 Mbps at the sink
+against a bound near 237 Mbps.
+
+How far this reaches, measured:
+
+| scenario | dB-domain mean | linear mean | gap |
+|---|---|---|---|
+| `ntn-real-stack-smoke` | 31.56 dB | 31.83 dB | 0.26 dB |
+| `ntn-cho-handover-traffic` | 18.37 dB | 20.64 dB | 2.26 dB |
+| `thz-ntn-isac-coexist-traffic` | -85.19 dB | +35.70 dB | 121 dB |
+
+The manuscript's SINR figures come from the tight-distribution cases, where the
+two statistics agree to well under a decibel, so no published number moves. The
+definition is deliberately left unchanged for that reason: redefining it would
+silently shift every SINR the toolkit has ever reported. `dl_sinr_db_linear_mean`
+now ships beside it, so a bimodal run announces itself rather than presenting one
+misleading figure, and any scenario quoting SINR near a noise floor should use
+the linear-mean row.
+
 ## A13 — A CHO trigger that fires is not always the thing that moves the terminal
 
 Until 2026-09-01 none of the six standardized handover trigger classes was
