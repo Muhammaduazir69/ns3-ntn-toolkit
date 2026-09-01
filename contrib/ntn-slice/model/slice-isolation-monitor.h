@@ -42,6 +42,11 @@ struct BreachEvent
     bool latencyBreach{false};
     bool reliabilityBreach{false};
     uint64_t windowSamples{0};
+    //! True when the latency window held too few samples for a p99 to mean
+    //! anything, so the latency verdict is withheld rather than guessed from
+    //! a handful of packets. Consumers should not read latencyBreach as a
+    //! negative verdict when this is set.
+    bool latencyVerdictWithheld{false};
 };
 
 class SliceIsolationMonitor : public Object

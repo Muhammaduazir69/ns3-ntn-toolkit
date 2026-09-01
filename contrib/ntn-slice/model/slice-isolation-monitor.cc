@@ -112,7 +112,19 @@ SliceIsolationMonitor::EvaluateSlice(const PerSlice& ps) const
         }
         ev.observedLossRate = static_cast<double>(lost) / ps.deliveredWindow.size();
     }
-    ev.latencyBreach = ev.observedLatencyP99Ms > ev.latencyBudgetMs;
+    // A p99 needs enough samples for a 99th percentile to exist. The window
+    // holds 200 and the index is floor(0.99 * (n-1)), so with n = 5 the "p99"
+    // is the 4th of 5 and one outlier declares an SLA breach for the slice.
+    // Nothing downstream filtered on windowSamples, which the event has always
+    // carried, so a thin-window verdict would have been counted like any other.
+    //
+    // Below kMinPercentileSamples the latency verdict is withheld rather than
+    // guessed. This changes no shipped result: the isolation example's slices
+    // carry 630, 4047 and 18078 packets, so their windows are full.
+    static constexpr std::size_t kMinPercentileSamples = 100;
+    ev.latencyVerdictWithheld = (ev.windowSamples < kMinPercentileSamples);
+    ev.latencyBreach = !ev.latencyVerdictWithheld &&
+                       ev.observedLatencyP99Ms > ev.latencyBudgetMs;
     ev.reliabilityBreach = (1.0 - ev.observedLossRate) < ev.reliabilityTarget;
     return ev;
 }
