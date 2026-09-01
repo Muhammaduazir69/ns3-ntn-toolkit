@@ -98,6 +98,11 @@ bool g_hoPendingRequested = false;
 std::string g_hoPendingPrefix;  // event row up to the success column
 std::string g_hoPendingSuffix;  // event row after the ping-pong column
 bool g_hoPendingIsPP = false;
+// A20b: the verdict comes from the RRC's own HandoverEndOk for the TARGET cell,
+// which is the pattern ntn-cho-real-stack already used. A cumulative counter
+// only says "some handover finished"; the trace says which one.
+uint16_t g_hoPendingTarget = 0;
+bool g_hoPendingCompleted = false;
 std::string g_hoPendingGeoPre;   // geojson feature up to the success value
 std::string g_hoPendingGeoPost;  // geojson feature after it
 Ptr<NtnChoAlgorithm> g_cho;
@@ -424,9 +429,9 @@ ChoTick()
     // A20: resolve the previous tick's handover before deciding a new one.
     if (decisionTick && g_hoPending)
     {
-        const uint32_t nowCompletions = g_rs->GetHandoverCount();
-        const bool ok = g_hoPendingRequested && (nowCompletions > g_hoCompletionsSeen);
-        g_hoCompletionsSeen = nowCompletions;
+        // Attribute on the RRC trace for the target cell, not on a counter.
+        const bool ok = g_hoPendingRequested && g_hoPendingCompleted;
+        g_hoCompletionsSeen = g_rs->GetHandoverCount();
         if (ok)
         {
             ++g_successHos;
@@ -527,6 +532,8 @@ ChoTick()
             g_hoPendingSuffix = suf.str();
             g_hoPendingIsPP = isPP;
             g_hoPendingRequested = requested;
+            g_hoPendingTarget = chosen;
+            g_hoPendingCompleted = false;
             g_hoPending = true;
         }
 
@@ -854,6 +861,18 @@ main(int argc, char* argv[])
     // defines it for.
     rs.SetKOffsetConsumption(true);
     rs.Build(gnbSats, ueNodes);
+    // A20b: take the verdict from the radio's own completion event, for the cell
+    // the handover was aimed at. ntn-cho-real-stack already binds this trace;
+    // this scenario inferred the outcome from a cumulative counter instead,
+    // which cannot tell which handover finished when more than one is in flight.
+    Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/HandoverEndOk",
+                    MakeCallback(+[](std::string /*ctx*/, uint64_t /*imsi*/, uint16_t cellId,
+                                     uint16_t /*rnti*/) {
+                        if (g_hoPending && cellId == g_hoPendingTarget)
+                        {
+                            g_hoPendingCompleted = true;
+                        }
+                    }));
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(1.0),
                       Seconds(simTime - 0.5));
     rs.EnableAiFlowMonitor(outputDir + "/ntn-cho-full-constellation");
