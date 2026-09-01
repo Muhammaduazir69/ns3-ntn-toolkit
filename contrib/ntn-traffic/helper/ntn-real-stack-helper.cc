@@ -2225,6 +2225,7 @@ NtnRealStackHelper::AccumulateDl(double sinrLinear,
     // Fold one measured sample into an accumulator (Enabler D adds MCS/rank/PRB).
     auto fold = [&](SinrAccum& a) {
         a.sumSinrDb += sinrDb;
+        a.sumSinrLin += std::max(sinrLinear, 1e-12);
         a.sumTbler += tbler;
         a.n += 1;
         if (corrupt)
@@ -3130,6 +3131,16 @@ NtnRealStackHelper::WriteHealthReport()
         << (gateStackDepth ? 1 : 0) << ",phy-trace\n";
     out << "dl_sinr_db," << (std::isnan(m_dlSinrDbMean) ? 0.0 : m_dlSinrDbMean) << ",-,"
         << (gateProvenance ? 1 : 0) << ",phy-trace\n";
+    // The row above is the arithmetic mean of the per-TB SINRs IN DECIBELS,
+    // which is the geometric mean of the linear values. On a bimodal sample set
+    // it collapses toward the 1e-12 floor and stops describing the link the
+    // decoder saw: thz-ntn-isac-coexist-traffic reported -85.19 dB while 21.5%
+    // of its transport blocks decoded and the sink measured 4.27 Mbps, a
+    // throughput far above the Shannon bound for -85 dB. Both statistics ship,
+    // so the discrepancy is visible instead of being a single misleading number.
+    const double sinrLinMean = (m_dlGlobal.n > 0) ? m_dlGlobal.sumSinrLin / m_dlGlobal.n : 0.0;
+    const double sinrLinMeanDb = (sinrLinMean > 0.0) ? 10.0 * std::log10(sinrLinMean) : 0.0;
+    out << "dl_sinr_db_linear_mean," << sinrLinMeanDb << ",-,-,phy-trace\n";
     out << "dl_tbler_mean," << m_dlTblerMean << ",-," << (gateErrorModel ? 1 : 0)
         << ",phy-trace\n";
     out << "dl_corrupt_frac," << corruptFrac << "," << m_gates.maxDlCorruptFraction << ","

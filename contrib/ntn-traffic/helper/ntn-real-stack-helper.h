@@ -1111,6 +1111,11 @@ class NtnRealStackHelper
     struct SinrAccum
     {
         double sumSinrDb = 0.0;
+        // Linear-domain SINR sum. Averaging in dB is the geometric mean of the
+        // linear values, which collapses toward the noise floor whenever the
+        // sample set is bimodal, and then no longer describes the link the
+        // decoder actually saw. Keep both so the two can be compared.
+        double sumSinrLin = 0.0;
         double sumTbler = 0.0;
         uint64_t n = 0;
         uint64_t corrupt = 0;
