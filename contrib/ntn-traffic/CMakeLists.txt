@@ -23,6 +23,7 @@ set(source_files
     model/ntn-static-extra-loss-model.cc
     model/ntn-tr38811-excess-loss-model.cc
     model/ntn-tdl-spectrum-loss-model.cc
+    model/ntn-tdl-spectrum-propagation-loss-model.cc
     model/three-gpp-http-satellite-client.cc
     stats/application-stats-helper.cc
     stats/application-stats-delay-helper.cc
@@ -57,6 +58,7 @@ set(header_files
     model/ntn-static-extra-loss-model.h
     model/ntn-tr38811-excess-loss-model.h
     model/ntn-tdl-spectrum-loss-model.h
+    model/ntn-tdl-spectrum-propagation-loss-model.h
     model/three-gpp-http-satellite-client.h
     stats/application-stats-helper.h
     stats/application-stats-delay-helper.h
@@ -71,6 +73,7 @@ set(test_sources
     test/ntn-oran-application-test.cc
     test/ntn-real-stack-helper-test.cc
     test/ntn-http-satellite-test.cc
+    test/ntn-tdl-spectrum-test.cc
     test/ntn-spectrum-seam-test.cc
 )
 

@@ -174,6 +174,24 @@ sees, so it belongs behind a flag and a re-run, not a silent default flip.
   K-factor) chained on the spectrum channel; replace the σ/clutter constants with the
   §6.6.2 elevation tables. Code: `contrib/ntn-traffic/model/ntn-tr38811-excess-loss-model.*`.
 
+> **Update 2026-09-01.** A frequency-selective tapped-delay-line now reaches a
+> spectrum channel. `NtnTdlSpectrumLossModel` had always computed a per-subcarrier
+> transfer function, but it is a plain Object rather than a
+> `SpectrumPropagationLossModel`, so nothing could attach it and its `ApplyTo()`
+> had two callers in the whole tree, both inside its own unit test.
+> `NtnTdlSpectrumPropagationLossModel` is the adapter, and a scenario opts in
+> through the helper's existing `AddSpectrumChannelLoss()`. Measured across
+> 20 MHz at S band: 2.34 dB of variation with mean gain 1.024, against 0 dB for
+> a flat model, and the regression test fails if the shaping is replaced by a
+> flat scale.
+>
+> **This does not make the claim below claimable.** The tap table is a documented
+> stand-in, not TR 38.811 Table 6.9.2-1 through -4, because those values could
+> not be verified here and attributing invented taps to a 3GPP table is the exact
+> defect this audit found in the THz gaseous model. A paper may claim a
+> frequency-selective channel with a stated delay spread. It still may not claim
+> "NTN-TDL".
+
 ## A2 — THz antenna / pointing / beam physics is offline, not in the measured packet path
 
 - **Bounded:** the (genuinely strong) THz array-factor, beamforming codebook, and
