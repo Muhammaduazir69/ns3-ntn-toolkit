@@ -101,6 +101,41 @@ suppress or widen the underlying A3 hysteresis (`--hoHystDb`) so the radio stops
 pre-empting it. That is a scenario design choice, not something the module can
 decide, so it is left explicit here.
 
+## A14 — The flagship CHO campaign does not reproduce on the current code
+
+`ntn-cho-full-constellation` produces the manuscript's CHO table. Run today at
+the campaign's own settings (600 s, seed 1) it produces **zero** CHO handovers,
+against 137 in the committed April 2026 data. Two separate reasons, both
+measured rather than inferred.
+
+First, `tte_computations.csv`, the file that documents the TTE-aware admission
+behaviour, did not record the algorithm. Its `admitted` column was computed by
+the example from a parallel GEO oracle, and an oracle cannot disagree with the
+rule that produced it. Logging the algorithm's own verdict beside it, over a
+120 s pass: the oracle admitted on 46 of 46 evaluations, and the algorithm had
+admitted none of them. Both columns now ship, named `oracle_admitted` and
+`cho_admitted`.
+
+Second, the reason the algorithm admitted nothing is a parameter sized against
+the wrong quantity. `d1Threshold` is 50 km, a beam-footprint radius, but
+CondEventD1 here measures the terminal against the sub-satellite point, which on
+a 550 km shell is 23 km away at 87 degrees elevation, 280 km at 61 degrees and
+545 km at 42 degrees. D1 therefore holds only near zenith and everything gated on
+it stays silent. Raising the threshold to 600 km restores admission and produces
+a handover in the same run.
+
+The default is deliberately left as it is. Which D1 semantics the study wants,
+and therefore which threshold is correct, decides what the CHO results mean, and
+that is an author decision rather than something to change quietly under a
+manuscript. What has changed is that the scenario can no longer fail silently: a
+run whose algorithm admitted no candidate on any tick now prints a warning naming
+the threshold and the geometry, instead of writing a full set of plausible CSVs
+and reporting a 100 percent success rate over zero handovers.
+
+Re-running the campaign is priced in A11. This boundary is the reason it needs
+re-running, and it stands independently of the stale-binary problem the
+`run_mc_sweep.sh` guard already covers.
+
 ## A11 — The published Monte Carlo campaign is no longer affordable as configured
 
 `papers/sim_runs/run_mc_sweep.sh` runs four algorithms across ten seeds, 600 s of
