@@ -138,7 +138,7 @@ it can be dropped into an existing ns-3 tree on its own.
 
 | Module | What it gives you |
 |---|---|
-| **[`oran-ntn`](contrib/oran-ntn)** | Space O-RAN: E2AP termination, E2SM-KPM under TS 28.552 measurement names, E2SM-RC control actions that actuate a real handover, A1 policy distribution, a multi-tier RIC (on-board real-time, gateway, cloud) whose E2 latency comes from live slant geometry, transparent and Rel-19 regenerative payload options, a WG3 conflict-mitigation taxonomy, and a FlexRIC bridge. |
+| **[`oran-ntn`](contrib/oran-ntn)** | Space O-RAN: E2AP termination, E2SM-KPM under TS 28.552 measurement names, E2SM-RC control actions that a scenario wires to a real handover (the framework supplies the hook; two of the eleven examples install it), A1 policy distribution, a multi-tier RIC (on-board real-time, gateway, cloud) whose E2 latency comes from live slant geometry, transparent and Rel-19 regenerative payload options, a WG3 conflict-mitigation taxonomy, and a FlexRIC bridge. |
 | **[`ns3-ai-ntn`](contrib/ns3-ai-ntn)** | A fork of ns3-ai carrying a Gymnasium 1.0 environment set for NTN: handover selection, beam management, slice admission and power control, with a versioned shared-memory contract so the C++ and Python sides cannot silently disagree. |
 
 ### Operations

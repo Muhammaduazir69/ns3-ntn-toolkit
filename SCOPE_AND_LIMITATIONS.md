@@ -259,8 +259,13 @@ sees, so it belongs behind a flag and a re-run, not a silent default flip.
   E2SM-RC decisions are real algorithms on measured (or honestly-tagged geometry-budget)
   inputs, but their outputs are logged (CSV/SDL/traces), not applied: there is one
   slice-agnostic mmwave cell, and the framework RC-action handler records decisions
-  without changing HO/PRB/beam. The single genuine closed loop is the inlined
-  `oran-ntn-ric-controlled-traffic` beam example.
+  without changing HO/PRB/beam unless the SCENARIO wires it. Updated 2026-09-01:
+  the framework hook is `OranNtnE2Interface::SetRcActionCallback`, and **two of the
+  eleven** oran-ntn examples install one. `oran-ntn-ric-controlled-traffic` drives
+  a beam parameter, and `oran-ntn-gym-handover-example` drives
+  `NtnRealStackHelper::TriggerHandover`, so a handover half of this boundary is
+  now genuinely closed in that scenario. This entry previously named the beam
+  example as the single closed loop, which understated it.
 - **Why:** the mmwave scheduler is not slice/5QI-aware and exposes no per-slice queue or
   generic RC-actuation hook; only the beam example reaches into a tunable parameter.
 - **Effect:** "isolation held/violated" and xApp "control" are observed statistically on a
