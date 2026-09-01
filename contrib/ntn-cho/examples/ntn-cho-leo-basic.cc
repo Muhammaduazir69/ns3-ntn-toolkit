@@ -13,6 +13,7 @@
 #include "ns3/network-module.h"
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
+#include "ns3/ntn-orbit-predictor.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 
@@ -101,9 +102,23 @@ main(int argc, char* argv[])
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
     servSatMob->SetElements(elements[0]);
 
+    // CHO-23: give the scenario a real second cell.
+    //
+    // This example used `candCell = servingCell + 100`, an id naming no gNB in
+    // the simulation, and fed it a candidate SINR of `servSinr - 3.0`, a fixed
+    // offset the comment described as ephemeris-predicted. With one satellite
+    // there was no candidate to hand over to, the CHO evaluation could not
+    // change anything, and SelectBestCandidate()'s return value was discarded
+    // without being read. The Walker build already returns 80 elements, so the
+    // neighbour in the same plane is available at no modelling cost.
+    Ptr<ns3::ntncon::Sgp4MobilityModel> candSatMob =
+        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    candSatMob->SetElements(elements[1]);
+
     NodeContainer satNodes;
-    satNodes.Create(1);
+    satNodes.Create(2);
     satNodes.Get(0)->AggregateObject(servSatMob);
+    satNodes.Get(1)->AggregateObject(candSatMob);
     NodeContainer ueNodes;
     ueNodes.Create(numUes);
 
@@ -136,6 +151,13 @@ main(int argc, char* argv[])
     if (Ptr<NtnOrbitPredictor> orbit = ntnHelper->GetOrbitPredictor())
     {
         orbit->SetGeometricBeam(/*peakGainDbi=*/30.0, /*beamwidth3dbDeg=*/4.4127);
+        // CHO-23: the aux models above are stationary and exist only to carry
+        // the antenna-pattern plumbing. Bind the predictor's kinematics to the
+        // real propagated orbits, as the other CHO examples do.
+        orbit->SetKinematicsSource(0, servSatMob);
+        orbit->SetKinematicsSource(1, candSatMob);
+        NS_ABORT_MSG_IF(orbit->CountFrozenSatellites() > 0,
+                        "CHO predictor still has stationary satellites");
     }
 
     Ptr<NtnChoAlgorithm> choAlgo = ntnHelper->CreateChoAlgorithm();
@@ -145,8 +167,9 @@ main(int argc, char* argv[])
     servSatMob->GetGeodetic(subLat, subLon, subAlt);
     NtnTr38811MobilityHelper ueMobility(1);
     auto mobProfile = NtnMobilityScenarios::MixedContinental();
-    ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03, subLon - 0.03,
-                       subLon + 0.03);
+    auto ueModels = ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
+                                      subLon - 0.03, subLon + 0.03);
+    Ptr<NtnTr38811MobilityModel> ueMob = ueModels[0];
 
     // ---- Real NR NTN cell + traffic (mmwave FR2 or nr FR1) ----
     NtnRealStackHelper rs;
@@ -169,10 +192,14 @@ main(int argc, char* argv[])
     rs.EnableAiFlowMonitor("ntn-cho-leo-basic"); // WS2 KPM series (TS 28.552 names)
 
     // Radio-agnostic serving cell id (mmwave or nr gNB under the hood).
-    const uint16_t servingCell = rs.GetServingCellId();
-    const uint16_t candCell = servingCell + 100;
+    const uint16_t servingCell = rs.GetGnbCellId(0);
+    const uint16_t candCell = rs.GetGnbCellId(1);
+    NS_ABORT_MSG_IF(candCell == 0 || candCell == servingCell,
+                    "CHO needs two distinct real cells; got serving=" << servingCell
+                                                                     << " candidate=" << candCell);
     choAlgo->AddCandidateCell(servingCell, 0, 0);
     choAlgo->AddCandidateCell(candCell, 1, 0);
+    uint32_t choDecisions = 0;
 
     // CHO exercised every 200 ms on the MEASURED serving SINR (UE 0); the
     // candidate is ephemeris-predicted off that measured baseline.
@@ -182,10 +209,29 @@ main(int argc, char* argv[])
         {
             return;
         }
-        choAlgo->UpdateMeasurement(servingCell, servSinr, 5.0);
-        choAlgo->UpdateMeasurement(candCell, servSinr - 3.0, 2.0);
+        // CHO-23: candidate quality from the real slant geometry of the second
+        // satellite, not a constant offset, and the UE position the geometric
+        // triggers need (CHO-21).
+        const Vector u = ueMob->GetPosition();
+        const Vector sPos = servSatMob->GetPosition();
+        const Vector cPos = candSatMob->GetPosition();
+        const double servSlant = ntngeo::SlantRangeM(u, sPos);
+        const double candSlant = ntngeo::SlantRangeM(u, cPos);
+        const double servElev = ntngeo::ElevationDeg(u, sPos);
+        const double candElev = ntngeo::ElevationDeg(u, cPos);
+        const double candSinr =
+            servSinr + 20.0 * std::log10(servSlant / std::max(1.0, candSlant));
+
+        choAlgo->UpdateUeKinematics(GeoCoordinate(u), ueMob->GetVelocity());
+        choAlgo->UpdateMeasurement(servingCell, servSinr, std::max(-20.0, (servElev - 45.0) / 5.0));
+        choAlgo->UpdateMeasurement(candCell, candSinr, std::max(-20.0, (candElev - 45.0) / 5.0));
+        choAlgo->UpdateCandidateSlantRange(servingCell, servSlant);
+        choAlgo->UpdateCandidateSlantRange(candCell, candSlant);
         choAlgo->EvaluateConditions();
-        choAlgo->SelectBestCandidate();
+        if (choAlgo->SelectBestCandidate() != 0)
+        {
+            ++choDecisions;
+        }
     });
 
     Simulator::Stop(Seconds(simTime));
@@ -193,7 +239,9 @@ main(int argc, char* argv[])
     rs.Collect();
     rs.WriteHealthReport();
 
-    std::cout << "  measured mean SINR: " << rs.GetMeanDlSinrDb() << " dB\n"
+    std::cout << "  CHO trigger (" << triggerType << ") fired on " << choDecisions
+              << " evaluations against real cell " << candCell << "\n"
+              << "  measured mean SINR: " << rs.GetMeanDlSinrDb() << " dB\n"
               << "  measured throughput: " << rs.GetRxThroughputMbps() << " Mbps\n";
     Simulator::Destroy();
     return 0;

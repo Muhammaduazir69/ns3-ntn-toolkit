@@ -129,6 +129,12 @@ ChoTick()
     const double servGain = std::max(-20.0, (servElev - 45.0) / 5.0);
     const double candGain = std::max(-20.0, (candElev - 45.0) / 5.0);
 
+    // CHO-21, same defect as ntn-cho-handover-traffic. D1, D2, T1 and the TTE
+    // estimator evaluate against m_uePosition, and this scenario never set it,
+    // so every geometric trigger it offers was measuring from a
+    // default-constructed coordinate while the radio flew the real orbit.
+    g_cho->UpdateUeKinematics(GeoCoordinate(u), g_ueMob->GetVelocity());
+
     g_cho->UpdateMeasurement(g_servingCellId, servSinr, servGain);
     g_cho->UpdateMeasurement(g_candCellId, candSinr, candGain);
     // Live ephemeris slant ranges -> RACH-less TA pre-compensation (RCHO).
