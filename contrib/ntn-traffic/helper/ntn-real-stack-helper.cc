@@ -632,6 +632,38 @@ NtnRealStackHelper::BuildNrRadio()
                        TimeValue(m_channelUpdatePeriod));
     m_nr->SetChannelConditionModelAttribute("UpdatePeriod",
                                             TimeValue(m_channelUpdatePeriod));
+    // A9. SRS configuration indices, not spectrum, are what caps how many UEs a
+    // gNB can admit. NrGnbRrc::SrsPeriodicity defaults to 40 and the toolkit
+    // never set it, so DoAllocateTemporaryCellRnti started returning 0 once the
+    // indices ran out. That refusal is not honoured downstream: the MAC still
+    // builds a RAR, several refused UEs collide on RNTI 0 in m_rapIdRntiMap, and
+    // a UE then receives two RARs matching its own preamble in one message. The
+    // second arrives at NrUeRrc in IDLE_CONNECTING, where
+    // DoNotifyRandomAccessSuccessful has no case for it and calls
+    // NS_FATAL_ERROR. Measured: fine at 16 UEs, aborts at 30, with the probe
+    // showing IMSI 22 processing preamble 40 twice at the same instant, both
+    // times with rnti=0 while its peers held 32 to 40.
+    //
+    // Size the periodicity to the run instead of leaving the default. The
+    // allowed set is {2, 5, 10, 20, 40, 80, 160, 320} and only part of each
+    // period is usable as indices, so the headroom below is measured rather than
+    // assumed: 40 could not carry 30 UEs.
+    {
+        static const uint32_t kAllowed[] = {2, 5, 10, 20, 40, 80, 160, 320};
+        const uint32_t needed = 2 * (m_ue.GetN() + 2);
+        uint32_t srs = kAllowed[sizeof(kAllowed) / sizeof(kAllowed[0]) - 1];
+        for (uint32_t cand : kAllowed)
+        {
+            if (cand >= needed)
+            {
+                srs = cand;
+                break;
+            }
+        }
+        Config::SetDefault("ns3::NrGnbRrc::SrsPeriodicity", UintegerValue(srs));
+        NS_LOG_INFO("SrsPeriodicity set to " << srs << " for " << m_ue.GetN() << " UEs");
+    }
+
     m_nr->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
     // Friis large-scale loss on EVERY BWP (frame-independent, valid at LEO

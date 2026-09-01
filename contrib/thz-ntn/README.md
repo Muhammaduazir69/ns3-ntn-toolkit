@@ -7,7 +7,7 @@
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/band-100%20GHz%20%E2%80%93%201%20THz-success.svg" alt="100 GHz to 1 THz"/>
   <img src="https://img.shields.io/badge/ITU--R-P.676%20%C2%B7%20P.618%20%C2%B7%20P.838%20%C2%B7%20P.840-orange.svg" alt="ITU-R P.676 P.618 P.838 P.840"/>
-  <img src="https://img.shields.io/badge/examples-18-informational.svg" alt="18 examples"/>
+  <img src="https://img.shields.io/badge/examples-17-informational.svg" alt="17 examples"/>
 </p>
 
 <p align="center">

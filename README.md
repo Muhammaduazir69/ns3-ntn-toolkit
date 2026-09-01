@@ -31,7 +31,7 @@
   <img src="https://img.shields.io/badge/Sionna%20RT-ray%20tracing-red.svg" alt="Sionna RT"/>
   <img src="https://img.shields.io/badge/RL-Gymnasium%201.0-yellow.svg" alt="Gymnasium 1.0"/>
   <img src="https://img.shields.io/badge/modules-14%20custom-informational.svg" alt="14 custom modules"/>
-  <img src="https://img.shields.io/badge/examples-95-informational.svg" alt="95 examples"/>
+  <img src="https://img.shields.io/badge/examples-93-informational.svg" alt="93 examples"/>
 </p>
 
 <p align="center">

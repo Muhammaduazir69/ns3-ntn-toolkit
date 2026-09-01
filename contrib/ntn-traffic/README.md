@@ -7,7 +7,7 @@
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-TR%2038.811%20%2F%2038.821-orange.svg" alt="3GPP TR 38.811 and TR 38.821"/>
   <img src="https://img.shields.io/badge/backends-mmWave%20%2B%205G--LENA%20nr-purple.svg" alt="mmWave and 5G-LENA nr backends"/>
-  <img src="https://img.shields.io/badge/examples-12-informational.svg" alt="12 examples"/>
+  <img src="https://img.shields.io/badge/examples-11-informational.svg" alt="11 examples"/>
 </p>
 
 <p align="center">
@@ -218,7 +218,7 @@ A minimal CBR data plane over a single point-to-point LEO link — the lightweig
 
 ### three-gpp-http-example
 
-The 3GPP HTTP traffic model (browsing sessions of a main object plus embedded objects with reading-time gaps), retained for NTN web-browsing studies over a satellite bent-pipe / regenerative link. **Source-only:** `examples/three-gpp-http-example.cc` (arg `--SimulationTime`, default 300 s) is shipped as a reference program but is **not** registered as an `ns3 run` target in `examples/CMakeLists.txt`; the HTTP model is exercised instead by the `three-gpp-http-client-server-test` system suite:
+The 3GPP HTTP traffic model (browsing sessions of a main object plus embedded objects with reading-time gaps), retained for NTN web-browsing studies over a satellite bent-pipe or regenerative link. Exercised by the **`ntn-http-satellite`** system suite, which runs a browsing session across `Simulator::Run()` over a link with a real one-way delay and asserts that the measured page-load time clears the round trip. This paragraph used to point at a `three-gpp-http-client-server-test` suite instead; that file was a stale fork of the upstream ns-3 test, was never listed in `TEST_SOURCES`, did not compile against ns-3.43, and collided with upstream on its log-component name, so nothing had ever run it.
 
 ```sh
 ./test.py -s three-gpp-http-client-server-test

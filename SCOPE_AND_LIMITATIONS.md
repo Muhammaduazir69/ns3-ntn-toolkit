@@ -28,7 +28,7 @@ that depends on the scenario. Measured on 2026-09-01 with 20 s runs:
 
 | Scenario | 4 UEs | 8 UEs | 16 UEs | 30 UEs |
 |---|---|---|---|---|
-| `ntn-real-stack-smoke` (no handover logic) | ok | ok | ok | **abort** |
+| `ntn-real-stack-smoke` (no handover logic) | ok | ok | ok | ok since the SrsPeriodicity fix |
 | `ntn-cho-full-constellation` | ok | **abort** | abort | abort |
 
 Two distinct faults, both in the vendored NR, neither caught by any test because
@@ -49,12 +49,22 @@ campaign cannot currently be reproduced on the NR spine at its published size.
 scalability claim in UEs on the `nr` backend needs this ceiling stated, or the
 mmwave backend, which does not share these two faults.
 
-**What closing it would require.** A fix in the vendored NR: contention
-resolution so a duplicate RA success is discarded rather than fatal, and a TDD
-pattern that does not schedule an uplink transmission inside a UE's own reception
-window once NTN K_offset has shifted it. Both are upstream changes. A UE attach
-stagger was tried and made matters worse, taking the failure down to 6 UEs, so it
-is not the answer.
+**Half of this is now fixed.** The RRC abort was not a RACH collision, which is
+what a first guess suggested and what an attach stagger failed to fix, making
+things worse instead. It was capacity. `NrGnbRrc::SrsPeriodicity` defaults to 40
+and the toolkit never set it, so once the SRS configuration indices ran out
+`DoAllocateTemporaryCellRnti` began returning 0. That refusal is not honoured
+downstream: the MAC still builds a RAR, several refused UEs collide on RNTI 0 in
+`m_rapIdRntiMap`, and a UE then receives two RARs matching its own preamble in one
+message. A probe caught it exactly: IMSI 22 processing preamble 40 twice at the
+same instant, both times with rnti=0 while its peers held 32 to 40.
+`NtnRealStackHelper` now sizes the periodicity to the configured UE count from the
+allowed set {2, 5, 10, 20, 40, 80, 160, 320}, and 30 UEs runs clean.
+
+**What remains.** The half-duplex abort in `ntn-cho-full-constellation` at 8 UEs is
+untouched and still needs a TDD pattern that does not schedule an uplink
+transmission inside a UE's own reception window once NTN K_offset has shifted it.
+That one is an upstream change.
 
 ## A8 — Most shipped scenarios propagate with Kepler + J2, not SGP4
 
