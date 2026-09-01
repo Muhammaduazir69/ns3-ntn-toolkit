@@ -86,6 +86,20 @@ NtnRealStackHelper* g_rs = nullptr;
 // CHO-3: handover outcomes as reported by the RRC, not asserted by the model.
 // GetHandoverCount() counts NrGnbRrc HandoverEndOk completions.
 uint32_t g_hoCompletionsSeen = 0;
+// A20: a handover's verdict cannot be read on the statement that requests it.
+// TriggerHandover issues an RRC reconfiguration-with-sync and GetHandoverCount
+// counts HandoverEndOk, which cannot have arrived yet, so the old synchronous
+// check made success false by construction (and the version before it hardcoded
+// true, making it 100 percent by construction). The verdict is now resolved on
+// the following decision tick, by which time a completion has had a full tick to
+// arrive and can be attributed to the request that caused it.
+bool g_hoPending = false;
+bool g_hoPendingRequested = false;
+std::string g_hoPendingPrefix;  // event row up to the success column
+std::string g_hoPendingSuffix;  // event row after the ping-pong column
+bool g_hoPendingIsPP = false;
+std::string g_hoPendingGeoPre;   // geojson feature up to the success value
+std::string g_hoPendingGeoPost;  // geojson feature after it
 Ptr<NtnChoAlgorithm> g_cho;
 Ptr<NtnChoHelper> g_choHelper;
 Ptr<NtnOrbitPredictor> g_orbit;
@@ -407,6 +421,34 @@ ChoTick()
         }
     }
 
+    // A20: resolve the previous tick's handover before deciding a new one.
+    if (decisionTick && g_hoPending)
+    {
+        const uint32_t nowCompletions = g_rs->GetHandoverCount();
+        const bool ok = g_hoPendingRequested && (nowCompletions > g_hoCompletionsSeen);
+        g_hoCompletionsSeen = nowCompletions;
+        if (ok)
+        {
+            ++g_successHos;
+        }
+        else
+        {
+            ++g_failedHos;
+        }
+        g_hoFile << g_hoPendingPrefix << (ok ? 1 : 0) << "," << (g_hoPendingIsPP ? 1 : 0)
+                 << g_hoPendingSuffix
+                 << (ok ? "" : (g_hoPendingRequested ? "no-rrc-completion-observed"
+                                                     : "radio-refused-request"))
+                 << "\n";
+        if (!g_fHo)
+        {
+            g_hoGeo << ",\n";
+        }
+        g_hoGeo << g_hoPendingGeoPre << (ok ? "true" : "false") << g_hoPendingGeoPost;
+        g_fHo = false;
+        g_hoPending = false;
+    }
+
     // ---- Real CHO decision (algorithm state machine + baselines) ----
     uint16_t chosen = 0;
     if (decisionTick)
@@ -441,20 +483,11 @@ ChoTick()
         // outcome is the radio's word: the RRC confirms completion through
         // HandoverEndOk, which is what g_rrcConfirmed counts.
         const bool requested = g_rs->TriggerHandover(0, chosen);
-        const uint32_t completions = g_rs->GetHandoverCount();
-        const bool success = requested && (completions > g_hoCompletionsSeen);
-        g_hoCompletionsSeen = completions;
+        // A20: do NOT grade it here. The completion counter is sampled when this
+        // verdict is resolved, one decision tick later.
         const double tos = (g_lastHoTime >= 0.0) ? (t - g_lastHoTime) : t;
         const bool isPP =
             (g_lastHoTime >= 0.0 && chosen == g_lastSourceCell && tos < 10.0);
-        if (success)
-        {
-            ++g_successHos;
-        }
-        else
-        {
-            ++g_failedHos;
-        }
         if (isPP)
         {
             ++g_ppCount;
@@ -479,45 +512,38 @@ ChoTick()
             ttePred = itTte->second;
         }
 
-        g_hoFile << std::fixed << std::setprecision(3) << t << ",0,"
-                 << g_serving << "," << chosen << "," << g_servSatId << ","
-                 << chosen << ",0,0," << g_algorithm << ","
-                 << std::setprecision(2) << servSinr << "," << tgtSinr << ","
-                 << ttePred << "," << tos << "," << (success ? 1 : 0) << ","
-                 << (isPP ? 1 : 0) << "," << std::setprecision(6) << ueLat << ","
-                 << ueLon << ",0," << g_ueModels[0]->GetClassName() << ","
-                 << std::setprecision(1) << servElev << "," << tgtElev << ","
-                 // The schema has always declared failure_reason and nothing
-                 // ever wrote it, so every row carried an empty field including
-                 // the rows that record a failure. A column that exists to say
-                 // why a handover failed, and is blank on the failures, is worse
-                 // than no column: it reads as "no reason given" rather than
-                 // "never asked".
-                 //
-                 // The two outcomes are distinguishable at this point.
-                 // TriggerHandover returning false means the radio refused the
-                 // request outright. Returning true without the completion
-                 // counter advancing means the request went out and no RRC
-                 // HandoverEndOk came back before this tick was accounted.
-                 << (success ? ""
-                             : (requested ? "no-rrc-completion-observed"
-                                          : "radio-refused-request"))
-                 << "\n";
-
-        if (!g_fHo)
+        // A20: buffer the row and emit it when the verdict resolves next tick.
         {
-            g_hoGeo << ",\n";
+            std::ostringstream pre, suf;
+            pre << std::fixed << std::setprecision(3) << t << ",0,"
+                << g_serving << "," << chosen << "," << g_servSatId << ","
+                << chosen << ",0,0," << g_algorithm << ","
+                << std::setprecision(2) << servSinr << "," << tgtSinr << ","
+                << ttePred << "," << tos << ",";
+            suf << "," << std::setprecision(6) << ueLat << ","
+                << ueLon << ",0," << g_ueModels[0]->GetClassName() << ","
+                << std::setprecision(1) << servElev << "," << tgtElev << ",";
+            g_hoPendingPrefix = pre.str();
+            g_hoPendingSuffix = suf.str();
+            g_hoPendingIsPP = isPP;
+            g_hoPendingRequested = requested;
+            g_hoPending = true;
         }
-        g_hoGeo << "{\"type\":\"Feature\",\"properties\":{\"ueId\":0,\"time\":"
-                << std::setprecision(1) << t << ",\"sourceCell\":" << g_serving
-                << ",\"targetCell\":" << chosen
-                << ",\"success\":" << (success ? "true" : "false")
-                << ",\"pingPong\":" << (isPP ? "true" : "false") << ",\"algorithm\":\""
-                << g_algorithm << "\",\"tte\":" << std::setprecision(2) << ttePred
-                << ",\"sinrBefore\":" << servSinr << ",\"sinrAfter\":" << tgtSinr
-                << "},\"geometry\":{\"type\":\"Point\",\"coordinates\":["
-                << std::setprecision(6) << ueLon << "," << ueLat << "]}}";
-        g_fHo = false;
+
+        // A20: the geojson carries the same verdict, so it is buffered too.
+        {
+            std::ostringstream gpre, gpost;
+            gpre << "{\"type\":\"Feature\",\"properties\":{\"ueId\":0,\"time\":"
+                 << std::setprecision(1) << t << ",\"sourceCell\":" << g_serving
+                 << ",\"targetCell\":" << chosen << ",\"success\":";
+            gpost << ",\"pingPong\":" << (isPP ? "true" : "false") << ",\"algorithm\":\""
+                  << g_algorithm << "\",\"tte\":" << std::setprecision(2) << ttePred
+                  << ",\"sinrBefore\":" << servSinr << ",\"sinrAfter\":" << tgtSinr
+                  << "},\"geometry\":{\"type\":\"Point\",\"coordinates\":["
+                  << std::setprecision(6) << ueLon << "," << ueLat << "]}}";
+            g_hoPendingGeoPre = gpre.str();
+            g_hoPendingGeoPost = gpost.str();
+        }
 
         std::printf("  %6.1fs  HANDOVER cell %u -> %u  (servSINR meas=%.1f dB, candSINR "
                     "pred=%.1f dB, TTE=%.1fs, interruption=%.1f ms%s)\n",

@@ -103,12 +103,21 @@ cumulative and `g_hoCompletionsSeen` is updated only here, so a completion that
 lands between two decision ticks is credited to the NEXT request rather than to
 the one it belongs to.
 
-This is a defect with a known fix, not a modelling boundary: resolve the verdict
-on the following decision tick, or bind it to the `HandoverEndOk` trace directly
-so the outcome is attributed to the request that caused it. It is written down
-rather than changed here because it moves a headline KPI in the flagship
-scenario, and the same run has an open question above it (A19) about whether the
-handover should have been taken at all. Both want deciding together.
+**Fixed 2026-09-01.** This one had a single correct implementation rather than a
+choice to make, so deferring it alongside A19 was wrong: A19 asks which policy is
+intended, while this asks only that an outcome be read after it happens. The
+verdict now resolves on the following decision tick, and the event row and the
+GeoJSON feature are both buffered and emitted when it does, so the outcome is
+attributed to the request that caused it.
+
+Re-measured at 300 s with `--d1Threshold=761341`, seeds 1, 2 and 3: one handover
+each at a 100 percent success rate, with an empty `failure_reason`. The handover
+was completing all along. What was broken was reading `GetHandoverCount()` on the
+statement after issuing the request, one tick before the completion could arrive.
+
+The number moved from 0 to 100 percent and neither figure was ever a measurement
+of the radio, so nothing that quoted the old one should be carried forward. A19
+above is untouched and still open.
 
 Note the history: this line replaced `const bool success = true;`, which made the
 rate 100 percent by construction. The current form makes it 0 percent by
