@@ -1043,6 +1043,33 @@ NtnChoAlgorithm::SelectBestCandidate() const
                   return a->tte > b->tte;
               });
 
+    // A19: a candidate must be worth the switch, not merely admissible.
+    //
+    // Nothing here used to read the serving cell's own time-to-exit, so the rule
+    // could not decline a handover however good the current cell was. With both
+    // sides saturated at the prediction horizon that is a tie the policy could
+    // not observe, and it switched. A handover costs an interruption; an equal
+    // predicted time-of-stay does not pay for it.
+    if (m_config.requireBetterThanServing && m_tteEstimator)
+    {
+        const CandidateInfo* servingIt = ServingState();
+        if (servingIt)
+        {
+            const auto servingTte = m_tteEstimator->ComputeTte(m_uePosition,
+                                                               m_ueVelocity,
+                                                               servingIt->satId,
+                                                               servingIt->beamId,
+                                                               m_config.gainThreshold_dB);
+            const Time bestTte = admissible.front()->tte;
+            if (servingTte.tte >= bestTte)
+            {
+                NS_LOG_DEBUG("staying: serving TTE " << servingTte.tte.GetSeconds()
+                             << " s >= best candidate " << bestTte.GetSeconds() << " s");
+                return INVALID_CELL_ID;
+            }
+        }
+    }
+
     // Tie-breaking: within epsilon of the best TTE, pick highest SINR
     const CandidateInfo* best = admissible[0];
     for (size_t i = 1; i < admissible.size(); i++)

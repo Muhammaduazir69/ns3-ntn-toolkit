@@ -158,6 +158,22 @@ class NtnChoAlgorithm : public Object
         Time t304Timer = Seconds(2.0);        //!< CHO execution timer
         double gainThreshold_dB = -3.0;       //!< Beam gain threshold for TTE computation
         Time tteEpsilon = Seconds(2.0);       //!< TTE tie-breaking window
+
+        /// A19: require a candidate to BEAT the serving cell's own time-to-exit
+        /// before handing over, so an equal predicted time-of-stay does not pay
+        /// for the cost of a handover.
+        ///
+        /// The selection rule never read the serving cell's TTE at all, and the
+        /// serving cell is excluded from the candidate map, so the comparison
+        /// could not happen even implicitly. Measured consequence on
+        /// ntn-cho-full-constellation: at the first decision tick the terminal
+        /// left a satellite at 87 degrees elevation for one at 51 degrees with
+        /// 1.8 dB less SINR, with tte_target and tte_serving BOTH saturated at
+        /// the 120 s prediction horizon. Facing a tie it could not see, the
+        /// policy switched.
+        ///
+        /// Set false to reproduce the pre-2026-09-02 behaviour for comparison.
+        bool requireBetterThanServing = true;
         double a3Offset_dB = 3.0;             //!< A3 event offset (for baseline)
         Time a3TimeToTrigger = MilliSeconds(160); //!< A3 TTT (for baseline)
 
