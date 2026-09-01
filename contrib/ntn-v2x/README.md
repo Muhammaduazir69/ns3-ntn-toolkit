@@ -26,7 +26,7 @@ Vehicles that leave terrestrial coverage are the obvious NTN use case and the ea
 
 Here the sidelink carries real messages. Basic safety messages are encoded the way SAE J2735 encodes them, a 21-octet core with UPER offset-from-lower-bound integers and the standard's range clamps, which matters more than it sounds: DE_Elevation spans -4096 to 61439, a range wider than a signed 16-bit integer, so a naive cast turns a legal 6000 m altitude into -553.6 m.
 
-Relay decisions actuate. A runtime transmit gate lets a decision start and stop a flow mid-run, which ns-3 application start and stop times cannot, so a direct-versus-relay policy is observable as 28,892 packets from on-air terminals against 0 from gated ones rather than as a counter. Vehicles are real UEs carrying their own PHY measurements, so blockage varies per vehicle instead of by loop parity.
+Relay decisions actuate. A runtime transmit gate lets a decision start and stop a flow mid-run, which ns-3 application start and stop times cannot, so a direct-versus-relay policy is observable as real traffic from on-air terminals against exactly 0 from gated ones rather than as a counter. Re-measured 2026-09-01 on the default run: 14 792 packets on-air, 0 gated. The earlier figure of 28,892 is superseded; it stopped reproducing when the spine's default carrier and channel width moved to 2.185 GHz and 20 MHz. The zero is what the claim rests on, not the absolute count. Vehicles are real UEs carrying their own PHY measurements, so blockage varies per vehicle instead of by loop parity.
 
 ## Quick start
 

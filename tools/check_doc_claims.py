@@ -110,6 +110,9 @@ STALE_CLAIMS = [
     # thousands separator into a comma before matching, so "29 871" in the
     # source is "29,871" here. Written with the space, this entry matched
     # nothing and the tamper test passed a README with the stale figure back in.
+    ("ns-3-dev/contrib/ntn-v2x/README.md", "28,892",
+     "the on-air packet count from before the spine moved to 2.185 GHz / "
+     "20 MHz; the default run now carries 14,792 on-air against 0 gated"),
     ("ns-3-dev/contrib/ntn-fapi/README.md", "29,871",
      "the FAPI cross-check count from before the spine moved to 2.185 GHz / "
      "20 MHz; the default 20 s run now emits 102 020 TX_DATA.request against "
