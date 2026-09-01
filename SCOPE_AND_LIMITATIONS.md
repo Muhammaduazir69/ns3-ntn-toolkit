@@ -59,6 +59,11 @@ that depends on the scenario. Measured on 2026-09-01 with 20 s runs:
 | Scenario | 4 UEs | 8 UEs | 16 UEs | 30 UEs |
 |---|---|---|---|---|
 | `ntn-real-stack-smoke` (no handover logic) | ok | ok | ok | ok since the SrsPeriodicity fix |
+
+After that fix `ntn-real-stack-smoke` was run further, on 20 s of simulated time:
+30 UEs completes in 496 s of wall clock, 50 UEs in 926 s, 100 UEs in 2118 s, all
+exiting zero. Wall clock is close to linear in UE count at roughly 21 s per UE,
+so the practical limit on this backend is now patience rather than a fault.
 | `ntn-cho-full-constellation` | ok | **abort** | abort | abort |
 
 Two distinct faults, both in the vendored NR, neither caught by any test because
