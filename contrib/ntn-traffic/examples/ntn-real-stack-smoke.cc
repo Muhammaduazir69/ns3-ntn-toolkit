@@ -30,6 +30,7 @@ main(int argc, char* argv[])
     double simTime = 10.0;
     double channelUpdateMs = -1.0; // -1 = leave the helper default
     bool airDelay = false; // put the slant on the air interface, not the backhaul
+    std::string tddPattern = ""; // empty = ns-3 default (all flexible)
 
     uint32_t numUes = 4;
     double altKm = 600.0;
@@ -65,6 +66,10 @@ main(int argc, char* argv[])
                  "ConstantSpeedPropagationDelayModel, instead of folding it into "
                  "the backhaul. See SCOPE_AND_LIMITATIONS.md A6.",
                  airDelay);
+    cmd.AddValue("tddPattern",
+                 "gNB TDD slot pattern, e.g. \"DL|DL|DL|F|UL|DL|DL|DL|F|UL|\". "
+                 "Empty keeps the ns-3 all-flexible default.",
+                 tddPattern);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altKm", "Satellite altitude [km]", altKm);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power [dBm]; -1 = backend default", satEirpDbm);
@@ -137,6 +142,10 @@ main(int argc, char* argv[])
         rs.SetChannelUpdatePeriod(MilliSeconds(static_cast<uint64_t>(channelUpdateMs)));
     }
     rs.SetAirInterfaceDelay(airDelay);
+    if (!tddPattern.empty())
+    {
+        rs.SetTddPattern(tddPattern);
+    }
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
     rs.SetBandwidthHz(bwMhz * 1e6);
     // NT-02: declared as CONDUCTED power at the array input. This carrier has

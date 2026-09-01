@@ -141,11 +141,14 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
 
-    // Every example that stands up a real radio owes a provenance record.
-    // This one built one and never wrote sim_health.csv, so its measured
-    // KPIs carried no statement of how they were obtained.
-    rs.WriteHealthReport();
     rs.Collect();
+    // Ordering matters, and this was wrong until 2026-09-01: the report was
+    // written BEFORE Collect(), which is what harvests the PHY traces, so
+    // phy_rx_tb and rx_throughput_mbps came out zero while the application
+    // counters showed traffic flowing. A health record claiming the radio
+    // carried nothing, in a run where it did, is worse than no record at all.
+    rs.WriteHealthReport();
+
     const uint32_t hoCount = rs.GetHandoverCount();
     Simulator::Destroy();
 
