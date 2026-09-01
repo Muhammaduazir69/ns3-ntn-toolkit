@@ -75,6 +75,40 @@ taken at 2.0 GHz in a 30 MHz channel and is not band-conformant. Numbers move by
 about a decibel, in the favourable direction, and need re-running before they can
 be described as NTN FR1 results.
 
+## A18 — The DRX duty cycle is a function of the poll cadence, not of the terminal
+
+`ntn-rrc-drx-data-traffic` reports a DRX duty cycle and a power saving derived
+from it. The gate itself is real: when the state machine says asleep the example
+calls `SetTransmitEnabled(false)` and the downlink flow genuinely stops, which
+was a fix (RRC-3) for an earlier version that multiplied the goodput by the awake
+fraction afterwards and called that an effect.
+
+What is not real is the sleep schedule driving the gate. The state machine learns
+about traffic from `DrxPoll`, which samples the sink's byte counter and calls
+`NotifyDataActivity()` when it has grown. That is sampling, not reacting to
+packets, so the inactivity timer's behaviour follows the poll cadence. Measured
+by changing only that cadence and nothing else:
+
+| poll interval | reported awake fraction | measured goodput |
+|---|---|---|
+| 320 ms (one DRX long cycle) | 12.5% | 24.910 Mbps |
+| 10 ms (a quarter of the on-duration) | 93.4% | 24.992 Mbps |
+
+Neither is the terminal's duty cycle. The 12.5% coincides with
+`onDuration / longCycle`, which is what makes it look like a result.
+
+Two further consequences worth stating. The throughput barely moves in either
+case, 24.910 against 24.997 Mbps ungated, so the gate is not costing what an
+87 percent sleep would cost, and the "DRX effective goodput" line is still
+goodput multiplied by the awake fraction. And the honest fix, notifying activity
+from the sink's per-packet `Rx` trace, would make the deeper problem visible
+rather than hide it: under this example's own `CBR_SATURATING` flow the
+inactivity timer restarts on every arrival, so a conforming terminal barely
+sleeps and there is no power saving to demonstrate without a bursty profile.
+
+The poll cadence is deliberately left where it was. Swapping one arbitrary
+sampling rate for another would replace a known artifact with an unknown one.
+
 ## A17 — Several advertised stack features are available but off by default
 
 `NtnRealStackHelper` carries the features the documentation lists, and most of

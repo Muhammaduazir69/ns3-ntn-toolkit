@@ -285,6 +285,26 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(2.0), &GeoTick);
     // Poll the real DL byte counter once per DRX long cycle so genuine traffic
     // drives the DRX state transitions (>= one long cycle avoids over-driving).
+    // RRC-3b: the DRX duty cycle this example reports is NOT a physical result.
+    //
+    // The state machine is told about traffic by DrxPoll, which samples the
+    // sink's byte counter and calls NotifyDataActivity() when it grew. That is
+    // sampling, not reacting to packets, so the inactivity timer's behaviour and
+    // therefore the whole duty cycle follow the poll cadence. Measured on this
+    // scenario by changing only that cadence: one poll per 320 ms long cycle
+    // reports 12.5% awake and 24.910 Mbps, one poll per 10 ms reports 93.4%
+    // awake and 24.992 Mbps. Neither number is the terminal's real duty cycle.
+    //
+    // The gate itself is real: SetTransmitEnabled does suppress the downlink
+    // flow. What is not real is the sleep schedule driving it. Fixing this means
+    // notifying activity from the sink's per-packet Rx trace, which exists, and
+    // that in turn makes the honest answer visible: under this example's own
+    // CBR_SATURATING flow the inactivity timer restarts on every arrival and a
+    // conforming terminal barely sleeps at all, so there is no 87 percent power
+    // saving to demonstrate without a bursty traffic profile.
+    //
+    // Left at the cycle cadence rather than swapped for a different arbitrary
+    // one, and recorded in SCOPE A18.
     g_drxPollMs = drxLongCycleMs;
     Simulator::Schedule(Seconds(1.0), &DrxPoll);
     Simulator::Stop(Seconds(simSeconds));
