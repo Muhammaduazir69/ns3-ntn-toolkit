@@ -103,6 +103,7 @@ bool g_hoPendingIsPP = false;
 // only says "some handover finished"; the trace says which one.
 uint16_t g_hoPendingTarget = 0;
 bool g_hoPendingCompleted = false;
+bool g_lastActuationAccepted = false;
 std::string g_hoPendingGeoPre;   // geojson feature up to the success value
 std::string g_hoPendingGeoPost;  // geojson feature after it
 Ptr<NtnChoAlgorithm> g_cho;
@@ -476,7 +477,6 @@ ChoTick()
     if (chosen != 0 && chosen != g_serving && chosen != g_servingCellId)
     {
         ++g_totalHos;
-        g_cho->ExecuteHandover(chosen);
         const auto st = g_cho->GetMechanismStats();
         // CHO-3 FIX (2026-08-24): ask the radio whether the handover happened.
         //
@@ -487,9 +487,13 @@ ChoTick()
         // genuine reconfiguration-with-sync through TriggerHandover, and the
         // outcome is the radio's word: the RRC confirms completion through
         // HandoverEndOk, which is what g_rrcConfirmed counts.
-        const bool requested = g_rs->TriggerHandover(0, chosen);
-        // A20: do NOT grade it here. The completion counter is sampled when this
-        // verdict is resolved, one decision tick later.
+        // A21: actuate THROUGH the algorithm so ExecuteHandover stops taking its
+        // "no radio wired" branch, where it logs that nothing was actuated and
+        // self-completes every handover as a success.
+        g_lastActuationAccepted = false;
+        g_cho->ExecuteHandover(chosen);
+        const bool requested = g_lastActuationAccepted;
+        // Do NOT grade it here; the verdict resolves one decision tick later.
         const double tos = (g_lastHoTime >= 0.0) ? (t - g_lastHoTime) : t;
         const bool isPP =
             (g_lastHoTime >= 0.0 && chosen == g_lastSourceCell && tos < 10.0);
@@ -872,6 +876,21 @@ main(int argc, char* argv[])
                         {
                             g_hoPendingCompleted = true;
                         }
+                        // A21: hand the outcome to the algorithm OFF THE STACK.
+                        // Calling NotifyHandoverComplete inline from this trace
+                        // re-enters the algorithm while ExecuteHandover is still
+                        // unwinding and mutates the candidate map underneath it,
+                        // which segfaulted every seed. ScheduleNow runs it in the
+                        // same simulated instant with the stack unwound.
+                        if (g_cho)
+                        {
+                            Simulator::ScheduleNow([cellId]() {
+                                if (g_cho)
+                                {
+                                    g_cho->NotifyHandoverComplete(cellId, true);
+                                }
+                            });
+                        }
                     }));
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(1.0),
                       Seconds(simTime - 0.5));
@@ -886,6 +905,21 @@ main(int argc, char* argv[])
     g_choHelper->SetD1Threshold(d1Threshold);
     g_choHelper->SetQualityThreshold(qualityTh);
     g_cho = g_choHelper->CreateChoAlgorithm();
+
+    // A21: the algorithm actuates the radio, as ntn-cho-real-stack does.
+    g_cho->SetHandoverExecutionCallback(
+        MakeCallback(+[](uint16_t /*from*/, uint16_t to) {
+            g_lastActuationAccepted = g_rs->TriggerHandover(0, to);
+            if (!g_lastActuationAccepted)
+            {
+                Simulator::ScheduleNow([to]() {
+                    if (g_cho)
+                    {
+                        g_cho->NotifyHandoverComplete(to, false);
+                    }
+                });
+            }
+        }));
 
     NtnChoAlgorithm::ChoConfig cfg = g_cho->GetConfig();
     cfg.triggerType = TriggerFor(algorithm);

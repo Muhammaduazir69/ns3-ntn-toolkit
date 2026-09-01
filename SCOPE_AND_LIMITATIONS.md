@@ -149,16 +149,28 @@ the algorithm actuates through the callback, the RRC trace feeds
 `NotifyHandoverComplete` back, and a refusal is reported instead of being masked
 by T304.
 
-**Porting that pattern here segfaults.** Routing actuation through the callback and
-feeding the trace back into the algorithm crashed all three seeds immediately. The
-likely mechanism is re-entrancy: `ExecuteHandover` invokes the callback, which
-issues the handover, and the completion path re-enters `NotifyHandoverComplete`
-and mutates the candidate map while the outer call is still on the stack. The
-change was reverted; the scenario runs and reports as before.
+**Fixed 2026-09-01, after two wrong diagnoses of my own.** The algorithm now
+actuates through `SetHandoverExecutionCallback`, and the `HandoverEndOk` trace
+hands the outcome back with `Simulator::ScheduleNow` so the completion runs with
+the stack unwound.
 
-That makes this a real defect with a non-trivial fix, not a copy-paste job, and it
-is recorded rather than left half-done. Anyone attempting it should expect to
-defer the re-entrant completion rather than call it inline.
+The first two attempts segfaulted every seed, and I recorded here that the cause
+was re-entrancy, `ExecuteHandover` invoking the callback while the completion path
+mutated the candidate map underneath it. That was a guess and it was wrong. A
+backtrace put the crash in `Ptr<CallbackImplBase>::operator=` called from `main`,
+i.e. at setup rather than in the simulation: I had registered the callback 48
+lines before `g_cho = g_choHelper->CreateChoAlgorithm()`, so it was a method call
+on a null pointer. Moving the registration after the object exists fixes it.
+
+Measured at 300 s with `--d1Threshold=761341`, seeds 1, 2 and 3: exit 0, one
+handover each at 100 percent with an empty `failure_reason`, and the "no handover
+callback registered" line gone from the log, so `ExecuteHandover` no longer takes
+its standalone branch and the algorithm's own state follows the radio rather than
+assuming success. The `ntn-cho` suite passes.
+
+The lesson worth keeping: a plausible mechanism written into a boundary document
+is still a guess until something measures it. Two attempts were spent on a
+re-entrancy theory that a thirty-second backtrace refuted.
 
 ## A19 — TTE-aware selection never compares against the serving cell it is leaving
 
