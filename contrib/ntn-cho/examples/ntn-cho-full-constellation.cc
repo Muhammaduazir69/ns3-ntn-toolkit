@@ -116,6 +116,7 @@ std::vector<uint32_t> g_candBeamIds;      // aux geo-33E beam id per candidate (
 const GeoCoordinate kAuxRefPos(49.75, 3.75, 0.0);
 
 uint32_t g_totalHos = 0;
+uint32_t g_admitTicks = 0; // decision ticks where the algorithm admitted a candidate
 uint32_t g_successHos = 0;
 uint32_t g_failedHos = 0;
 uint32_t g_ppCount = 0;
@@ -284,6 +285,33 @@ ChoTick()
     // keeps the GEO antenna-pattern search off the critical per-second path.
     const bool decisionTick = (std::fmod(t, 5.0) < g_dt);
 
+    // Evaluate the CHO conditions BEFORE the TTE oracle writes its file, so the
+    // cho_admitted column records this tick's verdict rather than the previous
+    // tick's leftover state.
+    //
+    // CHO-21: the algorithm was also deciding for a different terminal than the
+    // one this scenario simulates. StartMonitoring seeded m_uePosition once with
+    // the fixed kAuxRefPos and nothing updated it, while the oracle below runs
+    // on g_ueModels[0]'s live position, so D1 measured a stationary point
+    // against moving references.
+    if (decisionTick)
+    {
+        double ueLatD, ueLonD, ueAltD;
+        g_ueModels[0]->GetGeodetic(ueLatD, ueLonD, ueAltD);
+        g_cho->UpdateUeKinematics(GeoCoordinate(ueLatD, ueLonD, ueAltD),
+                                  g_ueModels[0]->GetVelocity());
+        g_cho->EvaluateConditions();
+        for (const uint16_t cid : g_candCellIds)
+        {
+            if (g_cho->IsCandidateAdmitted(cid))
+            {
+                ++g_admitTicks;
+                break;
+            }
+        }
+    }
+
+
     std::map<uint16_t, double> tteByCell;
     if (decisionTick && g_tte && !beamInfos.empty())
     {
@@ -381,19 +409,7 @@ ChoTick()
     uint16_t chosen = 0;
     if (decisionTick)
     {
-        // CHO-21: the algorithm was deciding for a different terminal than the
-        // one this scenario simulates. StartMonitoring seeded m_uePosition once
-        // with kAuxRefPos, a fixed coordinate, and nothing updated it, while the
-        // TTE oracle above runs on g_ueModels[0]'s live position. D1 therefore
-        // measured a stationary point against moving beam centres and almost
-        // never held, so the TTE-aware path admitted nothing: measured over a
-        // 120 s pass, the oracle column said admitted on 46 of 46 evaluations
-        // and the algorithm had admitted none of them.
-        double ueLatD, ueLonD, ueAltD;
-        g_ueModels[0]->GetGeodetic(ueLatD, ueLonD, ueAltD);
-        g_cho->UpdateUeKinematics(GeoCoordinate(ueLatD, ueLonD, ueAltD),
-                                  g_ueModels[0]->GetVelocity());
-        g_cho->EvaluateConditions();
+        // Conditions were evaluated above, before the TTE file write.
         if (g_algorithm == "a3-baseline")
         {
             chosen = g_cho->SelectBaselineA3(servSinr);
@@ -1067,6 +1083,22 @@ main(int argc, char* argv[])
 
     // KPI summary (HO counts from the real algorithm, avg SINR measured).
     const double measSinrMean = rs.GetMeanDlSinrDb();
+    // A trigger that admitted nothing for an entire run must say so. Without
+    // this the run writes a full set of plausible CSVs, reports a 100 percent
+    // success rate over zero handovers, and looks like a mobility result.
+    if (g_admitTicks == 0)
+    {
+        std::cout << "\n  WARNING: the CHO algorithm admitted no candidate on any decision tick.\n"
+                  << "           No handover in this run came from the " << g_algorithm
+                  << " trigger.\n"
+                  << "           The usual cause is d1Threshold (" << (g_d1Threshold / 1000.0)
+                  << " km) being sized like a beam footprint while the D1 reference\n"
+                  << "           is the sub-satellite point, which at this altitude is "
+                  << "hundreds of km from the terminal\n"
+                  << "           for most of a pass. Raise --d1Threshold to match the "
+                  << "geometry, or select a trigger\n"
+                  << "           that does not gate on D1.\n";
+    }
     std::ofstream kpiSummary(outputDir + "/kpi_summary.txt");
     kpiSummary << "=== NTN-CHO KPI Summary (REAL plane) ===\n"
                << "Trigger Type: " << algorithm << "\n"

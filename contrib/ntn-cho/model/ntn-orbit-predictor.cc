@@ -485,8 +485,19 @@ NtnOrbitPredictor::GetBeamSnapshotAtTime(uint32_t satId,
     }
     else
     {
-        // Steered/geometric beam: the boresight is the terminal and the
-        // footprint centre IS the sub-satellite point.
+        // Steered/geometric beam: the footprint centre is the SUB-SATELLITE
+        // point. The boresight is steered at the terminal, but the D1 reference
+        // location deliberately is not, because a reference that follows the
+        // terminal sits at zero distance from it forever and CondEventD1 stops
+        // discriminating anything.
+        //
+        // The consequence has to be sized for, and was not. This distance is
+        // UE-to-nadir, which on a 550 km shell runs from 0 km at zenith to
+        // 23 km at 87 deg, 280 km at 61 deg and 545 km at 42 deg elevation. A
+        // d1Threshold set to a beam-footprint radius, say 50 km, therefore holds
+        // only within a few degrees of zenith, and the triggers that gate on
+        // d1Met (TTE-aware, D1) admit nothing for the rest of the pass. Size the
+        // threshold against this geometry, not against a footprint.
         snap.beamCenter = GeoCoordinate(satPosFuture.GetLatitude(),
                                         satPosFuture.GetLongitude(), 0.0);
     }
