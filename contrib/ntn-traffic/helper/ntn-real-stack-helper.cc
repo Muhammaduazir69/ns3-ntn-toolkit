@@ -650,6 +650,14 @@ NtnRealStackHelper::BuildNrRadio()
     // assumed: 40 could not carry 30 UEs.
     {
         static const uint32_t kAllowed[] = {2, 5, 10, 20, 40, 80, 160, 320};
+        // Never go BELOW NrGnbRrc's own default of 40. A first version of this
+        // picked the smallest allowed value that fit, which for the three- and
+        // four-UE scenarios most examples default to chose 10 or 20 instead. A
+        // shorter SRS period means SRS is sent more often, so that would have
+        // changed uplink behaviour, and every measured result that depends on
+        // it, across scenarios that never had a capacity problem. This may only
+        // add capacity, never alter a run that was already fine.
+        static const uint32_t kDefaultPeriodicity = 40;
         const uint32_t needed = 2 * (m_ue.GetN() + 2);
         uint32_t srs = kAllowed[sizeof(kAllowed) / sizeof(kAllowed[0]) - 1];
         for (uint32_t cand : kAllowed)
@@ -660,6 +668,7 @@ NtnRealStackHelper::BuildNrRadio()
                 break;
             }
         }
+        srs = std::max(srs, kDefaultPeriodicity);
         Config::SetDefault("ns3::NrGnbRrc::SrsPeriodicity", UintegerValue(srs));
         NS_LOG_INFO("SrsPeriodicity set to " << srs << " for " << m_ue.GetN() << " UEs");
     }
