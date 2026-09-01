@@ -21,6 +21,36 @@ what closing it would require.**
 > **STATUS 2026-06-27 — A1 & A5(ii) largely CLOSED on the mmwave spine; A5(i)/A3/A4 unblocked by the nr integration.**
 > A1: the model now uses the **real TR 38.811 §6.6.2 σ_SF tables** (per scenario, elevation-interpolated), **CL=0 for LOS** (spec-correct), and a **Rician small-scale fading term** with the §6.7.2 elevation-dependent K-factor. **NT-07 correction:** that term defaults to OFF and is not executing on the measured plane, deliberately: both radio backends already apply small-scale fading through the 3GPP phased-array spectrum model, and running the Rician process as well would multiply two independent fading realizations onto one link. Enable it only for a link with no 3GPP spectrum model in the path. Its normalization (unit mean power) and its elevation dependence are covered by `Tr38811FastFadingStatisticsTest`; before that they were asserted only by the comment above the code. *Remaining:* the full multi-tap frequency-selective NTN-TDL (§6.9.2). A5(ii): the **TR 38.811 §6.4.1 J1-Airy satellite beam pattern** is implemented (`NtnSatBeamGainModel`, opt-in via `NtnRealStackHelper::SetSatelliteBeam`) and verified (0 dB boresight, −3.01 dB at the half-beamwidth). **NT-07:** that setter had no callers anywhere in the tree. The pattern was still exercised on the measured plane by `ntn-tr38821-array-gain-calibration`, which constructs the model directly, but no scenario reached it through the helper, so no run assembled it into a helper-built propagation chain. `ntn-real-stack-smoke` now exposes `--satBeam`, `--beamwidthDeg` and `--beamCenterXKm`, and a fixed beam centre 300 km off the terminal costs a measured 11.07 dB (16.20 → 5.13 dB SINR) while a tracking beam costs 0 dB, which is the same reason a steered-beam calibration reports a constant offset. `NtnChannelExtrasReachTheChainTest` asserts the model is in the chain rather than merely constructible. `SetNtnScenario` had no callers either, so every run used the Suburban shadow-fading bins; it is now `--ntnScenario`. A2 (THz pointing) is wired into the measured path. **5G-LENA `nr` is now in the tree** (see A5), so A5(i)/A3/A4 are reachable on an nr spine.
 
+## A10 — Three shipped examples do not run
+
+Measured by executing all 93 buildable examples on 2026-09-01.
+
+**`ntn-cho-leo-basic`** aborts on its own default. It selects `tte-aware`, which
+needs a time-to-exit estimator, and never calls `SetupConstellation()`, so the
+guard in `EvaluateConditions()` correctly refuses. The example creates the
+algorithm before its satellite nodes exist, so the call cannot simply be moved
+up. Reordering it and mirroring the Walker satellite onto an SNS3
+`SatConstantPositionMobilityModel` clears that guard but then hits
+`SatAntennaGainPatternContainer: unvalid beam id: 0`, because the geo-33E pattern
+corpus numbers beams from its filenames, 1 to 72, and the example asks for beam 0.
+`ntn-cho-real-stack` passes beam 0 too and does not abort, so something in its
+longer setup makes the lookup reachable; that difference is not yet understood and
+the partial fix was reverted rather than left in the tree. Use
+`ntn-cho-real-stack`, which runs on all its triggers.
+
+**`ntn-tr38821-array-gain-calibration`** exits non-zero on its own pattern gate:
+paired in-lobe rms is 3.36 dB against a 3.00 dB tolerance. This is deliberate and
+predates this audit. The gate is not relaxed, and the manuscript reports it as
+failing. Its other two gates pass, one of them only after this audit replaced a
+per-sample spread bound with a test on the pinned mean.
+
+**`oran-ntn-e2-termination`** exits non-zero reporting `[ric] no traffic seen`. It
+also rejects `--outputDir`, which every other example accepts, so a sweep that
+passes that flag uniformly gets a usage error instead of the real failure.
+
+**What a paper may claim.** Results from the 90 examples that run. Any figure
+sourced from these three needs the run re-done on a working example first.
+
 ## A9 — The NR spine has a UE ceiling, and it is lower than the published campaign
 
 **What is bounded.** Scenarios on the 5G-LENA `nr` backend abort above a UE count
