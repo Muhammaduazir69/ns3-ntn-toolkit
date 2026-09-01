@@ -34,6 +34,18 @@ class NtnRrcHelper
     NtnRrcHelper();
 
     void SetPayloadMode(PayloadMode mode);
+
+    /**
+     * \brief Supply the gateway geometry the transparent feeder leg needs.
+     *
+     * RRC-2 put the feeder leg back into NtnTimingAdvance, and
+     * SetGatewayMobility() is what activates it: without a gateway the class
+     * returns a zero feeder range for every payload mode, so transparent and
+     * regenerative come out identical. Only the unit tests ever called it, so in
+     * every shipped scenario the documented difference between the two payloads
+     * was inert. The helper now passes it through.
+     */
+    void SetGatewayMobility(Ptr<MobilityModel> gw) { m_gatewayMob = gw; }
     void SetReferencePosition(const Vector& earthFixedRefPosition);
 
     /// Build a NtnTimingAdvance instance bound to the given UE and satellite
@@ -60,6 +72,7 @@ class NtnRrcHelper
 
   private:
     PayloadMode m_payloadMode{PayloadMode::Transparent};
+    Ptr<MobilityModel> m_gatewayMob;
     Vector m_referencePos{0.0, 0.0, 0.0};
 };
 

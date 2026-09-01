@@ -4,6 +4,8 @@
 
 #include "ntn-timing-advance.h"
 
+#include <iostream>
+
 #include <ns3/log.h>
 #include <ns3/mobility-model.h>
 #include <ns3/simulator.h>
@@ -72,6 +74,31 @@ NtnTimingAdvance::GetFeederRangeMetres() const
 {
     // Zero when the payload terminates on board (the gNB is the satellite, so
     // there is no feeder leg in the timing loop) or when no gateway was given.
+    //
+    // RRC-2b: the second case used to be silent, and it is not the same thing as
+    // the first. A Transparent payload genuinely HAS a feeder leg; returning
+    // zero because nobody supplied the gateway makes the advance identical to
+    // regenerative and the payload-mode distinction inert. SetGatewayMobility
+    // had no caller outside the unit tests, so every shipped scenario in
+    // Transparent mode was quietly under-compensating: measured on
+    // ntn-rrc-real-stack, 3789 us either way, against 7717 us once the gateway
+    // is supplied. Warn once rather than let it pass for a result.
+    if (m_payloadMode == PayloadMode::Transparent && m_sat && !m_gw)
+    {
+        static bool warned = false;
+        if (!warned)
+        {
+            warned = true;
+            // std::cerr, not NS_LOG_WARN: the logging macros are compiled out
+            // of ns-3 optimized builds, which is how every example in this tree
+            // is run, so a warning behind NS_LOG would never have been seen by
+            // the people it is for.
+            std::cerr << "[ntn-rrc/RRC-2b] Transparent payload with no gateway mobility. The "
+                         "feeder leg is omitted, so this timing advance covers the service link "
+                         "only and reports what a REGENERATIVE payload would. Call "
+                         "NtnRrcHelper::SetGatewayMobility() to include it.\n";
+        }
+    }
     if (m_payloadMode != PayloadMode::Transparent || !m_gw || !m_sat)
     {
         return 0.0;

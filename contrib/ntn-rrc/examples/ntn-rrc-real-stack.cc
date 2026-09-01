@@ -298,6 +298,23 @@ main(int argc, char* argv[])
     rrc.SetPayloadMode(transparent ? PayloadMode::Transparent : PayloadMode::RegenerativeFull);
     // TA reference = beam centre at the sub-point (ECEF), per TS 38.331.
     rrc.SetReferencePosition(ntngeo::GeodeticToEcef(subLat, subLon, 0.0));
+    // RRC-2b: give the transparent payload its feeder leg.
+    //
+    // NtnTimingAdvance only adds the satellite-to-gateway hop when a gateway
+    // mobility model is supplied; without one it returns a zero feeder range for
+    // EVERY payload mode. SetGatewayMobility had no caller outside the unit
+    // tests, so --transparent=1 and --transparent=0 produced an identical
+    // 3789 us and the documented difference between the two payloads was inert
+    // in every shipped run.
+    //
+    // The gateway sits 300 km from the sub-point, a realistic ground-station
+    // offset for a LEO feeder link, so the transparent advance now covers both
+    // legs as TS 38.213 requires.
+    {
+        Ptr<ConstantPositionMobilityModel> gwMob = CreateObject<ConstantPositionMobilityModel>();
+        gwMob->SetPosition(ntngeo::GeodeticToEcef(subLat + 2.7, subLon, 0.0));
+        rrc.SetGatewayMobility(gwMob);
+    }
     g_ta = rrc.InstallTimingAdvance(ueMob, satMob);
 
     const uint16_t cellId = rs.GetServingCellId(); // radio-agnostic (mmwave or nr gNB)

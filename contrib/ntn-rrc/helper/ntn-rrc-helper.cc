@@ -37,6 +37,10 @@ NtnRrcHelper::InstallTimingAdvance(Ptr<MobilityModel> ueMob, Ptr<MobilityModel> 
     ta->SetSatelliteMobility(satMob);
     ta->SetReferencePosition(m_referencePos);
     ta->SetPayloadMode(m_payloadMode);
+    if (m_gatewayMob)
+    {
+        ta->SetGatewayMobility(m_gatewayMob);
+    }
     return ta;
 }
 
