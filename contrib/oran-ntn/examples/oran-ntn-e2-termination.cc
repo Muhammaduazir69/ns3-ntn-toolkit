@@ -261,7 +261,7 @@ RunAgent(E2Transport::Protocol proto,
 int
 main(int argc, char* argv[])
 {
-    std::string role = "ric";
+    std::string role = "both";
     std::string proto = "sctp";
     std::string host = "127.0.0.1";
     uint32_t port = 36421;
@@ -269,7 +269,10 @@ main(int argc, char* argv[])
     uint32_t indications = 5;
 
     CommandLine cmd(__FILE__);
-    cmd.AddValue("role", "ric | agent", role);
+    cmd.AddValue("role",
+                 "both (default: RIC plus an agent on a thread, self-contained) | "
+                 "ric | agent",
+                 role);
     cmd.AddValue("proto", "sctp | tcp", proto);
     cmd.AddValue("host", "bind/connect host", host);
     cmd.AddValue("port", "E2 port", port);
@@ -284,5 +287,38 @@ main(int argc, char* argv[])
     {
         return RunAgent(p, host, static_cast<uint16_t>(port), indications);
     }
+
+    if (role == "both")
+    {
+        // Self-contained mode, and the default.
+        //
+        // This example is a two-process demo: a RIC in one terminal, an agent in
+        // another. Run on its own it defaulted to role=ric, sat waiting for a
+        // peer that was never started, and exited 1 reporting "no traffic seen".
+        // That is correct behaviour for a listener with no client and useless as
+        // a check: any sweep or CI run over the examples recorded it as a
+        // permanent failure, and the E2 exchange it exists to demonstrate was
+        // never actually exercised by anything.
+        //
+        // Here the agent runs on a thread against this process's own listener,
+        // so the association, the PER-encoded KPM indications and the decode all
+        // happen for real over a loopback SCTP (or TCP) socket. The two-process
+        // roles are unchanged for anyone who wants them.
+        int agentRc = 0;
+        std::thread agent([&]() {
+            // Let the listener bind before connecting; a connect that races the
+            // bind fails for a reason that has nothing to do with E2.
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            agentRc = RunAgent(p, host, static_cast<uint16_t>(port), indications);
+        });
+        const int ricRc = RunRic(p, host, static_cast<uint16_t>(port), duration);
+        agent.join();
+        if (ricRc != 0 || agentRc != 0)
+        {
+            std::cout << "[both] ric=" << ricRc << " agent=" << agentRc << "\n";
+        }
+        return (ricRc == 0 && agentRc == 0) ? 0 : 1;
+    }
+
     return RunRic(p, host, static_cast<uint16_t>(port), duration);
 }

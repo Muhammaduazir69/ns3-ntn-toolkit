@@ -16,7 +16,12 @@
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 
+#include "ns3/geo-coordinate.h"
+#include "ns3/satellite-antenna-gain-pattern-container.h"
+#include "ns3/satellite-constant-position-mobility-model.h"
+#include "ns3/satellite-env-variables.h"
 #include "ns3/sgp4-mobility-model.h"
+#include "ns3/singleton.h"
 #include "ns3/walker-constellation.h"
 
 #include <cmath>
@@ -77,7 +82,11 @@ main(int argc, char* argv[])
     ntnHelper->SetBandwidth(30.0e6);
     ntnHelper->SetSatelliteTxPower(satEirpDbm);
     ntnHelper->SetTteMinimum(Seconds(tteMinimum));
-    Ptr<NtnChoAlgorithm> choAlgo = ntnHelper->CreateChoAlgorithm();
+    // CHO-5: the algorithm used to be created here, before the satellite nodes
+    // below existed, so SetupConstellation() could not have run first and the
+    // helper handed it a null time-to-exit estimator. The example's own DEFAULT
+    // trigger is tte-aware, which needs that estimator, so out of the box this
+    // aborted on the guard in EvaluateConditions(). Created below instead.
 
     // ---- Nodes: one Kepler+J2-secular serving satellite (real mmwave gNB) +
     //      TR 38.811 UEs (Vallado SGP4 available via Sgp4MobilityModel::SetUseVallado) ----
@@ -97,6 +106,39 @@ main(int argc, char* argv[])
     satNodes.Get(0)->AggregateObject(servSatMob);
     NodeContainer ueNodes;
     ueNodes.Create(numUes);
+
+    // Give the helper a constellation before asking it for an algorithm, then
+    // switch the predictor to the analytic beam, which is what the other three
+    // CHO examples do and what this one was missing.
+    Singleton<SatEnvVariables>::Get()->DoInitialize();
+    Singleton<SatEnvVariables>::Get()->SetOutputVariables("ntn-cho-leo-basic", "", true);
+    Ptr<SatAntennaGainPatternContainer> agp = CreateObject<SatAntennaGainPatternContainer>(
+        2,
+        Singleton<SatEnvVariables>::Get()->LocateDataDirectory() +
+            "/scenarios/geo-33E/antennapatterns");
+    NodeContainer auxSats;
+    auxSats.Create(2);
+    Ptr<SatConstantPositionMobilityModel> auxServ =
+        CreateObject<SatConstantPositionMobilityModel>();
+    Ptr<SatConstantPositionMobilityModel> auxCand =
+        CreateObject<SatConstantPositionMobilityModel>();
+    auxServ->SetGeoPosition(GeoCoordinate(servSatMob->GetPosition()));
+    auxCand->SetGeoPosition(GeoCoordinate(servSatMob->GetPosition()));
+    auxSats.Get(0)->AggregateObject(auxServ);
+    auxSats.Get(1)->AggregateObject(auxCand);
+    agp->ConfigureBeamsMobility(0, auxServ);
+    agp->ConfigureBeamsMobility(1, auxCand);
+    ntnHelper->SetupConstellation(auxSats, agp);
+
+    // CHO-2: the shipped SNS3 pattern grids are GEO-referenced and are not
+    // defined for beam id 0, so touching them aborts. The analytic TR 38.811
+    // 6.4.1 beam is what the other CHO examples use; same Set-1 parameters.
+    if (Ptr<NtnOrbitPredictor> orbit = ntnHelper->GetOrbitPredictor())
+    {
+        orbit->SetGeometricBeam(/*peakGainDbi=*/30.0, /*beamwidth3dbDeg=*/4.4127);
+    }
+
+    Ptr<NtnChoAlgorithm> choAlgo = ntnHelper->CreateChoAlgorithm();
 
     // TR 38.811 class mobility (real MobilityModel) under the t=0 sub-point.
     double subLat, subLon, subAlt;
