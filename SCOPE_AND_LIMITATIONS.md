@@ -108,14 +108,34 @@ is not K_offset pushing an uplink into a fixed downlink slot: the configured TDD
 pattern is `F|F|F|F|F|F|F|F|F|F|`, all flexible, so there are no fixed downlink
 slots to land in.
 
-What is left is the size of the offset. K_offset raises N2Delay, the gap between a
-uplink grant and the transmission it authorises, from roughly 2 slots to roughly 13
-for a 780 km service link at 30 kHz SCS. The vendored NR scheduler does not reserve
-the target slot when it issues the grant, so across a window that wide it can
-allocate a downlink reception to the same UE in the slot the grant already claimed.
-Terrestrial spacing hides this because the window is short. Closing it means
-teaching the scheduler to reserve the slot at grant time, which is an upstream
-change in `contrib/nr`, not something this helper can paper over.
+A third theory was tested and refuted too: that a MAC reset failing to flush the
+uplink HARQ buffers, which TS 38.321 section 5.12 requires, left a grant alive
+across the handover. Adding the flush changes nothing, and the change was reverted
+rather than left in vendored code on a fix that does not work.
+
+Instrumenting the abort site directly settled it. At t=4.436 s, RNTI 5 on cell 3
+is in RX_DATA and is asked to send uplink control on the same cell and the same
+slot. Not a cross-cell effect, not a stale grant: the scheduler simply allocated
+both directions to one UE at one instant.
+
+K_offset raises N2Delay, the gap between an uplink grant and the transmission it
+authorises, from roughly 2 slots to roughly 13 at 780 km and 30 kHz SCS. The
+vendored NR scheduler does not reserve the target slot when it issues the grant, so
+across a window that wide it can later allocate a downlink to the same UE in the
+slot the grant already claimed. Terrestrial spacing hides this because the window
+is short.
+
+**A partial mitigation exists and is opt-in.** ns-3 defaults `NrGnbPhy::Pattern` to
+`F|F|F|F|F|F|F|F|F|F|`, all flexible, so nothing separates the directions. An
+explicit pattern helps: with `DL|DL|DL|F|UL|DL|DL|DL|F|UL|`,
+`ntn-cho-full-constellation` goes from aborting at 8 UEs to completing. It is not a
+complete fix, 30 UEs still abort, and it is deliberately NOT the default, because
+the slot pattern changes how every scenario schedules and flipping it would move
+every committed measurement to dodge an upstream limitation.
+`NtnRealStackHelper::SetTddPattern()` exposes it for anyone who wants the trade.
+
+Closing it properly means teaching the scheduler to reserve the slot at grant time,
+which is an upstream change in `contrib/nr`.
 
 ## A8 — Most shipped scenarios propagate with Kepler + J2, not SGP4
 

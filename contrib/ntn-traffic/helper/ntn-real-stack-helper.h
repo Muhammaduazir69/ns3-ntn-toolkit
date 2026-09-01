@@ -298,6 +298,30 @@ class NtnRealStackHelper
      * without re-deriving it.
      */
     uint32_t GetScsKhz() const { return 15u << m_numerology; }
+
+    /**
+     * \brief Override the gNB TDD slot pattern (nr backend).
+     *
+     * ns-3 defaults NrGnbPhy::Pattern to "F|F|F|F|F|F|F|F|F|F|", all flexible,
+     * so the scheduler decides each slot's direction. That is fine terrestrially
+     * and interacts badly with the NTN cell-specific K_offset: the offset pushes
+     * an uplink grant about 13 slots ahead at 780 km and 30 kHz SCS, and across
+     * a window that wide the scheduler can later allocate a downlink to the same
+     * UE in the slot the grant already claimed. NrSpectrumPhy answers that with
+     * NS_FATAL_ERROR("Cannot TX while RX").
+     *
+     * An explicit pattern separates the directions and helps. Measured on
+     * ntn-cho-full-constellation with "DL|DL|DL|F|UL|DL|DL|DL|F|UL|": 8 UEs go
+     * from aborting to completing. It is NOT a complete fix, 30 UEs still abort,
+     * so this is offered as an opt-in rather than made the default.
+     *
+     * Deliberately not the default for a second reason: the slot pattern changes
+     * how every scenario schedules, so flipping it would silently move every
+     * committed measurement to dodge an upstream scheduler limitation. See
+     * SCOPE_AND_LIMITATIONS.md A9.
+     */
+    void SetTddPattern(std::string p) { m_tddPattern = std::move(p); }
+    std::string GetTddPattern() const { return m_tddPattern; }
     uint16_t GetNumerology() const { return m_numerology; }
     void SetCarrierFrequencyHz(double f) { m_freqHz = f; }
     /// TS 38.101-5 NTN FR1 band conformance (SLICE-4 / NT-09).
@@ -1237,6 +1261,8 @@ class NtnRealStackHelper
     /// Anything non-zero from 10 ms to 2 s lands within 0.6 dB, so the value is
     /// not delicate. What matters is that regeneration happens at all.
     Time m_channelUpdatePeriod{MilliSeconds(100)};
+    /// Empty means leave NrGnbPhy::Pattern at the ns-3 default.
+    std::string m_tddPattern{};
     /// WF-07: verdict of the last health report.
     bool m_lastGateVerdict{true};
     /// OBS-07: TLE provenance declared by the scenario, for the manifest.

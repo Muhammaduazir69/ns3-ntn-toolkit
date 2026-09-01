@@ -672,6 +672,11 @@ NtnRealStackHelper::BuildNrRadio()
         Config::SetDefault("ns3::NrGnbRrc::SrsPeriodicity", UintegerValue(srs));
         NS_LOG_INFO("SrsPeriodicity set to " << srs << " for " << m_ue.GetN() << " UEs");
     }
+    if (!m_tddPattern.empty())
+    {
+        Config::SetDefault("ns3::NrGnbPhy::Pattern", StringValue(m_tddPattern));
+        NS_LOG_INFO("NtnRealStackHelper: TDD pattern " << m_tddPattern);
+    }
 
     m_nr->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
 
