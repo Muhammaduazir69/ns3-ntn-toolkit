@@ -47,95 +47,56 @@ against its own listener and completes the real exchange over loopback SCTP.
 **What a paper may claim.** Results from the examples that run. A figure sourced
 from the array-gain calibration must carry its failing gate.
 
-## A9 — The NR spine scales, but ntn-cho-full-constellation still aborts at 8 UEs
+## A9 — Half-duplex collisions are dropped and counted, not fatal
 
-**What is bounded.** Scenarios on the 5G-LENA `nr` backend abort above a UE count
-that depends on the scenario. Measured on 2026-09-01 with 20 s runs:
+**What was bounded.** Scenarios on the 5G-LENA `nr` backend aborted above a UE
+count that depended on the scenario: `ntn-real-stack-smoke` at 30,
+`ntn-cho-full-constellation` at 8. Two separate causes, both now closed.
 
-| Scenario | 4 UEs | 8 UEs | 16 UEs | 30 UEs |
-|---|---|---|---|---|
-| `ntn-real-stack-smoke` (no handover logic) | ok | ok | ok | ok since the SrsPeriodicity fix |
+**Capacity, closed.** `NrGnbRrc::SrsPeriodicity` defaults to 40 and the toolkit
+never set it, so once SRS configuration indices ran out
+`DoAllocateTemporaryCellRnti` returned 0 and that refusal was not honoured
+downstream: several refused UEs collided on RNTI 0 and a UE received two
+random-access responses matching its own preamble. A probe caught it exactly, IMSI
+22 processing preamble 40 twice at one instant. The helper sizes the periodicity to
+the UE count now, never below the default of 40, and the spine carries 100 UEs.
 
-After that fix `ntn-real-stack-smoke` was run further, on 20 s of simulated time:
-30 UEs completes in 496 s of wall clock, 50 UEs in 926 s, 100 UEs in 2118 s, all
-exiting zero. Wall clock is close to linear in UE count at roughly 21 s per UE,
-so the practical limit on this backend is now patience rather than a fault.
-| `ntn-cho-full-constellation` | ok | **abort** | abort | abort |
+**Half duplex, closed.** `NrSpectrumPhy` called `NS_FATAL_ERROR` whenever a TDD
+node was asked to transmit while receiving, or to receive an SRS while
+transmitting. That is not a physical impossibility; it is the absence of a
+scheduling rule. A real half-duplex radio simply does not perform the
+transmission, and TS 38.213 defines the prioritisation. Three sites now drop and
+count instead of aborting.
 
-Two distinct faults, both in the vendored NR, neither caught by any test because
-every example defaults to four UEs or fewer:
+Reached over NTN because the cell-specific K_offset widens the gap between an
+uplink grant and the transmission it authorises from about 2 slots to about 13 at
+780 km and 30 kHz SCS, and the vendored scheduler does not reserve the target slot
+when it issues the grant. Terrestrial spacing hides this.
 
-- `NS_FATAL_ERROR("unexpected event in state IDLE_CONNECTING")`,
-  `nr-ue-rrc.cc:714`. `DoNotifyRandomAccessSuccessful` handles only
-  `IDLE_RANDOM_ACCESS` and `CONNECTED_HANDOVER`, so a second random-access
-  success for a UE that has already advanced past those is fatal.
-- `NS_FATAL_ERROR("Cannot TX while RX")`, `nr-spectrum-phy.cc:711`, a half-duplex
-  violation that appears earlier, at 8 UEs, once handover signalling is in play.
+**The drops are reported, so they can never be silent.** `sim_health.csv` carries
+`halfduplex_ulctrl_drops`, `halfduplex_data_drops` and `halfduplex_srs_rx_drops`
+on every `nr` run. Measured on `ntn-cho-full-constellation` over 20 s:
 
-**Why it matters.** The Monte Carlo campaign under `papers/sim_runs/` is
-configured for 30 UEs. Neither example can run that configuration today, so that
-campaign cannot currently be reproduced on the NR spine at its published size.
+| UEs | transport blocks | ctrl drops | data drops | SRS drops | share |
+|---:|---:|---:|---:|---:|---:|
+| 4 | 33,562 | 0 | 0 | 0 | 0 |
+| 8 | 143,979 | 4 | 0 | 0 | 0.003% |
+| 16 | 390,306 | 16 | 8 | 0 | 0.006% |
 
-**What a paper may claim.** Results at the UE counts that actually run. A
-scalability claim in UEs on the `nr` backend needs this ceiling stated, or the
-mmwave backend, which does not share these two faults.
+**The patch is inert where the fault does not occur.** `ntn-real-stack-smoke` at
+60 s with 4 UEs still gives `dl_sinr_db` 27.8332, bit-identical to before, with all
+three counters at zero. No committed measurement moves unless the run was
+previously aborting.
 
-**Half of this is now fixed.** The RRC abort was not a RACH collision, which is
-what a first guess suggested and what an attach stagger failed to fix, making
-things worse instead. It was capacity. `NrGnbRrc::SrsPeriodicity` defaults to 40
-and the toolkit never set it, so once the SRS configuration indices ran out
-`DoAllocateTemporaryCellRnti` began returning 0. That refusal is not honoured
-downstream: the MAC still builds a RAR, several refused UEs collide on RNTI 0 in
-`m_rapIdRntiMap`, and a UE then receives two RARs matching its own preamble in one
-message. A probe caught it exactly: IMSI 22 processing preamble 40 twice at the
-same instant, both times with rnti=0 while its peers held 32 to 40.
-`NtnRealStackHelper` now sizes the periodicity to the configured UE count from the
-allowed set {2, 5, 10, 20, 40, 80, 160, 320}, and 30 UEs runs clean.
+**What a paper may claim.** Results at these UE counts, reading the drop counters
+alongside `phy_rx_tb`. A large count means the node is over-subscribed and its
+throughput figure means something different; single-digit counts against hundreds
+of thousands of transport blocks do not change a result.
 
-**The half-duplex abort is diagnosed but not fixed.** `ntn-cho-full-constellation`
-still aborts at 8 or more UEs with `NS_FATAL_ERROR("Cannot TX while RX")` from
-`NrSpectrumPhy::StartTxUlControlFrames`. Bisecting the example's helper calls one
-at a time: removing `SetKOffsetConsumption(true)` clears it, removing
-`SetHandover(true, ...)` clears it, removing `EnableAiFlowMonitor` does not. It
-needs both of the first two, and it reproduces with a single cell
-(`--numCandidates=0`), so it is not a multi-cell effect.
-
-Two theories were tested and both are wrong, which is worth recording so nobody
-retries them. It is not the LIVE reprogramming of N2Delay when SIB19 refreshes:
-deferring that write to a drained boundary changes nothing (the deferral was kept
-anyway, because instantaneous reprogramming is incorrect on its own terms). And it
-is not K_offset pushing an uplink into a fixed downlink slot: the configured TDD
-pattern is `F|F|F|F|F|F|F|F|F|F|`, all flexible, so there are no fixed downlink
-slots to land in.
-
-A third theory was tested and refuted too: that a MAC reset failing to flush the
-uplink HARQ buffers, which TS 38.321 section 5.12 requires, left a grant alive
-across the handover. Adding the flush changes nothing, and the change was reverted
-rather than left in vendored code on a fix that does not work.
-
-Instrumenting the abort site directly settled it. At t=4.436 s, RNTI 5 on cell 3
-is in RX_DATA and is asked to send uplink control on the same cell and the same
-slot. Not a cross-cell effect, not a stale grant: the scheduler simply allocated
-both directions to one UE at one instant.
-
-K_offset raises N2Delay, the gap between an uplink grant and the transmission it
-authorises, from roughly 2 slots to roughly 13 at 780 km and 30 kHz SCS. The
-vendored NR scheduler does not reserve the target slot when it issues the grant, so
-across a window that wide it can later allocate a downlink to the same UE in the
-slot the grant already claimed. Terrestrial spacing hides this because the window
-is short.
-
-**A partial mitigation exists and is opt-in.** ns-3 defaults `NrGnbPhy::Pattern` to
-`F|F|F|F|F|F|F|F|F|F|`, all flexible, so nothing separates the directions. An
-explicit pattern helps: with `DL|DL|DL|F|UL|DL|DL|DL|F|UL|`,
-`ntn-cho-full-constellation` goes from aborting at 8 UEs to completing. It is not a
-complete fix, 30 UEs still abort, and it is deliberately NOT the default, because
-the slot pattern changes how every scenario schedules and flipping it would move
-every committed measurement to dodge an upstream limitation.
-`NtnRealStackHelper::SetTddPattern()` exposes it for anyone who wants the trade.
-
-Closing it properly means teaching the scheduler to reserve the slot at grant time,
-which is an upstream change in `contrib/nr`.
+**What remains upstream.** Teaching the scheduler to reserve the slot at grant
+time, so the collision does not arise at all. `NtnRealStackHelper::SetTddPattern()`
+offers an explicit DL/UL pattern as a partial mitigation, deliberately not the
+default because the slot pattern changes how every scenario schedules.
 
 ## A8 — Most shipped scenarios propagate with Kepler + J2, not SGP4
 

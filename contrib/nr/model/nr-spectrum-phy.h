@@ -469,7 +469,44 @@ class NrSpectrumPhy : public SpectrumPhy
      */
     void DoDispose() override;
 
+  public:
+    /**
+     * \brief Uplink control transmissions dropped because the half-duplex UE
+     *        was receiving at the time (NTN patch).
+     *
+     * Non-zero means the scheduler asked this UE to transmit uplink control in a
+     * slot it was already using to receive. Over NTN that is expected under a
+     * large cell-specific K_offset; a large count means the uplink is
+     * over-subscribed and the run should report it rather than hide it.
+     */
+    uint64_t GetUlCtrlDropCount() const { return m_ulCtrlDroppedHalfDuplex; }
+
+    /**
+     * \brief Data transmissions dropped because the half-duplex node was
+     *        receiving at the time (NTN patch).
+     *
+     * More consequential than a control drop: this is user traffic that never
+     * went out, so a non-zero count changes what the throughput figure means.
+     */
+    uint64_t GetDataDropCount() const { return m_dataDroppedHalfDuplex; }
+
+    /**
+     * \brief SRS receptions dropped because the node was not IDLE or BUSY
+     *        (NTN patch).
+     *
+     * An SRS the gNB never heard degrades its channel estimate for that UE, so
+     * a non-zero count is worth reporting rather than assuming away.
+     */
+    uint64_t GetSrsDropCount() const { return m_srsDroppedHalfDuplex; }
+
   private:
+    /// NTN patch: half-duplex uplink-control drops, see GetUlCtrlDropCount().
+    uint64_t m_ulCtrlDroppedHalfDuplex{0};
+    /// NTN patch: half-duplex data drops, see GetDataDropCount().
+    uint64_t m_dataDroppedHalfDuplex{0};
+    /// NTN patch: SRS receptions dropped, see GetSrsDropCount().
+    uint64_t m_srsDroppedHalfDuplex{0};
+
     std::vector<MimoSinrChunk>
         m_mimoSinrPerceived; //!< received SINR values during data reception for TB decoding, to
                              //!< replace m_sinrPerceived for all (MIMO and SISO) receivers

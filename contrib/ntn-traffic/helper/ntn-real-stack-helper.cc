@@ -3026,6 +3026,55 @@ NtnRealStackHelper::WriteHealthReport()
         << ",1,config\n";
     out << "wall_clock_s," << wallSec << ",-,-,measured\n";
     out << "air_interface," << airTag << ",-," << (ntnBandOk ? 1 : 0) << ",config\n";
+
+    // Half-duplex drops, so they can never be silent.
+    //
+    // The vendored NR PHY used to NS_FATAL_ERROR whenever a TDD node was asked
+    // to transmit while receiving, or to receive an SRS while transmitting. That
+    // is not a physical impossibility, it is the absence of a scheduling rule,
+    // and a real half-duplex radio simply does not perform the transmission. The
+    // patch makes it drop instead of abort, which would be a silent degradation
+    // if the count were not reported. It is reported here.
+    //
+    // Non-zero is not automatically wrong: over NTN a large cell-specific
+    // K_offset widens the grant-to-transmission gap enough that occasional
+    // collisions are expected. A LARGE count means the node is over-subscribed
+    // and its throughput figure means something different, so read it alongside
+    // phy_rx_tb rather than on its own.
+    if (m_backend == RadioBackend::Nr)
+    {
+        uint64_t ctrlDrops = 0;
+        uint64_t dataDrops = 0;
+        uint64_t srsDrops = 0;
+        const uint8_t nBwpHealth = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+        for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+        {
+            for (uint8_t b = 0; b < nBwpHealth; ++b)
+            {
+                if (Ptr<NrSpectrumPhy> sp = m_nr->GetGnbPhy(m_enbDevs.Get(i), b)->GetSpectrumPhy())
+                {
+                    ctrlDrops += sp->GetUlCtrlDropCount();
+                    dataDrops += sp->GetDataDropCount();
+                    srsDrops += sp->GetSrsDropCount();
+                }
+            }
+        }
+        for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+        {
+            for (uint8_t b = 0; b < nBwpHealth; ++b)
+            {
+                if (Ptr<NrSpectrumPhy> sp = m_nr->GetUePhy(m_ueDevs.Get(i), b)->GetSpectrumPhy())
+                {
+                    ctrlDrops += sp->GetUlCtrlDropCount();
+                    dataDrops += sp->GetDataDropCount();
+                    srsDrops += sp->GetSrsDropCount();
+                }
+            }
+        }
+        out << "halfduplex_ulctrl_drops," << ctrlDrops << ",-,-,measured\n";
+        out << "halfduplex_data_drops," << dataDrops << ",-,-,measured\n";
+        out << "halfduplex_srs_rx_drops," << srsDrops << ",-,-,measured\n";
+    }
     out << "carrier_hz," << m_freqHz << ",-,-,config\n";
     // WF-11: refusals reach the health file, so they are visible in the
     // release build where NS_LOG_WARN is compiled out. pass=0 when a decision
