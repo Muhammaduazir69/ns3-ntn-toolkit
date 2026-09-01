@@ -325,6 +325,31 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
     rs.Collect();
+    // WF-12b: same as ris-assisted-leo-link. The provenance line below is printed
+    // to stdout; the health record is what survives the run, so it carries the
+    // channel's origin too.
+    if (g_provenanceCh)
+    {
+        rs.AddHealthRow("sionna_ray_traced",
+                        g_provenanceCh->AllQueriesRayTraced() ? "1" : "0",
+                        g_provenanceCh->AllQueriesRayTraced()
+                            ? "sionna-rt (no free-space fallback)"
+                            : "free-space fallback occurred");
+        rs.AddHealthRow("sionna_fallbacks",
+                        std::to_string(g_provenanceCh->GetFallbacks()),
+                        "sionna-bridge counter");
+        rs.AddHealthRow("sionna_ray_traced_queries",
+                        std::to_string(g_provenanceCh->GetRayTraced()),
+                        "sionna-bridge counter");
+    }
+    else
+    {
+        // Silence is what this fix is about. With no live channel the run is
+        // pure TR 38.811, and an artifact that simply omits the row leaves a
+        // reader unable to tell that from a ray-traced one.
+        rs.AddHealthRow("sionna_ray_traced", "0",
+                        "no NtnSionnaChannel in this run (TR 38.811 only)");
+    }
     rs.WriteHealthReport();
 
     if (g_writerOpen)
