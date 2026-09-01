@@ -1102,6 +1102,77 @@ class NtnChoStandardizedTriggersTestCase : public TestCase
 /// successful handover onward that lookup missed and every one of those triggers
 /// returned early. They were dead for the rest of the run while still being
 /// reported as the active trigger.
+/**
+ * CHO-20. Two handovers must not empty the candidate map.
+ *
+ * NotifyHandoverComplete drops the cell just moved TO, which is right: it is the
+ * serving cell now, not a candidate. GAP H3 kept "the rest" armed, but with a
+ * small candidate set there is no rest. Handover to B erases B, handover to C
+ * erases C, and the cell the terminal came FROM was never put back, so from the
+ * second execution the map holds only the original serving cell and eventually
+ * nothing. Every trigger then evaluates an empty set and SelectBestCandidate
+ * returns INVALID_CELL_ID for the remainder of the run, at any geometry.
+ *
+ * The vacated cell is a legitimate neighbour the moment the handover completes,
+ * and Rel-17 keeps prepared candidates across an execution, so it is re-armed.
+ */
+class ChoVacatedCellIsRearmedTestCase : public TestCase
+{
+  public:
+    ChoVacatedCellIsRearmedTestCase()
+        : TestCase("CHO-20 - the cell a terminal leaves is re-armed as a candidate")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto cho = CreateObject<NtnChoAlgorithm>();
+        NtnChoAlgorithm::ChoConfig cfg = cho->GetConfig();
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_ELEVATION;
+        cho->Configure(cfg);
+
+        const uint16_t cellA = 1;
+        const uint16_t cellB = 2;
+        const uint16_t cellC = 3;
+        cho->AddCandidateCell(cellA, 0, 0);
+        cho->AddCandidateCell(cellB, 1, 0);
+        cho->AddCandidateCell(cellC, 2, 0);
+        cho->SetServingCell(cellA);
+        cho->UpdateCandidateSlantRange(cellA, 1200e3);
+        cho->UpdateMeasurement(cellA, 12.0, 25.0);
+
+        // First handover, A -> B. B is erased as the new serving cell. A is
+        // still in the map because it was registered at setup, so nothing is
+        // lost yet and this step passes with or without the fix.
+        cho->NotifyHandoverComplete(cellB, true);
+        cho->SetServingCell(cellB);
+        cho->UpdateCandidateSlantRange(cellB, 1300e3);
+        cho->UpdateMeasurement(cellB, 11.0, 24.0);
+
+        // Second handover, B -> C. C is erased. B is the cell just vacated, and
+        // it is NOT in the map any more: it was removed by the first handover.
+        // Without the re-arm the map now holds only A, and one more handover
+        // empties it completely.
+        cho->NotifyHandoverComplete(cellC, true);
+        cho->SetServingCell(cellC);
+
+        // A cell absent from the map cannot have its state set, so this is a
+        // presence check that does not need a new accessor.
+        cho->SetCandidateStateForTest(cellB, Seconds(30), /*admitted=*/true, /*d1Met=*/true);
+        NS_TEST_ASSERT_MSG_EQ(cho->IsCandidateAdmitted(cellB), true,
+                              "the cell the terminal just left must be re-armed as a "
+                              "candidate; without this the map drains to empty after two "
+                              "handovers and every trigger goes permanently silent");
+
+        // And the original serving cell must not have been evicted by the fix.
+        cho->SetCandidateStateForTest(cellA, Seconds(30), /*admitted=*/true, /*d1Met=*/true);
+        NS_TEST_ASSERT_MSG_EQ(cho->IsCandidateAdmitted(cellA), true,
+                              "re-arming the vacated cell must not displace candidates that "
+                              "were already in the map");
+    }
+};
+
 class NtnChoTriggersSurviveHandoverTestCase : public TestCase
 {
   public:
@@ -1989,6 +2060,7 @@ class NtnChoTestSuite : public TestSuite
         AddTestCase(new NtnOrbitPredictorTimeOffsetGainTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnOrbitPredictorPropagationAccuracyTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnChoTriggersSurviveHandoverTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new ChoVacatedCellIsRearmedTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnChoRachLessDrivesTimingAdvanceTestCase, TestCase::Duration::QUICK);
         AddTestCase(new ChoExecutionCountEqualsActuationTestCase, TestCase::Duration::QUICK);
         AddTestCase(new ChoHandoverCsvIsWellFormedTestCase, TestCase::Duration::QUICK);
