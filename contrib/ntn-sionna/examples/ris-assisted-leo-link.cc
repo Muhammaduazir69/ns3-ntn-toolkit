@@ -254,6 +254,25 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
     rs.Collect();
+    // WF-12b: put the channel's origin in the ARTIFACT, not only on stdout. The
+    // bridge counts ray-traced queries against free-space fallbacks and offers
+    // ProvenanceLine(); this example printed it and the health record, which is
+    // what a reader opens months later, said nothing about where the channel
+    // came from.
+    if (baseNoRis)
+    {
+        rs.AddHealthRow("sionna_ray_traced",
+                        baseNoRis->AllQueriesRayTraced() ? "1" : "0",
+                        baseNoRis->AllQueriesRayTraced()
+                            ? "sionna-rt (no free-space fallback)"
+                            : "free-space fallback occurred");
+        rs.AddHealthRow("sionna_fallbacks",
+                        std::to_string(baseNoRis->GetFallbacks()),
+                        "sionna-bridge counter");
+        rs.AddHealthRow("sionna_ray_traced_queries",
+                        std::to_string(baseNoRis->GetRayTraced()),
+                        "sionna-bridge counter");
+    }
     rs.WriteHealthReport();
 
     double gMin = 0.0, gMax = 0.0, gMean = 0.0;

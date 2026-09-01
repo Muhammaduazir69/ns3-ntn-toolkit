@@ -56,6 +56,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <tuple>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -3246,6 +3247,12 @@ NtnRealStackHelper::WriteHealthReport()
     out << "ues," << m_ue.GetN() << ",-,-,config\n";
     out << "gnbs," << m_gnb.GetN() << ",-,-,config\n";
     out << "run_tag," << m_runTag << ",-,-,config\n";
+    // Caller-supplied provenance rows, emitted last so they cannot displace a
+    // gated row if a module picks a colliding name.
+    for (const auto& [metric, value, prov] : m_extraHealthRows)
+    {
+        out << metric << "," << value << ",-,-," << prov << "\n";
+    }
     out.close();
 
     // ---- OBS-07: reproducibility manifest, written for EVERY real-stack run --

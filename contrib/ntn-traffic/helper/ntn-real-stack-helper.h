@@ -659,6 +659,27 @@ class NtnRealStackHelper
     /// own default carrier is nonconformant. Folding it in would abort every
     /// shipped example for a reason unrelated to fidelity.
     void SetStrictGates(bool s) { m_strictGates = s; }
+
+    /**
+     * \brief Add a caller-supplied provenance row to sim_health.csv.
+     *
+     * Modules that wrap this helper can record where a quantity came from in the
+     * artifact rather than only on stdout. ntn-sionna is the case that prompted
+     * it: the bridge counts ray-traced queries against free-space fallbacks and
+     * offers ProvenanceLine(), four examples print it, and none of it reached the
+     * health record. A reader analysing a run months later opens the CSV, not the
+     * console log, and the whole point of that file is that a number carries
+     * where it came from.
+     *
+     * \param metric row name
+     * \param value row value
+     * \param provenance where the value came from
+     */
+    void AddHealthRow(std::string metric, std::string value, std::string provenance)
+    {
+        m_extraHealthRows.emplace_back(std::move(metric), std::move(value),
+                                       std::move(provenance));
+    }
     bool GetStrictGates() const { return m_strictGates; }
 
     /// WF-07: the verdict of the last WriteHealthReport, so a scenario or a
@@ -1209,6 +1230,7 @@ class NtnRealStackHelper
     bool m_uplink{false};
     HealthGates m_gates{};
     bool m_strictGates{false};
+    std::vector<std::tuple<std::string, std::string, std::string>> m_extraHealthRows;
     RadioBackend m_backend{RadioBackend::Mmwave}; // default: zero-regression mmwave
     uint16_t m_numerology{1};                     // nr backend FR1 numerology (30 kHz)
 
