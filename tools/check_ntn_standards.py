@@ -18,6 +18,7 @@ Run from the ns-3 root:  python3 tools/check_ntn_standards.py
 
 import concurrent.futures
 import glob
+import os
 import math
 import re
 import subprocess
@@ -39,6 +40,36 @@ failures = []
 def run(cmd, timeout=900):
     return subprocess.run(cmd, shell=True, cwd=NS3_ROOT, capture_output=True,
                           text=True, timeout=timeout)
+
+
+def stale_reason(exe):
+    """Why `exe` is out of date, or None.
+
+    ns-3 examples link the module SHARED LIBRARIES, so editing a library source
+    rebuilds libns3.43-<mod>-optimized.so and does NOT relink the executable.
+    Comparing the executable against library sources therefore reports a stale
+    binary for a perfectly current one, which is what an earlier version of this
+    guard did. Compare each artifact against the sources that actually produce
+    it: the executable against its own example .cc, and each shared library
+    against its own module's model/ and helper/ sources.
+    """
+    own = "contrib/ntn-cho/examples/ntn-cho-handover-traffic.cc"
+    if os.path.exists(own) and os.path.getmtime(own) > os.path.getmtime(exe):
+        return f"{os.path.basename(exe)} is older than {own}"
+    for mod in ("ntn-cho", "ntn-traffic", "ntn-constellation"):
+        lib = f"build/lib/libns3.43-{mod}-optimized.so"
+        if not os.path.exists(lib):
+            continue
+        srcs = []
+        for sub in ("model", "helper"):
+            for ext in ("*.cc", "*.h"):
+                srcs += glob.glob(f"contrib/{mod}/{sub}/**/{ext}", recursive=True)
+        if not srcs:
+            continue
+        newest = max(srcs, key=os.path.getmtime)
+        if os.path.getmtime(newest) > os.path.getmtime(lib):
+            return f"{os.path.basename(lib)} is older than {newest}"
+    return None
 
 
 def check(name, ok, detail=""):
@@ -177,9 +208,25 @@ def main():
     # against the built binary, since 6 x 212 s sequential is not a gate anyone
     # would keep running.
     TRIGGERS = ["a3", "d1", "t1", "d2", "elevation", "ta"]
-    cands = glob.glob("build/contrib/ntn-cho/examples/*ntn-cho-handover-traffic*")
-    cands = [c for c in cands if not c.endswith(".log")]
-    binpath = cands[0] if cands else None
+    # Pick the binary deterministically, and refuse a stale one.
+    #
+    # This used to take glob()[0], which is filesystem order, not a choice. On
+    # this tree it selected the -default build from 19 July over the -optimized
+    # build from today: a six-week-old binary that predates the accounting line
+    # the gate parses, so every trigger reported fires=0 and all six gates
+    # failed while the code they test was working. That is the same stale-binary
+    # failure run_mc_sweep.sh already guards against, reproduced in a new gate.
+    cands = sorted(c for c in glob.glob(
+        "build/contrib/ntn-cho/examples/*ntn-cho-handover-traffic*")
+        if not c.endswith(".log") and os.access(c, os.X_OK))
+    binpath = next((c for c in cands if c.endswith("-optimized")), None) or \
+              (cands[0] if cands else None)
+    if binpath:
+        why = stale_reason(binpath)
+        if why:
+            check("ho-trigger binary is current", False,
+                  f"{why}; rebuild before trusting these gates")
+            binpath = None
 
     def one(trig):
         outdir = f"/tmp/ntn-trig-gate/{trig}"

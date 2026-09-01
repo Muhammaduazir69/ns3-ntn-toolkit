@@ -188,12 +188,68 @@ def gate(rows: dict, metric: str) -> bool:
     return bool(v) and v[2] == "1"
 
 
+_NEWEST_SRC_CACHE = {}
+
+
+def _newest_source(repo: Path, exe: Path = None):
+    """Newest source the given example binary actually depends on.
+
+    Library sources (model/, helper/) across contrib, plus the example's own
+    .cc. Scanning every file under contrib/ flags a binary as stale whenever any
+    unrelated sibling example is edited, which is a false report: ns3 does not
+    relink a target whose own inputs did not change.
+    """
+    key = repo
+    if key not in _NEWEST_SRC_CACHE:
+        newest = None
+        contrib = repo / "contrib"
+        if contrib.is_dir():
+            for mod in contrib.iterdir():
+                for sub in ("model", "helper"):
+                    d = mod / sub
+                    if not d.is_dir():
+                        continue
+                    for f in d.rglob("*"):
+                        if f.suffix in (".cc", ".h") and f.is_file():
+                            if newest is None or f.stat().st_mtime > newest.stat().st_mtime:
+                                newest = f
+        _NEWEST_SRC_CACHE[key] = newest
+    newest = _NEWEST_SRC_CACHE[key]
+    if exe is not None:
+        stem = exe.name.replace("ns3.43-", "")
+        for suffix in ("-optimized", "-default", "-debug"):
+            stem = stem.replace(suffix, "")
+        own = exe.parent.parent.parent / "contrib"
+        matches = list((repo / "contrib").glob(f"*/examples/{stem}.cc"))
+        if matches:
+            cand = matches[0]
+            if newest is None or cand.stat().st_mtime > newest.stat().st_mtime:
+                newest = cand
+    return newest
+
+
 def run_one(repo: Path, name: str, exe_rel: str, flag: str, extra: str,
             sim_time: float) -> Result:
     res = Result(name=name)
     exe = repo / exe_rel
+
+    # Prefer the optimized build, and refuse a stale one.
+    #
+    # Every path in REAL_STACK_EXAMPLES names a -default binary. This tree is
+    # configured optimized, so those -default files were last written on
+    # 19 July 2026 and have not been rebuilt since: the fidelity verdict was
+    # describing six-week-old code while reporting on the current tree. The tool
+    # only ever checked whether the file EXISTED, which a stale binary does.
+    opt = exe.with_name(exe.name.replace("-default", "-optimized"))
+    if opt.exists() and (not exe.exists() or opt.stat().st_mtime > exe.stat().st_mtime):
+        exe = opt
     if not exe.exists():
         res.error = f"binary not found: {exe_rel}"
+        return res
+    newest = _newest_source(repo, exe)
+    if newest and newest.stat().st_mtime > exe.stat().st_mtime:
+        res.error = (f"stale binary: {exe.name} predates {newest.relative_to(repo)}; "
+                     f"rebuild before trusting this verdict")
         return res
     out_dir = Path(tempfile.mkdtemp(prefix="fidelity-"))
     cmd = [str(exe), f"{flag}={sim_time}", f"--outputDir={out_dir}"]
