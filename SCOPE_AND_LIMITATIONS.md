@@ -30,9 +30,14 @@ That configuration was affordable in April 2026 because the binary it used was t
 pre-real-stack version of `ntn-cho-full-constellation`. The 24 June commit
 "real-stack full-constellation, measured SINR and real CHO algorithm" replaced the
 analytic plane with a full NR spectrum PHY, and the cost changed by orders of
-magnitude. Measured on this machine, one run at **20 s** of simulated time with 30
-UEs exceeds **ten minutes** of wall clock. Scaling to the campaign's 600 s puts a
-single run above five hours and the forty-run campaign above a week of continuous
+magnitude.
+
+Measured on this machine, uncontended: one run of `ntn-cho-full-constellation` at
+**20 s** of simulated time with 30 UEs takes **1004 s** of wall clock, a slowdown
+of **50x against real time**. Extrapolating linearly in simulated time, which is
+reasonable for a steady-state radio run but is an extrapolation and not a
+measurement, the campaign's 600 s puts one run at about **8.4 hours** and the
+forty-run campaign at about **335 hours, near fourteen days** of continuous
 compute.
 
 **Why this matters.** The committed `mc_table.csv` was produced on 29 April by the
