@@ -317,6 +317,17 @@ sees, so it belongs behind a flag and a re-run, not a silent default flip.
   guard in `nr-common.h` for the lte-macro collision); `cttc-nr-demo` runs. `nr` supports
   μ0/μ1 (15/30 kHz FR1 numerology), real FR1-NTN bands/BWPs, and is TR 38.821-calibratable.
   The migration is therefore now a code path, not a missing dependency.
+- **SUPERSEDED 2026-09-01.** The note below describes `NtnNrStackHelper`, a second
+  spine that no longer exists. It was written when `NtnRealStackHelper` was
+  mmwave-only, and by the time it was deleted it carried none of the audit fixes:
+  no SRS periodicity sizing, no live X2 delay, no TR 38.811 excess-loss chain and
+  no health record. FR1 now comes from the one spine, via
+  `NtnRealStackHelper::SetRadioBackend(RadioBackend::Nr)` plus `SetNumerology()`,
+  which is what most examples already use. The measured figures below stand; they
+  were produced by an equivalent FR1 configuration.
+
+  This also dates the "may not claim" line above: it is scoped *on the mmwave
+  spine*, and on the `nr` backend a run genuinely is FR1 numerology at S band.
 - **DONE 2026-06-27 (spine + first flagship):** `NtnNrStackHelper`
   (`contrib/ntn-traffic/helper/ntn-nr-stack-helper.*`) is built on `NrHelper` /
   `NrPointToPointEpcHelper`, **alongside** `NtnRealStackHelper`. It runs **FR1 numerology
