@@ -587,6 +587,28 @@ class NtnChoAlgorithm : public Object
     bool SetCandidateReferenceIsSatellite(uint16_t cellId, bool isSatellite);
     /// What a candidate's D2 reference currently resolves to.
     bool GetCandidateReferenceIsSatellite(uint16_t cellId) const;
+
+    /**
+     * \brief The algorithm's own admission verdict for one candidate.
+     *
+     * Reports what EvaluateConditions() actually decided, so a scenario can log
+     * the algorithm's state instead of recomputing an admission rule beside it.
+     * A parallel oracle cannot disagree with itself, which is how a run can
+     * write a file full of admitted candidates while the algorithm admitted
+     * none.
+     *
+     * \param cellId candidate cell
+     * \return true if the candidate is currently admitted
+     */
+    bool IsCandidateAdmitted(uint16_t cellId) const;
+
+    /**
+     * \brief The time-to-exit the algorithm currently holds for a candidate.
+     *
+     * \param cellId candidate cell
+     * \return the stored TTE, or zero if the cell is not a candidate
+     */
+    Time GetCandidateTte(uint16_t cellId) const;
     /// Test seam: the D2 moving-reference distance for a candidate, so the
     /// reference KIND can be checked without standing up a full D2 evaluation.
     double DistanceToMovingReferenceForTest(uint16_t cellId) const;

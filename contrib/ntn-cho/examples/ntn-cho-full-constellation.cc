@@ -318,6 +318,8 @@ ChoTick()
                       << ",0," << r.cellId << "," << std::setprecision(2)
                       << r.tte.GetSeconds() << "," << r.currentGain_dB << ","
                       << r.peakGain_dB << ","
+                      << (g_cho->IsCandidateAdmitted(r.cellId) ? 1 : 0) << ","
+                      << g_cho->GetCandidateTte(r.cellId).GetSeconds() << ","
                       << ((r.currentSinr_dB >= g_qualityTh &&
                            r.tte.GetSeconds() >= g_tteMinimum)
                               ? 1
@@ -379,6 +381,18 @@ ChoTick()
     uint16_t chosen = 0;
     if (decisionTick)
     {
+        // CHO-21: the algorithm was deciding for a different terminal than the
+        // one this scenario simulates. StartMonitoring seeded m_uePosition once
+        // with kAuxRefPos, a fixed coordinate, and nothing updated it, while the
+        // TTE oracle above runs on g_ueModels[0]'s live position. D1 therefore
+        // measured a stationary point against moving beam centres and almost
+        // never held, so the TTE-aware path admitted nothing: measured over a
+        // 120 s pass, the oracle column said admitted on 46 of 46 evaluations
+        // and the algorithm had admitted none of them.
+        double ueLatD, ueLonD, ueAltD;
+        g_ueModels[0]->GetGeodetic(ueLatD, ueLonD, ueAltD);
+        g_cho->UpdateUeKinematics(GeoCoordinate(ueLatD, ueLonD, ueAltD),
+                                  g_ueModels[0]->GetVelocity());
         g_cho->EvaluateConditions();
         if (g_algorithm == "a3-baseline")
         {
@@ -981,7 +995,8 @@ main(int argc, char* argv[])
                << "doppler_Hz,propagation_delay_ms,ue_lat,ue_lon\n";
     g_tteFile.open(outputDir + "/tte_computations.csv");
     g_tteFile << "time_s,ue_id,sat_id,beam_id,cell_id,tte_predicted_s,"
-              << "current_gain_dB,peak_gain_dB,admitted,trigger_type\n";
+              << "current_gain_dB,peak_gain_dB,cho_admitted,cho_tte_s,oracle_admitted,"
+              << "trigger_type\n";
     g_satTrackFile.open(outputDir + "/satellite_tracks.csv");
     g_satTrackFile << "time_s,sat_id,lat,lon,altitude_km,velocity_mps\n";
     g_ueTrackFile.open(outputDir + "/ue_tracks.csv");

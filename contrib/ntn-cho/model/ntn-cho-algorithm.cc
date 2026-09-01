@@ -1488,6 +1488,20 @@ NtnChoAlgorithm::GetCandidateReferenceIsSatellite(uint16_t cellId) const
            it->second.referenceKind == CandidateInfo::ReferenceKind::SatelliteEphemeris;
 }
 
+bool
+NtnChoAlgorithm::IsCandidateAdmitted(uint16_t cellId) const
+{
+    auto it = m_candidates.find(cellId);
+    return it != m_candidates.end() && it->second.admitted;
+}
+
+Time
+NtnChoAlgorithm::GetCandidateTte(uint16_t cellId) const
+{
+    auto it = m_candidates.find(cellId);
+    return it == m_candidates.end() ? Seconds(0) : it->second.tte;
+}
+
 void
 NtnChoAlgorithm::TransitionState(ChoState newState)
 {
