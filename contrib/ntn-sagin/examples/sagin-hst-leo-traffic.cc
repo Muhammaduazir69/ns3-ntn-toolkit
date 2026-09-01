@@ -58,7 +58,7 @@ main(int argc, char* argv[])
     double simSeconds = 30.0;
     double leoAltKm = 550.0;
     double satSpeed = 7500.0;
-    double freqGHz = 2.0;
+    double freqGHz = 2.185; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz).
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double trainSpeedKmh = 500.0;
     std::string outputDir = "sagin-hst-leo-output";

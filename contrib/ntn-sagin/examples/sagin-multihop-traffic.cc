@@ -301,7 +301,7 @@ int
 main(int argc, char* argv[])
 {
     double simSeconds = 120.0;
-    double freqGHz = 2.0;
+    double freqGHz = 2.185; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz).
     double dataRateMbps = 5.0;
     uint32_t packetBytes = 1200;
     double uavAltM = 120.0;

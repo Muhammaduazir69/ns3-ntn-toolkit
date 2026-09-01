@@ -55,7 +55,7 @@ int
 main(int argc, char* argv[])
 {
     double simSeconds = 40.0;
-    double freqGHz = 2.0; // S-band (so the oran-ntn TR 38.811 band matches)
+    double freqGHz = 2.185; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz). // S-band (so the oran-ntn TR 38.811 band matches)
     double satEirpDbm = 70.0; // healthy nr (FR1 Friis) LEO downlink
     double rainRateMmH = 0.0;
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)

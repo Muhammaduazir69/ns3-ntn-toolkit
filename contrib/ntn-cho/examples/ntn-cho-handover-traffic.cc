@@ -137,7 +137,7 @@ main(int argc, char* argv[])
     double simSeconds = 60.0;
     uint32_t numUes = 2;
     double leoAltKm = 550.0;
-    double freqGHz = 2.0;
+    double freqGHz = 2.185; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz).
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     double tteMinSec = 3.0;
     double hoHystDb = 2.0; // A3 hysteresis for the actuated NR X2 handover

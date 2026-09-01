@@ -129,6 +129,13 @@ def main():
     # and with the fix markers in the tree. Stale tags are not cosmetic: they
     # sent more than one session off re-deriving closures that were already
     # recorded, so the reconciliation runs as a gate rather than by hand.
+    # A12: the air_interface conformance flag existed for months, read pass=0 in
+    # about forty-five examples, and nothing failed. A flag nobody enforces is a
+    # description, not a check.
+    r = run("python3 tools/check_band_conformance.py --quiet")
+    check("band-conformance", r.returncode == 0,
+          (r.stdout.strip().splitlines() or ["no output"])[-1].replace("[band] ", ""))
+
     r = run("python3 tools/check_gap_register.py --quiet")
     note = (r.stdout.strip().splitlines() or ["no output"])[-1].replace("[gap-register] ", "")
     if note.startswith("SKIP"):

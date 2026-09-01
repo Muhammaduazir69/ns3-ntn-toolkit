@@ -153,7 +153,7 @@ main(int argc, char* argv[])
     double simSeconds = 20.0;
     uint32_t numUes = 4;
     double leoAltKm = 1200.0;
-    double freqGHz = 2.0;
+    double freqGHz = 2.185; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz).
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     bool drxEnabled = true;

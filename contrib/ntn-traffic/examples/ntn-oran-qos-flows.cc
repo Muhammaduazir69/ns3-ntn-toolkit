@@ -44,7 +44,7 @@ main(int argc, char* argv[])
 {
     double simSeconds = 40.0;
     double leoAltKm = 550.0;
-    double freqGHz = 2.0; // S-band carrier (mmWave-NR FR2 numerology, not a 3GPP NR-NTN FR1 band/numerology)
+    double freqGHz = 2.185; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz). // S-band carrier (mmWave-NR FR2 numerology, not a 3GPP NR-NTN FR1 band/numerology)
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "ntn-oran-qos-flows-output";
