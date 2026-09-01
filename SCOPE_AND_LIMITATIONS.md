@@ -129,6 +129,37 @@ Note the history: this line replaced `const bool success = true;`, which made th
 rate 100 percent by construction. The current form makes it 0 percent by
 construction. The measurement has never been of the radio.
 
+## A21 — The campaign scenario actuates the radio behind its own algorithm's back
+
+`ntn-cho-full-constellation` calls `NtnRealStackHelper::TriggerHandover` directly
+from its decision tick and never registers
+`NtnChoAlgorithm::SetHandoverExecutionCallback`. With no callback, `ExecuteHandover`
+takes its standalone decision-model branch, logs that no radio was actuated, and
+self-completes with `NotifyHandoverComplete(target, true)`.
+
+So the radio IS actuated, the log says it is not, and the algorithm's own state
+records every handover as a success whatever the RRC does. `GetMechanismStats()`
+figures that ride on that state, the interruption and RACH-less counters, are
+assumptions rather than observations. The scenario's REPORTED success rate is not
+affected: it comes from the example's own counters, which since A20 are attributed
+from the `HandoverEndOk` trace.
+
+`ntn-cho-real-stack` wires this correctly, so the pattern exists one file away:
+the algorithm actuates through the callback, the RRC trace feeds
+`NotifyHandoverComplete` back, and a refusal is reported instead of being masked
+by T304.
+
+**Porting that pattern here segfaults.** Routing actuation through the callback and
+feeding the trace back into the algorithm crashed all three seeds immediately. The
+likely mechanism is re-entrancy: `ExecuteHandover` invokes the callback, which
+issues the handover, and the completion path re-enters `NotifyHandoverComplete`
+and mutates the candidate map while the outer call is still on the stack. The
+change was reverted; the scenario runs and reports as before.
+
+That makes this a real defect with a non-trivial fix, not a copy-paste job, and it
+is recorded rather than left half-done. Anyone attempting it should expect to
+defer the re-entrant completion rather than call it inline.
+
 ## A19 — TTE-aware selection never compares against the serving cell it is leaving
 
 The module describes the novelty as admitting "a target beam only when it will
