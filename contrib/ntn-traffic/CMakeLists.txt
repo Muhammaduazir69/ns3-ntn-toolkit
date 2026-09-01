@@ -4,7 +4,6 @@ set(source_files
     helper/nrtv-helper.cc
     helper/ntn-realistic-traffic-helper.cc
     helper/ntn-real-stack-helper.cc
-    helper/ntn-nr-stack-helper.cc
     helper/three-gpp-http-satellite-helper.cc
     model/cbr-application.cc
     model/nrtv-header.cc
@@ -38,7 +37,6 @@ set(header_files
     helper/nrtv-helper.h
     helper/ntn-realistic-traffic-helper.h
     helper/ntn-real-stack-helper.h
-    helper/ntn-nr-stack-helper.h
     helper/three-gpp-http-satellite-helper.h
     model/traffic.h
     model/cbr-application.h

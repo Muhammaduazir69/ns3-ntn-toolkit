@@ -289,6 +289,15 @@ class NtnRealStackHelper
     /// FR1 numerology for the Nr backend only: 0 = 15 kHz, 1 = 30 kHz (default).
     /// Ignored by the Mmwave backend. Call before Build().
     void SetNumerology(uint16_t n) { m_numerology = n; }
+
+    /**
+     * \brief Subcarrier spacing in kHz implied by the configured numerology.
+     *
+     * NR defines SCS = 15 kHz x 2^mu (TS 38.211 Table 4.2-1), so this is derived
+     * rather than stored. Present so scenarios can report the spacing they ran
+     * without re-deriving it.
+     */
+    uint32_t GetScsKhz() const { return 15u << m_numerology; }
     uint16_t GetNumerology() const { return m_numerology; }
     void SetCarrierFrequencyHz(double f) { m_freqHz = f; }
     /// TS 38.101-5 NTN FR1 band conformance (SLICE-4 / NT-09).

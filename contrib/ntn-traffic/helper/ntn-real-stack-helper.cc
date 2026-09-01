@@ -549,7 +549,7 @@ NtnRealStackHelper::BuildNrRadio()
     ConfigureNtnRlcRrcTimers();
 
     // ===== 5G-LENA (nr) FR1 NTN backend (closes A5(i)) =====
-    // Mirrors the validated NtnNrStackHelper recipe: a single operational band ->
+    // The 5G-LENA cttc-nr-demo recipe: a single operational band ->
     // 1 CC -> 1 FR1 BWP at m_freqHz/m_bwHz, FR1 numerology m_numerology, ideal
     // beamforming, and — crucially for the real NTN mobility models (SGP4/TR
     // 38.811, which feed ECEF positions) — a Friis large-scale loss instead of

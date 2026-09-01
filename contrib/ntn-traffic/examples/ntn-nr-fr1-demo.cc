@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // ntn-nr-fr1-demo — proves the 5G-LENA (nr) FR1 NTN radio spine
-// (NtnNrStackHelper) closes boundary A5(i): a real NR data plane at FR1
+// closes boundary A5(i): a real NR data plane at FR1
 // numerology (30 kHz SCS) on an S-band (2.0 GHz) carrier with 20 MHz BW — the
 // FR1 regime the FR2-locked mmwave NtnRealStackHelper cannot reach.
 //
@@ -79,7 +79,19 @@ main(int argc, char* argv[])
                        subLon - 0.03, subLon + 0.03);
 
     // ---- Build the FR1 NR spine -----------------------------------------
-    NtnNrStackHelper nr;
+    //
+    // This used to instantiate NtnNrStackHelper, a second NR spine written when
+    // NtnRealStackHelper was mmwave-only and therefore locked to FR2
+    // numerologies. That is no longer true: SetRadioBackend(Nr) plus
+    // SetNumerology gives FR1 at 15 or 30 kHz SCS from the main spine, which is
+    // exactly what the alternative was created to supply.
+    //
+    // Keeping the second spine had a real cost. None of the audit fixes landed
+    // in it: no SRS periodicity sizing, so it aborts where the main spine now
+    // carries 100 UEs; no live X2 delay; no TR 38.811 excess-loss chain; and no
+    // health record, so its measured KPIs carried no provenance at all.
+    NtnRealStackHelper nr;
+    nr.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
     nr.SetSimTime(Seconds(simTime));
     nr.SetOutputDir(outputDir);
     nr.SetCarrierFrequencyHz(freqGhz * 1e9);
@@ -93,11 +105,17 @@ main(int argc, char* argv[])
     nr.SetBackhaulDelay(MilliSeconds(5));
 
     nr.Build(gnbNodes, ueNodes);
-    nr.InstallTraffic(Seconds(0.4), Seconds(simTime));
+    // The main spine takes an explicit traffic profile; the alternative spine
+    // had a single implicit one. eMBB streaming is the closest match to what it
+    // installed.
+    nr.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(0.4),
+                      Seconds(simTime));
 
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
     nr.Collect();
+    nr.WriteHealthReport();
     Simulator::Destroy();
 
     std::cout << "\n================ NTN nr FR1 spine — MEASURED KPIs ================\n";
