@@ -57,7 +57,7 @@ The `2.1.1` image is **~7.5 GB extracted** (`linux/amd64`); most of that is the 
 - **`NtnOranAiFlowMonitor`**: TS 28.552 / E2SM-KPM-named KPI series, AI feature windows, anomaly events, CSV/XML/InfluxDB/E2 export.
 - **Multi-tier RIC** in `oran-ntn`: on-board RT-RIC (<10 ms enforced), RIC placement with E2 latency from live slant geometry, NWDAF + transport-path controller + cross-domain SMO, optional ONNX Runtime xApp inference.
 - **Regenerative payload architecture**: transparent / RU / RU+DU / full-gNB payload options, fronthaul split model (Opt 2, 7.2a, 7.2b, 8), platform latency classes, measured-trigger role switching.
-- **Standards campaign**: TR 38.821 Set-1 LEO-600 S-band link-budget calibration, all five 3GPP NTN handover trigger classes (A3 / D1 / T1 / elevation / timing-advance), orbital-theory test suite; repo gates 36/36 fidelity + 12/12 standards checks PASS.
+- **Standards campaign**: TR 38.821 Set-1 LEO-600 S-band link-budget calibration, all six 3GPP NTN handover trigger classes (A3 / D1 / T1 / Rel-18 D2 / elevation / timing-advance), each asserted on its own firing count, orbital-theory test suite; repo gates 36/36 fidelity + 17/17 standards checks PASS.
 
 ## What's inside
 
@@ -94,7 +94,7 @@ A few of the reproducible numbers shipped with the image:
 - `ntn-cho`: HOs **135 ± 12** vs A3 baseline 463 ± 48 (10 seeds × 600 s × 66-sat Walker-Star); ping-pong 57 % → 0 %; Wilcoxon p < 0.005
 - `oran-ntn`: 5 live xApps over 600 s → **85 074 actions, 0 reported conflicts**
 - `ntn-traffic`: TR 38.821 Set-1 LEO-600 calibration — constant array-gain offset (σ < 1 dB), FSPL slope within 0.2 dB of theory
-- toolkit gates: `tools/check_protocol_fidelity.py` **36/36** · `tools/check_ntn_standards.py` **12/12**
+- toolkit gates: `tools/check_protocol_fidelity.py` **36/36** · `tools/check_ntn_standards.py` **17/17**
 - `ntn-sionna`: 30-step LEO pass — max \|Δ path-loss\| = **0.002 dB** vs TR 38.811
 - `ntn-digital-twin`: `/predict/handover` p99 = **29.9 ms** (16× under the 500 ms gate)
 - `ntn-slice`: URLLC p99 = **47 ms** (mode-skip ON) vs 295 ms (forced GEO) — 6.3× improvement
