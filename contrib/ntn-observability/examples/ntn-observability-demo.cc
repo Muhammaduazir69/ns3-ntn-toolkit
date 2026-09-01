@@ -248,10 +248,14 @@ main(int argc, char* argv[])
     std::string outputDir = ".";
     std::string runId = "demo-1";
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
-    std::string influxFile = "/tmp/ntn-observability-demo.lp";
+    // Empty means "put it with the rest of the run", resolved after parsing so an
+    // explicit --influxFile still wins. These used to default into /tmp, so the
+    // two artifacts this example exists to produce landed outside --outputDir and
+    // archiving the run directory silently lost them.
+    std::string influxFile;
     std::string udpHost;
     uint16_t udpPort = 8089;
-    std::string netSimPath = "/tmp/ntn-observability-demo.json";
+    std::string netSimPath;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
@@ -265,6 +269,23 @@ main(int argc, char* argv[])
     cmd.AddValue("netSim", "NetSimulyzer JSON output", netSimPath);
     cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
+
+    // Resolve the scene outputs into the run's own directory unless overridden.
+    {
+        std::string dir = outputDir.empty() ? std::string(".") : outputDir;
+        if (dir.back() != '/')
+        {
+            dir += '/';
+        }
+        if (influxFile.empty())
+        {
+            influxFile = dir + "ntn-observability-demo.lp";
+        }
+        if (netSimPath.empty())
+        {
+            netSimPath = dir + "ntn-observability-demo.json";
+        }
+    }
 
     Wiring w;
     w.runId = runId;
@@ -387,6 +408,16 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
     rs.Collect();
+    // OBS-14b: state which time anchor these artifacts used. TimeAnchorNote()
+    // exists precisely because the three export surfaces anchor time
+    // differently on purpose, and its own comment says that being unable to
+    // tell which one an artifact used is the defect. Until now the only caller
+    // was a unit test, so no actual run said it, and cross-referencing a CZML
+    // timestamp against an Influx point stayed guesswork.
+    if (w.sink)
+    {
+        rs.AddHealthRow("influx_time_anchor", "wall-clock-base-epoch", w.sink->TimeAnchorNote());
+    }
     rs.WriteHealthReport();
 
     w.sib19->Stop();
@@ -409,5 +440,9 @@ main(int argc, char* argv[])
         std::cout << "  influx udp           : " << udpHost << ":" << udpPort << "\n";
     }
     std::cout << "  netsimulyzer file    : " << netSimPath << "\n";
+    if (w.sink)
+    {
+        std::cout << "  time anchor          : " << w.sink->TimeAnchorNote() << "\n";
+    }
     return 0;
 }
