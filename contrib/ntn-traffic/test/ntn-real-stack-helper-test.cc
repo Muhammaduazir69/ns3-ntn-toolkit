@@ -414,6 +414,54 @@ class RealStackKOffsetConsumedTest : public TestCase
     }
 };
 
+/// Gate 14 (rd-audit-2026-08-24): the NEGATIVE half of the K_offset gate.
+///
+/// RealStackKOffsetConsumedTest above proves the offset is applied when
+/// consumption is ON. That is only half a gate: it passes just as happily if the
+/// offset were applied unconditionally, so a stuck-on K_offset, or a default
+/// that silently flipped to true, would go unnoticed. The audit register lists
+/// this as open ("there is no case asserting N2Delay stays at base when
+/// consumption is off").
+///
+/// With consumption OFF the helper must consume zero slots and leave N2Delay at
+/// the stack's base value on exactly the same geometry.
+class RealStackKOffsetNotConsumedTest : public TestCase
+{
+  public:
+    RealStackKOffsetNotConsumedTest()
+        : TestCase("Gate 14 - with K_offset consumption OFF, N2Delay stays at base")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        LeoRig rig; // identical geometry to the positive case
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        // Deliberately NOT calling SetKOffsetConsumption(true).
+        rs.Build(rig.sat, rig.ue);
+
+        NS_TEST_ASSERT_MSG_EQ(rs.GetKOffsetConsumption(), false,
+                              "consumption must default to off; if this flips, every shipped "
+                              "run silently changes its uplink timing");
+        NS_TEST_ASSERT_MSG_EQ(rs.GetConsumedKOffsetSlots(), 0u,
+                              "no K_offset may be consumed while consumption is off");
+
+        // The geometry still yields a non-zero offset, so the zero above is a
+        // decision not to apply it rather than an absence of anything to apply.
+        NS_TEST_ASSERT_MSG_GT(rs.ComputeKOffsetSlots(), 0u,
+                              "the geometry must still derive a non-zero K_offset, or this test "
+                              "would pass for the wrong reason");
+
+        NS_TEST_ASSERT_MSG_EQ(rs.GetGnbN2Delay(0, 0), 2u,
+                              "N2Delay must remain at the stack base of 2 slots when K_offset "
+                              "consumption is off");
+
+        Simulator::Destroy();
+    }
+};
+
 /// R2.6 (OJCOMS reviewer response): the scalability/regime characterisation
 /// only means something if the OFFERED LOAD it reports is bookkeeping-consistent
 /// with the traffic that actually ran. examples/ntn-scalability-load-regimes.cc
@@ -1984,25 +2032,27 @@ class NtnFr1BandConformanceTest : public TestCase
                               "3.5 GHz is FR1 but not an NTN FR1 band");
         NS_TEST_ASSERT_MSG_EQ(none.conformant, false, "and so cannot be conformant");
 
-        // ---- The shipped default is NON-CONFORMANT, deliberately and knowably ----
+        // ---- The shipped default is now CONFORMANT ----
         //
-        // This asserts the uncomfortable thing rather than hiding it. The
-        // conformant bandwidth is 20 MHz, and switching to it aborts
-        // ntn-cho-full-constellation at t=36.2 s on nr's half-duplex assertion
-        // (see the m_bwHz comment for the full measurement). Rather than ship
-        // that, the default stays 30 MHz and the toolkit REPORTS that it is out
-        // of spec. If someone later fixes the half-duplex fragility and moves
-        // the default, this test fails and forces the claim to be re-examined -
-        // which is the correct outcome, not a nuisance.
+        // This block used to assert the opposite, and it was right to: the
+        // default was 30 MHz, which TS 38.101-5 Table 5.3.5-1 does not permit
+        // for n256, and 20 MHz aborted ntn-cho-full-constellation at t=36.2 s on
+        // nr's half-duplex assertion. The comment said that if someone later
+        // moved the default this test would fail and force the claim to be
+        // re-examined. It did exactly that, which is the tripwire working.
+        //
+        // Re-examined 2026-09-01: the half-duplex sites now count drops instead
+        // of aborting, the default moved to 2.185 GHz / 20 MHz, and
+        // ntn-cho-full-constellation runs a full 300 s pass. So the default is
+        // inside a legal n256 downlink channel and the assertions flip.
         NtnRealStackHelper fresh;
-        NS_TEST_ASSERT_MSG_EQ_TOL(fresh.GetBandwidthHz(), 30.0e6, 1.0,
-                                  "the shipped default is still 30 MHz");
-        NS_TEST_ASSERT_MSG_EQ(fresh.GetNtnFr1Band().bandwidthSupported, false,
-                              "and the helper must REPORT it as an unsupported channel "
-                              "bandwidth. Silently believing the default is conformant is the "
-                              "defect; running non-conformant on purpose, and saying so, is not");
-        NS_TEST_ASSERT_MSG_EQ(fresh.GetNtnFr1Band().conformant, false,
-                              "the default configuration is not TS 38.101-5 conformant");
+        NS_TEST_ASSERT_MSG_EQ_TOL(fresh.GetBandwidthHz(), 20.0e6, 1.0,
+                                  "the shipped default is a TS 38.101-5 Table 5.3.5-1 channel "
+                                  "width for n256");
+        NS_TEST_ASSERT_MSG_EQ(fresh.GetNtnFr1Band().bandwidthSupported, true,
+                              "and the helper must report the channel width as supported");
+        NS_TEST_ASSERT_MSG_EQ(fresh.GetNtnFr1Band().conformant, true,
+                              "the default configuration is TS 38.101-5 conformant");
         NS_TEST_ASSERT_MSG_EQ(std::string(fresh.GetNtnFr1Band().name), "n256",
                               "and the band it is closest to is named correctly");
     }
@@ -3369,6 +3419,7 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new RealStackNtnHarqProfileTest, Duration::QUICK);
         AddTestCase(new RealStackUeKeySeparationTest, Duration::QUICK);
         AddTestCase(new RealStackKOffsetConsumedTest, Duration::QUICK);
+        AddTestCase(new RealStackKOffsetNotConsumedTest, Duration::QUICK);
         AddTestCase(new RealStackOfferedLoadAccountingTest, Duration::QUICK);
         AddTestCase(new SatBeamGainAngleDependenceTest, Duration::QUICK);
         AddTestCase(new RealStackRsrpPerResourceElementTest, Duration::QUICK);

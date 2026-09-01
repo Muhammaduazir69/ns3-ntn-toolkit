@@ -26,12 +26,38 @@ import sys
 
 NS3_ROOT = "."
 
+# Every NTN test suite in the tree, not a hand-picked five.
+#
+# This list held 5 of the 21 suites, so 16 were ungated: ntn-cho,
+# ntn-constellation, ntn-real-stack-helper, ntn-rrc, ntn-sagin, ntn-sionna,
+# ntn-slice, ntn-v2x, thz-ntn and the rest. The consequence showed up the same
+# day it mattered. Moving the helper's default channel width from 30 MHz to
+# 20 MHz for n256 conformance broke SLICE-4 in ntn-real-stack-helper, which
+# asserts the shipped default, and nothing noticed for an entire session because
+# that suite was not gated. The whole set runs in 27 seconds.
 TEST_SUITES = [
-    "ntn-standards-validation",
-    "ntn-oran-application",
+    "ntn-cho",
+    "ntn-constellation",
+    "ntn-digital-twin",
+    "ntn-fapi",
+    "ntn-http-satellite",
+    "ntn-observability",
     "ntn-oran-ai-flow-monitor",
+    "ntn-oran-application",
+    "ntn-real-stack-helper",
+    "ntn-rrc",
+    "ntn-sagin",
+    "ntn-sionna",
+    "ntn-slice",
+    "ntn-spectrum-seam",
+    "ntn-standards-validation",
+    "ntn-tdl-spectrum",
+    "ntn-v2x",
+    "oran-ntn",
+    "oran-ntn-airan-inference",
     "oran-ntn-multi-tier-ric",
     "oran-ntn-ws4",
+    "thz-ntn",
 ]
 
 failures = []
