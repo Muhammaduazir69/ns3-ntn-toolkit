@@ -54,6 +54,12 @@ main(int argc, char* argv[])
     double altitudeKm = 550.0;
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string out = "ntn-official.json";
+    // Every other example in the toolkit takes --outputDir and writes its
+    // artifacts there. This one took only --out, defaulted to a bare relative
+    // filename, and therefore wrote into whatever directory it was launched
+    // from: running it from the repo root left ntn-official.json and
+    // ntn-official.json.scene.json sitting in the source tree.
+    std::string outputDir = ".";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("sats", "Satellites to render", sats);
@@ -62,7 +68,15 @@ main(int argc, char* argv[])
     cmd.AddValue("altitude", "Constellation altitude (km)", altitudeKm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("out", "Official NetSimulyzer JSON output path", out);
+    cmd.AddValue("outputDir", "Directory to write the JSON into", outputDir);
     cmd.Parse(argc, argv);
+
+    // Only join when --out is a bare name, so an absolute or explicitly
+    // relative --out still wins and existing invocations keep working.
+    if (!outputDir.empty() && outputDir != "." && out.find('/') == std::string::npos)
+    {
+        out = outputDir + (outputDir.back() == '/' ? "" : "/") + out;
+    }
 
     // ---- REAL SGP4 satellites (ECEF) ----
     ns3::ntncon::WalkerConfig wcfg;
