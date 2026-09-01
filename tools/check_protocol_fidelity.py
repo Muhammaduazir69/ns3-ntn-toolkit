@@ -32,6 +32,24 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Rows whose own gate cannot pass, each with the reason it is expected.
+# Anything NOT listed here that reports pass=0 is a defect, not a known case.
+# Keep this table short: an entry is a standing admission, not a way to silence
+# a gate that started failing.
+KNOWN_FAILING_GATES = {
+    ("thz-ntn-leo-ground", "rx_over_tx"):
+        "the THz link budget deliberately does not close at the default 10 GHz "
+        "noise bandwidth (SNR -31 dB, margin -36 dB), so the data plane "
+        "correctly delivers almost nothing; the example says so in its output",
+    ("thz-ntn-leo-ground", "wall_clock_s"):
+        "follows from the above: almost no packets survive, so there is almost "
+        "no work to do and the run finishes under the wall-clock floor",
+    ("thz-ntn-isl", "rx_over_tx"):
+        "same non-closing THz budget on the inter-satellite link",
+    ("thz-ntn-isl", "wall_clock_s"):
+        "follows from the above",
+}
+
 # (display-name, binary, time-flag, extra-args)
 # Real-stack examples register here as modules migrate (Phase 1+).
 REAL_STACK_EXAMPLES = [
@@ -188,44 +206,42 @@ def gate(rows: dict, metric: str) -> bool:
     return bool(v) and v[2] == "1"
 
 
-_NEWEST_SRC_CACHE = {}
+_LIB_STALE_CACHE = {}
 
 
-def _newest_source(repo: Path, exe: Path = None):
-    """Newest source the given example binary actually depends on.
+def _lib_stale(repo: Path):
+    """Modules whose shared library is older than its own model/helper sources."""
+    if repo in _LIB_STALE_CACHE:
+        return _LIB_STALE_CACHE[repo]
+    stale = []
+    contrib = repo / "contrib"
+    for mod in sorted(p.name for p in contrib.iterdir() if p.is_dir()):
+        libs = list((repo / "build/lib").glob(f"libns3.43-{mod}-optimized.so"))
+        libs += list((repo / "build/lib").glob(f"libns3.43-{mod}-default.so"))
+        if not libs:
+            continue
+        lib = max(libs, key=lambda f: f.stat().st_mtime)
+        srcs = []
+        for sub in ("model", "helper"):
+            d = contrib / mod / sub
+            if d.is_dir():
+                srcs += [f for f in d.rglob("*") if f.suffix in (".cc", ".h") and f.is_file()]
+        if not srcs:
+            continue
+        newest = max(srcs, key=lambda f: f.stat().st_mtime)
+        if newest.stat().st_mtime > lib.stat().st_mtime:
+            stale.append(f"{lib.name} older than {newest.relative_to(repo)}")
+    _LIB_STALE_CACHE[repo] = stale
+    return stale
 
-    Library sources (model/, helper/) across contrib, plus the example's own
-    .cc. Scanning every file under contrib/ flags a binary as stale whenever any
-    unrelated sibling example is edited, which is a false report: ns3 does not
-    relink a target whose own inputs did not change.
-    """
-    key = repo
-    if key not in _NEWEST_SRC_CACHE:
-        newest = None
-        contrib = repo / "contrib"
-        if contrib.is_dir():
-            for mod in contrib.iterdir():
-                for sub in ("model", "helper"):
-                    d = mod / sub
-                    if not d.is_dir():
-                        continue
-                    for f in d.rglob("*"):
-                        if f.suffix in (".cc", ".h") and f.is_file():
-                            if newest is None or f.stat().st_mtime > newest.stat().st_mtime:
-                                newest = f
-        _NEWEST_SRC_CACHE[key] = newest
-    newest = _NEWEST_SRC_CACHE[key]
-    if exe is not None:
-        stem = exe.name.replace("ns3.43-", "")
-        for suffix in ("-optimized", "-default", "-debug"):
-            stem = stem.replace(suffix, "")
-        own = exe.parent.parent.parent / "contrib"
-        matches = list((repo / "contrib").glob(f"*/examples/{stem}.cc"))
-        if matches:
-            cand = matches[0]
-            if newest is None or cand.stat().st_mtime > newest.stat().st_mtime:
-                newest = cand
-    return newest
+
+def _own_example_source(repo: Path, exe: Path):
+    """The .cc this executable is built from, if it can be located."""
+    stem = exe.name.replace("ns3.43-", "")
+    for suffix in ("-optimized", "-default", "-debug"):
+        stem = stem.replace(suffix, "")
+    matches = list((repo / "contrib").glob(f"*/examples/{stem}.cc"))
+    return matches[0] if matches else None
 
 
 def run_one(repo: Path, name: str, exe_rel: str, flag: str, extra: str,
@@ -246,10 +262,20 @@ def run_one(repo: Path, name: str, exe_rel: str, flag: str, extra: str,
     if not exe.exists():
         res.error = f"binary not found: {exe_rel}"
         return res
-    newest = _newest_source(repo, exe)
-    if newest and newest.stat().st_mtime > exe.stat().st_mtime:
-        res.error = (f"stale binary: {exe.name} predates {newest.relative_to(repo)}; "
+    # Staleness, compared against the artifact that actually produces each
+    # thing. ns-3 examples link the module SHARED LIBRARIES, so editing a
+    # library source rebuilds libns3.43-<mod>-optimized.so and never relinks the
+    # executable: comparing the executable against library sources marks every
+    # binary in the tree stale the moment the helper is touched, which is
+    # exactly what the first version of this guard did.
+    own = _own_example_source(repo, exe)
+    if own and own.stat().st_mtime > exe.stat().st_mtime:
+        res.error = (f"stale binary: {exe.name} predates {own.relative_to(repo)}; "
                      f"rebuild before trusting this verdict")
+        return res
+    libstale = _lib_stale(repo)
+    if libstale:
+        res.error = f"stale library: {libstale[0]}; rebuild before trusting this verdict"
         return res
     out_dir = Path(tempfile.mkdtemp(prefix="fidelity-"))
     cmd = [str(exe), f"{flag}={sim_time}", f"--outputDir={out_dir}"]
@@ -290,6 +316,20 @@ def run_one(repo: Path, name: str, exe_rel: str, flag: str, extra: str,
         v = rows.get(m)
         if not v or v[3] != "phy-trace":
             res.failures.append(f"{m}:provenance")
+
+    # An example's OWN declared gates must pass.
+    #
+    # sim_health.csv carries a floor and a pass verdict per row, and the helper
+    # only aborts on a miss when SetStrictGates(true) is set. It defaults to
+    # false and essentially nothing sets it, so a scenario could miss its own
+    # delivery floor by twenty times, print FAIL, exit 0, and be recorded as a
+    # passing example. Nothing anywhere read this column.
+    for metric, v in sorted(rows.items()):
+        if str(v[2]).strip() != "0":
+            continue
+        why = KNOWN_FAILING_GATES.get((name, metric))
+        if why is None:
+            res.failures.append(f"{metric}:own-gate-failed(value={v[0]},floor={v[1]})")
     return res
 
 

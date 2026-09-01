@@ -367,6 +367,14 @@ NrSpectrumPhy::SetDataErrorModelEnabled(bool dataErrorModelEnabled)
     m_dataErrorModelEnabled = dataErrorModelEnabled;
 }
 
+bool
+NrSpectrumPhy::IsDataErrorModelEnabled() const
+{
+    // NTN patch, see the header. The attribute is setter-only, so this is the
+    // only way to distinguish "error model off" from "clean link".
+    return m_dataErrorModelEnabled;
+}
+
 void
 NrSpectrumPhy::SetErrorModelType(TypeId errorModelType)
 {

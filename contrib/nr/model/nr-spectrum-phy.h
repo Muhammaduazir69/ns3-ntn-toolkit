@@ -234,6 +234,19 @@ class NrSpectrumPhy : public SpectrumPhy
      * \param dataErrorModelEnabled boolean saying whether the data error model should be enabled
      */
     void SetDataErrorModelEnabled(bool dataErrorModelEnabled);
+
+    /**
+     * \brief NTN patch: read back whether the data error model is enabled.
+     *
+     * The DataErrorModelEnabled attribute is registered with a setter-only
+     * accessor, so GetAttribute on it aborts and a health gate cannot tell a
+     * disabled error model from a pristine link that simply produced no block
+     * errors. Both report a TBLER of exactly zero. This getter makes the
+     * distinction readable.
+     *
+     * \return true when the data error model is applied to received TBs
+     */
+    bool IsDataErrorModelEnabled() const;
     /**
      * \brief Sets the error model type
      */

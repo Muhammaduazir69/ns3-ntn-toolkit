@@ -2603,11 +2603,27 @@ NtnRealStackHelper::IsErrorModelEnabled() const
     {
         return enabled.Get();
     }
-    // Attribute not readable on this backend (nr): fall back to the value probe.
-    // A live model reports a finite TBLER (~1e-8 even on a clean link); a
-    // disabled one writes exactly 0.0 for every TB. This can false-fail an
-    // extremely clean link, so treat "no TB samples at all" as inconclusive and
-    // let the separate provenance gate judge that case.
+    // S9 follow-up: ask the nr PHY directly.
+    //
+    // The value probe below was a heuristic forced by the setter-only attribute,
+    // and its own comment admitted it can false-fail an extremely clean link.
+    // It did: thz-ntn-leo-ground-downlink-traffic decodes 2906 transport blocks
+    // at 41.8 dB with zero block errors, which is what a healthy link looks
+    // like, and the probe reported the error model as disabled. NrSpectrumPhy
+    // now carries IsDataErrorModelEnabled(), so the question is answered rather
+    // than inferred.
+    if (m_backend == RadioBackend::Nr)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(0));
+        if (dev && dev->GetPhy(0) && dev->GetPhy(0)->GetSpectrumPhy())
+        {
+            return dev->GetPhy(0)->GetSpectrumPhy()->IsDataErrorModelEnabled();
+        }
+    }
+
+    // Other backends with an unreadable attribute keep the value probe: a live
+    // model reports a finite TBLER even on a clean link, a disabled one writes
+    // exactly 0.0 for every TB.
     return m_sawNonZeroTbler || (m_dlGlobal.n == 0);
 }
 
