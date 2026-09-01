@@ -25,12 +25,17 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import shutil
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Spatial streams allowed when bounding throughput. Generous on purpose: no
+# rank row is written by default, so the bound must never false-fail a MIMO run.
+MAX_LAYERS = 4
 
 # Rows whose own gate cannot pass, each with the reason it is expected.
 # Anything NOT listed here that reports pass=0 is a defect, not a known case.
@@ -179,6 +184,7 @@ class Result:
     legacy: bool = False
     rows: dict = field(default_factory=dict)  # metric -> (value, floor, pass, provenance)
     failures: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -317,6 +323,46 @@ def run_one(repo: Path, name: str, exe_rel: str, flag: str, extra: str,
         if not v or v[3] != "phy-trace":
             res.failures.append(f"{m}:provenance")
 
+    # Physics: measured throughput cannot exceed the Shannon bound of the SINR
+    # the run itself reports.
+    #
+    # The regression gates cannot catch this. A scenario can run, write every
+    # expected file, pass every provenance check and still report a throughput
+    # its own link could not carry, which is what thz-ntn-isac-coexist-traffic
+    # did: 4.27 Mbps over 20 MHz at a reported -85.19 dB, where the bound is
+    # essentially zero.
+    #
+    # The bound allows up to MAX_LAYERS spatial streams so a MIMO run can never
+    # false-fail, and no rank row is written by default. A failure here therefore
+    # means the numbers are inconsistent by orders of magnitude, not by a
+    # modelling detail.
+    def _f(metric):
+        v = rows.get(metric)
+        try:
+            return float(v[0])
+        except (TypeError, ValueError):
+            return None
+
+    bw, thr = _f("channel_bw_hz"), _f("rx_throughput_mbps")
+    sinr_db, sinr_lin_db = _f("dl_sinr_db"), _f("dl_sinr_db_linear_mean")
+    if bw and thr and thr > 0 and sinr_db is not None:
+        def bound_mbps(db):
+            return MAX_LAYERS * bw * math.log2(1.0 + 10.0 ** (db / 10.0)) / 1e6
+        if thr > bound_mbps(sinr_db):
+            # Distinguish "the statistic collapsed" from "the numbers are wrong".
+            # dl_sinr_db is a decibel-domain mean and goes to the noise floor on a
+            # bimodal sample set (SCOPE A15); the linear-domain mean is the one
+            # that describes the link the decoder saw.
+            if sinr_lin_db is not None and thr <= bound_mbps(sinr_lin_db):
+                res.notes.append(
+                    f"dl_sinr_db={sinr_db:.2f} dB is a collapsed decibel-domain mean "
+                    f"(linear mean {sinr_lin_db:.2f} dB is consistent with "
+                    f"{thr:.2f} Mbps); see SCOPE A15")
+            else:
+                res.failures.append(
+                    f"throughput-exceeds-shannon(thr={thr:.2f}Mbps > "
+                    f"bound={bound_mbps(sinr_db):.4f}Mbps at {sinr_db:.2f}dB)")
+
     # An example's OWN declared gates must pass.
     #
     # sim_health.csv carries a floor and a pass verdict per row, and the helper
@@ -369,6 +415,9 @@ def main() -> int:
                 "LEGACY/COSMETIC" if r.legacy else "FAIL (" + ", ".join(r.failures) + ")")
             f.write(f"| `{r.name}` | {tb} | {sinr} | {tbler} | {thr} | {prov} | {verdict} |\n")
     print(f"[fidelity] report -> {args.out}")
+    for r in results:
+        for n in r.notes:
+            print(f"[fidelity] NOTE {r.name}: {n}")
     if failed:
         for r in failed:
             print(f"[fidelity] FAIL {r.name}: {r.error or ', '.join(r.failures)}")
