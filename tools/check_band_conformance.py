@@ -117,8 +117,20 @@ def main() -> int:
     if len(skipped) == len(SCENARIOS):
         print("[band] SKIP  no scenario produced an air_interface row")
         return 0
-    print(f"[band] PASS  {len(SCENARIOS) - len(skipped)} scenario(s) inside a legal "
-          f"NTN band and channel per TS 38.101-5")
+    # Say what fraction of the tree this actually covers.
+    #
+    # "6 scenario(s) inside a legal NTN band" reads like a statement about the
+    # toolkit. It is a statement about six examples. The sweep counts 66 that
+    # declare a band row: 45 conformant, 21 outside any FR1 NTN band by design
+    # (thz-ntn at 100 GHz, the Ku/Ka ray-tracing and RIC scenarios at 12 to
+    # 28 GHz, and the two TR 38.821 calibration examples pinned to the study's
+    # own 2 GHz S-band reference). This gate runs the FR1 real-stack spine only;
+    # a new example hardcoding an illegal S-band carrier outside that list is
+    # not covered.
+    print(f"[band] PASS  {len(SCENARIOS) - len(skipped)} of {len(SCENARIOS)} checked "
+          f"scenario(s) inside a legal NTN band and channel per TS 38.101-5 "
+          f"(FR1 real-stack spine only; see SCOPE A16 for the examples this "
+          f"gate does not reach)")
     return 0
 
 

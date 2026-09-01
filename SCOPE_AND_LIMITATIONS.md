@@ -75,6 +75,33 @@ taken at 2.0 GHz in a 30 MHz channel and is not band-conformant. Numbers move by
 about a decibel, in the favourable direction, and need re-running before they can
 be described as NTN FR1 results.
 
+## A16 — The band-conformance gate covers the FR1 spine, not the whole tree
+
+`tools/check_band_conformance.py` runs six scenarios. Its verdict line used to
+read "6 scenario(s) inside a legal NTN band", which is true and reads like a
+statement about the toolkit; it is a statement about six examples. Counted over
+the full sweep, 66 examples write a band row.
+
+| | count | |
+|---|---|---|
+| conformant, inside an n256 downlink channel | 45 | |
+| outside any FR1 NTN band, by design | 21 | |
+| — `thz-ntn` at 100 GHz | 8 | no FR1 band applies to a terahertz carrier |
+| — Ku/Ka scenarios at 12, 20, 28 GHz | 11 | `ntn-sionna` ray tracing, `oran-ntn` RIC placement, `ntn-sagin` flight links, `ntn-observability` |
+| — TR 38.821 calibration pair at 2.000 GHz | 2 | see below |
+
+The last pair is a real standards tension rather than an oversight.
+`ntn-tr38821-calibration` and `ntn-tr38821-array-gain-calibration` sit at
+2.000 GHz with a 30 MHz channel. TS 38.101-5 Table 5.2-1 puts the n256 downlink
+at 2170 to 2200 MHz and Table 5.3.5-1 permits 5, 10, 15 and 20 MHz, so neither
+value is deployable. They are correct anyway: TR 38.821's Set-1 reference
+configuration is specified at 2 GHz S-band, and a calibration run has to use the
+study's own carrier or it is not calibrating against that study. Moving them into
+n256 would make them conformant and meaningless.
+
+What the gate does not do is catch a NEW example hardcoding an illegal S-band
+carrier outside its six-scenario list. The gate's own output now says so.
+
 ## A15 — `dl_sinr_db` is a decibel-domain mean, and it is only safe on a tight distribution
 
 The reported mean SINR is the arithmetic mean of the per-transport-block SINRs
