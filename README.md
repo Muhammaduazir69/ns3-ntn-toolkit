@@ -190,10 +190,13 @@ Simulation platforms are easy to overclaim and hard to check. Three mechanisms i
 this tree exist specifically to make the claims checkable by someone who did not
 write them.
 
-**Provenance on every metric.** The health record each scenario writes
-(`sim_health.csv`) labels every row with how its value was obtained: measured
-in band, modeled from a closed form, or configured. A number that came from an
-equation cannot be printed as if it came from a packet.
+**Provenance on every metric.** Every scenario built on `NtnRealStackHelper`
+writes a health record (`sim_health.csv`) labelling each row with how its value
+was obtained: measured in band, modeled from a closed form, or configured. A
+number that came from an equation cannot be printed as if it came from a packet.
+Measured across the 93 buildable examples, 72 write one; the other 21 do not
+stand up a radio at all (calculators, trace tools, the THz sweeps) and so have
+nothing to attest.
 
 **Gates that can fail.** `tools/check_ntn_standards.py` runs 16 gates covering the
 TR 38.821 Set-1 link budget, orbital geometry, the published latency bands and all
@@ -213,7 +216,9 @@ air interface.
 
 ## Reproducing a result
 
-Every shipped scenario writes a CSV and a health record to `--outputDir`.
+Every scenario that stands up a radio writes a CSV and a health record to
+`--outputDir`. Not every example takes `--outputDir`; a few hardcode their
+output directory, so check `--PrintHelp` before scripting a sweep.
 
 ```bash
 # 1. A TR 38.821 Set-1 LEO-600 link-budget calibration

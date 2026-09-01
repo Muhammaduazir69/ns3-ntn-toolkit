@@ -140,6 +140,11 @@ main(int argc, char* argv[])
 
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
+
+    // Every example that stands up a real radio owes a provenance record.
+    // This one built one and never wrote sim_health.csv, so its measured
+    // KPIs carried no statement of how they were obtained.
+    rs.WriteHealthReport();
     rs.Collect();
     const uint32_t hoCount = rs.GetHandoverCount();
     Simulator::Destroy();
