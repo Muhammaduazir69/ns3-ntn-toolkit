@@ -82,6 +82,18 @@ on every `nr` run. Measured on `ntn-cho-full-constellation` over 20 s:
 | 4 | 33,562 | 0 | 0 | 0 | 0 |
 | 8 | 143,979 | 4 | 0 | 0 | 0.003% |
 | 16 | 390,306 | 16 | 8 | 0 | 0.006% |
+| 30 | 709,031 | 2 | 0 | 0 | 0.0003% |
+
+The count is not monotonic in load, which is expected: a collision needs a grant
+and a downlink to land on the same slot for the same UE, and that depends on the
+scheduling pattern rather than simply on how busy the cell is.
+
+30 UEs is the configuration the Monte Carlo campaign under `papers/sim_runs/` uses,
+so that campaign is runnable on this example again. Read its results knowing the
+cell is heavily loaded at that size: mean DL SINR over 20 s falls 28.45, 23.77,
+10.76, 2.61 dB across 4, 8, 16 and 30 UEs on one beam, while aggregate throughput
+rises 20.0, 37.9, 48.9, 54.0 Mbps. That is ordinary multi-user sharing, not an
+artefact of the drops, which are four orders of magnitude too rare to explain it.
 
 **The patch is inert where the fault does not occur.** `ntn-real-stack-smoke` at
 60 s with 4 UEs still gives `dl_sinr_db` 27.8332, bit-identical to before, with all
