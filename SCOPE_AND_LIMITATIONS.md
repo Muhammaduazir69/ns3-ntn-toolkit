@@ -106,9 +106,15 @@ the one it belongs to.
 **Fixed 2026-09-01.** This one had a single correct implementation rather than a
 choice to make, so deferring it alongside A19 was wrong: A19 asks which policy is
 intended, while this asks only that an outcome be read after it happens. The
-verdict now resolves on the following decision tick, and the event row and the
-GeoJSON feature are both buffered and emitted when it does, so the outcome is
-attributed to the request that caused it.
+verdict now comes from the RRC's own `HandoverEndOk` for the cell the handover
+was aimed at, matched by cell id, with the event row and the GeoJSON feature
+buffered and emitted when it resolves on the following decision tick.
+
+That pattern was already in the tree: `ntn-cho-real-stack` binds the same trace
+and attributes completion by cell id. This scenario, the one the campaign runs,
+inferred the outcome from a cumulative counter instead, which can only say that
+some handover finished rather than which one. The right implementation was one
+file away and was not reused.
 
 Re-measured at 300 s with `--d1Threshold=761341`, seeds 1, 2 and 3: one handover
 each at a 100 percent success rate, with an empty `failure_reason`. The handover
