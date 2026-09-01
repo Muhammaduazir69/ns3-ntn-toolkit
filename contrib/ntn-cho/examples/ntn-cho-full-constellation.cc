@@ -486,7 +486,23 @@ ChoTick()
                  << ttePred << "," << tos << "," << (success ? 1 : 0) << ","
                  << (isPP ? 1 : 0) << "," << std::setprecision(6) << ueLat << ","
                  << ueLon << ",0," << g_ueModels[0]->GetClassName() << ","
-                 << std::setprecision(1) << servElev << "," << tgtElev << ",\n";
+                 << std::setprecision(1) << servElev << "," << tgtElev << ","
+                 // The schema has always declared failure_reason and nothing
+                 // ever wrote it, so every row carried an empty field including
+                 // the rows that record a failure. A column that exists to say
+                 // why a handover failed, and is blank on the failures, is worse
+                 // than no column: it reads as "no reason given" rather than
+                 // "never asked".
+                 //
+                 // The two outcomes are distinguishable at this point.
+                 // TriggerHandover returning false means the radio refused the
+                 // request outright. Returning true without the completion
+                 // counter advancing means the request went out and no RRC
+                 // HandoverEndOk came back before this tick was accounted.
+                 << (success ? ""
+                             : (requested ? "no-rrc-completion-observed"
+                                          : "radio-refused-request"))
+                 << "\n";
 
         if (!g_fHo)
         {

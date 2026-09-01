@@ -75,6 +75,45 @@ taken at 2.0 GHz in a 30 MHz channel and is not band-conformant. Numbers move by
 about a decibel, in the favourable direction, and need re-running before they can
 be described as NTN FR1 results.
 
+## A20 — The CHO success rate is sampled before the handover can have completed
+
+`ntn-cho-full-constellation` decides a handover, actuates it, and grades it in
+three consecutive statements:
+
+```
+const bool requested   = g_rs->TriggerHandover(0, chosen);
+const uint32_t completions = g_rs->GetHandoverCount();
+const bool success = requested && (completions > g_hoCompletionsSeen);
+```
+
+`GetHandoverCount()` counts `NrGnbRrc` **HandoverEndOk** events. It is read on the
+statement after the request is issued. An RRC reconfiguration-with-sync cannot
+complete in zero simulated time: it is signalling across an X2 and an air
+interface with propagation delay. The counter therefore cannot have advanced, and
+`success` is false by construction.
+
+Measured: seeds 1, 2 and 3 each report one handover at a 0.00 percent success
+rate. That is the accounting, not the radio. The `failure_reason` column, which
+was declared in the schema and never written until now, records
+`no-rrc-completion-observed` for exactly this reason: the request went out and
+the completion had not arrived a statement later.
+
+There is a second-order effect once more than one handover occurs. The counter is
+cumulative and `g_hoCompletionsSeen` is updated only here, so a completion that
+lands between two decision ticks is credited to the NEXT request rather than to
+the one it belongs to.
+
+This is a defect with a known fix, not a modelling boundary: resolve the verdict
+on the following decision tick, or bind it to the `HandoverEndOk` trace directly
+so the outcome is attributed to the request that caused it. It is written down
+rather than changed here because it moves a headline KPI in the flagship
+scenario, and the same run has an open question above it (A19) about whether the
+handover should have been taken at all. Both want deciding together.
+
+Note the history: this line replaced `const bool success = true;`, which made the
+rate 100 percent by construction. The current form makes it 0 percent by
+construction. The measurement has never been of the radio.
+
 ## A19 — TTE-aware selection never compares against the serving cell it is leaving
 
 The module describes the novelty as admitting "a target beam only when it will
