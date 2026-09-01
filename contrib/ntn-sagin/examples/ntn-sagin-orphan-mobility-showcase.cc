@@ -115,10 +115,15 @@ main(int argc, char* argv[])
     std::string netSimOut;
     std::string czmlOut;
 
+    std::string outputDir = ".";
+
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
+    // The HAPS trajectory CSV was written to a bare relative name, so it landed
+    // in whatever directory the example was launched from.
+    cmd.AddValue("outputDir", "Directory for the run's artifacts", outputDir);
     cmd.Parse(argc, argv);
     g_simTime = duration;
 
@@ -162,7 +167,10 @@ main(int argc, char* argv[])
     // Serialise the trajectory to a CSV in the importer's documented column
     // layout, then load it back with HapsTrajectoryImporter::LoadCsv so the
     // mobility model is driven by the parsed (not the in-memory) trace.
-    const std::string hapsCsv = "orphan-haps-trajectory.csv";
+    const std::string hapsCsv =
+        outputDir.empty() ? std::string("orphan-haps-trajectory.csv")
+                          : outputDir + (outputDir.back() == '/' ? "" : "/") +
+                                "orphan-haps-trajectory.csv";
     {
         std::ofstream f(hapsCsv);
         f << "platform_id,time_s,lat_deg,lon_deg,alt_m\n";

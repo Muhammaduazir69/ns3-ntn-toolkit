@@ -36,6 +36,7 @@
 #include "ns3/uinteger.h"
 #include "ns3/nr-gnb-net-device.h"
 #include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-phy-rx-trace.h"
 #include "ns3/nr-spectrum-phy.h"
 #include "ns3/nr-phy-mac-common.h"
 #include "ns3/ntn-oran-ai-flow-monitor.h"
@@ -1023,6 +1024,18 @@ NtnRealStackHelper::BuildNrRadio()
     // dump an O-RAN KPM / observability sink can also read.
     if (m_nrNativeTraces)
     {
+        // Point 5G-LENA's stat calculators at the run's output directory. The
+        // comment above has always said these files land under the output dir;
+        // NrPhyRxTrace::m_resultsFolder is a static that defaults to empty, so
+        // without this they were written to the process working directory
+        // instead, which put UlPathlossTrace.txt and its siblings in the source
+        // tree whenever an example was launched from the repo root.
+        std::string folder = m_outputDir.empty() ? std::string("./") : m_outputDir;
+        if (folder.back() != '/')
+        {
+            folder += '/';
+        }
+        m_nr->GetPhyRxTrace()->SetResultsFolder(folder);
         m_nr->EnableTraces();
     }
 

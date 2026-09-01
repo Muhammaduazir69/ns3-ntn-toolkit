@@ -65,12 +65,19 @@ main(int argc, char* argv[])
     // pathological case where the serving cell is swept into signal loss.
     double vSatKmps = 7.5; // nominal LEO ground-track speed (display only)
 
+    std::string outputDir = "./nr-ho-pass/";
+
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altitudeKm", "Satellite altitude (km)", altitudeKm);
     cmd.AddValue("hystDb", "A3 hysteresis (dB)", hystDb);
     cmd.AddValue("tttMs", "A3 time-to-trigger (ms)", tttMs);
+    // The output directory was hardcoded to ./nr-ho-pass/, so the example wrote
+    // into whatever directory it was launched from and left an nr-ho-pass/ tree
+    // in the repo when the sweep ran from the source root. Every other example
+    // takes --outputDir.
+    cmd.AddValue("outputDir", "Directory for the run's artifacts", outputDir);
     cmd.Parse(argc, argv);
 
     // ---- Two satellites (gNBs) sharing the carrier + ground UEs ----------
@@ -121,7 +128,7 @@ main(int argc, char* argv[])
     // ---- Build the NR radio with Enabler A armed -------------------------
     NtnRealStackHelper rs;
     rs.SetSimTime(Seconds(simTime));
-    rs.SetOutputDir("./nr-ho-pass/");
+    rs.SetOutputDir(outputDir);
     rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
     rs.SetNumerology(1);
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
