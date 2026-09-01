@@ -414,6 +414,59 @@ class RealStackKOffsetConsumedTest : public TestCase
     }
 };
 
+/// Gate 17 (rd-audit-2026-08-24 / WF-09): slice isolation on the MEASURED plane.
+///
+/// The register's charge against the existing candidate is precise:
+/// OrchestratorExternalSharesTest "hands the orchestrator shares 0.6/0.3/0.1 and
+/// asserts the orchestrator's own servedMbps output honours them - pure
+/// arithmetic on the class under test, no radio, no PRB, no measured plane". A
+/// test like that passes for any implementation that can multiply.
+///
+/// This one asks the radio instead. Two slices are configured, which splits the
+/// NR band into two BWPs and routes each 5QI to its own, and two flows run
+/// concurrently. The assertion is that transport blocks are actually observed on
+/// BOTH bandwidth parts: if the BWP manager were not routing by 5QI, or the
+/// second BWP were never activated, every TB would land on one and the isolation
+/// the module advertises would be a label rather than a MAC behaviour.
+class RealStackSliceBwpIsolationMeasuredTest : public TestCase
+{
+  public:
+    RealStackSliceBwpIsolationMeasuredTest()
+        : TestCase("Gate 17 - slice traffic is measured on both BWPs, not asserted by bookkeeping")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        LeoRig rig(2); // one UE per slice
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetSimTime(Seconds(3.0));
+        rs.SetSlices({{"eMBB", 9}, {"URLLC", 82}});
+        rs.Build(rig.sat, rig.ue);
+        rs.InstallOranFlow(0, /*fiveQi=*/9, /*sst=*/1, /*sd=*/1,
+                           NtnOranApplication::CBR_SATURATING, Seconds(0.5), Seconds(2.5));
+        rs.InstallOranFlow(1, /*fiveQi=*/82, /*sst=*/2, /*sd=*/2,
+                           NtnOranApplication::CBR_SATURATING, Seconds(0.5), Seconds(2.5));
+        Simulator::Stop(Seconds(3.0));
+        Simulator::Run();
+        rs.Collect();
+
+        const uint64_t tb0 = rs.GetBwpRxTb(0);
+        const uint64_t tb1 = rs.GetBwpRxTb(1);
+
+        NS_TEST_ASSERT_MSG_GT(tb0, 0u,
+                              "BWP 0 must carry measured transport blocks");
+        NS_TEST_ASSERT_MSG_GT(tb1, 0u,
+                              "BWP 1 must carry measured transport blocks too. If every TB lands "
+                              "on one bandwidth part, the per-5QI BWP routing is not happening "
+                              "and slice isolation is a label rather than a MAC behaviour");
+
+        Simulator::Destroy();
+    }
+};
+
 /// Gate 1 (rd-audit-2026-08-24): a measured one-way delay may not beat light.
 ///
 /// The register lists this as open: "the computation exists
@@ -3475,6 +3528,7 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new RealStackKOffsetConsumedTest, Duration::QUICK);
         AddTestCase(new RealStackKOffsetNotConsumedTest, Duration::QUICK);
         AddTestCase(new RealStackOwdRespectsLightSpeedTest, Duration::QUICK);
+        AddTestCase(new RealStackSliceBwpIsolationMeasuredTest, Duration::QUICK);
         AddTestCase(new RealStackOfferedLoadAccountingTest, Duration::QUICK);
         AddTestCase(new SatBeamGainAngleDependenceTest, Duration::QUICK);
         AddTestCase(new RealStackRsrpPerResourceElementTest, Duration::QUICK);
