@@ -21,6 +21,41 @@ what closing it would require.**
 > **STATUS 2026-06-27 — A1 & A5(ii) largely CLOSED on the mmwave spine; A5(i)/A3/A4 unblocked by the nr integration.**
 > A1: the model now uses the **real TR 38.811 §6.6.2 σ_SF tables** (per scenario, elevation-interpolated), **CL=0 for LOS** (spec-correct), and a **Rician small-scale fading term** with the §6.7.2 elevation-dependent K-factor. **NT-07 correction:** that term defaults to OFF and is not executing on the measured plane, deliberately: both radio backends already apply small-scale fading through the 3GPP phased-array spectrum model, and running the Rician process as well would multiply two independent fading realizations onto one link. Enable it only for a link with no 3GPP spectrum model in the path. Its normalization (unit mean power) and its elevation dependence are covered by `Tr38811FastFadingStatisticsTest`; before that they were asserted only by the comment above the code. *Remaining:* the full multi-tap frequency-selective NTN-TDL (§6.9.2). A5(ii): the **TR 38.811 §6.4.1 J1-Airy satellite beam pattern** is implemented (`NtnSatBeamGainModel`, opt-in via `NtnRealStackHelper::SetSatelliteBeam`) and verified (0 dB boresight, −3.01 dB at the half-beamwidth). **NT-07:** that setter had no callers anywhere in the tree. The pattern was still exercised on the measured plane by `ntn-tr38821-array-gain-calibration`, which constructs the model directly, but no scenario reached it through the helper, so no run assembled it into a helper-built propagation chain. `ntn-real-stack-smoke` now exposes `--satBeam`, `--beamwidthDeg` and `--beamCenterXKm`, and a fixed beam centre 300 km off the terminal costs a measured 11.07 dB (16.20 → 5.13 dB SINR) while a tracking beam costs 0 dB, which is the same reason a steered-beam calibration reports a constant offset. `NtnChannelExtrasReachTheChainTest` asserts the model is in the chain rather than merely constructible. `SetNtnScenario` had no callers either, so every run used the Suburban shadow-fading bins; it is now `--ntnScenario`. A2 (THz pointing) is wired into the measured path. **5G-LENA `nr` is now in the tree** (see A5), so A5(i)/A3/A4 are reachable on an nr spine.
 
+## A9 — The NR spine has a UE ceiling, and it is lower than the published campaign
+
+**What is bounded.** Scenarios on the 5G-LENA `nr` backend abort above a UE count
+that depends on the scenario. Measured on 2026-09-01 with 20 s runs:
+
+| Scenario | 4 UEs | 8 UEs | 16 UEs | 30 UEs |
+|---|---|---|---|---|
+| `ntn-real-stack-smoke` (no handover logic) | ok | ok | ok | **abort** |
+| `ntn-cho-full-constellation` | ok | **abort** | abort | abort |
+
+Two distinct faults, both in the vendored NR, neither caught by any test because
+every example defaults to four UEs or fewer:
+
+- `NS_FATAL_ERROR("unexpected event in state IDLE_CONNECTING")`,
+  `nr-ue-rrc.cc:714`. `DoNotifyRandomAccessSuccessful` handles only
+  `IDLE_RANDOM_ACCESS` and `CONNECTED_HANDOVER`, so a second random-access
+  success for a UE that has already advanced past those is fatal.
+- `NS_FATAL_ERROR("Cannot TX while RX")`, `nr-spectrum-phy.cc:711`, a half-duplex
+  violation that appears earlier, at 8 UEs, once handover signalling is in play.
+
+**Why it matters.** The Monte Carlo campaign under `papers/sim_runs/` is
+configured for 30 UEs. Neither example can run that configuration today, so that
+campaign cannot currently be reproduced on the NR spine at its published size.
+
+**What a paper may claim.** Results at the UE counts that actually run. A
+scalability claim in UEs on the `nr` backend needs this ceiling stated, or the
+mmwave backend, which does not share these two faults.
+
+**What closing it would require.** A fix in the vendored NR: contention
+resolution so a duplicate RA success is discarded rather than fatal, and a TDD
+pattern that does not schedule an uplink transmission inside a UE's own reception
+window once NTN K_offset has shifted it. Both are upstream changes. A UE attach
+stagger was tried and made matters worse, taking the failure down to 6 UEs, so it
+is not the answer.
+
 ## A8 — Most shipped scenarios propagate with Kepler + J2, not SGP4
 
 **What is bounded.** `Sgp4MobilityModel` has two propagation paths and picks one
