@@ -9,12 +9,15 @@ Aggregates every standards check into one PASS/FAIL:
   2. TR 38.821 Set-1 LEO-600 CNR calibration on the measured radio
      (offset constant across the pass + elevation slope matches FSPL);
   3. paper-Table-3 per-platform latency bands with real packets;
-  4. the five 3GPP NTN handover trigger classes all execute a handover on
-     the measured radio (a3 / d1 / t1 / elevation / ta).
+  4. the six 3GPP NTN handover trigger classes each FIRE on their own
+     condition on the measured radio (a3 / d1 / t1 / d2 / elevation / ta),
+     and do not all fire identically.
 
 Run from the ns-3 root:  python3 tools/check_ntn_standards.py
 """
 
+import concurrent.futures
+import glob
 import math
 import re
 import subprocess
@@ -154,31 +157,65 @@ def main():
     # 4. NTN trigger classes: Rel-17 CondEvents A4-combined a3/d1/t1,
     #    Rel-18 CondEventD2 (moving references), plus the TR 38.821-studied
     #    elevation and timing-advance mechanisms.
-    for trig in ["a3", "d1", "t1", "d2", "elevation", "ta"]:
-        r = run(f'./ns3 run "ntn-cho-handover-traffic --simSeconds=60 --numUes=2 '
-                f'--trigger={trig}"')
-        # CVC-03, again. This used to regex "handovers=(\d+)", which matches
-        # "ACTUATED X2 handovers=", the count of times the vendored NR A3-RSRP
-        # and X2 machinery physically moved a UE. That number is the same
-        # whichever trigger is selected, because it is not produced by the
-        # trigger: the gate was asserting that the radio can hand over, under
-        # six different names, and would have passed with the CHO logic removed.
-        #
-        # Read the algorithm's own decision count instead, which is the quantity
-        # the trigger class actually determines.
-        m = re.search(r"CHO decisions=(\d+)", r.stdout)
-        decisions = int(m.group(1)) if m else 0
-        m_act = re.search(r"ACTUATED X2 handovers=(\d+)", r.stdout)
-        actuated = int(m_act.group(1)) if m_act else 0
-        check(f"ho-trigger-class {trig}", r.returncode == 0 and decisions >= 1,
-              f"cho_decisions={decisions} actuated_x2={actuated}")
+    # CVC-03, third pass, and the first one that measures the trigger.
+    #
+    # The previous two versions read "handovers=" and then "CHO decisions=" out
+    # of the summary line. Both numbers were produced by the scenario's fallback
+    # rule, not by the selected trigger, so all six classes printed byte
+    # identical output and the gate would have passed with every trigger
+    # condition deleted. Three defects kept the triggers from running at all:
+    # the candidate map was drained by the radio's own X2 handovers (CHO-20),
+    # D2/A3/D1 were admitted then refused by a time-to-exit filter that belongs
+    # to a different trigger (CHO-19), and the UE position the geometric classes
+    # evaluate against was never set (CHO-21).
+    #
+    # Read the per-trigger fire count instead, which only that trigger's own
+    # condition can produce, and require the six not to be identical. The window
+    # is 300 s because these are real orbital conditions: the serving satellite
+    # has to descend to the 10 degree floor before the elevation class can fire,
+    # which happens at t=248 s on this shell. The six runs go in parallel
+    # against the built binary, since 6 x 212 s sequential is not a gate anyone
+    # would keep running.
+    TRIGGERS = ["a3", "d1", "t1", "d2", "elevation", "ta"]
+    cands = glob.glob("build/contrib/ntn-cho/examples/*ntn-cho-handover-traffic*")
+    cands = [c for c in cands if not c.endswith(".log")]
+    binpath = cands[0] if cands else None
+
+    def one(trig):
+        outdir = f"/tmp/ntn-trig-gate/{trig}"
+        subprocess.run(f"rm -rf {outdir} && mkdir -p {outdir}", shell=True)
+        if binpath:
+            cmd = (f"LD_LIBRARY_PATH=build/lib {binpath} --simSeconds=300 "
+                   f"--numUes=2 --trigger={trig} --outputDir={outdir}/")
+        else:
+            cmd = (f'./ns3 run "ntn-cho-handover-traffic --simSeconds=300 '
+                   f'--numUes=2 --trigger={trig} --outputDir={outdir}/"')
+        return trig, run(cmd, timeout=2400)
+
+    fires_by_trig = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        for trig, r in ex.map(one, TRIGGERS):
+            m = re.search(r"CHO trigger accounting: fires=(\d+)", r.stdout)
+            fires = int(m.group(1)) if m else 0
+            m_td = re.search(r"trigger-decided handovers=(\d+)", r.stdout)
+            tdec = int(m_td.group(1)) if m_td else 0
+            fires_by_trig[trig] = fires
+            check(f"ho-trigger-class {trig}", r.returncode == 0 and fires >= 1,
+                  f"trigger_fires={fires} trigger_decided_ho={tdec}")
+
+    # A trigger that fires is necessary but not sufficient: six classes that all
+    # fire identically are still one mechanism wearing six labels.
+    distinct = len(set(fires_by_trig.values()))
+    check("ho-trigger-classes are distinct", distinct >= 3,
+          f"distinct fire counts={distinct} of {len(fires_by_trig)} "
+          f"({', '.join(f'{k}={v}' for k, v in fires_by_trig.items())})")
 
     print()
     if failures:
         print(f"[standards] FAIL — {len(failures)} check(s): {', '.join(failures)}")
         return 1
     print("[standards] PASS — toolkit validated against 3GPP TR 38.821 link "
-          "budget, orbital theory, paper Table 3, and all five NTN HO classes")
+          "budget, orbital theory, paper Table 3, and all six NTN HO classes")
     return 0
 
 

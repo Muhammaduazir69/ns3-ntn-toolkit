@@ -190,9 +190,10 @@ module usually needs this toolkit rather than a bare ns-3.
 python3 tools/check_ntn_standards.py
 ```
 
-Sixteen gates: the TR 38.821 Set-1 LEO-600 link-budget calibration, orbital
-geometry, the published platform-latency bands, all five NTN handover trigger
-classes, and the documentation-claim checks. It exits nonzero on any failure, so
+Seventeen gates: the TR 38.821 Set-1 LEO-600 link-budget calibration, orbital
+geometry, the published platform-latency bands, all six NTN handover trigger
+classes plus a check that the six do not fire identically, and the
+documentation-claim checks. It exits nonzero on any failure, so
 it works as a CI step.
 
 ```bash

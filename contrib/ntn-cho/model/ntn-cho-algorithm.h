@@ -346,6 +346,7 @@ class NtnChoAlgorithm : public Object
         bool admitted = false;            //!< Passed TTE + quality filter
         Time lastUpdate = Seconds(0);     //!< Last measurement update time
         Time a4MetSince = Seconds(-1.0);  //!< When the A4 quality condition was first met (-1 = not met)
+        Time a3MetSince = Seconds(-1.0);  //!< When the A3 entering inequality was first met (-1 = not met)
 
         // ---- Rel-19 conditional LTM state ----
         /**
@@ -496,6 +497,21 @@ class NtnChoAlgorithm : public Object
      * \param ueVelocity UE velocity vector
      */
     void StartMonitoring(GeoCoordinate uePosition, Vector ueVelocity);
+
+    /**
+     * \brief Refresh the UE kinematics the geometric triggers evaluate against.
+     *
+     * StartMonitoring() also seeds these, but it transitions state and starts a
+     * self-scheduling evaluation loop, so a scenario that drives
+     * EvaluateConditions() on its own cadence cannot use it to keep the UE
+     * position current. Without a call to one of the two, D1, D2, T1 and the
+     * TTE estimator evaluate against a default-constructed position while the
+     * radio flies the real one.
+     *
+     * \param uePosition current UE position
+     * \param ueVelocity current UE velocity
+     */
+    void UpdateUeKinematics(GeoCoordinate uePosition, Vector ueVelocity);
 
     /**
      * \brief Stop condition monitoring
@@ -757,6 +773,17 @@ class NtnChoAlgorithm : public Object
     void EvaluateLtmConditional(CandidateInfo& cand);
     /// Standardized NTN trigger classes (TIME_T1 / ELEVATION / TIMING_ADVANCE).
     void EvaluateStandardNtnTrigger(CandidateInfo& cand);
+
+    /**
+     * \brief Evaluate the TS 38.331 CondEventA3 entering condition for one candidate.
+     *
+     * Mn + Ofn + Ocn - Hys > Mp + Ofp + Ocp + Off, held for a3TimeToTrigger.
+     * A3 is a pure measurement event: it does not involve the D1 location
+     * condition and it computes no time-to-exit.
+     *
+     * \param cand the candidate to evaluate, admitted in place
+     */
+    void EvaluateEventA3(CandidateInfo& cand);
     /// CHO-14: TRIGGER_TIME_BASED. Admit once the UE has dwelt on its serving
     /// beam for Config::beamDwellThreshold and the candidate is usable.
     void EvaluateBeamDwell(CandidateInfo& cand);

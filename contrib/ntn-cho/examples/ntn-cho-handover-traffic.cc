@@ -56,6 +56,9 @@ uint16_t g_servingCellId = 0;
 uint16_t g_candCellId = 0;
 uint16_t g_serving = 0;
 uint32_t g_handovers = 0;
+uint32_t g_triggerFires = 0;    // ticks where the CHO trigger selected a cell
+uint32_t g_triggerHandovers = 0; // handovers the trigger decided
+uint32_t g_fallbackHandovers = 0; // handovers the fallback rule decided
 uint32_t g_evals = 0;
 double g_simTime = 60.0;
 double g_sinrAtHo = 0.0;
@@ -87,6 +90,17 @@ ChoTick()
     const double servGain = std::max(-20.0, (servElev - 45.0) / 5.0);
     const double candGain = std::max(-20.0, (candElev - 45.0) / 5.0);
 
+    // CHO-21: hand the algorithm the UE's real position every tick.
+    //
+    // D1, D2, T1 and the TTE estimator all evaluate against m_uePosition, which
+    // only StartMonitoring() used to set, and this scenario never called it
+    // because it drives EvaluateConditions() on its own 1 s cadence. So those
+    // triggers were measuring distances from a default-constructed coordinate
+    // while the radio flew the real orbit: the geometric trigger classes could
+    // not fire at any geometry, and the handovers the run reported for them came
+    // from the fallback rule below instead.
+    g_cho->UpdateUeKinematics(GeoCoordinate(u), g_ueMob->GetVelocity());
+
     g_cho->UpdateMeasurement(g_servingCellId, servSinr, servGain);
     g_cho->UpdateMeasurement(g_candCellId, candSinr, candGain);
     g_cho->UpdateCandidateSlantRange(g_servingCellId, servSlant);
@@ -107,6 +121,15 @@ ChoTick()
                      Simulator::Now().GetSeconds(), g_servingCellId, g_candCellId, servSinr,
                      candSinr, servElev, candElev, servSlant / 1e3, candSlant / 1e3, chosen);
     }
+    // CHO-22: remember WHO decided, so the fallback is never reported as the
+    // named trigger. Every committed "CHO decisions=N (a3 ...)" line was
+    // produced by the rule below rather than by A3, and because the rule is the
+    // same for all six classes, all six runs printed identical numbers.
+    const bool fromTrigger = (chosen != 0);
+    if (fromTrigger)
+    {
+        ++g_triggerFires;
+    }
     if (chosen == 0)
     {
         // TTE-aware fallback before the estimator admits: better-predicted
@@ -118,6 +141,14 @@ ChoTick()
     if (chosen != g_serving && chosen != 0 && chosen != g_servingCellId)
     {
         ++g_handovers;
+        if (fromTrigger)
+        {
+            ++g_triggerHandovers;
+        }
+        else
+        {
+            ++g_fallbackHandovers;
+        }
         g_sinrAtHo = servSinr;
         g_cho->ExecuteHandover(chosen);
         const auto st = g_cho->GetMechanismStats();
@@ -419,6 +450,9 @@ main(int argc, char* argv[])
 
     const auto st = g_cho->GetMechanismStats();
     const uint32_t actuatedHo = rs.GetHandoverCount();
+    std::printf("# CHO trigger accounting: fires=%u  trigger-decided handovers=%u  "
+                "fallback-decided handovers=%u  (mechanism=%s)\n",
+                g_triggerFires, g_triggerHandovers, g_fallbackHandovers, trigger.c_str());
     std::printf("# === summary ===  CHO decisions=%u (%s on measured SINR, real orbits)  "
                 "ACTUATED X2 handovers=%u  serving-cell measured goodput=%.3f Mbps  "
                 "mean SINR=%.2f dB  SINR@handover=%.2f dB  interruption(last)=%.1f ms  "

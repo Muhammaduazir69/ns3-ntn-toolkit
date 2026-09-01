@@ -198,9 +198,10 @@ Measured across the 93 buildable examples, 72 write one; the other 21 do not
 stand up a radio at all (calculators, trace tools, the THz sweeps) and so have
 nothing to attest.
 
-**Gates that can fail.** `tools/check_ntn_standards.py` runs 16 gates covering the
+**Gates that can fail.** `tools/check_ntn_standards.py` runs 17 gates covering the
 TR 38.821 Set-1 link budget, orbital geometry, the published latency bands and all
-five NTN handover trigger classes. `tools/check_doc_claims.py` fails the build when
+six NTN handover trigger classes, each asserted on its own firing count rather
+than on a handover the radio would have performed anyway. `tools/check_doc_claims.py` fails the build when
 a README makes a capability claim the code contradicts, or quotes a number the
 committed data does not carry. `tools/check_dashboard_producers.py` walks each
 dashboard panel back through the metric schema to the code that emits it.
