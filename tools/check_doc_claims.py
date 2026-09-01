@@ -41,7 +41,13 @@ BANNED = [
     (r"live FlexRIC SCTP/E2AP",
      "no SCTP association and no FlexRIC interop ship in the tree",
      "say the live wire is scaffolded, not demonstrated"),
-    (r"E2AP[- ]over[- ]SCTP\b(?![^.]*\b(roadmap|scaffold|planned|not (yet )?built|no SCTP)\b)",
+    # The qualifier list started as roadmap/scaffold/planned/not-built/no-SCTP.
+    # Widening this check to the module READMEs immediately flagged oran-ntn's
+    # "E2AP-over-SCTP is **not** simulated", which is a plainer disclaimer than
+    # any of the accepted phrasings. Rewording an honest sentence to satisfy a
+    # rule is the wrong direction, so the rule accepts honest negations too.
+    (r"E2AP[- ]over[- ]SCTP\b(?![^.]*\b(roadmap|scaffold|planned|"
+     r"not (yet )?(built|simulated|modelled|modeled|implemented)|no SCTP)\b)",
      "an unqualified SCTP wire claim",
      "qualify it as roadmapped or scaffolded in the same sentence"),
     # AI-09: the "multi-agent" trainers are single-agent PPO/SAC over N
@@ -61,6 +67,23 @@ DOC_GLOBS = [
     "ns-3-dev/README.md",
     "ns-3-dev/distribution/docker/HUBDESCRIPTION.md",
     "ns-3-dev/distribution/docker/README.md",
+    # The per-module READMEs were outside this check, and they are where a
+    # reader goes for a module's specifics. ntn-fapi's quoted its cross-check
+    # count as "29 871 on the default run"; the default run produces 102 020
+    # since the spine's carrier and channel width moved, and nothing here was
+    # reading that file to notice.
+    "ns-3-dev/contrib/ntn-cho/README.md",
+    "ns-3-dev/contrib/ntn-constellation/README.md",
+    "ns-3-dev/contrib/ntn-fapi/README.md",
+    "ns-3-dev/contrib/ntn-observability/README.md",
+    "ns-3-dev/contrib/ntn-rrc/README.md",
+    "ns-3-dev/contrib/ntn-sagin/README.md",
+    "ns-3-dev/contrib/ntn-sionna/README.md",
+    "ns-3-dev/contrib/ntn-slice/README.md",
+    "ns-3-dev/contrib/ntn-traffic/README.md",
+    "ns-3-dev/contrib/ntn-v2x/README.md",
+    "ns-3-dev/contrib/oran-ntn/README.md",
+    "ns-3-dev/contrib/thz-ntn/README.md",
 ]
 
 
@@ -83,6 +106,14 @@ NUMERIC_CLAIMS = [
      "the 10-seed campaign shell, matching tab:kpi in the manuscript"),
 ]
 STALE_CLAIMS = [
+    # Needle in NORMALISED form: _normalize_digit_groups turns a thin-space
+    # thousands separator into a comma before matching, so "29 871" in the
+    # source is "29,871" here. Written with the space, this entry matched
+    # nothing and the tamper test passed a README with the stale figure back in.
+    ("ns-3-dev/contrib/ntn-fapi/README.md", "29,871",
+     "the FAPI cross-check count from before the spine moved to 2.185 GHz / "
+     "20 MHz; the default 20 s run now emits 102 020 TX_DATA.request against "
+     "the same phy_rx_tb"),
     ("ns-3-dev/README.md", "85,074",
      "superseded action count; the committed CSV sums to 71,967"),
     ("ns-3-dev/README.md", "12/12 standards gates",
@@ -154,10 +185,26 @@ def check_numeric_claims() -> list:
             continue
         text = _normalize_digit_groups(p.read_text(encoding="utf-8", errors="replace"))
         for lineno, line in enumerate(text.splitlines(), 1):
-            # A line that quotes the stale value while explaining that it IS
-            # stale is fine; that is how the correction is documented.
-            if needle in line and "superseded" not in line and "contradicted" not in line:
+            # A quotation of the stale value that explains it IS stale is fine;
+            # that is how a correction gets documented. But the exemption has to
+            # be LOCAL to the occurrence. Checking the whole line let one
+            # "superseded" anywhere pardon every stale claim on it, and a
+            # markdown paragraph is a single line: the ntn-fapi README paragraph
+            # is 1168 characters, so putting the stale figure back as a live
+            # claim in the same paragraph still passed.
+            # Scope the exemption to the SENTENCE holding the occurrence.
+            # Whole-line was useless because a markdown paragraph is one line.
+            # A fixed character window is arbitrary and was also wrong: with
+            # +/-120 characters the honest correction sat 11 away from
+            # "superseded" and a reinstated live claim sat 101 away, so both
+            # were pardoned. A sentence is the unit a reader actually parses.
+            for sentence in re.split(r"(?<=[.!?])\s+", line):
+                if needle not in sentence:
+                    continue
+                if "superseded" in sentence or "contradicted" in sentence:
+                    continue
                 out.append(f"{rel}:{lineno}: stale claim '{needle}' ({why})")
+                break
     return out
 
 
@@ -171,8 +218,14 @@ def main() -> int:
         checked += 1
         text = _normalize_digit_groups(p.read_text(encoding="utf-8", errors="replace"))
         for lineno, line in enumerate(text.splitlines(), 1):
+            # Match against the prose, not the markup. "E2AP-over-SCTP is
+            # **not** simulated" is a plain disclaimer, but the emphasis
+            # asterisks sit between "not" and "simulated", so a qualifier
+            # pattern that expects contiguous words never sees it and the
+            # sentence gets flagged for saying exactly the right thing.
+            probe = line.replace("**", "").replace("__", "")
             for pattern, why, instead in BANNED:
-                if re.search(pattern, line):
+                if re.search(pattern, probe):
                     failures.append(
                         f"{rel}:{lineno}: {why}\n"
                         f"    line: {line.strip()[:160]}\n"
