@@ -110,6 +110,9 @@ STALE_CLAIMS = [
     # thousands separator into a comma before matching, so "29 871" in the
     # source is "29,871" here. Written with the space, this entry matched
     # nothing and the tamper test passed a README with the stale figure back in.
+    ("ns-3-dev/contrib/ntn-v2x/README.md", "23-byte",
+     "the BSM core header is 21 octets (GetSerializedSize returns 21); 23-byte "
+     "predates V2X-7 shrinking DE_Elevation from four octets to two"),
     ("ns-3-dev/contrib/ntn-v2x/README.md", "28,892",
      "the on-air packet count from before the spine moved to 2.185 GHz / "
      "20 MHz; the default run now carries 14,792 on-air against 0 gated"),
