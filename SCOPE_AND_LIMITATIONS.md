@@ -240,8 +240,19 @@ sees, so it belongs behind a flag and a re-run, not a silent default flip.
   Timing-Advance model, and the SIB19 content/codec are each spec-faithful in isolation,
   but none is wired into the live stack: DRX never gates PDCCH monitoring on the mmwave
   UE-MAC, TA never sets the UL transmit timing, and SIB19 is emitted on a TracedCallback
-  rather than carried on BCCH/PDSCH to a decoding UE. K_offset is stored metadata applied
-  to no scheduling decision.
+  rather than carried on BCCH/PDSCH to a decoding UE.
+
+  **Two corrections, 2026-09-01.** This used to end "K_offset is stored metadata
+  applied to no scheduling decision", which is now false on the `nr` backend: RRC-1
+  wired the broadcast `cellSpecificKoffset` through to `NrGnbPhy::N2Delay`, so the
+  offset does change how the network schedules, and it changes it enough to have
+  exposed the half-duplex fault in A9. It remains true on the mmwave backend, which
+  is what the heading scopes this entry to, and the distinction was missing.
+
+  DRX likewise gates something real now: `ntn-rrc-drx-data-traffic` drives
+  `SetTransmitEnabled()` from `IsAwake()`, so the awake fraction starts and stops an
+  actual flow. It still does not gate PDCCH monitoring on the UE MAC, which is what
+  the claim below is about.
 - **Why:** the vendored mmwave UE-MAC/RRC (forced `UseIdealRrc=true`) exposes no hooks to
   drive DRX active-time, UL timing, or SI acquisition from these external objects.
 - **Effect:** DRX awake-fraction, TA, and SIB19 are reported as analytic/structural
