@@ -117,6 +117,7 @@ const GeoCoordinate kAuxRefPos(49.75, 3.75, 0.0);
 
 uint32_t g_totalHos = 0;
 uint32_t g_admitTicks = 0; // decision ticks where the algorithm admitted a candidate
+double g_minServElevDeg = 1e9; // lowest serving elevation seen, for the D1 sizing hint
 uint32_t g_successHos = 0;
 uint32_t g_failedHos = 0;
 uint32_t g_ppCount = 0;
@@ -179,6 +180,7 @@ ChoTick()
     const Vector u = g_ueModels[0]->GetPosition(); // TR 38.811 UE, ECEF
     const Vector sPos = g_servSat->GetPosition();  // Kepler+J2 serving sat, ECEF
     const double servElev = ntngeo::ElevationDeg(u, sPos);
+    g_minServElevDeg = std::min(g_minServElevDeg, servElev);
     const double servSlant = ntngeo::SlantRangeM(u, sPos);
 
     // Serving SINR is MEASURED from the real mmwave PHY (UE 0).
@@ -1095,9 +1097,26 @@ main(int argc, char* argv[])
                   << " km) being sized like a beam footprint while the D1 reference\n"
                   << "           is the sub-satellite point, which at this altitude is "
                   << "hundreds of km from the terminal\n"
-                  << "           for most of a pass. Raise --d1Threshold to match the "
-                  << "geometry, or select a trigger\n"
-                  << "           that does not gate on D1.\n";
+                  << "           for most of a pass.\n";
+        // Say what would have covered THIS pass, rather than leaving the reader
+        // to derive it. Ground range from terminal to sub-satellite point at
+        // elevation e on a shell of altitude h:
+        //     psi = acos(Re cos e / (Re + h)) - e,  d = Re psi.
+        if (g_minServElevDeg < 1e8)
+        {
+            const double kRe = 6371e3;
+            const double e = g_minServElevDeg * M_PI / 180.0;
+            const double psi = std::acos(kRe * std::cos(e) / (kRe + g_leoAltM)) - e;
+            const double needM = kRe * psi;
+            std::cout << "           This run's serving elevation reached "
+                      << std::fixed << std::setprecision(1) << g_minServElevDeg
+                      << " deg, where the terminal is "
+                      << std::setprecision(0) << (needM / 1000.0)
+                      << " km from the sub-satellite point.\n"
+                      << "           --d1Threshold=" << std::setprecision(0) << needM
+                      << " would have covered the whole pass.\n";
+        }
+        std::cout << "           Alternatively select a trigger that does not gate on D1.\n";
     }
     std::ofstream kpiSummary(outputDir + "/kpi_summary.txt");
     kpiSummary << "=== NTN-CHO KPI Summary (REAL plane) ===\n"

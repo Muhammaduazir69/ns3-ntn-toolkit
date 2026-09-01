@@ -127,7 +127,13 @@ a handover in the same run.
 The default is deliberately left as it is. Which D1 semantics the study wants,
 and therefore which threshold is correct, decides what the CHO results mean, and
 that is an author decision rather than something to change quietly under a
-manuscript. What has changed is that the scenario can no longer fail silently: a
+manuscript. The scenario now computes the answer for whoever makes it: the
+warning reports the lowest serving elevation the run reached and the threshold
+that would have covered that whole pass. On the 780 km shell, seed 1, the serving
+satellite descends to 40.5 degrees, where the terminal is 761 km from the
+sub-satellite point, so `--d1Threshold=761341` covers the pass end to end. That
+also explains the 600 km probe above admitting only intermittently: 600 km is
+inside 761 km, so it covers the high-elevation part of the arc and not the rest. What has changed is that the scenario can no longer fail silently: a
 run whose algorithm admitted no candidate on any tick now prints a warning naming
 the threshold and the geometry, instead of writing a full set of plausible CSVs
 and reporting a 100 percent success rate over zero handovers.
