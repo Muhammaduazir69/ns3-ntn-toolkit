@@ -75,6 +75,32 @@ taken at 2.0 GHz in a 30 MHz channel and is not band-conformant. Numbers move by
 about a decibel, in the favourable direction, and need re-running before they can
 be described as NTN FR1 results.
 
+## A13 — A CHO trigger that fires is not always the thing that moves the terminal
+
+Until 2026-09-01 none of the six standardized handover trigger classes was
+running at all. Four independent defects each made that certain: the radio's own
+X2 handovers drained the candidate map after two executions (CHO-20), the
+geometric classes evaluated against a UE position nothing ever set (CHO-21),
+D2/A3/D1 were admitted by their evaluator and then refused by a time-to-exit
+filter belonging to a different trigger (CHO-19), and A3 contained no A3
+condition (CHO-18). The six-trigger conformance gate stayed green throughout,
+because the number it read was produced by the scenario's fallback rule, which is
+identical for all six classes. All four are fixed and the gate now reads a
+per-trigger fire count that only that trigger's condition can produce.
+
+What remains, and is a boundary rather than a defect: firing is not actuation.
+On the shipped two-cell pass the vendored NR A3-RSRP and X2 machinery performs
+the cell change on its own schedule, and it usually gets there first. Measured
+over 300 s, five of the six classes fire and decide zero handovers; only D2
+decided one. `ntn-cho-handover-traffic` therefore reports trigger-decided and
+fallback-decided handovers as separate counts, and they must not be summed or
+quoted as though the CHO layer caused every cell change in the run.
+
+A study that needs the CHO decision to be the *cause* of the handover has to
+suppress or widen the underlying A3 hysteresis (`--hoHystDb`) so the radio stops
+pre-empting it. That is a scenario design choice, not something the module can
+decide, so it is left explicit here.
+
 ## A11 — The published Monte Carlo campaign is no longer affordable as configured
 
 `papers/sim_runs/run_mc_sweep.sh` runs four algorithms across ten seeds, 600 s of
