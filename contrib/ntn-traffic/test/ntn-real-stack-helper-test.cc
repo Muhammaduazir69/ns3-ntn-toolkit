@@ -414,6 +414,60 @@ class RealStackKOffsetConsumedTest : public TestCase
     }
 };
 
+/// Gate 1 (rd-audit-2026-08-24): a measured one-way delay may not beat light.
+///
+/// The register lists this as open: "the computation exists
+/// (ntn-real-stack-helper.cc:1893-1920, :2187-2193) but no test asserts it and
+/// neither checker reads app_owd_ms's pass column". The second half is closed
+/// now, check_protocol_fidelity.py fails on any pass=0 row. This is the first
+/// half: an actual assertion that the measured delay respects the geometric
+/// floor.
+///
+/// ComputeOwdFloorMs() is a true lower bound by construction. It uses the
+/// satellite ALTITUDE rather than the instantaneous slant, so a UE directly
+/// under the sub-point is the fastest geometry the run can contain, and it adds
+/// the configured backhaul. A measured OWD below it would mean a packet outran
+/// its own link.
+class RealStackOwdRespectsLightSpeedTest : public TestCase
+{
+  public:
+    RealStackOwdRespectsLightSpeedTest()
+        : TestCase("Gate 1 - measured one-way delay is at or above the geometric floor")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        LeoRig rig;
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetSimTime(Seconds(3.0));
+        rs.Build(rig.sat, rig.ue);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
+                          Seconds(0.5), Seconds(2.5));
+        Simulator::Stop(Seconds(3.0));
+        Simulator::Run();
+        rs.Collect();
+
+        const double floorMs = rs.ComputeOwdFloorMs();
+        const double owdMs = rs.GetMeanDelayMs();
+
+        NS_TEST_ASSERT_MSG_GT(floorMs, 0.0,
+                              "the geometric floor must be a real number; a zero floor would "
+                              "make this gate vacuous");
+        NS_TEST_ASSERT_MSG_GT(owdMs, 0.0,
+                              "the run must have measured a delay at all, or there is nothing "
+                              "to compare against the floor");
+        NS_TEST_ASSERT_MSG_GT(owdMs, floorMs * 0.999,
+                              "measured one-way delay is below the speed-of-light floor for "
+                              "this geometry; a packet cannot arrive before its own link "
+                              "allows");
+
+        Simulator::Destroy();
+    }
+};
+
 /// Gate 14 (rd-audit-2026-08-24): the NEGATIVE half of the K_offset gate.
 ///
 /// RealStackKOffsetConsumedTest above proves the offset is applied when
@@ -3420,6 +3474,7 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new RealStackUeKeySeparationTest, Duration::QUICK);
         AddTestCase(new RealStackKOffsetConsumedTest, Duration::QUICK);
         AddTestCase(new RealStackKOffsetNotConsumedTest, Duration::QUICK);
+        AddTestCase(new RealStackOwdRespectsLightSpeedTest, Duration::QUICK);
         AddTestCase(new RealStackOfferedLoadAccountingTest, Duration::QUICK);
         AddTestCase(new SatBeamGainAngleDependenceTest, Duration::QUICK);
         AddTestCase(new RealStackRsrpPerResourceElementTest, Duration::QUICK);
