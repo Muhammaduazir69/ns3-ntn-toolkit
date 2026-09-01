@@ -21,37 +21,33 @@ what closing it would require.**
 > **STATUS 2026-06-27 — A1 & A5(ii) largely CLOSED on the mmwave spine; A5(i)/A3/A4 unblocked by the nr integration.**
 > A1: the model now uses the **real TR 38.811 §6.6.2 σ_SF tables** (per scenario, elevation-interpolated), **CL=0 for LOS** (spec-correct), and a **Rician small-scale fading term** with the §6.7.2 elevation-dependent K-factor. **NT-07 correction:** that term defaults to OFF and is not executing on the measured plane, deliberately: both radio backends already apply small-scale fading through the 3GPP phased-array spectrum model, and running the Rician process as well would multiply two independent fading realizations onto one link. Enable it only for a link with no 3GPP spectrum model in the path. Its normalization (unit mean power) and its elevation dependence are covered by `Tr38811FastFadingStatisticsTest`; before that they were asserted only by the comment above the code. *Remaining:* the full multi-tap frequency-selective NTN-TDL (§6.9.2). A5(ii): the **TR 38.811 §6.4.1 J1-Airy satellite beam pattern** is implemented (`NtnSatBeamGainModel`, opt-in via `NtnRealStackHelper::SetSatelliteBeam`) and verified (0 dB boresight, −3.01 dB at the half-beamwidth). **NT-07:** that setter had no callers anywhere in the tree. The pattern was still exercised on the measured plane by `ntn-tr38821-array-gain-calibration`, which constructs the model directly, but no scenario reached it through the helper, so no run assembled it into a helper-built propagation chain. `ntn-real-stack-smoke` now exposes `--satBeam`, `--beamwidthDeg` and `--beamCenterXKm`, and a fixed beam centre 300 km off the terminal costs a measured 11.07 dB (16.20 → 5.13 dB SINR) while a tracking beam costs 0 dB, which is the same reason a steered-beam calibration reports a constant offset. `NtnChannelExtrasReachTheChainTest` asserts the model is in the chain rather than merely constructible. `SetNtnScenario` had no callers either, so every run used the Suburban shadow-fading bins; it is now `--ntnScenario`. A2 (THz pointing) is wired into the measured path. **5G-LENA `nr` is now in the tree** (see A5), so A5(i)/A3/A4 are reachable on an nr spine.
 
-## A10 — Three shipped examples do not run
+## A10 — One shipped example exits non-zero, by design
 
-Measured by executing all 93 buildable examples on 2026-09-01.
+Measured by executing all 93 buildable examples. Two of the three that failed when
+this audit started are fixed; the third is deliberate.
 
-**`ntn-cho-leo-basic`** aborts on its own default. It selects `tte-aware`, which
-needs a time-to-exit estimator, and never calls `SetupConstellation()`, so the
-guard in `EvaluateConditions()` correctly refuses. The example creates the
-algorithm before its satellite nodes exist, so the call cannot simply be moved
-up. Reordering it and mirroring the Walker satellite onto an SNS3
-`SatConstantPositionMobilityModel` clears that guard but then hits
-`SatAntennaGainPatternContainer: unvalid beam id: 0`, because the geo-33E pattern
-corpus numbers beams from its filenames, 1 to 72, and the example asks for beam 0.
-`ntn-cho-real-stack` passes beam 0 too and does not abort, so something in its
-longer setup makes the lookup reachable; that difference is not yet understood and
-the partial fix was reverted rather than left in the tree. Use
-`ntn-cho-real-stack`, which runs on all its triggers.
+**`ntn-tr38821-array-gain-calibration`** exits non-zero on its own pattern-fidelity
+gate: paired in-lobe rms is 3.36 dB against a 3.00 dB tolerance. This is deliberate
+and predates the audit. The gate is not relaxed and the manuscript reports it as
+failing rather than moving the bar. Its other two gates pass, one of them only
+after this audit replaced a per-sample spread bound with a test on the pinned mean.
 
-**`ntn-tr38821-array-gain-calibration`** exits non-zero on its own pattern gate:
-paired in-lobe rms is 3.36 dB against a 3.00 dB tolerance. This is deliberate and
-predates this audit. The gate is not relaxed, and the manuscript reports it as
-failing. Its other two gates pass, one of them only after this audit replaced a
-per-sample spread bound with a test on the pinned mean.
+Worth carrying into any re-run: the corrected spatial channel moves this figure.
+Mean residual drops from 3.48 to 1.62 dB while rms drops only from 3.98 to 3.36, so
+the bias-removed rms the manuscript quotes goes from about 2.09 dB to about 2.94 dB.
 
-**`oran-ntn-e2-termination`** exits non-zero reporting `[ric] no traffic seen`. It
-also rejects `--outputDir`, which every other example accepts, so a sweep that
-passes that flag uniformly gets a usage error instead of the real failure.
+**Fixed since.** `ntn-cho-leo-basic` aborted on its own default trigger, first for
+want of a time-to-exit estimator and then on a beam id the GEO pattern grid does
+not define; it now enables the analytic TR 38.811 6.4.1 beam like the other three
+CHO examples and runs on all its triggers. `oran-ntn-e2-termination` is a
+two-process demo that defaulted to the listener role, so standalone it waited for a
+peer nobody started; a self-contained `role=both` now runs the agent on a thread
+against its own listener and completes the real exchange over loopback SCTP.
 
-**What a paper may claim.** Results from the 90 examples that run. Any figure
-sourced from these three needs the run re-done on a working example first.
+**What a paper may claim.** Results from the examples that run. A figure sourced
+from the array-gain calibration must carry its failing gate.
 
-## A9 — The NR spine has a UE ceiling, and it is lower than the published campaign
+## A9 — The NR spine scales, but ntn-cho-full-constellation still aborts at 8 UEs
 
 **What is bounded.** Scenarios on the 5G-LENA `nr` backend abort above a UE count
 that depends on the scenario. Measured on 2026-09-01 with 20 s runs:
