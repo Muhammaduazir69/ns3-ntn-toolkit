@@ -144,13 +144,27 @@ Measured consequence, `ntn-cho-full-constellation` at 300 s with
 
 ```
 t=5.0s  cell 1 -> 3   servSINR 29.73 dB   candSINR 27.90 dB
-        elevation_before 87.2 deg   elevation_after 51.5 deg   success=0
+        elevation_before 87.2 deg   elevation_after 51.5 deg
 ```
 
-The terminal leaves a satellite at 87 degrees, essentially overhead and with the
-most coverage time it will ever have, for one at 51 degrees that is 1.8 dB worse.
-A rule that weighed staying against switching could not produce that, because the
-serving cell's time-to-exit at zenith exceeds any candidate's.
+The terminal leaves a satellite at 87 degrees for one at 51 degrees that is
+1.8 dB worse. The reason is worth stating precisely, because the obvious reading
+is wrong: the serving satellite IS descending, reaching 37.7 degrees by t=130 and
+19.9 by t=230, so leaving it eventually is right.
+
+What makes the timing indefensible is the horizon. `m_maxPredictionWindow` is
+120 s, and at t=5 both candidates report exactly 120.00 s, i.e. saturated: their
+exit is further away than the estimator looks. The serving cell, still above
+19 degrees more than 200 s later, would saturate too. So this is a tie at the cap
+between staying and switching, and the rule has no way to see it, because the
+serving cell's time-to-exit is never computed and the serving cell is excluded
+from the candidate set. Facing a tie it cannot observe, the policy switches.
+
+A rule that compared against staying would break that tie the other way: a
+handover has a cost and an equal predicted time-of-stay does not pay for it. Note
+also that time-to-exit is genuinely time-varying over the run, taking values from
+11.31 s upward, so the ranking dimension is real; it is saturated at this
+particular instant, which is exactly when the missing comparison matters most.
 
 Two smaller things visible in the same row. The handover fails, and
 `failure_reason` is empty, so a failed handover records no cause. And across
