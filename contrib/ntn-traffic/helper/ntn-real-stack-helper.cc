@@ -1947,19 +1947,42 @@ NtnRealStackHelper::SetBroadcastKOffsetSlots(uint32_t slots)
     {
         return;
     }
+    // Apply the change at a drained boundary rather than instantaneously.
+    //
+    // N2Delay is the gap between a UL grant and the UE's transmission. Writing
+    // it onto live PHYs the instant the broadcast changes re-times a
+    // transmission the UE has already been told about, which is wrong
+    // independently of whether anything downstream notices. TS 38.331 does not
+    // switch instantaneously either: a SIB19 change takes effect at a boundary
+    // both ends can compute. Deferring by the larger of the two offsets plus a
+    // slot is long enough for every grant issued under the old value to have
+    // been served.
+    //
+    // Stated plainly because it was tried as a fix and is not one: this does
+    // NOT resolve the "Cannot TX while RX" abort that ntn-cho-full-constellation
+    // hits at 8 or more UEs. That fault survives this change, and it survives
+    // removing the live reprogram entirely; what clears it is disabling K_offset
+    // consumption altogether, so its trigger is the SIZE of the offset, not the
+    // moment it is applied. See boundary A9 for the measured diagnosis.
+    const uint32_t oldSlots = m_consumedKOffsetSlots;
     m_consumedKOffsetSlots = slots;
     const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
-    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
-    {
-        for (uint8_t b = 0; b < nBwp; ++b)
+    const Time slotPeriod = MilliSeconds(1) / (1 << m_numerology);
+    const Time guard = slotPeriod * static_cast<int64_t>(std::max(oldSlots, slots) + 1);
+    Simulator::Schedule(guard, [this, slots, nBwp]() {
+        for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
         {
-            m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
-                ->SetAttribute("N2Delay", UintegerValue(m_baseN2Delay + slots));
+            for (uint8_t b = 0; b < nBwp; ++b)
+            {
+                m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
+                    ->SetAttribute("N2Delay", UintegerValue(m_baseN2Delay + slots));
+            }
         }
-    }
+    });
     NS_LOG_INFO("NtnRealStackHelper: SIB19 refresh -> K_offset "
                 << slots << " slots; N2Delay " << m_baseN2Delay << " -> "
-                << (m_baseN2Delay + slots));
+                << (m_baseN2Delay + slots) << " applied after "
+                << guard.GetMilliSeconds() << " ms so no in-flight grant straddles it");
 }
 
 uint32_t

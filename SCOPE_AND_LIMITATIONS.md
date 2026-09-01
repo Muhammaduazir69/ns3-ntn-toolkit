@@ -96,10 +96,30 @@ same instant, both times with rnti=0 while its peers held 32 to 40.
 `NtnRealStackHelper` now sizes the periodicity to the configured UE count from the
 allowed set {2, 5, 10, 20, 40, 80, 160, 320}, and 30 UEs runs clean.
 
-**What remains.** The half-duplex abort in `ntn-cho-full-constellation` at 8 UEs is
-untouched and still needs a TDD pattern that does not schedule an uplink
-transmission inside a UE's own reception window once NTN K_offset has shifted it.
-That one is an upstream change.
+**The half-duplex abort is diagnosed but not fixed.** `ntn-cho-full-constellation`
+still aborts at 8 or more UEs with `NS_FATAL_ERROR("Cannot TX while RX")` from
+`NrSpectrumPhy::StartTxUlControlFrames`. Bisecting the example's helper calls one
+at a time: removing `SetKOffsetConsumption(true)` clears it, removing
+`SetHandover(true, ...)` clears it, removing `EnableAiFlowMonitor` does not. It
+needs both of the first two, and it reproduces with a single cell
+(`--numCandidates=0`), so it is not a multi-cell effect.
+
+Two theories were tested and both are wrong, which is worth recording so nobody
+retries them. It is not the LIVE reprogramming of N2Delay when SIB19 refreshes:
+deferring that write to a drained boundary changes nothing (the deferral was kept
+anyway, because instantaneous reprogramming is incorrect on its own terms). And it
+is not K_offset pushing an uplink into a fixed downlink slot: the configured TDD
+pattern is `F|F|F|F|F|F|F|F|F|F|`, all flexible, so there are no fixed downlink
+slots to land in.
+
+What is left is the size of the offset. K_offset raises N2Delay, the gap between a
+uplink grant and the transmission it authorises, from roughly 2 slots to roughly 13
+for a 780 km service link at 30 kHz SCS. The vendored NR scheduler does not reserve
+the target slot when it issues the grant, so across a window that wide it can
+allocate a downlink reception to the same UE in the slot the grant already claimed.
+Terrestrial spacing hides this because the window is short. Closing it means
+teaching the scheduler to reserve the slot at grant time, which is an upstream
+change in `contrib/nr`, not something this helper can paper over.
 
 ## A8 — Most shipped scenarios propagate with Kepler + J2, not SGP4
 
