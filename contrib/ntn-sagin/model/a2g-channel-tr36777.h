@@ -67,6 +67,20 @@ class A2gChannelTr36777 : public Object
     /// TR 36.777 prediction.
     static bool WasLastCallAboveValidatedHeight();
 
+    /**
+     * \brief True if ANY evaluation since the last reset was above the band.
+     *
+     * WasLastCallAboveValidatedHeight() reports only the most recent call, which
+     * is the wrong question for a run summary: a scenario that mixes a 20 km
+     * HAPS with a 30 m UAV answers according to whichever link happened to be
+     * evaluated last. A run wants to know whether ANY reported loss was an
+     * extrapolation.
+     */
+    static bool AnyCallAboveValidatedHeight();
+
+    /// Clear the sticky flag (start of a run, or between phases).
+    static void ResetValidatedHeightFlags();
+
     static double PathLossDb(A2gScenario scenario, A2gLink link,
                              double d3dM, double fcGHz, double hUtM);
 

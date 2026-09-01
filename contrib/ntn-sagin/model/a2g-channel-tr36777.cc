@@ -40,6 +40,7 @@ constexpr double k40Pi3Db = 32.44;
 /// File-scope because PathLossDb is static and stateless by design; this is
 /// diagnostic only and never feeds the returned value.
 bool g_lastAboveValidatedHeight = false;
+static bool g_everAboveValidatedHeight = false;
 
 // Lower height threshold of the aerial-vehicle band (TR 36.777 Table B-1.1/2).
 double
@@ -181,6 +182,19 @@ A2gChannelTr36777::WasLastCallAboveValidatedHeight()
     return g_lastAboveValidatedHeight;
 }
 
+bool
+A2gChannelTr36777::AnyCallAboveValidatedHeight()
+{
+    return g_everAboveValidatedHeight;
+}
+
+void
+A2gChannelTr36777::ResetValidatedHeightFlags()
+{
+    g_lastAboveValidatedHeight = false;
+    g_everAboveValidatedHeight = false;
+}
+
 double
 A2gChannelTr36777::PathLossDb(A2gScenario scenario, A2gLink link,
                               double d3dM, double fcGHz, double hUtM)
@@ -215,6 +229,7 @@ A2gChannelTr36777::PathLossDb(A2gScenario scenario, A2gLink link,
     // 20 km link, which is a different wrong number wearing a guard. The
     // extrapolation is returned and declared, so a caller can refuse it.
     g_lastAboveValidatedHeight = (hUtM > kMaxValidatedHeightM);
+    g_everAboveValidatedHeight = g_everAboveValidatedHeight || g_lastAboveValidatedHeight;
     if (g_lastAboveValidatedHeight)
     {
         NS_LOG_WARN("h_UT=" << hUtM << " m is above the TR 36.777 aerial-vehicle validation "

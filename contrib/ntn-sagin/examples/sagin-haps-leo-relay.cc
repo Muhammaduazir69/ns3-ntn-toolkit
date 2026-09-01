@@ -35,6 +35,7 @@
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 #include "ns3/constant-position-mobility-model.h"
+#include "ns3/a2g-channel-tr36777.h"
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/multi-layer-router.h"
@@ -177,7 +178,18 @@ main(int argc, char* argv[])
     out.close();
 
     std::cout << "sagin-haps-leo-relay complete (UAV->ground access on a real mmwave NR cell).\n"
-              << "  measured access SINR : " << rs.GetMeanDlSinrDb() << " dB (TR 36.777 A2G)\n"
+              << "  measured access SINR : " << rs.GetMeanDlSinrDb() << " dB ("
+              // SAGIN-8b: do not call an extrapolation a TR 36.777 prediction.
+              // This HAPS sits at 20 km and the coefficients are fitted to
+              // 1.5-300 m, so the loss behind this SINR is an extrapolation 67x
+              // beyond its data. The model has always known
+              // (AnyCallAboveValidatedHeight) and the NS_LOG warning that says
+              // so is compiled out of the optimized builds every example runs
+              // under, so the label was the only thing a reader saw.
+              << (A2gChannelTr36777::AnyCallAboveValidatedHeight()
+                      ? "TR 36.777 coefficients EXTRAPOLATED above the 300 m validated band"
+                      : "TR 36.777 A2G")
+              << ")\n"
               << "  measured throughput  : " << rs.GetRxThroughputMbps() << " Mbps\n"
               << "  router geometry csv  : " << outputDir << "/" << csvPath << "\n";
     Simulator::Destroy();
