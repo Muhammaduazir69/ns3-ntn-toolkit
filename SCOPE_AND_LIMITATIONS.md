@@ -21,6 +21,36 @@ what closing it would require.**
 > **STATUS 2026-06-27 — A1 & A5(ii) largely CLOSED on the mmwave spine; A5(i)/A3/A4 unblocked by the nr integration.**
 > A1: the model now uses the **real TR 38.811 §6.6.2 σ_SF tables** (per scenario, elevation-interpolated), **CL=0 for LOS** (spec-correct), and a **Rician small-scale fading term** with the §6.7.2 elevation-dependent K-factor. **NT-07 correction:** that term defaults to OFF and is not executing on the measured plane, deliberately: both radio backends already apply small-scale fading through the 3GPP phased-array spectrum model, and running the Rician process as well would multiply two independent fading realizations onto one link. Enable it only for a link with no 3GPP spectrum model in the path. Its normalization (unit mean power) and its elevation dependence are covered by `Tr38811FastFadingStatisticsTest`; before that they were asserted only by the comment above the code. *Remaining:* the full multi-tap frequency-selective NTN-TDL (§6.9.2). A5(ii): the **TR 38.811 §6.4.1 J1-Airy satellite beam pattern** is implemented (`NtnSatBeamGainModel`, opt-in via `NtnRealStackHelper::SetSatelliteBeam`) and verified (0 dB boresight, −3.01 dB at the half-beamwidth). **NT-07:** that setter had no callers anywhere in the tree. The pattern was still exercised on the measured plane by `ntn-tr38821-array-gain-calibration`, which constructs the model directly, but no scenario reached it through the helper, so no run assembled it into a helper-built propagation chain. `ntn-real-stack-smoke` now exposes `--satBeam`, `--beamwidthDeg` and `--beamCenterXKm`, and a fixed beam centre 300 km off the terminal costs a measured 11.07 dB (16.20 → 5.13 dB SINR) while a tracking beam costs 0 dB, which is the same reason a steered-beam calibration reports a constant offset. `NtnChannelExtrasReachTheChainTest` asserts the model is in the chain rather than merely constructible. `SetNtnScenario` had no callers either, so every run used the Suburban shadow-fading bins; it is now `--ntnScenario`. A2 (THz pointing) is wired into the measured path. **5G-LENA `nr` is now in the tree** (see A5), so A5(i)/A3/A4 are reachable on an nr spine.
 
+## A11 — The published Monte Carlo campaign is no longer affordable as configured
+
+`papers/sim_runs/run_mc_sweep.sh` runs four algorithms across ten seeds, 600 s of
+simulated time each, 30 UEs. Forty runs.
+
+That configuration was affordable in April 2026 because the binary it used was the
+pre-real-stack version of `ntn-cho-full-constellation`. The 24 June commit
+"real-stack full-constellation, measured SINR and real CHO algorithm" replaced the
+analytic plane with a full NR spectrum PHY, and the cost changed by orders of
+magnitude. Measured on this machine, one run at **20 s** of simulated time with 30
+UEs exceeds **ten minutes** of wall clock. Scaling to the campaign's 600 s puts a
+single run above five hours and the forty-run campaign above a week of continuous
+compute.
+
+**Why this matters.** The committed `mc_table.csv` was produced on 29 April by the
+cheap binary, so its numbers describe code the manuscript no longer documents.
+Regenerating them on the current code is the right thing to do and is not a
+session-scale task; it is a machine-time decision for the author.
+
+**Options, in the order I would consider them.** Reduce the seed count and report a
+wider confidence interval, which the table already carries. Reduce simulated time
+per run, at the cost of fewer handovers per seed. Reduce UE count, noting that mean
+DL SINR on one beam falls from 28.45 dB at 4 UEs to 2.61 dB at 30, so the UE count
+is not a free parameter. Or run the campaign on `ntn-cho-real-stack`, which is
+cheaper and also exercises the real trigger set.
+
+**What a paper may not do** is quote the April numbers against the current code.
+The staleness guard now in both sweep scripts refuses to run against a binary older
+than its sources, so the specific mistake that produced them cannot recur silently.
+
 ## A10 — One shipped example exits non-zero, by design
 
 Measured by executing all 93 buildable examples. Two of the three that failed when
