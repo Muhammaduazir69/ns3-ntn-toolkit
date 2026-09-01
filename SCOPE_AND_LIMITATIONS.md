@@ -221,8 +221,19 @@ sees, so it belongs behind a flag and a re-run, not a silent default flip.
 - **Bounded:** the (genuinely strong) THz array-factor, beamforming codebook, and
   pointing-error models live in the standalone `ThzNtnLinkBudget` calculator. The
   `PropagationLossModel` chained into the *measured* `thz-ntn-*-traffic` examples adds
-  only gaseous + rain + fog + snow; the dominant THz impairments (pointing loss, beam
-  mispoint, **beam squint** over the 10–20 GHz band) do not reach the measured KPIs.
+  gaseous + rain + fog + snow.
+
+  **Corrected 2026-09-01: pointing loss now DOES reach the measured KPIs**, and this
+  entry said otherwise. `ThzNtnPointingLossModel` is chained into the measured path
+  by `thz-ntn-weather-traffic`, `thz-ntn-ris-relay-traffic`,
+  `thz-ntn-isac-coexist-traffic` and `thz-ntn-leo-ground-downlink-traffic`, and
+  `thz-ntn-beam-tracking` applies a live tracker-derived pointing loss through
+  `NtnStaticExtraLossModel`, driving it to 200 dB on beam failure and to the
+  computed mispoint loss otherwise. Five examples, not zero.
+
+  What remains outside the measured path is the array factor and beamforming
+  codebook in the standalone `ThzNtnLinkBudget` calculator, and **beam squint**
+  across the 10-20 GHz band, which no chained model represents.
 - **Why:** the array/pointing models predate the measured-plane wiring and were never
   re-homed as a chained loss; beam squint (frequency-dependent steering) is unmodeled.
 - **Effect:** measured THz SINR/TBLER/goodput reflect FSPL + atmosphere only and are
