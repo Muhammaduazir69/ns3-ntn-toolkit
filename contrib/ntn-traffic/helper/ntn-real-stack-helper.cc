@@ -3127,6 +3127,18 @@ NtnRealStackHelper::WriteHealthReport()
         << "\n";
     out << "channel_in_path," << (channelInPath ? 1 : 0) << ",1,"
         << (channelInPath ? 1 : 0) << ",topology\n";
+    // TS 38.213 4.2. The toolkit advertises "cellSpecificKoffset consumed by
+    // the scheduler" as a capability, and it is real: the broadcast offset is
+    // added to the gNB N2Delay so a UL grant is issued the right number of slots
+    // early for the round trip. It left no trace in this artifact, though, so a
+    // reader could not tell whether a given run had it. It is off by default and
+    // one shipped example turns it on, which is exactly the kind of thing a
+    // provenance row exists to make visible.
+    out << "koffset_slots_consumed," << (m_kOffsetConsumption ? m_consumedKOffsetSlots : 0)
+        << ",-,-,"
+        << (m_kOffsetConsumption ? "ts38213-4.2 (added to gNB N2Delay)"
+                                 : "not-consumed (SetKOffsetConsumption is off)")
+        << "\n";
     out << "phy_rx_tb," << m_phyRxTb << "," << m_gates.minPhyRxTb << ","
         << (gateStackDepth ? 1 : 0) << ",phy-trace\n";
     out << "dl_sinr_db," << (std::isnan(m_dlSinrDbMean) ? 0.0 : m_dlSinrDbMean) << ",-,"
