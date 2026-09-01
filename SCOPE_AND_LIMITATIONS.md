@@ -75,6 +75,47 @@ taken at 2.0 GHz in a 30 MHz channel and is not band-conformant. Numbers move by
 about a decibel, in the favourable direction, and need re-running before they can
 be described as NTN FR1 results.
 
+## A19 — TTE-aware selection never compares against the serving cell it is leaving
+
+The module describes the novelty as admitting "a target beam only when it will
+stay in coverage long enough to be **worth the switch**". The implementation has
+the first half and not the second. `SelectBestCandidate`'s admissible filter is
+
+```
+info.admitted && info.d1Met && info.sinr_dB >= qualityThreshold && info.tte >= tteMinimum
+```
+
+then sort by time-to-exit descending. Nothing in it reads the serving cell's own
+time-to-exit, and nothing requires the candidate to be better than what the
+terminal already has. `servingTte` is computed in exactly one place, the T1
+trigger arm, and never here. The serving cell is also excluded from the candidate
+map by design, so it cannot enter the comparison even implicitly.
+
+Measured consequence, `ntn-cho-full-constellation` at 300 s with
+`--d1Threshold=761341`, on the first decision tick:
+
+```
+t=5.0s  cell 1 -> 3   servSINR 29.73 dB   candSINR 27.90 dB
+        elevation_before 87.2 deg   elevation_after 51.5 deg   success=0
+```
+
+The terminal leaves a satellite at 87 degrees, essentially overhead and with the
+most coverage time it will ever have, for one at 51 degrees that is 1.8 dB worse.
+A rule that weighed staying against switching could not produce that, because the
+serving cell's time-to-exit at zenith exceeds any candidate's.
+
+Two smaller things visible in the same row. The handover fails, and
+`failure_reason` is empty, so a failed handover records no cause. And across
+seeds 1, 2 and 3 the run produces one handover and a 0 percent success rate every
+time, with 1 admission out of 108, 102 and 100 evaluations, so this configuration
+carries almost no stochastic spread for a Monte Carlo campaign to average over.
+
+Nothing here is changed. Adding a serving-versus-candidate comparison would alter
+the mechanism the manuscript is about, and which behaviour is intended is the
+author's call rather than a fix to land quietly. It is recorded because it bears
+directly on the central claim: a policy that reduces unnecessary handovers has to
+be able to decline one.
+
 ## A18 — The DRX duty cycle is a function of the poll cadence, not of the terminal
 
 `ntn-rrc-drx-data-traffic` reports a DRX duty cycle and a power saving derived
