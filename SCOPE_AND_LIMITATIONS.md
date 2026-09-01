@@ -221,11 +221,22 @@ seeds 1, 2 and 3 the run produces one handover and a 0 percent success rate ever
 time, with 1 admission out of 108, 102 and 100 evaluations, so this configuration
 carries almost no stochastic spread for a Monte Carlo campaign to average over.
 
-Nothing here is changed. Adding a serving-versus-candidate comparison would alter
-the mechanism the manuscript is about, and which behaviour is intended is the
-author's call rather than a fix to land quietly. It is recorded because it bears
-directly on the central claim: a policy that reduces unnecessary handovers has to
-be able to decline one.
+The decision is deliberately unchanged: which way that tie should break decides
+what the manuscript's mechanism is, and that is the author's call rather than a
+fix to land quietly.
+
+What has changed is that the missing quantity is now recorded.
+`handover_events.csv` carries a `serving_tte_s` column, computed with the same
+estimator and the same TR 38.821 ten-degree gain threshold the candidates are
+ranked by, so the two are directly comparable. On the run above it reads:
+
+```
+t=5.000  1 -> 3   tte_target=120.00   tte_serving=120.00   success=1
+```
+
+The handover gained exactly nothing in predicted time-of-stay, and the artifact
+now says so on the row rather than leaving it to be inferred. Deciding the policy
+needs that number; producing it does not require deciding the policy.
 
 ## A18 — The DRX duty cycle is a function of the poll cadence, not of the terminal
 

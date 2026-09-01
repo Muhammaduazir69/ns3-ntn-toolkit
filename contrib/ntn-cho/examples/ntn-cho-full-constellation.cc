@@ -524,14 +524,33 @@ ChoTick()
         // A20: buffer the row and emit it when the verdict resolves next tick.
         {
             std::ostringstream pre, suf;
+            suf << std::fixed;
             pre << std::fixed << std::setprecision(3) << t << ",0,"
                 << g_serving << "," << chosen << "," << g_servSatId << ","
                 << chosen << ",0,0," << g_algorithm << ","
                 << std::setprecision(2) << servSinr << "," << tgtSinr << ","
                 << ttePred << "," << tos << ",";
+            // A19: the serving cell's own time-to-exit, computed with the same
+            // estimator and threshold the candidates were ranked by, so the two
+            // are directly comparable.
+            double servTte = -1.0;
+            if (g_tte)
+            {
+                double sLat, sLon, sAlt;
+                g_ueModels[0]->GetGeodetic(sLat, sLon, sAlt);
+                const auto r = g_tte->ComputeTte(GeoCoordinate(sLat, sLon, sAlt),
+                                                 g_ueModels[0]->GetVelocity(),
+                                                 g_servSatId,
+                                                 0,
+                                                 g_orbit ? g_orbit->GainThresholdForMinElevationDb(
+                                                               10.0, g_leoAltM)
+                                                         : 0.0);
+                servTte = r.tte.GetSeconds();
+            }
             suf << "," << std::setprecision(6) << ueLat << ","
                 << ueLon << ",0," << g_ueModels[0]->GetClassName() << ","
-                << std::setprecision(1) << servElev << "," << tgtElev << ",";
+                << std::setprecision(1) << servElev << "," << tgtElev << ","
+                << std::setprecision(2) << servTte << ",";
             g_hoPendingPrefix = pre.str();
             g_hoPendingSuffix = suf.str();
             g_hoPendingIsPP = isPP;
@@ -1101,7 +1120,12 @@ main(int argc, char* argv[])
     g_hoFile << "time_s,ue_id,source_cell,target_cell,source_sat,target_sat,"
              << "source_beam,target_beam,algorithm,sinr_before_dB,sinr_after_dB,"
              << "tte_predicted_s,time_of_stay_s,success,ping_pong,ue_lat,ue_lon,"
-             << "ue_speed_mps,mobility_type,elevation_before,elevation_after,failure_reason\n";
+             << "ue_speed_mps,mobility_type,elevation_before,elevation_after,"
+             // A19: what the terminal gave up. The selection rule never computes
+             // the serving cell's own time-to-exit, so a reader could not tell
+             // whether staying would have lasted longer than switching. The
+             // decision is unchanged; the number it would need is now recorded.
+             << "serving_tte_s,failure_reason\n";
     g_measFile.open(outputDir + "/measurements.csv");
     g_measFile << "time_s,ue_id,sat_id,beam_id,cell_id,rsrp_dBm,sinr_dB,"
                << "path_loss_dB,antenna_gain_dB,elevation_deg,range_km,"
