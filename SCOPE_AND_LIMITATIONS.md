@@ -53,6 +53,23 @@ noise floor falls faster than the bandwidth is lost. Application throughput does
 not move at all, being offered-load limited. Conformance was therefore close to
 free here, which is the main reason it should have been done sooner.
 
+**Coverage, measured by re-running every example.** Before: about forty-five
+scenarios non-conformant. After: **two**, and both on purpose.
+`ntn-tr38821-calibration` and `ntn-tr38821-array-gain-calibration` stay at 2.0 GHz
+because they calibrate against TR 38.821 Set-1, whose S-band study case is
+specified there. Calibrating against a study at a carrier the study does not use
+would be the more serious error, so they report `pass=0` and carry a band note
+saying why. Everything that represents a deployment sits at 2185 MHz.
+
+Bands other than n255/n256 are unaffected: the FR2 and THz scenarios are not NTN
+FR1 and are not judged against these tables.
+
+**Enforced, not just reported.** The flag had read `pass=0` for months with nothing
+failing on it. `tools/check_band_conformance.py` is now gate 17 of
+`check_ntn_standards.py`, runs six scenarios across six modules, and fails on
+either an uplink-block carrier or an unsupported channel width. Both arms are
+tamper-tested.
+
 **Consequence for existing results.** Any figure measured before 2026-09-01 was
 taken at 2.0 GHz in a 30 MHz channel and is not band-conformant. Numbers move by
 about a decibel, in the favourable direction, and need re-running before they can

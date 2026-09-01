@@ -157,10 +157,21 @@ def main():
     for trig in ["a3", "d1", "t1", "d2", "elevation", "ta"]:
         r = run(f'./ns3 run "ntn-cho-handover-traffic --simSeconds=60 --numUes=2 '
                 f'--trigger={trig}"')
-        m = re.search(r"handovers=(\d+)", r.stdout)
-        handovers = int(m.group(1)) if m else 0
-        check(f"ho-trigger-class {trig}", r.returncode == 0 and handovers >= 1,
-              f"handovers={handovers}")
+        # CVC-03, again. This used to regex "handovers=(\d+)", which matches
+        # "ACTUATED X2 handovers=", the count of times the vendored NR A3-RSRP
+        # and X2 machinery physically moved a UE. That number is the same
+        # whichever trigger is selected, because it is not produced by the
+        # trigger: the gate was asserting that the radio can hand over, under
+        # six different names, and would have passed with the CHO logic removed.
+        #
+        # Read the algorithm's own decision count instead, which is the quantity
+        # the trigger class actually determines.
+        m = re.search(r"CHO decisions=(\d+)", r.stdout)
+        decisions = int(m.group(1)) if m else 0
+        m_act = re.search(r"ACTUATED X2 handovers=(\d+)", r.stdout)
+        actuated = int(m_act.group(1)) if m_act else 0
+        check(f"ho-trigger-class {trig}", r.returncode == 0 and decisions >= 1,
+              f"cho_decisions={decisions} actuated_x2={actuated}")
 
     print()
     if failures:

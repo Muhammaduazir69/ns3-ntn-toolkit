@@ -57,6 +57,15 @@
 //   array_gain_summary.csv      per-regime aggregates + the pattern-fidelity error
 //
 // Quick run:  --simSeconds=60 --samplePeriodS=1.0
+//
+// BAND NOTE. This stays at 2.0 GHz deliberately, and reports
+// air_interface=mmwave-fr1-n256-uplinkcarrier with pass=0 as a result. It is
+// calibrating against TR 38.821 Set-1, whose S-band study case is specified at
+// 2 GHz; moving to the TS 38.101-5 n256 downlink block would calibrate against a
+// carrier the study does not use. Deployment scenarios in this toolkit sit at
+// 2185 MHz; a calibration against a study sits where the study puts it. See
+// SCOPE_AND_LIMITATIONS.md A12.
+
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"

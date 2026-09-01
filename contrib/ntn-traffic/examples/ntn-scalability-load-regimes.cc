@@ -275,7 +275,7 @@ struct Cfg
     /// generated TLE epoch to 2000-01-01T00:00:00Z (946684800).
     double epochUnix{1735689600.0};
     double controlHz{1.0};
-    double freqGhz{2.0};
+    double freqGhz{2.185}; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz)
     double satEirpDbm{-1.0}; ///< -1 = backend default (mmwave 55, nr 70)
     uint32_t rngRun{1};
     // Offered-load overrides (0 / <0 / "" = keep the regime preset).

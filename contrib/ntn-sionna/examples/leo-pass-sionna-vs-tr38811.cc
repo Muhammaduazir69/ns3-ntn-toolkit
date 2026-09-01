@@ -76,7 +76,7 @@ NtnRealStackHelper* g_rs = nullptr;
 Ptr<SionnaCirPropagationLossModel> g_cir;
 Ptr<NtnEnuProjectionMobilityModel> g_satEnu;
 Ptr<MobilityModel> g_ueMob;
-double g_freqHz = 2.0e9;
+double g_freqHz = 2.185e9; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz).
 double g_simTime = 12.0;
 
 // Measured-SINR statistics from the real plane, plus the TR 38.811 free-space
@@ -187,7 +187,7 @@ int
 main(int argc, char* argv[])
 {
     double duration = 12.0;
-    double freqHz = 2.0e9;
+    double freqHz = 2.185e9; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz).
     double altKm = 600.0;
     double satEirpDbm = 70.0; // healthy nr (FR1 Friis) LEO downlink
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)

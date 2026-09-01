@@ -109,7 +109,7 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("oran-ntn-emergency");
-    rs.SetCarrierFrequencyHz(2.0e9);
+    rs.SetCarrierFrequencyHz(2.185e9);
     // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
     // S-band LEO reference payload. Declared as a DENSITY so the helper
     // back-computes conducted power against the array gain instead of the

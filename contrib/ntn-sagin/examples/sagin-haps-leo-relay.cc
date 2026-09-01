@@ -148,7 +148,7 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-haps-leo-relay");
-    rs.SetCarrierFrequencyHz(2.0e9);
+    rs.SetCarrierFrequencyHz(2.185e9);
     // NT-02: declared as CONDUCTED power at the array input. This carrier has
     // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
     // reports "not asserted" rather than certifying an uncalibrated budget.

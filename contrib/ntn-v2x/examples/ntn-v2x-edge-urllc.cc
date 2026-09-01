@@ -108,7 +108,7 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-edge-urllc-" + edge);
-    rs.SetCarrierFrequencyHz(2.0e9);
+    rs.SetCarrierFrequencyHz(2.185e9);
     // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 60 dBm.
     // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
     // S-band LEO reference payload. Declared as a DENSITY so the helper
