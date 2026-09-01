@@ -200,8 +200,8 @@ The next three run on the **5G-LENA (`nr`) FR1 backend** of `NtnRealStackHelper`
 ```bash
 ./ns3 run "ntn-nr-fr1-demo --simTime=2 --numerology=1"
 ```
-A real NR data plane at FR1 numerology (30 kHz SCS) on an S-band 2.0 GHz carrier
-with 20 MHz bandwidth — the FR1 regime the FR2-locked `mmwave` path cannot reach.
+A real NR data plane at FR1 numerology (30 kHz SCS) on an S-band 2.185 GHz
+carrier (band n256 downlink, TS 38.101-5 Table 5.2-1) with 20 MHz bandwidth — the FR1 regime the FR2-locked `mmwave` path cannot reach.
 One LEO gNB at ~600 km over a few ground UEs; prints a measured NR summary.
 Args: `simTime` (s, def 2), `numUes` (def 3), `altitudeKm` (def 600),
 `numerology` (0 = 15 kHz, 1 = 30 kHz; def 1), `satEirpDbm` (def 70),

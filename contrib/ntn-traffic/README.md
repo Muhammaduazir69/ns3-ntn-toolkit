@@ -155,7 +155,7 @@ Minimal validation of `NtnRealStackHelper`: a single LEO gNB (SGP4 Walker servin
 
 ### ntn-nr-fr1-demo
 
-Proves the **5G-LENA (`nr`) FR1 NTN radio spine** on the `NtnRealStackHelper` NR backend: a real NR data plane at FR1 numerology (30 kHz SCS) on an S-band (2.0 GHz) carrier with 20 MHz bandwidth — the FR1 regime the FR2-locked `mmwave` path cannot reach. Topology: one LEO gNB at ~600 km with a few ground UEs directly below.
+Proves the **5G-LENA (`nr`) FR1 NTN radio spine** on the `NtnRealStackHelper` NR backend: a real NR data plane at FR1 numerology (30 kHz SCS) on an S-band 2.185 GHz carrier (3GPP band n256 downlink, TS 38.101-5 Table 5.2-1) with 20 MHz bandwidth — the FR1 regime the FR2-locked `mmwave` path cannot reach. Topology: one LEO gNB at ~600 km with a few ground UEs directly below.
 
 ```sh
 ./ns3 run "ntn-nr-fr1-demo --simTime=2 --numerology=1"
