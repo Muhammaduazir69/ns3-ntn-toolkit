@@ -1,6 +1,6 @@
 <h1 align="center">oran-ntn</h1>
 
-<p align="center"><strong>Space O-RAN: E2 and A1 control loops that actuate a real radio, across on-board, gateway and cloud RIC placements</strong></p>
+<p align="center"><strong>Space O-RAN: E2 and A1 control loops that actuate a real radio, across on-board, aerial, gateway and cloud RIC placements</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
