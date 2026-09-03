@@ -108,6 +108,13 @@ class NtnTteEstimator : public Object
      * \param gainThreshold_dB Minimum gain for D1 condition validity (dB)
      * \return TteResult with estimated time-to-exit and quality metrics
      */
+    /// The look-ahead horizon. A TTE at this value is SATURATED: the exit lies
+    /// beyond where the estimator can see, so the number is a floor on the true
+    /// time-to-exit rather than a measurement of it. Two saturated TTEs are not
+    /// evidence that two cells are equally good, and a policy that compares them
+    /// has to know the difference.
+    Time GetMaxPredictionWindow() const { return m_maxPredictionWindow; }
+
     TteResult ComputeTte(GeoCoordinate uePosition,
                          Vector ueVelocity,
                          uint32_t satId,

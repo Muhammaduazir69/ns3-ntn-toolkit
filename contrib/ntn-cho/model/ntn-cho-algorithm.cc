@@ -1061,7 +1061,25 @@ NtnChoAlgorithm::SelectBestCandidate() const
                                                                servingIt->beamId,
                                                                m_config.gainThreshold_dB);
             const Time bestTte = admissible.front()->tte;
-            if (servingTte.tte >= bestTte)
+
+            // A19b: a tie AT THE PREDICTION HORIZON carries no information.
+            //
+            // The first version of this check declined whenever the serving TTE
+            // was at least the best candidate's, and that turned "prefer staying
+            // on a tie" into "never hand over": measured over a 600 s pass it
+            // declined every single switch, because both sides sit at the 120 s
+            // horizon for most of the pass and equality at a cap is an artifact
+            // of where the estimator stops looking, not a statement that the two
+            // cells are equally good.
+            //
+            // When both are saturated the comparison is skipped and selection
+            // falls through to the ranking below. The rule only declines when it
+            // can actually see both exits.
+            const Time horizon = m_tteEstimator->GetMaxPredictionWindow();
+            const Time margin = MilliSeconds(100);
+            const bool bothSaturated = (servingTte.tte + margin >= horizon) &&
+                                       (bestTte + margin >= horizon);
+            if (!bothSaturated && servingTte.tte >= bestTte)
             {
                 NS_LOG_DEBUG("staying: serving TTE " << servingTte.tte.GetSeconds()
                              << " s >= best candidate " << bestTte.GetSeconds() << " s");
