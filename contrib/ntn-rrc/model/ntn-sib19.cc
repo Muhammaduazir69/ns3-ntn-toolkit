@@ -279,10 +279,23 @@ NtnSib19Broadcaster::RefreshNow()
         // slot. kMac (TS 38.213 §4.2, the DL-config offset for MAC-CE timing) is
         // set to the same coverage; both are in slots of the configured
         // numerology.
-        const double slotS = 1.0e-3 / std::pow(2.0, static_cast<double>(m_numerology));
+        // RRC-7 (2026-09-18). cellSpecificKoffset-r17 is counted in slots of
+        // the REFERENCE 15 kHz subcarrier spacing, not in slots of the
+        // numerology the cell happens to run. TS 38.331 bounds the field at
+        // 1..1023, and that ceiling only makes sense at 15 kHz: 1023 slots of
+        // 1 ms covers the ~541 ms GEO round trip, whereas at numerology 1 it
+        // would cap at 512 ms and could not express the geometry the field
+        // exists for. kmac-r17 uses the same reference spacing in FR1.
+        //
+        // This previously divided by 1 ms / 2^mu, so a 600 km shell at the
+        // default numerology broadcast 9 where the specified derivation gives
+        // 5. The value that leaves the broadcaster is now numerology-
+        // independent; converting it into the scheduler's own slots is the
+        // consumer's job, and NtnRealStackHelper does that conversion.
+        constexpr double kRefSlotS = 1.0e-3; // 15 kHz reference SCS
         const double rttS = m_ta->ComputeCommonTa().GetSeconds();
         uint32_t koff =
-            static_cast<uint32_t>(std::ceil(rttS / slotS)) + 1;
+            static_cast<uint32_t>(std::ceil(rttS / kRefSlotS)) + 1;
 
         // RRC-6: TS 38.331 bounds these fields, and the code emitted values
         // outside them.
@@ -307,11 +320,10 @@ NtnSib19Broadcaster::RefreshNow()
         if (koff > kMaxKoffset)
         {
             NS_LOG_WARN("SIB19 cell " << m_cellId << ": K_offset " << koff
-                        << " slots exceeds the TS 38.331 ceiling of " << kMaxKoffset
-                        << " at numerology " << static_cast<uint32_t>(m_numerology)
-                        << "; clamping. The broadcast offset no longer covers the "
-                        << rttS * 1e3 << " ms round trip, which this numerology cannot "
-                           "express at this geometry.");
+                        << " reference slots exceeds the TS 38.331 ceiling of "
+                        << kMaxKoffset << "; clamping. The broadcast offset no longer "
+                           "covers the " << rttS * 1e3 << " ms round trip, which the "
+                           "field cannot express at this geometry.");
             koff = kMaxKoffset;
         }
         m_latest.cellSpecificKoffset = koff;
@@ -341,11 +353,17 @@ NtnSib19Broadcaster::RefreshNow()
         // how fast this geometry actually invalidates: the time for the common
         // TA to drift by one slot, capped to the enumerated set.
         {
+            // RRC-7: this block asks how long the broadcast stays usable, which
+            // is a question about the cell's own scheduling granularity, so it
+            // keeps the configured-numerology slot. Only the K_offset field
+            // above is counted in 15 kHz reference slots.
+            const double schedSlotS =
+                1.0e-3 / std::pow(2.0, static_cast<double>(m_numerology));
             const double drift = std::fabs(m_latest.taCommonDriftRate);
             double validS = 900.0;
             if (drift > 0.0)
             {
-                validS = slotS / drift;
+                validS = schedSlotS / drift;
             }
             static const double kEnum[] = {5, 10, 15, 20, 25, 30, 35, 40,
                                            45, 50, 55, 60, 120, 180, 240, 900};

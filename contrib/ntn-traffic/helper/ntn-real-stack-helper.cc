@@ -886,8 +886,22 @@ NtnRealStackHelper::BuildNrRadio()
     {
         // RRC-1: prefer the value the network BROADCAST over a local
         // re-derivation, so the scheduler and SIB19 cannot disagree.
-        m_consumedKOffsetSlots =
-            (m_broadcastKOffsetSlots > 0) ? m_broadcastKOffsetSlots : ComputeKOffsetSlots();
+        //
+        // RRC-7 (2026-09-18): the broadcast field is counted in slots of the
+        // 15 kHz reference subcarrier spacing (TS 38.331), while N2Delay below
+        // is counted in slots of the numerology this cell actually runs. The
+        // two are the same only at numerology 0, so convert rather than adding
+        // a 15 kHz slot count to a 30 kHz scheduler. ComputeKOffsetSlots()
+        // already works in the configured numerology and needs no scaling.
+        if (m_broadcastKOffsetSlots > 0)
+        {
+            m_consumedKOffsetSlots =
+                m_broadcastKOffsetSlots * (1u << m_numerology);
+        }
+        else
+        {
+            m_consumedKOffsetSlots = ComputeKOffsetSlots();
+        }
         // Read the stack's default N2Delay so we ADD to it, not clobber it.
         UintegerValue n2v;
         m_nr->GetGnbPhy(m_enbDevs.Get(0), 0)->GetAttribute("N2Delay", n2v);

@@ -568,11 +568,29 @@ class Sib19FieldsPopulatedAndInRangeTest : public TestCase
                                   "at zenith the range rate is zero and the validity is the "
                                   "maximum, correctly");
 
-        // ---- GEO: the ranges must be respected ----------------------------
-        // 35786 km one way is a 238.8 ms round trip; at numerology 1 that is
-        // 478 slots, which fits K_offset but is close to kMac's ceiling. Push
-        // to numerology 3 (0.125 ms slots) to exceed both.
-        const Sib19Content geo = Broadcast(35786e3, 0.0, 3, 0.0);
+        // ---- The field does not move with the numerology -------------------
+        //
+        // RRC-7: cellSpecificKoffset-r17 counts slots of the 15 kHz REFERENCE
+        // subcarrier spacing, so the same geometry must broadcast the same
+        // number whatever the cell runs. Before the fix this block used
+        // numerology 3 to drive the value past its ceiling, which only worked
+        // because the derivation was numerology-dependent.
+        {
+            const Sib19Content mu0 = Broadcast(35786e3, 0.0, 0, 0.0);
+            const Sib19Content mu3 = Broadcast(35786e3, 0.0, 3, 0.0);
+            NS_TEST_ASSERT_MSG_EQ(mu0.cellSpecificKoffset, mu3.cellSpecificKoffset,
+                                  "K_offset is counted in 15 kHz reference slots and must not "
+                                  "change with the configured numerology (got "
+                                      << mu0.cellSpecificKoffset << " at mu=0 and "
+                                      << mu3.cellSpecificKoffset << " at mu=3)");
+        }
+
+        // ---- The ranges must be respected when the geometry exceeds them ---
+        // At 15 kHz reference slots the standard's ranges cover every real NTN
+        // geometry: even a transparent GEO round trip is about 478 slots, inside
+        // both ceilings. To exercise the clamps at all the geometry has to be
+        // pushed past GEO, which is the honest way to test them now.
+        const Sib19Content geo = Broadcast(200000e3, 0.0, 1, 0.0);
         NS_TEST_ASSERT_MSG_LT(geo.cellSpecificKoffset, 1024u,
                               "cellSpecificKoffset-r17 is INTEGER (1..1023); "
                               << geo.cellSpecificKoffset << " cannot be encoded");
@@ -588,6 +606,14 @@ class Sib19FieldsPopulatedAndInRangeTest : public TestCase
         NS_TEST_ASSERT_MSG_NE(geo.kMac, geo.cellSpecificKoffset,
                               "at a geometry past both ceilings the clamps differ, so the two "
                               "fields must differ too");
+
+        // ---- A real GEO geometry fits both ranges without clamping --------
+        const Sib19Content realGeo = Broadcast(35786e3, 0.0, 1, 0.0);
+        NS_TEST_ASSERT_MSG_LT(realGeo.cellSpecificKoffset, 1024u,
+                              "a transparent GEO round trip must fit K_offset's range at the "
+                              "15 kHz reference spacing");
+        NS_TEST_ASSERT_MSG_LT(realGeo.kMac, 513u,
+                              "and must fit kMac's smaller range too");
 
         // ---- LEO still fits, so the clamp must not be firing everywhere ----
         NS_TEST_ASSERT_MSG_EQ(leo.kMac, leo.cellSpecificKoffset,
@@ -608,8 +634,15 @@ class Sib19KOffsetPopulatedTest : public TestCase
     void DoRun() override
     {
         // Satellite at 600 km straight overhead -> common TA (RTT) = 2*600km/c
-        // = 4.0028 ms. At numerology 1 (0.5 ms slot) K_offset = ceil(4.0028/0.5)
-        // + 1 = 9 slots.
+        // = 4.0028 ms.
+        //
+        // RRC-7: cellSpecificKoffset-r17 counts slots of the 15 kHz REFERENCE
+        // subcarrier spacing, so the answer is ceil(4.0028/1.0) + 1 = 5 and
+        // does NOT move with the cell's numerology. This test used to assert 9
+        // by dividing with the 0.5 ms slot of numerology 1, which is the
+        // conversion the scheduler applies on consumption, not the value that
+        // goes on the wire. The numerology is still set below precisely so the
+        // test would fail again if the broadcaster reintroduced the dependency.
         Ptr<ConstantVelocityMobilityModel> sat = CreateObject<ConstantVelocityMobilityModel>();
         sat->SetPosition(Vector{0.0, 0.0, 600e3});
         sat->SetVelocity(Vector{0.0, 0.0, 0.0});
@@ -633,13 +666,13 @@ class Sib19KOffsetPopulatedTest : public TestCase
         const auto& sib = bc->GetLatest();
         const double c = 299792458.0;
         const double rttS = 2.0 * 600e3 / c;
-        const double slotS = 0.5e-3;
-        const uint32_t expected = static_cast<uint32_t>(std::ceil(rttS / slotS)) + 1;
+        const double kRefSlotS = 1.0e-3; // 15 kHz reference SCS
+        const uint32_t expected = static_cast<uint32_t>(std::ceil(rttS / kRefSlotS)) + 1;
 
         NS_TEST_ASSERT_MSG_NE(sib.cellSpecificKoffset, 0u,
                               "K_offset must not be 0 on the wire (R3)");
         NS_TEST_ASSERT_MSG_EQ(sib.cellSpecificKoffset, expected,
-                              "K_offset must cover the common-TA round trip in slots");
+                              "K_offset must cover the common-TA round trip in 15 kHz reference slots");
         NS_TEST_ASSERT_MSG_EQ(sib.kMac, expected, "kMac must match K_offset coverage");
         Simulator::Destroy();
     }

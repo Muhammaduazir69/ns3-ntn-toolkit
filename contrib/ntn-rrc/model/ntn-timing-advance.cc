@@ -208,12 +208,21 @@ NtnTimingAdvance::ComputeTaDriftRate(Time eps) const
     const Vector ue1{ue0.x + ueV.x * dt, ue0.y + ueV.y * dt, ue0.z + ueV.z * dt};
     const Vector sat1{sat0.x + satV.x * dt, sat0.y + satV.y * dt, sat0.z + satV.z * dt};
     const double d1 = CalculateDistance(ue1, sat1);
-    // TA_total is the round-trip service-link delay (2*d/c) for BOTH payload
-    // modes — see ComputeTotalTa(). t0 above already uses 2*d/c, so t1 must too;
-    // a mode-dependent multiplier here made regenerative drift ~= (d/c - 2d/c)/dt
-    // ~= -0.18 s/s at LEO regardless of geometry (poisoning SIB19
-    // taCommonDriftRate). Use 2.0 unconditionally to match ComputeTotalTa().
-    const Time t1 = Seconds(2.0 * d1 / kSpeedOfLight);
+
+    // RRC-8 (2026-09-18): t0 and t1 must cover the SAME path.
+    //
+    // ComputeTotalTa() spans the service link plus, in Transparent mode, the
+    // gateway feeder leg. This projection used only the service slant, so with
+    // a gateway attached the difference carried a spurious -2*feeder/c term and
+    // the reported drift was wrong by a constant far larger than the drift
+    // itself. The feeder endpoint is fixed on the ground while the satellite
+    // moves, so the feeder leg is projected with the satellite as well.
+    double feeder1 = 0.0;
+    if (m_payloadMode == PayloadMode::Transparent && m_gw)
+    {
+        feeder1 = CalculateDistance(sat1, m_gw->GetPosition());
+    }
+    const Time t1 = Seconds(2.0 * (d1 + feeder1) / kSpeedOfLight);
     const double dTa = (t1 - t0).GetSeconds();
     return (dt > 0.0) ? (dTa / dt) : 0.0;
 }
