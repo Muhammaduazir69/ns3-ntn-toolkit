@@ -21,8 +21,8 @@ authors:
 repository-code: "https://github.com/Muhammaduazir69/ns3-ntn-toolkit"
 url: "https://muhammaduazir69.github.io/ns3-ntn-toolkit/"
 license: GPL-2.0-only
-version: "2.5.0"
-date-released: "2026-08-27"
+version: "2.6.0"
+date-released: "2026-09-19"
 keywords:
   - 6G
   - non-terrestrial networks
