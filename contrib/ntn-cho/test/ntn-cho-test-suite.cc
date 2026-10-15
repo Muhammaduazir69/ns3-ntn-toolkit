@@ -920,6 +920,178 @@ class NtnTteEstimatorComputeTteTestCase : public TestCase
     }
 };
 
+// Shared fixture for the ephemeris and exit-policy tests: a satellite crossing
+// directly over a terminal on the equator, the geometry CHO-8 already
+// validates against spherical truth, with a nadir-fixed 4-degree beam.
+static Ptr<NtnOrbitPredictor>
+MakeCrossingPredictor(double vx, Ptr<ConstantVelocityMobilityModel>& satMob)
+{
+    satMob = CreateObject<ConstantVelocityMobilityModel>();
+    satMob->SetPosition(Vector(6371e3 + 600e3, 0.0, 0.0));
+    satMob->SetVelocity(Vector(0.0, vx, 0.0));
+    auto pred = CreateObject<NtnOrbitPredictor>();
+    pred->SetKinematicsSource(1, satMob);
+    pred->SetGeometricBeam(30.0, 4.0);
+    pred->SetSteeredBeam(false);
+    return pred;
+}
+
+static Ptr<NtnTteEstimator>
+MakeFineEstimator(Ptr<NtnOrbitPredictor> pred)
+{
+    auto est = CreateObject<NtnTteEstimator>();
+    est->SetOrbitPredictor(pred);
+    est->SetAttribute("PredictionStep", TimeValue(MilliSeconds(100)));
+    est->SetAttribute("MaxPredictionWindow", TimeValue(Seconds(120.0)));
+    est->SetAttribute("BinarySearchTolerance", TimeValue(MilliSeconds(10)));
+    return est;
+}
+
+/**
+ * An along-track ephemeris error is a time shift of the pass: a satellite the
+ * network believes is 2 km further along its track leaves the beam 2 km / v
+ * earlier. The shift is predicted from the geometry, not read off the model.
+ */
+class ChoEphemerisErrorShiftsExitTestCase : public TestCase
+{
+  public:
+    ChoEphemerisErrorShiftsExitTestCase()
+        : TestCase("ephemeris error: an along-track offset shifts the predicted exit by offset/v")
+    {
+    }
+
+    void DoRun() override
+    {
+        const double vx = 7560.0;
+        Ptr<ConstantVelocityMobilityModel> satMob;
+        auto pred = MakeCrossingPredictor(vx, satMob);
+        auto est = MakeFineEstimator(pred);
+        const GeoCoordinate ue(0.0, 0.0, 0.0);
+
+        const double t0 = est->ComputeTte(ue, Vector(0, 0, 0), 1, 0, -3.0).tte.GetSeconds();
+        const double alongM = 2000.0;
+        pred->SetEphemerisErrorRtn(1, 0.0, alongM, 0.0);
+        const double t1 = est->ComputeTte(ue, Vector(0, 0, 0), 1, 0, -3.0).tte.GetSeconds();
+
+        // Ahead along the track means out of the beam sooner, by offset / speed.
+        const double expected = -alongM / vx;
+        NS_TEST_ASSERT_MSG_LT(t1, t0, "a satellite believed further along its track exits sooner");
+        NS_TEST_ASSERT_MSG_EQ_TOL(t1 - t0, expected, 0.2 * std::abs(expected),
+                                  "along-track error must shift the exit by offset / speed ("
+                                      << expected << " s); got " << (t1 - t0) << " s");
+
+        // The error lives in the prediction only. The mobility model the
+        // scenario owns, which stands for the true orbit, is untouched.
+        NS_TEST_ASSERT_MSG_EQ_TOL(satMob->GetPosition().y, 0.0, 1e-9,
+                                  "injecting an ephemeris error must not move the true satellite");
+
+        pred->ClearEphemerisErrors();
+        const double t2 = est->ComputeTte(ue, Vector(0, 0, 0), 1, 0, -3.0).tte.GetSeconds();
+        NS_TEST_ASSERT_MSG_EQ_TOL(t2, t0, 0.02, "clearing the error restores the exact prediction");
+        Simulator::Destroy();
+    }
+};
+
+/**
+ * First-order error propagation: along-track sigma maps to sigma / v at any
+ * geometry, while a cross-track offset barely moves the exit of a pass over the
+ * ground track (its first-order sensitivity is proportional to the terminal's
+ * cross-track distance, which is zero here). The call must also leave any
+ * injected error exactly as it found it.
+ */
+class ChoTteSigmaPropagationTestCase : public TestCase
+{
+  public:
+    ChoTteSigmaPropagationTestCase()
+        : TestCase("ComputeTteSigma: along-track sigma maps to sigma/v; cross-track vanishes overhead")
+    {
+    }
+
+    void DoRun() override
+    {
+        const double vx = 7560.0;
+        Ptr<ConstantVelocityMobilityModel> satMob;
+        auto pred = MakeCrossingPredictor(vx, satMob);
+        auto est = MakeFineEstimator(pred);
+        const GeoCoordinate ue(0.0, 0.0, 0.0);
+        pred->SetEphemerisErrorRtn(1, 10.0, 20.0, 30.0);
+
+        const double sAlong = est->ComputeTteSigma(ue, Vector(0, 0, 0), 1, 0, -3.0, 0.0, 2000.0, 0.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(sAlong, 2000.0 / vx, 0.2 * 2000.0 / vx,
+                                  "along-track sigma must propagate as sigma / v");
+        const double sCross = est->ComputeTteSigma(ue, Vector(0, 0, 0), 1, 0, -3.0, 0.0, 0.0, 2000.0);
+        NS_TEST_ASSERT_MSG_LT(sCross, 0.2 * sAlong,
+                              "a pass over the ground track is insensitive to cross-track error "
+                              "at first order");
+        const Vector after = pred->GetEphemerisErrorRtn(1);
+        NS_TEST_ASSERT_MSG_EQ_TOL(after.x, 10.0, 1e-12, "radial error restored");
+        NS_TEST_ASSERT_MSG_EQ_TOL(after.y, 20.0, 1e-12, "along-track error restored");
+        NS_TEST_ASSERT_MSG_EQ_TOL(after.z, 30.0, 1e-12, "cross-track error restored");
+        NS_TEST_ASSERT_MSG_EQ_TOL(est->ComputeTteSigma(ue, Vector(0, 0, 0), 1, 0, -3.0, 0, 0, 0),
+                                  0.0, 1e-12, "no uncertainty, no sigma");
+        Simulator::Destroy();
+    }
+};
+
+/**
+ * Exit-triggered selection: while the serving cell has more life than the
+ * margin the rule stays put, even though a longer-lived candidate exists (the
+ * eager rule would switch); once the serving cell is inside the margin it takes
+ * the LONGEST-lived candidate, not the strongest one.
+ */
+class ChoExitTriggeredSelectionTestCase : public TestCase
+{
+  public:
+    ChoExitTriggeredSelectionTestCase()
+        : TestCase("tteExitTriggered: stay until the serving exit, then take the longest-lived cell")
+    {
+    }
+
+    uint16_t Select(Time margin, bool exitTriggered)
+    {
+        Ptr<ConstantVelocityMobilityModel> satMob;
+        auto pred = MakeCrossingPredictor(7560.0, satMob); // serving: exits in about 3 s
+        auto est = MakeFineEstimator(pred);
+        auto cho = CreateObject<NtnChoAlgorithm>();
+        cho->SetOrbitPredictor(pred);
+        cho->SetTteEstimator(est);
+        auto cfg = cho->GetConfig();
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_TTE_AWARE;
+        cfg.tteRequireD1 = false;
+        cfg.tteExitTriggered = exitTriggered;
+        cfg.tteExitMargin = margin;
+        cfg.tteMinimum = Seconds(10.0);
+        cfg.maxCandidates = 6;
+        cho->Configure(cfg);
+        cho->UpdateUeKinematics(GeoCoordinate(0.0, 0.0, 0.0), Vector(0, 0, 0));
+        cho->AddCandidateCell(1, 1, 0);
+        cho->UpdateCandidateSlantRange(1, 600e3);
+        cho->UpdateMeasurement(1, 10.0, 0.0);
+        cho->SetServingCell(1);
+        cho->AddCandidateCell(2, 2, 0);
+        cho->AddCandidateCell(3, 3, 0);
+        cho->UpdateMeasurement(2, 5.0, 0.0);  // weaker, lives longer
+        cho->UpdateMeasurement(3, 15.0, 0.0); // stronger, sets sooner
+        cho->SetCandidateStateForTest(2, Seconds(50.0), true, true);
+        cho->SetCandidateStateForTest(3, Seconds(30.0), true, true);
+        const uint16_t pick = cho->SelectBestCandidate();
+        Simulator::Destroy();
+        return pick;
+    }
+
+    void DoRun() override
+    {
+        NS_TEST_ASSERT_MSG_EQ(Select(Seconds(5.0), true), 2,
+                              "inside the margin the rule must take the longest-lived candidate "
+                              "(cell 2, 50 s) rather than the strongest (cell 3, 15 dB)");
+        NS_TEST_ASSERT_MSG_EQ(Select(Seconds(1.0), true), NtnChoAlgorithm::INVALID_CELL_ID,
+                              "with the serving cell still outside the margin the rule must stay");
+        NS_TEST_ASSERT_MSG_NE(Select(Seconds(1.0), false), NtnChoAlgorithm::INVALID_CELL_ID,
+                              "the eager rule switches in the same state, which is the difference "
+                              "the exit trigger exists to make");
+    }
+};
+
 class NtnGeodeticFixedMobilityTestCase : public TestCase
 {
   public:
@@ -2070,6 +2242,9 @@ class NtnChoTestSuite : public TestSuite
                     TestCase::Duration::QUICK);
         AddTestCase(new ChoLtmL1CadenceTestCase, TestCase::Duration::QUICK);
         AddTestCase(new ChoNtnNtnCandidateReferenceTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new ChoEphemerisErrorShiftsExitTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new ChoTteSigmaPropagationTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new ChoExitTriggeredSelectionTestCase, TestCase::Duration::QUICK);
     }
 };
 

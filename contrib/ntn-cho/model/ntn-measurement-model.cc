@@ -241,15 +241,25 @@ NtnMeasurementModel::ComputeDopplerShift(GeoCoordinate uePosition, uint32_t satI
 {
     NS_LOG_FUNCTION(this << satId);
 
-    Ptr<SatMobilityModel> satMob = m_orbitPredictor->GetSatelliteMobility(satId);
-    GeoCoordinate satPos = satMob->GetGeoPosition();
-
-    // Get satellite velocity from mobility model
-    Vector satVel = satMob->GetVelocity(); // m/s in ECEF
+    // The satellite may be known only through a kinematics source (the SGP4
+    // path, which has no SatMobilityModel). Dereferencing
+    // GetSatelliteMobility() unconditionally segfaulted that configuration the
+    // first time a measurement asked for a Doppler shift.
+    Vector satCart;
+    Vector satVel; // m/s in ECEF
+    if (!m_orbitPredictor->GetPredictedSatEcef(satId, satCart, satVel))
+    {
+        Ptr<SatMobilityModel> satMob = m_orbitPredictor->GetSatelliteMobility(satId);
+        if (!satMob)
+        {
+            return 0.0;
+        }
+        satCart = satMob->GetGeoPosition().ToVector();
+        satVel = satMob->GetVelocity();
+    }
 
     // Vector from UE to satellite
     Vector ueCart = uePosition.ToVector();
-    Vector satCart = satPos.ToVector();
     double dx = satCart.x - ueCart.x;
     double dy = satCart.y - ueCart.y;
     double dz = satCart.z - ueCart.z;

@@ -318,9 +318,11 @@ ChoTick()
     // against moving references.
     if (decisionTick)
     {
-        double ueLatD, ueLonD, ueAltD;
-        g_ueModels[0]->GetGeodetic(ueLatD, ueLonD, ueAltD);
-        g_cho->UpdateUeKinematics(GeoCoordinate(ueLatD, ueLonD, ueAltD),
+        // GeoCoordinate defaults to a SPHERICAL Earth, while GetGeodetic returns
+        // WGS84 latitude and height, so building one from the other moved the
+        // terminal by about 19 km at 30 degrees latitude. Build it from the
+        // ECEF vector instead, which round-trips exactly.
+        g_cho->UpdateUeKinematics(GeoCoordinate(g_ueModels[0]->GetPosition()),
                                   g_ueModels[0]->GetVelocity());
         g_cho->EvaluateConditions();
         for (const uint16_t cid : g_candCellIds)
@@ -347,11 +349,8 @@ ChoTick()
         // time-to-exit was zero: the oracle reported the exit time of a
         // terminal that was never in the beam. Use the UE's own position and
         // velocity, which is what a time-to-exit is defined against.
-        double ueLatT = 0.0;
-        double ueLonT = 0.0;
-        double ueAltT = 0.0;
-        g_ueModels[0]->GetGeodetic(ueLatT, ueLonT, ueAltT);
-        const GeoCoordinate ueGeoNow(ueLatT, ueLonT, ueAltT);
+        // Spherical GeoCoordinate from the ECEF vector, not from WGS84 geodetic.
+        const GeoCoordinate ueGeoNow(g_ueModels[0]->GetPosition());
         // CHO-2b: the threshold must be on the quantity the search examines,
         // which is antenna gain. g_qualityTh is a SINR threshold (default
         // -3 dB); against a 26 to 29 dB steered-beam gain it can never be
@@ -536,9 +535,7 @@ ChoTick()
             double servTte = -1.0;
             if (g_tte)
             {
-                double sLat, sLon, sAlt;
-                g_ueModels[0]->GetGeodetic(sLat, sLon, sAlt);
-                const auto r = g_tte->ComputeTte(GeoCoordinate(sLat, sLon, sAlt),
+                const auto r = g_tte->ComputeTte(GeoCoordinate(g_ueModels[0]->GetPosition()),
                                                  g_ueModels[0]->GetVelocity(),
                                                  g_servSatId,
                                                  0,

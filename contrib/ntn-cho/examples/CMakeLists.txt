@@ -82,3 +82,15 @@ build_lib_example(
     ${libmmwave}
     ${liblte}
 )
+
+build_lib_example(
+  NAME ntn-cho-tte-campaign
+  SOURCE_FILES ntn-cho-tte-campaign.cc
+  LIBRARIES_TO_LINK
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libpropagation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+)

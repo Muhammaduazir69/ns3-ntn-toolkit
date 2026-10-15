@@ -36,11 +36,18 @@ NtnTteEstimator::GetTypeId()
                           TimeValue(Seconds(1.0)),
                           MakeTimeAccessor(&NtnTteEstimator::m_predictionStep),
                           MakeTimeChecker(MilliSeconds(100), Seconds(10)))
+            // The ceiling was 600 s, shorter than a single LEO pass above a low
+            // elevation mask (about 10 min at 550 km and 25 deg, over 20 min
+            // at 1200 km and 10 deg). A horizon that cannot reach the exit
+            // reports every long-lived cell as "at least the horizon", which
+            // is the saturated tie recorded as A19b. One hour covers any LEO
+            // pass; the 120 s default is kept for the existing scenarios.
             .AddAttribute("MaxPredictionWindow",
-                          "Maximum look-ahead time for TTE prediction",
+                          "Maximum look-ahead time for TTE prediction. Set it to cover a full "
+                          "pass when exit times are compared across candidates.",
                           TimeValue(Seconds(120.0)),
                           MakeTimeAccessor(&NtnTteEstimator::m_maxPredictionWindow),
-                          MakeTimeChecker(Seconds(10), Seconds(600)))
+                          MakeTimeChecker(Seconds(10), Seconds(3600)))
             .AddAttribute("BinarySearchTolerance",
                           "Precision of binary search for exit time",
                           TimeValue(MilliSeconds(100)),
@@ -204,6 +211,57 @@ NtnTteEstimator::ComputeTte(GeoCoordinate uePosition,
     return result;
 }
 
+double
+NtnTteEstimator::ComputeTteSigma(GeoCoordinate uePosition,
+                                 Vector ueVelocity,
+                                 uint32_t satId,
+                                 uint32_t beamId,
+                                 double gainThreshold_dB,
+                                 double sigmaRadialM,
+                                 double sigmaAlongM,
+                                 double sigmaCrossM) const
+{
+    NS_ASSERT_MSG(m_orbitPredictor, "OrbitPredictor not set");
+    if (sigmaRadialM <= 0.0 && sigmaAlongM <= 0.0 && sigmaCrossM <= 0.0)
+    {
+        return 0.0;
+    }
+    const TteResult nominal = ComputeTte(uePosition, ueVelocity, satId, beamId, gainThreshold_dB);
+    if (!nominal.isValid || nominal.tte <= Seconds(0))
+    {
+        return 0.0;
+    }
+    const Vector base = m_orbitPredictor->GetEphemerisErrorRtn(satId);
+    const double sig[3] = {sigmaRadialM, sigmaAlongM, sigmaCrossM};
+    double var = 0.0;
+    for (int k = 0; k < 3; ++k)
+    {
+        if (sig[k] <= 0.0)
+        {
+            continue;
+        }
+        // Central difference: the exit time is not linear in a cross-track or
+        // radial offset near a grazing pass, and a one-sided step would fold
+        // that curvature into the slope.
+        Vector up = base;
+        Vector dn = base;
+        double* u = (k == 0 ? &up.x : (k == 1 ? &up.y : &up.z));
+        double* d = (k == 0 ? &dn.x : (k == 1 ? &dn.y : &dn.z));
+        *u += sig[k];
+        *d -= sig[k];
+        m_orbitPredictor->SetEphemerisErrorRtn(satId, up.x, up.y, up.z);
+        const double tUp =
+            ComputeTte(uePosition, ueVelocity, satId, beamId, gainThreshold_dB).tte.GetSeconds();
+        m_orbitPredictor->SetEphemerisErrorRtn(satId, dn.x, dn.y, dn.z);
+        const double tDn =
+            ComputeTte(uePosition, ueVelocity, satId, beamId, gainThreshold_dB).tte.GetSeconds();
+        const double half = 0.5 * (tUp - tDn); // = d(tte)/d(axis) * sigma
+        var += half * half;
+    }
+    m_orbitPredictor->SetEphemerisErrorRtn(satId, base.x, base.y, base.z);
+    return std::sqrt(var);
+}
+
 std::vector<NtnTteEstimator::TteResult>
 NtnTteEstimator::ComputeBatchTte(GeoCoordinate uePosition,
                                   Vector ueVelocity,
@@ -303,7 +361,8 @@ NtnTteEstimator::ComputeTteDistance(GeoCoordinate uePosition,
         return result;
     }
 
-    result.tte = FindDistanceExitTime(uePosition, satId, beamId, d1Threshold_m, tGood, tBad);
+    result.tte =
+        FindDistanceExitTime(uePosition, ueVelocity, satId, beamId, d1Threshold_m, tGood, tBad);
     result.exitGain_dB = m_orbitPredictor->ComputeBeamGain(
         satId, beamId, ProjectUePosition(uePosition, ueVelocity, result.tte));
     result.isValid = true;
@@ -362,6 +421,7 @@ NtnTteEstimator::FindBeamExitTime(GeoCoordinate uePos,
 
 Time
 NtnTteEstimator::FindDistanceExitTime(GeoCoordinate uePos,
+                                       Vector ueVelocity,
                                        uint32_t satId,
                                        uint32_t beamId,
                                        double distThreshold_m,
@@ -378,9 +438,13 @@ NtnTteEstimator::FindDistanceExitTime(GeoCoordinate uePos,
         }
 
         Time tMid = Seconds((tGood.GetSeconds() + tBad.GetSeconds()) / 2.0);
-        auto snap = m_orbitPredictor->GetBeamSnapshotAtTime(satId, beamId, uePos, tMid);
+        // The coarse search above moves the terminal; the refinement has to
+        // move it the same way, or it brackets one geometry and refines
+        // another (the CHO-13 defect, which was fixed only in the gain search).
+        const GeoCoordinate ueAtMid = ProjectUePosition(uePos, ueVelocity, tMid);
+        auto snap = m_orbitPredictor->GetBeamSnapshotAtTime(satId, beamId, ueAtMid, tMid);
 
-        Vector uCart = uePos.ToVector();
+        Vector uCart = ueAtMid.ToVector();
         Vector bCart = snap.beamCenter.ToVector();
         double dx = uCart.x - bCart.x;
         double dy = uCart.y - bCart.y;

@@ -332,6 +332,21 @@ Sgp4MobilityModel::GetEcefPosition() const
     return EciToEcef(m_cachedEci, unix_s);
 }
 
+void
+Sgp4MobilityModel::GetEcefStateAt(Time offset, Vector& posEcef, Vector& velEcef) const
+{
+    const double unix_s =
+        m_elements.epoch_unix_s + Simulator::Now().GetSeconds() + offset.GetSeconds();
+    Vector posEci;
+    Vector velEci;
+    Propagate(unix_s, posEci, velEci);
+    posEcef = EciToEcef(posEci, unix_s);
+    // v_ecef = R(v_eci) - omega x r_ecef, the same transport GetEcefVelocity uses.
+    const Vector vRot = EciToEcef(velEci, unix_s);
+    const double w = kEarthRotationRadS;
+    velEcef = Vector(vRot.x + w * posEcef.y, vRot.y - w * posEcef.x, vRot.z);
+}
+
 Vector
 Sgp4MobilityModel::GetEcefVelocity() const
 {

@@ -211,6 +211,75 @@ NtnOrbitPredictor::SetKinematicsSource(uint32_t satId, Ptr<MobilityModel> mob)
     m_kinematics[satId] = mob;
 }
 
+void
+NtnOrbitPredictor::SetEphemerisErrorRtn(uint32_t satId, double radialM, double alongM, double crossM)
+{
+    m_ephErrorRtn[satId] = Vector(radialM, alongM, crossM);
+}
+
+void
+NtnOrbitPredictor::ClearEphemerisErrors()
+{
+    m_ephErrorRtn.clear();
+}
+
+Vector
+NtnOrbitPredictor::GetEphemerisErrorRtn(uint32_t satId) const
+{
+    auto e = m_ephErrorRtn.find(satId);
+    return e == m_ephErrorRtn.end() ? Vector(0.0, 0.0, 0.0) : e->second;
+}
+
+Vector
+NtnOrbitPredictor::KinematicsPosition(uint32_t satId, const Ptr<MobilityModel>& mob) const
+{
+    const Vector r = mob->GetPosition();
+    auto e = m_ephErrorRtn.find(satId);
+    if (e == m_ephErrorRtn.end())
+    {
+        return r;
+    }
+    // RTN basis from the reported state. The along-track axis is built from
+    // the INERTIAL velocity (v_ecef + omega x r): the Earth-fixed velocity of a
+    // LEO satellite is tilted by the ground's rotation, and an error model
+    // stated along the orbit has to follow the orbit.
+    constexpr double kOmega = 7.2921159e-5;
+    const Vector ve = mob->GetVelocity();
+    const Vector v(ve.x - kOmega * r.y, ve.y + kOmega * r.x, ve.z);
+    const double rn = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z);
+    if (rn <= 0.0)
+    {
+        return r;
+    }
+    const Vector R(r.x / rn, r.y / rn, r.z / rn);
+    Vector N(r.y * v.z - r.z * v.y, r.z * v.x - r.x * v.z, r.x * v.y - r.y * v.x);
+    const double nn = std::sqrt(N.x * N.x + N.y * N.y + N.z * N.z);
+    if (nn <= 0.0)
+    {
+        return r;
+    }
+    N = Vector(N.x / nn, N.y / nn, N.z / nn);
+    // T = N x R completes the right-handed triad and points along the motion.
+    const Vector T(N.y * R.z - N.z * R.y, N.z * R.x - N.x * R.z, N.x * R.y - N.y * R.x);
+    const Vector& d = e->second; // (radial, along, cross)
+    return Vector(r.x + d.x * R.x + d.y * T.x + d.z * N.x,
+                  r.y + d.x * R.y + d.y * T.y + d.z * N.y,
+                  r.z + d.x * R.z + d.y * T.z + d.z * N.z);
+}
+
+bool
+NtnOrbitPredictor::GetPredictedSatEcef(uint32_t satId, Vector& pos, Vector& vel) const
+{
+    auto kin = m_kinematics.find(satId);
+    if (kin == m_kinematics.end() || !kin->second)
+    {
+        return false;
+    }
+    pos = KinematicsPosition(satId, kin->second);
+    vel = kin->second->GetVelocity();
+    return true;
+}
+
 bool
 NtnOrbitPredictor::HasUsableKinematics(uint32_t satId) const
 {
@@ -315,7 +384,7 @@ NtnOrbitPredictor::GetBeamSnapshot(uint32_t satId,
     auto kinNow = m_kinematics.find(satId);
     if (kinNow != m_kinematics.end())
     {
-        satPos = GeoCoordinate(kinNow->second->GetPosition());
+        satPos = GeoCoordinate(KinematicsPosition(satId, kinNow->second));
     }
     else if (satMob)
     {
@@ -413,7 +482,7 @@ NtnOrbitPredictor::GetBeamSnapshotAtTime(uint32_t satId,
     {
         // CHO-2: real orbital kinematics, registered separately because the
         // toolkit's SGP4 model is not a SatMobilityModel.
-        satCartNow = kin->second->GetPosition();
+        satCartNow = KinematicsPosition(satId, kin->second);
         satVel = kin->second->GetVelocity();
     }
     else if (satMob)
@@ -702,7 +771,7 @@ NtnOrbitPredictor::ComputeBeamGain(uint32_t satId,
         auto kin = m_kinematics.find(satId);
         if (kin != m_kinematics.end())
         {
-            satEcef = kin->second->GetPosition();
+            satEcef = KinematicsPosition(satId, kin->second);
         }
         else
         {
@@ -748,7 +817,7 @@ NtnOrbitPredictor::ResolveSatPosition(uint32_t satId, GeoCoordinate& out) const
     auto kin = m_kinematics.find(satId);
     if (kin != m_kinematics.end() && kin->second)
     {
-        out = GeoCoordinate(kin->second->GetPosition());
+        out = GeoCoordinate(KinematicsPosition(satId, kin->second));
         return true;
     }
     Ptr<SatMobilityModel> satMob = GetSatelliteMobility(satId);

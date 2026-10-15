@@ -174,6 +174,69 @@ class NtnChoAlgorithm : public Object
         ///
         /// Set false to reproduce the pre-2026-09-02 behaviour for comparison.
         bool requireBetterThanServing = true;
+        /**
+         * Gate time-to-exit admission on the D1 location condition.
+         *
+         * TRIGGER_TTE_AWARE was built as "D1 plus a time-to-exit filter", so a
+         * candidate had to satisfy CondEventD1 before its exit time was even
+         * computed. D1 measures the terminal against a FIXED reference location
+         * (TS 38.331 5.5.4.15), which suits quasi-Earth-fixed cells and does
+         * not describe an Earth-moving cell at all. Set false to admit on
+         * quality and time-to-exit alone. Default true keeps the original
+         * behaviour.
+         */
+        bool tteRequireD1 = true;
+        /**
+         * Execute only when the SERVING cell is about to be lost.
+         *
+         * With this false, the time-to-exit rule switches as soon as some
+         * candidate is predicted to outlast the serving cell, which hands over
+         * early and repeatedly while the terminal is still well served. With it
+         * true the rule waits until the serving cell's own predicted
+         * time-to-exit falls to tteExitMargin (or its quality falls below
+         * qualityThreshold_dB) and then takes the admissible candidate with the
+         * longest predicted time-to-exit. Under exact prediction that greedy
+         * choice covers a pass with the fewest handovers, which is why it is
+         * offered as a policy rather than as a tuning of the eager rule.
+         */
+        bool tteExitTriggered = false;
+        /**
+         * Serving time-to-exit at or below which an exit-triggered handover is
+         * executed. It has to cover the execution latency plus the prediction
+         * error of the ephemeris in use; a margin that only covers the former
+         * converts every early prediction error into a radio link failure.
+         */
+        Time tteExitMargin = Seconds(5.0);
+        /**
+         * The network's own ephemeris uncertainty, one sigma per RTN axis, in
+         * metres. When any is non-zero the exit-triggered margin grows by
+         * tteMarginZ standard deviations of the serving cell's predicted exit
+         * time (NtnTteEstimator::ComputeTteSigma), computed for the pass the
+         * terminal is actually on. Zero (the default) leaves the margin at
+         * tteExitMargin.
+         */
+        double ephSigmaRadialM = 0.0;
+        double ephSigmaAlongM = 0.0;
+        double ephSigmaCrossM = 0.0;
+        /// One-sided confidence multiplier on the exit-time sigma (2 covers ~97.7 %).
+        double tteMarginZ = 2.0;
+        /**
+         * Serving quality below which an exit-triggered rule hands over at
+         * once, whatever the predicted exit says. This is a link-loss safety
+         * net, not the candidate quality floor: tying it to qualityThreshold_dB
+         * makes a demanding floor fire on a perfectly usable serving cell at
+         * every evaluation, and the rule degenerates into ping-pong. The default
+         * sits at the radio-link Qin level.
+         */
+        double tteServingFloor_dB = -6.0;
+        /**
+         * How long the serving cell must stay below tteServingFloor_dB before
+         * the safety net fires. Blockage is not predictable from an ephemeris,
+         * so an exit-triggered rule has to fall back on measurements for it,
+         * and a measurement trigger without a time-to-trigger reacts to every
+         * shadowing dip. Zero keeps the immediate behaviour.
+         */
+        Time tteServingFloorTtt = Seconds(0);
         double a3Offset_dB = 3.0;             //!< A3 event offset (for baseline)
         Time a3TimeToTrigger = MilliSeconds(160); //!< A3 TTT (for baseline)
 
@@ -692,6 +755,9 @@ class NtnChoAlgorithm : public Object
      */
     ChoState GetState() const;
 
+    /// Exit margin the last exit-triggered evaluation applied (base + z sigma).
+    Time GetLastExitMargin() const { return m_lastExitMargin; }
+
     /**
      * \brief Get information about all candidates
      */
@@ -755,6 +821,8 @@ class NtnChoAlgorithm : public Object
     double DistanceToMovingReference(const CandidateInfo& cand) const;
 
     ChoState m_state;                                  //!< Current state
+    mutable Time m_servingBelowFloorSince{Seconds(-1)}; //!< serving below tteServingFloor_dB since
+    mutable Time m_lastExitMargin{Seconds(0)}; //!< last exit-triggered margin applied
     ChoConfig m_config;                                //!< Configuration
     std::map<uint16_t, CandidateInfo> m_candidates;    //!< cellId -> CandidateInfo
     uint16_t m_servingCellId;                          //!< Current serving cell

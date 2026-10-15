@@ -71,6 +71,38 @@ class NtnOrbitPredictor : public Object
     /// none is refused rather than silently accepted.
     void SetKinematicsSource(uint32_t satId, Ptr<MobilityModel> mob);
 
+    /// Inject a known ephemeris error for \p satId, in the satellite's own
+    /// radial / along-track / cross-track (RTN) frame, in metres.
+    ///
+    /// A ground network predicts from broadcast or catalogue ephemeris, not from
+    /// the satellite's true state, and SGP4 element sets drift mostly along
+    /// track as they age. This offset is added to the position read from the
+    /// kinematics source every time the predictor looks at it, so every
+    /// prediction (time-to-exit, moving reference, elevation) is made from the
+    /// erroneous state while the scenario's own mobility model keeps the true
+    /// orbit. The difference between the two is what a study of ephemeris
+    /// sensitivity measures. The velocity is left as reported, which is the
+    /// first-order effect of a stale element set: position error dominates over
+    /// the prediction horizons a handover uses.
+    ///
+    /// \param satId satellite identifier as registered with SetKinematicsSource
+    /// \param radialM radial offset, positive away from the Earth
+    /// \param alongM along-track offset, positive in the direction of motion
+    /// \param crossM cross-track offset, positive along the orbit normal r x v
+    void SetEphemerisErrorRtn(uint32_t satId, double radialM, double alongM, double crossM);
+
+    /// Remove every injected ephemeris error.
+    void ClearEphemerisErrors();
+
+    /// Injected ephemeris error for \p satId as (radial, along, cross) metres;
+    /// zero when none was injected.
+    Vector GetEphemerisErrorRtn(uint32_t satId) const;
+
+    /// Position the predictor believes \p satId occupies now: the kinematics
+    /// source plus any injected RTN error. False when the satellite has no
+    /// kinematics source.
+    bool GetPredictedSatEcef(uint32_t satId, Vector& pos, Vector& vel) const;
+
     /// CHO-2: use an analytic TR 38.811 Section 6.4.1 aperture beam instead of
     /// the SNS3 antenna-gain-pattern grid.
     ///
@@ -287,6 +319,10 @@ class NtnOrbitPredictor : public Object
     bool ResolveSatPosition(uint32_t satId, GeoCoordinate& out) const;
     /// CHO-2: real kinematics per satellite, when supplied.
     std::map<uint32_t, Ptr<MobilityModel>> m_kinematics;
+    /// Injected ephemeris error per satellite, RTN metres (radial, along, cross).
+    std::map<uint32_t, Vector> m_ephErrorRtn;
+    /// Kinematics-source position with the injected ephemeris error applied.
+    Vector KinematicsPosition(uint32_t satId, const Ptr<MobilityModel>& mob) const;
     bool m_geometricBeam{false};      ///< CHO-2: analytic beam instead of the pattern grid
     double m_beamPeakGainDbi{30.0};   ///< CHO-2: boresight gain when analytic
     double m_beam3dbDeg{4.4127};      ///< CHO-2: full 3 dB beamwidth when analytic

@@ -119,6 +119,16 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     /// ECEF velocity (m/s).
     Vector GetEcefVelocity() const;
 
+    /// ECEF position and velocity at Simulator::Now() + \p offset, from the
+    /// same propagator GetPosition() uses, without touching the position cache.
+    ///
+    /// A study of prediction error needs the orbit the satellite will actually
+    /// fly, evaluated at a future instant, to compare against what a predictor
+    /// expected. Reading GetPosition() after the simulator has advanced gives
+    /// the same answer but only one instant at a time, and only once the
+    /// instant has passed. This returns it on demand.
+    void GetEcefStateAt(Time offset, Vector& posEcef, Vector& velEcef) const;
+
     /// Geodetic latitude / longitude / altitude (deg, deg, m above WGS-84
     /// reference ellipsoid).
     void GetGeodetic(double& lat_deg, double& lon_deg, double& alt_m) const;

@@ -855,7 +855,11 @@ NtnChoAlgorithm::EvaluateConditions()
         }
 
         // Step 1: Check D1 condition
-        bool d1Now = CheckD1Condition(cand);
+        // tteRequireD1 = false: an Earth-moving cell has no fixed reference
+        // location for D1 to measure against, so time-to-exit admission runs on
+        // quality and predicted exit alone.
+        const bool skipD1 = (m_config.triggerType == TRIGGER_TTE_AWARE && !m_config.tteRequireD1);
+        bool d1Now = skipD1 ? true : CheckD1Condition(cand);
 
         if (d1Now && !cand.d1Met)
         {
@@ -1050,7 +1054,66 @@ NtnChoAlgorithm::SelectBestCandidate() const
     // sides saturated at the prediction horizon that is a tie the policy could
     // not observe, and it switched. A handover costs an interruption; an equal
     // predicted time-of-stay does not pay for it.
-    if (m_config.requireBetterThanServing && m_tteEstimator)
+    // Exit-triggered execution: stay until the serving cell is about to be
+    // lost, then take the longest-lived admissible candidate.
+    if (m_config.tteExitTriggered && m_tteEstimator)
+    {
+        const CandidateInfo* servingIt = ServingState();
+        if (servingIt)
+        {
+            const auto servingTte = m_tteEstimator->ComputeTte(m_uePosition,
+                                                               m_ueVelocity,
+                                                               servingIt->satId,
+                                                               servingIt->beamId,
+                                                               m_config.gainThreshold_dB);
+            // No serving measurement yet means the quality is unknown, not lost:
+            // the member's initial value is a sentinel, and reading it as a
+            // collapsed link handed every freshly attached terminal over at once.
+            const bool belowFloor = !m_servingSinrHistory.empty() &&
+                                    m_servingSinr_dB < m_config.tteServingFloor_dB;
+            if (!belowFloor)
+            {
+                m_servingBelowFloorSince = Seconds(-1);
+            }
+            else if (m_servingBelowFloorSince < Seconds(0))
+            {
+                m_servingBelowFloorSince = Simulator::Now();
+            }
+            const bool qualityLost =
+                belowFloor &&
+                (Simulator::Now() - m_servingBelowFloorSince >= m_config.tteServingFloorTtt);
+            Time margin = m_config.tteExitMargin;
+            if (m_config.ephSigmaRadialM > 0.0 || m_config.ephSigmaAlongM > 0.0 ||
+                m_config.ephSigmaCrossM > 0.0)
+            {
+                const double sigmaS = m_tteEstimator->ComputeTteSigma(m_uePosition,
+                                                                      m_ueVelocity,
+                                                                      servingIt->satId,
+                                                                      servingIt->beamId,
+                                                                      m_config.gainThreshold_dB,
+                                                                      m_config.ephSigmaRadialM,
+                                                                      m_config.ephSigmaAlongM,
+                                                                      m_config.ephSigmaCrossM);
+                margin += Seconds(m_config.tteMarginZ * sigmaS);
+            }
+            m_lastExitMargin = margin;
+            if (!qualityLost && servingTte.tte > margin)
+            {
+                return INVALID_CELL_ID; // serving cell still has life left
+            }
+            const CandidateInfo* best = admissible.front(); // sorted by TTE, descending
+            if (!qualityLost && best->tte <= servingTte.tte)
+            {
+                return INVALID_CELL_ID; // nothing outlives the cell we are on
+            }
+            NS_LOG_INFO("TTE exit-triggered selection: cell " << best->cellId << " (TTE="
+                        << best->tte.GetSeconds() << " s, serving TTE="
+                        << servingTte.tte.GetSeconds() << " s)");
+            return best->cellId;
+        }
+    }
+
+    if (m_config.requireBetterThanServing && m_tteEstimator && !m_config.tteExitTriggered)
     {
         const CandidateInfo* servingIt = ServingState();
         if (servingIt)
