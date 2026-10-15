@@ -274,6 +274,7 @@ struct Params
     double assumedSigmaCrossM = -1.0;
     // accuracy mode
     uint32_t accuracySamples = 2000;
+    int32_t traceUe = -1; // write trace.csv for this terminal (1 s cadence)
 };
 
 Params g_p;
@@ -341,6 +342,7 @@ double g_tteGainTh = 0.0;   // exit threshold the prediction-based policies use
 double g_coverGainTh = 0.0; // scan limit: where a satellite stops covering at all
 std::ofstream g_events;
 std::ofstream g_acc;
+std::ofstream g_trace;
 const double kTick = 0.1;
 
 uint16_t
@@ -884,6 +886,21 @@ Tick()
             u.seSum += std::min(std::log2(1.0 + std::pow(10.0, l1 / 10.0)), 5.55);
             ++u.samples;
         }
+        if (static_cast<int32_t>(i) == g_p.traceUe && refresh)
+        {
+            // one row per covering satellite: what the terminal sees, and which
+            // cell it is on, once a second
+            for (const auto& [sat, ls] : u.links)
+            {
+                if (ls.covered)
+                {
+                    g_trace << std::fixed << std::setprecision(1) << now << "," << sat << ","
+                            << std::setprecision(2) << ls.elevDeg << "," << ls.l3 << ","
+                            << (static_cast<int32_t>(sat) == u.serving ? 1 : 0) << ","
+                            << (ls.los ? 1 : 0) << "\n";
+                }
+            }
+        }
         if (refresh && !u.executing)
         {
             SyncCandidates(u);
@@ -976,9 +993,11 @@ RunAccuracy()
             const double sigma = g_tte->ComputeTteSigma(
                 geo, Vector(0, 0, 0), static_cast<uint32_t>(s), 0, g_tteGainTh,
                 g_p.ephSigmaRadialM, g_p.ephSigmaAlongM, g_p.ephSigmaCrossM);
-            // geometry descriptor: the pass's peak elevation, from the true orbit
+            // geometry descriptor: the pass's peak elevation, from the true orbit,
+            // scanned over the whole pass (a sample taken after culmination would
+            // otherwise report its own elevation as the peak)
             double peak = elev;
-            for (double x = 2.0; x <= truth; x += 2.0)
+            for (double x = -g_p.horizonS; x <= truth; x += 2.0)
             {
                 Vector p;
                 Vector v;
@@ -1046,6 +1065,7 @@ main(int argc, char* argv[])
     cmd.AddValue("assumedSigmaAlongM", "network-assumed sigma, along (m); -1 = true", p.assumedSigmaAlongM);
     cmd.AddValue("assumedSigmaCrossM", "network-assumed sigma, cross (m); -1 = true", p.assumedSigmaCrossM);
     cmd.AddValue("accuracySamples", "samples in tte-accuracy mode", p.accuracySamples);
+    cmd.AddValue("traceUe", "terminal index to trace at 1 s (-1 = none)", p.traceUe);
     cmd.Parse(argc, argv);
 
     if (p.assumedSigmaRadialM < 0.0)
@@ -1247,6 +1267,11 @@ main(int argc, char* argv[])
         return 0;
     }
 
+    if (p.traceUe >= 0)
+    {
+        g_trace.open(p.outputDir + "/trace.csv");
+        g_trace << "t_s,sat,elev_deg,l3_db,serving,los\n";
+    }
     g_events.open(p.outputDir + "/events.csv");
     g_events << "t_s,ue,from_sat,to_sat,kind,success,pp1,pp5,pred_serv_tte_s,margin_s,"
                 "true_serv_exit_s,target_tte_s,target_elev_deg,interruption_ms\n";
