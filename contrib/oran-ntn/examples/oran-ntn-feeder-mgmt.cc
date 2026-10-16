@@ -1571,9 +1571,9 @@ RicOnA1(A1NtnPolicy a)
         {
             continue;
         }
-        if (g.strat == Strategy::Reactive)
+        if (IsReactiveLike())
         {
-            PushPolicyToSat(s, false);
+            PushPolicyToSat(s, IsLeasing());
         }
         else if (IsPal())
         {
