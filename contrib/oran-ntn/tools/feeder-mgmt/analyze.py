@@ -291,41 +291,55 @@ def analyze_eps(plt, main):
                 mac(f"Eps{tag}Tau", ci(col(data, c, "lease_tau_s"))[0], "{:.1f}")
 
     # --- does the realized cost reach its minimum at the predicted eps?
-    # Estimate p_v (violation probability while a superseded intent is held)
-    # and Delta (mean over-provisioning while on the safe intent) from the
-    # share-state counters of the eps=0.2 PAL runs, one gateway, 550 km.
+    # p_v (violation probability while a superseded intent is held) and Delta
+    # (mean over-provisioning while on the safe intent) are estimated from
+    # HELD-OUT runs (reactive hybrid with lease, eps=0.2), then the realized
+    # cost of the PAL runs is scored over a finer eps grid.
     def pooled_checks(cfg, keys):
         tot = defaultdict(float)
         for sd in data[cfg]:
             for k in keys:
                 tot[k] += float(data[cfg][sd]["checks"][0][k])
         return tot
-    c0 = "pal_s550_gw1_eps0.2"
-    if c0 in data and data[c0][1]["checks"] and "samp_stale" in data[c0][1]["checks"][0]:
+    c0 = "reactive-ttl_s550_gw1_eps0.2"
+    grid = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.9, 0.99]
+    if c0 in data:
         t = pooled_checks(c0, ["samp_stale", "viol_stale", "samp_fallback", "over_fallback"])
         pv = t["viol_stale"] / max(1.0, t["samp_stale"])
         dl = t["over_fallback"] / max(1.0, t["samp_fallback"])
         mac("EstPv", pv, "{:.2f}")
         mac("EstDelta", dl * 100, "{:.1f}")
-        rows = []
+        lines = []
         for target, tg in [(0.2, "A"), (0.5, "B")]:
             ratio = target * pv / dl  # w_o / w_v giving predicted eps = target
-            js = []
-            for eps in epss:
+            J = {}
+            for eps in grid:
                 c = f"pal_s550_gw1_eps{eps}"
-                if c not in data:
+                if c in data:
+                    J[eps] = col(data, c, "sla_viol_frac") + ratio * col(data, c, "overprov_mean")
+            best = min(J, key=lambda e: float(np.mean(J[e])))
+            # paired differences to the predicted eps; count grid points whose
+            # cost is significantly lower than at the prediction
+            better = 0
+            diffs = []
+            for e in J:
+                if e == target:
                     continue
-                J = col(data, c, "sla_viol_frac") + ratio * col(data, c, "overprov_mean")
-                js.append((eps, float(np.mean(J))))
-            best = min(js, key=lambda x: x[1])
+                m, h, _ = ci(J[e] - J[target])
+                diffs.append((e, m, h))
+                if m + h < 0:
+                    better += 1
+            near = [d for d in diffs if abs(d[1]) <= d[2]]
             mac(f"CostTarget{tg}", target, "{:.1f}")
-            mac(f"CostArgmin{tg}", best[0], "{:g}")
+            mac(f"CostArgmin{tg}", best, "{:g}")
             mac(f"CostRatio{tg}", ratio, "{:.2f}")
-            rows.append((target, ratio, js))
+            mac(f"CostBetter{tg}", better, "{:d}")
+            mac(f"CostIndist{tg}", ", ".join(f"{d[0]:g}" for d in sorted(near)), "{}")
+            lines.append(f"target {target} ratio {ratio:.3f} argmin {best} better {better}: " +
+                         "; ".join(f"{e:g}: {m*100:+.3f}+-{h*100:.3f} pts" for e, m, h in sorted(diffs)))
+        mac("CostGridN", len(grid), "{:d}")
         with open(os.path.join(TAB, "cost_check.txt"), "w") as f:
-            for target, ratio, js in rows:
-                f.write(f"target eps {target}: w_o/w_v={ratio:.3f}: " +
-                        ", ".join(f"{e}:{j:.5f}" for e, j in js) + "\n")
+            f.write("\n".join(lines) + "\n")
 
 
 def analyze_main(plt):
@@ -372,6 +386,11 @@ def analyze_main(plt):
                 t.write(f"{shell} km, {gw} & {av:.1f}$\\pm${ah:.1f} & {ou:.1f} & {np.median(dur):.0f} & "
                         f"{100*np.mean(pr):.0f} & {100*np.mean(ob):.0f} & {sw:.1f}\\\\\n")
         t.write("\\bottomrule\n\\end{tabular}\n")
+    fa = {c: sum(int(float(data[c][sd]["summary"]["false_autonomy"])) for sd in data[c]) for c in data}
+    bad = {c: n for c, n in fa.items() if n > 0}
+    mac("FalseAutonomyTotal", sum(fa.values()), "{:d}")
+    if bad:
+        print("WARNING false autonomy:", bad)
     n_runs = sum(len(v) for v in data.values())
     mac("MainRuns", n_runs, "{:d}")
     mac("MainConfigs", len(data), "{:d}")
@@ -728,22 +747,22 @@ def analyze_sens(main):
     data = load("sens")
     if not data:
         return
-    for strat in ["reactive", "pal"]:
+    for strat in ["reactive-ttl", "pal"]:
         for sig in [0.0, 2.0, 5.0]:
             c = f"{strat}_s550_gw1_eph{sig}"
             if c in data:
-                tg = f"{strat.capitalize()}Eph{ {0: 'Zero', 2: 'Two', 5: 'Five'}[int(sig)] }"
+                tg = f"{SNM[strat]}Eph{ {0: 'Zero', 2: 'Two', 5: 'Five'}[int(sig)] }"
                 mac(f"NfMiss{tg}", ci((1 - col(data, c, "nf_hit_ratio")) * 100)[0], "{:.2f}")
                 mac(f"Viol{tg}", ci(col(data, c, "sla_viol_frac") * 100)[0], "{:.1f}")
         for rain in [0.0, 6.0]:
             c = f"{strat}_s550_gw1_rain{rain}"
             if c in data:
-                tg = f"{strat.capitalize()}Rain{ {0: 'Zero', 6: 'Six'}[int(rain)] }"
+                tg = f"{SNM[strat]}Rain{ {0: 'Zero', 6: 'Six'}[int(rain)] }"
                 mac(f"NfMiss{tg}", ci((1 - col(data, c, "nf_hit_ratio")) * 100)[0], "{:.2f}")
                 mac(f"Viol{tg}", ci(col(data, c, "sla_viol_frac") * 100)[0], "{:.1f}")
                 mac(f"Ttc{tg}", ci(recon(data, c, "ttc", 1000))[0], "{:.0f}")
                 mac(f"Conf{tg}", ci(recon(data, c, "direct_conflicts"))[0], "{:.2f}")
-    for strat in ["onboard", "reactive", "pal"]:
+    for strat in ["onboard", "reactive-ttl", "pal"]:
         c = f"{strat}_s550_gw1_proc5"
         if c in data:
             tg = SNM[strat]

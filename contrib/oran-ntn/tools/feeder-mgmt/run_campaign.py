@@ -40,6 +40,10 @@ def jobs_for(group):
             for gw in [1, 2]:
                 cfg = dict(strategy=strat, shell=550, numGw=gw, leaseEps=eps, **HB_MAIN)
                 out.append((f"{strat}_s550_gw{gw}_eps{eps}", cfg))
+        # finer grid for the realized-cost check (PAL, one gateway)
+        for eps in [0.1, 0.3, 0.4, 0.7]:
+            cfg = dict(strategy="pal", shell=550, numGw=1, leaseEps=eps, **HB_MAIN)
+            out.append((f"pal_s550_gw1_eps{eps}", cfg))
     elif group == "main":
         for strat, shell, gw in itertools.product(
             ["ground", "onboard", "reactive", "reactive-ttl", "pal"], [550, 1200], [1, 2, 3, 4]
@@ -51,14 +55,15 @@ def jobs_for(group):
             cfg = dict(strategy=strat, shell=shell, numGw=gw, **HB_MAIN)
             out.append((f"{strat}_s{shell}_gw{gw}", cfg))
     elif group == "sens":
-        # Ephemeris error and unpredicted-outage rate, closest baseline vs pal.
-        for strat, sig in itertools.product(["reactive", "pal"], [0.0, 2.0, 5.0]):
+        # Ephemeris error, unpredicted-outage rate and on-board processing,
+        # PAL against its closest baseline (reactive hybrid with lease).
+        for strat, sig in itertools.product(["reactive-ttl", "pal"], [0.0, 2.0, 5.0]):
             cfg = dict(strategy=strat, shell=550, numGw=1, ephSigmaS=sig, **HB_MAIN)
             out.append((f"{strat}_s550_gw1_eph{sig}", cfg))
-        for strat, rain in itertools.product(["reactive", "pal"], [0.0, 6.0]):
+        for strat, rain in itertools.product(["reactive-ttl", "pal"], [0.0, 6.0]):
             cfg = dict(strategy=strat, shell=550, numGw=1, rainPerHour=rain, **HB_MAIN)
             out.append((f"{strat}_s550_gw1_rain{rain}", cfg))
-        for strat in ["onboard", "reactive", "pal"]:
+        for strat in ["onboard", "reactive-ttl", "pal"]:
             cfg = dict(strategy=strat, shell=550, numGw=1, procScaleOnboard=5.0, **HB_MAIN)
             out.append((f"{strat}_s550_gw1_proc5", cfg))
     else:
