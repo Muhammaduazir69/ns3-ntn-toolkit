@@ -422,7 +422,16 @@ OranNtnA1Adapter::HandleIncomingPolicy(A1NtnPolicy policy)
 {
     NS_LOG_FUNCTION(this << policy.policyId);
 
-    if (policy.active)
+    // ORAN-31: a policy that arrives after its validUntil is not activated. A
+    // feeder outage can hold an A1 message long enough for its lease to lapse
+    // in transit, and activating it on arrival would enforce an expired intent.
+    if (policy.active && !IsLive(policy))
+    {
+        m_activePolicies.erase(policy.policyId);
+        NS_LOG_INFO("A1 Adapter: Rejected policy " << policy.policyId
+                    << " (arrived after validUntil)");
+    }
+    else if (policy.active)
     {
         m_activePolicies[policy.policyId] = policy;
         NS_LOG_INFO("A1 Adapter: Activated policy " << policy.policyId);
@@ -436,6 +445,21 @@ OranNtnA1Adapter::HandleIncomingPolicy(A1NtnPolicy policy)
     m_policyReceived(policy);
 }
 
+// ORAN-31 FIX (2026-10-16). The adapter enforced a policy until a
+// deactivation message reached it, and nothing else. Expiry was evaluated only
+// by the Non-RT side (OranNtnA1PolicyManager::CheckPolicyExpiry), which then
+// DISTRIBUTES the deactivation. When the Near-RT RIC sits behind a feeder link
+// that is down, that message cannot arrive, so an on-board RIC kept enforcing
+// an A1 policy past its validUntil for the whole outage, which is exactly when
+// a stale intent does most harm. validUntil is now honoured where the policy
+// is enforced: every read below filters out policies whose lease has lapsed.
+// validUntil == 0 keeps the old meaning (no expiry).
+bool
+OranNtnA1Adapter::IsLive(const A1NtnPolicy& p)
+{
+    return p.validUntil <= Seconds(0) || Simulator::Now() < p.validUntil;
+}
+
 std::vector<A1NtnPolicy>
 OranNtnA1Adapter::GetActivePolicies() const
 {
@@ -443,7 +467,10 @@ OranNtnA1Adapter::GetActivePolicies() const
     result.reserve(m_activePolicies.size());
     for (const auto& [id, p] : m_activePolicies)
     {
-        result.push_back(p);
+        if (IsLive(p))
+        {
+            result.push_back(p);
+        }
     }
     return result;
 }
@@ -454,7 +481,7 @@ OranNtnA1Adapter::GetPoliciesByType(A1PolicyType type) const
     std::vector<A1NtnPolicy> result;
     for (const auto& [id, p] : m_activePolicies)
     {
-        if (p.type == type)
+        if (p.type == type && IsLive(p))
         {
             result.push_back(p);
         }
@@ -470,7 +497,7 @@ OranNtnA1Adapter::GetThreshold(A1PolicyType type, const std::string& paramName) 
 
     for (const auto& [id, p] : m_activePolicies)
     {
-        if (p.type != type)
+        if (p.type != type || !IsLive(p))
         {
             continue;
         }

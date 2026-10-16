@@ -76,6 +76,8 @@ set(source_files
     # WS3 — multi-tier RIC + cross-domain SMO + ONNX inference (AI-Native plan)
     model/oran-ntn-rt-ric.cc
     model/oran-ntn-ric-placement.cc
+    model/oran-ntn-contact-plan.cc
+    model/oran-ntn-authority-lease.cc
     model/oran-ntn-cross-domain.cc
     model/oran-ntn-onnx-xapp.cc
     # WS4 — payload options / FH split / platform spec / role switch
@@ -166,6 +168,8 @@ set(header_files
     # WS3 — multi-tier RIC + cross-domain SMO + ONNX inference (AI-Native plan)
     model/oran-ntn-rt-ric.h
     model/oran-ntn-ric-placement.h
+    model/oran-ntn-contact-plan.h
+    model/oran-ntn-authority-lease.h
     model/oran-ntn-cross-domain.h
     model/oran-ntn-onnx-xapp.h
     # WS4 — payload options / FH split / platform spec / role switch
@@ -178,6 +182,7 @@ set(header_files
 set(test_sources
     test/oran-ntn-test-suite.cc
     test/oran-ntn-multi-tier-ric-test.cc
+    test/oran-ntn-feeder-mgmt-test.cc
     test/oran-ntn-ws4-test.cc
 )
 

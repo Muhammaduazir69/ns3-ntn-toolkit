@@ -253,6 +253,9 @@ class OranNtnA1Adapter : public Object
     void DoDispose() override;
 
   private:
+    /// ORAN-31: true while \p p is within its validUntil (or has none).
+    static bool IsLive(const A1NtnPolicy& p);
+
     std::map<uint32_t, A1NtnPolicy> m_activePolicies;
     FeedbackCallback m_feedbackCb;
 };
