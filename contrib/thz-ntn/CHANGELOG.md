@@ -2,7 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed
+- THZ-13: the bundled table `data/hitran2024-lut-subthz.csv` and its generator
+  still carried the pre-THZ-01 six-layer atmosphere. Regenerated from the
+  ITU-R P.835-6 Sec. 1.1 closed form on a 1 GHz x 1 km grid, 100-1000 GHz,
+  with log-linear altitude interpolation; the table declares its atmosphere
+  and is bypassed when the configured profile or water-vapour scale differs.
+- THZ-14: `HumidityProfile` names selected invented altitude-band multipliers;
+  they now select the ITU-R P.835-6 Sec. 2 seasonal atmospheres. Default
+  `global-annual` is unchanged bit for bit.
+
 ### Added
+- `WaterVapourScale` attribute and `GetWaterVapourColumn()`.
+- Example `thz-ntn-absorption-sweep` (frequency x elevation x column CSV).
 - `HitranLut` (namespace `ns3::thzntn`): bundled HITRAN-2024 specific-attenuation
   lookup table + generator script (`tools/hitran2024-lut-gen.py`)
 - ITU-R reference wrappers: `Itu838RainModel`, `Itu618LossModel`,

@@ -31,14 +31,16 @@ double ComputeSlantPathAbsorption(
     double freqHz, double elevationDeg,
     double groundAlt_km, double satAlt_km) const;
 
-void SetHumidityProfile(const std::string& profile);  // tropical / midlatitude-summer / winter / subarctic
+void SetHumidityProfile(const std::string& profile);  // global-annual (P.835-6 Sec. 1.1) / low-latitude / midlatitude-summer / midlatitude-winter / high-latitude-summer / high-latitude-winter (Sec. 2)
+double GetWaterVapourColumn() const;                  // kg/m2, includes WaterVapourScale
 double GetTransmittance(double freqHz, double distanceM, double altitudeAvg_km) const;
 ```
 
 ### Attributes
 | Attribute | Default | Description |
 |---|---|---|
-| `HumidityProfile` | `"midlatitude-summer"` | Atmospheric humidity profile |
+| `HumidityProfile` | `"global-annual"` | ITU-R P.835-6 reference atmosphere (T, P and water vapour); aliases tropical = low-latitude, subarctic = high-latitude-winter |
+| `WaterVapourScale` | `1.0` | Multiplier on the water-vapour density at every height (column sweeps) |
 | `IntegrationSteps` | `50` | Number of atmospheric layer slices |
 
 ### Key formula (Van Vleck-Weisskopf line shape)

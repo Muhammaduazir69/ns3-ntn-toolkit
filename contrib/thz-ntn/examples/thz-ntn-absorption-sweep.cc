@@ -114,7 +114,7 @@ main(int argc, char* argv[])
     cmd.AddValue("profile", "reference atmosphere (HumidityProfile attribute)", profile);
     cmd.AddValue("out", "output CSV", out);
     cmd.AddValue("elevs", "comma-separated elevations, deg", elevs);
-    cmd.AddValue("pwvs", "comma-separated PWV columns, mm (empty: profile as published)", pwvs);
+    cmd.AddValue("pwvs", "comma-separated PWV columns, mm (none: profile as published)", pwvs);
     cmd.AddValue("fStart", "first carrier, GHz", fStart);
     cmd.AddValue("fStop", "last carrier, GHz", fStop);
     cmd.AddValue("fStep", "carrier step, GHz", fStep);
@@ -134,7 +134,7 @@ main(int argc, char* argv[])
         }
     }
 
-    std::vector<double> pwvList = ParseList(pwvs);
+    std::vector<double> pwvList = (pwvs == "none") ? std::vector<double>{} : ParseList(pwvs);
     const bool asPublished = pwvList.empty();
     if (asPublished)
     {
