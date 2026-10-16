@@ -195,3 +195,18 @@ build_lib_example(
     ${libcore}
     ${libnetwork}
 )
+
+# Paper 3 (TNSM): O-RAN control management under intermittent feeder links.
+# Packet-level E2/A1/lease traffic over SGP4 feeder geometry; no radio stack.
+build_lib_example(
+  NAME oran-ntn-feeder-mgmt
+  SOURCE_FILES oran-ntn-feeder-mgmt.cc
+  LIBRARIES_TO_LINK
+    ${liboran-ntn}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+)
