@@ -381,6 +381,8 @@ std::vector<L::Write> groundLog;
 // Per-sat ground view
 struct GroundView
 {
+    bool e2{false};                                        // RIC answered E2 setup
+    std::array<bool, kClasses> subAcked{false, false, false}; // SUB_RSP seen
     std::array<bool, kClasses> leased{false, false, false};
     bool hbArmed{false};
     Time lastRenew{Seconds(0)};
@@ -694,6 +696,12 @@ HostedOnboard(int cls, const Sat& s)
 // SLA / staleness bookkeeping
 // ---------------------------------------------------------------------------
 uint64_t nsFallback = 0;
+// NF epoch bookkeeping for miss attribution: epoch time -> state code at the
+// epoch (bit0 link up, bit1 hosted on board, bit2 E2 set up, bit3 subscribed,
+// bit4 autonomous, bit5 leased, bit6 within 5 s after a switch).
+std::map<int64_t, uint16_t> nfPending;
+std::map<int64_t, uint16_t> nfMissed;
+double lastSwitchT = -1e9;
 
 void
 RecordNsDecision(uint32_t verUsed)
@@ -773,6 +781,11 @@ ApplyAction(int s, int cls, Time tMeas, double value, uint32_t ver, L::Host writ
     {
         st.late[cls]++;
     }
+    if (cls == kNF)
+    {
+        nfPending.erase(tMeas.GetNanoSeconds());
+        nfMissed.erase(tMeas.GetNanoSeconds());
+    }
     if (cls == kNF && switchPending && curSwitch < st.switches.size() &&
         st.switches[curSwitch].blackoutNf < 0 && st.switches[curSwitch].to == sat.id)
     {
@@ -820,6 +833,21 @@ Epoch(int cls)
     {
         sat.lastDemand = demand;
         sat.lastDemandAt = tMeas;
+    }
+    if (cls == kNF)
+    {
+        // Settle epochs older than 2 deadlines: whatever is still pending missed.
+        const int64_t cut = (tMeas - Seconds(2 * g.deadlineS[kNF])).GetNanoSeconds();
+        while (!nfPending.empty() && nfPending.begin()->first < cut)
+        {
+            nfMissed.insert(*nfPending.begin());
+            nfPending.erase(nfPending.begin());
+        }
+        uint16_t code = (sat.linkUp ? 1 : 0) | (HostedOnboard(cls, sat) ? 2 : 0) |
+                        (sat.e2Setup ? 4 : 0) | (sat.subscribed[kNF] ? 8 : 0) |
+                        (sat.autonomous ? 16 : 0) | (sat.leased[kNF] ? 32 : 0) |
+                        (tMeas.GetSeconds() - lastSwitchT < 5.0 ? 64 : 0);
+        nfPending[tMeas.GetNanoSeconds()] = code;
     }
     if (HostedOnboard(cls, sat))
     {
@@ -949,6 +977,7 @@ void PushPolicyToSat(int s, bool lease);
 void
 RicOnSetup(int s)
 {
+    gview[s].e2 = true;
     MgmtHeader r;
     r.type = E2_SETUP_RSP;
     SendToSat(s, r, PayloadSize(E2_SETUP_RSP, 0));
@@ -1271,6 +1300,7 @@ RicRecv(Ptr<Socket> sock)
             RicOnSetup(s);
             break;
         case SUB_RSP:
+            gview[s].subAcked[h.cls] = true;
             break;
         case A1_ACK:
             break;
@@ -1340,6 +1370,32 @@ RicRecv(Ptr<Socket> sock)
         }
         default:
             break;
+        }
+    }
+}
+
+// RIC subscription timer: a subscription request whose response has not
+// arrived is re-sent every second (lost requests and responses happen on the
+// feeder), as an E2AP RIC subscription procedure would on timer expiry.
+void
+SubRetryLoop()
+{
+    Simulator::Schedule(Seconds(1.0), &SubRetryLoop);
+    for (int s = 0; s < static_cast<int>(sats.size()); ++s)
+    {
+        if (!gview[s].e2 || !(IsServing(s) || sats[s].provisioned))
+        {
+            continue;
+        }
+        for (int c = 0; c < kClasses; ++c)
+        {
+            if (GroundNeedsSub(c) && !gview[s].subAcked[c])
+            {
+                MgmtHeader q;
+                q.type = SUB_REQ;
+                q.cls = static_cast<uint8_t>(c);
+                SendToSat(s, q, PayloadSize(SUB_REQ, 0));
+            }
         }
     }
 }
@@ -1828,6 +1884,7 @@ TopoTick()
         }
         if (servingIdx >= 0)
         {
+            lastSwitchT = t;
             Stats::Switch sw;
             sw.t = t;
             sw.from = prev >= 0 ? sats[prev].id : 0;
@@ -2383,6 +2440,7 @@ main(int argc, char* argv[])
         Simulator::Schedule(Seconds(1.0 + rvU->GetValue(0, g.periodS[c])), &Epoch, c);
     }
     Simulator::Schedule(MilliSeconds(50), &SlaTick);
+    Simulator::Schedule(Seconds(1.0), &SubRetryLoop);
     Simulator::Schedule(Seconds(rvArr->GetValue()), &Arrival);
     // Warm the session process to stationarity: start with Poisson(lambda*T)
     // sessions already active.
@@ -2551,6 +2609,23 @@ main(int argc, char* argv[])
             {
                 f << kClassName[c] << "," << b * 0.25 << "," << n << "\n";
             }
+        }
+    }
+    {
+        // Late-but-applied epochs are removed from nfPending when applied, so
+        // nfMissed holds epochs never actuated (late actuations are counted
+        // separately in summary.csv).
+        for (const auto& kv : nfPending)
+        {
+            nfMissed.insert(kv);
+        }
+        std::ofstream f(g.outDir + "/nf_miss.csv");
+        f << "t,link_up,onboard,e2_setup,subscribed,autonomous,leased,after_switch\n";
+        for (const auto& [t, c] : nfMissed)
+        {
+            f << t * 1e-9 << "," << (c & 1) << "," << ((c >> 1) & 1) << "," << ((c >> 2) & 1)
+              << "," << ((c >> 3) & 1) << "," << ((c >> 4) & 1) << "," << ((c >> 5) & 1) << ","
+              << ((c >> 6) & 1) << "\n";
         }
     }
     {
