@@ -19,10 +19,10 @@ and valid to 1000 GHz, so no ``.par`` ingest is needed (or offered). The output
 reproduces the ITU-Rpy P.676-13 validation set to within ~2%.
 
 The generated grid samples specific attenuation (dB/km) on a (frequency x
-altitude) grid using the same ITU-R P.835 layered atmosphere and intra-layer
-exponential decay (5.5 km pressure scale height, 2 km water-vapour scale
-height, midlatitude-summer humidity profile) as the C++ model, so a loaded LUT
-matches the in-process kernel.
+altitude) grid using the same ITU-R P.835-6 Section 1.1 closed-form
+atmosphere as the C++ model's default "global-annual" profile, and declares
+that atmosphere in its header so the C++ model only consults the table when
+the configured atmosphere matches it.
 
 Output columns:
    freq_ghz, alt_km, attenuation_db_per_km
@@ -35,21 +35,55 @@ import sys
 from typing import Iterable
 
 # ---------------------------------------------------------------------------
-#  ITU-R P.835 layered atmosphere — exact match for
-#  thz-ntn-molecular-absorption.cc InitAtmosphericLayers().
-#  (altLow_km, altHigh_km, T_K, P_hPa, H2O_gm3)
+#  ITU-R P.835-6 Section 1.1 reference atmosphere, closed form. Exact mirror of
+#  ThzNtnMolecularAbsorption::GetAtmosphericConditions for the default
+#  "global-annual" profile.
+#
+#  THZ-13: until Oct 2026 this file still carried the six isothermal layers
+#  (with 5.5 km / 2 km restarted exponentials) that THZ-01 removed from the C++
+#  model in Aug 2026, so the bundled table no longer matched the kernel it
+#  claimed to mirror. tests: "THZ-13 bundled LUT reproduces the kernel".
 # ---------------------------------------------------------------------------
-LAYERS = [
-    (0.0,   2.0,   288.15, 1013.25, 7.5),
-    (2.0,   5.0,   275.0,   800.0,  4.0),
-    (5.0,  10.0,   255.0,   550.0,  1.0),
-    (10.0, 20.0,   220.0,   250.0,  0.01),
-    (20.0, 50.0,   250.0,    50.0,  0.001),
-    (50.0, 100.0,  260.0,     0.5,  0.0),
-]
 
-PRESSURE_SCALE_HEIGHT_KM = 5.5   # matches C++ GetAtmosphericConditions
-HUMIDITY_SCALE_HEIGHT_KM = 2.0
+
+def p835_global_annual(alt_km: float, wv_scale: float = 1.0) -> tuple[float, float, float]:
+    """(T[K], P_total[hPa], rho[g/m^3]) of P.835-6 Section 1.1."""
+    if alt_km >= 100.0:
+        return 210.0, 0.001, 0.0
+    h = max(alt_km, 0.0)
+    hp = 6356.766 * h / (6356.766 + h)
+    if hp <= 11.0:
+        T = 288.15 - 6.5 * hp
+        P = 1013.25 * (288.15 / (288.15 - 6.5 * hp)) ** (-34.1632 / 6.5)
+    elif hp <= 20.0:
+        T = 216.65
+        P = 226.3226 * math.exp(-34.1632 * (hp - 11.0) / 216.65)
+    elif hp <= 32.0:
+        T = 216.65 + (hp - 20.0)
+        P = 54.74980 * (216.65 / (216.65 + (hp - 20.0))) ** 34.1632
+    elif hp <= 47.0:
+        T = 228.65 + 2.8 * (hp - 32.0)
+        P = 8.680422 * (228.65 / (228.65 + 2.8 * (hp - 32.0))) ** (34.1632 / 2.8)
+    elif hp <= 51.0:
+        T = 270.65
+        P = 1.109106 * math.exp(-34.1632 * (hp - 47.0) / 270.65)
+    elif hp <= 71.0:
+        T = 270.65 - 2.8 * (hp - 51.0)
+        P = 0.6694167 * (270.65 / (270.65 - 2.8 * (hp - 51.0))) ** (-34.1632 / 2.8)
+    elif hp <= 84.852:
+        T = 214.65 - 2.0 * (hp - 71.0)
+        P = 0.03956649 * (214.65 / (214.65 - 2.0 * (hp - 71.0))) ** (-34.1632 / 2.0)
+    else:
+        T, P = 186.946, 0.003743
+    rho = 7.5 * wv_scale * math.exp(-h / 2.0)
+    e = rho * T / 216.7
+    denom = P - e
+    mr = 0.622 * e / denom if denom > 0 else 0.0
+    if mr < 2e-6 and P > 0:
+        e_floor = 2e-6 * P / (0.622 + 2e-6)
+        rho = e_floor * 216.7 / T
+    return T, P, rho
+
 
 # ---------------------------------------------------------------------------
 #  ITU-R P.676-13 Table 1: oxygen lines (f0_GHz, a1..a6)
@@ -143,18 +177,9 @@ H2O_LINES = [
 ]
 
 
-def atmospheric_conditions(alt_km: float) -> tuple[float, float, float]:
-    """Local (T[K], P_total[hPa], rho[g/m^3]) — mirrors the C++
-    GetAtmosphericConditions() with intra-layer exponential decay and the
-    default midlatitude-summer humidity profile (scale 1.0)."""
-    if alt_km >= 100.0:
-        return 210.0, 0.001, 0.0
-    for lo, hi, t, p, h in LAYERS:
-        if lo <= alt_km < hi:
-            press = p * math.exp(-(alt_km - lo) / PRESSURE_SCALE_HEIGHT_KM)
-            hum = h * math.exp(-(alt_km - lo) / HUMIDITY_SCALE_HEIGHT_KM)
-            return t, press, hum
-    return 288.15, 1013.25, 7.5
+def atmospheric_conditions(alt_km: float, wv_scale: float = 1.0) -> tuple[float, float, float]:
+    """Local (T[K], P_total[hPa], rho[g/m^3]) of the default C++ atmosphere."""
+    return p835_global_annual(alt_km, wv_scale)
 
 
 def specific_attenuation_db_km(f_ghz: float, temp_K: float, press_hPa: float,
@@ -195,23 +220,26 @@ def specific_attenuation_db_km(f_ghz: float, temp_K: float, press_hPa: float,
     return max(0.0, 0.1820 * f * npp)
 
 
-def absorption_db_per_km(f_ghz: float, alt_km: float) -> float:
-    t, p, h = atmospheric_conditions(alt_km)
+def absorption_db_per_km(f_ghz: float, alt_km: float, wv_scale: float = 1.0) -> float:
+    t, p, h = atmospheric_conditions(alt_km, wv_scale)
     return specific_attenuation_db_km(f_ghz, t, p, h)
 
 
 def generate(freqs_ghz: Iterable[float], alts_km: Iterable[float],
-             release: str = "ITU-R-P.676-13") -> str:
+             release: str = "ITU-R-P.676-13", wv_scale: float = 1.0) -> str:
     out = [
         f"# release: {release}",
         "# generated by contrib/thz-ntn/tools/p676-lut-gen.py",
         "# model: ITU-R P.676-13 Annex 1 line-by-line (44 O2 + 35 H2O lines)",
+        "# atmosphere: ITU-R P.835-6 Section 1.1 (closed form)",
+        "# profile: global-annual",
+        f"# water_vapour_scale: {wv_scale:g}",
         "# columns: freq_ghz, alt_km, attenuation_db_per_km",
         "freq_ghz,alt_km,attenuation_db_per_km",
     ]
     for f in freqs_ghz:
         for h in alts_km:
-            out.append(f"{f:.3f},{h:.2f},{absorption_db_per_km(f, h):.6f}")
+            out.append(f"{f:.3f},{h:.2f},{absorption_db_per_km(f, h, wv_scale):.6g}")
     return "\n".join(out) + "\n"
 
 
@@ -219,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("--out", required=True)
-    p.add_argument("--freqs", default="100:500:10",
+    p.add_argument("--freqs", default="100:1000:1",
                    help="freq grid spec start:stop:step (GHz)")
     p.add_argument("--alts", default="0:30:1",
                    help="alt grid spec start:stop:step (km)")

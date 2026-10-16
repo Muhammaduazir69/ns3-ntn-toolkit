@@ -59,11 +59,24 @@ ThzNtnMolecularAbsorption::GetTypeId()
             .SetGroupName("ThzNtn")
             .AddConstructor<ThzNtnMolecularAbsorption>()
             .AddAttribute("HumidityProfile",
-                          "Atmospheric humidity profile: tropical, "
-                          "midlatitude-summer, midlatitude-winter, subarctic",
-                          StringValue("midlatitude-summer"),
-                          MakeStringAccessor(&ThzNtnMolecularAbsorption::m_humidityProfile),
+                          "Reference atmosphere (temperature, pressure and water vapour): "
+                          "global-annual (ITU-R P.835-6 Sec. 1.1, the default), "
+                          "low-latitude, midlatitude-summer, midlatitude-winter, "
+                          "high-latitude-summer, high-latitude-winter (P.835-6 Sec. 2). "
+                          "Legacy aliases: tropical = low-latitude, "
+                          "subarctic = high-latitude-winter.",
+                          StringValue("global-annual"),
+                          MakeStringAccessor(&ThzNtnMolecularAbsorption::SetHumidityProfile,
+                                             &ThzNtnMolecularAbsorption::GetHumidityProfile),
                           MakeStringChecker())
+            .AddAttribute("WaterVapourScale",
+                          "Multiplier on the water-vapour density of the selected "
+                          "reference atmosphere at every height (1 = the profile as "
+                          "published). Use it to sweep the integrated water-vapour "
+                          "column; GetWaterVapourColumn() reports the result.",
+                          DoubleValue(1.0),
+                          MakeDoubleAccessor(&ThzNtnMolecularAbsorption::m_waterVapourScale),
+                          MakeDoubleChecker<double>(0.0, 50.0))
             .AddAttribute("IntegrationSteps",
                           "Number of integration sub-steps per atmospheric layer",
                           UintegerValue(10),
@@ -78,7 +91,8 @@ ThzNtnMolecularAbsorption::GetTypeId()
 // ---------------------------------------------------------------------------
 
 ThzNtnMolecularAbsorption::ThzNtnMolecularAbsorption()
-    : m_humidityProfile("midlatitude-summer"),
+    : m_humidityProfile("global-annual"),
+      m_profileKind(ProfileKind::GLOBAL_ANNUAL),
       m_integrationSteps(10)
 {
     NS_LOG_FUNCTION(this);
@@ -287,11 +301,105 @@ ThzNtnMolecularAbsorption::InitAbsorptionLines()
 // Humidity profile setter
 // ---------------------------------------------------------------------------
 
+ThzNtnMolecularAbsorption::ProfileKind
+ThzNtnMolecularAbsorption::ParseProfileName(const std::string& profile, bool* known)
+{
+    if (known)
+    {
+        *known = true;
+    }
+    if (profile == "global-annual" || profile == "reference" || profile == "standard")
+    {
+        return ProfileKind::GLOBAL_ANNUAL;
+    }
+    if (profile == "low-latitude" || profile == "tropical")
+    {
+        return ProfileKind::LOW_LATITUDE;
+    }
+    if (profile == "midlatitude-summer")
+    {
+        return ProfileKind::MID_SUMMER;
+    }
+    if (profile == "midlatitude-winter")
+    {
+        return ProfileKind::MID_WINTER;
+    }
+    if (profile == "high-latitude-summer")
+    {
+        return ProfileKind::HIGH_SUMMER;
+    }
+    if (profile == "high-latitude-winter" || profile == "subarctic")
+    {
+        return ProfileKind::HIGH_WINTER;
+    }
+    if (known)
+    {
+        *known = false;
+    }
+    return ProfileKind::GLOBAL_ANNUAL;
+}
+
 void
 ThzNtnMolecularAbsorption::SetHumidityProfile(const std::string& profile)
 {
     NS_LOG_FUNCTION(this << profile);
+    // THZ-14. The four names used to select hand-invented altitude-band
+    // multipliers on the Section 1.1 water-vapour exponential ("tropical" was
+    // 2.5x below 2 km, "subarctic" 0.2x, ...), described as "per ITU-R P.835".
+    // P.835 contains no such multipliers: its Section 2 gives seasonal
+    // reference atmospheres in which temperature, pressure AND humidity all
+    // change. The names now select those profiles.
+    bool known = true;
+    m_profileKind = ParseProfileName(profile, &known);
+    if (!known)
+    {
+        NS_LOG_WARN("Unknown reference atmosphere '" << profile
+                    << "', using the ITU-R P.835-6 Section 1.1 global-annual profile");
+    }
     m_humidityProfile = profile;
+}
+
+std::string
+ThzNtnMolecularAbsorption::GetHumidityProfile() const
+{
+    return m_humidityProfile;
+}
+
+double
+ThzNtnMolecularAbsorption::GetWaterVapourColumn() const
+{
+    // Integrated water vapour, kg/m2 (= mm of precipitable water). Midpoint
+    // rule on 5 m steps to 30 km, where more than 99.99 percent of the column
+    // sits for every P.835 profile, then 100 m steps to the top.
+    double column = 0.0;
+    double T = 0.0;
+    double P = 0.0;
+    double rho = 0.0;
+    for (double h = 0.0; h < 100.0;)
+    {
+        const double dh = (h < 30.0) ? 0.005 : 0.1;
+        GetAtmosphericConditions(h + 0.5 * dh, T, P, rho);
+        column += rho * dh; // g/m3 x km = kg/m2
+        h += dh;
+    }
+    return column;
+}
+
+bool
+ThzNtnMolecularAbsorption::LutMatchesAtmosphere() const
+{
+    // THZ-13. A LUT tabulates specific attenuation for ONE atmosphere. The
+    // integrator used to consult it whatever profile or humidity had been
+    // configured, so SetHumidityProfile() and every humidity sweep were
+    // silently ignored once a table was loaded.
+    if (!m_lut.IsLoaded())
+    {
+        return false;
+    }
+    const std::string declared =
+        m_lut.DeclaredProfile().empty() ? std::string("global-annual") : m_lut.DeclaredProfile();
+    return ParseProfileName(declared, nullptr) == m_profileKind &&
+           std::abs(m_lut.DeclaredWaterVapourScale() - m_waterVapourScale) < 1e-12;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +421,13 @@ ThzNtnMolecularAbsorption::GetAtmosphericConditions(double altitude_km,
         return;
     }
 
-    // Find the enclosing layer and interpolate within it
+    if (m_profileKind != ProfileKind::GLOBAL_ANNUAL)
+    {
+        GetSeasonalConditions(altitude_km, tempK, pressureHPa, humidity);
+        humidity *= m_waterVapourScale;
+        return;
+    }
+
     // THZ-01: ITU-R P.835-6 Section 1.1, the mean annual global reference
     // atmosphere, evaluated in closed form.
     //
@@ -411,7 +525,7 @@ ThzNtnMolecularAbsorption::GetAtmosphericConditions(double altitude_km,
     // 2 km scale height from a 7.5 g/m3 surface density, which integrates to
     // the 15 kg/m2 reference column. The old per-layer restart gave 17.55, a
     // 17 percent excess, and an eight-fold discontinuity at 10 km.
-    double rho = 7.5 * std::exp(-h / 2.0);
+    double rho = 7.5 * m_waterVapourScale * std::exp(-h / 2.0);
 
     // P.835 Section 1.1 also floors the MIXING RATIO at 2e-6, so above the
     // altitude where the exponential falls below that, the mixing ratio rather
@@ -429,93 +543,230 @@ ThzNtnMolecularAbsorption::GetAtmosphericConditions(double altitude_km,
         rho = eFloor * 216.7 / tempK;
     }
 
-    humidity = ApplyHumidityProfile(rho, altitude_km);
+    humidity = rho;
 }
 
 // ---------------------------------------------------------------------------
-// Humidity profile scaling
+// THZ-14: ITU-R P.835-6 Section 2 seasonal reference atmospheres.
 //
-// Multipliers relative to the midlatitude-summer baseline per ITU-R P.835.
+// Temperature T(h) in K, pressure P(h) in hPa and water-vapour density rho(h)
+// in g/m3 at geometric height h in km, as printed in Sections 2.1 (low
+// latitude), 2.2 (mid latitude summer and winter) and 2.3 (high latitude
+// summer and winter). Above the stated water-vapour ceiling (15 km, or 10 km
+// for the two winter profiles) the recommendation gives no humidity and the
+// density is zero. These replace altitude-band multipliers that had been
+// labelled "per ITU-R P.835" but appear nowhere in it.
 // ---------------------------------------------------------------------------
 
-double
-ThzNtnMolecularAbsorption::ApplyHumidityProfile(double baseHumidity,
-                                                  double altitude_km) const
+void
+ThzNtnMolecularAbsorption::GetSeasonalConditions(double altitude_km,
+                                                 double& tempK,
+                                                 double& pressureHPa,
+                                                 double& humidity) const
 {
-    double scale = 1.0;
-
-    if (m_humidityProfile == "tropical")
+    const double h = std::min(std::max(altitude_km, 0.0), 100.0);
+    switch (m_profileKind)
     {
-        // Tropical: significantly higher water vapour at all altitudes
-        if (altitude_km < 2.0)
+    case ProfileKind::LOW_LATITUDE:
+        if (h < 17.0)
         {
-            scale = 2.5;   // ~19 g/m3 surface
+            tempK = 300.4222 - 6.3533 * h + 0.005886 * h * h;
         }
-        else if (altitude_km < 5.0)
+        else if (h < 47.0)
         {
-            scale = 2.2;
+            tempK = 194.0 + (h - 17.0) * 2.533;
         }
-        else if (altitude_km < 10.0)
+        else if (h < 52.0)
         {
-            scale = 1.8;
+            tempK = 270.0;
+        }
+        else if (h < 80.0)
+        {
+            tempK = 270.0 - (h - 52.0) * 3.0714;
         }
         else
         {
-            scale = 1.5;
+            tempK = 184.0;
         }
-    }
-    else if (m_humidityProfile == "midlatitude-summer")
-    {
-        scale = 1.0; // baseline
-    }
-    else if (m_humidityProfile == "midlatitude-winter")
-    {
-        // Winter: reduced water vapour
-        if (altitude_km < 2.0)
+        if (h <= 10.0)
         {
-            scale = 0.45;  // ~3.5 g/m3 surface
+            pressureHPa = 1012.0306 - 109.0338 * h + 3.6316 * h * h;
         }
-        else if (altitude_km < 5.0)
+        else if (h <= 72.0)
         {
-            scale = 0.50;
-        }
-        else if (altitude_km < 10.0)
-        {
-            scale = 0.55;
+            pressureHPa = 284.8526 * std::exp(-0.147 * (h - 10.0));
         }
         else
         {
-            scale = 0.60;
+            pressureHPa = 0.0313660 * std::exp(-0.165 * (h - 72.0));
         }
-    }
-    else if (m_humidityProfile == "subarctic")
-    {
-        // Subarctic: very dry
-        if (altitude_km < 2.0)
+        humidity = (h <= 15.0) ? 19.6542 * std::exp(-0.2313 * h - 0.1122 * h * h +
+                                                    0.01351 * h * h * h -
+                                                    0.0005923 * h * h * h * h)
+                               : 0.0;
+        return;
+    case ProfileKind::MID_SUMMER:
+        if (h < 13.0)
         {
-            scale = 0.20;  // ~1.5 g/m3 surface
+            tempK = 294.9838 - 5.2159 * h - 0.07109 * h * h;
         }
-        else if (altitude_km < 5.0)
+        else if (h < 17.0)
         {
-            scale = 0.25;
+            tempK = 215.15;
         }
-        else if (altitude_km < 10.0)
+        else if (h < 47.0)
         {
-            scale = 0.30;
+            tempK = 215.15 * std::exp((h - 17.0) * 0.008128);
+        }
+        else if (h < 53.0)
+        {
+            tempK = 275.0;
+        }
+        else if (h < 80.0)
+        {
+            tempK = 275.0 + 20.0 * (1.0 - std::exp((h - 53.0) * 0.06));
         }
         else
         {
-            scale = 0.35;
+            tempK = 175.0;
         }
+        if (h <= 10.0)
+        {
+            pressureHPa = 1012.8186 - 111.5569 * h + 3.8646 * h * h;
+        }
+        else if (h <= 72.0)
+        {
+            pressureHPa = 283.7096 * std::exp(-0.147 * (h - 10.0));
+        }
+        else
+        {
+            pressureHPa = 0.03124022 * std::exp(-0.165 * (h - 72.0));
+        }
+        humidity = (h <= 15.0)
+                       ? 14.3542 * std::exp(-0.4174 * h - 0.02290 * h * h + 0.001007 * h * h * h)
+                       : 0.0;
+        return;
+    case ProfileKind::MID_WINTER:
+        if (h < 10.0)
+        {
+            tempK = 272.7241 - 3.6217 * h - 0.1759 * h * h;
+        }
+        else if (h < 33.0)
+        {
+            tempK = 218.0;
+        }
+        else if (h < 47.0)
+        {
+            tempK = 218.0 + (h - 33.0) * 3.3571;
+        }
+        else if (h < 53.0)
+        {
+            tempK = 265.0;
+        }
+        else if (h < 80.0)
+        {
+            tempK = 265.0 - (h - 53.0) * 2.0370;
+        }
+        else
+        {
+            tempK = 210.0;
+        }
+        if (h <= 10.0)
+        {
+            pressureHPa = 1018.8627 - 124.2954 * h + 4.8307 * h * h;
+        }
+        else if (h <= 72.0)
+        {
+            pressureHPa = 258.9787 * std::exp(-0.147 * (h - 10.0));
+        }
+        else
+        {
+            pressureHPa = 0.02851702 * std::exp(-0.155 * (h - 72.0));
+        }
+        humidity = (h <= 10.0) ? 3.4742 * std::exp(-0.2697 * h - 0.03604 * h * h +
+                                                   0.0004489 * h * h * h)
+                               : 0.0;
+        return;
+    case ProfileKind::HIGH_SUMMER:
+        if (h < 10.0)
+        {
+            tempK = 286.8374 - 4.7805 * h - 0.1402 * h * h;
+        }
+        else if (h < 23.0)
+        {
+            tempK = 225.0;
+        }
+        else if (h < 48.0)
+        {
+            tempK = 225.0 * std::exp((h - 23.0) * 0.008317);
+        }
+        else if (h < 53.0)
+        {
+            tempK = 277.0;
+        }
+        else if (h < 79.0)
+        {
+            tempK = 277.0 - (h - 53.0) * 4.0769;
+        }
+        else
+        {
+            tempK = 171.0;
+        }
+        if (h <= 10.0)
+        {
+            pressureHPa = 1008.0278 - 113.2494 * h + 3.9408 * h * h;
+        }
+        else if (h <= 72.0)
+        {
+            pressureHPa = 269.6138 * std::exp(-0.140 * (h - 10.0));
+        }
+        else
+        {
+            pressureHPa = 0.04582115 * std::exp(-0.165 * (h - 72.0));
+        }
+        humidity = (h <= 15.0) ? 8.988 * std::exp(-0.3614 * h - 0.005402 * h * h -
+                                                  0.001955 * h * h * h)
+                               : 0.0;
+        return;
+    case ProfileKind::HIGH_WINTER:
+    default:
+        if (h < 8.5)
+        {
+            tempK = 257.4345 + 2.3474 * h - 1.5479 * h * h + 0.08473 * h * h * h;
+        }
+        else if (h < 30.0)
+        {
+            tempK = 217.5;
+        }
+        else if (h < 50.0)
+        {
+            tempK = 217.5 + (h - 30.0) * 2.125;
+        }
+        else if (h < 54.0)
+        {
+            tempK = 260.0;
+        }
+        else
+        {
+            tempK = 260.0 - (h - 54.0) * 1.667;
+        }
+        if (h <= 10.0)
+        {
+            pressureHPa = 1010.8828 - 122.2411 * h + 4.554 * h * h;
+        }
+        else if (h <= 72.0)
+        {
+            pressureHPa = 243.8718 * std::exp(-0.147 * (h - 10.0));
+        }
+        else
+        {
+            pressureHPa = 0.02685355 * std::exp(-0.150 * (h - 72.0));
+        }
+        humidity = (h <= 10.0) ? 1.2319 * std::exp(0.07481 * h - 0.0981 * h * h +
+                                                   0.00281 * h * h * h)
+                               : 0.0;
+        return;
     }
-    else
-    {
-        NS_LOG_WARN("Unknown humidity profile '" << m_humidityProfile
-                    << "', using midlatitude-summer baseline");
-        scale = 1.0;
-    }
-
-    return baseHumidity * scale;
 }
 
 // ---------------------------------------------------------------------------
@@ -708,6 +959,7 @@ ThzNtnMolecularAbsorption::ComputeSlantPathAbsorption(double freqHz,
     double R_g = R_E + hLow;  // geocentric radius of ground station
 
     double totalAbsorption_Np = 0.0;
+    const bool useLut = LutMatchesAtmosphere();
 
     // Iterate over atmospheric layers that the path intersects
     for (const auto& layer : m_layers)
@@ -754,7 +1006,7 @@ ThzNtnMolecularAbsorption::ComputeSlantPathAbsorption(double freqHz,
 
             // Absorption coefficient at this point [Np/km]
             double k_NpKm;
-            if (m_lut.IsLoaded())
+            if (useLut)
             {
                 // HITRAN-2024 LUT path (Roadmap §4.3.1) — returns dB/km;
                 // convert to Np/km via 1/NP_TO_DB.
@@ -843,8 +1095,8 @@ ThzNtnMolecularAbsorption::GetTransmittance(double freqHz,
 {
     NS_LOG_FUNCTION(this << freqHz << distanceM << altitudeAvg_km);
 
-    // Roadmap §4.3.1: HITRAN-2024 LUT path when loaded.
-    if (m_lut.IsLoaded())
+    // Roadmap §4.3.1: LUT path when loaded AND tabulated for this atmosphere.
+    if (LutMatchesAtmosphere())
     {
         double db_per_km = m_lut.Get(freqHz, altitudeAvg_km);
         if (std::isfinite(db_per_km))

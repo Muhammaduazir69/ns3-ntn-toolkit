@@ -71,6 +71,12 @@ class HitranLut
     double Get(double freqHz, double altKm) const;
 
     /// LUT grid metadata (used by tests + manifest emitters).
+    /// THZ-13: the atmosphere the table was generated for, from the
+    /// `# profile:` and `# water_vapour_scale:` header lines. Empty profile and
+    /// scale 1 when the file does not declare them (legacy tables).
+    const std::string& DeclaredProfile() const { return m_declaredProfile; }
+    double DeclaredWaterVapourScale() const { return m_declaredWvScale; }
+
     const std::vector<double>& FrequencyGridGhz() const { return m_freqGhz; }
     const std::vector<double>& AltitudeGridKm() const { return m_altKm; }
     size_t Size() const { return m_attDbKm.size(); }
@@ -86,6 +92,8 @@ class HitranLut
     size_t LowerIndex(const std::vector<double>& v, double x) const;
 
     std::string m_releaseTag;
+    std::string m_declaredProfile;
+    double m_declaredWvScale{1.0};
     std::vector<double> m_freqGhz;        //!< ascending grid
     std::vector<double> m_altKm;          //!< ascending grid
     /// Row-major flatten: m_attDbKm[freqIdx * altSize + altIdx].

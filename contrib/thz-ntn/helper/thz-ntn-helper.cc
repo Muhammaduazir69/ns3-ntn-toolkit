@@ -134,7 +134,9 @@ ThzNtnHelper::CreateMolecularAbsorption() const
     NS_LOG_FUNCTION(this);
     Ptr<ThzNtnMolecularAbsorption> model =
         CreateObject<ThzNtnMolecularAbsorption>();
-    model->SetHumidityProfile("midlatitude-summer");
+    // THZ-14: "midlatitude-summer" now selects the P.835-6 Section 2 profile;
+    // this helper has always meant the Section 1.1 global-annual atmosphere.
+    model->SetHumidityProfile("global-annual");
     return model;
 }
 

@@ -184,15 +184,32 @@ class ThzNtnMolecularAbsorption : public Object
                                       double satAlt_km) const;
 
     /**
-     * \brief Select the humidity profile.
+     * \brief Select the reference atmosphere.
      *
-     * The profile controls the water-vapour density scaling applied to each
-     * atmospheric layer.  Supported values are "tropical",
-     * "midlatitude-summer" (default), "midlatitude-winter", and "subarctic".
+     * THZ-14. "global-annual" (the default) is ITU-R P.835-6 Section 1.1.
+     * "low-latitude", "midlatitude-summer", "midlatitude-winter",
+     * "high-latitude-summer" and "high-latitude-winter" are the Section 2
+     * seasonal profiles, in which temperature, pressure and water vapour all
+     * change. "tropical" and "subarctic" are kept as aliases of low-latitude
+     * and high-latitude-winter. An unknown name logs a warning and selects
+     * global-annual.
      *
-     * \param profile humidity profile name (case-sensitive)
+     * \param profile reference atmosphere name (case-sensitive)
      */
     void SetHumidityProfile(const std::string& profile);
+
+    /// Name of the selected reference atmosphere.
+    std::string GetHumidityProfile() const;
+
+    /**
+     * \brief Integrated water-vapour column of the configured atmosphere.
+     *
+     * Includes the WaterVapourScale attribute. 15.0 kg/m2 for the default
+     * P.835-6 Section 1.1 profile.
+     *
+     * \return column in kg/m2 (numerically equal to mm of precipitable water)
+     */
+    double GetWaterVapourColumn() const;
 
     /**
      * \brief Compute the atmospheric transmittance (linear, 0--1).
@@ -317,17 +334,34 @@ class ThzNtnMolecularAbsorption : public Object
 
 
 
-    /**
-     * \brief Apply humidity profile scaling to the base layer humidity.
-     *
-     * \param baseHumidity base water-vapour density in g/m^3
-     * \param altitude_km  altitude in km
-     * \return scaled water-vapour density in g/m^3
-     */
-    double ApplyHumidityProfile(double baseHumidity, double altitude_km) const;
+    /// THZ-14: reference atmospheres of ITU-R P.835-6.
+    enum class ProfileKind
+    {
+        GLOBAL_ANNUAL, //!< Section 1.1, mean annual global
+        LOW_LATITUDE,  //!< Section 2.1
+        MID_SUMMER,    //!< Section 2.2, summer
+        MID_WINTER,    //!< Section 2.2, winter
+        HIGH_SUMMER,   //!< Section 2.3, summer
+        HIGH_WINTER    //!< Section 2.3, winter
+    };
+
+    /// Map a profile name to its kind; *known is false for an unknown name.
+    static ProfileKind ParseProfileName(const std::string& profile, bool* known);
+
+    /// P.835-6 Section 2 seasonal profile (unscaled humidity).
+    void GetSeasonalConditions(double altitude_km,
+                               double& tempK,
+                               double& pressureHPa,
+                               double& humidity) const;
+
+    /// THZ-13: true iff a LUT is loaded AND it was tabulated for the
+    /// configured atmosphere (profile and water-vapour scale).
+    bool LutMatchesAtmosphere() const;
 
     // Configuration
-    std::string m_humidityProfile;  //!< humidity profile name
+    std::string m_humidityProfile;  //!< reference atmosphere name
+    ProfileKind m_profileKind;      //!< parsed reference atmosphere
+    double m_waterVapourScale{1.0}; //!< multiplier on water-vapour density
     uint32_t m_integrationSteps;    //!< number of sub-steps per atmospheric layer
 
     // Pre-built tables

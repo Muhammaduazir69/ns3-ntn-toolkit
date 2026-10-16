@@ -1232,12 +1232,13 @@ class ThzNtnHitranLutLoadTest : public TestCase
                                   0.012345,
                                   1e-9,
                                   "200 GHz at 10 km");
-        const double mid =
-            0.25 * (0.012345 + 0.001234 + 0.123456 + 0.012345);
+        // THZ-13: linear in frequency, log-linear (geometric) in altitude.
+        const double mid = 0.5 * (std::sqrt(0.012345 * 0.001234) +
+                                  std::sqrt(0.123456 * 0.012345));
         NS_TEST_ASSERT_MSG_EQ_TOL(lut.Get(150e9, 5.0),
                                   mid,
                                   1e-9,
-                                  "bilinear midpoint");
+                                  "midpoint: linear in f, geometric in h");
         NS_TEST_ASSERT_MSG_EQ_TOL(lut.Get(50e9, 0.0),
                                   0.012345,
                                   1e-9,
@@ -1357,7 +1358,7 @@ class ThzNtnHitranBundledLutTest : public TestCase
 {
   public:
     ThzNtnHitranBundledLutTest()
-        : TestCase("Bundled ITU-R P.676-13 sub-THz LUT loads and covers 100-500 GHz, 0-30 km")
+        : TestCase("Bundled ITU-R P.676-13 LUT loads and covers 100-1000 GHz, 0-30 km")
     {
     }
 
@@ -1385,10 +1386,10 @@ class ThzNtnHitranBundledLutTest : public TestCase
                               "bundled LUT is generated from the ITU-R P.676-13 "
                               "line-by-line model (not HITRAN)");
         NS_TEST_EXPECT_MSG_EQ(lut.FrequencyGridGhz().size(),
-                              41u,
-                              "41 freqs");
+                              901u,
+                              "901 freqs (100 to 1000 GHz, 1 GHz step)");
         NS_TEST_EXPECT_MSG_EQ(lut.AltitudeGridKm().size(), 31u, "31 alts");
-        NS_TEST_EXPECT_MSG_EQ(lut.Size(), 41u * 31u, "1271 cells");
+        NS_TEST_EXPECT_MSG_EQ(lut.Size(), 901u * 31u, "27931 cells");
         const double v = lut.Get(220e9, 0.0);
         NS_TEST_ASSERT_MSG_GT(v, 0.1, "220 GHz sea level too low");
         NS_TEST_ASSERT_MSG_LT(v, 5.0, "220 GHz sea level too high");
@@ -2918,6 +2919,210 @@ class ThzNativeAbove100GhzTest : public TestCase
     }
 };
 
+
+namespace
+{
+const char*
+FindBundledLut()
+{
+    static const char* candidates[] = {
+        "contrib/thz-ntn/data/hitran2024-lut-subthz.csv",
+        "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/thz-ntn/data/hitran2024-lut-subthz.csv",
+    };
+    for (const char* c : candidates)
+    {
+        std::ifstream f(c);
+        if (f.good())
+        {
+            return c;
+        }
+    }
+    return nullptr;
+}
+} // namespace
+
+/**
+ * THZ-13. The bundled table must reproduce the kernel it claims to mirror.
+ *
+ * The generator still carried the six isothermal layers that THZ-01 removed
+ * from the C++ atmosphere, so the shipped table disagreed with the in-process
+ * model by up to a factor of two at 1 to 3 km while its header said it was an
+ * exact mirror. The old bundled-LUT test only checked the grid size and that
+ * 220 GHz sat between 0.1 and 5 dB/km, which the stale file passed.
+ */
+class ThzNtnBundledLutMatchesKernelTest : public TestCase
+{
+  public:
+    ThzNtnBundledLutMatchesKernelTest()
+        : TestCase("THZ-13 bundled LUT reproduces the in-process P.676-13 kernel at its nodes")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const char* path = FindBundledLut();
+        NS_TEST_ASSERT_MSG_NE(path, nullptr, "bundled LUT not found");
+        thzntn::HitranLut lut;
+        NS_TEST_ASSERT_MSG_EQ(lut.LoadCsv(path), true, "bundled LUT loads");
+        Ptr<ThzNtnMolecularAbsorption> atm = CreateObject<ThzNtnMolecularAbsorption>();
+        const double np2db = 10.0 / std::log(10.0);
+        // Nodes below 500 GHz first: the legacy table covered them, so a
+        // failure here is the stale atmosphere, not the grid extent.
+        for (double f : {220.0, 340.0, 410.0, 460.0, 650.0, 850.0})
+        {
+            for (double h : {0.0, 1.0, 2.0, 3.0, 5.0, 10.0, 20.0})
+            {
+                double T, P, rho;
+                atm->GetAtmosphericConditions(h, T, P, rho);
+                const double kernel =
+                    atm->ComputeAbsorptionCoefficient(f * 1e9, T, P, rho) * np2db;
+                const double tab = lut.Get(f * 1e9, h);
+                NS_TEST_ASSERT_MSG_EQ(std::isfinite(tab), true,
+                                      "node f=" << f << " GHz h=" << h << " km is on the grid");
+                NS_TEST_ASSERT_MSG_EQ_TOL(tab, kernel, 1e-4 * kernel + 1e-6,
+                                          "LUT node f=" << f << " GHz h=" << h
+                                                        << " km disagrees with the kernel: "
+                                                        << tab << " vs " << kernel << " dB/km");
+            }
+        }
+        NS_TEST_EXPECT_MSG_EQ(lut.DeclaredProfile(), "global-annual",
+                              "the table declares the atmosphere it was made for");
+    }
+};
+
+/**
+ * THZ-13. A loaded LUT must not override the configured atmosphere.
+ *
+ * The slant integrator consulted the table whatever profile or humidity was
+ * set, so SetHumidityProfile() was a silent no-op once a LUT was loaded.
+ */
+class ThzNtnLutRespectsAtmosphereTest : public TestCase
+{
+  public:
+    ThzNtnLutRespectsAtmosphereTest()
+        : TestCase("THZ-13 a LUT tabulated for one atmosphere is bypassed for another")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const char* path = FindBundledLut();
+        NS_TEST_ASSERT_MSG_NE(path, nullptr, "bundled LUT not found");
+        for (const std::string profile : {"midlatitude-summer", "high-latitude-winter"})
+        {
+            Ptr<ThzNtnMolecularAbsorption> ref = CreateObject<ThzNtnMolecularAbsorption>();
+            Ptr<ThzNtnMolecularAbsorption> lut = CreateObject<ThzNtnMolecularAbsorption>();
+            ref->SetHumidityProfile(profile);
+            lut->SetHumidityProfile(profile);
+            NS_TEST_ASSERT_MSG_EQ(lut->LoadHitran2024Lut(path), true, "load");
+            const double a = ref->ComputeSlantPathAbsorption(340e9, 30.0, 0.0, 550.0);
+            const double b = lut->ComputeSlantPathAbsorption(340e9, 30.0, 0.0, 550.0);
+            NS_TEST_ASSERT_MSG_EQ_TOL(b, a, 1e-9 * a,
+                                      "profile " << profile << ": LUT path gave " << b
+                                                 << " dB, configured atmosphere gives " << a);
+        }
+        Ptr<ThzNtnMolecularAbsorption> ref = CreateObject<ThzNtnMolecularAbsorption>();
+        Ptr<ThzNtnMolecularAbsorption> lut = CreateObject<ThzNtnMolecularAbsorption>();
+        ref->SetAttribute("WaterVapourScale", DoubleValue(2.0));
+        lut->SetAttribute("WaterVapourScale", DoubleValue(2.0));
+        NS_TEST_ASSERT_MSG_EQ(lut->LoadHitran2024Lut(path), true, "load");
+        const double a = ref->ComputeSlantPathAbsorption(410e9, 45.0, 0.0, 550.0);
+        const double b = lut->ComputeSlantPathAbsorption(410e9, 45.0, 0.0, 550.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(b, a, 1e-9 * a, "a doubled water column is not ignored");
+        // And the default atmosphere still uses the table (within its
+        // interpolation error), so the fast path is not simply disabled.
+        Ptr<ThzNtnMolecularAbsorption> d0 = CreateObject<ThzNtnMolecularAbsorption>();
+        Ptr<ThzNtnMolecularAbsorption> d1 = CreateObject<ThzNtnMolecularAbsorption>();
+        NS_TEST_ASSERT_MSG_EQ(d1->LoadHitran2024Lut(path), true, "load");
+        const double x0 = d0->ComputeSlantPathAbsorption(340.5e9, 30.0, 0.0, 550.0);
+        const double x1 = d1->ComputeSlantPathAbsorption(340.5e9, 30.0, 0.0, 550.0);
+        NS_TEST_ASSERT_MSG_NE(x0, x1, "default atmosphere takes the tabulated path");
+        NS_TEST_ASSERT_MSG_EQ_TOL(x1, x0, 0.01 * x0, "and agrees within 1 percent off-node");
+    }
+};
+
+/**
+ * THZ-14. The named profiles are the ITU-R P.835-6 Section 2 atmospheres.
+ *
+ * They were altitude-band multipliers on the Section 1.1 water-vapour
+ * exponential with temperature and pressure unchanged. Reference values below
+ * were computed with ITU-Rpy 0.4.0 (itur.models.itu835, revision 6), an
+ * independent implementation.
+ */
+class ThzNtnP835SeasonalProfilesTest : public TestCase
+{
+  public:
+    ThzNtnP835SeasonalProfilesTest()
+        : TestCase("THZ-14 named profiles are the ITU-R P.835-6 Section 2 atmospheres")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        struct Ref
+        {
+            const char* name;
+            double h, T, P, rho;
+        };
+        const Ref refs[] = {
+            {"low-latitude", 0.0, 300.4222, 1012.0306, 19.6542},
+            {"low-latitude", 5.0, 268.80285, 557.6516, 1.3984347},
+            {"tropical", 12.0, 225.030184, 212.293946, 0.0075157},
+            {"midlatitude-summer", 0.0, 294.9838, 1012.8186, 14.3542},
+            {"midlatitude-summer", 5.0, 267.12705, 551.6491, 1.1393040},
+            {"midlatitude-winter", 5.0, 250.2181, 518.1532, 0.3875063},
+            {"midlatitude-winter", 12.0, 218.0, 193.010737, 0.0},
+            {"high-latitude-summer", 5.0, 259.4299, 540.3008, 1.0095103},
+            {"high-latitude-winter", 0.0, 257.4345, 1010.8828, 1.2319},
+            {"subarctic", 5.0, 241.06525, 513.5273, 0.2190090},
+        };
+        for (const auto& r : refs)
+        {
+            Ptr<ThzNtnMolecularAbsorption> atm = CreateObject<ThzNtnMolecularAbsorption>();
+            atm->SetHumidityProfile(r.name);
+            double T, P, rho;
+            atm->GetAtmosphericConditions(r.h, T, P, rho);
+            NS_TEST_ASSERT_MSG_EQ_TOL(T, r.T, 1e-4, r.name << " T at " << r.h << " km");
+            NS_TEST_ASSERT_MSG_EQ_TOL(P, r.P, 1e-3, r.name << " P at " << r.h << " km");
+            NS_TEST_ASSERT_MSG_EQ_TOL(rho, r.rho, 1e-6 + 1e-6 * r.rho,
+                                      r.name << " rho at " << r.h << " km");
+        }
+    }
+};
+
+/**
+ * THZ-14. WaterVapourScale moves the column, and the column is reported.
+ */
+class ThzNtnWaterVapourColumnTest : public TestCase
+{
+  public:
+    ThzNtnWaterVapourColumnTest()
+        : TestCase("THZ-14 WaterVapourScale sets the integrated water-vapour column")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ThzNtnMolecularAbsorption> atm = CreateObject<ThzNtnMolecularAbsorption>();
+        NS_TEST_ASSERT_MSG_EQ_TOL(atm->GetWaterVapourColumn(), 15.0, 0.01,
+                                  "P.835-6 Section 1.1 column is 15 kg/m2");
+        const double a1 = atm->ComputeSlantPathAbsorption(340e9, 30.0, 0.0, 550.0);
+        atm->SetAttribute("WaterVapourScale", DoubleValue(2.0));
+        NS_TEST_ASSERT_MSG_EQ_TOL(atm->GetWaterVapourColumn(), 30.0, 0.02,
+                                  "doubling the density doubles the column");
+        const double a2 = atm->ComputeSlantPathAbsorption(340e9, 30.0, 0.0, 550.0);
+        NS_TEST_ASSERT_MSG_GT(a2, 1.8 * a1, "340 GHz is water-vapour dominated");
+        atm->SetAttribute("WaterVapourScale", DoubleValue(0.0));
+        // The 2e-6 mixing-ratio floor alone holds about 0.02 kg/m2.
+        NS_TEST_ASSERT_MSG_LT(atm->GetWaterVapourColumn(), 0.05,
+                              "zero scale leaves only the mixing-ratio floor");
+    }
+};
+
 class ThzNtnTestSuite : public TestSuite
 {
   public:
@@ -2946,6 +3151,10 @@ ThzNtnTestSuite::ThzNtnTestSuite()
     AddTestCase(new ThzNtnHitranLutModelRoundTripTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnHitranSlantPathTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnHitranBundledLutTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnBundledLutMatchesKernelTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnLutRespectsAtmosphereTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnP835SeasonalProfilesTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnWaterVapourColumnTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnHitranSimulatorTimeTest, TestCase::Duration::QUICK);
     // Roadmap §4.3.2 — ITU-R P.618 / P.676 / P.838 / P.681 wrappers.
     AddTestCase(new ThzNtnP838CoefficientsTest, TestCase::Duration::QUICK);

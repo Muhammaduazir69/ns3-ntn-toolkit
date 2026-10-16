@@ -313,3 +313,13 @@ build_lib_example(
     ${libapplications}
     ${libflow-monitor}
 )
+
+# Slant-path gaseous absorption sweep (frequency x elevation x PWV) of the
+# absorption engine; in-process kernel vs tabulated LUT paths.
+build_lib_example(
+  NAME thz-ntn-absorption-sweep
+  SOURCE_FILES thz-ntn-absorption-sweep.cc
+  LIBRARIES_TO_LINK
+    ${libthz-ntn}
+    ${libcore}
+)

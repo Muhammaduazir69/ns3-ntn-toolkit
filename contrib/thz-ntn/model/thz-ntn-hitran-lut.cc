@@ -51,6 +51,8 @@ HitranLut::LoadCsv(const std::string& path)
     m_altKm.clear();
     m_attDbKm.clear();
     m_releaseTag.clear();
+    m_declaredProfile.clear();
+    m_declaredWvScale = 1.0;
 
     // Pre-pass: collect unique freq + alt grids so we can size the table.
     std::set<double> freqSet;
@@ -69,6 +71,32 @@ HitranLut::LoadCsv(const std::string& path)
         // line, if present, sets the release tag.
         if (line[0] == '#')
         {
+            auto trimmed = [](std::string v) {
+                while (!v.empty() && (v.front() == ' ' || v.front() == '\t'))
+                {
+                    v.erase(v.begin());
+                }
+                while (!v.empty() &&
+                       (v.back() == ' ' || v.back() == '\t' || v.back() == '\r'))
+                {
+                    v.pop_back();
+                }
+                return v;
+            };
+            auto ppos = line.find("profile:");
+            if (ppos != std::string::npos)
+            {
+                m_declaredProfile = trimmed(line.substr(ppos + 8));
+            }
+            auto spos = line.find("water_vapour_scale:");
+            if (spos != std::string::npos)
+            {
+                double sc = 1.0;
+                if (ParseDouble(trimmed(line.substr(spos + 19)), sc))
+                {
+                    m_declaredWvScale = sc;
+                }
+            }
             auto pos = line.find("release:");
             if (pos != std::string::npos)
             {
@@ -219,8 +247,19 @@ HitranLut::Get(double freqHz, double altKm) const
     const double a01 = m_attDbKm[idx(fi, aiNext)];
     const double a10 = m_attDbKm[idx(fiNext, ai)];
     const double a11 = m_attDbKm[idx(fiNext, aiNext)];
-    return (1.0 - tf) * ((1.0 - th) * a00 + th * a01) +
-           tf * ((1.0 - th) * a10 + th * a11);
+    // THZ-13: specific attenuation falls off close to exponentially with
+    // height (2 km water-vapour scale height), so a straight line between two
+    // altitude nodes overstates every interior value; on the 1 km bundled grid
+    // that bias reached a few percent of the slant total. Interpolate the
+    // logarithm in altitude when both nodes are positive, linearly otherwise.
+    const auto alongAlt = [th](double lo, double hi) {
+        if (lo > 0.0 && hi > 0.0)
+        {
+            return std::exp((1.0 - th) * std::log(lo) + th * std::log(hi));
+        }
+        return (1.0 - th) * lo + th * hi;
+    };
+    return (1.0 - tf) * alongAlt(a00, a01) + tf * alongAlt(a10, a11);
 }
 
 } // namespace thzntn
