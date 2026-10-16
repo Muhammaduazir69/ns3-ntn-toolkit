@@ -1,0 +1,769 @@
+#!/usr/bin/env python3
+# Copy of papers/paper3_tnsm_oran_ntn/sim/ from the author's tree; paths below are absolute to that tree.
+"""Analysis for Paper 3 (TNSM). Reads runs/<group>/<config>/seedNN/*.csv and
+writes ../results_macros.tex, ../tables/*.tex and ../figures/*.pdf.
+
+Every number quoted in the manuscript is a macro written here. Means are over
+the 10 seeds of a configuration; a 95% CI is the Student-t interval of the
+seed means. A difference between two strategies is paired by seed (the same
+seed gives the same epoch, orbit geometry, rain and ephemeris error for every
+strategy), and its CI is the t interval of the per-seed differences.
+"""
+import csv
+import glob
+import math
+import os
+import sys
+from collections import defaultdict
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PAPER = os.path.dirname(HERE)
+RUNS = os.path.join(HERE, "runs")
+FIG = os.path.join(PAPER, "figures")
+TAB = os.path.join(PAPER, "tables")
+os.makedirs(FIG, exist_ok=True)
+os.makedirs(TAB, exist_ok=True)
+
+T975 = {2: 12.706, 3: 4.303, 4: 3.182, 5: 2.776, 6: 2.571, 7: 2.447, 8: 2.365, 9: 2.306, 10: 2.262}
+
+macros = {}
+
+
+def mac(name, value, fmt="{:.2f}"):
+    if isinstance(value, str):
+        macros[name] = value
+    elif value is None or (isinstance(value, float) and math.isnan(value)):
+        macros[name] = "n/a"
+    else:
+        macros[name] = fmt.format(value)
+
+
+def load(group):
+    """{config: {seed: {"summary": row, "outages": [...], "switches": [...]}}}"""
+    out = defaultdict(dict)
+    for d in sorted(glob.glob(os.path.join(RUNS, group, "*", "seed*"))):
+        sp = os.path.join(d, "summary.csv")
+        if not os.path.exists(sp):
+            continue
+        cfg = os.path.basename(os.path.dirname(d))
+        seed = int(os.path.basename(d)[4:])
+        rec = {"summary": next(csv.DictReader(open(sp)))}
+        for k in ["outages", "switches", "checks", "nf_miss"]:
+            p = os.path.join(d, f"{k}.csv")
+            rec[k] = list(csv.DictReader(open(p))) if os.path.exists(p) else []
+        lh = os.path.join(d, "loop_hist.csv")
+        rec["hist"] = list(csv.DictReader(open(lh))) if os.path.exists(lh) else []
+        out[cfg][seed] = rec
+    return out
+
+
+def col(data, cfg, key):
+    v = []
+    for s in sorted(data[cfg]):
+        x = data[cfg][s]["summary"][key]
+        try:
+            x = float(x)
+        except ValueError:
+            x = float("nan")
+        v.append(x)
+    return np.array(v)
+
+
+def ci(v):
+    v = np.asarray([x for x in v if not math.isnan(x)])
+    n = len(v)
+    if n == 0:
+        return float("nan"), float("nan"), 0
+    m = float(np.mean(v))
+    if n < 2:
+        return m, float("nan"), n
+    h = T975.get(n, 1.96) * float(np.std(v, ddof=1)) / math.sqrt(n)
+    return m, h, n
+
+
+def paired(data, a, b, key):
+    """mean and CI half-width of (a - b), paired by seed."""
+    seeds = sorted(set(data[a]) & set(data[b]))
+    d = []
+    for s in seeds:
+        xa = float(data[a][s]["summary"][key])
+        xb = float(data[b][s]["summary"][key])
+        if not (math.isnan(xa) or math.isnan(xb)):
+            d.append(xa - xb)
+    return ci(d)
+
+
+def pooled(data, cfg, kind, key, filt=lambda r: True):
+    v = []
+    for s in sorted(data[cfg]):
+        for r in data[cfg][s][kind]:
+            if filt(r):
+                try:
+                    v.append(float(r[key]))
+                except ValueError:
+                    pass
+    return np.array(v)
+
+
+def recon(data, cfg, key, scale=1.0):
+    """Per-seed mean over reconnections (feeder back to the SAME satellite),
+    excluding the start-up acquisition at t = 0. Returns per-seed values."""
+    out = []
+    for s in sorted(data[cfg]):
+        v = []
+        for r in data[cfg][s]["outages"]:
+            if int(r["ended_by_switch"]) == 0 and r.get("kind", "2") in ("1", "2"):
+                x = float(r[key])
+                if key == "ttc" and x < 0:
+                    continue
+                v.append(x * scale)
+        if v:
+            out.append(float(np.mean(v)))
+    return np.array(out)
+
+
+def blackout(data, cfg, stat="mean"):
+    """Per-seed blackout statistic in ms over satellite switches, excluding the
+    start-up 'switch' at t = 0 (initial acquisition)."""
+    out = []
+    for s in sorted(data[cfg]):
+        v = [float(r["blackout_nf_s"]) * 1000 for r in data[cfg][s]["switches"]
+             if float(r["t"]) >= 1.0 and float(r["blackout_nf_s"]) >= 0]
+        if v:
+            out.append(float(np.mean(v)) if stat == "mean" else float(np.percentile(v, 95)))
+    return np.array(out)
+
+
+def recon_count(data, cfg):
+    n = 0
+    for s in data[cfg]:
+        n += sum(1 for r in data[cfg][s]["outages"]
+                 if int(r["ended_by_switch"]) == 0 and r.get("kind", "2") in ("1", "2"))
+    return n
+
+
+def tex_num(x, nd=2):
+    return f"{x:.{nd}f}"
+
+
+def write_macros():
+    p = os.path.join(PAPER, "results_macros.tex")
+    with open(p, "w") as f:
+        f.write("% Generated by sim/analyze.py. Do not edit by hand.\n")
+        for k in sorted(macros):
+            f.write(f"\\newcommand{{\\{k}}}{{{macros[k]}}}\n")
+    print(f"wrote {len(macros)} macros -> {p}")
+
+
+# ---------------------------------------------------------------- plotting --
+def plt_setup():
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.style.use("/home/uzair/6g_ntn_ns3/papers/templates/ieee.mplstyle")
+    plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
+    return plt
+
+
+NAVY, BLUE, GOLD, GRAY, STEEL, RED = "#0E3A6B", "#2E78B5", "#C98A0B", "#4A4A4A", "#7FA3CC", "#C23B22"
+STRAT_STYLE = {
+    "ground": dict(color=GRAY, marker="s", ls=":", label="Ground only"),
+    "onboard": dict(color=STEEL, marker="^", ls="-.", label="On-board only"),
+    "reactive": dict(color=BLUE, marker="o", ls="--", label="Reactive hybrid"),
+    "reactive-ttl": dict(color=NAVY, marker="v", ls="-.", label="Reactive + lease"),
+    "pal": dict(color=GOLD, marker="D", ls="-", label="PAL (this work)"),
+}
+STRATS = ["ground", "onboard", "reactive", "pal"]          # figures
+STRATS_ALL = ["ground", "onboard", "reactive", "reactive-ttl", "pal"]  # tables, macros
+SNM = {"ground": "Gnd", "onboard": "Onb", "reactive": "Rea", "reactive-ttl": "Ttl", "pal": "Pal"}
+WORD = {1: "one", 2: "two", 3: "three", 4: "four"}
+ROMAN = {550: "Five", 1200: "Twelve"}
+
+
+# ------------------------------------------------------------------ groups --
+def analyze_hb(plt):
+    data = load("hb")
+    if not data:
+        return
+    hbs = [0.05, 0.1, 0.2, 0.5, 1.0, 2.0]
+    fig, ax = plt.subplots(figsize=(3.45, 2.45))
+    gw = 1
+    for strat in ["reactive", "pal"]:
+        xs, ys, es = [], [], []
+        for hb in hbs:
+            c = f"{strat}_s550_gw{gw}_hb{hb}"
+            if c not in data:
+                continue
+            m, h, _ = ci((1.0 - col(data, c, "nf_hit_ratio")) * 1e2)
+            k, _, _ = ci(col(data, c, "hb_kbps"))
+            xs.append(k); ys.append(m); es.append(h)
+        st = STRAT_STYLE[strat]
+        ax.errorbar(xs, ys, yerr=es, color=st["color"], marker=st["marker"], ls=st["ls"],
+                    label=st["label"], capsize=2, lw=1.0)
+        for x, y, hb in zip(xs, ys, hbs):
+            if strat == "reactive" and hb in (0.05, 2.0):
+                ax.annotate(f"$P_{{\\mathrm{{hb}}}}$={int(hb*1000)} ms", (x, y), textcoords="offset points",
+                            xytext=(6, -2) if hb == 2.0 else (-30, 8), fontsize=7)
+    ax.set_xscale("log")
+    ax.set_xlabel("Heartbeat load on the feeder (kb/s)")
+    ax.set_ylabel("Near-RT deadline misses (%)")
+    ax.legend(loc="upper right", frameon=False)
+    fig.tight_layout()
+    fig.savefig(os.path.join(FIG, "fig_hb_tradeoff.pdf"))
+    plt.close(fig)
+    # macros at the main-grid heartbeat (0.1 s) and the slowest (2 s), gw 1
+    for strat in ["reactive", "pal"]:
+        for hb, tag in [(0.1, "Fast"), (2.0, "Slow")]:
+            c = f"{strat}_s550_gw1_hb{hb}"
+            if c in data:
+                m, h, n = ci((1 - col(data, c, "nf_hit_ratio")) * 100)
+                mac(f"Hb{strat.capitalize()}{tag}Miss", m, "{:.2f}")
+                mac(f"Hb{strat.capitalize()}{tag}MissCi", h, "{:.2f}")
+                mac(f"Hb{strat.capitalize()}{tag}Kbps", ci(col(data, c, "hb_kbps"))[0], "{:.1f}")
+    HBN = {0.05: "A", 0.1: "B", 0.2: "C", 0.5: "D", 1.0: "E", 2.0: "F"}
+    for strat in ["reactive", "pal"]:
+        for hb, t in HBN.items():
+            c = f"{strat}_s550_gw1_hb{hb}"
+            if c in data:
+                mac(f"Hb{strat.capitalize()}{t}Miss", ci((1 - col(data, c, "nf_hit_ratio")) * 100)[0], "{:.2f}")
+                mac(f"Hb{strat.capitalize()}{t}Kbps", ci(col(data, c, "hb_kbps"))[0], "{:.1f}")
+    mac("HbRuns", sum(len(v) for v in data.values()), "{:d}")
+    c1, c2 = "pal_s550_gw1_hb2.0", "reactive_s550_gw1_hb2.0"
+    if c1 in data and c2 in data:
+        m, h, n = paired(data, c2, c1, "nf_hit_ratio")
+        mac("HbSlowGainPts", -m * 100, "{:.2f}")
+        mac("HbSlowGainPtsCi", h * 100, "{:.2f}")
+
+
+def analyze_eps(plt, main):
+    data = load("eps")
+    if not data:
+        return
+    epss = [0.05, 0.2, 0.5, 0.9, 0.99]
+    fig, axes = plt.subplots(1, 2, figsize=(7.1, 2.55))
+    for ax, gw in zip(axes, [1, 2]):
+        for strat, lab in [("pal", r"PAL, $\varepsilon$ swept"),
+                           ("reactive-ttl", r"Reactive + lease, $\varepsilon$ swept")]:
+            xs, ys, exs, eys = [], [], [], []
+            for eps in epss:
+                c = f"{strat}_s550_gw{gw}_eps{eps}"
+                if c not in data:
+                    continue
+                mx, hx, _ = ci(col(data, c, "overprov_mean") * 100)
+                my, hy, _ = ci(col(data, c, "sla_viol_frac") * 100)
+                xs.append(mx); ys.append(my); exs.append(hx); eys.append(hy)
+            st = STRAT_STYLE[strat]
+            ax.errorbar(xs, ys, xerr=exs, yerr=eys, color=st["color"], marker=st["marker"],
+                        ls=st["ls"], capsize=2, lw=1.0, label=lab)
+            if strat == "pal":
+                for x, y, eps in zip(xs, ys, epss):
+                    if eps in (0.05, 0.99):
+                        ax.annotate(rf"$\varepsilon$={eps}", (x, y), textcoords="offset points",
+                                    xytext=(4, 4), fontsize=7)
+        for strat in ["ground", "onboard", "reactive"]:
+            c = f"{strat}_s550_gw{gw}"
+            if c in main:
+                mx, hx, _ = ci(col(main, c, "overprov_mean") * 100)
+                my, hy, _ = ci(col(main, c, "sla_viol_frac") * 100)
+                st = STRAT_STYLE[strat]
+                ax.errorbar([mx], [my], xerr=[hx], yerr=[hy], color=st["color"], marker=st["marker"],
+                            ls="none", capsize=2, label=st["label"])
+        ax.set_xlabel("Critical-slice over-provisioning (% of cell)")
+        ax.set_ylabel("Time under the current intent (%)")
+        ax.set_title(f"({'ab'[gw-1]}) {WORD[gw]} gateway{'s' if gw > 1 else ''}", fontsize=8)
+        ax.legend(loc="upper right", frameon=False, fontsize=6.5)
+    fig.tight_layout()
+    fig.savefig(os.path.join(FIG, "fig_lease_tradeoff.pdf"))
+    plt.close(fig)
+    mac("EpsRuns", sum(len(v) for v in data.values()), "{:d}")
+    ET = {0.05: "Lo", 0.2: "Mid", 0.5: "Half", 0.9: "Ninety", 0.99: "Hi"}
+    for strat, st in [("pal", "Pal"), ("reactive-ttl", "Ttl")]:
+        for eps, tag in ET.items():
+            c = f"{strat}_s550_gw1_eps{eps}"
+            if c in data:
+                mac(f"Eps{st}{tag}Viol", ci(col(data, c, "sla_viol_frac") * 100)[0], "{:.1f}")
+                mac(f"Eps{st}{tag}Over", ci(col(data, c, "overprov_mean") * 100)[0], "{:.2f}")
+                mac(f"Eps{tag}Tau", ci(col(data, c, "lease_tau_s"))[0], "{:.1f}")
+
+    # --- does the realized cost reach its minimum at the predicted eps?
+    # Estimate p_v (violation probability while a superseded intent is held)
+    # and Delta (mean over-provisioning while on the safe intent) from the
+    # share-state counters of the eps=0.2 PAL runs, one gateway, 550 km.
+    def pooled_checks(cfg, keys):
+        tot = defaultdict(float)
+        for sd in data[cfg]:
+            for k in keys:
+                tot[k] += float(data[cfg][sd]["checks"][0][k])
+        return tot
+    c0 = "pal_s550_gw1_eps0.2"
+    if c0 in data and data[c0][1]["checks"] and "samp_stale" in data[c0][1]["checks"][0]:
+        t = pooled_checks(c0, ["samp_stale", "viol_stale", "samp_fallback", "over_fallback"])
+        pv = t["viol_stale"] / max(1.0, t["samp_stale"])
+        dl = t["over_fallback"] / max(1.0, t["samp_fallback"])
+        mac("EstPv", pv, "{:.2f}")
+        mac("EstDelta", dl * 100, "{:.1f}")
+        rows = []
+        for target, tg in [(0.2, "A"), (0.5, "B")]:
+            ratio = target * pv / dl  # w_o / w_v giving predicted eps = target
+            js = []
+            for eps in epss:
+                c = f"pal_s550_gw1_eps{eps}"
+                if c not in data:
+                    continue
+                J = col(data, c, "sla_viol_frac") + ratio * col(data, c, "overprov_mean")
+                js.append((eps, float(np.mean(J))))
+            best = min(js, key=lambda x: x[1])
+            mac(f"CostTarget{tg}", target, "{:.1f}")
+            mac(f"CostArgmin{tg}", best[0], "{:g}")
+            mac(f"CostRatio{tg}", ratio, "{:.2f}")
+            rows.append((target, ratio, js))
+        with open(os.path.join(TAB, "cost_check.txt"), "w") as f:
+            for target, ratio, js in rows:
+                f.write(f"target eps {target}: w_o/w_v={ratio:.3f}: " +
+                        ", ".join(f"{e}:{j:.5f}" for e, j in js) + "\n")
+
+
+def analyze_main(plt):
+    data = load("main")
+    if not data:
+        return data
+    # --- scenario description macros
+    for shell in [550, 1200]:
+        for gw in [1, 2, 3, 4]:
+            c = f"pal_s{shell}_gw{gw}"
+            if c not in data:
+                continue
+            tag = f"{ROMAN[shell]}G{WORD[gw].capitalize()}"
+            m, h, n = ci(col(data, c, "feeder_avail") * 100)
+            mac(f"Avail{tag}", m, "{:.1f}")
+            mac(f"Avail{tag}Ci", h, "{:.1f}")
+            mac(f"Switches{tag}", ci(col(data, c, "switches"))[0], "{:.1f}")
+            mac(f"Outages{tag}", ci(col(data, c, "outages"))[0], "{:.1f}")
+            # share of outages that end with a satellite switch rather than a
+            # reconnection to the same satellite
+            ob = pooled(data, c, "outages", "ended_by_switch")
+            mac(f"OutBySwitch{tag}", 100 * float(np.mean(ob)) if len(ob) else float("nan"), "{:.0f}")
+            dur = pooled(data, c, "outages", "dur")
+            mac(f"OutDurMed{tag}", float(np.median(dur)) if len(dur) else float("nan"), "{:.0f}")
+            pr = pooled(data, c, "outages", "predicted")
+            mac(f"OutPred{tag}", 100 * float(np.mean(pr)) if len(pr) else float("nan"), "{:.0f}")
+    # --- feeder statistics table
+    with open(os.path.join(TAB, "table_feeder.tex"), "w") as t:
+        t.write("% Generated by sim/analyze.py\n")
+        t.write("\\begin{tabular}{@{}lrrrrrr@{}}\n\\toprule\n")
+        t.write("Shell, GW & Avail. & Outages & Median & Predict. & End by & Switches\\\\\n")
+        t.write(" & (\\%) & (/h) & (s) & (\\%) & switch (\\%) & (/h)\\\\\n\\midrule\n")
+        for shell in [550, 1200]:
+            for gw in [1, 2, 3, 4]:
+                c = f"pal_s{shell}_gw{gw}"
+                if c not in data:
+                    continue
+                av, ah, _ = ci(col(data, c, "feeder_avail") * 100)
+                ou = ci(col(data, c, "outages"))[0]
+                dur = pooled(data, c, "outages", "dur")
+                pr = pooled(data, c, "outages", "predicted")
+                ob = pooled(data, c, "outages", "ended_by_switch")
+                sw = ci(col(data, c, "switches"))[0]
+                t.write(f"{shell} km, {gw} & {av:.1f}$\\pm${ah:.1f} & {ou:.1f} & {np.median(dur):.0f} & "
+                        f"{100*np.mean(pr):.0f} & {100*np.mean(ob):.0f} & {sw:.1f}\\\\\n")
+        t.write("\\bottomrule\n\\end{tabular}\n")
+    n_runs = sum(len(v) for v in data.values())
+    mac("MainRuns", n_runs, "{:d}")
+    mac("MainConfigs", len(data), "{:d}")
+    mac("SimHours", 1.0, "{:.0f}")
+    mx = max(float(data[c][s]["summary"]["max_el_err_deg"]) for c in data for s in data[c])
+    mac("MaxElErr", mx, "{:.3f}")
+    fails = sum(int(float(data[c][s]["summary"]["kpm_codec_fail"])) for c in data for s in data[c])
+    mac("CodecFails", fails, "{:d}")
+    kpm = sum(int(float(data[c][s]["summary"]["kpm_delivered"])) for c in data for s in data[c])
+    mac("KpmDecoded", f"{kpm:,}".replace(",", "{,}"))
+    rtt = sum(int(data[c][s]["checks"][0]["rt_ticks"]) for c in data if c.startswith("pal") for s in data[c] if data[c][s]["checks"])
+    rtg = sum(int(data[c][s]["checks"][0]["rt_ground_feasible_ticks"]) for c in data if c.startswith("pal") for s in data[c] if data[c][s]["checks"])
+    mac("RtGroundFeasPct", 100.0 * rtg / max(1, rtt), "{:.1f}")
+    sats = [float(data[c][s]["summary"]["sats_in_set"]) for c in data for s in data[c] if "_s550_" in c]
+    mac("SatsServedFive", float(np.mean(sats)), "{:.0f}")
+
+    # --- Fig: RT hit ratio and near-RT misses vs gateways
+    fig, axes = plt.subplots(2, 3, figsize=(7.1, 4.1), sharex=True)
+    for r, shell in enumerate([550, 1200]):
+        for k, (cls, lab) in enumerate([("rt", "real-time, 10 ms"), ("nf", "near-RT, 100 ms"),
+                                         ("ns", "near-RT slice, 1 s")]):
+            ax = axes[r, k]
+            for strat in STRATS:
+                if cls != "rt" and strat == "onboard":
+                    continue  # zero misses in every run: nothing to draw on a log axis
+                xs, ys, es = [], [], []
+                for gw in [1, 2, 3, 4]:
+                    c = f"{strat}_s{shell}_gw{gw}"
+                    if c not in data:
+                        continue
+                    v = col(data, c, f"{cls}_hit_ratio") * 100
+                    if cls != "rt":
+                        v = 100 - v
+                    m, h, _ = ci(v)
+                    xs.append(gw); ys.append(m); es.append(h)
+                st = STRAT_STYLE[strat]
+                ax.errorbar(xs, ys, yerr=es, color=st["color"], marker=st["marker"], ls=st["ls"],
+                            label=st["label"], capsize=2, lw=1.0)
+            ax.set_title(f"({'abcdef'[3*r+k]}) {shell} km, {lab}", fontsize=8)
+            if cls == "rt":
+                ax.set_ylabel("Deadline-hit ratio (%)")
+                ax.set_ylim(-5, 105)
+            else:
+                ax.set_yscale("log")
+                ax.set_ylabel("Deadline misses (%)")
+            if r == 1:
+                ax.set_xlabel("Gateways")
+            ax.set_xticks([1, 2, 3, 4])
+    h, l = axes[0, 0].get_legend_handles_labels()
+    fig.legend(h, l, loc="upper center", ncol=4, frameon=False, fontsize=7)
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.savefig(os.path.join(FIG, "fig_placement_map.pdf"))
+    plt.close(fig)
+
+    # --- macros for every strategy x shell x gw on the core metrics
+    keys = {
+        "rt_hit_ratio": ("RtHit", 100, "{:.1f}"),
+        "nf_hit_ratio": ("NfHit", 100, "{:.2f}"),
+        "ns_hit_ratio": ("NsHit", 100, "{:.2f}"),
+        "nf_p99_ms": ("NfPnn", 1, "{:.1f}"),
+        "rt_p99_ms": ("RtPnn", 1, "{:.1f}"),
+        "sla_viol_frac": ("Viol", 100, "{:.1f}"),
+        "overprov_mean": ("Over", 100, "{:.2f}"),
+        "superseded_frac": ("Super", 100, "{:.1f}"),
+        "stale_mean_s": ("Stale", 1, "{:.1f}"),
+        "blackout_mean_s": ("Black", 1000, "{:.0f}"),
+        "blackout_p95_s": ("BlackPnf", 1000, "{:.0f}"),
+        "ttc_mean_s": ("Ttc", 1000, "{:.0f}"),
+        "conflicts_per_outage": ("Conf", 1, "{:.2f}"),
+        "policy_conflicts_per_outage": ("PConf", 1, "{:.2f}"),
+        "feeder_kbps": ("Kbps", 1, "{:.1f}"),
+        "sig_bytes_per_switch": ("SigB", 1, "{:.0f}"),
+        "sig_msgs_per_switch": ("SigM", 1, "{:.1f}"),
+        "fallback_frac": ("Fallb", 100, "{:.1f}"),
+        "nf_onboard_frac": ("NfOnb", 100, "{:.1f}"),
+        "ns_onboard_frac": ("NsOnb", 100, "{:.1f}"),
+    }
+    SN = SNM
+    for strat in STRATS_ALL:
+        for shell in [550, 1200]:
+            for gw in [1, 2, 3, 4]:
+                c = f"{strat}_s{shell}_gw{gw}"
+                if c not in data:
+                    continue
+                tag = f"{SN[strat]}{ROMAN[shell]}G{WORD[gw].capitalize()}"
+                for k, (nm, sc, fm) in keys.items():
+                    m, h, n = ci(col(data, c, k) * sc)
+                    mac(f"{nm}{tag}", m, fm)
+                    mac(f"{nm}{tag}Ci", h, fm)
+                m, h, n = ci((1 - col(data, c, "nf_hit_ratio")) * 100)
+                mac(f"NfMissPct{tag}", m, "{:.2f}")
+    # reconnection metrics from outages.csv (start-up acquisition excluded)
+    for strat in STRATS_ALL:
+        for shell in [550, 1200]:
+            for gw in [1, 2, 3, 4]:
+                c = f"{strat}_s{shell}_gw{gw}"
+                if c not in data:
+                    continue
+                tag = f"{SN[strat]}{ROMAN[shell]}G{WORD[gw].capitalize()}"
+                for key, nm, sc, fm in [("ttc", "Ttc", 1000, "{:.0f}"),
+                                        ("direct_conflicts", "Conf", 1, "{:.2f}"),
+                                        ("policy_stale", "PConf", 1, "{:.2f}")]:
+                    m, h, n = ci(recon(data, c, key, sc))
+                    mac(f"{nm}{tag}", m, fm)
+                    mac(f"{nm}{tag}Ci", h, fm)
+                mac(f"Recon{tag}", recon_count(data, c), "{:d}")
+                for stt, nm in [("mean", "Black"), ("p95", "BlackPnf")]:
+                    m, h, n = ci(blackout(data, c, stt))
+                    mac(f"{nm}{tag}", m, "{:.0f}")
+                    mac(f"{nm}{tag}Ci", h, "{:.0f}")
+
+    # evidence that PAL's procedures actually ran (550 km, one gateway)
+    for shell in [550, 1200]:
+        c = f"pal_s{shell}_gw1"
+        if c in data:
+            tg = f"{ROMAN[shell]}GOne"
+            mac(f"PalLeases{tg}", ci(col(data, c, "leases"))[0], "{:.1f}")
+            mac(f"PalPreprov{tg}", ci(col(data, c, "preprov_frac") * 100)[0], "{:.0f}")
+            mac(f"PalAutonomy{tg}", ci(col(data, c, "autonomy_entries"))[0], "{:.1f}")
+            mac(f"PalFalseAut{tg}", float(np.sum(col(data, c, "false_autonomy"))), "{:.0f}")
+            r = f"reactive_s{shell}_gw1"
+            mac(f"ReaAutonomy{tg}", ci(col(data, r, "autonomy_entries"))[0], "{:.1f}")
+            mac(f"ReaFalseAut{tg}", float(np.sum(col(data, r, "false_autonomy"))), "{:.0f}")
+
+    # paired PAL - reactive differences (closest baseline)
+    for shell in [550, 1200]:
+        for gw in [1, 2, 3, 4]:
+            a, b = f"pal_s{shell}_gw{gw}", f"reactive_s{shell}_gw{gw}"
+            if a not in data or b not in data:
+                continue
+            tag = f"{ROMAN[shell]}G{WORD[gw].capitalize()}"
+            for k, nm, sc, fm in [("sla_viol_frac", "DViol", 100, "{:.1f}"),
+                                  ("overprov_mean", "DOver", 100, "{:.2f}"),
+                                  ("nf_hit_ratio", "DNf", 100, "{:.2f}"),
+                                  ("superseded_frac", "DSuper", 100, "{:.1f}"),
+                                  ("feeder_kbps", "DKbps", 1, "{:.1f}")]:
+                m, h, n = paired(data, a, b, k)
+                mac(f"{nm}{tag}", m * sc, fm)
+                mac(f"{nm}{tag}Ci", h * sc, fm)
+            bt = f"reactive-ttl_s{shell}_gw{gw}"
+            if bt in data:
+                for k, nm, sc, fm in [("sla_viol_frac", "DlViol", 100, "{:.1f}"),
+                                      ("overprov_mean", "DlOver", 100, "{:.2f}")]:
+                    m, h, n = paired(data, bt, b, k)
+                    mac(f"{nm}{tag}", m * sc, fm)
+                    mac(f"{nm}{tag}Ci", h * sc, fm)
+                for k, nm, sc, fm in [("sla_viol_frac", "DtViol", 100, "{:.1f}"),
+                                      ("overprov_mean", "DtOver", 100, "{:.2f}"),
+                                      ("nf_hit_ratio", "DtNf", 100, "{:.2f}"),
+                                      ("superseded_frac", "DtSuper", 100, "{:.1f}")]:
+                    m, h, n = paired(data, a, bt, k)
+                    mac(f"{nm}{tag}", m * sc, fm)
+                    mac(f"{nm}{tag}Ci", h * sc, fm)
+            ra = ci(col(data, b, "sla_viol_frac"))[0]
+            pa = ci(col(data, a, "sla_viol_frac"))[0]
+            mac(f"ViolRel{tag}", 100 * (ra - pa) / ra if ra > 0 else float("nan"), "{:.0f}")
+
+    # --- main table: shell x gw in {1,2} x strategy
+    rows = []
+    for shell in [550, 1200]:
+        for gw in [1, 2]:
+            for strat in STRATS_ALL:
+                c = f"{strat}_s{shell}_gw{gw}"
+                if c not in data:
+                    continue
+                def f(k, sc, nd):
+                    m, h, _ = ci(col(data, c, k) * sc)
+                    return f"{m:.{nd}f}"
+                def fpm(k, sc, nd):
+                    m, h, _ = ci(col(data, c, k) * sc)
+                    return f"{m:.{nd}f}$\\pm${h:.{nd}f}"
+                rows.append((shell, gw, strat, [
+                    f("rt_hit_ratio", 100, 1), fpm("nf_hit_ratio", 100, 2), f("nf_p99_ms", 1, 1),
+                    fpm("sla_viol_frac", 100, 1), f("overprov_mean", 100, 2),
+                    f("superseded_frac", 100, 1), f"{ci(blackout(data, c))[0]:.0f}",
+                    f("feeder_kbps", 1, 1)]))
+    with open(os.path.join(TAB, "table_main.tex"), "w") as t:
+        t.write("% Generated by sim/analyze.py\n")
+        t.write("\\begin{tabular}{@{}llrrrrrrrr@{}}\n\\toprule\n")
+        t.write("Shell, GW & Strategy & RT hit & NF hit & NF p99 & Viol. & Over. & Super. & Blk. & Load\\\\\n")
+        t.write(" & & (\\%) & (\\%) & (ms) & (\\%) & (\\%) & (\\%) & (ms) & (kb/s)\\\\\n\\midrule\n")
+        last = None
+        for shell, gw, strat, vals in rows:
+            key = (shell, gw)
+            lead = f"{shell} km, {gw}" if key != last else ""
+            if last is not None and key != last:
+                t.write("\\addlinespace[2pt]\n")
+            name = {"ground": "Ground only", "onboard": "On-board only",
+                    "reactive": "Reactive", "reactive-ttl": "Reactive + lease",
+                    "pal": "\\textbf{PAL}"}[strat]
+            t.write(f"{lead} & {name} & " + " & ".join(vals) + "\\\\\n")
+            last = key
+        t.write("\\bottomrule\n\\end{tabular}\n")
+
+    # --- where violations come from: share state at each 100 ms sample
+    rows = []
+    for strat in ["reactive", "reactive-ttl", "pal"]:
+        c = f"{strat}_s550_gw1"
+        if c not in data or not data[c][1]["checks"] or "samp_current" not in data[c][1]["checks"][0]:
+            continue
+        tot = defaultdict(float)
+        for sd in data[c]:
+            for k, v in data[c][sd]["checks"][0].items():
+                tot[k] += float(v)
+        allS = sum(tot[f"samp_{x}"] for x in ["default", "fallback", "stale", "current"])
+        cells = []
+        for x in ["current", "stale", "fallback", "default"]:
+            share = 100 * tot[f"samp_{x}"] / allS
+            vr = 100 * tot[f"viol_{x}"] / max(1, tot[f"samp_{x}"])
+            cells += [f"{share:.1f}", f"{vr:.1f}" if tot[f"samp_{x}"] > 0 else "--"]
+            mac(f"State{x.capitalize()}Share{SNM[strat]}", share, "{:.1f}")
+            mac(f"State{x.capitalize()}Viol{SNM[strat]}", vr, "{:.1f}")
+        rows.append((STRAT_STYLE[strat]["label"].replace(" (this work)", ""), cells))
+    with open(os.path.join(TAB, "table_state.tex"), "w") as t:
+        t.write("% Generated by sim/analyze.py\n\\begin{tabular}{@{}lrrrrrrrr@{}}\n\\toprule\n")
+        t.write(" & \\multicolumn{2}{c}{Current} & \\multicolumn{2}{c}{Superseded} & "
+                "\\multicolumn{2}{c}{Safe} & \\multicolumn{2}{c}{Default}\\\\\n")
+        t.write("Strategy & time & viol. & time & viol. & time & viol. & time & viol.\\\\\n\\midrule\n")
+        for name, cells in rows:
+            t.write(name + " & " + " & ".join(cells) + "\\\\\n")
+        t.write("\\bottomrule\n\\end{tabular}\n")
+    # takeovers by a satellite without a feeder (kind 3), pooled
+    for strat in STRATS_ALL:
+        for shell in [550, 1200]:
+            c = f"{strat}_s{shell}_gw1"
+            if c in data:
+                n3 = sum(1 for sd in data[c] for r in data[c][sd]["outages"] if r.get("kind") == "3")
+                mac(f"Dark{SNM[strat]}{ROMAN[shell]}GOne", n3, "{:d}")
+
+    # --- NF miss attribution (550 km, one gateway)
+    att = miss_attribution(data)
+    SN2 = {"ground": "Gnd", "onboard": "Onb", "reactive": "Rea", "pal": "Pal"}
+    for strat, d in att.items():
+        for cause in ["transit", "detect", "switch", "onboard"]:
+            mac(f"Miss{cause.capitalize()}{SN2[strat]}", d.get(cause, 0.0), "{:.0f}")
+        mac(f"MissTotal{SN2[strat]}", sum(d.values()), "{:.0f}")
+
+    # --- NF loop-time CCDF at 550 km, 2 gateways (pooled histograms)
+    fig, ax = plt.subplots(figsize=(3.45, 2.45))
+    for strat in STRATS:
+        c = f"{strat}_s550_gw2"
+        if c not in data:
+            continue
+        h = defaultdict(int)
+        for s in data[c]:
+            for r in data[c][s]["hist"]:
+                if r["cls"] == "nf":
+                    h[float(r["bin_ms"])] += int(r["count"])
+        if not h:
+            continue
+        b = np.array(sorted(h))
+        n = np.array([h[x] for x in b], dtype=float)
+        ccdf = 1.0 - np.cumsum(n) / n.sum()
+        st = STRAT_STYLE[strat]
+        ax.step(b + 0.25, np.maximum(ccdf, 1e-6), where="post", color=st["color"], ls=st["ls"],
+                label=st["label"], lw=1.1)
+    ax.axvline(100, color=RED, ls=":", lw=0.8)
+    ax.text(95, 2e-5, "100 ms deadline ", color=RED, fontsize=7, va="bottom", ha="right")
+    ax.set_yscale("log")
+    ax.set_xscale("log")
+    ax.set_ylim(1e-5, 1.2)
+    ax.set_xlabel("Measure-to-actuation time of applied actions (ms)")
+    ax.set_ylabel("CCDF")
+    ax.legend(loc="lower left", frameon=False)
+    fig.tight_layout()
+    fig.savefig(os.path.join(FIG, "fig_loop_ccdf.pdf"))
+    plt.close(fig)
+    return data
+
+
+def miss_attribution(data):
+    """Classify never-actuated NF epochs by the state recorded at the epoch.
+    Returns {strategy: {cause: misses per hour of service}} at 550 km, 1 gw."""
+    out = {}
+    for strat in STRATS:
+        c = f"{strat}_s550_gw1"
+        if c not in data:
+            continue
+        cnt = defaultdict(float)
+        hours = 0.0
+        for s in data[c]:
+            hours += float(data[c][s]["summary"]["served_s"]) / 3600.0
+            for r in data[c][s]["nf_miss"]:
+                lu, ob, e2, sub, aut, ls, asw = (int(r[k]) for k in ["link_up", "onboard",
+                    "e2_setup", "subscribed", "autonomous", "leased", "after_switch"])
+                if ob:
+                    cause = "onboard"
+                elif asw and (not e2 or not sub):
+                    cause = "switch"
+                elif not lu:
+                    cause = "detect"
+                else:
+                    cause = "transit"
+                cnt[cause] += 1
+        out[strat] = {k: v / hours for k, v in cnt.items()}
+    return out
+
+
+def analyze_ablation(main):
+    data = load("ablation")
+    if not data:
+        return
+    rows = []
+    for shell in [550, 1200]:
+        for gw in [1, 2]:
+            for strat, name in [("reactive", "Reactive hybrid"), ("pal", "PAL"),
+                                ("pal-nopre", "PAL without pre-provisioning"),
+                                ("pal-gw", "PAL with ground-wins merge")]:
+                c = f"{strat}_s{shell}_gw{gw}"
+                src = main if strat in ("reactive", "pal") else data
+                if c not in src:
+                    continue
+                def f(k, sc, nd, src=src, c=c):
+                    m, h, _ = ci(col(src, c, k) * sc)
+                    return f"{m:.{nd}f}"
+                def r_(k, sc, nd, src=src, c=c):
+                    m, h, _ = ci(recon(src, c, k, sc))
+                    return "--" if math.isnan(m) else f"{m:.{nd}f}"
+                rows.append((shell, gw, name, [
+                    f"{ci(blackout(src, c))[0]:.0f}", f"{ci(blackout(src, c, 'p95'))[0]:.0f}",
+                    r_("ttc", 1000, 0), r_("direct_conflicts", 1, 2),
+                    r_("policy_stale", 1, 2), f("sla_viol_frac", 100, 1),
+                    f("sig_bytes_per_switch", 1, 0)]))
+    with open(os.path.join(TAB, "table_ablation.tex"), "w") as t:
+        t.write("% Generated by sim/analyze.py\n")
+        t.write("\\begin{tabular}{@{}llrrrrrrr@{}}\n\\toprule\n")
+        t.write("Shell, GW & Variant & Blk. & Blk. p95 & TTC & Confl. & Pol. & Viol. & Sig.\\\\\n")
+        t.write(" & & (ms) & (ms) & (ms) & /outage & /outage & (\\%) & (B/switch)\\\\\n\\midrule\n")
+        last = None
+        for shell, gw, name, vals in rows:
+            key = (shell, gw)
+            lead = f"{shell} km, {gw}" if key != last else ""
+            if last is not None and key != last:
+                t.write("\\addlinespace[2pt]\n")
+            t.write(f"{lead} & {name} & " + " & ".join(vals) + "\\\\\n")
+            last = key
+        t.write("\\bottomrule\n\\end{tabular}\n")
+    n = sum(len(v) for v in data.values())
+    mac("AblRuns", n, "{:d}")
+    for strat, tag in [("pal-nopre", "NoPre"), ("pal-gw", "Gw")]:
+        for shell in [550, 1200]:
+            for gw in [1, 2]:
+                c = f"{strat}_s{shell}_gw{gw}"
+                if c not in data:
+                    continue
+                tg = f"{tag}{ROMAN[shell]}G{WORD[gw].capitalize()}"
+                mac(f"Black{tg}", ci(blackout(data, c))[0], "{:.0f}")
+                mac(f"BlackPnf{tg}", ci(blackout(data, c, "p95"))[0], "{:.0f}")
+                mac(f"Ttc{tg}", ci(recon(data, c, "ttc", 1000))[0], "{:.0f}")
+                mac(f"Conf{tg}", ci(recon(data, c, "direct_conflicts"))[0], "{:.2f}")
+
+
+def analyze_sens(main):
+    data = load("sens")
+    if not data:
+        return
+    for strat in ["reactive", "pal"]:
+        for sig in [0.0, 2.0, 5.0]:
+            c = f"{strat}_s550_gw1_eph{sig}"
+            if c in data:
+                tg = f"{strat.capitalize()}Eph{ {0: 'Zero', 2: 'Two', 5: 'Five'}[int(sig)] }"
+                mac(f"NfMiss{tg}", ci((1 - col(data, c, "nf_hit_ratio")) * 100)[0], "{:.2f}")
+                mac(f"Viol{tg}", ci(col(data, c, "sla_viol_frac") * 100)[0], "{:.1f}")
+        for rain in [0.0, 6.0]:
+            c = f"{strat}_s550_gw1_rain{rain}"
+            if c in data:
+                tg = f"{strat.capitalize()}Rain{ {0: 'Zero', 6: 'Six'}[int(rain)] }"
+                mac(f"NfMiss{tg}", ci((1 - col(data, c, "nf_hit_ratio")) * 100)[0], "{:.2f}")
+                mac(f"Viol{tg}", ci(col(data, c, "sla_viol_frac") * 100)[0], "{:.1f}")
+                mac(f"Ttc{tg}", ci(recon(data, c, "ttc", 1000))[0], "{:.0f}")
+                mac(f"Conf{tg}", ci(recon(data, c, "direct_conflicts"))[0], "{:.2f}")
+    for strat in ["onboard", "reactive", "pal"]:
+        c = f"{strat}_s550_gw1_proc5"
+        if c in data:
+            tg = SNM[strat]
+            for cls in ["rt", "nf", "ns"]:
+                mac(f"ProcFive{cls.capitalize()}Hit{tg}", ci(col(data, c, f"{cls}_hit_ratio") * 100)[0], "{:.2f}")
+            mac(f"ProcFiveViol{tg}", ci(col(data, c, "sla_viol_frac") * 100)[0], "{:.1f}")
+            mac(f"ProcFiveRtPnn{tg}", ci(col(data, c, "rt_p99_ms"))[0], "{:.1f}")
+    n = sum(len(v) for v in data.values())
+    mac("SensRuns", n, "{:d}")
+
+
+def main():
+    plt = plt_setup()
+    analyze_hb(plt)
+    m = analyze_main(plt)
+    analyze_eps(plt, m or {})
+    analyze_ablation(m or {})
+    analyze_sens(m or {})
+    write_macros()
+
+
+if __name__ == "__main__":
+    main()
