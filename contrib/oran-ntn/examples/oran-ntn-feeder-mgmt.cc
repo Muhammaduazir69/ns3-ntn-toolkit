@@ -402,7 +402,7 @@ uint64_t violBy[2][2] = {{0, 0}, {0, 0}}, sampBy[2][2] = {{0, 0}, {0, 0}};
 // Demand process
 uint32_t sessions = 0;
 Ptr<ExponentialRandomVariable> rvArr, rvHold, rvA1;
-Ptr<UniformRandomVariable> rvU;
+Ptr<UniformRandomVariable> rvU, rvIntent;
 
 // Pending consistency tracking for the outage currently being restored.
 struct PendingTtc
@@ -1374,8 +1374,10 @@ SmoIssue()
     static const double hs[3] = {0.1, 0.2, 0.3};
     Policy p;
     p.ver = smoCur.ver + 1;
-    p.g = gs[rvU->GetInteger(0, 3)];
-    p.h = hs[rvU->GetInteger(0, 2)];
+    // Intent values come from their own stream so that every strategy sees
+    // the same sequence of intents for the same run (paired comparison).
+    p.g = gs[rvIntent->GetInteger(0, 3)];
+    p.h = hs[rvIntent->GetInteger(0, 2)];
     smoCur = p;
     verIssued[p.ver] = Simulator::Now().GetSeconds();
     smoMgr->UpdatePolicy(smoPolicyId, ToA1(p));
@@ -2066,6 +2068,8 @@ main(int argc, char* argv[])
     RngSeedManager::SetSeed(20261016);
     RngSeedManager::SetRun(g.run);
     rvU = CreateObject<UniformRandomVariable>();
+    rvIntent = CreateObject<UniformRandomVariable>();
+    rvIntent->SetStream(15);
     rvArr = CreateObject<ExponentialRandomVariable>();
     rvArr->SetAttribute("Mean", DoubleValue(g.arrivalMeanS));
     rvHold = CreateObject<ExponentialRandomVariable>();
