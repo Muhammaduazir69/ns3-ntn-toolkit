@@ -305,4 +305,11 @@ NtnMeasurementModel::ComputeNoisePower() const
     return noisePower_dBm;
 }
 
+double
+NtnL3FilterCoefficient(uint32_t filterCoefficientK, double samplePeriodS)
+{
+    const double a = 1.0 / std::pow(2.0, filterCoefficientK / 4.0);
+    return 1.0 - std::pow(1.0 - a, samplePeriodS / 0.2);
+}
+
 } // namespace ns3

@@ -9,6 +9,8 @@
 
 #include "ntn-tte-estimator.h"
 
+#include "ntn-tr38811-mobility-model.h"
+
 #include <ns3/double.h>
 #include <ns3/log.h>
 #include <ns3/simulator.h>
@@ -94,6 +96,25 @@ NtnTteEstimator::SetOrbitPredictor(Ptr<NtnOrbitPredictor> predictor)
     m_orbitPredictor = predictor;
 }
 
+void
+NtnTteEstimator::SetLosProbabilityTable(const std::map<int, double>& pctByBin)
+{
+    m_plosPct = pctByBin;
+}
+
+double
+NtnTteEstimator::LosProbability(double elevDeg) const
+{
+    if (m_plosPct.empty())
+    {
+        return 1.0;
+    }
+    int q = static_cast<int>(std::lround(elevDeg / 10.0)) * 10;
+    q = std::max(10, std::min(90, q));
+    const auto it = m_plosPct.find(q);
+    return (it == m_plosPct.end()) ? 1.0 : it->second / 100.0;
+}
+
 NtnTteEstimator::TteResult
 NtnTteEstimator::ComputeTte(GeoCoordinate uePosition,
                              Vector ueVelocity,
@@ -130,6 +151,16 @@ NtnTteEstimator::ComputeTte(GeoCoordinate uePosition,
     Time tGood = Seconds(0);
     Time tBad = m_maxPredictionWindow;
     bool exitFound = false;
+    // N1: usable-time integral along the same predicted samples
+    const bool weighLos = !m_plosPct.empty();
+    double pPrev = 1.0;
+    double usableS = 0.0;
+    if (weighLos)
+    {
+        const auto s0 = m_orbitPredictor->GetBeamSnapshotAtTime(satId, beamId, uePosition, Seconds(0));
+        pPrev = LosProbability(
+            ntngeo::GeodeticElevationDeg(uePosition.ToVector(), s0.satellitePosition.ToVector()));
+    }
 
     for (Time t = m_predictionStep; t <= m_maxPredictionWindow; t += m_predictionStep)
     {
@@ -154,6 +185,14 @@ NtnTteEstimator::ComputeTte(GeoCoordinate uePosition,
         const NtnOrbitPredictor::BeamSnapshot snap =
             m_orbitPredictor->GetBeamSnapshotAtTime(satId, beamId, projectedUe, t);
         double gain = snap.gainAtUe_dB;
+        const bool inside = (gain >= gainThreshold_dB);
+        if (weighLos && inside)
+        {
+            const double pk = LosProbability(ntngeo::GeodeticElevationDeg(
+                projectedUe.ToVector(), snap.satellitePosition.ToVector()));
+            usableS += 0.5 * (pPrev + pk) * m_predictionStep.GetSeconds();
+            pPrev = pk;
+        }
 
         if (gain > result.peakGain_dB)
         {
@@ -176,6 +215,7 @@ NtnTteEstimator::ComputeTte(GeoCoordinate uePosition,
     {
         // Beam covers UE for the entire prediction window
         result.tte = m_maxPredictionWindow;
+        result.usable = weighLos ? Seconds(usableS) : result.tte;
         // CHO-1 (residual): this projected the UE to the horizon but evaluated
         // the gain with ComputeBeamGain, which places the satellite at
         // Simulator::Now(). The terminal moved and the satellite did not, which
@@ -200,6 +240,9 @@ NtnTteEstimator::ComputeTte(GeoCoordinate uePosition,
         FindBeamExitTime(uePosition, ueVelocity, satId, beamId, gainThreshold_dB, tGood, tBad);
 
     result.tte = preciseExit;
+    // N1: the last partial step at the last covered elevation's P_LOS
+    result.usable = weighLos ? Seconds(usableS + pPrev * std::max(0.0, (preciseExit - tGood).GetSeconds()))
+                             : result.tte;
     result.exitGain_dB = gainThreshold_dB; // By definition at the exit point
     result.isValid = true;
 

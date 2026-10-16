@@ -64,6 +64,10 @@ Vector EnuVelocityToEcef(double latDeg, double lonDeg, double vEast, double vNor
 /// Elevation angle (deg) of `satEcef` as seen from `ueEcef` (local-up = ue/|ue|).
 double ElevationDeg(const Vector& ueEcef, const Vector& satEcef);
 
+/// Elevation angle (deg) about the WGS-84 ellipsoid normal at `ueEcef`, the
+/// topocentric elevation a terminal with a GNSS fix would compute.
+double GeodeticElevationDeg(const Vector& ueEcef, const Vector& satEcef);
+
 /// Slant range (m) between two ECEF points.
 double SlantRangeM(const Vector& a, const Vector& b);
 

@@ -88,6 +88,7 @@ struct RealisticUe
 
     // --- Heading-evolution state ---
     double heading_rad{0.0};      //!< current heading (0 = north, +π/2 = east)
+    double meanHeading_rad{0.0};  //!< F21: road direction the Gauss-Markov heading reverts to
     double headingChangeUntil_s{0.0}; //!< time after which heading is re-rolled
 
     // --- Waypoint state (used by HST, maritime, aviation) ---

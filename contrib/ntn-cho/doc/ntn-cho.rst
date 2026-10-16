@@ -23,10 +23,15 @@ measurements with a MAC-CE-style fast switch) and trajectory-predictive
 CHO (PCHO), with optional RACH-less execution from ephemeris/GNSS
 timing-advance pre-compensation.
 
-Orbit propagation and the Walker constellation geometry are
-**consumed** from the SNS3 ``satellite`` module
-(``SatSGP4MobilityModel`` + antenna-gain patterns); ``ntn-cho`` does not
-implement orbit propagation or a constellation generator of its own.
+Orbit propagation and the Walker constellation geometry are **consumed**,
+not implemented here. ``NtnOrbitPredictor`` reads any ns-3
+``MobilityModel`` registered with ``SetKinematicsSource()``; the
+constellation-scale campaign (``ntn-cho-tte-campaign``) registers
+``ntn-constellation``'s ``Sgp4MobilityModel``, which for Walker elements
+propagates Kepler plus the secular J2 drift of node and perigee (not
+Vallado SGP4). The SNS3 ``satellite`` module's ``SatSGP4MobilityModel`` and
+antenna-gain-pattern grids are used only by scenarios that do not register a
+kinematics source and do not select the analytic beam.
 The real-stack examples additionally use the sibling toolkit modules
 ``ntn-traffic`` (``NtnRealStackHelper`` — a real mmwave NR NTN cell with
 measured traffic) and ``ntn-constellation`` (``Sgp4MobilityModel`` +
@@ -58,11 +63,24 @@ The module exposes the following public classes:
   encodes the trigger condition, so ``SelectBestCandidate()`` returns
   the strongest measured candidate (maximum SINR); the TTE-aware path
   selects the maximum TTE with a SINR tie-break.
-* ``NtnTteEstimator`` — Time-to-Exit estimator: forward propagation
-  plus a binary search for the beam-exit instant, cached per candidate.
-* ``NtnOrbitPredictor`` — wraps the ``satellite`` module's
-  ``SatSGP4MobilityModel`` and antenna-gain-pattern container to predict
-  satellite/beam positions and the best beam per UE.
+* ``NtnTteEstimator`` — Time-to-Exit estimator: coarse forward search
+  over the predicted orbit plus a bisection for the exit instant. With a
+  line-of-sight probability table (``SetLosProbabilityTable``) it also
+  returns the expected usable time to exit, the integral of P_LOS along the
+  predicted pass. ``ComputeTteSigma`` gives the first-order sigma of the
+  exit time by central differences over the injected RTN ephemeris error.
+  The estimator itself does not cache; ``NtnChoAlgorithm`` caches candidate
+  predictions when ``ChoConfig::tteCacheRefresh`` is positive (recomputed
+  after that interval or 100 m of terminal motion, aged by the elapsed time
+  in between; the serving cell is always recomputed).
+* ``NtnOrbitPredictor`` — the network's copy of each satellite's state:
+  the registered mobility model's state plus an optional fixed RTN
+  ephemeris error per satellite (the along-track axis follows the inertial
+  velocity), propagated two-body along the orbit plane and rotated with the
+  Earth. Beams are the SNS3 pattern grid or an analytic aperture or steered
+  (cos^n scan-loss) beam; ``SetSteeredBeamElevationIndexed`` indexes the
+  scan loss by the topocentric (WGS-84) elevation so that a threshold from
+  ``GainThresholdForMinElevationDb(e)`` is exactly the contour of elevation e.
 * ``NtnMeasurementModel`` — RSRP / SINR / elevation / signed Doppler
   from satellite beams using 3GPP TR 38.811 NTN channel scenarios.
 * ``NtnTr38811MobilityModel`` — the 3GPP TR 38.811 §6.1.1.1 NTN UE
@@ -72,6 +90,22 @@ The module exposes the following public classes:
   geometry utilities and ``NtnTr38811MobilityHelper``.
 * ``NtnAiInterface`` — optional ns3-ai bridge (observation / action) for
   learning-based HO policies; requires the ``ns3-ai`` module.
+
+Exit-triggered time-to-exit CHO (TTE-CHO) and its extensions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+With ``tteExitTriggered`` the rule stays while the serving cell's predicted
+exit exceeds ``tteExitMargin`` plus ``tteMarginZ`` times its exit-time sigma,
+and then takes the admissible candidate (quality at least
+``qualityThreshold_dB``, predicted exit at least ``tteMinimum`` and later than
+the serving cell's) with the best score. A measurement safety net leaves at
+once when the serving quality has been below ``tteServingFloor_dB`` for
+``tteServingFloorTtt``; it then accepts any candidate above the quality floor,
+whatever its predicted exit. The score is the predicted exit, or, with
+``rankByUsableTime``, the expected usable time to exit. ``escapeHoldoff``
+keeps the cell left through the safety net out of the target set for that
+long unless it is the only one. ``UpdateCandidateElevation`` feeds the
+topocentric elevation that the elevation trigger reads.
 
 Helpers:
 

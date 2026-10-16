@@ -31,6 +31,7 @@
 #include <ns3/traced-callback.h>
 #include <ns3/vector.h>
 
+#include <map>
 #include <vector>
 
 namespace ns3
@@ -69,6 +70,10 @@ class NtnTteEstimator : public Object
         double exitGain_dB;      //!< Gain at the moment of exit
         double currentSinr_dB;   //!< Current SINR estimate
         bool isValid;            //!< Whether TTE computation succeeded
+        /// N1: expected usable time to exit, the integral of the line-of-sight
+        /// probability along the predicted pass up to the exit. Equal to tte
+        /// when no LOS-probability table is configured (line of sight assumed).
+        Time usable{Seconds(0)};
     };
 
     /**
@@ -120,6 +125,24 @@ class NtnTteEstimator : public Object
                          uint32_t satId,
                          uint32_t beamId,
                          double gainThreshold_dB) const;
+
+    /**
+     * \brief N1: LOS-probability table for the expected usable time to exit.
+     *
+     * \p pctByBin maps an elevation bin (10, 20, ..., 90 deg) to the
+     * line-of-sight probability in percent, e.g. TR 38.811 Table 6.6.1-1 for the
+     * terminal's environment class. When set, ComputeTte also returns
+     * TteResult::usable = sum over the coarse search steps of
+     * P_LOS(e(t_k)) * step (trapezoid), with e the elevation of the PREDICTED
+     * orbit seen from the projected terminal (WGS-84 normal), and the last
+     * partial step weighted at the last covered elevation. The bin of an
+     * elevation e is round(e / 10) * 10 clamped to [10, 90], the convention of
+     * the scenario's own LOS draw. An empty map (the default) means line of
+     * sight everywhere and usable == tte.
+     */
+    void SetLosProbabilityTable(const std::map<int, double>& pctByBin);
+    /// N1: P_LOS in [0, 1] for elevation \p elevDeg under the configured table.
+    double LosProbability(double elevDeg) const;
 
     /**
      * \brief Batch TTE computation for multiple candidate beams
@@ -259,6 +282,7 @@ class NtnTteEstimator : public Object
 
 
 
+    std::map<int, double> m_plosPct;            //!< N1: LOS probability (%) by elevation bin
     Ptr<NtnOrbitPredictor> m_orbitPredictor;   //!< Orbit prediction engine
     Time m_predictionStep;                      //!< Coarse search step (default 1s)
     Time m_maxPredictionWindow;                 //!< Max look-ahead window (default 120s)

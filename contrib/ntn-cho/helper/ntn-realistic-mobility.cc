@@ -227,6 +227,9 @@ NtnRealisticMobilityHelper::InitializeVehicular(RealisticUe& ue)
                        ? std::clamp(hwy(m_rng), 18.0, 40.0)
                        : std::clamp(urb(m_rng), 4.0, 18.0);
     ue.heading_rad = ang(m_rng);
+    // F21: each vehicle keeps its own road direction; the Gauss-Markov
+    // heading reverted to 0 rad, so every vehicle turned north within minutes.
+    ue.meanHeading_rad = ue.heading_rad;
     ue.vEast  = ue.speed_mps * std::sin(ue.heading_rad);
     ue.vNorth = ue.speed_mps * std::cos(ue.heading_rad);
 }
@@ -352,7 +355,7 @@ NtnRealisticMobilityHelper::AdvanceVehicular(RealisticUe& ue, double dt_s)
     std::normal_distribution<double> eps(0.0, 1.0);
     double sigma = 0.2; // rad — tight angular spread (aligned roads)
     ue.heading_rad = alpha * ue.heading_rad +
-                     (1.0 - alpha) * 0.0 +
+                     (1.0 - alpha) * ue.meanHeading_rad +
                      sigma * std::sqrt(1.0 - alpha * alpha) * eps(m_rng);
     ue.vEast  = ue.speed_mps * std::sin(ue.heading_rad);
     ue.vNorth = ue.speed_mps * std::cos(ue.heading_rad);

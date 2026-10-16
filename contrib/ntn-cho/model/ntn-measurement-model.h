@@ -28,6 +28,20 @@ namespace ns3
 {
 
 /**
+ * F14: layer-3 filter coefficient adapted to the measurement period.
+ *
+ * TS 38.331 Section 5.5.3.2 defines F_n = (1 - a) F_{n-1} + a M_n with
+ * a = 1/2^(k/4) for measurements arriving every 200 ms, and requires the UE to
+ * adapt the filter at other input rates so that its time characteristics are
+ * preserved. Keeping the decay per unit time equal gives
+ * a_eff = 1 - (1 - a)^(T_s / 200 ms).
+ *
+ * \param filterCoefficientK the configured filterCoefficient k (fc4 = 4)
+ * \param samplePeriodS      the input measurement period in seconds
+ */
+double NtnL3FilterCoefficient(uint32_t filterCoefficientK, double samplePeriodS);
+
+/**
  * \ingroup ntn-cho
  * \brief Computes RSRP/SINR measurements from satellite beams using 3GPP NTN models
  *

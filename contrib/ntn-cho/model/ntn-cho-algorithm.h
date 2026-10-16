@@ -44,6 +44,7 @@
 #include <ns3/traced-callback.h>
 
 #include <map>
+#include <limits>
 #include <vector>
 
 namespace ns3
@@ -237,6 +238,29 @@ class NtnChoAlgorithm : public Object
          * shadowing dip. Zero keeps the immediate behaviour.
          */
         Time tteServingFloorTtt = Seconds(0);
+        /**
+         * N1: rank candidates by the EXPECTED USABLE time to exit, the
+         * integral of the line-of-sight probability along the predicted pass
+         * (NtnTteEstimator::SetLosProbabilityTable), instead of by the
+         * geometric time to exit. With no LOS table configured, or under line
+         * of sight, the two are equal and the rule is unchanged.
+         */
+        bool rankByUsableTime = false;
+        /**
+         * F3b: reuse a candidate's predicted exit between full recomputations.
+         * Zero (the default) recomputes at every evaluation. When positive, a
+         * candidate's time to exit (and usable time) is recomputed when this
+         * long has passed or the terminal moved more than tteCacheMoveM since
+         * the last computation, and otherwise aged by the elapsed time. The
+         * serving cell's exit and its sigma are always recomputed.
+         */
+        Time tteCacheRefresh = Seconds(0);
+        double tteCacheMoveM = 100.0;
+        /**
+         * N3: after a safety-net escape, the cell left is not a target for
+         * this long unless it is the only one available. Zero disables it.
+         */
+        Time escapeHoldoff = Seconds(0);
         double a3Offset_dB = 3.0;             //!< A3 event offset (for baseline)
         Time a3TimeToTrigger = MilliSeconds(160); //!< A3 TTT (for baseline)
 
@@ -461,6 +485,17 @@ class NtnChoAlgorithm : public Object
 
         // ---- RACH-less execution state ----
         double slantRangeM = 0.0;         //!< ephemeris/GNSS slant range to sat
+
+        /// F7: topocentric elevation fed by the scenario (NaN = not known; the
+        /// elevation trigger then falls back to the slant-range relation).
+        double elevationDeg = std::numeric_limits<double>::quiet_NaN();
+        /// N1: expected usable time to exit (equals tte without a LOS table).
+        Time usable = Seconds(0);
+        /// F3b: prediction cache.
+        Time tteAt = Seconds(0);
+        Time usableAt = Seconds(0);
+        Time tteComputedAt = Seconds(-1);
+        Vector tteUeEcef;
     };
 
     static TypeId GetTypeId();
@@ -538,6 +573,21 @@ class NtnChoAlgorithm : public Object
      *        pre-compensated (TS 38.821 §6.3.3) so the RACH is skipped.
      */
     void UpdateCandidateSlantRange(uint16_t cellId, double slantRangeM);
+
+    /// F7: feed the true topocentric elevation (deg) of a candidate or the
+    /// serving cell, as the terminal's own GNSS and the ephemeris give it.
+    void UpdateCandidateElevation(uint16_t cellId, double elevationDeg);
+
+    /// N2/F3b: seed a candidate's prediction cache with a time to exit (and
+    /// usable time) the network has just computed, e.g. while choosing the
+    /// prepared set, so the next evaluation does not recompute it.
+    void SeedCandidatePrediction(uint16_t cellId, Time tte, Time usable);
+
+    /// N3: true when the last SelectBestCandidate() chose through the safety net.
+    bool LastSelectionViaSafetyNet() const { return m_lastSelectViaNet; }
+
+    /// F3b: number of full time-to-exit evaluations performed so far.
+    uint64_t GetTteEvaluationCount() const { return m_tteEvalCount; }
 
     /// CHO-4: true when the serving cell's own geometry is known, i.e. the
     /// standardized triggers that compare candidate against serving can run.
@@ -823,6 +873,12 @@ class NtnChoAlgorithm : public Object
     ChoState m_state;                                  //!< Current state
     mutable Time m_servingBelowFloorSince{Seconds(-1)}; //!< serving below tteServingFloor_dB since
     mutable Time m_lastExitMargin{Seconds(0)}; //!< last exit-triggered margin applied
+    mutable bool m_lastSelectViaNet{false};    //!< N3: last selection used the safety net
+    uint16_t m_escapedCell{0};                 //!< N3: cell left through the safety net
+    Time m_escapedAt{Seconds(-1e9)};           //!< N3: when
+    mutable uint64_t m_tteEvalCount{0};        //!< F3b: full TTE evaluations
+    /// F3b/N1: refresh (or age) a candidate's predicted exit and usable time.
+    void RefreshPrediction(CandidateInfo& cand);
     ChoConfig m_config;                                //!< Configuration
     std::map<uint16_t, CandidateInfo> m_candidates;    //!< cellId -> CandidateInfo
     uint16_t m_servingCellId;                          //!< Current serving cell

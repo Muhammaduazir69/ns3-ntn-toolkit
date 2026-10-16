@@ -86,6 +86,26 @@ ElevationDeg(const Vector& ueEcef, const Vector& satEcef)
 }
 
 double
+GeodeticElevationDeg(const Vector& ueEcef, const Vector& satEcef)
+{
+    // Topocentric elevation about the WGS-84 ellipsoid normal at the terminal.
+    // ElevationDeg() above takes local up as the geocentric radius vector, which
+    // tilts the horizon by the geocentric/geodetic latitude difference (up to
+    // about 0.19 deg at 45 deg latitude) and is kept for its existing callers.
+    double latDeg = 0.0;
+    double lonDeg = 0.0;
+    double altM = 0.0;
+    EcefToGeodetic(ueEcef, latDeg, lonDeg, altM);
+    const double lat = latDeg * M_PI / 180.0;
+    const double lon = lonDeg * M_PI / 180.0;
+    const Vector up(std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat));
+    const Vector d(satEcef.x - ueEcef.x, satEcef.y - ueEcef.y, satEcef.z - ueEcef.z);
+    const double dNorm = std::max(1.0, d.GetLength());
+    const double s = (d.x * up.x + d.y * up.y + d.z * up.z) / dNorm;
+    return std::asin(std::max(-1.0, std::min(1.0, s))) * 180.0 / M_PI;
+}
+
+double
 SlantRangeM(const Vector& a, const Vector& b)
 {
     const double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;

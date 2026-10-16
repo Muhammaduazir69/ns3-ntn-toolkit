@@ -9,6 +9,8 @@
 
 #include "ntn-orbit-predictor.h"
 
+#include "ntn-tr38811-mobility-model.h"
+
 #include "ns3/satellite-constant-position-mobility-model.h"
 
 #include <ns3/double.h>
@@ -119,6 +121,20 @@ NtnOrbitPredictor::GeometricBeamGainDb(const GeoCoordinate& uePosition,
         return 0.0; // relative convention: boresight is 0 dB
     }
     double rolloffDb = 0.0;
+    if (m_steeredBeam && m_elevIndexed)
+    {
+        // F13: same cos^n law, indexed by the topocentric elevation so that the
+        // contour of GainThresholdForMinElevationDb(e) is the elevation e.
+        constexpr double kReNom = 6371000.0;
+        const double elev = ntngeo::GeodeticElevationDeg(ue, sat);
+        if (elev <= 0.0)
+        {
+            return -40.0;
+        }
+        const double sinT = (kReNom / (kReNom + m_elevIndexedAltM)) * std::cos(elev * M_PI / 180.0);
+        const double cosScan = std::max(std::cos(std::asin(std::min(1.0, sinT))), 1e-6);
+        return std::max(10.0 * m_scanLossExp * std::log10(cosScan), -40.0);
+    }
     if (m_steeredBeam)
     {
         // Boresight tracks the terminal, so the aperture pattern contributes
@@ -182,6 +198,13 @@ NtnOrbitPredictor::GainThresholdForMinElevationDb(double minElevDeg, double satA
     const double j1 = std::cyl_bessel_j(1.0, u);
     const double g = 4.0 * (j1 / u) * (j1 / u);
     return std::max(10.0 * std::log10(std::max(g, 1e-12)), -40.0);
+}
+
+void
+NtnOrbitPredictor::SetSteeredBeamElevationIndexed(bool on, double nominalAltM)
+{
+    m_elevIndexed = on;
+    m_elevIndexedAltM = nominalAltM;
 }
 
 void
