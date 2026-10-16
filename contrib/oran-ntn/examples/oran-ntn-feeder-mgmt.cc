@@ -2100,6 +2100,8 @@ main(int argc, char* argv[])
     cmd.AddValue("leadS", "PAL handoff lead before a predicted loss (s)", g.leadS);
     cmd.AddValue("maxLeaseS", "PAL lease cap (s)", g.maxLeaseS);
     cmd.AddValue("preS", "PAL pre-provisioning horizon (s)", g.preS);
+    cmd.AddValue("leaseEps", "PAL supersession bound eps of the lease horizon", g.leaseEps);
+    cmd.AddValue("priorUpdateS", "PAL prior for the mean A1 update spacing (s)", g.priorUpdateS);
     cmd.AddValue("a1MeanS", "mean time between A1 policy updates (s)", g.a1MeanS);
     cmd.AddValue("a1RetryS", "SMO A1 retry period, onboard strategy (s)", g.a1RetryS);
     cmd.AddValue("outputDir", "output directory", g.outDir);
