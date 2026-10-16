@@ -156,8 +156,41 @@ def check_n4(d):
     return dev < 1e-3 and hit == len(offs), f"max deviation {dev:.2e} m; offsets from the 6-12 h rows: {hit}/{len(offs)}"
 
 
+# TR 38.811 Table 6.6.1-1 LOS probabilities (%), urban and dense urban (the
+# values of ns-3 channel-condition-model.cc UrbanLOSProb / DenseUrbanLOSProb).
+PLOS_TABLES = {"urban": {10: 24.6, 20: 38.6, 30: 49.3, 40: 61.3, 50: 72.6, 60: 80.5, 70: 91.9, 80: 96.8, 90: 99.2},
+               "denseurban": {10: 28.2, 20: 33.1, 30: 39.8, 40: 46.8, 50: 53.7, 60: 61.2, 70: 73.8, 80: 82.0,
+                              90: 98.1}}
+
+
+def check_env(d):
+    """Urban and dense-urban channels draw the LOS state from their own TR 38.811 tables:
+    the pooled share of LOS draws in every elevation bin with >= 200 draws lies within
+    5 points of the table."""
+    msgs, ok = [], True
+    for env, table in PLOS_TABLES.items():
+        o = os.path.join(d, f"env_{env}")
+        run(o, "--policy=a3", "--a3OffsetDb=6", "--a3TttMs=640", f"--channel={env}", "--numUes=100",
+            "--simTime=60", "--rngRun=1", "--dumpLosDraws=1")
+        cnt, los = {}, {}
+        for r in rows(os.path.join(o, "los_draws.csv")):
+            b = int(r["elev_bin"])
+            cnt[b] = cnt.get(b, 0) + 1
+            los[b] = los.get(b, 0) + int(r["los"])
+        worst, used = 0.0, 0
+        for b, n in cnt.items():
+            if n < 200:
+                continue
+            used += 1
+            worst = max(worst, abs(100.0 * los[b] / n - table[b]))
+        ok = ok and used >= 3 and worst <= 5.0
+        msgs.append(f"{env}: {used} bins, max |share - table| {worst:.1f} pts")
+    return ok, "; ".join(msgs)
+
+
 CHECKS = {"F1": check_f1, "F3": check_f3, "F4": check_f4, "F5": check_f5, "F8": check_f8,
-          "F12": check_f12, "F16": check_f16, "N2": check_n2, "N4": check_n4}
+          "F12": check_f12, "F16": check_f16, "N2": check_n2, "N4": check_n4,
+          "ENV": check_env}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

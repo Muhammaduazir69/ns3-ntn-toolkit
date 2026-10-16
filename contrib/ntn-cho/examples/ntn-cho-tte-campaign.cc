@@ -41,6 +41,10 @@
  *  - Carrier 2.185 GHz with a 20 MHz channel (inside the n256 downlink block of
  *    TS 38.101-5). Handheld terminal: 0 dBi, 3 dB polarization loss, 7 dB noise
  *    figure (TR 38.821 Table 6.1.1.1-2).
+ *  - Environments (--channel): los and suburban use the suburban model and
+ *    tables; urban and denseurban use ns-3's ThreeGppNTNUrban/DenseUrban
+ *    models with their TR 38.811 Table 6.6.1-1 LOS probabilities and
+ *    Table 6.6.2-2/2-3 S-band shadowing sigmas.
  *  - Path loss: ns3::ThreeGppNTNSuburbanPropagationLossModel (TR 38.811
  *    Section 6.6) under a line-of-sight condition. At S-band its atmospheric
  *    absorption is applied only below 10 deg (zero here) and its scintillation
@@ -188,7 +192,34 @@ const std::map<int, double> kPlosSuburban{{10, 78.2},
                                           {70, 94.9},
                                           {80, 95.2},
                                           {90, 99.8}};
+// Urban and dense-urban environments (TR 38.811 Tables 6.6.1-1 and 6.6.2-1/2/3,
+// S band), as carried by ns-3: LOS probabilities from
+// src/propagation/model/channel-condition-model.cc (UrbanLOSProb,
+// DenseUrbanLOSProb) and shadow-fading sigmas from
+// src/propagation/model/three-gpp-propagation-loss-model.cc (SFCL_Urban,
+// SFCL_DenseUrban, columns S_LOS_sigF and S_NLOS_sigF).
+const std::map<int, double> kPlosUrban{{10, 24.6}, {20, 38.6}, {30, 49.3}, {40, 61.3}, {50, 72.6},
+                                       {60, 80.5}, {70, 91.9}, {80, 96.8}, {90, 99.2}};
+const std::map<int, double> kPlosDenseUrban{{10, 28.2}, {20, 33.1}, {30, 39.8}, {40, 46.8}, {50, 53.7},
+                                            {60, 61.2}, {70, 73.8}, {80, 82.0}, {90, 98.1}};
+const std::map<int, double> kSfLosSigmaUrban{{10, 4.0}, {20, 4.0}, {30, 4.0}, {40, 4.0}, {50, 4.0},
+                                             {60, 4.0}, {70, 4.0}, {80, 4.0}, {90, 4.0}};
+const std::map<int, double> kSfNlosSigmaUrban{{10, 6.0}, {20, 6.0}, {30, 6.0}, {40, 6.0}, {50, 6.0},
+                                              {60, 6.0}, {70, 6.0}, {80, 6.0}, {90, 6.0}};
+const std::map<int, double> kSfLosSigmaDenseUrban{{10, 3.5}, {20, 3.4}, {30, 2.9}, {40, 3.0}, {50, 3.1},
+                                                  {60, 2.7}, {70, 2.5}, {80, 2.3}, {90, 1.2}};
+const std::map<int, double> kSfNlosSigmaDenseUrban{{10, 15.5}, {20, 13.9}, {30, 12.4}, {40, 11.7},
+                                                   {50, 10.6}, {60, 10.5}, {70, 10.1}, {80, 9.2},
+                                                   {90, 9.2}};
+// Tables of the active environment. The "los" channel keeps the suburban
+// sigmas (its path loss is the suburban model under a forced LOS condition).
+const std::map<int, double>* g_plosTable = &kPlosSuburban;
+const std::map<int, double>* g_sfLosTable = &kSfLosSigmaS;
+const std::map<int, double>* g_sfNlosTable = &kSfNlosSigmaS;
 // TR 38.811 Table 6.7.2-5a/6a: shadowing decorrelation distance, suburban.
+// ns-3 applies the same 37 m (LOS) and 50 m (NLOS) to its urban and
+// dense-urban NTN models (TR 38.811 Tables 6.7.2-1a/b to 6.7.2-3a/b), so the
+// two values serve every environment here.
 constexpr double kSfDecorrM = 37.0;
 constexpr double kSfDecorrNlosM = 50.0;
 // The line-of-sight state is redrawn when the terminal has moved this far
@@ -208,7 +239,7 @@ SfSigmaAt(double elevDeg)
 {
     int q = static_cast<int>(std::lround(elevDeg / 10.0)) * 10;
     q = std::max(10, std::min(90, q));
-    return kSfLosSigmaS.at(q);
+    return g_sfLosTable->at(q);
 }
 
 // Chord distance between the terminal and the sub-satellite point of a satellite
@@ -241,7 +272,7 @@ struct Params
     double centerLon = 70.0;
     double halfSpanDeg = 1.0;
     std::string ueProfile = "mixed"; // mixed | static
-    std::string channel = "los";     // los | suburban (TR 38.811 LOS/NLOS process)
+    std::string channel = "los";     // los | suburban | urban | denseurban (TR 38.811 LOS/NLOS process)
     // radio
     double fcGhz = 2.185;
     double bwMhz = 20.0;
@@ -295,6 +326,7 @@ struct Params
     bool prepareByTte = false;       // prepared set by predicted score, not by L3
     double escapeHoldoffS = 0.0;     // hold-off of the cell left via the safety net
     int32_t dumpLinksUe = -1;        // F8 check: per-tick link realization dump
+    bool dumpLosDraws = false;       // write every LOS-state draw (elevation bin, state)
     double execMarginS = 0.2;
     double marginZ = 2.0;
     double predStepS = 2.0;
@@ -390,6 +422,7 @@ std::ofstream g_events;
 std::ofstream g_acc;
 std::ofstream g_trace;
 std::ofstream g_dump;
+std::ofstream g_losDump; // --dumpLosDraws: one row per LOS-state draw
 Ptr<NormalRandomVariable> g_normOut; // F8: draws whose occurrence depends on the policy
 const double kTick = 0.1;
 
@@ -524,9 +557,9 @@ MeasureUe(UeCtx& u, const Vector& uePos)
         ls.elevDeg = elev;
         ls.slantM = ntngeo::SlantRangeM(uePos, sp);
         ls.scanLossDb = ScanLossDb(uePos, sp);
-        // line-of-sight state (suburban channel only)
+        // line-of-sight state (blockage channels only)
         bool losChanged = false;
-        if (g_p.channel == "suburban")
+        if (g_p.channel != "los")
         {
             const int bin = ElevBin(elev);
             double moved = 0.0;
@@ -540,7 +573,11 @@ MeasureUe(UeCtx& u, const Vector& uePos)
             if (!ls.losInit || bin != ls.losBin || moved > kLosDecorrM)
             {
                 const bool was = ls.los;
-                ls.los = g_uni->GetValue(0.0, 100.0) < kPlosSuburban.at(bin);
+                ls.los = g_uni->GetValue(0.0, 100.0) < g_plosTable->at(bin);
+                if (g_p.dumpLosDraws)
+                {
+                    g_losDump << bin << "," << (ls.los ? 1 : 0) << "\n";
+                }
                 losChanged = ls.losInit && (was != ls.los);
                 ls.losInit = true;
                 ls.losBin = bin;
@@ -550,7 +587,7 @@ MeasureUe(UeCtx& u, const Vector& uePos)
         // shadowing, correlated over terminal displacement; a change of
         // line-of-sight state starts an independent realization, as ns-3's
         // ThreeGppPropagationLossModel does
-        const double sig = ls.los ? SfSigmaAt(elev) : kSfNlosSigmaS.at(ElevBin(elev));
+        const double sig = ls.los ? SfSigmaAt(elev) : g_sfNlosTable->at(ElevBin(elev));
         const double decorr = ls.los ? kSfDecorrM : kSfDecorrNlosM;
         // F12: the satellite's own motion decorrelates the shadowing too. A
         // change of the link's 10-degree elevation bin (the granularity of the
@@ -1264,7 +1301,7 @@ main(int argc, char* argv[])
     cmd.AddValue("centerLon", "service-area centre longitude", p.centerLon);
     cmd.AddValue("halfSpanDeg", "service-area half span (deg)", p.halfSpanDeg);
     cmd.AddValue("ueProfile", "mixed | static", p.ueProfile);
-    cmd.AddValue("channel", "los | suburban (TR 38.811 Table 6.6.1-1 LOS/NLOS process)", p.channel);
+    cmd.AddValue("channel", "los | suburban | urban | denseurban (TR 38.811 Table 6.6.1-1 LOS/NLOS process)", p.channel);
     cmd.AddValue("minElevDeg", "minimum service elevation (deg)", p.minElevDeg);
     cmd.AddValue("measErrDb", "L1 measurement error sigma (dB)", p.measErrDb);
     cmd.AddValue("qualityThDb", "candidate quality floor (dB)", p.qualityThDb);
@@ -1306,6 +1343,7 @@ main(int argc, char* argv[])
     cmd.AddValue("escapeHoldoffS", "N3: hold-off (s) of the cell left via the safety net",
                  p.escapeHoldoffS);
     cmd.AddValue("dumpLinksUe", "write per-tick link realizations of this terminal", p.dumpLinksUe);
+    cmd.AddValue("dumpLosDraws", "write every LOS-state draw to los_draws.csv", p.dumpLosDraws);
     cmd.AddValue("ephErrorFile", "N4: CSV of measured RTN errors (catnr,name,alt_km,age_h,dt_min,"
                  "err_r_m,err_a_m,err_c_m); replaces the Gaussian draw", p.ephErrorFile);
     cmd.AddValue("ephAgeMinH", "N4: minimum element-set age (h) of the drawn samples", p.ephAgeMinH);
@@ -1386,13 +1424,36 @@ main(int argc, char* argv[])
     // ---- radio ---------------------------------------------------------------
     g_noiseDbm = -174.0 + 10.0 * std::log10(p.bwMhz * 1e6) + p.ueNfDb;
     g_eirpDbm = p.eirpDensityDbwPerMhz + 30.0 + 10.0 * std::log10(p.bwMhz);
-    g_pl = CreateObject<ThreeGppNTNSuburbanPropagationLossModel>();
+    auto makePl = [&p]() -> Ptr<ThreeGppPropagationLossModel> {
+        if (p.channel == "urban")
+        {
+            return CreateObject<ThreeGppNTNUrbanPropagationLossModel>();
+        }
+        if (p.channel == "denseurban")
+        {
+            return CreateObject<ThreeGppNTNDenseUrbanPropagationLossModel>();
+        }
+        return CreateObject<ThreeGppNTNSuburbanPropagationLossModel>();
+    };
+    if (p.channel == "urban")
+    {
+        g_plosTable = &kPlosUrban;
+        g_sfLosTable = &kSfLosSigmaUrban;
+        g_sfNlosTable = &kSfNlosSigmaUrban;
+    }
+    else if (p.channel == "denseurban")
+    {
+        g_plosTable = &kPlosDenseUrban;
+        g_sfLosTable = &kSfLosSigmaDenseUrban;
+        g_sfNlosTable = &kSfNlosSigmaDenseUrban;
+    }
+    g_pl = makePl();
     g_pl->SetAttribute("Frequency", DoubleValue(p.fcGhz * 1e9));
     g_pl->SetAttribute("ShadowingEnabled", BooleanValue(false));
     g_pl->SetChannelConditionModel(CreateObject<AlwaysLosChannelConditionModel>());
     g_norm = CreateObject<NormalRandomVariable>();
     g_norm->SetStream(2000);
-    g_plNlos = CreateObject<ThreeGppNTNSuburbanPropagationLossModel>();
+    g_plNlos = makePl();
     g_plNlos->SetAttribute("Frequency", DoubleValue(p.fcGhz * 1e9));
     g_plNlos->SetAttribute("ShadowingEnabled", BooleanValue(false));
     g_plNlos->SetChannelConditionModel(CreateObject<NeverLosChannelConditionModel>());
@@ -1400,7 +1461,9 @@ main(int argc, char* argv[])
     g_uni->SetStream(2500);
     g_normOut = CreateObject<NormalRandomVariable>();
     g_normOut->SetStream(2600);
-    NS_ABORT_MSG_IF(p.channel != "los" && p.channel != "suburban", "unknown --channel");
+    NS_ABORT_MSG_IF(p.channel != "los" && p.channel != "suburban" && p.channel != "urban" &&
+                        p.channel != "denseurban",
+                    "unknown --channel");
 
     // ---- the network's predictor: same satellites, wrong ephemeris ----------
     g_pred = CreateObject<NtnOrbitPredictor>();
@@ -1510,12 +1573,12 @@ main(int argc, char* argv[])
     g_tte->SetAttribute("PredictionStep", TimeValue(Seconds(p.predStepS)));
     g_tte->SetAttribute("MaxPredictionWindow", TimeValue(Seconds(p.horizonS)));
     g_tte->SetAttribute("BinarySearchTolerance", TimeValue(MilliSeconds(50)));
-    if (p.channel == "suburban")
+    if (p.channel != "los")
     {
         // N1: the network knows the terminal's environment class, not the
         // drawn state, so the usable time weighs the predicted pass by the
         // same TR 38.811 Table 6.6.1-1 probabilities the channel is drawn from.
-        g_tte->SetLosProbabilityTable(kPlosSuburban);
+        g_tte->SetLosProbabilityTable(*g_plosTable);
     }
     g_coverGainTh = g_pred->GainThresholdForMinElevationDb(p.minElevDeg, p.altitudeKm * 1e3);
     // A quality floor is planned for as an EXIT: with a steered beam both the
@@ -1620,6 +1683,11 @@ main(int argc, char* argv[])
     {
         g_trace.open(p.outputDir + "/trace.csv");
         g_trace << "t_s,sat,elev_deg,l3_db,serving,los\n";
+    }
+    if (p.dumpLosDraws)
+    {
+        g_losDump.open(p.outputDir + "/los_draws.csv");
+        g_losDump << "elev_bin,los\n";
     }
     if (p.dumpLinksUe >= 0)
     {
