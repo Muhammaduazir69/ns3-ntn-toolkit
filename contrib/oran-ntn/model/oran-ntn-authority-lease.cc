@@ -102,7 +102,11 @@ OranNtnAuthorityLease::Merge(MergeRule rule,
     {
         const Write* g = latest(ground, p, [&](const Write& w) { return w.at >= leaseStart; });
         const Write* o = latest(onboard, p, inLease);
-        if (g && o && std::fabs(g->value - o->value) > tol)
+        // A direct conflict is a disagreement under the SAME intent version:
+        // two writes made under different versions are expected to differ and
+        // are handled as policy-stale writes instead.
+        if (g && o && g->policyVersion == o->policyVersion &&
+            std::fabs(g->value - o->value) > tol)
         {
             ++r.directConflicts;
         }

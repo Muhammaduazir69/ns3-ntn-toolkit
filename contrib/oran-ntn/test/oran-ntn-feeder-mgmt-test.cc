@@ -285,7 +285,7 @@ class OranNtnAuthorityLeaseRulesTest : public TestCase
             {3, 0.70, 2, Seconds(140), L::Host::Ground},
         };
         std::vector<L::Write> onboard = {
-            {1, 0.35, 1, Seconds(120), L::Host::Onboard},
+            {1, 0.35, 2, Seconds(120), L::Host::Onboard},
             {2, 0.50, 1, Seconds(130), L::Host::Onboard},
         };
         auto gw = L::Merge(L::MergeRule::GroundWins, ground, onboard, Seconds(100), Seconds(160),
@@ -293,7 +293,7 @@ class OranNtnAuthorityLeaseRulesTest : public TestCase
         NS_TEST_ASSERT_MSG_EQ_TOL(gw.state[1], 0.45, 1e-12, "ground wins p1");
         NS_TEST_ASSERT_MSG_EQ((gw.winner[1] == L::Host::Ground), true, "ground winner p1");
         NS_TEST_ASSERT_MSG_EQ_TOL(gw.state[2], 0.50, 1e-12, "only onboard wrote p2");
-        NS_TEST_ASSERT_MSG_EQ(gw.directConflicts, 1u, "p1 written by both sides, values differ");
+        NS_TEST_ASSERT_MSG_EQ(gw.directConflicts, 1u, "p1 written by both sides under v2, values differ");
         NS_TEST_ASSERT_MSG_EQ(gw.policyStaleWrites, 1u, "p2 kept under v1 < v2");
         NS_TEST_ASSERT_MSG_EQ(gw.recompute.size(), 0u, "ground-wins never recomputes");
 
@@ -309,6 +309,10 @@ class OranNtnAuthorityLeaseRulesTest : public TestCase
         NS_TEST_ASSERT_MSG_EQ(lv.recompute.size(), 1u, "p2 flagged for recompute under v2");
         NS_TEST_ASSERT_MSG_EQ(lv.recompute[0], 2u, "the flagged parameter is p2");
 
+        // Writes under different versions are not direct conflicts.
+        std::vector<L::Write> g3 = {{1, 0.45, 3, Seconds(161), L::Host::Ground}};
+        auto m3 = L::Merge(L::MergeRule::GroundWins, g3, onboard, Seconds(100), Seconds(160), 3, 1e-3);
+        NS_TEST_ASSERT_MSG_EQ(m3.directConflicts, 0u, "different versions: not a direct conflict");
         // Without the post-lease ground write, the lease decides p1.
         ground.erase(ground.begin() + 1);
         auto lv2 = L::Merge(L::MergeRule::LeaseVersioned, ground, onboard, Seconds(100),

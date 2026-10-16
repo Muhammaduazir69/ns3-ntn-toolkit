@@ -36,6 +36,9 @@
 //   onboard   all three classes on the on-board Space RIC; A1 over the feeder
 //   reactive  RT class on board, near-RT classes on the ground, heartbeat
 //             failover to on-board autonomy, ground-wins on reconnection
+//   reactive-ttl  reactive, but the satellite's A1 copy carries the same
+//             lease (validUntil = last contact + tau*) as in pal: the lease
+//             without prediction, merge or pre-provisioning
 //   pal       predictive authority leasing (this work): contact-plan driven
 //             placement and handoff before predicted feeder loss, A1 policy
 //             snapshots carried as leases (validUntil), pre-provisioning of
@@ -168,6 +171,7 @@ enum class Strategy
     Ground,
     Onboard,
     Reactive,
+    ReactiveTtl,
     Pal,
     PalNoPre,
     PalGw
@@ -218,6 +222,7 @@ struct Cfg
     std::array<double, kClasses> procGroundS{0.0002, 0.0005, 0.002};
     std::array<double, kClasses> procOnboardS{0.001, 0.003, 0.010};
     uint32_t sctpPad{20};
+    double procScaleOnboard{1.0};
     std::string outDir{"oran-ntn-feeder-mgmt-output"};
     uint32_t run{1};
 };
@@ -296,6 +301,7 @@ struct Sat
     // applied NS parameter
     double share{-1};
     uint32_t shareVer{0};
+    bool shareDefault{true}; // still the configured share set at the switch
     std::vector<L::Write> log;
     double lastDemand{0};
     Time lastDemandAt{Seconds(0)};
@@ -319,6 +325,10 @@ struct Stats
         double start, end;
         bool predicted;
         bool endedBySwitch;
+        // 0 start-up acquisition, 1 geometric (window edge), 2 fade or other
+        // loss of an established feeder, 3 takeover by a satellite with no
+        // feeder yet, 4 still open at the end of the run (censored).
+        int kind{2};
         uint32_t direct{0}, policyStale{0};
         double ttc{-1};
         uint32_t nfMiss{0};
@@ -382,6 +392,8 @@ std::vector<L::Write> groundLog;
 struct GroundView
 {
     bool e2{false};                                        // RIC answered E2 setup
+    bool prepSent{false};                                  // PREP sent (PAL)
+    Time prepAt{Seconds(-10)};
     std::array<bool, kClasses> subAcked{false, false, false}; // SUB_RSP seen
     std::array<bool, kClasses> leased{false, false, false};
     bool hbArmed{false};
@@ -393,12 +405,22 @@ struct GroundView
     uint32_t onboardVerAtLease{0};
 };
 std::vector<GroundView> gview;
+
+// The RIC's own view of reachability: some message from the satellite
+// arrived within the heartbeat timeout.
+bool
+RicSeesUp(int s)
+{
+    return Simulator::Now() - gview[s].lastHbAck <= Seconds(g.hbPeriodS * g.hbMiss);
+}
 // On-board write log snapshot carried by a RECON or a resume HB_ACK. The
 // payload of those messages is sized from it (24 B per entry); the receiver
 // reads the snapshot taken at send time, never the live on-board log.
 std::map<int, std::vector<L::Write>> reconSnap;
 uint64_t rtGroundFeasibleTicks = 0, rtTicks = 0;
 // SLA violation breakdown: [linkUp][appliedVersionCurrent]
+uint64_t catSamp[4] = {0, 0, 0, 0}, catViol[4] = {0, 0, 0, 0};
+double catOver[4] = {0, 0, 0, 0};
 uint64_t violBy[2][2] = {{0, 0}, {0, 0}}, sampBy[2][2] = {{0, 0}, {0, 0}};
 
 // Demand process
@@ -493,9 +515,22 @@ IsPal()
 }
 
 bool
+IsReactiveLike()
+{
+    return g.strat == Strategy::Reactive || g.strat == Strategy::ReactiveTtl;
+}
+
+// Strategies whose satellite-side A1 copy carries a validUntil lease.
+bool
+IsLeasing()
+{
+    return IsPal() || g.strat == Strategy::ReactiveTtl;
+}
+
+bool
 UsesHeartbeat()
 {
-    return g.strat == Strategy::Reactive || IsPal();
+    return IsReactiveLike() || IsPal();
 }
 
 // Payload sizes (bytes, after the fixed header) of the non-KPM messages.
@@ -630,6 +665,9 @@ IsServing(int s)
     return s >= 0 && s == servingIdx;
 }
 
+struct GroundView;
+bool RicSeesUp(int s);
+
 void
 SendToSat(int s, MgmtHeader h, uint32_t payload, bool fromSmo = false)
 {
@@ -683,6 +721,7 @@ HostedOnboard(int cls, const Sat& s)
     case Strategy::Onboard:
         return true;
     case Strategy::Reactive:
+    case Strategy::ReactiveTtl:
         return cls == kRT || s.autonomous;
     default:
         // PAL pins RT on board: the placement rule is evaluated for RT every
@@ -767,6 +806,7 @@ ApplyAction(int s, int cls, Time tMeas, double value, uint32_t ver, L::Host writ
         // a deadline sample; it only changes the parameter.
         sat.share = value;
         sat.shareVer = ver;
+        sat.shareDefault = false;
         CheckTtc(s, ver, true);
         return;
     }
@@ -797,6 +837,7 @@ ApplyAction(int s, int cls, Time tMeas, double value, uint32_t ver, L::Host writ
     {
         sat.share = value;
         sat.shareVer = ver;
+        sat.shareDefault = false;
         bool confirming;
         if (writer == L::Host::Onboard)
         {
@@ -852,7 +893,8 @@ Epoch(int cls)
     if (HostedOnboard(cls, sat))
     {
         st.hostOnboardEpochs[cls]++;
-        const double proc = g.procOnboardS[cls] * (0.8 + 0.4 * rvU->GetValue());
+        const double proc =
+            g.procScaleOnboard * g.procOnboardS[cls] * (0.8 + 0.4 * rvU->GetValue());
         double value = 0;
         uint32_t ver = 0;
         if (cls == kNS)
@@ -966,6 +1008,7 @@ GroundNeedsSub(int cls)
     case Strategy::Onboard:
         return false;
     case Strategy::Reactive:
+    case Strategy::ReactiveTtl:
         return cls != kRT;
     default:
         return cls != kRT; // pal: RT is never placed on the ground (predicted loop > 10 ms)
@@ -1002,9 +1045,9 @@ RicOnSetup(int s)
         a.v2 = smoCur.h;
         SendToSat(s, a, PayloadSize(A1_PUT, 0), true);
     }
-    else if (g.strat == Strategy::Reactive)
+    else if (IsReactiveLike())
     {
-        PushPolicyToSat(s, false); // shadow copy for autonomy
+        PushPolicyToSat(s, IsLeasing()); // shadow copy for autonomy
     }
     else if (IsPal())
     {
@@ -1087,6 +1130,59 @@ SatInstallPolicy(int s, uint32_t ver, double gg, double hh, Time until)
     sats[s].a1->HandleIncomingPolicy(ToA1(p));
 }
 
+// Ground-wins resume (reactive hybrid and the PAL ablation): leave autonomy
+// and report the on-board write log and a fresh demand measurement so the
+// ground can decide at once.
+void
+SatResume(int s)
+{
+    Sat& sat = sats[s];
+    sat.autonomous = false;
+    reconSnap[s] = sat.log;
+    sat.log.clear();
+    MgmtHeader r;
+    r.type = HB_ACK;
+    r.flags = 1;
+    r.v2 = Demand();
+    r.tMeasNs = Simulator::Now().GetNanoSeconds();
+    r.ver = sat.shareVer;
+    r.v1 = sat.share;
+    SendSatMsg(s, r, PayloadSize(RECON, static_cast<uint32_t>(reconSnap[s].size())));
+}
+
+// PAL return path: report the write log of the lease interval and a fresh
+// demand measurement; the Space RIC keeps control until RECON_ACK.
+void
+SatSendRecon(int s)
+{
+    Sat& sat = sats[s];
+    bool any = sat.autonomous;
+    for (int c = 0; c < kClasses; ++c)
+    {
+        any = any || sat.leased[c];
+    }
+    if (!any || !sat.e2Setup)
+    {
+        return;
+    }
+    MgmtHeader r;
+    r.type = RECON;
+    r.flags = 0;
+    for (int c = 0; c < kClasses; ++c)
+    {
+        if (sat.leased[c] || sat.autonomous)
+        {
+            r.flags |= (2u << c);
+        }
+    }
+    r.ver = sat.shareVer;
+    r.v1 = sat.share;
+    r.v2 = Demand();
+    r.tMeasNs = Simulator::Now().GetNanoSeconds();
+    reconSnap[s] = sat.log;
+    SendSatMsg(s, r, PayloadSize(RECON, static_cast<uint32_t>(sat.log.size())));
+}
+
 void
 SatRecv(int s, Ptr<Socket> sock)
 {
@@ -1097,6 +1193,12 @@ SatRecv(int s, Ptr<Socket> sock)
         MgmtHeader h;
         p->RemoveHeader(h);
         Sat& sat = sats[s];
+        // Any message from the ground proves the path is up; the heartbeat
+        // timeout counts from the latest one. (Without this, a satellite whose
+        // reconciliation reply arrived before the first heartbeat fell back
+        // into autonomy with its feeder up.)
+        const bool wasAutoAny = sat.autonomous;
+        sat.lastHbRx = Simulator::Now();
         switch (h.type)
         {
         case RC_CTRL:
@@ -1145,29 +1247,26 @@ SatRecv(int s, Ptr<Socket> sock)
             break;
         }
         case HB: {
-            const bool wasAuto = sat.autonomous;
-            sat.lastHbRx = Simulator::Now();
+            const bool wasAuto = wasAutoAny && sat.autonomous;
             if (h.untilNs > 0 && sat.snap.ver > 0)
             {
                 // PAL: every contact re-anchors the lease of the held snapshot.
                 SatInstallPolicy(s, sat.snap.ver, sat.snap.g, sat.snap.h, NanoSeconds(h.untilNs));
             }
-            MgmtHeader r;
-            r.type = HB_ACK;
-            if (wasAuto)
+            if (wasAuto && (!IsPal() || g.strat == Strategy::PalGw))
             {
-                // Feeder back: leave autonomy. Report fresh measurements so
-                // the ground can act at once (tuned reactive behaviour).
-                sat.autonomous = false;
-                reconSnap[s] = sat.log;
-                sat.log.clear();
-                r.flags = 1;
-                r.v2 = Demand();
-                r.tMeasNs = Simulator::Now().GetNanoSeconds();
-                r.ver = sat.shareVer;
-                r.v1 = sat.share;
+                SatResume(s);
             }
-            SendSatMsg(s, r, wasAuto ? PayloadSize(RECON, static_cast<uint32_t>(reconSnap[s].size())) : 0);
+            else
+            {
+                if (wasAuto)
+                {
+                    SatSendRecon(s); // PAL: the RECON sent at link-up was lost
+                }
+                MgmtHeader r;
+                r.type = HB_ACK;
+                SendSatMsg(s, r, 0);
+            }
             break;
         }
         case RECON_ACK: {
@@ -1255,7 +1354,7 @@ ReconcileGroundWins(int s, const MgmtHeader& h)
         o.policyStale += m.policyStaleWrites;
     }
     reconSnap[s].clear();
-    PushPolicyToSat(s, IsPal());
+    PushPolicyToSat(s, IsLeasing());
     RicDecideAndSend(s, kNS, NanoSeconds(h.tMeasNs), h.v2, true);
 }
 
@@ -1273,6 +1372,8 @@ RicRecv(Ptr<Socket> sock)
         {
             continue;
         }
+        // Any message from the satellite proves the path is up.
+        gview[s].lastHbAck = Simulator::Now();
         switch (h.type)
         {
         case KPM_IND: {
@@ -1310,7 +1411,7 @@ RicRecv(Ptr<Socket> sock)
             if (h.flags & 1)
             {
                 gv.autonomous = false;
-                if (g.strat == Strategy::Reactive || g.strat == Strategy::PalGw)
+                if (IsReactiveLike() || g.strat == Strategy::PalGw)
                 {
                     ReconcileGroundWins(s, h);
                 }
@@ -1383,7 +1484,7 @@ SubRetryLoop()
     Simulator::Schedule(Seconds(1.0), &SubRetryLoop);
     for (int s = 0; s < static_cast<int>(sats.size()); ++s)
     {
-        if (!gview[s].e2 || !(IsServing(s) || sats[s].provisioned))
+        if (!gview[s].e2 || !(IsServing(s) || gview[s].prepSent))
         {
             continue;
         }
@@ -1437,6 +1538,17 @@ SmoIssue()
     smoCur = p;
     verIssued[p.ver] = Simulator::Now().GetSeconds();
     smoMgr->UpdatePolicy(smoPolicyId, ToA1(p));
+    if (g.strat == Strategy::Onboard && servingIdx >= 0 && gview[servingIdx].e2)
+    {
+        // On-board only: the SMO pushes a new version at once (the retry loop
+        // covers losses), as the RIC mirrors it in the hybrid strategies.
+        MgmtHeader a;
+        a.type = A1_PUT;
+        a.ver = p.ver;
+        a.v1 = p.g;
+        a.v2 = p.h;
+        SendToSat(servingIdx, a, PayloadSize(A1_PUT, 0), true);
+    }
 }
 
 // SMO -> ground RIC over the cloud link (10 ms), modeled through the A1
@@ -1455,7 +1567,7 @@ RicOnA1(A1NtnPolicy a)
     ricPolicy = FromA1(*ricA1);
     for (int s = 0; s < static_cast<int>(sats.size()); ++s)
     {
-        if (!sats[s].e2Setup || !(IsServing(s) || (IsPal() && sats[s].provisioned)))
+        if (!gview[s].e2 || !(IsServing(s) || (IsPal() && gview[s].prepSent)))
         {
             continue;
         }
@@ -1479,7 +1591,7 @@ SmoRetryLoop()
         return;
     }
     const int s = servingIdx;
-    if (!sats[s].e2Setup)
+    if (!gview[s].e2)
     {
         return;
     }
@@ -1505,11 +1617,11 @@ HbLoop()
     }
     Sat& sat = sats[s];
     GroundView& gv = gview[s];
-    if (sat.e2Setup)
+    if (gv.e2)
     {
         MgmtHeader h;
         h.type = HB;
-        h.untilNs = IsPal() ? PredictedLeaseUntil(s).GetNanoSeconds() : 0;
+        h.untilNs = IsLeasing() ? PredictedLeaseUntil(s).GetNanoSeconds() : 0;
         SendToSat(s, h, 0);
     }
     const Time to = Seconds(g.hbPeriodS * g.hbMiss);
@@ -1566,7 +1678,8 @@ PalTick()
     Simulator::Schedule(MilliSeconds(100), &PalTick);
     const Time now = Simulator::Now();
     const int s = servingIdx;
-    if (s >= 0 && sats[s].e2Setup && sats[s].linkUp)
+    // Uses only what the RIC knows: its own E2 state and recent traffic.
+    if (s >= 0 && gview[s].e2 && RicSeesUp(s))
     {
         Sat& sat = sats[s];
         GroundView& gv = gview[s];
@@ -1651,7 +1764,7 @@ PalTick()
     for (size_t k = serveSeg + 1; k < serveTl.size() && k <= serveSeg + 2; ++k)
     {
         const int n = serveTl[k].sat;
-        if (n < 0 || sats[n].provisioned || sats[n].e2Setup)
+        if (n < 0 || gview[n].e2 || now - gview[n].prepAt < Seconds(1.0))
         {
             continue;
         }
@@ -1659,8 +1772,10 @@ PalTick()
         {
             break;
         }
-        if (sats[n].linkUp)
+        if (planPred->IsVisible(sats[n].id, now))
         {
+            gview[n].prepSent = true;
+            gview[n].prepAt = now;
             MgmtHeader h;
             h.type = PREP;
             SendToSat(n, h, PayloadSize(PREP, 0));
@@ -1675,35 +1790,12 @@ OnFeederUp(int s)
     FlushBuffer(s);
     if (IsPal() && g.strat != Strategy::PalGw)
     {
-        bool any = sat.autonomous;
-        for (int c = 0; c < kClasses; ++c)
-        {
-            any = any || sat.leased[c];
-        }
-        if (any && sat.e2Setup)
-        {
-            MgmtHeader r;
-            r.type = RECON;
-            r.flags = 0;
-            for (int c = 0; c < kClasses; ++c)
-            {
-                if (sat.leased[c] || sat.autonomous)
-                {
-                    r.flags |= (2u << c);
-                }
-            }
-            r.ver = sat.shareVer;
-            r.v1 = sat.share;
-            r.v2 = Demand();
-            r.tMeasNs = Simulator::Now().GetNanoSeconds();
-            reconSnap[s] = sat.log;
-            SendSatMsg(s, r, PayloadSize(RECON, static_cast<uint32_t>(sat.log.size())));
-        }
+        SatSendRecon(s);
     }
     if (g.strat == Strategy::PalGw)
     {
         // Ablation: ground-wins return. Leases are dropped at once and the
-        // heartbeat resume path (as in `reactive`) reconciles.
+        // resume path of the reactive hybrid reconciles.
         bool any = false;
         for (int c = 0; c < kClasses; ++c)
         {
@@ -1715,6 +1807,12 @@ OnFeederUp(int s)
         {
             sat.autonomous = true;
         }
+    }
+    // Every hybrid reports at link-up, not at the next heartbeat, so the
+    // return paths of all strategies start from the same trigger.
+    if ((IsReactiveLike() || g.strat == Strategy::PalGw) && sat.autonomous && sat.e2Setup)
+    {
+        SatResume(s);
     }
     if ((IsServing(s) || sat.provisioned) && !sat.e2Setup)
     {
@@ -1809,6 +1907,18 @@ StartOutage(int s, int gwLost)
         }
     }
     o.endedBySwitch = false;
+    if (o.start < 2.0)
+    {
+        o.kind = 0;
+    }
+    else if (gwLost < 0)
+    {
+        o.kind = 3;
+    }
+    else
+    {
+        o.kind = o.predicted ? 1 : 2;
+    }
     st.outages.push_back(o);
     curOutage = st.outages.size() - 1;
 }
@@ -1873,6 +1983,7 @@ TopoTick()
             switchPending = true;
             ns.share = g.defaultShare;
             ns.shareVer = 0;
+            ns.shareDefault = true;
             ns.lastHbRx = now; // heartbeats start with the role
             ns.hbArmed = true;
             gview[servingIdx].lastHbAck = now;
@@ -1997,10 +2108,18 @@ SlaTick()
     const int lu = sat.linkUp ? 1 : 0;
     const int vc = sat.shareVer >= smoCur.ver ? 1 : 0;
     ++sampBy[lu][vc];
+    // State of the applied share: 0 configured default after a switch,
+    // 1 safe fallback, 2 decided under a superseded intent, 3 current intent.
+    const int cat = sat.shareDefault ? 0
+                    : sat.shareVer == 0 ? 1
+                    : sat.shareVer < smoCur.ver ? 2 : 3;
+    ++catSamp[cat];
+    catOver[cat] += std::max(0.0, a - r);
     if (a < r - 0.01)
     {
         ++st.slaViol;
         ++violBy[lu][vc];
+        ++catViol[cat];
     }
     st.overSum += std::max(0.0, a - r);
 }
@@ -2058,7 +2177,7 @@ main(int argc, char* argv[])
 {
     std::string strat = "pal";
     CommandLine cmd(__FILE__);
-    cmd.AddValue("strategy", "ground|onboard|reactive|pal|pal-nopre|pal-gw", strat);
+    cmd.AddValue("strategy", "ground|onboard|reactive|reactive-ttl|pal|pal-nopre|pal-gw", strat);
     cmd.AddValue("simSeconds", "simulated time (s)", g.simS);
     cmd.AddValue("shell", "550 (Walker-Delta 1584/72/1, 53 deg) or 1200 (Walker-Star 648/18, 87.9 deg)", g.shell);
     cmd.AddValue("numGw", "number of gateways (1-4)", g.numGw);
@@ -2079,6 +2198,7 @@ main(int argc, char* argv[])
     cmd.AddValue("priorUpdateS", "PAL prior for the mean A1 update spacing (s)", g.priorUpdateS);
     cmd.AddValue("a1MeanS", "mean time between A1 policy updates (s)", g.a1MeanS);
     cmd.AddValue("a1RetryS", "SMO A1 retry period, onboard strategy (s)", g.a1RetryS);
+    cmd.AddValue("procScaleOnboard", "scale factor on on-board processing times", g.procScaleOnboard);
     cmd.AddValue("outputDir", "output directory", g.outDir);
     cmd.AddValue("run", "RNG run (seed index)", g.run);
     cmd.Parse(argc, argv);
@@ -2089,6 +2209,8 @@ main(int argc, char* argv[])
         g.strat = Strategy::Onboard;
     else if (strat == "reactive")
         g.strat = Strategy::Reactive;
+    else if (strat == "reactive-ttl")
+        g.strat = Strategy::ReactiveTtl;
     else if (strat == "pal")
         g.strat = Strategy::Pal;
     else if (strat == "pal-nopre")
@@ -2467,6 +2589,7 @@ main(int argc, char* argv[])
     {
         st.outages[curOutage].end = g.simS;
         st.outages[curOutage].endedBySwitch = true;
+        st.outages[curOutage].kind = 4;
     }
 
     // ---- Output ------------------------------------------------------------
@@ -2554,12 +2677,12 @@ main(int argc, char* argv[])
     }
     {
         std::ofstream f(g.outDir + "/outages.csv");
-        f << "start,end,dur,predicted,ended_by_switch,direct_conflicts,policy_stale,ttc\n";
+        f << "start,end,dur,predicted,ended_by_switch,direct_conflicts,policy_stale,ttc,kind\n";
         for (const auto& o : st.outages)
         {
             f << o.start << "," << o.end << "," << (o.end - o.start) << "," << o.predicted << ","
               << o.endedBySwitch << "," << o.direct << "," << o.policyStale << "," << o.ttc
-              << "\n";
+              << "," << o.kind << "\n";
         }
     }
     {
@@ -2608,10 +2731,17 @@ main(int argc, char* argv[])
     {
         std::ofstream f(g.outDir + "/checks.csv");
         f << "rt_ticks,rt_ground_feasible_ticks,samp_down_stale,samp_down_cur,samp_up_stale,samp_up_cur,"
-             "viol_down_stale,viol_down_cur,viol_up_stale,viol_up_cur\n"
+             "viol_down_stale,viol_down_cur,viol_up_stale,viol_up_cur,"
+             "samp_default,viol_default,over_default,samp_fallback,viol_fallback,over_fallback,"
+             "samp_stale,viol_stale,over_stale,samp_current,viol_current,over_current\n"
           << rtTicks << "," << rtGroundFeasibleTicks << "," << sampBy[0][0] << "," << sampBy[0][1] << ","
           << sampBy[1][0] << "," << sampBy[1][1] << "," << violBy[0][0] << "," << violBy[0][1] << ","
-          << violBy[1][0] << "," << violBy[1][1] << "\n";
+          << violBy[1][0] << "," << violBy[1][1];
+        for (int k = 0; k < 4; ++k)
+        {
+            f << "," << catSamp[k] << "," << catViol[k] << "," << catOver[k];
+        }
+        f << "\n";
     }
     std::printf("# feeder-mgmt %s shell=%u gw=%u run=%u served=%.0fs avail=%.3f sats=%zu "
                 "switches=%zu outages=%zu nf_hit=%.4f ns_hit=%.4f rt_hit=%.4f sla_viol=%.4f "

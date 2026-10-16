@@ -67,7 +67,7 @@ class OranNtnAuthorityLease : public Object
     {
         std::map<uint32_t, double> state;  //!< reconciled value per parameter
         std::map<uint32_t, Host> winner;   //!< which side's write was kept
-        uint32_t directConflicts{0};       //!< both sides wrote, values differ
+        uint32_t directConflicts{0};       //!< both wrote under one version, values differ
         uint32_t policyStaleWrites{0};     //!< kept writes under an old version
         std::vector<uint32_t> recompute;   //!< parameters to recompute
     };
@@ -100,9 +100,10 @@ class OranNtnAuthorityLease : public Object
      * is the largest tau for which the probability that the snapshot has
      * been superseded stays at or below \p eps:
      *     tau* = -meanUpdate * ln(1 - eps),   0 < eps < 1.
-     * eps is the ratio of the marginal over-provisioning cost of the safe
-     * fallback to the marginal cost of enforcing a superseded intent, so the
-     * horizon is where the two marginal costs meet.
+     * Read as a cost ratio, eps = (cost rate of the safe fallback) / (expected
+     * cost rate of enforcing a superseded intent); the horizon is then where
+     * the two marginal costs meet, and it minimizes the expected outage cost
+     * for any outage length (paper, Sec. IV-C).
      */
     static Time LeaseHorizon(Time meanUpdate, double eps);
 
