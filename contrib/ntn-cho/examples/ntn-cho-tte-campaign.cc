@@ -261,6 +261,15 @@ struct Params
     double tteExitElevDeg = -1.0; // quality-feasible exit; -1 = the coverage limit
     double tteFloorDb = -6.0;     // serving-loss safety net (blockage)
     double tteFloorTttMs = 160.0; // time below the floor before it fires (A3's default TTT)
+    // Single-factor controls for the standardized conditions:
+    //  measFallback gives A3/D2/T1/elev the same serving-floor safety net as
+    //  TTE-CHO (a second prepared candidate on a measurement condition), executed
+    //  to the strongest prepared candidate;
+    //  tteRank keeps the configured execution condition but takes, among the
+    //  candidates it admitted, the one with the longest predicted time to exit
+    //  (the rule of Noreen and Schotten, CCNC 2026, mapped onto moving cells).
+    bool measFallback = false;
+    bool tteRank = false;
     double execMarginS = 0.2;
     double marginZ = 2.0;
     double predStepS = 2.0;
@@ -308,6 +317,7 @@ struct UeCtx
     bool reestablishing = false;
     double outageUntil = 0.0;    // no data before this time
     double t310Start = -1.0;     // running T310 since (s), -1 = stopped
+    double floorSince = -1.0;    // serving L3 below the fallback floor since (s)
     int32_t prevServing = -1;
     double lastHoTime = -1e9;
     std::unordered_map<uint32_t, LinkState> links;
@@ -615,6 +625,7 @@ Attach(UeCtx& u, int32_t sat)
     u.serving = sat;
     u.connectedSince = Simulator::Now().GetSeconds();
     u.t310Start = -1.0;
+    u.floorSince = -1.0;
     // The serving cell has to be known to the algorithm with its geometry, so
     // the triggers that compare against it work from the first evaluation.
     u.cho->ClearCandidates();
@@ -790,11 +801,65 @@ Decide(size_t idx)
         ++it;
     }
     u.cho->EvaluateConditions();
-    const uint16_t target = u.cho->SelectBestCandidate();
+    uint16_t target = u.cho->SelectBestCandidate();
+    const bool isTteFamily = (g_p.policy == "tte-cho" || g_p.policy == "mst" || g_p.policy == "tte-eager");
+    if (g_p.tteRank && !isTteFamily && target != NtnChoAlgorithm::INVALID_CELL_ID)
+    {
+        // Same execution instant, different target: longest predicted exit
+        // among the admitted candidates that pass the quality floor.
+        double bestTte = -1.0;
+        for (const auto& [cellId, info] : u.cho->GetCandidates())
+        {
+            if (!info.admitted || info.sinr_dB < g_p.qualityThDb ||
+                SatOf(cellId) == static_cast<uint32_t>(u.serving))
+            {
+                continue;
+            }
+            const double tt =
+                g_tte->ComputeTte(geo, u.mob->GetVelocity(), SatOf(cellId), 0, g_tteGainTh).tte.GetSeconds();
+            if (tt > bestTte)
+            {
+                bestTte = tt;
+                target = cellId;
+            }
+        }
+    }
+    if (g_p.measFallback && !isTteFamily)
+    {
+        const double now = Simulator::Now().GetSeconds();
+        if (sv->second.l3 < g_p.tteFloorDb)
+        {
+            if (u.floorSince < 0.0)
+            {
+                u.floorSince = now;
+            }
+        }
+        else
+        {
+            u.floorSince = -1.0;
+        }
+        const bool lost = u.floorSince >= 0.0 && (now - u.floorSince) * 1e3 >= g_p.tteFloorTttMs - 1e-6;
+        if (lost && (target == NtnChoAlgorithm::INVALID_CELL_ID ||
+                     SatOf(target) == static_cast<uint32_t>(u.serving)))
+        {
+            double best = -1e9;
+            for (uint32_t s : u.candidates)
+            {
+                const auto ls = u.links.find(s);
+                if (s != static_cast<uint32_t>(u.serving) && ls != u.links.end() && ls->second.covered &&
+                    ls->second.l3 > best && ls->second.l3 > sv->second.l3)
+                {
+                    best = ls->second.l3;
+                    target = CellOf(s);
+                }
+            }
+        }
+    }
     if (target == NtnChoAlgorithm::INVALID_CELL_ID || SatOf(target) == static_cast<uint32_t>(u.serving))
     {
         return;
     }
+    u.floorSince = -1.0;
     // Record what the network predicted for the cell it is leaving, and what
     // will actually happen to it, before executing.
     const double predServ =
@@ -1066,6 +1131,8 @@ main(int argc, char* argv[])
     cmd.AddValue("assumedSigmaCrossM", "network-assumed sigma, cross (m); -1 = true", p.assumedSigmaCrossM);
     cmd.AddValue("accuracySamples", "samples in tte-accuracy mode", p.accuracySamples);
     cmd.AddValue("traceUe", "terminal index to trace at 1 s (-1 = none)", p.traceUe);
+    cmd.AddValue("measFallback", "serving-floor fallback for the standardized conditions", p.measFallback);
+    cmd.AddValue("tteRank", "rank the admitted candidates by predicted time to exit", p.tteRank);
     cmd.Parse(argc, argv);
 
     if (p.assumedSigmaRadialM < 0.0)
