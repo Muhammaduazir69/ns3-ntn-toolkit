@@ -39,6 +39,8 @@
 //   reactive-ttl  reactive, but the satellite's A1 copy carries the same
 //             lease (validUntil = last contact + tau*) as in pal: the lease
 //             without prediction, merge or pre-provisioning
+//   reactive-ttl-pre  reactive-ttl plus the pre-provisioning of the next
+//             serving satellite that pal uses
 //   pal       predictive authority leasing (this work): contact-plan driven
 //             placement and handoff before predicted feeder loss, A1 policy
 //             snapshots carried as leases (validUntil), pre-provisioning of
@@ -172,6 +174,7 @@ enum class Strategy
     Onboard,
     Reactive,
     ReactiveTtl,
+    ReactiveTtlPre,
     Pal,
     PalNoPre,
     PalGw
@@ -343,6 +346,7 @@ struct Stats
         uint64_t sigBytes{0};
         uint32_t sigMsgs{0};
         bool preProvisioned{false};
+        double firstEpochS{-1}; // switch -> first NF measurement epoch
     };
     std::vector<Switch> switches;
     uint64_t feederBytes{0}, feederPkts{0};
@@ -517,14 +521,23 @@ IsPal()
 bool
 IsReactiveLike()
 {
-    return g.strat == Strategy::Reactive || g.strat == Strategy::ReactiveTtl;
+    return g.strat == Strategy::Reactive || g.strat == Strategy::ReactiveTtl ||
+           g.strat == Strategy::ReactiveTtlPre;
 }
 
 // Strategies whose satellite-side A1 copy carries a validUntil lease.
 bool
 IsLeasing()
 {
-    return IsPal() || g.strat == Strategy::ReactiveTtl;
+    return IsPal() || g.strat == Strategy::ReactiveTtl || g.strat == Strategy::ReactiveTtlPre;
+}
+
+// Strategies that provision the next serving satellite in advance.
+bool
+UsesPreprov()
+{
+    return g.strat == Strategy::Pal || g.strat == Strategy::PalGw ||
+           g.strat == Strategy::ReactiveTtlPre;
 }
 
 bool
@@ -722,6 +735,7 @@ HostedOnboard(int cls, const Sat& s)
         return true;
     case Strategy::Reactive:
     case Strategy::ReactiveTtl:
+    case Strategy::ReactiveTtlPre:
         return cls == kRT || s.autonomous;
     default:
         // PAL pins RT on board: the placement rule is evaluated for RT every
@@ -875,6 +889,11 @@ Epoch(int cls)
         sat.lastDemand = demand;
         sat.lastDemandAt = tMeas;
     }
+    if (cls == kNF && switchPending && curSwitch < st.switches.size() &&
+        st.switches[curSwitch].firstEpochS < 0)
+    {
+        st.switches[curSwitch].firstEpochS = tMeas.GetSeconds() - st.switches[curSwitch].t;
+    }
     if (cls == kNF)
     {
         // Settle epochs older than 2 deadlines: whatever is still pending missed.
@@ -1009,6 +1028,7 @@ GroundNeedsSub(int cls)
         return false;
     case Strategy::Reactive:
     case Strategy::ReactiveTtl:
+    case Strategy::ReactiveTtlPre:
         return cls != kRT;
     default:
         return cls != kRT; // pal: RT is never placed on the ground (predicted loop > 10 ms)
@@ -1571,7 +1591,7 @@ RicOnA1(A1NtnPolicy a)
     ricPolicy = FromA1(*ricA1);
     for (int s = 0; s < static_cast<int>(sats.size()); ++s)
     {
-        if (!gview[s].e2 || !(IsServing(s) || (IsPal() && gview[s].prepSent)))
+        if (!gview[s].e2 || !(IsServing(s) || (UsesPreprov() && gview[s].prepSent)))
         {
             continue;
         }
@@ -1760,11 +1780,16 @@ PalTick()
             SendSatMsg(s, r, PayloadSize(RECON, static_cast<uint32_t>(sat.log.size())));
         }
     }
-    // Pre-provisioning of the next serving satellite.
-    if (g.strat == Strategy::PalNoPre)
-    {
-        return;
-    }
+}
+
+// Pre-provisioning of the next serving satellite (PAL, and the reactive
+// hybrid with lease and pre-provisioning). Uses the serving schedule and the
+// predicted contact plan only.
+void
+PreprovTick()
+{
+    Simulator::Schedule(MilliSeconds(100), &PreprovTick);
+    const Time now = Simulator::Now();
     for (size_t k = serveSeg + 1; k < serveTl.size() && k <= serveSeg + 2; ++k)
     {
         const int n = serveTl[k].sat;
@@ -2215,6 +2240,8 @@ main(int argc, char* argv[])
         g.strat = Strategy::Reactive;
     else if (strat == "reactive-ttl")
         g.strat = Strategy::ReactiveTtl;
+    else if (strat == "reactive-ttl-pre")
+        g.strat = Strategy::ReactiveTtlPre;
     else if (strat == "pal")
         g.strat = Strategy::Pal;
     else if (strat == "pal-nopre")
@@ -2303,13 +2330,39 @@ main(int argc, char* argv[])
             bool keep = cur >= 0 && elev(cur) >= g.serveMaskDeg;
             if (!keep)
             {
+                // Refine the instant the serving satellite crossed the mask
+                // (bisection to 1 ms), so switch times are continuous and not
+                // locked to whole seconds; the successor is chosen there.
+                double tc = t;
+                if (cur >= 0 && k > 0)
+                {
+                    auto elevAt = [&](size_t i, double tt) {
+                        Vector p, v;
+                        allMob[i]->GetEcefStateAt(Seconds(tt), p, v);
+                        return OranNtnContactPlan::ElevationDeg(p, cell);
+                    };
+                    double lo = t - 1.0, hi = t;
+                    while (hi - lo > 1e-3)
+                    {
+                        const double mid = 0.5 * (lo + hi);
+                        if (elevAt(cur, mid) >= g.serveMaskDeg)
+                        {
+                            lo = mid;
+                        }
+                        else
+                        {
+                            hi = mid;
+                        }
+                    }
+                    tc = hi;
+                }
                 int best = -1;
-                double be = g.serveMaskDeg;
+                double be = g.serveMaskDeg - 1e-6;
                 for (size_t i = 0; i < allMob.size(); ++i)
                 {
                     // cheap prefilter: a satellite far from the cell cannot serve
                     Vector p, v;
-                    allMob[i]->GetEcefStateAt(Seconds(t), p, v);
+                    allMob[i]->GetEcefStateAt(Seconds(tc), p, v);
                     if (CalculateDistance(p, cell) > 3.5e6)
                     {
                         continue;
@@ -2323,7 +2376,7 @@ main(int argc, char* argv[])
                 }
                 if (best != cur || k == 0)
                 {
-                    raw.push_back({t, best});
+                    raw.push_back({tc, best});
                     cur = best;
                 }
             }
@@ -2584,6 +2637,10 @@ main(int argc, char* argv[])
     {
         Simulator::Schedule(Seconds(0.55), &PalTick);
     }
+    if (UsesPreprov())
+    {
+        Simulator::Schedule(Seconds(0.6), &PreprovTick);
+    }
 
     Simulator::Stop(Seconds(g.simS));
     Simulator::Run();
@@ -2691,11 +2748,12 @@ main(int argc, char* argv[])
     }
     {
         std::ofstream f(g.outDir + "/switches.csv");
-        f << "t,from,to,pre_provisioned,blackout_nf_s,sig_bytes,sig_msgs\n";
+        f << "t,from,to,pre_provisioned,blackout_nf_s,sig_bytes,sig_msgs,first_epoch_s\n";
         for (const auto& s : st.switches)
         {
             f << s.t << "," << s.from << "," << s.to << "," << s.preProvisioned << ","
-              << s.blackoutNf << "," << s.sigBytes << "," << s.sigMsgs << "\n";
+              << s.blackoutNf << "," << s.sigBytes << "," << s.sigMsgs << "," << s.firstEpochS
+              << "\n";
         }
     }
     {
