@@ -397,7 +397,7 @@ std::vector<GroundView> gview;
 // payload of those messages is sized from it (24 B per entry); the receiver
 // reads the snapshot taken at send time, never the live on-board log.
 std::map<int, std::vector<L::Write>> reconSnap;
-uint64_t rtGroundFeasibleTicks = 0, rtTicks = 0, darkPreLeases = 0;
+uint64_t rtGroundFeasibleTicks = 0, rtTicks = 0;
 // SLA violation breakdown: [linkUp][appliedVersionCurrent]
 uint64_t violBy[2][2] = {{0, 0}, {0, 0}}, sampBy[2][2] = {{0, 0}, {0, 0}};
 
@@ -1666,31 +1666,6 @@ PalTick()
             SendToSat(n, h, PayloadSize(PREP, 0));
         }
     }
-    // Dark switch: the next serving satellite is set up but the plan says it
-    // will have no feeder when it takes over. Lease the near-RT classes to it
-    // now, while it can still be reached, so it controls from its first epoch.
-    if (serveSeg + 1 < serveTl.size())
-    {
-        const int n = serveTl[serveSeg + 1].sat;
-        const Time tsw = Seconds(serveTl[serveSeg + 1].start);
-        if (n >= 0 && sats[n].e2Setup && sats[n].linkUp && !gview[n].leased[kNF] &&
-            tsw - now <= Seconds(g.preS) && tsw > now &&
-            !planPred->IsVisible(sats[n].id, tsw + Seconds(g.leadS)))
-        {
-            MgmtHeader a;
-            a.type = LEASE;
-            a.ver = ricPolicy.ver;
-            a.v1 = ricPolicy.g;
-            a.v2 = ricPolicy.h;
-            a.untilNs = (now + LeaseTau()).GetNanoSeconds();
-            a.flags = 1 | (2u << kNF) | (2u << kNS);
-            gview[n].leased[kNF] = gview[n].leased[kNS] = true;
-            gview[n].leaseStart = now;
-            ++st.leasesGranted;
-            ++darkPreLeases;
-            SendToSat(n, a, PayloadSize(LEASE, 0));
-        }
-    }
 }
 
 void
@@ -2512,7 +2487,7 @@ main(int argc, char* argv[])
              "ttc_p95_s,ttc_n,blackout_mean_s,blackout_p95_s,blackout_n,sig_bytes_per_switch,"
              "sig_msgs_per_switch,preprov_frac,feeder_bytes,feeder_kbps,autonomy_entries,"
              "false_autonomy,leases,kpm_delivered,kpm_discarded,ctrl_lost,kpm_codec_fail,fallback_frac,"
-             "dark_preleases,hb_kbps,lease_kbps,e2setup_kbps,kpm_kbps,ctrl_kbps,a1_kbps,recon_kbps,lease_tau_s\n";
+             "hb_kbps,lease_kbps,e2setup_kbps,kpm_kbps,ctrl_kbps,a1_kbps,recon_kbps,lease_tau_s\n";
         uint32_t closed = 0;
         std::vector<float> ttc, conf, pconf, bo;
         for (const auto& o : st.outages)
@@ -2563,7 +2538,7 @@ main(int argc, char* argv[])
           << st.feederBytes * 8.0 / 1e3 / g.simS << "," << st.autonomyEntries << ","
           << st.falseAutonomy << "," << st.leasesGranted << "," << st.kpmDelivered << ","
           << st.kpmDiscarded << "," << st.ctrlLost << "," << st.kpmCodecFail << ","
-          << (st.nsDecisions ? double(nsFallback) / st.nsDecisions : 0) << "," << darkPreLeases;
+          << (st.nsDecisions ? double(nsFallback) / st.nsDecisions : 0);
         auto kbps = [&](std::initializer_list<int> types) {
             uint64_t b = 0;
             for (int t : types)
