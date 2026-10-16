@@ -46,7 +46,7 @@ def jobs_for(group):
             out.append((f"pal_s550_gw1_eps{eps}", cfg))
     elif group == "main":
         for strat, shell, gw in itertools.product(
-            ["ground", "onboard", "reactive", "reactive-ttl", "pal"], [550, 1200], [1, 2, 3, 4]
+            ["ground", "onboard", "reactive", "reactive-ttl", "reactive-ttl-pre", "pal"], [550, 1200], [1, 2, 3, 4]
         ):
             cfg = dict(strategy=strat, shell=shell, numGw=gw, **HB_MAIN)
             out.append((f"{strat}_s{shell}_gw{gw}", cfg))
