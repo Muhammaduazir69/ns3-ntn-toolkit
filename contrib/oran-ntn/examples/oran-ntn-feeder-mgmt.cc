@@ -1138,6 +1138,10 @@ SatResume(int s)
 {
     Sat& sat = sats[s];
     sat.autonomous = false;
+    // Link-up is contact: restart the heartbeat timeout here, or the next
+    // check would put the satellite straight back into autonomy before any
+    // ground message has had time to arrive.
+    sat.lastHbRx = Simulator::Now();
     reconSnap[s] = sat.log;
     sat.log.clear();
     MgmtHeader r;
