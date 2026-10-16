@@ -76,12 +76,10 @@ def p835_global_annual(alt_km: float, wv_scale: float = 1.0) -> tuple[float, flo
     else:
         T, P = 186.946, 0.003743
     rho = 7.5 * wv_scale * math.exp(-h / 2.0)
+    # THZ-15: P.835-6 floors e/P at 2e-6 (not the mass mixing ratio).
     e = rho * T / 216.7
-    denom = P - e
-    mr = 0.622 * e / denom if denom > 0 else 0.0
-    if mr < 2e-6 and P > 0:
-        e_floor = 2e-6 * P / (0.622 + 2e-6)
-        rho = e_floor * 216.7 / T
+    if P > 0 and e / P < 2e-6:
+        rho = 2e-6 * P * 216.7 / T
     return T, P, rho
 
 

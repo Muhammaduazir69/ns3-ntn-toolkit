@@ -3116,6 +3116,12 @@ class ThzNtnWaterVapourColumnTest : public TestCase
                                   "doubling the density doubles the column");
         const double a2 = atm->ComputeSlantPathAbsorption(340e9, 30.0, 0.0, 550.0);
         NS_TEST_ASSERT_MSG_GT(a2, 1.8 * a1, "340 GHz is water-vapour dominated");
+        // THZ-15: above the crossover the floor holds e/P at exactly 2e-6.
+        atm->SetAttribute("WaterVapourScale", DoubleValue(1.0));
+        double Tf, Pf, rf;
+        atm->GetAtmosphericConditions(40.0, Tf, Pf, rf);
+        NS_TEST_ASSERT_MSG_EQ_TOL((rf * Tf / 216.7) / Pf, 2.0e-6, 1e-12,
+                                  "P.835-6 floors e/P, the volume mixing ratio, at 2e-6");
         atm->SetAttribute("WaterVapourScale", DoubleValue(0.0));
         // The 2e-6 mixing-ratio floor alone holds about 0.02 kg/m2.
         NS_TEST_ASSERT_MSG_LT(atm->GetWaterVapourColumn(), 0.05,

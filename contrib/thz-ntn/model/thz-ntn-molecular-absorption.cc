@@ -527,20 +527,17 @@ ThzNtnMolecularAbsorption::GetAtmosphericConditions(double altitude_km,
     // 17 percent excess, and an eight-fold discontinuity at 10 km.
     double rho = 7.5 * m_waterVapourScale * std::exp(-h / 2.0);
 
-    // P.835 Section 1.1 also floors the MIXING RATIO at 2e-6, so above the
-    // altitude where the exponential falls below that, the mixing ratio rather
-    // than the density is held constant. Mixing ratio (mass of water vapour
-    // per unit mass of dry air) from density and pressure:
-    //   e = rho T / 216.7   [hPa]   and   mr = 0.622 e / (P - e).
+    // P.835 Section 1.1 also floors the mixing ratio: the exponential holds
+    // until e(h)/P(h) = 2e-6, and above that altitude the ratio stays at 2e-6.
+    //
+    // THZ-15: this used to apply the floor to the MASS mixing ratio
+    // 0.622 e / (P - e), a different quantity from the recommendation's
+    // e/P, which put the floor at about 3.2 ppmv instead of 2 ppmv.
     const double e = rho * tempK / 216.7;
-    const double denom = pressureHPa - e;
-    const double mr = (denom > 0.0) ? (0.622 * e / denom) : 0.0;
-    constexpr double kMinMixingRatio = 2.0e-6;
-    if (mr < kMinMixingRatio && pressureHPa > 0.0)
+    constexpr double kMinMixingRatio = 2.0e-6; // e/P, P.835-6 Sec. 1.1
+    if (pressureHPa > 0.0 && e / pressureHPa < kMinMixingRatio)
     {
-        // Invert the same relations at the floor value.
-        const double eFloor = kMinMixingRatio * pressureHPa / (0.622 + kMinMixingRatio);
-        rho = eFloor * 216.7 / tempK;
+        rho = kMinMixingRatio * pressureHPa * 216.7 / tempK;
     }
 
     humidity = rho;
