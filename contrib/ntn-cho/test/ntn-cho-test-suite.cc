@@ -2295,6 +2295,41 @@ class ChoSafetyNetWithoutAdmissibleTestCase : public TestCase
 };
 
 /**
+ * F23: an escape must not require time left inside the quality-feasible
+ * contour. With e_Q above a strong candidate's elevation its predicted time to
+ * exit e_Q is 0; before the fix the escape pool required tau > 0, found nothing
+ * and the terminal stayed on its blocked link until radio link failure.
+ */
+class ChoEscapeBelowExitContourTestCase : public TestCase
+{
+  public:
+    ChoEscapeBelowExitContourTestCase()
+        : TestCase("F23: the safety net escapes to a strong candidate below the exit contour")
+    {
+    }
+
+    void DoRun() override
+    {
+        Ptr<NtnOrbitPredictor> pred;
+        Ptr<NtnTteEstimator> est;
+        Ptr<ConstantVelocityMobilityModel> satMob;
+        auto cho = MakeExitTriggeredCho(pred, est, satMob);
+        cho->UpdateMeasurement(1, -12.0, 0.0); // serving link blocked
+        cho->UpdateMeasurement(2, 6.0, 0.0);   // strong, but below e_Q
+        cho->UpdateMeasurement(3, 0.0, 0.0);   // weaker, also below e_Q
+        cho->SetCandidateStateForTest(2, Seconds(0.0), /*admitted=*/false, /*d1Met=*/true);
+        cho->SetCandidateStateForTest(3, Seconds(0.0), /*admitted=*/false, /*d1Met=*/true);
+        const uint16_t pick = cho->SelectBestCandidate();
+        NS_TEST_ASSERT_MSG_EQ(pick, 2,
+                              "with the serving link lost the rule must escape to the strongest "
+                              "candidate above Q even when no candidate has time left inside e_Q");
+        NS_TEST_ASSERT_MSG_EQ(cho->LastSelectionViaSafetyNet(), true,
+                              "the selection must be recorded as a safety-net escape");
+        Simulator::Destroy();
+    }
+};
+
+/**
  * N1: with rankByUsableTime the target is the candidate with the largest
  * expected usable time, which can differ from the one with the latest exit.
  */
@@ -2721,6 +2756,7 @@ class NtnChoTestSuite : public TestSuite
         AddTestCase(new ChoEphemerisErrorShiftsExitTestCase, TestCase::Duration::QUICK);
         AddTestCase(new ChoTteSigmaPropagationTestCase, TestCase::Duration::QUICK);
         AddTestCase(new ChoSafetyNetWithoutAdmissibleTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new ChoEscapeBelowExitContourTestCase, TestCase::Duration::QUICK);
         AddTestCase(new ChoRankByUsableTimeTestCase, TestCase::Duration::QUICK);
         AddTestCase(new TteUsableTimeIntegralTestCase, TestCase::Duration::QUICK);
         AddTestCase(new ChoEscapeHoldoffTestCase, TestCase::Duration::QUICK);

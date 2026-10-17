@@ -1198,11 +1198,21 @@ NtnChoAlgorithm::SelectBestCandidate() const
                 // serving test describe a planned exit, not an escape; applying
                 // them here left a terminal on a dead link whenever no candidate
                 // had ten seconds of predicted coverage left.
+                // F23: nor does an escape require time left inside the
+                // quality-feasible contour. tte is the time to exit e_Q, so with
+                // e_Q = 40 deg every strong satellite below 40 deg has tte = 0 and
+                // was excluded; the terminal then stayed on its blocked link
+                // until radio link failure (urban: 9.4 RLF per terminal-hour at
+                // e_Q = 40 deg against 0.6 at 25 deg). Prepared candidates are
+                // covering satellites (the scenario releases those that leave
+                // coverage), so every prepared candidate above the floor is
+                // admissible; ties of the score, frequent at 0, go to the
+                // strongest candidate.
                 std::vector<const CandidateInfo*> pool;
                 for (const auto& [cellId, info] : m_candidates)
                 {
                     if (cellId != m_servingCellId && info.d1Met &&
-                        info.sinr_dB >= m_config.qualityThreshold_dB && info.tte > Seconds(0))
+                        info.sinr_dB >= m_config.qualityThreshold_dB)
                     {
                         pool.push_back(&info);
                     }
@@ -1234,7 +1244,13 @@ NtnChoAlgorithm::SelectBestCandidate() const
                 }
                 const CandidateInfo* best = *std::max_element(
                     pool.begin(), pool.end(), [&score](const CandidateInfo* a, const CandidateInfo* b) {
-                        return score(a) < score(b);
+                        const auto sa = score(a);
+                        const auto sb = score(b);
+                        if (sa != sb)
+                        {
+                            return sa < sb;
+                        }
+                        return a->sinr_dB < b->sinr_dB;
                     });
                 m_lastSelectViaNet = true;
                 NS_LOG_INFO("TTE safety-net selection: cell " << best->cellId);
