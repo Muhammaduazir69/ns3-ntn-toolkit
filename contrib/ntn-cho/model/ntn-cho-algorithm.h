@@ -261,6 +261,12 @@ class NtnChoAlgorithm : public Object
          * this long unless it is the only one available. Zero disables it.
          */
         Time escapeHoldoff = Seconds(0);
+        /**
+         * Escape target margin: when the safety net fires, rank only the
+         * candidates whose filtered quality is within this many dB of the
+         * strongest one (negative = rank every candidate above the floor).
+         */
+        double escapeNearBestDb = -1.0;
         double a3Offset_dB = 3.0;             //!< A3 event offset (for baseline)
         Time a3TimeToTrigger = MilliSeconds(160); //!< A3 TTT (for baseline)
 

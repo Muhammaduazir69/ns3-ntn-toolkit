@@ -1212,6 +1212,26 @@ NtnChoAlgorithm::SelectBestCandidate() const
                 {
                     return INVALID_CELL_ID;
                 }
+                // An escape answers a measured loss, which the ephemeris cannot
+                // see. Ranking every candidate above the floor by predicted
+                // (usable) time picked weak, long-lived targets that were often
+                // faded or blocked themselves, and the handover failed at
+                // completion (97 % of the rule's failures were escapes). With
+                // escapeNearBestDb >= 0 the ranking is restricted to candidates
+                // within that margin of the strongest one.
+                if (m_config.escapeNearBestDb >= 0.0)
+                {
+                    double strongest = -1e300;
+                    for (const CandidateInfo* c : pool)
+                    {
+                        strongest = std::max(strongest, c->sinr_dB);
+                    }
+                    pool.erase(std::remove_if(pool.begin(), pool.end(),
+                                              [&](const CandidateInfo* c) {
+                                                  return c->sinr_dB < strongest - m_config.escapeNearBestDb;
+                                              }),
+                               pool.end());
+                }
                 const CandidateInfo* best = *std::max_element(
                     pool.begin(), pool.end(), [&score](const CandidateInfo* a, const CandidateInfo* b) {
                         return score(a) < score(b);

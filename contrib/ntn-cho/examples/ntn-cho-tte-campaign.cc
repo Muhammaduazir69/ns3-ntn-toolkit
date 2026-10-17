@@ -325,6 +325,8 @@ struct Params
     bool rankByUsable = false;       // rank by expected usable time to exit
     bool prepareByTte = false;       // prepared set by predicted score, not by L3
     double escapeHoldoffS = 0.0;     // hold-off of the cell left via the safety net
+    double escapeNearBestDb = -1.0;  // escape target within this margin of the strongest (-1 = off)
+    uint32_t prepStrongest = 0;      // prepared slots reserved for the strongest satellites (with prepareByTte)
     int32_t dumpLinksUe = -1;        // F8 check: per-tick link realization dump
     bool dumpLosDraws = false;       // write every LOS-state draw (elevation bin, state)
     double execMarginS = 0.2;
@@ -828,6 +830,7 @@ SyncCandidates(UeCtx& u)
     // The prepared set: the strongest covered satellites other than the
     // serving one, as a terminal's measurement report would rank them.
     std::vector<std::pair<double, uint32_t>> ranked;
+    std::vector<std::pair<double, uint32_t>> strongest; // by L3, for reserved slots
     std::map<uint32_t, std::pair<double, double>> pred; // N2: (tte, usable) per satellite
     for (const auto& [sat, ls] : u.links)
     {
@@ -835,6 +838,7 @@ SyncCandidates(UeCtx& u)
         {
             continue;
         }
+        strongest.emplace_back(ls.l3, sat);
         if (g_p.prepareByTte)
         {
             // N2: the network ranks the covering satellites that meet the
@@ -856,9 +860,25 @@ SyncCandidates(UeCtx& u)
     }
     std::sort(ranked.rbegin(), ranked.rend());
     std::set<uint32_t> want;
-    for (size_t k = 0; k < ranked.size() && k < g_p.maxCandidates; ++k)
+    // The prepared set serves two purposes: the planned target, which the
+    // predicted score picks, and the escape target the safety net needs when a
+    // link is blocked, which is a strong satellite now. Preparing by the
+    // score alone left no strong satellite for the escape, and the terminal
+    // fell through to radio link failure. prepStrongest reserves that many
+    // slots for the strongest covering satellites.
+    const uint32_t reserve =
+        g_p.prepareByTte ? std::min<uint32_t>(g_p.prepStrongest, g_p.maxCandidates) : 0;
+    for (size_t k = 0; k < ranked.size() && want.size() < g_p.maxCandidates - reserve; ++k)
     {
         want.insert(ranked[k].second);
+    }
+    if (reserve > 0)
+    {
+        std::sort(strongest.rbegin(), strongest.rend());
+        for (size_t k = 0; k < strongest.size() && want.size() < g_p.maxCandidates; ++k)
+        {
+            want.insert(strongest[k].second);
+        }
     }
     for (auto it = u.candidates.begin(); it != u.candidates.end();)
     {
@@ -1338,6 +1358,8 @@ main(int argc, char* argv[])
     cmd.AddValue("tteCacheS", "candidate prediction cache refresh (s); 0 = recompute always",
                  p.tteCacheS);
     cmd.AddValue("rankByUsable", "N1: rank targets by expected usable time to exit", p.rankByUsable);
+    cmd.AddValue("prepStrongest", "prepared slots reserved for the strongest satellites (prepareByTte)", p.prepStrongest);
+    cmd.AddValue("escapeNearBestDb", "escape target within this margin of the strongest candidate (dB, -1 off)", p.escapeNearBestDb);
     cmd.AddValue("prepareByTte", "N2: prepare candidates by predicted score instead of by L3",
                  p.prepareByTte);
     cmd.AddValue("escapeHoldoffS", "N3: hold-off (s) of the cell left via the safety net",
@@ -1609,6 +1631,7 @@ main(int argc, char* argv[])
         c.t304Timer = Seconds(p.simTime + 10.0); // outcome is decided by CompleteHandover
         c.tteCacheRefresh = Seconds(p.tteCacheS);
         c.rankByUsableTime = p.rankByUsable;
+        c.escapeNearBestDb = p.escapeNearBestDb;
         c.escapeHoldoff = Seconds(p.escapeHoldoffS);
         if (p.policy == "a3")
         {
