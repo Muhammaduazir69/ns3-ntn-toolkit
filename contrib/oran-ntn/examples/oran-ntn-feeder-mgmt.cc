@@ -356,6 +356,7 @@ struct Stats
     uint64_t kpmDiscarded{0}, kpmDelivered{0}, ctrlLost{0};
     double servedS{0}, linkUpServedS{0};
     uint64_t kpmCodecFail{0};
+    uint64_t mergeGroundApplied{0}; // RECON_ACKs that carried a ground-authoritative value (D5)
 };
 
 Stats st;
@@ -390,7 +391,7 @@ Policy smoCur;
 std::map<uint32_t, double> verIssued; // version -> issue time
 Ptr<OranNtnA1Adapter> ricA1;
 Policy ricPolicy;
-std::vector<L::Write> groundLog;
+std::map<int, std::vector<L::Write>> groundLog; // per satellite (D5)
 
 // Per-sat ground view
 struct GroundView
@@ -1348,7 +1349,7 @@ RicDecideAndSend(int s, int cls, Time tMeas, double demand, bool recon = false)
             c.v1 = Decide(demand, p);
             c.ver = p.ver;
             RecordNsDecision(p.ver);
-            groundLog.push_back({1, c.v1, c.ver, tMeas, L::Host::Ground});
+            groundLog[s].push_back({1, c.v1, c.ver, tMeas, L::Host::Ground});
         }
         SendToSat(s, c, PayloadSize(RC_CTRL, 0));
     });
@@ -1451,16 +1452,34 @@ RicRecv(Ptr<Socket> sock)
             const Policy cur = FromA1(*ricA1);
             const std::vector<L::Write> ol = reconSnap[s];
             auto m = L::Merge(L::MergeRule::LeaseVersioned,
-                              groundLog,
+                              groundLog[s],
                               ol,
                               gv.leaseStart,
                               Simulator::Now(),
                               cur.ver,
                               0.01);
+            // Direct conflicts are counted with the same definition as on the
+            // ground-wins path: the latest on-board write of the lease against
+            // the ground's fresh decision from the measurement in this message
+            // (D3), so the column compares like with like.
+            uint32_t direct = 0;
+            if (h.v2 >= 0)
+            {
+                std::vector<L::Write> gl = {
+                    {1, Decide(h.v2, cur), cur.ver, Simulator::Now(), L::Host::Ground}};
+                direct = L::Merge(L::MergeRule::GroundWins,
+                                  gl,
+                                  ol,
+                                  gv.leaseStart,
+                                  Simulator::Now(),
+                                  cur.ver,
+                                  0.01)
+                             .directConflicts;
+            }
             if (pendTtc.sat == s)
             {
                 auto& o = st.outages[pendTtc.outageIdx];
-                o.direct += m.directConflicts;
+                o.direct += direct;
                 o.policyStale += m.policyStaleWrites;
             }
             reconSnap[s].clear();
@@ -1488,7 +1507,30 @@ RicRecv(Ptr<Socket> sock)
                 r.seq = static_cast<uint32_t>(std::lround(share * 1e6));
                 r.tMeasNs = h.tMeasNs;
                 RecordNsDecision(cur.ver);
-                groundLog.push_back({1, share, cur.ver, Simulator::Now(), L::Host::Ground});
+                groundLog[s].push_back({1, share, cur.ver, Simulator::Now(), L::Host::Ground});
+            }
+            else
+            {
+                // Apply the merge (D5): when the authoritative write is the
+                // ground's and it differs from what the satellite holds, the
+                // reconciled value is sent back with the authority.
+                const auto w = m.winner.find(1);
+                const L::Write* lastOb = nullptr;
+                for (const auto& x : ol)
+                {
+                    if (x.paramId == 1 && (!lastOb || x.at >= lastOb->at))
+                    {
+                        lastOb = &x;
+                    }
+                }
+                if (w != m.winner.end() && w->second == L::Host::Ground && m.state.count(1) &&
+                    (!lastOb || std::fabs(lastOb->value - m.state.at(1)) > 0.01))
+                {
+                    r.flags |= 1;
+                    r.seq = static_cast<uint32_t>(std::lround(m.state.at(1) * 1e6));
+                    r.tMeasNs = h.tMeasNs;
+                    ++st.mergeGroundApplied;
+                }
             }
             SendToSat(s, r, PayloadSize(RECON_ACK, 0));
             break;
@@ -2671,7 +2713,7 @@ main(int argc, char* argv[])
              "ttc_p95_s,ttc_n,blackout_mean_s,blackout_p95_s,blackout_n,sig_bytes_per_switch,"
              "sig_msgs_per_switch,preprov_frac,feeder_bytes,feeder_kbps,autonomy_entries,"
              "false_autonomy,leases,kpm_delivered,kpm_discarded,ctrl_lost,kpm_codec_fail,fallback_frac,"
-             "hb_kbps,lease_kbps,e2setup_kbps,kpm_kbps,ctrl_kbps,a1_kbps,recon_kbps,lease_tau_s\n";
+             "hb_kbps,lease_kbps,e2setup_kbps,kpm_kbps,ctrl_kbps,a1_kbps,recon_kbps,lease_tau_s,merge_ground_applied\n";
         uint32_t closed = 0;
         std::vector<float> ttc, conf, pconf, bo;
         for (const auto& o : st.outages)
@@ -2688,20 +2730,26 @@ main(int argc, char* argv[])
             }
         }
         double sigB = 0, sigM = 0, pre = 0;
+        size_t realSw = 0;
         for (const auto& s : st.switches)
         {
             if (s.blackoutNf >= 0)
             {
                 bo.push_back(s.blackoutNf);
             }
+            if (s.t < 1.0)
+            {
+                continue; // the initial attach is not a switch (D1)
+            }
+            ++realSw;
             sigB += s.sigBytes;
             sigM += s.sigMsgs;
             pre += s.preProvisioned ? 1 : 0;
         }
-        const double nsw = std::max<size_t>(1, st.switches.size());
+        const double nsw = std::max<size_t>(1, realSw);
         f << g.stratName << "," << g.shell << "," << g.numGw << "," << g.run << "," << st.servedS
           << "," << (st.servedS > 0 ? st.linkUpServedS / st.servedS : 0) << "," << maxElErr << ","
-          << sats.size() << "," << st.switches.size() << "," << st.outages.size() << "," << closed;
+          << sats.size() << "," << realSw << "," << st.outages.size() << "," << closed;
         for (int c = 0; c < kClasses; ++c)
         {
             f << "," << st.opp[c] << "," << st.hit[c] << "," << st.applied[c] << "," << st.late[c]
@@ -2734,7 +2782,7 @@ main(int argc, char* argv[])
         f << "," << kbps({HB, HB_ACK}) << "," << kbps({LEASE, PREP}) << ","
           << kbps({E2_SETUP_REQ, E2_SETUP_RSP, SUB_REQ, SUB_RSP}) << "," << kbps({KPM_IND}) << ","
           << kbps({RC_CTRL}) << "," << kbps({A1_PUT, A1_ACK}) << "," << kbps({RECON, RECON_ACK})
-          << "," << LeaseTau().GetSeconds() << "\n";
+          << "," << LeaseTau().GetSeconds() << "," << st.mergeGroundApplied << "\n";
     }
     {
         std::ofstream f(g.outDir + "/outages.csv");
