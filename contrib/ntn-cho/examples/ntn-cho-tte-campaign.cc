@@ -383,6 +383,8 @@ struct UeCtx
     double outageUntil = 0.0;    // no data before this time
     double t310Start = -1.0;     // running T310 since (s), -1 = stopped
     double floorSince = -1.0;    // serving L3 below the fallback floor since (s)
+    int32_t escCell = -1;        // cell left through the fallback (standardized conditions)
+    double escUntil = -1.0;      // its hold-off end (s)
     double intUntil = -1.0;      // F1: interruption already booked as outage until (s)
     Vector tickPos;              // F8: position and velocity read at the last tick
     Vector tickVel;
@@ -994,10 +996,20 @@ Decide(size_t idx)
             u.floorSince = -1.0;
         }
         const bool lost = u.floorSince >= 0.0 && (now - u.floorSince) * 1e3 >= g_p.tteFloorTttMs - 1e-6;
+        // Escape hold-off for the standardized conditions (the same rule the
+        // exit-triggered policy applies): the cell left through the fallback is
+        // not a target for escapeHoldoffS unless it is the only candidate.
+        const bool holdOn = g_p.escapeHoldoffS > 0.0 && u.escCell >= 0 && now < u.escUntil;
+        if (holdOn && !lost && target != NtnChoAlgorithm::INVALID_CELL_ID &&
+            static_cast<int32_t>(SatOf(target)) == u.escCell)
+        {
+            target = NtnChoAlgorithm::INVALID_CELL_ID; // the condition's own choice, held off
+        }
         if (lost && (target == NtnChoAlgorithm::INVALID_CELL_ID ||
                      SatOf(target) == static_cast<uint32_t>(u.serving)))
         {
             double best = -1e9;
+            int32_t heldBest = -1;
             for (uint32_t s : u.candidates)
             {
                 const auto ls = u.links.find(s);
@@ -1006,9 +1018,23 @@ Decide(size_t idx)
                     ls->second.l3 >= g_p.qualityThDb && ls->second.l3 > sv->second.l3 &&
                     ls->second.l3 > best)
                 {
+                    if (holdOn && static_cast<int32_t>(s) == u.escCell)
+                    {
+                        heldBest = static_cast<int32_t>(s);
+                        continue;
+                    }
                     best = ls->second.l3;
                     target = CellOf(s);
                 }
+            }
+            if (best < -1e8 && heldBest >= 0)
+            {
+                target = CellOf(static_cast<uint32_t>(heldBest)); // the only candidate
+            }
+            if (target != NtnChoAlgorithm::INVALID_CELL_ID && g_p.escapeHoldoffS > 0.0)
+            {
+                u.escCell = u.serving;
+                u.escUntil = now + g_p.escapeHoldoffS;
             }
         }
     }
