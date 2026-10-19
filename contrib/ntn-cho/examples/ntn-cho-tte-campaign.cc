@@ -122,6 +122,7 @@
 #include "ns3/ntn-realistic-mobility.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/ntn-tte-estimator.h"
+#include "ns3/orbital-elements.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/three-gpp-propagation-loss-model.h"
 #include "ns3/walker-constellation.h"
@@ -140,7 +141,9 @@
 #include <vector>
 
 using namespace ns3;
+using ns3::ntncon::KeplerianElements;
 using ns3::ntncon::Sgp4MobilityModel;
+using ns3::ntncon::TleRecord;
 using ns3::ntncon::WalkerConfig;
 using ns3::ntncon::WalkerConstellation;
 
@@ -150,7 +153,9 @@ namespace
 {
 
 constexpr double kC = 299792458.0;
-constexpr double kRe = 6371000.0;
+// R2: one Earth radius everywhere (WGS-84 equatorial, as the truth orbits and
+// the text); the predictor's elevation/scan mapping is set to the same value.
+constexpr double kRe = 6378137.0;
 constexpr double kNegInf = -1.0e9;
 // What a terminal measures on a cell that no longer illuminates it.
 constexpr double kNoSignalDb = -30.0;
@@ -211,21 +216,17 @@ const std::map<int, double> kSfLosSigmaDenseUrban{{10, 3.5}, {20, 3.4}, {30, 2.9
 const std::map<int, double> kSfNlosSigmaDenseUrban{{10, 15.5}, {20, 13.9}, {30, 12.4}, {40, 11.7},
                                                    {50, 10.6}, {60, 10.5}, {70, 10.1}, {80, 9.2},
                                                    {90, 9.2}};
-// Tables of the active environment. The "los" channel keeps the suburban
-// sigmas (its path loss is the suburban model under a forced LOS condition).
-const std::map<int, double>* g_plosTable = &kPlosSuburban;
-const std::map<int, double>* g_sfLosTable = &kSfLosSigmaS;
-const std::map<int, double>* g_sfNlosTable = &kSfNlosSigmaS;
 // TR 38.811 Table 6.7.2-5a/6a: shadowing decorrelation distance, suburban.
 // ns-3 applies the same 37 m (LOS) and 50 m (NLOS) to its urban and
 // dense-urban NTN models (TR 38.811 Tables 6.7.2-1a/b to 6.7.2-3a/b), so the
 // two values serve every environment here.
 constexpr double kSfDecorrM = 37.0;
 constexpr double kSfDecorrNlosM = 50.0;
-// The line-of-sight state is redrawn when the terminal has moved this far
-// (TR 38.901 Section 7.6.3.3 spatial consistency uses the same 50 m scale) or
-// when the link's elevation crosses into another 10-degree bin of Table 6.6.1-1.
-constexpr double kLosDecorrM = 50.0;
+// The line-of-sight state is redrawn when the terminal has moved --losCorrM
+// (default 50 m; TR 38.901 Section 7.6.3.3 spatial consistency uses the same
+// scale) or when the link's elevation crosses into another 10-degree bin of
+// Table 6.6.1-1 (--losModel=redraw), or decorrelates as a Markov process
+// (--losModel=markov).
 
 int
 ElevBin(double elevDeg)
@@ -235,12 +236,33 @@ ElevBin(double elevDeg)
 }
 
 double
-SfSigmaAt(double elevDeg)
+SfSigmaAt(const std::map<int, double>& table, double elevDeg)
 {
-    int q = static_cast<int>(std::lround(elevDeg / 10.0)) * 10;
-    q = std::max(10, std::min(90, q));
-    return g_sfLosTable->at(q);
+    return table.at(ElevBin(elevDeg));
 }
+
+// R2 (M8): environment of one terminal. A terminal class that does not move
+// through street clutter (aircraft, ships) sees the sky in line of sight, and
+// a high-speed train runs through rural terrain, whose TR 38.811 Table 6.6.1-1
+// row is the suburban/rural one; every other class sees the environment of
+// the run.
+enum EnvIdx
+{
+    kEnvLos = 0,
+    kEnvSub = 1,
+    kEnvUrb = 2,
+    kEnvDense = 3
+};
+struct EnvTables
+{
+    const std::map<int, double>* plos;
+    const std::map<int, double>* sfLos;
+    const std::map<int, double>* sfNlos;
+};
+EnvTables g_env[4] = {{&kPlosSuburban, &kSfLosSigmaS, &kSfNlosSigmaS},
+                      {&kPlosSuburban, &kSfLosSigmaS, &kSfNlosSigmaS},
+                      {&kPlosUrban, &kSfLosSigmaUrban, &kSfNlosSigmaUrban},
+                      {&kPlosDenseUrban, &kSfLosSigmaDenseUrban, &kSfNlosSigmaDenseUrban}};
 
 // Chord distance between the terminal and the sub-satellite point of a satellite
 // seen at elevation e from altitude h (the quantity CondEventD2 compares).
@@ -287,6 +309,21 @@ struct Params
     double qInDb = -6.0;
     double t310S = 1.0;
     double reestBaseMs = 200.0;
+    // R2 additions
+    bool classEnv = true;             // M8: per-class environment (air/sea LOS, train rural)
+    std::string losModel = "redraw";  // M16: redraw (50 m or new bin) | markov
+    double losCorrM = 50.0;           // LOS-state correlation distance (m)
+    double losCorrDeg = 10.0;         // markov: angular decorrelation scale (deg of elevation)
+    std::string ephModel = "propagated"; // M10: propagated (own orbit) | offset (re-anchored)
+    bool escapeByQuality = false;     // M2: escape to the strongest candidate better than serving
+    bool prepAboveContour = false;    // M7: prepare only candidates predicted inside e_Q for tau_min
+    std::string tleTruthFile;         // M10: real constellation, truth element sets (SupGP)
+    std::string tleNetFile;           //      network element sets (public GP)
+    double tleInclMinDeg = 52.5;
+    double tleInclMaxDeg = 53.5;
+    double tleAltMinKm = 455.0;
+    double tleAltMaxKm = 485.0;
+    double tleStartSpreadH = 1.0;     // start at the median truth epoch +- this
     // CHO common
     double qualityThDb = -3.0;
     uint32_t maxCandidates = 8;
@@ -358,6 +395,7 @@ struct LinkState
     bool losInit = false;
     int losBin = 0;
     Vector losUePos;
+    double losElev = 0.0;     // markov: elevation at the last update
     double sf = 0.0;          // current shadowing (dB)
     Vector sfUePos;           // terminal position at the last shadowing draw
     bool sfInit = false;
@@ -376,6 +414,8 @@ struct UeCtx
     Ptr<NtnTr38811MobilityModel> mob;
     Ptr<NtnChoAlgorithm> cho;
     std::string ueClass;
+    int env = kEnvLos;                // R2 (M8): environment of this terminal
+    Ptr<NtnTteEstimator> tte;         // estimator carrying this environment's LOS table
     int32_t serving = -1;        // satellite index, -1 = not connected
     double connectedSince = 0.0; // time the current serving association began
     bool executing = false;      // handover in flight
@@ -407,6 +447,17 @@ struct UeCtx
     uint32_t lbHandovers = 0;
     uint64_t decisions = 0;      // F3b cost: decision epochs evaluated
     uint32_t t1Rearms = 0;       // F5: CondEventT1 windows re-armed
+    // R2 (M6): conditional-reconfiguration messages the configuration implies
+    bool rrcDirty = false;
+    bool rrcCandDirty = false;
+    bool rrcWinDirty = false;
+    uint32_t rrc = 0;            // epochs at which a new conditional reconfiguration is needed
+    uint32_t rrcCand = 0;        // of which the prepared set changed
+    uint32_t rrcWin = 0;         // of which the execution window / target moved
+    double sigEnd = -1.0;        // TTE family: window end last signaled
+    uint16_t sigTarget = 0;      //             and its candidate
+    uint32_t hoPlanned = 0;      // handovers by trigger kind
+    uint32_t hoEscape = 0;
 };
 
 std::vector<Ptr<Sgp4MobilityModel>> g_sats;
@@ -414,8 +465,12 @@ std::vector<Vector> g_satPos; // ECEF at the current tick
 std::vector<UeCtx> g_ues;
 Ptr<NtnOrbitPredictor> g_pred;
 Ptr<NtnTteEstimator> g_tte;
-Ptr<ThreeGppPropagationLossModel> g_pl;     // line of sight
-Ptr<ThreeGppPropagationLossModel> g_plNlos; // non line of sight (adds TR 38.811 clutter loss)
+Ptr<ThreeGppPropagationLossModel> g_plEnv[4];     // line of sight, per environment
+Ptr<ThreeGppPropagationLossModel> g_plNlosEnv[4]; // non line of sight (TR 38.811 clutter loss)
+Ptr<NtnTteEstimator> g_tteEnv[4];
+std::vector<Ptr<Sgp4MobilityModel>> g_net; // R2 (M10): the network's own copy of each orbit
+bool g_ephActive = false;                  // any ephemeris error injected
+std::vector<Vector> g_ephDrawn;            // R2: drawn RTN error per satellite at t = 0
 Ptr<UniformRandomVariable> g_uni;
 Ptr<NormalRandomVariable> g_norm;
 double g_noiseDbm = 0.0;
@@ -563,7 +618,43 @@ MeasureUe(UeCtx& u, const Vector& uePos)
         ls.scanLossDb = ScanLossDb(uePos, sp);
         // line-of-sight state (blockage channels only)
         bool losChanged = false;
-        if (g_p.channel != "los")
+        const EnvTables& et = g_env[u.env];
+        if (u.env != kEnvLos && g_p.losModel == "markov")
+        {
+            // M16: first-order Markov LOS state. The state decorrelates with
+            // terminal displacement over losCorrM and with the satellite's
+            // elevation change over losCorrDeg; when it decorrelates it is
+            // redrawn from the marginal of the current bin, so the marginal
+            // tracks TR 38.811 Table 6.6.1-1 and the correlation is
+            // exp(-dx/d - de/theta). One uniform is drawn per link and tick
+            // whatever the outcome, so the stream is policy-independent.
+            const int bin = ElevBin(elev);
+            double pre = 1.0;
+            if (ls.losInit)
+            {
+                const double mx = uePos.x - ls.losUePos.x;
+                const double my = uePos.y - ls.losUePos.y;
+                const double mz = uePos.z - ls.losUePos.z;
+                const double moved = std::sqrt(mx * mx + my * my + mz * mz);
+                pre = 1.0 - std::exp(-moved / g_p.losCorrM - std::abs(elev - ls.losElev) / g_p.losCorrDeg);
+            }
+            const double x = g_uni->GetValue(0.0, 1.0);
+            if (!ls.losInit || x < pre)
+            {
+                const bool was = ls.los;
+                ls.los = g_uni->GetValue(0.0, 100.0) < et.plos->at(bin);
+                if (g_p.dumpLosDraws)
+                {
+                    g_losDump << bin << "," << (ls.los ? 1 : 0) << "\n";
+                }
+                losChanged = ls.losInit && (was != ls.los);
+                ls.losInit = true;
+            }
+            ls.losBin = bin;
+            ls.losUePos = uePos;
+            ls.losElev = elev;
+        }
+        else if (u.env != kEnvLos)
         {
             const int bin = ElevBin(elev);
             double moved = 0.0;
@@ -574,10 +665,10 @@ MeasureUe(UeCtx& u, const Vector& uePos)
                 const double mz = uePos.z - ls.losUePos.z;
                 moved = std::sqrt(mx * mx + my * my + mz * mz);
             }
-            if (!ls.losInit || bin != ls.losBin || moved > kLosDecorrM)
+            if (!ls.losInit || bin != ls.losBin || moved > g_p.losCorrM)
             {
                 const bool was = ls.los;
-                ls.los = g_uni->GetValue(0.0, 100.0) < g_plosTable->at(bin);
+                ls.los = g_uni->GetValue(0.0, 100.0) < et.plos->at(bin);
                 if (g_p.dumpLosDraws)
                 {
                     g_losDump << bin << "," << (ls.los ? 1 : 0) << "\n";
@@ -591,7 +682,7 @@ MeasureUe(UeCtx& u, const Vector& uePos)
         // shadowing, correlated over terminal displacement; a change of
         // line-of-sight state starts an independent realization, as ns-3's
         // ThreeGppPropagationLossModel does
-        const double sig = ls.los ? SfSigmaAt(elev) : g_sfNlosTable->at(ElevBin(elev));
+        const double sig = ls.los ? SfSigmaAt(*et.sfLos, elev) : et.sfNlos->at(ElevBin(elev));
         const double decorr = ls.los ? kSfDecorrM : kSfDecorrNlosM;
         // F12: the satellite's own motion decorrelates the shadowing too. A
         // change of the link's 10-degree elevation bin (the granularity of the
@@ -619,7 +710,7 @@ MeasureUe(UeCtx& u, const Vector& uePos)
                 ls.sfUePos = uePos;
             }
         }
-        const double rx = (ls.los ? g_pl : g_plNlos)->CalcRxPower(g_eirpDbm, g_sats[s], u.mob) +
+        const double rx = (ls.los ? g_plEnv[u.env] : g_plNlosEnv[u.env])->CalcRxPower(g_eirpDbm, g_sats[s], u.mob) +
                           ls.scanLossDb -
                           ls.sf - g_p.polLossDb;
         const double sinr = rx - g_noiseDbm + g_p.measErrDb * g_norm->GetValue();
@@ -670,6 +761,25 @@ StrongestCovered(const UeCtx& u)
     return best;
 }
 
+// R2 (M9): the elevation a terminal evaluates for the elevation trigger is
+// computed from its GNSS position and the broadcast ephemeris, so under
+// ephemeris error it is the network copy's elevation, not the true one.
+double
+NetElevDeg(const UeCtx& u, uint32_t sat, const LinkState& ls)
+{
+    if (!g_ephActive || g_p.policy != "elev")
+    {
+        return ls.elevDeg;
+    }
+    Vector pp;
+    Vector pv;
+    if (!g_pred->GetPredictedSatEcef(sat, pp, pv))
+    {
+        return ls.elevDeg;
+    }
+    return ntngeo::GeodeticElevationDeg(u.tickPos, pp);
+}
+
 double
 ExecMarginFor(const UeCtx& u)
 {
@@ -679,7 +789,7 @@ ExecMarginFor(const UeCtx& u)
     const auto cfg = u.cho->GetConfig();
     if (cfg.ephSigmaRadialM > 0.0 || cfg.ephSigmaAlongM > 0.0 || cfg.ephSigmaCrossM > 0.0)
     {
-        m += g_p.marginZ * g_tte->ComputeTteSigma(GeoOf(u.tickPos), u.tickVel,
+        m += g_p.marginZ * u.tte->ComputeTteSigma(GeoOf(u.tickPos), u.tickVel,
                                                   static_cast<uint32_t>(u.serving), 0,
                                                   g_tteGainTh, cfg.ephSigmaRadialM,
                                                   cfg.ephSigmaAlongM, cfg.ephSigmaCrossM);
@@ -699,12 +809,18 @@ ArmT1(UeCtx& u)
     // F8: the position of the last tick; reading the mobility model here, at an
     // event time off the 100 ms grid, advanced it and shifted every later draw
     // of the shared engine for this policy only.
-    const auto r = g_tte->ComputeTte(GeoOf(u.tickPos), u.tickVel,
+    const auto r = u.tte->ComputeTte(GeoOf(u.tickPos), u.tickVel,
                                      static_cast<uint32_t>(u.serving), 0, g_tteGainTh);
     const double now = Simulator::Now().GetSeconds();
     const double end = now + r.tte.GetSeconds() - ExecMarginFor(u);
     auto cfg = u.cho->GetConfig();
-    cfg.t1ThresholdEpoch = Seconds(std::max(now + 1e-3, end - g_p.t1DurationS));
+    const Time newEpoch = Seconds(std::max(now + 1e-3, end - g_p.t1DurationS));
+    if (std::abs((newEpoch - cfg.t1ThresholdEpoch).GetSeconds()) > g_p.decisionPeriodS)
+    {
+        u.rrcDirty = true; // R2: a moved t1-Threshold is a new conditional reconfiguration
+        u.rrcWinDirty = true;
+    }
+    cfg.t1ThresholdEpoch = newEpoch;
     cfg.t1WindowDuration = Seconds(g_p.t1DurationS);
     u.cho->Configure(cfg);
 }
@@ -743,7 +859,7 @@ Attach(UeCtx& u, int32_t sat)
     u.cho->AddCandidateCell(CellOf(sat), sat, 0);
     const auto& ls = u.links[sat];
     u.cho->UpdateCandidateSlantRange(CellOf(sat), ls.slantM);
-    u.cho->UpdateCandidateElevation(CellOf(sat), ls.elevDeg);
+    u.cho->UpdateCandidateElevation(CellOf(sat), NetElevDeg(u, sat, ls));
     u.cho->UpdateMeasurement(CellOf(sat), ls.l3, -ls.scanLossDb);
     u.cho->SetServingCell(CellOf(sat));
     ArmT1(u);
@@ -766,7 +882,7 @@ StartReestablishment(UeCtx& u, const std::string& cause)
     }
     u.outageUntil = std::max(u.outageUntil, now + delay);
     g_events << std::fixed << std::setprecision(3) << now << "," << (&u - &g_ues[0]) << ","
-             << from << "," << to << ",reest-" << cause << ",0,0,0,,,,,,,,\n";
+             << from << "," << to << ",reest-" << cause << ",0,0,0,,,,,,,,,\n";
     const size_t idx = static_cast<size_t>(&u - &g_ues[0]);
     Simulator::Schedule(Seconds(delay), [idx]() {
         UeCtx& v = g_ues[idx];
@@ -779,9 +895,15 @@ StartReestablishment(UeCtx& u, const std::string& cause)
     });
 }
 
+// Trigger kind of a handover (R2, m5): planned exit of the exit-triggered
+// family, its safety-net escape, a standardized condition, or the
+// standardized conditions' measurement fallback.
+const char* const kTrigName[] = {"planned", "escape", "cond", "netesc"};
+
 void
 CompleteHandover(size_t idx, uint32_t target, double tStart, double predServTte,
-                 double margin, double trueServExit, double tgtTte, double tgtL3, int tgtRank)
+                 double margin, double trueServExit, double tgtTte, double tgtL3, int tgtRank,
+                 int trig)
 {
     UeCtx& u = g_ues[idx];
     if (!u.executing)
@@ -800,7 +922,8 @@ CompleteHandover(size_t idx, uint32_t target, double tStart, double predServTte,
              << "," << std::setprecision(2) << predServTte << "," << margin << ","
              << trueServExit << "," << tgtTte << ","
              << (it != u.links.end() ? it->second.elevDeg : -90.0) << ","
-             << (now - tStart) * 1000.0 << "," << tgtL3 << "," << tgtRank << "\n";
+             << (now - tStart) * 1000.0 << "," << tgtL3 << "," << tgtRank << ","
+             << kTrigName[trig] << "\n";
     u.cho->NotifyHandoverComplete(CellOf(target), ok);
     if (!ok)
     {
@@ -851,12 +974,23 @@ SyncCandidates(UeCtx& u)
             {
                 continue;
             }
-            const auto r = g_tte->ComputeTte(GeoOf(u.tickPos), u.tickVel, sat, 0, g_tteGainTh);
+            const auto r = u.tte->ComputeTte(GeoOf(u.tickPos), u.tickVel, sat, 0, g_tteGainTh);
             pred[sat] = {r.tte.GetSeconds(), r.usable.GetSeconds()};
             ranked.emplace_back(g_p.rankByUsable ? r.usable.GetSeconds() : r.tte.GetSeconds(), sat);
         }
         else
         {
+            if (g_p.prepAboveContour)
+            {
+                // M7: an operator preparing a condition that executes at the
+                // e_Q contour prepares only satellites predicted to stay
+                // inside that contour for at least tau_min.
+                const auto r = u.tte->ComputeTte(GeoOf(u.tickPos), u.tickVel, sat, 0, g_tteGainTh);
+                if (r.tte.GetSeconds() < g_p.tteMinS)
+                {
+                    continue;
+                }
+            }
             ranked.emplace_back(ls.l3, sat);
         }
     }
@@ -868,8 +1002,9 @@ SyncCandidates(UeCtx& u)
     // score alone left no strong satellite for the escape, and the terminal
     // fell through to radio link failure. prepStrongest reserves that many
     // slots for the strongest covering satellites.
-    const uint32_t reserve =
-        g_p.prepareByTte ? std::min<uint32_t>(g_p.prepStrongest, g_p.maxCandidates) : 0;
+    const uint32_t reserve = (g_p.prepareByTte || g_p.prepAboveContour)
+                                 ? std::min<uint32_t>(g_p.prepStrongest, g_p.maxCandidates)
+                                 : 0;
     for (size_t k = 0; k < ranked.size() && want.size() < g_p.maxCandidates - reserve; ++k)
     {
         want.insert(ranked[k].second);
@@ -888,6 +1023,8 @@ SyncCandidates(UeCtx& u)
         {
             u.cho->RemoveCandidateCell(CellOf(*it));
             it = u.candidates.erase(it);
+            u.rrcDirty = true;
+            u.rrcCandDirty = true;
         }
         else
         {
@@ -910,6 +1047,8 @@ SyncCandidates(UeCtx& u)
         {
             u.cho->AddCandidateCell(CellOf(sat), sat, 0);
             u.candidates.insert(sat);
+            u.rrcDirty = true;
+            u.rrcCandDirty = true;
         }
         const auto pr = pred.find(sat);
         if (pr != pred.end())
@@ -937,7 +1076,8 @@ Decide(size_t idx)
         return;
     }
     u.cho->UpdateCandidateSlantRange(CellOf(u.serving), sv->second.slantM);
-    u.cho->UpdateCandidateElevation(CellOf(u.serving), sv->second.elevDeg);
+    u.cho->UpdateCandidateElevation(CellOf(u.serving),
+                                    NetElevDeg(u, static_cast<uint32_t>(u.serving), sv->second));
     u.cho->UpdateMeasurement(CellOf(u.serving), sv->second.l3, -sv->second.scanLossDb);
     for (auto it = u.candidates.begin(); it != u.candidates.end();)
     {
@@ -949,10 +1089,12 @@ Decide(size_t idx)
             // last value.
             u.cho->RemoveCandidateCell(CellOf(*it));
             it = u.candidates.erase(it);
+            u.rrcDirty = true;
+            u.rrcCandDirty = true;
             continue;
         }
         u.cho->UpdateCandidateSlantRange(CellOf(*it), ls->second.slantM);
-        u.cho->UpdateCandidateElevation(CellOf(*it), ls->second.elevDeg);
+        u.cho->UpdateCandidateElevation(CellOf(*it), NetElevDeg(u, *it, ls->second));
         u.cho->UpdateMeasurement(CellOf(*it), ls->second.l3, -ls->second.scanLossDb);
         ++it;
     }
@@ -960,6 +1102,25 @@ Decide(size_t idx)
     u.cho->EvaluateConditions();
     uint16_t target = u.cho->SelectBestCandidate();
     const bool isTteFamily = (g_p.policy == "tte-cho" || g_p.policy == "mst" || g_p.policy == "tte-eager");
+    bool viaNet = isTteFamily && u.cho->LastSelectionViaSafetyNet();
+    if (isTteFamily && g_p.policy != "tte-eager")
+    {
+        // R2 (M6): signaled as a CondEventT1 window on one candidate, the rule
+        // needs a new conditional reconfiguration whenever its planned target
+        // changes or the window end moves by more than a decision period.
+        const double nowS = Simulator::Now().GetSeconds();
+        const uint16_t pt = u.cho->GetPlannedTarget();
+        const double end = nowS + u.cho->GetLastServingTte().GetSeconds() -
+                           u.cho->GetLastExitMargin().GetSeconds();
+        if (pt != NtnChoAlgorithm::INVALID_CELL_ID &&
+            (pt != u.sigTarget || std::abs(end - u.sigEnd) > g_p.decisionPeriodS + 1e-9))
+        {
+            u.rrcDirty = true;
+            u.rrcWinDirty = true;
+            u.sigTarget = pt;
+            u.sigEnd = end;
+        }
+    }
     if (g_p.tteRank && !isTteFamily && target != NtnChoAlgorithm::INVALID_CELL_ID)
     {
         // Same execution instant, different target: longest predicted exit
@@ -973,7 +1134,7 @@ Decide(size_t idx)
                 continue;
             }
             const double tt =
-                g_tte->ComputeTte(geo, u.tickVel, SatOf(cellId), 0, g_tteGainTh).tte.GetSeconds();
+                u.tte->ComputeTte(geo, u.tickVel, SatOf(cellId), 0, g_tteGainTh).tte.GetSeconds();
             if (tt > bestTte)
             {
                 bestTte = tt;
@@ -1031,6 +1192,10 @@ Decide(size_t idx)
             {
                 target = CellOf(static_cast<uint32_t>(heldBest)); // the only candidate
             }
+            if (target != NtnChoAlgorithm::INVALID_CELL_ID)
+            {
+                viaNet = true;
+            }
             if (target != NtnChoAlgorithm::INVALID_CELL_ID && g_p.escapeHoldoffS > 0.0)
             {
                 u.escCell = u.serving;
@@ -1046,7 +1211,7 @@ Decide(size_t idx)
     // Record what the network predicted for the cell it is leaving, and what
     // will actually happen to it, before executing.
     const double predServ =
-        g_tte->ComputeTte(geo, u.tickVel, static_cast<uint32_t>(u.serving), 0, g_tteGainTh)
+        u.tte->ComputeTte(geo, u.tickVel, static_cast<uint32_t>(u.serving), 0, g_tteGainTh)
             .tte.GetSeconds();
     const double margin = (g_p.policy == "tte-cho" || g_p.policy == "mst" || g_p.policy == "t1")
                               ? ExecMarginFor(u)
@@ -1061,20 +1226,29 @@ Decide(size_t idx)
     int tgtRank = 1;
     {
         const double mine =
-            g_tte->ComputeTte(geo, u.tickVel, SatOf(target), 0, g_tteGainTh).tte.GetSeconds();
+            u.tte->ComputeTte(geo, u.tickVel, SatOf(target), 0, g_tteGainTh).tte.GetSeconds();
         for (const auto& [sat, ls] : u.links)
         {
             if (!ls.covered || static_cast<int32_t>(sat) == u.serving || sat == SatOf(target))
             {
                 continue;
             }
-            if (g_tte->ComputeTte(geo, u.tickVel, sat, 0, g_tteGainTh).tte.GetSeconds() > mine + 1e-6)
+            if (u.tte->ComputeTte(geo, u.tickVel, sat, 0, g_tteGainTh).tte.GetSeconds() > mine + 1e-6)
             {
                 ++tgtRank;
             }
         }
     }
     ++u.hoAttempts;
+    const int trig = isTteFamily ? (viaNet ? 1 : 0) : (viaNet ? 3 : 2);
+    if (viaNet)
+    {
+        ++u.hoEscape;
+    }
+    else
+    {
+        ++u.hoPlanned;
+    }
     u.executing = true;
     u.cho->ExecuteHandover(target);
     // Scheduled and booked at the same nanosecond resolution: MilliSeconds()
@@ -1091,7 +1265,7 @@ Decide(size_t idx)
     u.outageS += intMs / 1000.0;
     u.intUntil = now + intMs / 1000.0;
     Simulator::Schedule(intT, &CompleteHandover, idx, SatOf(target), now, predServ,
-                        margin, trueServ, tgtTte, tgtL3, tgtRank);
+                        margin, trueServ, tgtTte, tgtL3, tgtRank, trig);
 }
 
 void
@@ -1207,6 +1381,13 @@ Tick()
         {
             Decide(i);
         }
+        if (u.rrcDirty)
+        {
+            ++u.rrc;
+            u.rrcCand += u.rrcCandDirty ? 1 : 0;
+            u.rrcWin += u.rrcWinDirty ? 1 : 0;
+            u.rrcDirty = u.rrcCandDirty = u.rrcWinDirty = false;
+        }
     }
     Simulator::Schedule(Seconds(kTick), &Tick);
 }
@@ -1318,11 +1499,94 @@ RunAccuracy()
             g_sats[s]->GetEcefStateAt(Seconds(x), p, v);
             peak = std::max(peak, ntngeo::GeodeticElevationDeg(pos, p));
         }
-        const Vector e = g_pred->GetEphemerisErrorRtn(static_cast<uint32_t>(s));
+        const Vector e = g_ephDrawn[s];
         g_acc << i << "," << s << "," << std::fixed << std::setprecision(3) << elev << ","
               << peak << "," << r.tte.GetSeconds() << "," << truth << "," << sigma << ","
               << e.x << "," << e.y << "," << e.z << "," << us << "\n";
     }
+}
+
+// R2 (M10): the network's copy of a satellite is an orbit of its own. Its
+// elements are those of the true (circular) orbit perturbed so that at t = 0
+// the copy sits at the drawn radial / along-track / cross-track offset, and
+// from then on it is propagated by the same Kepler + J2 model, never
+// re-anchored to the truth. The along-track offset is a shift of the argument
+// of latitude; the cross-track one a tilt of the orbit plane about the
+// satellite's position (inclination and node changed together); the radial
+// one a change of the semi-major axis, so that, as for a real element set, a
+// radial (energy) error turns into an along-track error growing at
+// -1.5 n da per second. When a measured along-track growth rate is supplied,
+// the semi-major-axis error is set from it instead (da = -(2/3) rate / n) and
+// the rest of the radial offset is carried by a small eccentricity with the
+// apse at the satellite.
+KeplerianElements
+PerturbedCopy(const KeplerianElements& t, double er, double ea, double ec, double rateA, bool useRate)
+{
+    KeplerianElements k = t;
+    const double a = t.semi_major_axis_m;
+    const double n = std::sqrt(ntncon::kEarthMuM3S2 / (a * a * a));
+    const double u0 = t.arg_perigee_rad + t.mean_anomaly_rad; // circular truth
+    const double da = useRate ? -(2.0 / 3.0) * rateA / n : er;
+    const double si = std::sin(t.inclination_rad);
+    const double dI = (ec / a) * std::sin(u0);
+    const double dO = (si > 1e-6) ? -(ec / a) * std::cos(u0) / si : 0.0;
+    const double du = ea / a - std::cos(t.inclination_rad) * dO;
+    k.semi_major_axis_m = a + da;
+    k.inclination_rad = t.inclination_rad + dI;
+    k.raan_rad = t.raan_rad + dO;
+    const double rem = er - da;
+    if (std::abs(rem) > 1e-3)
+    {
+        k.eccentricity = std::abs(rem) / (a + da);
+        // perigee (rem < 0) or apogee (rem > 0) at the satellite's position
+        k.arg_perigee_rad = u0 + du - (rem > 0.0 ? M_PI : 0.0);
+        k.mean_anomaly_rad = (rem > 0.0 ? M_PI : 0.0);
+    }
+    else
+    {
+        k.mean_anomaly_rad = t.mean_anomaly_rad + du;
+    }
+    return k;
+}
+
+// Copy minus truth, resolved in the true orbit's RTN frame (inertial velocity).
+Vector
+RtnDiff(const Vector& tp, const Vector& ve, const Vector& pp)
+{
+    constexpr double kOmegaE = 7.2921159e-5;
+    const Vector tv(ve.x - kOmegaE * tp.y, ve.y + kOmegaE * tp.x, ve.z);
+    const double rn = tp.GetLength();
+    const Vector R(tp.x / rn, tp.y / rn, tp.z / rn);
+    Vector N(R.y * tv.z - R.z * tv.y, R.z * tv.x - R.x * tv.z, R.x * tv.y - R.y * tv.x);
+    const double nn = N.GetLength();
+    N = Vector(N.x / nn, N.y / nn, N.z / nn);
+    const Vector T(N.y * R.z - N.z * R.y, N.z * R.x - N.x * R.z, N.x * R.y - N.y * R.x);
+    const Vector d(pp.x - tp.x, pp.y - tp.y, pp.z - tp.z);
+    return Vector(d.x * R.x + d.y * R.y + d.z * R.z, d.x * T.x + d.y * T.y + d.z * T.z,
+                  d.x * N.x + d.y * N.y + d.z * N.z);
+}
+
+// Element sets of a TLE file, keyed by catalog number.
+std::map<std::string, TleRecord>
+ReadTleFile(const std::string& path)
+{
+    std::ifstream f(path);
+    NS_ABORT_MSG_IF(!f.good(), "cannot read " << path);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    std::vector<TleRecord> recs;
+    ntncon::ParseTleStream(ss.str(), recs);
+    std::map<std::string, TleRecord> out;
+    for (const auto& r : recs)
+    {
+        if (r.line1.size() >= 7)
+        {
+            std::string cat = r.line1.substr(2, 5);
+            cat.erase(0, cat.find_first_not_of(' '));
+            out[cat] = r;
+        }
+    }
+    return out;
 }
 
 } // namespace
@@ -1396,7 +1660,27 @@ main(int argc, char* argv[])
                  "err_r_m,err_a_m,err_c_m); replaces the Gaussian draw", p.ephErrorFile);
     cmd.AddValue("ephAgeMinH", "N4: minimum element-set age (h) of the drawn samples", p.ephAgeMinH);
     cmd.AddValue("ephAgeMaxH", "N4: maximum element-set age (h), exclusive", p.ephAgeMaxH);
+    cmd.AddValue("reestBaseMs", "re-establishment base time (ms), before the RACH over the slant", p.reestBaseMs);
+    cmd.AddValue("classEnv", "R2: per-class environment (aircraft/ship LOS, train rural)", p.classEnv);
+    cmd.AddValue("losModel", "R2: LOS-state process, redraw | markov", p.losModel);
+    cmd.AddValue("losCorrM", "R2: LOS-state correlation distance (m)", p.losCorrM);
+    cmd.AddValue("losCorrDeg", "R2: markov LOS angular decorrelation (deg)", p.losCorrDeg);
+    cmd.AddValue("ephModel", "R2: network ephemeris copy, propagated | offset", p.ephModel);
+    cmd.AddValue("escapeByQuality", "R2: safety-net escape to the strongest candidate better than serving",
+                 p.escapeByQuality);
+    cmd.AddValue("prepAboveContour", "R2: prepare only candidates predicted inside e_Q for tau_min",
+                 p.prepAboveContour);
+    cmd.AddValue("prepStrongestStd", "alias kept for scripts: same as prepStrongest", p.prepStrongest);
+    cmd.AddValue("tleTruthFile", "R2: truth element sets (real constellation)", p.tleTruthFile);
+    cmd.AddValue("tleNetFile", "R2: network element sets", p.tleNetFile);
+    cmd.AddValue("tleInclMinDeg", "R2: TLE shell filter, inclination min", p.tleInclMinDeg);
+    cmd.AddValue("tleInclMaxDeg", "R2: TLE shell filter, inclination max", p.tleInclMaxDeg);
+    cmd.AddValue("tleAltMinKm", "R2: TLE shell filter, mean altitude min", p.tleAltMinKm);
+    cmd.AddValue("tleAltMaxKm", "R2: TLE shell filter, mean altitude max", p.tleAltMaxKm);
+    cmd.AddValue("tleStartSpreadH", "R2: start within +- this of the median truth epoch (h)", p.tleStartSpreadH);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(p.losModel != "redraw" && p.losModel != "markov", "unknown --losModel");
+    NS_ABORT_MSG_IF(p.ephModel != "propagated" && p.ephModel != "offset", "unknown --ephModel");
 
     if (!p.ephErrorFile.empty())
     {
@@ -1442,17 +1726,87 @@ main(int argc, char* argv[])
     wc.inclination_deg = p.inclinationDeg;
     // A different slice of the same shell per seed.
     wc.epoch_unix_s = 1735689600.0 - epochDraw->GetValue(0.0, 86400.0);
-    const auto elements = WalkerConstellation::BuildDelta(wc);
-    NS_ABORT_MSG_IF(elements.empty(), "Walker shell not expressible");
-    NodeContainer satNodes;
-    satNodes.Create(elements.size());
-    g_sats.resize(elements.size());
-    g_satPos.resize(elements.size());
-    for (size_t s = 0; s < elements.size(); ++s)
+    const bool tleMode = !p.tleTruthFile.empty();
+    std::vector<KeplerianElements> elements;
+    std::vector<std::pair<TleRecord, TleRecord>> tlePairs; // (truth, network)
+    double tleStartUnix = 0.0;
+    if (tleMode)
     {
-        g_sats[s] = CreateObject<Sgp4MobilityModel>();
-        g_sats[s]->SetElements(elements[s]);
-        g_sats[s]->SetCacheGranularity(MilliSeconds(1));
+        // R2 (M10): a real constellation. Truth: the supplemental element
+        // sets CelesTrak fits to the operator's ephemerides; network copy: the
+        // public GP sets. Both are propagated with SGP4 from one common start.
+        NS_ABORT_MSG_IF(p.tleNetFile.empty(), "--tleTruthFile needs --tleNetFile");
+        const auto tru = ReadTleFile(p.tleTruthFile);
+        const auto net = ReadTleFile(p.tleNetFile);
+        std::vector<double> epochs;
+        for (const auto& [cat, tr] : tru)
+        {
+            auto it = net.find(cat);
+            KeplerianElements ke;
+            KeplerianElements kn;
+            if (it == net.end() || !tr.ToKeplerian(ke) || !it->second.ToKeplerian(kn))
+            {
+                continue;
+            }
+            const double altKm = (ke.semi_major_axis_m - ntncon::kEarthRadiusM) / 1e3;
+            const double incl = ke.inclination_rad * 180.0 / M_PI;
+            if (altKm < p.tleAltMinKm || altKm > p.tleAltMaxKm || incl < p.tleInclMinDeg ||
+                incl > p.tleInclMaxDeg)
+            {
+                continue;
+            }
+            tlePairs.emplace_back(tr, it->second);
+            epochs.push_back(ke.epoch_unix_s);
+        }
+        NS_ABORT_MSG_IF(tlePairs.empty(), "no element sets in the TLE shell filter");
+        std::sort(epochs.begin(), epochs.end());
+        tleStartUnix = epochs[epochs.size() / 2] +
+                       3600.0 * epochDraw->GetValue(-p.tleStartSpreadH, p.tleStartSpreadH);
+    }
+    else
+    {
+        elements = WalkerConstellation::BuildDelta(wc);
+        NS_ABORT_MSG_IF(elements.empty(), "Walker shell not expressible");
+    }
+    std::vector<Ptr<Sgp4MobilityModel>> tleNet;
+    if (tleMode)
+    {
+        // drop satellites whose two element sets straddle a maneuver (copy
+        // more than 100 km from the truth at the start), as the measurement does
+        for (const auto& [tr, nr] : tlePairs)
+        {
+            Ptr<Sgp4MobilityModel> mt = CreateObject<Sgp4MobilityModel>();
+            Ptr<Sgp4MobilityModel> mn = CreateObject<Sgp4MobilityModel>();
+            mt->SetTle(tr);
+            mn->SetTle(nr);
+            mt->SetSimulationEpochUnix(tleStartUnix);
+            mn->SetSimulationEpochUnix(tleStartUnix);
+            mt->SetCacheGranularity(MilliSeconds(1));
+            mn->SetCacheGranularity(MilliSeconds(1));
+            const Vector d = mt->GetPosition() - mn->GetPosition();
+            if (d.GetLength() > 1e5)
+            {
+                continue;
+            }
+            g_sats.push_back(mt);
+            tleNet.push_back(mn);
+        }
+    }
+    else
+    {
+        g_sats.resize(elements.size());
+        for (size_t s = 0; s < elements.size(); ++s)
+        {
+            g_sats[s] = CreateObject<Sgp4MobilityModel>();
+            g_sats[s]->SetElements(elements[s]);
+            g_sats[s]->SetCacheGranularity(MilliSeconds(1));
+        }
+    }
+    NodeContainer satNodes;
+    satNodes.Create(g_sats.size());
+    g_satPos.resize(g_sats.size());
+    for (size_t s = 0; s < g_sats.size(); ++s)
+    {
         satNodes.Get(s)->AggregateObject(g_sats[s]);
     }
 
@@ -1472,39 +1826,37 @@ main(int argc, char* argv[])
     // ---- radio ---------------------------------------------------------------
     g_noiseDbm = -174.0 + 10.0 * std::log10(p.bwMhz * 1e6) + p.ueNfDb;
     g_eirpDbm = p.eirpDensityDbwPerMhz + 30.0 + 10.0 * std::log10(p.bwMhz);
-    auto makePl = [&p]() -> Ptr<ThreeGppPropagationLossModel> {
-        if (p.channel == "urban")
+    // One LOS and one NLOS path-loss model per environment (R2, M8): line of
+    // sight and suburban/rural use the suburban model, urban and dense urban
+    // their own.
+    auto makePl = [](int env) -> Ptr<ThreeGppPropagationLossModel> {
+        if (env == kEnvUrb)
         {
             return CreateObject<ThreeGppNTNUrbanPropagationLossModel>();
         }
-        if (p.channel == "denseurban")
+        if (env == kEnvDense)
         {
             return CreateObject<ThreeGppNTNDenseUrbanPropagationLossModel>();
         }
         return CreateObject<ThreeGppNTNSuburbanPropagationLossModel>();
     };
-    if (p.channel == "urban")
+    for (int env = 0; env < 4; ++env)
     {
-        g_plosTable = &kPlosUrban;
-        g_sfLosTable = &kSfLosSigmaUrban;
-        g_sfNlosTable = &kSfNlosSigmaUrban;
+        g_plEnv[env] = makePl(env);
+        g_plEnv[env]->SetAttribute("Frequency", DoubleValue(p.fcGhz * 1e9));
+        g_plEnv[env]->SetAttribute("ShadowingEnabled", BooleanValue(false));
+        g_plEnv[env]->SetChannelConditionModel(CreateObject<AlwaysLosChannelConditionModel>());
+        g_plNlosEnv[env] = makePl(env);
+        g_plNlosEnv[env]->SetAttribute("Frequency", DoubleValue(p.fcGhz * 1e9));
+        g_plNlosEnv[env]->SetAttribute("ShadowingEnabled", BooleanValue(false));
+        g_plNlosEnv[env]->SetChannelConditionModel(CreateObject<NeverLosChannelConditionModel>());
     }
-    else if (p.channel == "denseurban")
-    {
-        g_plosTable = &kPlosDenseUrban;
-        g_sfLosTable = &kSfLosSigmaDenseUrban;
-        g_sfNlosTable = &kSfNlosSigmaDenseUrban;
-    }
-    g_pl = makePl();
-    g_pl->SetAttribute("Frequency", DoubleValue(p.fcGhz * 1e9));
-    g_pl->SetAttribute("ShadowingEnabled", BooleanValue(false));
-    g_pl->SetChannelConditionModel(CreateObject<AlwaysLosChannelConditionModel>());
+    const int baseEnv = (p.channel == "urban")        ? kEnvUrb
+                        : (p.channel == "denseurban") ? kEnvDense
+                        : (p.channel == "suburban")   ? kEnvSub
+                                                      : kEnvLos;
     g_norm = CreateObject<NormalRandomVariable>();
     g_norm->SetStream(2000);
-    g_plNlos = makePl();
-    g_plNlos->SetAttribute("Frequency", DoubleValue(p.fcGhz * 1e9));
-    g_plNlos->SetAttribute("ShadowingEnabled", BooleanValue(false));
-    g_plNlos->SetChannelConditionModel(CreateObject<NeverLosChannelConditionModel>());
     g_uni = CreateObject<UniformRandomVariable>();
     g_uni->SetStream(2500);
     g_normOut = CreateObject<NormalRandomVariable>();
@@ -1519,17 +1871,23 @@ main(int argc, char* argv[])
     g_pred->SetGeometricBeam(30.0, 4.4127);
     g_pred->SetSteeredBeam(true, p.scanLossExp);
     g_pred->SetSteeredBeamElevationIndexed(true, p.altitudeKm * 1e3);
+    g_pred->SetReferenceEarthRadius(kRe); // R2 (m3): the radius of the orbits and the text
     Ptr<NormalRandomVariable> ephDraw = CreateObject<NormalRandomVariable>();
     ephDraw->SetStream(3000);
     // N4: measured error samples, drawn on their own stream so the Gaussian
     // stream (and every other stream) is unchanged by the choice of model
     std::vector<Vector> ephRows;
+    std::vector<double> ephRates; // R2: measured along-track growth (m/s) of each row
     if (!p.ephErrorFile.empty())
     {
         std::ifstream ef(p.ephErrorFile);
         NS_ABORT_MSG_IF(!ef.good(), "cannot read --ephErrorFile " << p.ephErrorFile);
         std::string line;
         std::getline(ef, line); // header
+        // dt = 30 min rows of the same element-set pair give the along-track
+        // growth rate of the copy (R2, M10)
+        std::map<std::string, double> along30;
+        std::vector<std::pair<std::string, Vector>> rows0;
         while (std::getline(ef, line))
         {
             std::stringstream ss(line);
@@ -1546,88 +1904,125 @@ main(int argc, char* argv[])
             const double er = std::stod(f[5]);
             const double ea = std::stod(f[6]);
             const double ec = std::stod(f[7]);
+            if (dt == 30.0 && std::abs(ea) <= 1e5)
+            {
+                along30[f[0]] = ea;
+            }
             if (dt == 0.0 && age >= p.ephAgeMinH && age < p.ephAgeMaxH && std::abs(er) <= 1e5 &&
                 std::abs(ea) <= 1e5 && std::abs(ec) <= 1e5)
             {
                 ephRows.emplace_back(er, ea, ec);
+                rows0.emplace_back(f[0], Vector(er, ea, ec));
             }
+        }
+        for (const auto& [cat, v] : rows0)
+        {
+            auto it = along30.find(cat);
+            ephRates.push_back(it == along30.end() ? 0.0 : (it->second - v.y) / 1800.0);
         }
         NS_ABORT_MSG_IF(ephRows.empty(), "no eligible rows in --ephErrorFile for the age window");
     }
     Ptr<UniformRandomVariable> ephPick = CreateObject<UniformRandomVariable>();
     ephPick->SetStream(3100);
     std::ofstream ephLog;
-    if (!p.ephErrorFile.empty())
+    const bool anyGauss = p.ephSigmaRadialM > 0.0 || p.ephSigmaAlongM > 0.0 || p.ephSigmaCrossM > 0.0;
+    g_ephActive = tleMode || anyGauss || !ephRows.empty();
+    if (g_ephActive)
     {
-        ephLog.open(p.outputDir + "/eph_offsets.csv");
-        ephLog << "sat,err_r_m,err_a_m,err_c_m,check_dev_m\n";
+        if (!ephLog.is_open())
+        {
+            ephLog.open(p.outputDir + "/eph_offsets.csv");
+        }
+        ephLog << "sat,err_r_m,err_a_m,err_c_m,rate_a_mps,d0_r_m,d0_a_m,d0_c_m,dT_r_m,dT_a_m,dT_c_m\n";
     }
     double ephCheckMax = 0.0;
+    g_ephDrawn.assign(g_sats.size(), Vector(0, 0, 0));
+    g_net.assign(g_sats.size(), nullptr);
     for (size_t s = 0; s < g_sats.size(); ++s)
     {
-        g_pred->SetKinematicsSource(static_cast<uint32_t>(s), g_sats[s]);
         double er = p.ephSigmaRadialM * ephDraw->GetValue();
         double ea = p.ephSigmaAlongM * ephDraw->GetValue();
         double ec = p.ephSigmaCrossM * ephDraw->GetValue();
+        double rate = 0.0;
         if (!ephRows.empty())
         {
-            const auto& row = ephRows[ephPick->GetInteger(0, static_cast<uint32_t>(ephRows.size() - 1))];
-            er = row.x;
-            ea = row.y;
-            ec = row.z;
+            const uint32_t k = ephPick->GetInteger(0, static_cast<uint32_t>(ephRows.size() - 1));
+            er = ephRows[k].x;
+            ea = ephRows[k].y;
+            ec = ephRows[k].z;
+            rate = ephRates[k];
         }
-        if (er != 0.0 || ea != 0.0 || ec != 0.0)
+        Ptr<Sgp4MobilityModel> netCopy = g_sats[s];
+        if (tleMode)
         {
-            g_pred->SetEphemerisErrorRtn(static_cast<uint32_t>(s), er, ea, ec);
+            netCopy = tleNet[s];
         }
-        if (ephLog.is_open())
+        else if (er != 0.0 || ea != 0.0 || ec != 0.0)
         {
-            // N4 check: the predicted position differs from the true one by
-            // exactly the drawn RTN vector
+            if (p.ephModel == "offset")
+            {
+                g_pred->SetEphemerisErrorRtn(static_cast<uint32_t>(s), er, ea, ec);
+            }
+            else
+            {
+                netCopy = CreateObject<Sgp4MobilityModel>();
+                netCopy->SetElements(PerturbedCopy(elements[s], er, ea, ec, rate, !ephRows.empty()));
+                netCopy->SetCacheGranularity(MilliSeconds(1));
+            }
+        }
+        g_net[s] = netCopy;
+        g_pred->SetKinematicsSource(static_cast<uint32_t>(s), netCopy);
+        g_ephDrawn[s] = Vector(er, ea, ec);
+        if (g_ephActive)
+        {
+            // check: copy minus truth in the true RTN frame, now and at the end
             Vector pp;
             Vector pv;
             g_pred->GetPredictedSatEcef(static_cast<uint32_t>(s), pp, pv);
-            const Vector tp = g_sats[s]->GetPosition();
-            // the error model is stated in the orbit's RTN frame, built from the
-            // INERTIAL velocity as NtnOrbitPredictor does
-            constexpr double kOmegaE = 7.2921159e-5;
-            const Vector ve = g_sats[s]->GetVelocity();
-            const Vector tv(ve.x - kOmegaE * tp.y, ve.y + kOmegaE * tp.x, ve.z);
-            const double rn = tp.GetLength();
-            const Vector R(tp.x / rn, tp.y / rn, tp.z / rn);
-            Vector N(R.y * tv.z - R.z * tv.y, R.z * tv.x - R.x * tv.z, R.x * tv.y - R.y * tv.x);
-            const double nn = N.GetLength();
-            N = Vector(N.x / nn, N.y / nn, N.z / nn);
-            const Vector T(N.y * R.z - N.z * R.y, N.z * R.x - N.x * R.z, N.x * R.y - N.y * R.x);
-            const Vector d(pp.x - tp.x, pp.y - tp.y, pp.z - tp.z);
-            const double dr = d.x * R.x + d.y * R.y + d.z * R.z;
-            const double da = d.x * T.x + d.y * T.y + d.z * T.z;
-            const double dc = d.x * N.x + d.y * N.y + d.z * N.z;
-            const double dev = std::sqrt((dr - er) * (dr - er) + (da - ea) * (da - ea) +
-                                         (dc - ec) * (dc - ec));
-            ephCheckMax = std::max(ephCheckMax, dev);
-            ephLog << s << "," << std::setprecision(10) << er << "," << ea << "," << ec << ","
-                   << dev << "\n";
+            const Vector d0 = RtnDiff(g_sats[s]->GetPosition(), g_sats[s]->GetVelocity(), pp);
+            Vector tpT;
+            Vector tvT;
+            Vector npT;
+            Vector nvT;
+            g_sats[s]->GetEcefStateAt(Seconds(p.simTime), tpT, tvT);
+            netCopy->GetEcefStateAt(Seconds(p.simTime), npT, nvT);
+            Vector dT = RtnDiff(tpT, tvT, npT);
+            if (p.ephModel == "offset" && !tleMode)
+            {
+                dT = d0; // re-anchored: the offset does not change
+            }
+            if (tleMode)
+            {
+                g_ephDrawn[s] = d0;
+            }
+            ephCheckMax = std::max(ephCheckMax, (d0 - g_ephDrawn[s]).GetLength());
+            ephLog << s << "," << std::setprecision(10) << g_ephDrawn[s].x << "," << g_ephDrawn[s].y
+                   << "," << g_ephDrawn[s].z << "," << rate << "," << d0.x << "," << d0.y << ","
+                   << d0.z << "," << dT.x << "," << dT.y << "," << dT.z << "\n";
         }
     }
     if (ephLog.is_open())
     {
         ephLog.close();
-        std::cout << "ephfile-check: " << ephRows.size() << " eligible rows, max |pred - true - "
-                  << "drawn RTN| = " << ephCheckMax << " m\n";
+        std::cout << "eph-check: model=" << (tleMode ? "tle" : p.ephModel) << " " << ephRows.size()
+                  << " file rows, max |copy - true - drawn RTN| at t=0 = " << ephCheckMax << " m\n";
     }
-    g_tte = CreateObject<NtnTteEstimator>();
-    g_tte->SetOrbitPredictor(g_pred);
-    g_tte->SetAttribute("PredictionStep", TimeValue(Seconds(p.predStepS)));
-    g_tte->SetAttribute("MaxPredictionWindow", TimeValue(Seconds(p.horizonS)));
-    g_tte->SetAttribute("BinarySearchTolerance", TimeValue(MilliSeconds(50)));
-    if (p.channel != "los")
+    for (int env = 0; env < 4; ++env)
     {
-        // N1: the network knows the terminal's environment class, not the
-        // drawn state, so the usable time weighs the predicted pass by the
-        // same TR 38.811 Table 6.6.1-1 probabilities the channel is drawn from.
-        g_tte->SetLosProbabilityTable(*g_plosTable);
+        g_tteEnv[env] = CreateObject<NtnTteEstimator>();
+        g_tteEnv[env]->SetOrbitPredictor(g_pred);
+        g_tteEnv[env]->SetAttribute("PredictionStep", TimeValue(Seconds(p.predStepS)));
+        g_tteEnv[env]->SetAttribute("MaxPredictionWindow", TimeValue(Seconds(p.horizonS)));
+        g_tteEnv[env]->SetAttribute("BinarySearchTolerance", TimeValue(MilliSeconds(50)));
+        if (env != kEnvLos)
+        {
+            // N1: the network knows the terminal's environment class, not the
+            // drawn state, so the usable time weighs the predicted pass by the
+            // same TR 38.811 Table 6.6.1-1 probabilities the channel is drawn from.
+            g_tteEnv[env]->SetLosProbabilityTable(*g_env[env].plos);
+        }
     }
+    g_tte = g_tteEnv[baseEnv];
     g_coverGainTh = g_pred->GainThresholdForMinElevationDb(p.minElevDeg, p.altitudeKm * 1e3);
     // A quality floor is planned for as an EXIT: with a steered beam both the
     // scan loss and the slant loss are monotone in elevation, so "this cell no
@@ -1644,9 +2039,22 @@ main(int argc, char* argv[])
         u.node = ueNodes.Get(i);
         u.mob = ueMobs[i];
         u.ueClass = u.mob->GetClassName();
+        u.env = baseEnv;
+        if (p.classEnv && baseEnv != kEnvLos)
+        {
+            if (u.ueClass == "aviation" || u.ueClass == "maritime")
+            {
+                u.env = kEnvLos; // above or away from street clutter
+            }
+            else if (u.ueClass == "hst")
+            {
+                u.env = kEnvSub; // rural row of TR 38.811 Table 6.6.1-1
+            }
+        }
+        u.tte = g_tteEnv[u.env];
         u.cho = CreateObject<NtnChoAlgorithm>();
         u.cho->SetOrbitPredictor(g_pred);
-        u.cho->SetTteEstimator(g_tte);
+        u.cho->SetTteEstimator(u.tte);
         NtnChoAlgorithm::ChoConfig c = u.cho->GetConfig();
         c.maxCandidates = static_cast<uint8_t>(p.maxCandidates + 2);
         c.qualityThreshold_dB = p.qualityThDb;
@@ -1659,6 +2067,7 @@ main(int argc, char* argv[])
         c.rankByUsableTime = p.rankByUsable;
         c.escapeNearBestDb = p.escapeNearBestDb;
         c.escapeHoldoff = Seconds(p.escapeHoldoffS);
+        c.escapeByQuality = p.escapeByQuality;
         if (p.policy == "a3")
         {
             c.triggerType = NtnChoAlgorithm::TRIGGER_EVENT_A3;
@@ -1745,7 +2154,8 @@ main(int argc, char* argv[])
     }
     g_events.open(p.outputDir + "/events.csv");
     g_events << "t_s,ue,from_sat,to_sat,kind,success,pp1,pp5,pred_serv_tte_s,margin_s,"
-                "true_serv_exit_s,target_tte_s,target_elev_deg,interruption_ms,target_l3_db,target_rank_all\n";
+                "true_serv_exit_s,target_tte_s,target_elev_deg,interruption_ms,target_l3_db,target_rank_all,"
+                "trigger\n";
     Simulator::Schedule(Seconds(0.0), &Tick);
     Simulator::Stop(Seconds(p.simTime + 5.0));
     Simulator::Run();
@@ -1753,7 +2163,7 @@ main(int argc, char* argv[])
     // ---- results --------------------------------------------------------------
     std::ofstream us(p.outputDir + "/ue_summary.csv");
     us << "ue,class,ho_attempts,ho_success,hof,rlf,pp1,pp5,outage_s,mean_sinr_db,mean_se,"
-          "mean_tos_s,lb_handovers\n";
+          "mean_tos_s,lb_handovers,env,rrc,rrc_cand,rrc_win,ho_planned,ho_escape\n";
     double sumAtt = 0;
     double sumOk = 0;
     double sumHof = 0;
@@ -1769,6 +2179,11 @@ main(int argc, char* argv[])
     double sumEvals = 0;
     double sumT1Rearms = 0;
     double sumDecisions = 0;
+    double sumRrc = 0;
+    double sumRrcCand = 0;
+    double sumRrcWin = 0;
+    double sumPlanned = 0;
+    double sumEscape = 0;
     std::vector<double> allTos;
     for (size_t i = 0; i < g_ues.size(); ++i)
     {
@@ -1791,10 +2206,17 @@ main(int argc, char* argv[])
            << std::setprecision(3) << u.outageS << ","
            << (u.samples ? u.sinrSum / u.samples : 0.0) << ","
            << (u.samples ? u.seSum / u.samples : 0.0) << "," << mt << ","
-           << (p.ueProfile == "static" ? std::to_string(u.lbHandovers) : std::string("")) << "\n";
+           << (p.ueProfile == "static" ? std::to_string(u.lbHandovers) : std::string("")) << ","
+           << u.env << "," << u.rrc << "," << u.rrcCand << "," << u.rrcWin << "," << u.hoPlanned << ","
+           << u.hoEscape << "\n";
         sumEvals += static_cast<double>(u.cho->GetTteEvaluationCount());
         sumDecisions += static_cast<double>(u.decisions);
         sumT1Rearms += u.t1Rearms;
+        sumRrc += u.rrc;
+        sumRrcCand += u.rrcCand;
+        sumRrcWin += u.rrcWin;
+        sumPlanned += u.hoPlanned;
+        sumEscape += u.hoEscape;
         sumAtt += u.hoAttempts;
         sumOk += u.hoSuccess;
         sumHof += u.hof;
@@ -1824,7 +2246,9 @@ main(int argc, char* argv[])
           "median_tos_s,lb_handovers_per_ue,eph_r_m,eph_a_m,eph_c_m,assumed_a_m,a3_offset_db,"
           "a3_ttt_ms,quality_db,min_elev_deg,channel,tte_floor_db,tte_floor_ttt_ms,tte_exit_elev_deg,d2_serv_elev_deg,d2_cand_elev_deg,elev_floor_deg,"
           "rank_by_usable,prepare_by_tte,escape_holdoff_s,meas_fallback,tte_rank,decision_period_s,"
-          "tte_evals_per_decision,t1_rearms,wall_s\n";
+          "tte_evals_per_decision,t1_rearms,wall_s,rrc_per_ue_min,rrc_cand_per_ue_min,"
+          "rrc_win_per_ue_min,escape_share,class_env,los_model,los_corr_m,los_corr_deg,eph_model,"
+          "escape_by_quality,prep_above_contour,reest_base_ms,n_sats\n";
     sm << p.policy << "," << p.rngRun << "," << p.numUes << "," << p.simTime << "," << sumAtt
        << "," << sumOk << "," << sumHof << "," << sumRlf << "," << sumPp1 << "," << sumPp5 << ","
        << std::fixed << std::setprecision(4) << sumOk / ueMin << ","
@@ -1839,7 +2263,12 @@ main(int argc, char* argv[])
        << (p.rankByUsable ? 1 : 0) << "," << (p.prepareByTte ? 1 : 0) << "," << p.escapeHoldoffS
        << "," << (p.measFallback ? 1 : 0) << "," << (p.tteRank ? 1 : 0) << "," << p.decisionPeriodS
        << "," << (sumDecisions > 0 ? sumEvals / sumDecisions : 0.0) << "," << sumT1Rearms << ","
-       << wall << "\n";
+       << wall << "," << sumRrc / ueMin << "," << sumRrcCand / ueMin << "," << sumRrcWin / ueMin
+       << "," << (sumPlanned + sumEscape > 0 ? sumEscape / (sumPlanned + sumEscape) : 0.0) << ","
+       << (p.classEnv ? 1 : 0) << "," << p.losModel << "," << p.losCorrM << "," << p.losCorrDeg
+       << "," << (tleMode ? std::string("tle") : p.ephModel) << "," << (p.escapeByQuality ? 1 : 0)
+       << "," << (p.prepAboveContour ? 1 : 0) << "," << p.reestBaseMs << "," << g_sats.size()
+       << "\n";
     sm.close();
     g_events.close();
     std::cout << "  HO/UE/min=" << sumOk / ueMin << " success=" << sumOk << "/" << sumAtt

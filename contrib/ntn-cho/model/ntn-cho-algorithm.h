@@ -267,6 +267,16 @@ class NtnChoAlgorithm : public Object
          * strongest one (negative = rank every candidate above the floor).
          */
         double escapeNearBestDb = -1.0;
+        /**
+         * R2 (escape target): when the safety net fires, take the prepared
+         * candidate with the highest filtered quality that is above the floor
+         * AND above the serving cell's filtered quality, the rule the
+         * measurement fallback of the standardized conditions applies. The
+         * default (false) keeps the earlier ranking by the predicted score,
+         * ties by quality, which picked candidates just above the floor whose
+         * filtered value lagged a fresh blockage.
+         */
+        bool escapeByQuality = false;
         double a3Offset_dB = 3.0;             //!< A3 event offset (for baseline)
         Time a3TimeToTrigger = MilliSeconds(160); //!< A3 TTT (for baseline)
 
@@ -814,6 +824,14 @@ class NtnChoAlgorithm : public Object
     /// Exit margin the last exit-triggered evaluation applied (base + z sigma).
     Time GetLastExitMargin() const { return m_lastExitMargin; }
 
+    /// R2 (signaling count): serving-cell time to exit computed by the last
+    /// exit-triggered evaluation, and the candidate that would be the planned
+    /// target at that instant (INVALID_CELL_ID when none is admissible). A
+    /// network that signals the rule as a CondEventT1 window on one candidate
+    /// has to re-send the window whenever either of them moves.
+    Time GetLastServingTte() const { return m_lastServingTte; }
+    uint16_t GetPlannedTarget() const { return m_plannedTarget; }
+
     /**
      * \brief Get information about all candidates
      */
@@ -880,6 +898,8 @@ class NtnChoAlgorithm : public Object
     mutable Time m_servingBelowFloorSince{Seconds(-1)}; //!< serving below tteServingFloor_dB since
     mutable Time m_lastExitMargin{Seconds(0)}; //!< last exit-triggered margin applied
     mutable bool m_lastSelectViaNet{false};    //!< N3: last selection used the safety net
+    mutable Time m_lastServingTte{Seconds(-1)}; //!< R2: last serving time to exit
+    mutable uint16_t m_plannedTarget{0};        //!< R2: planned target at the last evaluation
     uint16_t m_escapedCell{0};                 //!< N3: cell left through the safety net
     Time m_escapedAt{Seconds(-1e9)};           //!< N3: when
     mutable uint64_t m_tteEvalCount{0};        //!< F3b: full TTE evaluations

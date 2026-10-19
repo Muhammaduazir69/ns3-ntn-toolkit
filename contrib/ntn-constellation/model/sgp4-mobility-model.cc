@@ -306,7 +306,7 @@ Sgp4MobilityModel::EnsureCache() const
     {
         return;
     }
-    const double unix_s = m_elements.epoch_unix_s + now.GetSeconds();
+    const double unix_s = SimBaseUnix() + now.GetSeconds();
     Vector pos_eci;
     Vector vel_eci;
     Propagate(unix_s, pos_eci, vel_eci);
@@ -327,7 +327,7 @@ Vector
 Sgp4MobilityModel::GetEcefPosition() const
 {
     EnsureCache();
-    const double unix_s = m_elements.epoch_unix_s +
+    const double unix_s = SimBaseUnix() +
                             Simulator::Now().GetSeconds();
     return EciToEcef(m_cachedEci, unix_s);
 }
@@ -336,7 +336,7 @@ void
 Sgp4MobilityModel::GetEcefStateAt(Time offset, Vector& posEcef, Vector& velEcef) const
 {
     const double unix_s =
-        m_elements.epoch_unix_s + Simulator::Now().GetSeconds() + offset.GetSeconds();
+        SimBaseUnix() + Simulator::Now().GetSeconds() + offset.GetSeconds();
     Vector posEci;
     Vector velEci;
     Propagate(unix_s, posEci, velEci);
@@ -351,7 +351,7 @@ Vector
 Sgp4MobilityModel::GetEcefVelocity() const
 {
     EnsureCache();
-    const double unix_s = m_elements.epoch_unix_s +
+    const double unix_s = SimBaseUnix() +
                             Simulator::Now().GetSeconds();
     // ECEF velocity = R(ECI->ECEF) * vel_eci - omega x r_ecef
     Vector v_eci_in_ecef = EciToEcef(m_cachedEciVel, unix_s);

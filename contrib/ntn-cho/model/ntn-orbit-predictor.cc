@@ -125,7 +125,7 @@ NtnOrbitPredictor::GeometricBeamGainDb(const GeoCoordinate& uePosition,
     {
         // F13: same cos^n law, indexed by the topocentric elevation so that the
         // contour of GainThresholdForMinElevationDb(e) is the elevation e.
-        constexpr double kReNom = 6371000.0;
+        const double kReNom = m_refEarthRadiusM;
         const double elev = ntngeo::GeodeticElevationDeg(ue, sat);
         if (elev <= 0.0)
         {
@@ -174,7 +174,7 @@ NtnOrbitPredictor::GainThresholdForMinElevationDb(double minElevDeg, double satA
 {
     // Geometry: for a satellite at altitude h seen at elevation e, the off-nadir
     // (scan) angle theta satisfies sin(theta) = Re/(Re+h) * cos(e).
-    constexpr double kRe = 6371000.0;
+    const double kRe = m_refEarthRadiusM;
     const double e = minElevDeg * M_PI / 180.0;
     const double sinTheta = (kRe / (kRe + satAltM)) * std::cos(e);
     const double theta = std::asin(std::max(-1.0, std::min(1.0, sinTheta)));

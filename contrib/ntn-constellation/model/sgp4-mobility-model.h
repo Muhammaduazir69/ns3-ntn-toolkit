@@ -36,6 +36,8 @@
 #include "ns3/mobility-model.h"
 #include "ns3/nstime.h"
 
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -102,6 +104,18 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     /// path. Anything comparing the two must assert on this, or it risks
     /// comparing SGP4 against itself.
     bool IsUsingSgp4() const;
+
+    /// R2: anchor simulation time zero at an absolute UTC instant (Unix
+    /// seconds). By default time zero is the element set's own epoch, which
+    /// is what a Walker shell built from one epoch wants. Satellites loaded
+    /// from real element sets each carry their own epoch, so a constellation
+    /// of them is only consistent when every satellite is anchored to the
+    /// same instant.
+    void SetSimulationEpochUnix(double unixS) { m_simEpochUnixS = unixS; m_cacheValid = false; }
+    double SimBaseUnix() const
+    {
+        return std::isnan(m_simEpochUnixS) ? m_elements.epoch_unix_s : m_simEpochUnixS;
+    }
 
     /// Read-only access to the installed elements.
     const KeplerianElements& GetElements() const { return m_elements; }
@@ -216,6 +230,8 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     mutable uint64_t m_sgp4Calls{0};
     /// CVC-12: how many times it failed mid-run and silently fell back.
     mutable uint64_t m_sgp4Fallbacks{0};
+
+    double m_simEpochUnixS{std::numeric_limits<double>::quiet_NaN()}; //!< R2: see SetSimulationEpochUnix
 
     // Cache.
     mutable bool m_cacheValid{false};

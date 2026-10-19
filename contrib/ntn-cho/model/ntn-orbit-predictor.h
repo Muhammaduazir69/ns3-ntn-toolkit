@@ -157,6 +157,15 @@ class NtnOrbitPredictor : public Object
     /// edge) rather than to a number tuned until the output looked reasonable.
     double GainThresholdForMinElevationDb(double minElevDeg, double satAltM) const;
 
+    /// R2: radius of the sphere on which the elevation-indexed beam and
+    /// GainThresholdForMinElevationDb map elevation to scan angle. Default
+    /// 6371 km (mean radius) for backward compatibility; a scenario whose
+    /// orbits and text use the WGS-84 equatorial radius sets 6378.137 km so
+    /// one constant serves both. The round trip elevation -> gain -> elevation
+    /// is exact for any value.
+    void SetReferenceEarthRadius(double radiusM) { m_refEarthRadiusM = radiusM; }
+    double GetReferenceEarthRadius() const { return m_refEarthRadiusM; }
+
     /// True when the analytic beam is in use rather than the pattern grid.
     bool UsingGeometricBeam() const { return m_geometricBeam; }
 
@@ -341,6 +350,7 @@ class NtnOrbitPredictor : public Object
     bool m_steeredBeam{false};        ///< CHO-2: boresight tracks the terminal
     double m_scanLossExp{1.2};        ///< CHO-2: cos^n scan-loss exponent
     bool m_elevIndexed{false};        ///< F13: scan loss indexed by topocentric elevation
+    double m_refEarthRadiusM{6371000.0}; ///< R2: sphere of the elevation/scan mapping
     double m_elevIndexedAltM{550e3};  ///< F13: nominal altitude of that mapping
 
   protected:

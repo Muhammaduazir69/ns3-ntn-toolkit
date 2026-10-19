@@ -1187,6 +1187,8 @@ NtnChoAlgorithm::SelectBestCandidate() const
                 margin += Seconds(m_config.tteMarginZ * sigmaS);
             }
             m_lastExitMargin = margin;
+            m_lastServingTte = servingTte.tte;
+            m_plannedTarget = admissible.empty() ? INVALID_CELL_ID : admissible.front()->cellId;
             if (!qualityLost && servingTte.tte > margin)
             {
                 return INVALID_CELL_ID; // serving cell still has life left
@@ -1217,10 +1219,29 @@ NtnChoAlgorithm::SelectBestCandidate() const
                         pool.push_back(&info);
                     }
                 }
+                if (m_config.escapeByQuality)
+                {
+                    // R2: the strongest candidate that is better than the
+                    // serving link, as the standardized fallback does.
+                    pool.erase(std::remove_if(pool.begin(), pool.end(),
+                                              [&](const CandidateInfo* c) {
+                                                  return !(c->sinr_dB > m_servingSinr_dB);
+                                              }),
+                               pool.end());
+                }
                 applyHold(pool);
                 if (pool.empty())
                 {
                     return INVALID_CELL_ID;
+                }
+                if (m_config.escapeByQuality)
+                {
+                    const CandidateInfo* bestQ = *std::max_element(
+                        pool.begin(), pool.end(), [](const CandidateInfo* a, const CandidateInfo* b) {
+                            return a->sinr_dB < b->sinr_dB;
+                        });
+                    m_lastSelectViaNet = true;
+                    return bestQ->cellId;
                 }
                 // An escape answers a measured loss, which the ephemeris cannot
                 // see. Ranking every candidate above the floor by predicted
