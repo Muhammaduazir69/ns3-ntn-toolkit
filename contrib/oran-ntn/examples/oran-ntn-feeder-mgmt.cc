@@ -1620,6 +1620,17 @@ SatRecv(int s, Ptr<Socket> sock)
             {
                 sat.leaseTauS = (h.untilNs - h.tSendNs) * 1e-9;
             }
+            if ((h.flags & 2) && h.ver <= sat.snap.ver)
+            {
+                // onboard-ttl lease refresh from the SMO: it names the current
+                // version, so only a held snapshot of that version is renewed
+                // (the same rule as the hybrids' heartbeat re-anchor, D20).
+                if (h.ver == sat.snap.ver)
+                {
+                    SatInstallPolicy(s, h.ver, h.v1, h.v2, NanoSeconds(h.untilNs));
+                }
+                break;
+            }
             SatInstallPolicy(s, h.ver, h.v1, h.v2, NanoSeconds(h.untilNs));
             MgmtHeader r;
             r.type = A1_ACK;
@@ -2129,6 +2140,28 @@ EnterAutonomy(int s)
     }
 }
 
+// onboard-ttl: the SMO refreshes the lease of the serving satellite's intent
+// at the heartbeat period with a small A1 message that names the current
+// version; the satellite renews only a snapshot of that version.
+void
+SmoLeaseRefreshLoop()
+{
+    Simulator::Schedule(Seconds(g.hbPeriodS), &SmoLeaseRefreshLoop);
+    const int s = servingIdx;
+    if (s < 0 || !gview[s].e2)
+    {
+        return;
+    }
+    MgmtHeader a;
+    a.type = A1_PUT;
+    a.flags = 2;
+    a.ver = smoCur.ver;
+    a.v1 = smoCur.g;
+    a.v2 = smoCur.h;
+    a.untilNs = OnbLeaseUntilNs();
+    SendToSat(s, a, PayloadSize(A1_ACK, 0), true);
+}
+
 void
 HbLoop()
 {
@@ -2262,28 +2295,13 @@ PalTick()
     }
 }
 
-// Satellite-side timers, every 100 ms (D18): the return of a lease granted
-// for a loss that did not come uses only the satellite's own state; in
-// onboard-ttl the held snapshot's lease is re-anchored while the satellite's
-// own feeder carrier is up, since the SMO pushes every new version at once
-// and retries every second while it is unacknowledged.
+// Satellite-side timer, every 100 ms (D18): the return of a lease granted
+// for a loss that did not come uses only the satellite's own state.
 void
 SatTick()
 {
     Simulator::Schedule(MilliSeconds(100), &SatTick);
     const Time now = Simulator::Now();
-    if (g.strat == Strategy::OnboardTtl)
-    {
-        for (int k = 0; k < static_cast<int>(sats.size()); ++k)
-        {
-            Sat& sat = sats[k];
-            if (IsServing(k) && sat.e2Setup && sat.linkUp && sat.snap.ver > 0 && sat.leaseTauS > 0)
-            {
-                SatInstallPolicy(k, sat.snap.ver, sat.snap.g, sat.snap.h,
-                                 now + Seconds(sat.leaseTauS));
-            }
-        }
-    }
     const int s = servingIdx;
     if (s < 0 || !IsPal() || g.strat == Strategy::PalGw)
     {
@@ -3237,6 +3255,10 @@ main(int argc, char* argv[])
         Simulator::Schedule(Seconds(g.a1RetryS), &SmoRetryLoop);
     }
     Simulator::Schedule(Seconds(0.1), &SatTick);
+    if (g.strat == Strategy::OnboardTtl)
+    {
+        Simulator::Schedule(Seconds(0.45), &SmoLeaseRefreshLoop);
+    }
     Simulator::Schedule(MilliSeconds(5), &BeamTick);
     if (UsesHeartbeat())
     {
