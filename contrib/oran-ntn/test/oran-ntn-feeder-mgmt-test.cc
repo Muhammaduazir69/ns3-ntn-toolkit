@@ -319,6 +319,14 @@ class OranNtnAuthorityLeaseRulesTest : public TestCase
                             Seconds(160), 1, 1e-3);
         NS_TEST_ASSERT_MSG_EQ_TOL(lv2.state[1], 0.35, 1e-12, "onboard lease write beats older ground");
         NS_TEST_ASSERT_MSG_EQ(lv2.directConflicts, 0u, "no ground write of p1 since lease start");
+        // A kept write under the safe intent (version 0) is a fallback, not a
+        // superseded intent (D10), and is still recomputed.
+        std::vector<L::Write> ob0 = {{1, 0.60, 0, Seconds(150), L::Host::Onboard}};
+        std::vector<L::Write> g0 = {{1, 0.30, 2, Seconds(90), L::Host::Ground}};
+        auto m0 = L::Merge(L::MergeRule::LeaseVersioned, g0, ob0, Seconds(100), Seconds(160), 2, 1e-3);
+        NS_TEST_ASSERT_MSG_EQ(m0.policyStaleWrites, 0u, "safe-intent write is not superseded");
+        NS_TEST_ASSERT_MSG_EQ(m0.fallbackWrites, 1u, "safe-intent write counted as fallback");
+        NS_TEST_ASSERT_MSG_EQ(m0.recompute.size(), 1u, "safe-intent write recomputed");
         Simulator::Destroy();
     }
 };

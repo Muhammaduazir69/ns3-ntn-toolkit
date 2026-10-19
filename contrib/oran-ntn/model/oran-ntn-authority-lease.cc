@@ -150,7 +150,17 @@ OranNtnAuthorityLease::Merge(MergeRule rule,
         r.winner[p] = win->writer;
         if (win->policyVersion < currentVersion)
         {
-            ++r.policyStaleWrites;
+            // A write under the safe intent (version 0) is a deliberate
+            // fallback after a lapsed lease, not a superseded intent; it is
+            // counted apart but still recomputed under the current intent.
+            if (win->policyVersion == 0)
+            {
+                ++r.fallbackWrites;
+            }
+            else
+            {
+                ++r.policyStaleWrites;
+            }
             if (rule == MergeRule::LeaseVersioned)
             {
                 r.recompute.push_back(p);

@@ -68,7 +68,8 @@ class OranNtnAuthorityLease : public Object
         std::map<uint32_t, double> state;  //!< reconciled value per parameter
         std::map<uint32_t, Host> winner;   //!< which side's write was kept
         uint32_t directConflicts{0};       //!< both wrote under one version, values differ
-        uint32_t policyStaleWrites{0};     //!< kept writes under an old version
+        uint32_t policyStaleWrites{0};     //!< kept writes under an older operational version (> 0)
+        uint32_t fallbackWrites{0};        //!< kept writes under the safe intent (version 0)
         std::vector<uint32_t> recompute;   //!< parameters to recompute
     };
 
