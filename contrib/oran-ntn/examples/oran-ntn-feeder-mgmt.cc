@@ -1168,6 +1168,7 @@ SatResume(int s)
     MgmtHeader r;
     r.type = HB_ACK;
     r.flags = 1;
+    r.untilNs = sat.autonomyStart.GetNanoSeconds(); // t0 of the on-board log (M4b)
     r.v2 = Demand();
     r.tMeasNs = Simulator::Now().GetNanoSeconds();
     r.ver = sat.shareVer;
@@ -1203,6 +1204,7 @@ SatSendRecon(int s)
     r.ver = sat.shareVer;
     r.v1 = sat.share;
     r.v2 = Demand();
+    r.untilNs = sat.autonomyStart.GetNanoSeconds(); // t0 of the on-board log (M4b)
     r.tMeasNs = Simulator::Now().GetNanoSeconds();
     reconSnap[s] = sat.log;
     SendSatMsg(s, r, PayloadSize(RECON, static_cast<uint32_t>(sat.log.size())));
@@ -1365,10 +1367,11 @@ ReconcileGroundWins(int s, const MgmtHeader& h)
     const Policy p = FromA1(*ricA1);
     const double gDecision = Decide(h.v2, p);
     std::vector<L::Write> gl = {{1, gDecision, p.ver, Simulator::Now(), L::Host::Ground}};
+    const Time t0 = h.untilNs > 0 ? NanoSeconds(h.untilNs) : gv.leaseStart; // from the message (M4b)
     auto m = L::Merge(L::MergeRule::GroundWins,
                       gl,
                       reconSnap[s],
-                      gv.leaseStart,
+                      t0,
                       Simulator::Now(),
                       smoCur.ver,
                       0.01);
@@ -1451,10 +1454,11 @@ RicRecv(Ptr<Socket> sock)
             GroundView& gv = gview[s];
             const Policy cur = FromA1(*ricA1);
             const std::vector<L::Write> ol = reconSnap[s];
+            const Time t0 = h.untilNs > 0 ? NanoSeconds(h.untilNs) : gv.leaseStart; // (M4b)
             auto m = L::Merge(L::MergeRule::LeaseVersioned,
                               groundLog[s],
                               ol,
-                              gv.leaseStart,
+                              t0,
                               Simulator::Now(),
                               cur.ver,
                               0.01);
@@ -1470,7 +1474,7 @@ RicRecv(Ptr<Socket> sock)
                 direct = L::Merge(L::MergeRule::GroundWins,
                                   gl,
                                   ol,
-                                  gv.leaseStart,
+                                  t0,
                                   Simulator::Now(),
                                   cur.ver,
                                   0.01)
@@ -1514,17 +1518,10 @@ RicRecv(Ptr<Socket> sock)
                 // Apply the merge (D5): when the authoritative write is the
                 // ground's and it differs from what the satellite holds, the
                 // reconciled value is sent back with the authority.
+                // Compare with the share the satellite reports holding (M4c).
                 const auto w = m.winner.find(1);
-                const L::Write* lastOb = nullptr;
-                for (const auto& x : ol)
-                {
-                    if (x.paramId == 1 && (!lastOb || x.at >= lastOb->at))
-                    {
-                        lastOb = &x;
-                    }
-                }
                 if (w != m.winner.end() && w->second == L::Host::Ground && m.state.count(1) &&
-                    (!lastOb || std::fabs(lastOb->value - m.state.at(1)) > 0.01))
+                    std::fabs(h.v1 - m.state.at(1)) > 0.01)
                 {
                     r.flags |= 1;
                     r.seq = static_cast<uint32_t>(std::lround(m.state.at(1) * 1e6));
@@ -1696,9 +1693,18 @@ HbLoop()
     if (sat.hbArmed && !sat.autonomous && Simulator::Now() - sat.lastHbRx > to)
     {
         sat.autonomous = true;
-        sat.autonomyStart = Simulator::Now();
-        gv.leaseStart = sat.autonomyStart;
-        sat.log.clear();
+        // A satellite that already holds a lease has had authority since the
+        // grant: keep its log and start (M4a). Otherwise authority starts now.
+        bool leasedAny = false;
+        for (int c = 0; c < kClasses; ++c)
+        {
+            leasedAny = leasedAny || sat.leased[c];
+        }
+        if (!leasedAny)
+        {
+            sat.autonomyStart = Simulator::Now();
+            sat.log.clear();
+        }
         ++st.autonomyEntries;
         if (sat.linkUp)
         {
@@ -1817,6 +1823,7 @@ PalTick()
             r.ver = sat.shareVer;
             r.v1 = sat.share;
             r.v2 = Demand();
+            r.untilNs = sat.autonomyStart.GetNanoSeconds(); // t0 (M4b)
             r.tMeasNs = now.GetNanoSeconds();
             reconSnap[s] = sat.log;
             SendSatMsg(s, r, PayloadSize(RECON, static_cast<uint32_t>(sat.log.size())));
