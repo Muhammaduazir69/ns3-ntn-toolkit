@@ -49,8 +49,12 @@
 //   pal-nopre pal without pre-provisioning (ablation)
 //   pal-gw    pal with ground-wins reconciliation (ablation)
 //   onboard-ttl  onboard, but the satellite's A1 copy carries the same lease
-//             as pal (re-anchored while its feeder carrier is up, then the
-//             safe intent): the strongest on-board baseline (review D1)
+//             as pal (renewed by an SMO refresh that names the held version,
+//             then the safe intent): the strongest on-board baseline (review D1)
+//   sat-pred  reactive-ttl-pre, plus satellite-side prediction (review
+//             R3-M4): the satellite itself enters autonomy T_lead before the
+//             loss its own on-board contact plan predicts, with no LEASE from
+//             the RIC, and resumes through the ground-wins path
 //
 // Variants (all strategies): --softSwitch (Rel-17 make-before-break feeder
 // switch-over, no gap on a geometric gateway change), --linkDetectS (the
@@ -196,7 +200,8 @@ enum class Strategy
     Pal,
     PalNoPre,
     PalGw,
-    OnboardTtl
+    OnboardTtl,
+    SatPred
 };
 
 constexpr int kRT = 0;
@@ -337,6 +342,9 @@ struct Sat
     double lastDemand{0};
     Time lastDemandAt{Seconds(0)};
     uint32_t seq{0};
+    // sat-pred: autonomy entered from the on-board contact plan (R3-M4)
+    bool predAuto{false};
+    Time predAt{Seconds(0)};
 };
 
 struct Stats
@@ -347,6 +355,10 @@ struct Stats
     // NS / policy
     uint64_t slaSamples{0}, slaViol{0};
     double overSum{0};
+    // Shortfall depth (review R2-M5): sum of (r - x)^+ over the samples, and
+    // the same sum over the samples counted as short (x < r - 0.01).
+    double shortSum{0}, shortSumViol{0};
+    uint64_t satPredEntries{0}; // sat-pred: predictive autonomy entries
     uint64_t nsDecisions{0}, nsSuperseded{0};
     std::vector<float> staleS; // time since the used version was superseded
     std::vector<float> policyAgeS;
@@ -458,6 +470,7 @@ uint64_t rtGroundFeasibleTicks = 0, rtTicks = 0;
 // SLA violation breakdown: [linkUp][appliedVersionCurrent]
 uint64_t catSamp[4] = {0, 0, 0, 0}, catViol[4] = {0, 0, 0, 0};
 double catOver[4] = {0, 0, 0, 0};
+double catShort[4] = {0, 0, 0, 0}; // shortfall depth by state of the applied share
 uint64_t violBy[2][2] = {{0, 0}, {0, 0}}, sampBy[2][2] = {{0, 0}, {0, 0}};
 
 // Demand process
@@ -707,7 +720,7 @@ bool
 IsReactiveLike()
 {
     return g.strat == Strategy::Reactive || g.strat == Strategy::ReactiveTtl ||
-           g.strat == Strategy::ReactiveTtlPre;
+           g.strat == Strategy::ReactiveTtlPre || g.strat == Strategy::SatPred;
 }
 
 // Strategies whose satellite-side A1 copy carries a validUntil lease.
@@ -715,7 +728,7 @@ bool
 IsLeasing()
 {
     return IsPal() || g.strat == Strategy::ReactiveTtl || g.strat == Strategy::ReactiveTtlPre ||
-           g.strat == Strategy::OnboardTtl;
+           g.strat == Strategy::OnboardTtl || g.strat == Strategy::SatPred;
 }
 
 // Strategies that provision the next serving satellite in advance.
@@ -723,7 +736,7 @@ bool
 UsesPreprov()
 {
     return g.strat == Strategy::Pal || g.strat == Strategy::PalGw ||
-           g.strat == Strategy::ReactiveTtlPre;
+           g.strat == Strategy::ReactiveTtlPre || g.strat == Strategy::SatPred;
 }
 
 bool
@@ -1008,6 +1021,7 @@ HostedOnboard(int cls, const Sat& s)
     case Strategy::Reactive:
     case Strategy::ReactiveTtl:
     case Strategy::ReactiveTtlPre:
+    case Strategy::SatPred:
         return cls == kRT || s.autonomous;
     default:
         // PAL pins RT on board: the placement rule is evaluated for RT every
@@ -1331,6 +1345,7 @@ GroundNeedsSub(int cls)
     case Strategy::Reactive:
     case Strategy::ReactiveTtl:
     case Strategy::ReactiveTtlPre:
+    case Strategy::SatPred:
         return cls != kRT;
     default:
         return cls != kRT; // pal: RT is never placed on the ground (predicted loop > 10 ms)
@@ -1513,6 +1528,7 @@ SatResume(int s)
 {
     Sat& sat = sats[s];
     sat.autonomous = false;
+    sat.predAuto = false;
     // Link-up is contact: restart the heartbeat timeout here, or the next
     // check would put the satellite straight back into autonomy before any
     // ground message has had time to arrive.
@@ -1675,7 +1691,16 @@ SatRecv(int s, Ptr<Socket> sock)
                 // it only keeps the snapshot's lease anchored.
                 break;
             }
-            if (wasAuto && (!IsPal() || g.strat == Strategy::PalGw))
+            if (wasAuto && g.strat == Strategy::SatPred && sat.predAuto)
+            {
+                // sat-pred: autonomy taken from the on-board plan ahead of a
+                // predicted loss is kept while the feeder is still up; the
+                // satellite returns it itself (SatTick) or at link-up.
+                MgmtHeader r;
+                r.type = HB_ACK;
+                SendSatMsg(s, r, 0);
+            }
+            else if (wasAuto && (!IsPal() || g.strat == Strategy::PalGw))
             {
                 SatResume(s);
             }
@@ -2303,6 +2328,31 @@ SatTick()
     Simulator::Schedule(MilliSeconds(100), &SatTick);
     const Time now = Simulator::Now();
     const int s = servingIdx;
+    if (s >= 0 && g.strat == Strategy::SatPred)
+    {
+        // Satellite-side prediction (R3-M4): the satellite evaluates its own
+        // on-board contact plan (same ephemeris error as the RIC's plan) and
+        // takes the near-RT classes T_lead before the predicted loss, with
+        // no message from the ground. Same lead and the same return-after
+        // T_lead + 1 s rule as PAL, decided from on-board state only.
+        Sat& sat = sats[s];
+        if (sat.predAuto && sat.autonomous && sat.linkUp &&
+            now - sat.predAt > Seconds(g.leadS + 1.0))
+        {
+            SatResume(s); // the predicted loss did not come
+        }
+        else if (!sat.autonomous && sat.linkUp && sat.e2Setup && sat.hbArmed &&
+                 PredLoss(s) - now < Seconds(g.leadS))
+        {
+            sat.autonomous = true;
+            sat.predAuto = true;
+            sat.predAt = now;
+            sat.autonomyStart = now;
+            sat.log.clear();
+            ++st.satPredEntries;
+        }
+        return;
+    }
     if (s < 0 || !IsPal() || g.strat == Strategy::PalGw)
     {
         return;
@@ -2585,6 +2635,7 @@ TopoTick()
             ps.subscribed = {false, false, false};
             ps.leased = {false, false, false};
             ps.autonomous = false;
+            ps.predAuto = false;
             ps.hbArmed = false;
             ps.provisioned = false;
             ps.buf.clear();
@@ -2739,11 +2790,14 @@ SlaTick()
                     : sat.shareVer < smoCur.ver ? 2 : 3;
     ++catSamp[cat];
     catOver[cat] += std::max(0.0, a - r);
+    catShort[cat] += std::max(0.0, r - a);
+    st.shortSum += std::max(0.0, r - a);
     if (a < r - 0.01)
     {
         ++st.slaViol;
         ++violBy[lu][vc];
         ++catViol[cat];
+        st.shortSumViol += r - a;
     }
     st.overSum += std::max(0.0, a - r);
 }
@@ -2801,7 +2855,9 @@ main(int argc, char* argv[])
 {
     std::string strat = "pal";
     CommandLine cmd(__FILE__);
-    cmd.AddValue("strategy", "ground|onboard|reactive|reactive-ttl|pal|pal-nopre|pal-gw", strat);
+    cmd.AddValue("strategy",
+                 "ground|onboard|onboard-ttl|reactive|reactive-ttl|reactive-ttl-pre|pal|pal-nopre|pal-gw|sat-pred",
+                 strat);
     cmd.AddValue("simSeconds", "simulated time (s)", g.simS);
     cmd.AddValue("shell", "550 (Walker-Delta 1584/72/1, 53 deg) or 1200 (Walker-Star 648/18, 87.9 deg)", g.shell);
     cmd.AddValue("numGw", "number of gateways (1-4)", g.numGw);
@@ -2854,6 +2910,8 @@ main(int argc, char* argv[])
         g.strat = Strategy::PalGw;
     else if (strat == "onboard-ttl")
         g.strat = Strategy::OnboardTtl;
+    else if (strat == "sat-pred")
+        g.strat = Strategy::SatPred;
     else
         NS_ABORT_MSG("unknown strategy " << strat);
     NS_ABORT_MSG_IF(g.numGw < 1 || g.numGw > 4, "numGw must be 1..4");
@@ -3313,6 +3371,7 @@ main(int argc, char* argv[])
                 f << nm;
             }
         }
+        f << ",short_depth_mean,short_depth_cond,sat_pred_entries";
         f << "\n";
         uint32_t closed = 0;
         std::vector<float> ttc, conf, pconf, bo;
@@ -3392,6 +3451,8 @@ main(int argc, char* argv[])
                 f << "," << (beamSamp ? double(beamMis[i][j]) / beamSamp : 0.0);
             }
         }
+        f << "," << (st.slaSamples ? st.shortSum / st.slaSamples : 0) << ","
+          << (st.slaViol ? st.shortSumViol / st.slaViol : 0) << "," << st.satPredEntries;
         f << "\n";
     }
     {
@@ -3453,13 +3514,18 @@ main(int argc, char* argv[])
         f << "rt_ticks,rt_ground_feasible_ticks,samp_down_stale,samp_down_cur,samp_up_stale,samp_up_cur,"
              "viol_down_stale,viol_down_cur,viol_up_stale,viol_up_cur,"
              "samp_default,viol_default,over_default,samp_fallback,viol_fallback,over_fallback,"
-             "samp_stale,viol_stale,over_stale,samp_current,viol_current,over_current\n"
+             "samp_stale,viol_stale,over_stale,samp_current,viol_current,over_current,"
+             "short_default,short_fallback,short_stale,short_current\n"
           << rtTicks << "," << rtGroundFeasibleTicks << "," << sampBy[0][0] << "," << sampBy[0][1] << ","
           << sampBy[1][0] << "," << sampBy[1][1] << "," << violBy[0][0] << "," << violBy[0][1] << ","
           << violBy[1][0] << "," << violBy[1][1];
         for (int k = 0; k < 4; ++k)
         {
             f << "," << catSamp[k] << "," << catViol[k] << "," << catOver[k];
+        }
+        for (int k = 0; k < 4; ++k)
+        {
+            f << "," << catShort[k];
         }
         f << "\n";
     }
