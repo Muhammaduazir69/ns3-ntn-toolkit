@@ -56,9 +56,12 @@
  *    decorrelation distance of Table 6.7.2-5a, which is how 3GPP specifies it;
  *    a change of the link's 10-degree elevation bin (the satellite's own
  *    motion) starts a new realization at that bin's sigma.
- *  - Interference: none. Satellites covering the same area are assumed to use
- *    orthogonal resources, so SINR is SNR. A co-channel study would change
- *    absolute SINR, not the geometry every exit time is measured on.
+ *  - Interference: none by default. Satellites covering the same area are
+ *    assumed to use orthogonal resources, so SINR is SNR. --interfReuse=K
+ *    puts satellite s on carrier s mod K and adds every other covering
+ *    satellite on that carrier at its main-lobe power less --interfCouplingDb
+ *    (default 17.6 dB, the first sidelobe of the TR 38.811 aperture pattern),
+ *    times --interfLoad, to every measured quality (m9 sensitivity).
  *  - Measurement: L1 sample every 100 ms with 1 dB measurement error, layer-3
  *    filter of TS 38.331 Section 5.5.3.2 with filterCoefficient k = 4, its
  *    coefficient adapted to the 100 ms input period. Decisions run at every
@@ -324,6 +327,14 @@ struct Params
     double tleAltMinKm = 455.0;
     double tleAltMaxKm = 485.0;
     double tleStartSpreadH = 1.0;     // start at the median truth epoch +- this
+    // m9 (round 3): co-channel inter-satellite interference sensitivity. 0 = off
+    // (orthogonal resources, quality is SNR). K > 0: satellite s uses carrier
+    // s mod K and every other covering satellite on that carrier interferes at
+    // its received main-lobe power less interfCouplingDb (its beam serves a
+    // neighboring cell), times the activity factor interfLoad.
+    uint32_t interfReuse = 0;
+    double interfCouplingDb = 17.6;   // first sidelobe of the TR 38.811 aperture pattern
+    double interfLoad = 1.0;
     // CHO common
     double qualityThDb = -3.0;
     uint32_t maxCandidates = 8;
@@ -406,6 +417,8 @@ struct LinkState
     double slantM = 0.0;
     double scanLossDb = 0.0;
     bool covered = false;
+    double rxDbm = 0.0;       // m9: received main-lobe power this tick (interference mode)
+    double measErr = 0.0;     // m9: this tick's measurement-error draw (interference mode)
 };
 
 struct UeCtx
@@ -713,9 +726,47 @@ MeasureUe(UeCtx& u, const Vector& uePos)
         const double rx = (ls.los ? g_plEnv[u.env] : g_plNlosEnv[u.env])->CalcRxPower(g_eirpDbm, g_sats[s], u.mob) +
                           ls.scanLossDb -
                           ls.sf - g_p.polLossDb;
+        if (g_p.interfReuse > 0)
+        {
+            // m9: the SINR needs every covering satellite's power, so keep the
+            // sample and the error draw (same stream position) and finish below
+            ls.rxDbm = rx;
+            ls.measErr = g_p.measErrDb * g_norm->GetValue();
+            continue;
+        }
         const double sinr = rx - g_noiseDbm + g_p.measErrDb * g_norm->GetValue();
         ls.l1 = sinr;
         ls.l3 = (ls.l3 <= kNegInf + 1.0) ? sinr : (1.0 - a) * ls.l3 + a * sinr;
+    }
+    if (g_p.interfReuse > 0)
+    {
+        // m9: co-channel interference. Satellite s transmits on carrier
+        // s mod K (bandwidth B/K at the same EIRP density, so the SNR is
+        // unchanged); each other covering satellite on that carrier reaches the
+        // terminal at its main-lobe power less the coupling, times the load.
+        const uint32_t k = g_p.interfReuse;
+        std::vector<double> sumMw(k, 0.0);
+        for (const auto& [sat, ls] : u.links)
+        {
+            if (ls.covered)
+            {
+                sumMw[sat % k] += std::pow(10.0, ls.rxDbm / 10.0);
+            }
+        }
+        const double nMw = std::pow(10.0, g_noiseDbm / 10.0);
+        const double cpl = g_p.interfLoad * std::pow(10.0, -g_p.interfCouplingDb / 10.0);
+        for (auto& [sat, ls] : u.links)
+        {
+            if (!ls.covered)
+            {
+                continue;
+            }
+            const double own = std::pow(10.0, ls.rxDbm / 10.0);
+            const double iMw = cpl * std::max(0.0, sumMw[sat % k] - own);
+            const double sinr = ls.rxDbm - 10.0 * std::log10(nMw + iMw) + ls.measErr;
+            ls.l1 = sinr;
+            ls.l3 = (ls.l3 <= kNegInf + 1.0) ? sinr : (1.0 - a) * ls.l3 + a * sinr;
+        }
     }
     for (auto& [sat, ls] : u.links)
     {
@@ -1665,6 +1716,10 @@ main(int argc, char* argv[])
     cmd.AddValue("losModel", "R2: LOS-state process, redraw | markov", p.losModel);
     cmd.AddValue("losCorrM", "R2: LOS-state correlation distance (m)", p.losCorrM);
     cmd.AddValue("losCorrDeg", "R2: markov LOS angular decorrelation (deg)", p.losCorrDeg);
+    cmd.AddValue("interfReuse", "m9: co-channel interference, carriers K (0 = none, SNR)", p.interfReuse);
+    cmd.AddValue("interfCouplingDb", "m9: co-channel satellite attenuation below its main lobe (dB)",
+                 p.interfCouplingDb);
+    cmd.AddValue("interfLoad", "m9: activity factor of the interfering satellites", p.interfLoad);
     cmd.AddValue("ephModel", "R2: network ephemeris copy, propagated | offset", p.ephModel);
     cmd.AddValue("escapeByQuality", "R2: safety-net escape to the strongest candidate better than serving",
                  p.escapeByQuality);
@@ -2122,7 +2177,13 @@ main(int argc, char* argv[])
               << " sats=" << g_sats.size() << " ues=" << p.numUes << " T=" << p.simTime
               << " s run=" << p.rngRun << " EIRP=" << g_eirpDbm << " dBm N=" << g_noiseDbm
               << " dBm coverGainTh=" << g_coverGainTh << " dB tteGainTh=" << g_tteGainTh << " dB eph(R,A,C)=(" << p.ephSigmaRadialM
-              << "," << p.ephSigmaAlongM << "," << p.ephSigmaCrossM << ") m\n";
+              << "," << p.ephSigmaAlongM << "," << p.ephSigmaCrossM << ") m";
+    if (p.interfReuse > 0)
+    {
+        std::cout << " interf(K,coupling,load)=(" << p.interfReuse << "," << p.interfCouplingDb << ","
+                  << p.interfLoad << ")";
+    }
+    std::cout << "\n";
 
     if (p.mode == "tte-accuracy")
     {
