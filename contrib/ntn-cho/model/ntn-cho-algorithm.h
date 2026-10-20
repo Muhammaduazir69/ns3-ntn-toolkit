@@ -858,6 +858,17 @@ class NtnChoAlgorithm : public Object
      */
     void SetCandidateAdmittedCallback(CandidateAdmittedCallback cb);
 
+    /**
+     * Per-satellite ephemeris sigmas for the exit margin, as (radial, along,
+     * cross) in metres, indexed by satellite id. When set, the exit-triggered
+     * margin uses these sigmas for the serving satellite instead of the
+     * config's single triple, so the network can budget, for instance, each
+     * satellite by the age of its element set. Null (the default) keeps the
+     * config sigmas.
+     */
+    typedef Callback<Vector, uint32_t> EphSigmaProvider;
+    void SetEphSigmaProvider(EphSigmaProvider cb);
+
     // Trace sources
     TracedCallback<uint16_t, uint16_t, Time> m_handoverExecutedTrace;
     //              source,  target,  timeOfStay
@@ -897,6 +908,7 @@ class NtnChoAlgorithm : public Object
     ChoState m_state;                                  //!< Current state
     mutable Time m_servingBelowFloorSince{Seconds(-1)}; //!< serving below tteServingFloor_dB since
     mutable Time m_lastExitMargin{Seconds(0)}; //!< last exit-triggered margin applied
+    EphSigmaProvider m_ephSigmaProvider; //!< per-satellite margin sigmas (null: config)
     mutable bool m_lastSelectViaNet{false};    //!< N3: last selection used the safety net
     mutable Time m_lastServingTte{Seconds(-1)}; //!< R2: last serving time to exit
     mutable uint16_t m_plannedTarget{0};        //!< R2: planned target at the last evaluation

@@ -1172,17 +1172,26 @@ NtnChoAlgorithm::SelectBestCandidate() const
             const bool qualityLost =
                 belowFloor && (now - m_servingBelowFloorSince >= m_config.tteServingFloorTtt);
             Time margin = m_config.tteExitMargin;
-            if (m_config.ephSigmaRadialM > 0.0 || m_config.ephSigmaAlongM > 0.0 ||
-                m_config.ephSigmaCrossM > 0.0)
+            double sigR = m_config.ephSigmaRadialM;
+            double sigA = m_config.ephSigmaAlongM;
+            double sigC = m_config.ephSigmaCrossM;
+            if (!m_ephSigmaProvider.IsNull())
+            {
+                const Vector sig = m_ephSigmaProvider(servingIt->satId);
+                sigR = sig.x;
+                sigA = sig.y;
+                sigC = sig.z;
+            }
+            if (sigR > 0.0 || sigA > 0.0 || sigC > 0.0)
             {
                 const double sigmaS = m_tteEstimator->ComputeTteSigma(m_uePosition,
                                                                       m_ueVelocity,
                                                                       servingIt->satId,
                                                                       servingIt->beamId,
                                                                       m_config.gainThreshold_dB,
-                                                                      m_config.ephSigmaRadialM,
-                                                                      m_config.ephSigmaAlongM,
-                                                                      m_config.ephSigmaCrossM);
+                                                                      sigR,
+                                                                      sigA,
+                                                                      sigC);
                 m_tteEvalCount += 7;
                 margin += Seconds(m_config.tteMarginZ * sigmaS);
             }
@@ -1699,6 +1708,12 @@ void
 NtnChoAlgorithm::SetHandoverExecutionCallback(HandoverExecutionCallback cb)
 {
     m_hoCallback = cb;
+}
+
+void
+NtnChoAlgorithm::SetEphSigmaProvider(EphSigmaProvider cb)
+{
+    m_ephSigmaProvider = cb;
 }
 
 void

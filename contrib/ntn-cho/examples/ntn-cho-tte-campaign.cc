@@ -393,6 +393,15 @@ struct Params
     std::string ephErrorFile;
     double ephAgeMinH = 0.0;
     double ephAgeMaxH = 1e9;
+    // Age-aware margin (round 4, pre-registered): CSV of the measured one-sigma
+    // RTN error by element-set age bin (age_lo_h,age_hi_h,n,s68_r_m,s68_a_m,
+    // s68_c_m). With marginByAge, tte-cho budgets each serving satellite by the
+    // sigmas of its element set's age bin instead of the assumed triple.
+    std::string ageSigmaTable;
+    bool marginByAge = false;
+    // Gaussian error with age: each satellite draws an age bin (weights n) and
+    // its copy a Gaussian RTN offset with that bin's sigmas (needs the table)
+    bool ephGaussByAge = false;
     // accuracy mode
     uint32_t accuracySamples = 2000;
     int32_t traceUe = -1; // write trace.csv for this terminal (1 s cadence)
@@ -484,6 +493,34 @@ Ptr<NtnTteEstimator> g_tteEnv[4];
 std::vector<Ptr<Sgp4MobilityModel>> g_net; // R2 (M10): the network's own copy of each orbit
 bool g_ephActive = false;                  // any ephemeris error injected
 std::vector<Vector> g_ephDrawn;            // R2: drawn RTN error per satellite at t = 0
+// Age-aware margin: the measured sigma table and the age (h) of the network's
+// element set of each satellite at t = 0 (real shell: start minus the GP epoch)
+struct AgeBin
+{
+    double lo;
+    double hi;
+    double n;
+    Vector sig; // (radial, along, cross), m
+};
+std::vector<AgeBin> g_ageTable;
+std::vector<double> g_satAge0H;
+bool g_marginByAge = false;
+
+Vector
+AgeSigmaOf(uint32_t sat)
+{
+    const double age = g_satAge0H.at(sat) + Simulator::Now().GetSeconds() / 3600.0;
+    // step lookup: the bin that contains the age; the first bin also takes
+    // negative ages and the last one is open
+    for (size_t k = 1; k < g_ageTable.size(); ++k)
+    {
+        if (age < g_ageTable[k].lo)
+        {
+            return g_ageTable[k - 1].sig;
+        }
+    }
+    return g_ageTable.back().sig;
+}
 Ptr<UniformRandomVariable> g_uni;
 Ptr<NormalRandomVariable> g_norm;
 double g_noiseDbm = 0.0;
@@ -838,12 +875,16 @@ ExecMarginFor(const UeCtx& u)
     // latency plus z sigma of the predicted exit, as NtnChoAlgorithm computes it.
     double m = g_p.execMarginS;
     const auto cfg = u.cho->GetConfig();
-    if (cfg.ephSigmaRadialM > 0.0 || cfg.ephSigmaAlongM > 0.0 || cfg.ephSigmaCrossM > 0.0)
+    Vector sig(cfg.ephSigmaRadialM, cfg.ephSigmaAlongM, cfg.ephSigmaCrossM);
+    if (g_marginByAge)
+    {
+        sig = AgeSigmaOf(static_cast<uint32_t>(u.serving)); // as the algorithm's provider
+    }
+    if (sig.x > 0.0 || sig.y > 0.0 || sig.z > 0.0)
     {
         m += g_p.marginZ * u.tte->ComputeTteSigma(GeoOf(u.tickPos), u.tickVel,
                                                   static_cast<uint32_t>(u.serving), 0,
-                                                  g_tteGainTh, cfg.ephSigmaRadialM,
-                                                  cfg.ephSigmaAlongM, cfg.ephSigmaCrossM);
+                                                  g_tteGainTh, sig.x, sig.y, sig.z);
     }
     return m;
 }
@@ -1711,6 +1752,11 @@ main(int argc, char* argv[])
                  "err_r_m,err_a_m,err_c_m); replaces the Gaussian draw", p.ephErrorFile);
     cmd.AddValue("ephAgeMinH", "N4: minimum element-set age (h) of the drawn samples", p.ephAgeMinH);
     cmd.AddValue("ephAgeMaxH", "N4: maximum element-set age (h), exclusive", p.ephAgeMaxH);
+    cmd.AddValue("ageSigmaTable", "CSV of one-sigma RTN error by element-set age bin", p.ageSigmaTable);
+    cmd.AddValue("marginByAge", "tte-cho margin budgets each satellite by its age bin (needs ageSigmaTable)",
+                 p.marginByAge);
+    cmd.AddValue("ephGaussByAge", "Gaussian copy error with the sigmas of a drawn age bin (needs ageSigmaTable)",
+                 p.ephGaussByAge);
     cmd.AddValue("reestBaseMs", "re-establishment base time (ms), before the RACH over the slant", p.reestBaseMs);
     cmd.AddValue("classEnv", "R2: per-class environment (aircraft/ship LOS, train rural)", p.classEnv);
     cmd.AddValue("losModel", "R2: LOS-state process, redraw | markov", p.losModel);
@@ -1736,6 +1782,35 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     NS_ABORT_MSG_IF(p.losModel != "redraw" && p.losModel != "markov", "unknown --losModel");
     NS_ABORT_MSG_IF(p.ephModel != "propagated" && p.ephModel != "offset", "unknown --ephModel");
+    if (!p.ageSigmaTable.empty())
+    {
+        std::ifstream at(p.ageSigmaTable);
+        NS_ABORT_MSG_IF(!at.good(), "cannot read --ageSigmaTable " << p.ageSigmaTable);
+        std::string line;
+        std::getline(at, line); // header
+        while (std::getline(at, line))
+        {
+            std::stringstream ss(line);
+            std::string f[6];
+            for (int k = 0; k < 6 && std::getline(ss, f[k], ','); ++k)
+            {
+            }
+            if (f[5].empty())
+            {
+                continue;
+            }
+            g_ageTable.push_back({std::stod(f[0]), std::stod(f[1]), std::stod(f[2]),
+                                  Vector(std::stod(f[3]), std::stod(f[4]), std::stod(f[5]))});
+        }
+        NS_ABORT_MSG_IF(g_ageTable.empty(), "empty --ageSigmaTable");
+    }
+    // the margin by age is a property of the exit-triggered margin rule only
+    NS_ABORT_MSG_IF(p.marginByAge && (p.policy != "tte-cho" || g_ageTable.empty()),
+                    "--marginByAge needs --policy=tte-cho and --ageSigmaTable");
+    g_marginByAge = p.marginByAge;
+    NS_ABORT_MSG_IF(p.ephGaussByAge && g_ageTable.empty(), "--ephGaussByAge needs --ageSigmaTable");
+    NS_ABORT_MSG_IF(p.ephGaussByAge && (!p.tleTruthFile.empty() || !p.ephErrorFile.empty()),
+                    "--ephGaussByAge is a synthetic-shell error model");
 
     if (!p.ephErrorFile.empty())
     {
@@ -1845,6 +1920,9 @@ main(int argc, char* argv[])
             }
             g_sats.push_back(mt);
             tleNet.push_back(mn);
+            KeplerianElements kn;
+            nr.ToKeplerian(kn);
+            g_satAge0H.push_back((tleStartUnix - kn.epoch_unix_s) / 3600.0);
         }
     }
     else
@@ -1981,7 +2059,15 @@ main(int argc, char* argv[])
     ephPick->SetStream(3100);
     std::ofstream ephLog;
     const bool anyGauss = p.ephSigmaRadialM > 0.0 || p.ephSigmaAlongM > 0.0 || p.ephSigmaCrossM > 0.0;
-    g_ephActive = tleMode || anyGauss || !ephRows.empty();
+    g_ephActive = tleMode || anyGauss || !ephRows.empty() || p.ephGaussByAge;
+    Ptr<UniformRandomVariable> agePick;
+    if (p.ephGaussByAge)
+    {
+        // own stream, so every other draw is unchanged by the age model
+        agePick = CreateObject<UniformRandomVariable>();
+        agePick->SetStream(3200);
+        g_satAge0H.assign(g_sats.size(), 0.0);
+    }
     if (g_ephActive)
     {
         if (!ephLog.is_open())
@@ -1999,6 +2085,30 @@ main(int argc, char* argv[])
         double ea = p.ephSigmaAlongM * ephDraw->GetValue();
         double ec = p.ephSigmaCrossM * ephDraw->GetValue();
         double rate = 0.0;
+        if (p.ephGaussByAge)
+        {
+            // an age bin with probability n / N, the age uniform inside it
+            // (24 to 48 h for the open bin), and the bin's sigmas for the draw
+            double tot = 0.0;
+            for (const auto& b : g_ageTable)
+            {
+                tot += b.n;
+            }
+            double x = agePick->GetValue(0.0, tot);
+            size_t k = 0;
+            while (k + 1 < g_ageTable.size() && x >= g_ageTable[k].n)
+            {
+                x -= g_ageTable[k].n;
+                ++k;
+            }
+            const auto& b = g_ageTable[k];
+            const double hi = std::min(b.hi, b.lo + 24.0);
+            g_satAge0H[s] = agePick->GetValue(b.lo, hi);
+            const Vector sg = AgeSigmaOf(static_cast<uint32_t>(s));
+            er = sg.x * ephDraw->GetValue();
+            ea = sg.y * ephDraw->GetValue();
+            ec = sg.z * ephDraw->GetValue();
+        }
         if (!ephRows.empty())
         {
             const uint32_t k = ephPick->GetInteger(0, static_cast<uint32_t>(ephRows.size() - 1));
@@ -2061,6 +2171,22 @@ main(int argc, char* argv[])
         ephLog.close();
         std::cout << "eph-check: model=" << (tleMode ? "tle" : p.ephModel) << " " << ephRows.size()
                   << " file rows, max |copy - true - drawn RTN| at t=0 = " << ephCheckMax << " m\n";
+    }
+    if (g_marginByAge || p.ephGaussByAge)
+    {
+        // the element-set age of every satellite and the sigmas it is budgeted with at t = 0
+        NS_ABORT_MSG_IF(g_satAge0H.size() != g_sats.size(), "no element-set age for some satellites");
+        std::ofstream al(p.outputDir + "/sat_ages.csv");
+        al << "sat,age0_h,sig_r_m,sig_a_m,sig_c_m\n";
+        for (size_t s = 0; s < g_sats.size(); ++s)
+        {
+            const Vector sg = AgeSigmaOf(static_cast<uint32_t>(s));
+            al << s << "," << std::setprecision(6) << g_satAge0H[s] << "," << sg.x << "," << sg.y
+               << "," << sg.z << "\n";
+        }
+        std::cout << "age-margin: " << g_ageTable.size() << " bins, margin by age "
+                  << (g_marginByAge ? "on" : "off") << ", Gaussian by age "
+                  << (p.ephGaussByAge ? "on" : "off") << ", z " << p.marginZ << "\n";
     }
     for (int env = 0; env < 4; ++env)
     {
@@ -2169,6 +2295,10 @@ main(int argc, char* argv[])
             }
         }
         u.cho->Configure(c);
+        if (g_marginByAge)
+        {
+            u.cho->SetEphSigmaProvider(MakeCallback(&AgeSigmaOf));
+        }
         // Decisions are actuated by this scenario's own execution model.
         u.cho->SetHandoverExecutionCallback(MakeCallback(+[](uint16_t, uint16_t) {}));
     }
