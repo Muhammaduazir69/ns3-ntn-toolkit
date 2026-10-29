@@ -55,6 +55,15 @@
 //             R3-M4): the satellite itself enters autonomy T_lead before the
 //             loss its own on-board contact plan predicts, with no LEASE from
 //             the RIC, and resumes through the ground-wins path
+//   pred-ho   recent design (Baranda et al., IEEE OJ-COMS 2025): the RIC moves
+//             near-RT control on board before the ephemeris-predicted loss,
+//             as pal does, but the intent is held without expiry (the A1
+//             default), the next satellite is not provisioned and control
+//             returns through the ground-wins path
+//   ground-pre recent design (KubeSpace, Zhao et al. 2026): all classes stay
+//             on the ground, and the next serving satellite is provisioned
+//             (E2 setup and subscriptions) ahead of the switch from the
+//             predicted schedule
 //
 // Variants (all strategies): --softSwitch (Rel-17 make-before-break feeder
 // switch-over, no gap on a geometric gateway change), --linkDetectS (the
@@ -201,7 +210,9 @@ enum class Strategy
     PalNoPre,
     PalGw,
     OnboardTtl,
-    SatPred
+    SatPred,
+    PredHo,
+    GroundPre
 };
 
 constexpr int kRT = 0;
@@ -713,7 +724,15 @@ IsOnboardLike()
 bool
 IsPal()
 {
-    return g.strat == Strategy::Pal || g.strat == Strategy::PalNoPre || g.strat == Strategy::PalGw;
+    return g.strat == Strategy::Pal || g.strat == Strategy::PalNoPre || g.strat == Strategy::PalGw ||
+           g.strat == Strategy::PredHo;
+}
+
+// Predictive strategies whose control returns through the ground-wins path.
+bool
+GroundWinsReturn()
+{
+    return g.strat == Strategy::PalGw || g.strat == Strategy::PredHo;
 }
 
 bool
@@ -727,8 +746,9 @@ IsReactiveLike()
 bool
 IsLeasing()
 {
-    return IsPal() || g.strat == Strategy::ReactiveTtl || g.strat == Strategy::ReactiveTtlPre ||
-           g.strat == Strategy::OnboardTtl || g.strat == Strategy::SatPred;
+    return (IsPal() && g.strat != Strategy::PredHo) || g.strat == Strategy::ReactiveTtl ||
+           g.strat == Strategy::ReactiveTtlPre || g.strat == Strategy::OnboardTtl ||
+           g.strat == Strategy::SatPred;
 }
 
 // Strategies that provision the next serving satellite in advance.
@@ -736,7 +756,8 @@ bool
 UsesPreprov()
 {
     return g.strat == Strategy::Pal || g.strat == Strategy::PalGw ||
-           g.strat == Strategy::ReactiveTtlPre || g.strat == Strategy::SatPred;
+           g.strat == Strategy::ReactiveTtlPre || g.strat == Strategy::SatPred ||
+           g.strat == Strategy::GroundPre;
 }
 
 bool
@@ -1014,6 +1035,7 @@ HostedOnboard(int cls, const Sat& s)
     switch (g.strat)
     {
     case Strategy::Ground:
+    case Strategy::GroundPre:
         return false;
     case Strategy::Onboard:
     case Strategy::OnboardTtl:
@@ -1338,6 +1360,7 @@ GroundNeedsSub(int cls)
     switch (g.strat)
     {
     case Strategy::Ground:
+    case Strategy::GroundPre:
         return true;
     case Strategy::Onboard:
     case Strategy::OnboardTtl:
@@ -1390,7 +1413,7 @@ RicOnSetup(int s)
     }
     else if (IsPal())
     {
-        PushPolicyToSat(s, true);
+        PushPolicyToSat(s, IsLeasing());
     }
 }
 
@@ -1700,7 +1723,7 @@ SatRecv(int s, Ptr<Socket> sock)
                 r.type = HB_ACK;
                 SendSatMsg(s, r, 0);
             }
-            else if (wasAuto && (!IsPal() || g.strat == Strategy::PalGw))
+            else if (wasAuto && (!IsPal() || GroundWinsReturn()))
             {
                 SatResume(s);
             }
@@ -1885,7 +1908,7 @@ RicRecv(Ptr<Socket> sock)
             if (h.flags & 1)
             {
                 gv.autonomous = false;
-                if (IsReactiveLike() || g.strat == Strategy::PalGw)
+                if (IsReactiveLike() || GroundWinsReturn())
                 {
                     ReconcileGroundWins(s, h);
                 }
@@ -1940,7 +1963,7 @@ RicRecv(Ptr<Socket> sock)
             r.ver = cur.ver;
             r.v1 = cur.g;
             r.v2 = cur.h;
-            r.untilNs = PredictedLeaseUntil(s).GetNanoSeconds();
+            r.untilNs = IsLeasing() ? PredictedLeaseUntil(s).GetNanoSeconds() : 0;
             r.flags = 0;
             for (int c = 0; c < kClasses; ++c)
             {
@@ -2111,7 +2134,7 @@ RicOnA1(A1NtnPolicy a)
         }
         else if (IsPal())
         {
-            PushPolicyToSat(s, true);
+            PushPolicyToSat(s, IsLeasing());
         }
     }
 }
@@ -2298,7 +2321,7 @@ PalTick()
             a.ver = ricPolicy.ver;
             a.v1 = ricPolicy.g;
             a.v2 = ricPolicy.h;
-            a.untilNs = PredictedLeaseUntil(s).GetNanoSeconds();
+            a.untilNs = IsLeasing() ? PredictedLeaseUntil(s).GetNanoSeconds() : 0;
             a.flags = 1 | grant;
             gv.leaseStart = now;
             for (int c = kNF; c < kClasses; ++c)
@@ -2315,7 +2338,7 @@ PalTick()
         else if (now - gv.lastRenew > Seconds(30))
         {
             gv.lastRenew = now;
-            PushPolicyToSat(s, true); // lease renewal while connected
+            PushPolicyToSat(s, IsLeasing()); // lease renewal while connected
         }
     }
 }
@@ -2353,7 +2376,7 @@ SatTick()
         }
         return;
     }
-    if (s < 0 || !IsPal() || g.strat == Strategy::PalGw)
+    if (s < 0 || !IsPal() || GroundWinsReturn())
     {
         return;
     }
@@ -2420,11 +2443,11 @@ OnFeederUp(int s)
 {
     Sat& sat = sats[s];
     FlushBuffer(s);
-    if (IsPal() && g.strat != Strategy::PalGw)
+    if (IsPal() && !GroundWinsReturn())
     {
         SatSendRecon(s);
     }
-    if (g.strat == Strategy::PalGw)
+    if (GroundWinsReturn())
     {
         // Ablation: ground-wins return. Leases are dropped at once and the
         // resume path of the reactive hybrid reconciles.
@@ -2442,7 +2465,7 @@ OnFeederUp(int s)
     }
     // Every hybrid reports at link-up, not at the next heartbeat, so the
     // return paths of all strategies start from the same trigger.
-    if ((IsReactiveLike() || g.strat == Strategy::PalGw) && sat.autonomous && sat.e2Setup)
+    if ((IsReactiveLike() || GroundWinsReturn()) && sat.autonomous && sat.e2Setup)
     {
         SatResume(s);
     }
@@ -2856,7 +2879,8 @@ main(int argc, char* argv[])
     std::string strat = "pal";
     CommandLine cmd(__FILE__);
     cmd.AddValue("strategy",
-                 "ground|onboard|onboard-ttl|reactive|reactive-ttl|reactive-ttl-pre|pal|pal-nopre|pal-gw|sat-pred",
+                 "ground|onboard|onboard-ttl|reactive|reactive-ttl|reactive-ttl-pre|pal|pal-nopre|pal-gw|sat-pred|"
+                 "pred-ho|ground-pre",
                  strat);
     cmd.AddValue("simSeconds", "simulated time (s)", g.simS);
     cmd.AddValue("shell", "550 (Walker-Delta 1584/72/1, 53 deg) or 1200 (Walker-Star 648/18, 87.9 deg)", g.shell);
@@ -2912,6 +2936,10 @@ main(int argc, char* argv[])
         g.strat = Strategy::OnboardTtl;
     else if (strat == "sat-pred")
         g.strat = Strategy::SatPred;
+    else if (strat == "pred-ho")
+        g.strat = Strategy::PredHo;
+    else if (strat == "ground-pre")
+        g.strat = Strategy::GroundPre;
     else
         NS_ABORT_MSG("unknown strategy " << strat);
     NS_ABORT_MSG_IF(g.numGw < 1 || g.numGw > 4, "numGw must be 1..4");
