@@ -2,7 +2,7 @@
 
 > ns3-ntn-toolkit is an open-source ns-3.43 simulation platform for 5G and 6G
 > non-terrestrial networks (NTN). It carries fourteen custom modules and three
-> vendored upstream stacks in one tree, so that a LEO satellite's SGP4 position
+> vendored upstream stacks in one tree, so that a LEO satellite's propagated position
 > drives a real 5G NR spectrum PHY, a handover decision rides a real Xn interface
 > with a real propagation delay, and every reported KPI came off a packet that
 > crossed the air interface. Its distinguishing property is that the decision
@@ -27,9 +27,16 @@ radio resource management.
 
 ## Key capabilities
 
-- SGP4 and SDP4 orbital propagation of real Starlink, OneWeb, Kuiper and
-  Iridium NEXT two-line elements, plus Walker-Delta and Walker-Star generators,
-  contact-graph routing over inter-satellite links with limb clearance.
+- Orbital propagation with two paths, and the toolkit reports which one a run
+  used. Given a two-line element it runs the full Vallado SGP4, including drag,
+  for real Starlink, OneWeb, Kuiper and Iridium NEXT elements. Given orbital
+  elements, which is how the Walker-Delta and Walker-Star generators seed a
+  shell, it runs a Kepler propagator with J2 secular rates instead, because a
+  generated shell has no TLE to feed SGP4. Most shipped examples use generated
+  shells and are therefore on the Kepler + J2 path; the two differ by about 12 km for a real Starlink LEO
+  TLE, already at epoch and essentially unchanged 45 minutes later, so it is a
+  fixed offset rather than a drift that a shorter run avoids. Contact-graph routing over
+  inter-satellite links with limb clearance sits on top of either.
 - A real 5G NR data plane under satellite mobility: SpectrumPhy, LDPC error
   model, HARQ with an NTN-stretched process pool, RLC, PDCP, RRC, EPC and GTP,
   on either the mmWave FR2 backend or 5G-LENA nr at FR1.
@@ -41,11 +48,14 @@ radio resource management.
   fixed reference location, T1 on its absolute broadcast epoch, Rel-18 D2 on a
   moving ephemeris reference, plus elevation and timing-advance mechanisms.
 - NR-NTN control plane: SIB19 with cellSpecificKoffset consumed by the
-  scheduler, timing advance that differs between transparent and regenerative
+  scheduler when enabled, off by default and added to the gNB N2Delay, with a
+  koffset_slots_consumed health row recording which a given run had; timing advance that differs between transparent and regenerative
   payloads because the feeder leg is in the geometry, and DRX that gates a flow.
 - Space O-RAN: E2AP termination, E2SM-KPM under TS 28.552 names, E2SM-RC control
-  actions that actuate a real handover, A1 policy distribution, three RIC
-  placements (on-board real-time, gateway, cloud) whose E2 latency comes from
+  actions a scenario wires to a real handover (the framework supplies the hook,
+  SetRcActionCallback; two of the eleven shipped examples install it), A1 policy
+  distribution, four RIC
+  placements (on-board real-time, aerial/HAPS, gateway, cloud) whose E2 latency comes from
   live slant geometry, Release 19 regenerative payload options, the WG3 conflict
   taxonomy, and a FlexRIC bridge for the wire-level path. The in-simulation E2
   transport is an ns-3 header with toolkit-internal type values, not ASN.1 APER
@@ -90,9 +100,9 @@ radio resource management.
 - Every scenario writes sim_health.csv labelling each KPI measured, modeled or
   configured, so a number derived from an equation cannot be printed as if it
   came from a packet.
-- tools/check_ntn_standards.py runs sixteen gates covering the TR 38.821 link
-  budget, orbital geometry, the published latency bands and all five NTN
-  handover trigger classes.
+- tools/check_ntn_standards.py runs seventeen gates covering the TR 38.821 link
+  budget, orbital geometry, the published latency bands and all six NTN
+  handover trigger classes, each measured by its own firing count.
 - tools/check_doc_claims.py fails when a document makes a capability claim the
   code contradicts or quotes a number the committed data does not carry.
 - SCOPE_AND_LIMITATIONS.md is the authoritative statement of what the toolkit

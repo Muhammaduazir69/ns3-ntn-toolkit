@@ -1975,7 +1975,7 @@ answerable. <code>ns3-ai-ntn</code> exposes the same loop to a Gymnasium agent.<
 decision back in.</p>
 <h2 id="one-run-end-to-end">One run, end to end<a class="headerlink" href="#one-run-end-to-end" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart TD
-    A["CelesTrak / Space-Track&lt;br/&gt;two-line elements"] --&gt; B["ntn-constellation&lt;br/&gt;SGP4, ISL contact graph, presets"]
+    A["CelesTrak / Space-Track TLEs&lt;br/&gt;or generated Walker elements"] --&gt; B["ntn-constellation&lt;br/&gt;SGP4 from a TLE, Kepler+J2 from elements&lt;br/&gt;ISL contact graph, presets"]
     B --&gt; C["contrib/satellite (SNS3)&lt;br/&gt;SatSGP4MobilityModel"]
     C --&gt; D["ntn-traffic · NtnRealStackHelper&lt;br/&gt;NR SpectrumPhy, HARQ, RLC, PDCP, RRC, EPC"]
     D --&gt; P["thz-ntn / ntn-sionna&lt;br/&gt;atmospheric and ray-traced channel"]

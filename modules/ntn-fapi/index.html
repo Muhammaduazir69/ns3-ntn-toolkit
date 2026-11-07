@@ -1818,7 +1818,7 @@
 </tr>
 </tbody>
 </table>
-<p>The cross-check that these are driven rather than free-running is in the output: <code>TX_DATA.request</code> equals the health record's <code>phy_rx_tb</code> exactly, which a self-scheduled loop could not do.</p>
+<p>The cross-check that these are driven rather than free-running is in the output of the two slot-loop examples: <code>TX_DATA.request</code> equals the health record's <code>phy_rx_tb</code> exactly, which a self-scheduled loop could not do. Measured at 8 s: 35726 against 35726 for <code>ntn-fapi-dl-data-slotloop</code>, and 35043 against 35043 for <code>ntn-fapi-leo-pass-slotloop</code>. <code>ntn-fapi-real-stack</code> does not emit <code>TX_DATA.request</code>; it reports the scheduler pipeline (<code>DL_TTI.request</code>, <code>CRC.indication</code>) instead, so the same identity does not apply to it.</p>
 <h2 id="getting-it">Getting it<a class="headerlink" href="#getting-it" title="Permanent link">&para;</a></h2>
 <p><code>ntn-fapi</code> ships only inside the toolkit tree, because it decorates the NR SAP that <code>ntn-traffic</code> builds.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>uzairdocker69/ns3-ntn-toolkit:latest<span class="w"> </span>bash
