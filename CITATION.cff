@@ -1,6 +1,6 @@
 cff-version: 1.2.0
-message: "If you use this toolkit in your research, please cite it as below."
-title: "ns3-ntn-toolkit: a pre-integrated ns-3 simulation platform for 6G non-terrestrial networks"
+message: "If you use this toolkit in your research, please cite the article listed under preferred-citation."
+title: "ns3-ntn-toolkit: An Integrated ns-3 Platform for 6G Non-Terrestrial Networks"
 abstract: >-
   A fork of ns-3.43 carrying fourteen custom modules for 6G non-terrestrial
   network research: LEO satellite constellation generation and contact-graph
@@ -43,3 +43,33 @@ keywords:
   - space-air-ground integrated network
   - V2X
   - network simulation
+identifiers:
+  - type: doi
+    value: 10.1109/OJCOMS.2026.3745010
+    description: "Article describing the toolkit (IEEE OJ-COMS)"
+preferred-citation:
+  type: article
+  title: "ns3-ntn-toolkit: An Integrated ns-3 Platform for 6G Non-Terrestrial Networks"
+  authors:
+    - family-names: Uzair
+      given-names: Muhammad
+      orcid: "https://orcid.org/0009-0002-4104-2680"
+    - family-names: Aldahlan
+      given-names: Bassma G.
+      orcid: "https://orcid.org/0009-0006-9529-3206"
+    - family-names: Albar
+      given-names: Ali A.
+      orcid: "https://orcid.org/0009-0009-0250-8557"
+    - family-names: Althumali
+      given-names: Huda
+      orcid: "https://orcid.org/0000-0002-9208-1295"
+    - family-names: Alghammas
+      given-names: Adnan
+      orcid: "https://orcid.org/0000-0003-2747-3206"
+  journal: "IEEE Open Journal of the Communications Society"
+  volume: 7
+  start: 13440
+  end: 13467
+  year: 2026
+  doi: 10.1109/OJCOMS.2026.3745010
+  url: "https://doi.org/10.1109/OJCOMS.2026.3745010"
