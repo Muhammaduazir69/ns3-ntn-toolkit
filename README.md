@@ -45,6 +45,12 @@
 
 ---
 
+<p align="center">
+  <img src="docs/paper1_fig1.png" alt="Fig. 1 of the article: the system the platform models, with space, aerial, ground and measurement layers; a LEO Walker shell with optical inter-satellite links and an on-board Space RIC; HAPS and UAV tiers; a feeder gateway, gNB, near-RT RIC with E2 and A1 interfaces, and served households, handsets and vehicles; and a measurement rail from instrumented packets to controllers" width="960"/>
+</p>
+
+<p align="center"><sub><b>Fig. 1 of the article.</b> The system the platform models. Height is altitude and link color is carrier. E2 reaches a satellite over the feeder bearer. The rail underneath shows the measurement path: packets leave an application, cross a modeled radio, and are read back at the sink, where every KPI is computed.</sub></p>
+
 ## What this is
 
 Simulating a 6G non-terrestrial network usually means assembling four unrelated
