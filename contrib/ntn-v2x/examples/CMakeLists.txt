@@ -109,3 +109,19 @@ build_lib_example(
     ${libcore}
     ${libmobility}
 )
+
+# Street-canyon blockage of the LEO uplink, NR Mode-2 sidelink relaying to a neighbor in line of sight,
+# SGP4 satellites, gated IPv4 uplinks; age of information at the server.
+build_lib_example(
+  NAME ntn-v2x-canyon-relay
+  SOURCE_FILES ntn-v2x-canyon-relay.cc
+  LIBRARIES_TO_LINK
+    ${libapplications}
+    ${libntn-v2x}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libpoint-to-point}
+    ${libinternet}
+)

@@ -518,7 +518,7 @@ ThzNtnMolecularAbsorption::GetAtmosphericConditions(double altitude_km,
     }
     else
     {
-        pressureHPa = 0.003743;
+        pressureHPa = 0.00373405; // continuity with the 71-84.852 km segment
     }
 
     // Water vapour: P.835 Section 1.1 specifies a single exponential with a

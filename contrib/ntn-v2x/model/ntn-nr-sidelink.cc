@@ -113,12 +113,19 @@ NtnSlUeMac::BuildTxPacket()
 NtnSlGrant
 NtnSlUeMac::SelectResource(uint64_t nowSlot)
 {
+    return SelectResourceAt(nowSlot, nowSlot);
+}
+
+NtnSlGrant
+NtnSlUeMac::SelectResourceAt(uint64_t nowSlot, uint64_t arrivalSlot)
+{
     PruneSensing(nowSlot);
     ++m_reselections;
 
     const uint32_t C = m_pool.ResourcesPerSlot();
-    const uint64_t winStart = nowSlot + m_t1Slots;
-    const uint64_t winEnd = nowSlot + m_t2Slots; // inclusive
+    const uint64_t winStart = arrivalSlot + m_t1Slots;
+    // the packet delay budget of a periodic message does not exceed its period (the aligned mode only)
+    const uint64_t winEnd = arrivalSlot + (m_align ? std::min(m_t2Slots, m_prsvpSlots) : m_t2Slots); // inclusive
     const uint32_t windowSlots = static_cast<uint32_t>(winEnd - winStart + 1);
     const uint32_t total = windowSlots * C;
     NS_ASSERT_MSG(total > 0, "empty selection window");
@@ -228,9 +235,63 @@ NtnSlChannel::AddUe(Ptr<NtnSlUeMac> ue)
     m_ues.push_back(ue);
 }
 
+void
+NtnSlChannel::SetUrbanChannel(bool on, double nlosP)
+{
+    m_urban = on;
+    m_nlosP = nlosP;
+    if (on && !m_condRv)
+    {
+        m_condRv = CreateObject<UniformRandomVariable>();
+        m_stdNormal = CreateObject<NormalRandomVariable>();
+    }
+}
+
+double
+NtnSlChannel::UrbanLossDb(Ptr<MobilityModel> tx, Ptr<MobilityModel> rx) const
+{
+    // TR 37.885 urban: Table 6.2-1 gives P(LOS) = min(1, 1.05 exp(-0.0114 d)) for a link no building obstructs, the
+    // remainder being NLOSv (a blocking vehicle), as ns-3's ThreeGppV2vUrbanChannelConditionModel implements; two
+    // vehicles on one straight street are such a link. Table 6.2.1-1 gives the path loss and shadowing. m_nlosP is a
+    // stress knob: the share of pairs given the NLOS law regardless of the geometry.
+    const double d = std::max(tx->GetDistanceFrom(rx), 1.0);
+    const void* pa = PeekPointer(tx);
+    const void* pb = PeekPointer(rx);
+    const auto key = pa < pb ? std::make_pair(pa, pb) : std::make_pair(pb, pa);
+    auto it = m_pair.find(key);
+    if (it == m_pair.end() || std::abs(d - it->second.d0) > 10.0)
+    {
+        const double pLos = std::min(1.0, 1.05 * std::exp(-0.0114 * d));
+        const double stress = m_condRv->GetValue();
+        const int cond = stress < m_nlosP ? 2 : (m_condRv->GetValue() < pLos ? 0 : 1);
+        m_pair[key] = {cond, d};
+        it = m_pair.find(key);
+    }
+    const double fc = m_carrierHz / 1e9;
+    double pl;
+    if (it->second.cond == 2)
+    {
+        pl = 36.85 + 30.0 * std::log10(d) + 18.9 * std::log10(fc) + 4.0 * m_stdNormal->GetValue();
+    }
+    else
+    {
+        pl = 38.77 + 16.7 * std::log10(d) + 18.2 * std::log10(fc) + 3.0 * m_stdNormal->GetValue();
+        if (it->second.cond == 1)
+        {
+            // antenna heights equal: case 3 of TR 37.885 clause 6.2.1
+            pl += std::max(0.0, 5.0 + std::max(0.0, 15.0 * std::log10(d) - 41.0) + 4.0 * m_stdNormal->GetValue());
+        }
+    }
+    return pl;
+}
+
 double
 NtnSlChannel::SlRsrpDbm(Ptr<MobilityModel> tx, Ptr<MobilityModel> rx) const
 {
+    if (m_urban)
+    {
+        return m_txPowerDbm - UrbanLossDb(tx, rx);
+    }
     if (m_useTr37885)
     {
         return m_txPowerDbm - Tr37885PathLossDb(tx, rx);
@@ -369,7 +430,16 @@ NtnSlChannel::Start(Time firstTx, Time stop)
     // Give every UE an initial grant (first selection at slot 0).
     for (auto& ue : m_ues)
     {
-        NtnSlGrant g = ue->SelectResource(0);
+        NtnSlGrant g;
+        if (ue->m_align)
+        {
+            ue->m_arrival = static_cast<uint64_t>(ue->m_rand->GetInteger(0, ue->m_prsvpSlots - 1));
+            g = ue->SelectResourceAt(0, ue->m_arrival);
+        }
+        else
+        {
+            g = ue->SelectResource(0);
+        }
         // Offset the first transmission into the selection window.
         m_grants[ue->GetUeId()] = g;
         m_reselCounter[ue->GetUeId()] =
@@ -417,7 +487,34 @@ NtnSlChannel::SlotTick()
                                   [&](const Tx& t) { return t.ue == rxUe; });
         if (rxIsTx)
         {
-            continue; // half-duplex: cannot receive while transmitting
+            // Half-duplex: a UE cannot receive while it transmits. TR 37.885 counts
+            // every UE in range of the transmitter in the PRR denominator, so these
+            // missed receptions are failures, not exclusions.
+            for (const auto& t : txs)
+            {
+                if (t.ue == rxUe)
+                {
+                    continue;
+                }
+                const double dist = t.ue->GetMobility()->GetDistanceFrom(rxUe->GetMobility());
+                ++m_rxAttempt;
+                bool placed = false;
+                for (auto& b : m_rangeBuckets)
+                {
+                    if (std::abs(b.range - dist) < 25.0)
+                    {
+                        ++b.attempt;
+                        ++b.halfDuplex;
+                        placed = true;
+                        break;
+                    }
+                }
+                if (!placed)
+                {
+                    m_rangeBuckets.push_back({dist, 1, 0, 1});
+                }
+            }
+            continue;
         }
         for (const auto& t : txs)
         {
@@ -557,10 +654,20 @@ NtnSlChannel::SlotTick()
             NtnSlGrant g = m_grants[uid];
             g.slot = nextSlot;
             m_grants[uid] = g;
+            t.ue->m_arrival += t.ue->m_prsvpSlots;
         }
         else
         {
-            NtnSlGrant g = t.ue->SelectResource(m_slot);
+            NtnSlGrant g;
+            if (t.ue->m_align)
+            {
+                t.ue->m_arrival += t.ue->m_prsvpSlots;
+                g = t.ue->SelectResourceAt(m_slot, t.ue->m_arrival);
+            }
+            else
+            {
+                g = t.ue->SelectResource(m_slot);
+            }
             m_grants[uid] = g;
             m_reselCounter[uid] = static_cast<int32_t>(t.ue->m_rand->GetInteger(5, 15));
         }
@@ -580,6 +687,22 @@ NtnSlChannel::GetPrrWithinRange(double rangeM) const
         if (b.range <= rangeM)
         {
             att += b.attempt;
+            suc += b.success;
+        }
+    }
+    return att ? double(suc) / att : 0.0;
+}
+
+double
+NtnSlChannel::GetPrrWithinRangeExcludingHalfDuplex(double rangeM) const
+{
+    uint64_t att = 0;
+    uint64_t suc = 0;
+    for (const auto& b : m_rangeBuckets)
+    {
+        if (b.range <= rangeM)
+        {
+            att += b.attempt - b.halfDuplex;
             suc += b.success;
         }
     }

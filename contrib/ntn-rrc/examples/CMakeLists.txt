@@ -43,3 +43,13 @@ build_lib_example(
   LIBRARIES_TO_LINK ${_rrc_real_libs}
     ${libntn-observability}
 )
+
+build_lib_example(
+  NAME ntn-rrc-ul-timing
+  SOURCE_FILES ntn-rrc-ul-timing.cc
+  LIBRARIES_TO_LINK
+    ${libntn-rrc}
+    ${libntn-constellation}
+    ${libcore}
+    ${libmobility}
+)

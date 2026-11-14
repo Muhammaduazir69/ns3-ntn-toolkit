@@ -1,189 +1,190 @@
 <h1 align="center">ntn-observability</h1>
 
-<p align="center"><strong>One scene recorder feeding NetSimulyzer, Cesium, InfluxDB and Grafana, with topology and a real time anchor</strong></p>
+<p align="center"><strong>One scene recorder feeding InfluxDB, Grafana, NetSimulyzer and Cesium from measured KPIs, with a documented time anchor and a reproducibility manifest</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
-  <img src="https://img.shields.io/badge/sinks-NetSimulyzer%20%C2%B7%20CZML%20%C2%B7%20InfluxDB-purple.svg" alt="NetSimulyzer CZML InfluxDB"/>
+  <img src="https://img.shields.io/badge/sinks-InfluxDB%20%C2%B7%20NetSimulyzer%20%C2%B7%20CZML-purple.svg" alt="InfluxDB NetSimulyzer CZML"/>
   <img src="https://img.shields.io/badge/metrics-TS%2028.552%20names-orange.svg" alt="TS 28.552 measurement names"/>
-  <img src="https://img.shields.io/badge/examples-3-informational.svg" alt="3 examples"/>
+  <img src="https://img.shields.io/badge/tests-17%20cases-success.svg" alt="17 test cases"/>
+  <a href="https://doi.org/10.1109/OJCOMS.2026.3745010"><img src="https://img.shields.io/badge/DOI-10.1109%2FOJCOMS.2026.3745010-00629B.svg" alt="DOI"/></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-observability/">Docs</a>
+  &nbsp;·&nbsp;
   <a href="INSTALL.md">Install</a>
   &nbsp;·&nbsp;
-  <a href="#examples">Examples</a>
+  <a href="#results">Results</a>
   &nbsp;·&nbsp;
-  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-observability/">Docs</a>
+  <a href="#examples">Examples</a>
 </p>
 
 ---
 
-Visualizing an orbital simulation is mostly a question of what you refuse to draw. A globe that shows satellites moving is easy; a globe that shows which satellite is actually serving which terminal, at a time that maps back to simulation time, is the one that can catch a bug.
+## Why this module
 
-This module records the scene once and exports it four ways: NetSimulyzer JSON, CZML for a Cesium globe, InfluxDB line protocol, and CSV under TS 28.552 measurement names. Links travel with positions, so serving, feeder and inter-satellite edges appear rather than being inferred client-side. The time axis is anchored to a documented scene epoch instead of collapsing onto ingest time, and the sink reports which anchor it used.
+A multi-hour, multi-satellite run produces the telemetry a real RAN does (SINR,
+TBLER, goodput, timing advance, satellite positions, handovers), but ns-3's
+default trace surface stops at flat ASCII files. Visualizing an orbital
+simulation is also a question of what you refuse to draw: a globe that shows
+satellites moving is easy, while one that shows which satellite actually serves
+which terminal, at a time that maps back to simulation time, is the one that can
+catch a bug. This module records the scene once and exports it to the tools
+operators already use, with links traveling alongside positions, labels escaped
+on the way out, and a manifest that makes each run reproducible.
 
-User-controlled labels are escaped on the way out, because a node name with a quote in it should not be able to corrupt a line-protocol stream. `tools/check_dashboard_producers.py` walks every shipped Grafana panel back through the metric schema to the code that emits it, and fails when a panel queries something nothing produces.
+## System design
 
-## Quick start
+<p align="center">
+  <img src="doc/figures/ntn_observability_design.png" alt="ntn-observability system design: measured sources (NR NTN radio, SGP4 geometry, control events, AI flow monitor) feed the recording core (NtnObservabilityHelper, NtnSceneRecorder, EnableAiFlowMonitor), which writes line protocol, NetSimulyzer JSON, CZML and KPM series into InfluxDB with Grafana, NetSimulyzer, a Cesium globe and analysis scripts; the metric schema, the reproducibility manifest and the dashboard gate sit underneath" width="960"/>
+</p>
 
-Inside the toolkit, where the module is already present and built:
+<p align="center"><sub>Measured sources on the left, the recording core in the middle, sinks and external tools on the right. The schema names every measurement once; <code>tools/check_dashboard_producers.py</code> traces each Grafana panel back to the code that emits it. Script: <code>doc/figures/make_ntn_observability_design.py</code>.</sub></p>
 
-```bash
-./ns3 run ntn-observability-traffic
-./ns3 run ntn-observability-demo
-```
+## Results
 
-Standalone, into an existing ns-3.43 tree:
+<p align="center">
+  <img src="doc/figures/ntn_observability_results.png" alt="Three panels over a 60 s LEO pass read back from the exported line-protocol file: (a) elevation falls from 89 to 51 degrees while slant range grows from 550 to 688 km; (b) measured SINR near 25 dB with sparse TBLER spikes; (c) sink goodput near 4.9 Mb/s, easing to 4.5 Mb/s" width="960"/>
+</p>
 
-```bash
-git clone -b ntn-observability-v2 https://github.com/Muhammaduazir69/ntn-observability.git contrib/ntn-observability
-./ns3 configure --enable-modules='' --enable-examples --enable-tests
-./ns3 build
-```
+<p align="center"><sub>One run of <code>ntn-observability-traffic</code> (60 s, 550 km SGP4 pass, 20 GHz, 85 dBm EIRP, seed 1), plotted from the line-protocol file the sink wrote rather than from simulator memory: <code>sweep-results-2026-06-25/ntn-observability/traffic-heavy.lp</code> in the toolkit workspace (59 points, 58 with a PHY sample). Script: <code>doc/figures/make_ntn_observability_results.py</code>.</sub></p>
 
-`INSTALL.md` in this directory carries the full dependency list. Most examples in
-this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
-toolkit tree is the path of least resistance.
+Read back from the export: elevation 89.2 to 51.3 degrees, slant range 550 to
+688 km, mean per-second SINR 25.08 dB, mean per-second goodput 4.84 Mb/s. The
+run's own health record (`traffic-heavy-out/sim_health.csv`, all rows passing)
+gives the whole-run values: 26,119 transport blocks received, SINR 24.96 dB,
+TBLER 0.033, 4.71 Mb/s throughput, 7.81 ms one-way delay from in-band
+timestamps, 3.3 % application loss. Goodput eases from about 4.9 to 4.5 Mb/s over
+the last 20 s as the slant range grows; the plot is drawn from the exported
+series, not from a separate log.
 
-## Overview
+Also stored from the same sweep: `ntn-netsimulyzer-official-demo` (6 SGP4
+satellites, 4 TR 38.811 UEs, 15 s) wrote a NetSimulyzer scene with 190 events,
+a CZML file and a manifest that round-trips (`netsim-scene.log`: mean DL SINR
+17.34 dB, TBLER 0.041, 16.58 Mb/s).
 
-A 6G NTN simulation produces every kind of telemetry a real RAN does — RSRP, SINR, BLER, MCS, timing-advance, sat ECEF, ISL load, handover counters — but ns-3's default trace surface stops at flat ASCII files. That is fine for unit tests; it does not scale to a multi-hour, multi-satellite scenario where reviewers want a dashboard rather than a pile of `.tr` files. `ntn-observability` plugs the simulator into the same observability stack production RANs already use, and pairs every run with a reproducibility manifest:
-
-- **Structured run manifests** — `NtnReproManifest` captures the toolkit git SHA, ns-3 version, scenario name, TLE epoch, constellation, service models, CLI argv and arbitrary extras, then serialises to / parses from JSON so a run is reproducible byte-for-byte.
-- **KPI / observability sinks** — `NtnInfluxSink` emits InfluxDB v2 line protocol over UDP or to a file; `NtnNetSimulyzerExporter` streams NetSimulyzer 1.0 JSON for 3D playback.
-- **Canonical metric schema** — `ntn-metric-schema.h` names every measurement, tag and field exactly once so downstream dashboards never break when new modules add metrics.
-
-```
-ns-3 traces  ─┐
-              ├──► NtnInfluxSink ──► InfluxDB v2 ──► Grafana (4 dashboards)
-              │     (UDP-line-protocol or file mode)
-              │
-              └──► NtnNetSimulyzerExporter ──► NetSimulyzer 3D viewer
-                    (JSON 1.0 schema)
-```
-
-## What changed in v2.5
-
-See the [CHANGELOG](CHANGELOG.md) for the full history.
-
-- New **`ntn-repro-manifest` model** (`NtnReproManifest`) — a reproducibility manifest that records git SHA, ns-3 version, scenario, TLE epoch, constellation, Sionna / HITRAN / ITU versions, service models, CLI argv and extras, with `WriteJson()` / `LoadJson()` round-tripping.
-- **Both examples now observe a measured radio.** Each builds a real mmwave NR NTN cell (`NtnRealStackHelper` from `ntn-traffic`: SpectrumPhy + MAC + RLC/PDCP + RRC + EPC) on a real SGP4 Walker satellite pass. The exported SINR / TBLER come from the mmwave PHY trace, goodput from the UE sink's byte counter, elevation and slant range from live SGP4 geometry — the dashboard observes a genuine link, not a synthetic curve.
-- **Traffic is `NtnOranApplication` QoS flows** (`ntn-traffic`), not `OnOffApplication`: every packet carries a real 24-byte in-band payload header (5QI / S-NSSAI / QFI / sequence number / TX timestamp), so the goodput the sinks report is a real application-layer measurement.
-- **Interop:** `ntn-traffic`'s `NtnOranAiFlowMonitor` exports per-flow KPIs under official 3GPP TS 28.552 / O-RAN E2SM-KPM metric names as CSV, FlowMonitor-style XML or InfluxDB line protocol (measurement `ntn_oran_kpm`); those `.lp` files ingest through the same Docker stack and Grafana data source as this module's sinks. The **canonical wiring is `NtnRealStackHelper::EnableAiFlowMonitor(outputPrefix)`** — one call that attaches the monitor to every helper-installed flow and auto-exports `<outputPrefix>_kpm_series.csv` / `.lp` at end of simulation; `ntn-observability-traffic` uses it.
-- **Bounded buffering:** `NtnInfluxSink` caps its in-memory buffer via the `MaxBufferPoints` attribute (default 1,000,000 points); when exceeded the oldest points are dropped (warned once, counted via `GetDroppedPoints()`), so long runs without flushes degrade gracefully instead of exhausting RAM.
-- **Honest RSRP:** `ntn-observability-demo` exports the `radio` measurement only when a measured SINR sample exists, deriving RSRP from the cell's configured noise floor (`-174 dBm/Hz + NF + 10 log10(BW)`) instead of the old `SINR - 95` heuristic / `-120 dBm` fallback.
-
-## Models, helpers & key classes
+## Classes
 
 | Header | Provides |
 |---|---|
-| `model/ntn-metric-schema.h` | Header-only canonical schema — `measurement::`, `tag::`, `field::` string tables naming every KPI exactly once; pinned by `MetricSchemaStableTest`. |
-| `model/ntn-influx-sink.h` | `NtnInfluxSink` — InfluxDB v2 line-protocol encoder (escapes commas / spaces / equals in keys), buffered file or UDP transport, run-id tagging; `Push(Point)`, `Start()`. |
-| `model/ntn-netsimulyzer-exporter.h` | `NtnNetSimulyzerExporter` — streaming JSON writer for the NIST NetSimulyzer 1.0 schema (`configuration` / `nodes` / `series` / `events` in valid order). |
-| `model/ntn-repro-manifest.h` | `NtnReproManifest` — fluent setters (`SetToolkitGitSha`, `SetNs3Version`, `SetScenarioName`, `SetTleEpoch`, `SetConstellation`, `AddServiceModel`, `AddExtra`, …), `WriteJson()` / `ToJson()` / `LoadJson()` / `ParseJson()`. |
-| `helper/ntn-observability-helper.h` | `NtnObservabilityHelper` — one-call setup of both sinks with consistent run-id tagging (`SetRunId`, `SetInfluxUdp`, `SetNetSimulyzerOutput`, `InstallInfluxSink`). |
+| `model/ntn-metric-schema.h` | header-only canonical schema: `measurement::`, `tag::`, `field::` tables naming every KPI once; pinned by a test |
+| `model/ntn-influx-sink.h` | `NtnInfluxSink`: InfluxDB v2 line protocol with key escaping, file or UDP transport, run-id tags, `MaxBufferPoints` (default 1,000,000; oldest points dropped and counted), base epoch reported |
+| `model/ntn-netsimulyzer-exporter.h` | `NtnNetSimulyzerExporter`: streaming JSON in the NIST NetSimulyzer 1.0 schema |
+| `model/ntn-scene-recorder.h` | `NtnSceneRecorder`: one tap that reads mobility positions (ECEF or local ENU, converted to ECEF), KPIs and events, and fans them out to NetSimulyzer and CZML |
+| `model/ntn-repro-manifest.h` | `NtnReproManifest`: git SHA, ns-3 version, scenario, seed, TLE epoch, service models, argv; `WriteJson()` and `LoadJson()` |
+| `helper/ntn-observability-helper.h` | `NtnObservabilityHelper`: one-call setup of the sinks with consistent run-id tagging |
+| `helper/ntn-scene-helper.h` | wiring helpers for the scene recorder |
+| `dashboards/` | four Grafana dashboards: Overview, Handover, Radio, ISL |
+| `docker/` | InfluxDB 2.7, Grafana 10.4 and a Telegraf sidecar, with provisioning |
 
-Four pre-built Grafana dashboards (Overview, Handover, Radio, ISL) auto-load under the `ns3-ntn-toolkit` folder when the bundled Docker stack (InfluxDB 2.7 + Grafana 10.4 + Telegraf sidecar) starts.
+The per-flow KPM exporter `NtnOranAiFlowMonitor` lives in `ntn-traffic`; the
+canonical wiring is `NtnRealStackHelper::EnableAiFlowMonitor(prefix)`, which
+writes `<prefix>_kpm_series.csv` and `.lp` at the end of the run.
 
-## Examples
+## Quick start
 
-Build all examples with `./ns3 configure --enable-examples --enable-tests && ./ns3 build`. Each example produces the binary `build/contrib/ntn-observability/examples/ns3.43-<name>-default`.
-
-### ntn-observability-demo
-
-End-to-end telemetry demo: a real mmwave NR cell (SGP4 satellite, TR 38.811 UE, saturating eMBB `NtnOranApplication` stream) runs alongside the `ntn-rrc` NTN control-plane components (timing advance, SIB19 broadcast, UE location reports, DRX), and every KPI is pushed through `NtnObservabilityHelper` into the Influx sink and a NetSimulyzer JSON trace. The `radio` measurement carries the *measured* SINR from the cell's PHY trace.
-
-```bash
-./ns3 run "ntn-observability-demo --simTime=20 --runId=local-1 --influxFile=/tmp/run.lp --netSim=/tmp/run.json"
-```
-
-```bash
-LD_LIBRARY_PATH=build/lib \
-  ./build/contrib/ntn-observability/examples/ns3.43-ntn-observability-demo-default \
-  --simTime=20 --runId=local-1 --influxFile=/tmp/run.lp --netSim=/tmp/run.json
-```
-
-Outputs:
-- InfluxDB line-protocol file at `--influxFile` (default `/tmp/ntn-observability-demo.lp`) — `influx write -f` it, or send to `--udpHost:--udpPort` for live ingest.
-- NetSimulyzer JSON at `--netSim` (default `/tmp/ntn-observability-demo.json`) for 3D playback.
-- `sim_health.csv` in `--outputDir` (default `.`), written by `NtnRealStackHelper::WriteHealthReport()`.
-
-Key args: `--simTime` (sim duration, s; default 20) · `--runId` (tag value attached to every point) · `--influxFile` (line-protocol output file) · `--udpHost` (InfluxDB UDP host; if set, overrides file output) · `--udpPort` (InfluxDB UDP listener port) · `--netSim` (NetSimulyzer JSON output) · `--outputDir` (output directory for `sim_health.csv`).
-
-### ntn-observability-traffic
-
-Instruments a real LEO downlink with the observability stack: a real mmwave NR cell on a genuine SGP4 pass, driven by a saturating eMBB `NtnOranApplication` stream. Every second an `NtnInfluxSink` exports the *measured* KPIs as line protocol under measurement `ntn_downlink` — fields `goodput_mbps` (UE sink byte counter), `sinr_db` / `tbler` (mmwave PHY trace), `elevation_deg` / `slant_range_km` (live SGP4 geometry) and `rx_bytes_total` — so the exported time series is a faithful telemetry trace of the pass.
+Inside the toolkit, where the module is present and built:
 
 ```bash
 ./ns3 run "ntn-observability-traffic --simSeconds=40 --out=/tmp/ntn-obs.lp"
+./ns3 run "ntn-observability-demo --simTime=20 --runId=local-1 --influxFile=/tmp/run.lp --netSim=/tmp/run.json"
+
+cd contrib/ntn-observability/docker && docker compose up -d   # then open http://localhost:3000
 ```
+
+Standalone, into an existing ns-3.43 tree (the examples need `ntn-traffic` and
+`ntn-rrc`, so the toolkit tree is the easier path):
 
 ```bash
-LD_LIBRARY_PATH=build/lib \
-  ./build/contrib/ntn-observability/examples/ns3.43-ntn-observability-traffic-default \
-  --simSeconds=40 --out=/tmp/ntn-obs.lp
-```
-
-Outputs: InfluxDB line-protocol file at `--out` (default `ntn-observability-traffic.lp`) carrying the measured KPIs — optionally streamed over UDP to `--influxHost:--influxPort` instead of a file — plus per-flow KPM series `ntn-observability-traffic_kpm_series.csv` / `.lp` (auto-exported by `EnableAiFlowMonitor`), a per-second console table and `sim_health.csv` in `--outputDir` (default `ntn-observability-traffic-output`).
-
-Key args: `--simSeconds` (sim duration, s; default 40) · `--leoAltKm` (satellite altitude, km; default 550) · `--freqGHz` (carrier frequency, GHz; default 12, Ku-band) · `--satEirpDbm` (satellite EIRP / gNB Tx power, dBm) · `--out` (line-protocol output file) · `--influxHost` (InfluxDB/Telegraf UDP host; empty = file) · `--influxPort` (InfluxDB/Telegraf UDP port) · `--outputDir` (output directory for `sim_health.csv`).
-
-### ntn-netsimulyzer-official-demo
-
-Path B of the toolkit's 3D-visualization plan: drives the **official usnistgov NetSimulyzer** ns-3 module (schema-exact NetSimulyzer-1.0 JSON) from a live NR / mmwave NTN cell, so satellites and UEs render with per-UE, SINR-driven state. This is the standards-module path alongside the home-grown `NtnSceneRecorder`.
-
-```sh
-./ns3 run "ntn-netsimulyzer-official-demo --sats=6 --ues=4 --duration=30 --radio=nr"
-```
-
-Outputs: an official NetSimulyzer JSON scene at `--out` (default `ntn-official.json`) — open it in the NetSimulyzer desktop application.
-
-Key args: `--sats` (satellites to render; default 6) · `--ues` (UEs to render; default 4) · `--duration` (sim duration, s; default 30) · `--altitude` (constellation altitude, km; default 550) · `--radio` (radio backend: `nr` = 5G-LENA FR1 or `mmwave` = FR2; default `nr`) · `--out` (NetSimulyzer JSON output path; default `ntn-official.json`).
-
-## Build, run & test
-
-```bash
+git clone -b ntn-observability-v2 https://github.com/Muhammaduazir69/ntn-observability.git contrib/ntn-observability
 ./ns3 configure --enable-examples --enable-tests
-./ns3 build
-./test.py -s ntn-observability
+./ns3 build ntn-observability
 ```
 
-The `ntn-observability` suite has 10 unit tests. Five cover the sinks and schema (line-protocol basic encode, line-protocol escaping, Influx file-sink round-trip, NetSimulyzer JSON shape, and the pinned metric-schema-stability test). The other five cover the repro-manifest family: JSON round-trip, schema-header presence, tolerance of unknown keys, rejection of malformed JSON, and escape round-trip.
-
-### Grafana stack (Docker)
+With Docker, prebuilt:
 
 ```bash
-cd contrib/ntn-observability/docker
-docker compose up -d   # InfluxDB 2.7 + Grafana 10.4 + Telegraf sidecar
+docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
+  ./ns3 run "ntn-observability-traffic --simSeconds=40 --out=/tmp/ntn-obs.lp"
 ```
 
-Open Grafana at http://localhost:3000 (admin / admin) — the 4 NTN dashboards (Overview, Handover, Radio, ISL) are pre-loaded.
+## Examples
 
-See [INSTALL.md](INSTALL.md) for setup, dependencies and the Telegraf sidecar configuration that rewrites simulation-time stamps to ingest time. For the full toolkit, see [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
+| Example | What it does | Main outputs |
+|---|---|---|
+| `ntn-observability-traffic` | an NR NTN cell on an SGP4 pass with a saturating eMBB `NtnOranApplication` flow; each second exports measurement `ntn_downlink` (goodput, SINR, TBLER, elevation, slant range) | `--out` line protocol (or UDP to `--influxHost`), `_kpm_series.csv` and `.lp`, `sim_health.csv`; args `--simSeconds`, `--leoAltKm`, `--freqGHz`, `--satEirpDbm` |
+| `ntn-observability-demo` | the same radio plus `ntn-rrc` control-plane components (timing advance, SIB19, UE location reports, DRX); every KPI goes through `NtnObservabilityHelper` | `--influxFile` line protocol, `--netSim` NetSimulyzer JSON, `sim_health.csv` |
+| `ntn-netsimulyzer-official-demo` | drives the official usnistgov NetSimulyzer module from a live NR or mmWave NTN cell | `--out` NetSimulyzer JSON, plus CZML and manifest; args `--sats`, `--ues`, `--duration`, `--radio` |
 
----
+## Tests
 
-## Standards implemented
+```bash
+./test.py -s ntn-observability
+python3 -m pytest contrib/ntn-observability/tests-py/   # end-to-end pipeline check
+```
 
-3GPP TS 28.552 (5G performance measurements, the naming used for every exported series), TS 32.425. O-RAN E2SM-KPM measurement identities. CZML for time-dynamic geospatial scenes, InfluxDB line protocol, NetSimulyzer scene JSON.
+The suite registers 17 cases: line-protocol encoding and escaping, file-sink
+flush, bounded buffer that drops the oldest points, NetSimulyzer JSON shape,
+pinned metric names, five manifest round-trip and parser cases, the serving edge
+moving with a handover, hostile labels that cannot break line protocol or CZML,
+the scene recorder under `Simulator::Run()`, the base epoch applied to emitted
+points, the local-ENU to ECEF conversion at known geometries, and declared beams
+and handover links reaching the NetSimulyzer sink.
 
-## Keywords
+## Dependencies
 
-network observability, simulation telemetry, NetSimulyzer, Cesium, CZML, InfluxDB, Grafana dashboard, time series, TS 28.552, E2SM-KPM, KPI export, scene recorder, 3D visualization, satellite ground track, link topology, provenance, reproducibility manifest, non-terrestrial network, ns-3.
+ns-3.43 core, mobility and network; `ntn-traffic`, `ntn-rrc`, `ntn-cho`,
+`ntn-constellation` and `mmwave` for the examples; optionally the vendored `netsimulyzer`
+module for the official demo. Docker and Docker Compose for the dashboard stack.
+See [INSTALL.md](INSTALL.md), including the Telegraf setting that rewrites
+simulation-time stamps to ingest time.
 
-## Author
+## Honest scope
 
-**Muhammad Uzair**, Independent Researcher
-[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+- `NtnSceneRecorder` writes NetSimulyzer and CZML; its InfluxDB fan-out is
+  planned. Today line protocol comes from `NtnInfluxSink` and the AI flow monitor.
+- The `band` tag that `ntn-observability-traffic` writes is the fixed label `Ku`
+  even when `--freqGHz` selects another carrier (the run above used 20 GHz).
+  Read the carrier from the manifest or `sim_health.csv`, not from that tag.
+- The results above are from a June 2026 sweep. The module has since gained the
+  base-epoch, escaping and handover-edge fixes covered by the tests; rerun the
+  example to regenerate the series on the current code.
 
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
-a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
-Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+## Standards
+
+3GPP TS 28.552 and TS 32.425 measurement names; O-RAN E2SM-KPM measurement
+identities; CZML; InfluxDB line protocol; NetSimulyzer scene JSON 1.0.
+
+## Citation
+
+If this module contributes to a publication, please cite the toolkit article:
+
+> M. Uzair et al., "ns3-ntn-toolkit: An integrated ns-3 platform for 6G
+> non-terrestrial networks," *IEEE Open Journal of the Communications Society*,
+> 2026, doi: [10.1109/OJCOMS.2026.3745010](https://doi.org/10.1109/OJCOMS.2026.3745010).
+
+```bibtex
+@article{uzair2026ns3ntntoolkit,
+  author  = {Uzair, Muhammad and others},
+  title   = {ns3-ntn-toolkit: An Integrated ns-3 Platform for 6G Non-Terrestrial Networks},
+  journal = {IEEE Open Journal of the Communications Society},
+  year    = {2026},
+  doi     = {10.1109/OJCOMS.2026.3745010}
+}
+```
 
 ## License
 
 GPL-2.0-only, matching ns-3.
+
+## Contact
+
+**Muhammad Uzair**, Independent Researcher.
+Email [muhammaduzairr69@gmail.com](mailto:muhammaduzairr69@gmail.com),
+ORCID [0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

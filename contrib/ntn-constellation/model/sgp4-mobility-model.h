@@ -105,7 +105,7 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     /// comparing SGP4 against itself.
     bool IsUsingSgp4() const;
 
-    /// R2: anchor simulation time zero at an absolute UTC instant (Unix
+    /// Anchor simulation time zero at an absolute UTC instant (Unix
     /// seconds). By default time zero is the element set's own epoch, which
     /// is what a Walker shell built from one epoch wants. Satellites loaded
     /// from real element sets each carry their own epoch, so a constellation
@@ -231,7 +231,7 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     /// CVC-12: how many times it failed mid-run and silently fell back.
     mutable uint64_t m_sgp4Fallbacks{0};
 
-    double m_simEpochUnixS{std::numeric_limits<double>::quiet_NaN()}; //!< R2: see SetSimulationEpochUnix
+    double m_simEpochUnixS{std::numeric_limits<double>::quiet_NaN()}; //!< see SetSimulationEpochUnix
 
     // Cache.
     mutable bool m_cacheValid{false};

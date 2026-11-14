@@ -182,3 +182,7 @@ test1.db
 /*SWEEP_REPORT*.md
 /CSV_REALISM_FIXES_*.md
 /REALISM_*.md
+
+# Study datasets live in each module repository (paper/), audit run outputs stay local
+contrib/*/paper/
+toolkit-audit-*/

@@ -1,188 +1,176 @@
 <h1 align="center">ntn-slice</h1>
 
-<p align="center"><strong>Network slicing over NTN: eMBB, URLLC and mMTC with per-5QI bearers and SLA percentiles taken from a distribution</strong></p>
+<p align="center"><strong>Network slicing on a satellite cell in ns-3: per-slot RBG quotas enforced in the NR MAC, controllers that follow the pass, and SLA monitors that report tails rather than means</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
-  <img src="https://img.shields.io/badge/3GPP-TS%2023.501%20%2F%2038.300-orange.svg" alt="3GPP TS 23.501 and TS 38.300"/>
-  <img src="https://img.shields.io/badge/slices-eMBB%20%C2%B7%20URLLC%20%C2%B7%20mMTC%20%C2%B7%20V2X-purple.svg" alt="four slice types"/>
-  <img src="https://img.shields.io/badge/examples-3-informational.svg" alt="3 examples"/>
+  <img src="https://img.shields.io/badge/3GPP-TS%2023.501%20S--NSSAI%20%C2%B7%205QI-orange.svg" alt="3GPP TS 23.501 S-NSSAI and 5QI"/>
+  <img src="https://img.shields.io/badge/3GPP-TS%2022.261-orange.svg" alt="3GPP TS 22.261"/>
+  <img src="https://img.shields.io/badge/examples-6-informational.svg" alt="6 examples"/>
 </p>
 
 <p align="center">
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-slice/">Docs</a>
+  &nbsp;·&nbsp;
   <a href="INSTALL.md">Install</a>
   &nbsp;·&nbsp;
   <a href="#examples">Examples</a>
   &nbsp;·&nbsp;
-  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-slice/">Docs</a>
+  <a href="#results">Results</a>
 </p>
 
 ---
 
-A slice is only a slice if the radio treats it differently. This module maps S-NSSAI and 5QI onto dedicated EPS bearers with TFT filters on a real NR NTN cell, so a URLLC flow and an eMBB flow on the same satellite genuinely contend for different resources rather than sharing one pipe with different labels.
+## Why this module
 
-The SLA reporting is where slicing simulations usually quietly fail, and it is worth being explicit about the failure mode: if every packet is stamped with the same scalar mean delay, then the p99 of that slice is its mean, and a reliability target of one in a hundred thousand is unobservable no matter how long you run. The sink here retains a bounded delay histogram, so the three slices report 12.50, 11.50 and 11.50 ms at p99 rather than each reporting its own average.
+A slice is only a slice if the radio treats it differently. On a LEO cell that is harder than on the ground, because what a resource block carries changes over a pass: as the satellite recedes, the slant range grows, the MCS drops and a share that was enough at the start of the pass stops being enough near its end.
 
-A GEO mode-skip policy keeps latency-bound traffic off the orbital floor when a GEO hop would blow the budget.
+`ntn-slice` provides both halves. `NtnSliceQuotaScheduler`, a 5G-LENA OFDMA proportional-fair scheduler, enforces a per-slot RBG quota for each slice and lends what a slice leaves unused, so the partition is real in the MAC. The examples close loops around it: quotas from the ephemeris, from measured backlog and bytes per RBG, or from a tenant's rate contract with a delivered-rate trim. Around this sit the slice vocabulary (S-NSSAI, SliceProfile with TS 22.261 defaults, a flow selector), a GEO mode-skip rule for latency-bound slices, and an isolation monitor that keeps a delay histogram, so a p99 is a percentile and not a mean.
+
+## System design
+
+<p align="center">
+  <img src="doc/figures/ntn-slice-architecture.png" alt="ntn-slice architecture: slice definition classes map flows and RNTIs to slices; NtnSliceQuotaScheduler enforces per-slot RBG quotas set by quota controllers using measured backlog and bytes per RBG; SliceOrchestratorXapp and SliceIsolationMonitor observe without actuating" width="100%"/>
+</p>
+
+*Figure 1. Classes and data flow. The selector maps flows (and through RNTIs, UEs) to slices; controllers in the examples call `SetQuotas()` on `NtnSliceQuotaScheduler` every control period and read back its measured counters. `SliceOrchestratorXapp` is a shadow allocator: its PRB split is logged but does not reach the MAC. Source: [`doc/figures/make_architecture.py`](doc/figures/make_architecture.py).*
+
+## Results
+
+The results come from a slicing study on a LEO pass, run with this module's `ntn-slice-pass-leo` and `ntn-slice-tenants-leo` examples on a 5G-LENA cell. The study binaries are those examples with passive additions not yet merged here (block counters read from the UE PHY trace, a queue-proportional baseline, an `--aLimited` switch); no scheduler code differs. Patch, regression check and campaign scripts: `paper/tnsm-2026-slice-quotas/` of the toolkit tree (`ns3_patch/`, `compare_rev.py`, `run_final.py`, `make_macros5.py`).
+
+**Experiment.** One cell of 2.185 GHz and 20 MHz (numerology 1) through a 550 km, 53 degree SGP4 satellite with 55 dBm and an 8 x 8 array, free space plus TR 38.811 excess loss. The UE cluster sees the satellite recede from 87 to 31 degrees elevation over a 120 s run. Each mechanism runs on the same 12 seeds; every number below is a median over those seeds.
+
+<p align="center">
+  <img src="doc/figures/ntn-slice-pass-delay.png" alt="Delay-critical slice 99th percentile delay and share of packets over 50 ms against elevation for eight mechanisms" width="100%"/>
+</p>
+
+*Figure 2. Delay-critical slice (16 Mb/s, 50 ms budget) at full load over the falling pass: 99th-percentile one-way delay (left) and share of packets over 50 ms (right) per 5 s window, medians over 12 seeds. Thin lines mark 50 ms and 1 %; a share of zero is drawn at 0.01 %.*
+
+| Mechanism (`--policy`) | p99 delay, median (worst seed) | p99.9 delay | Windows over target (%) | eMBB (Mb/s) | All (Mb/s) |
+|---|---|---|---:|---:|---:|
+| PF, no slices (`pf`) | 2.8 s (6.7 s) | 3.4 s | 91 | 18.6 | 34.5 |
+| Two equal BWPs (`bwp`) | 133 ms (429 ms) | 261 ms | 26 | 20.6 | 36.6 |
+| Static quota sized at the start (`static`) | 2.6 s (3.6 s) | 3.4 s | 52 | 15.2 | 31.1 |
+| Static quota sized at the end (`static`) | 16 ms (22 ms) | 39 ms | 0 | 14.8 | 30.9 |
+| Ephemeris-driven quota (`predict`) | 20 ms (33 ms) | 49 ms | 0 | 14.2 | 30.3 |
+| Measured closed loop (`reactive`) | 19 ms (26 ms) | 47 ms | 0 | 14.4 | 30.4 |
+| 5QI priority, 5QI 79 (`qos`) | 15 ms (54 ms) | 58 ms | 0 | 17.2 | 33.3 |
+| 5QI priority, 5QI 3 (`qos`) | 14 ms (15 ms) | 32 ms | 0 | 17.1 | 33.2 |
+
+What the data say: on the calibration seed the delay-critical slice carried 77 bytes per RBG at 87 degrees and 50 at 31 degrees, 36 % less, so the quota it needs rises from 0.48 to 0.74 of the RBGs. A quota sized for the start of the pass failed once that headroom was used up; the measured loop and the ephemeris loop both kept up, and knowing the orbit bought nothing measurable over measuring. Priority with the strong 5QI 3 class gave the lowest tail, and both priority settings left eMBB about 2.7 Mb/s more than the measured loop; the study traces most of that lead to how this stack schedules retransmissions, not to the priority rule itself.
+
+<p align="center">
+  <img src="doc/figures/ntn-slice-tenants.png" alt="Tenant A throughput against its 12 Mb/s contract and tenant B throughput per 5 s window over the pass for ten mechanisms" width="100%"/>
+</p>
+
+*Figure 3. Two tenants on the same cell, contract R = 12 Mb/s for tenant A, decoding errors on, medians over 12 seeds. Tenant B pauses in the shaded interval. "Queue-proportional" is the study-only baseline.*
+
+| Mechanism (`--policy`) | A (Mb/s) | Lowest A window | Busy windows below R | B (Mb/s) | Busy total (Mb/s) |
+|---|---:|---:|---:|---:|---:|
+| PF, no slices (`pf`) | 17.6 | 15.4 | 0 % | 17.4 | 35.0 |
+| 5QI priority (`qos`) | 25.1 | 20.6 | 0 % | 8.1 | 33.3 |
+| Rate cap, no lending (`policed`) | 12.0 | 12.0 | 0 % | 27.4 | 39.4 |
+| Rate cap, lending (`limiter`) | 12.0 | 12.0 | 0 % | 27.5 | 39.5 |
+| Static quota, start of pass (`static`) | 12.5 | 10.6 | 33 % | 19.9 | 32.5 |
+| Static quota, best of sweep, 0.42 (`static`) | 15.2 | 12.4 | 0 % | 17.3 | 32.5 |
+| Contract quota (`contract`) | 14.3 | 13.4 | 0 % | 18.3 | 32.6 |
+| Contract quota, ephemeris table (`contract_eph`) | 14.4 | 12.9 | 0 % | 18.1 | 32.4 |
+| Trimmed contract loop (`contract_trim`) | 12.6 | 12.5 | 0 % | 19.8 | 32.5 |
+
+The trimmed loop held tenant A near its 12.6 Mb/s target and left tenant B more than the best fixed quota did; the rate cap with lending left B the most, and the cap without lending held A at 12.0 Mb/s even while B was idle, so it is not work conserving. Values are copied from `paper/tnsm-2026-slice-quotas/make_macros5.py`, written by `sim/make_macros5.py` from the run outputs in `sim/out/`.
+
+## Architecture and classes
+
+| Header | Provides |
+|---|---|
+| `model/ntn-slice-quota-scheduler.h` | `NtnSliceQuotaScheduler` (derived from `NrMacSchedulerOfdmaPF`): `SetSliceOfRnti()`, `SetQuotas()`, `TakeRbgCounts()`, `TakeBacklog()`, `TakeBytesPerRbg()`, and a per-slot allocation trace. A slice with demand gets at least floor(quota x RBGs) per slot; leftover RBGs go to any slice with data. Uplink stays plain PF. |
+| `model/ntn-slice-contract-trim.h` | `TrimmedQuota()`: scales a tenant quota by (target bytes / delivered bytes)^gain, clamped. |
+| `model/ntn-slice-types.h` | `SliceSst`, `Snssai` (8-bit SST + 24-bit SD, packed codecs), `SliceProfile`, default eMBB, URLLC and mMTC profiles after TS 22.261 Table 7.1-1. |
+| `model/ntn-slice-selector.h` | `NtnSliceSelector`: DSCP, port-range and app-label rule chain, first match wins, default fallback. |
+| `model/slice-orchestrator-xapp.h` | `SliceOrchestratorXapp`: min-throughput reservation plus priority-weighted sharing; `Step()` and `StepWithShares()` for an RL policy. Shadow allocator, see limitations. |
+| `model/slice-isolation-monitor.h` | `SliceIsolationMonitor`: rolling per-slice p99 delay and cumulative loss, `BreachEvent` records. |
+| `helper/ntn-slice-helper.h` | `NtnSliceHelper::ThreeSliceDefault()`, `ShouldSkipGeo()`, `IsGeoSatellite()` (30 000 km boundary). |
+
+A Grafana dashboard (`dashboards/ntn-slice.json`) plugs into the stack of the `ntn-observability` module.
 
 ## Quick start
 
 Inside the toolkit, where the module is already present and built:
 
 ```bash
-./ns3 run ntn-three-slice-leo-geo
-./ns3 run ntn-slice-demo
+./ns3 run "ntn-slice-quota-leo --policy=reactive"
+./ns3 run "ntn-slice-pass-leo --policy=reactive --duration=120"
+./ns3 run "ntn-slice-tenants-leo --policy=contract_trim --contractMbps=12"
 ```
 
 Standalone, into an existing ns-3.43 tree:
 
 ```bash
 git clone -b ntn-slice-v2 https://github.com/Muhammaduazir69/ntn-slice.git contrib/ntn-slice
-./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```
 
-`INSTALL.md` in this directory carries the full dependency list. Most examples in
-this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
-toolkit tree is the path of least resistance.
-
-## Overview
-
-5G slicing is straightforward when every cell is a few kilometres away. In NTN the latency budget of a URLLC slice (5 ms p99) is hard-bounded by orbital geometry — a GEO leg adds ~120 ms of one-way slant propagation (~240 ms ground–satellite–ground), blowing the budget by more than an order of magnitude regardless of any radio-side allocator decision. `ntn-slice` is a 3GPP-compliant slicing layer that *understands the orbital floor*:
-
-- **Per-slice PRB orchestration** with min-throughput reservation, then priority-weighted distribution of the remainder by unmet demand — or by externally supplied RL shares. **This orchestrator is an open-loop *shadow* allocator**: its PRB decisions are computed and logged but do **not** actuate the mmwave scheduler. All slices share **one slice-agnostic cell**; the 5QI / S-NSSAI is a packet label the MAC never reads; and per-slice isolation is **observed statistically** on the measured plane, not *enforced* by the allocator. There is no per-slice isolation guarantee — the reservation is the allocator's own bookkeeping, not a scheduler-enforced PRB partition.
-- **TS 22.261 demand profiles** — default per-slice KPIs (latency budget, min/max throughput, reliability target, priority, `allowGeo`) seeded from TS 22.261 Table 7.1-1.
-- **Per-slice latency / reliability KPIs** — a rolling-window isolation monitor that emits a `BreachEvent` whenever a slice exceeds its p99-latency or loss-rate target.
-- **GEO mode-skip policy** — keeps URLLC traffic on LEO satellites whose round-trip time is compatible with the slice latency target; `ShouldSkipGeo(slice)` is true exactly for slices with `allowGeo == false`.
-
-The orchestrator's `(observation, action)` shape matches the `SliceEnv` Gymnasium wrapper in [`ns3-ai`](https://github.com/Muhammaduazir69/ns3-ai), so a trained RL policy can drive the C++ allocator directly via `StepWithShares()`.
-
-| Slice | SST | Default min throughput | Default latency budget | GEO allowed |
-|---|---:|---:|---:|:---:|
-| eMBB  | 1 | 50 Mbps | 50 ms | yes |
-| URLLC | 2 |  5 Mbps |  5 ms | **no — mode-skip** |
-| mMTC  | 3 |  1 Mbps |  1 s  | yes |
-
-The V2X SST enum value (SST 4) is defined, but no default V2X profile ships yet — only the three slices above have a default-profile factory.
-
-## What changed in v2.5
-
-See the [CHANGELOG](CHANGELOG.md) for the full history.
-
-- **All three examples now run on a measured radio.** Every example builds a real mmwave NR NTN cell (`NtnRealStackHelper` from `ntn-traffic`: SpectrumPhy + MAC + RLC/PDCP + RRC + EPC) on a real SGP4 Walker satellite pass with TR 38.811 UE placement — no point-to-point stand-ins, no closed-form SNR curves.
-- **Traffic is `NtnOranApplication` QoS flows** (`ntn-traffic`), not `OnOffApplication`: each packet carries a real 24-byte in-band payload header (5QI / S-NSSAI / QFI / sequence number / TX timestamp), and per-UE delivered bytes are measured at the `NtnOranSink`. The `MixedBouquet` profile spreads UEs across eMBB (CBR-saturating, 5QI 2), URLLC (periodic pings, 5QI 82) and mMTC (periodic NB-IoT-style, 5QI 9) flows.
-- New **`ntn-slice-real-stack`** example: all slices contend for **one** shared mmwave cell, so per-slice service is genuinely contested rather than trivially separated by distinct links — but isolation here is *measured* on the shared cell, not *enforced* by a per-slice PRB scheduler (the orchestrator's PRB split does not drive the mmwave MAC).
-- **`ntn-slice-isolation-traffic`** was rebuilt on the same shared-cell recipe: the eMBB slice saturates the cell while URLLC and mMTC must hold their SLAs; per-slice SINR / throughput are measured and fed to the real `SliceIsolationMonitor`. It now also writes a **per-slice `slices.csv`** — per-BWP SINR, measured throughput, measured one-way delay, delivered / lost packet counts, and each slice's SLA breach verdict (`latency_breach` / `reliability_breach`) — making the real per-BWP isolation visible where the aggregate `sim_health.csv` hid it. A representative run shows eMBB saturating the cell (~15 Mbps) and URLLC's 5 ms budget breaching over the LEO slant (~8.56 ms measured, `latency_breach=1`) — the expected orbital-floor result, not a bug.
-- The **three-slice LEO/GEO example** validates URLLC GEO mode-skip against real geometry — LEO slant/c for LEO-served slices, the real ~36 000 km GEO slant/c (~120 ms one-way) for GEO-served ones — with delivery gated by the cell's measured TBLER.
-- `served_mbps` is clamped so it **never exceeds the per-slice demand** (no over-reporting of served load).
-
-## Models, helpers & key classes
-
-| Header | Provides |
-|---|---|
-| `model/ntn-slice-types.h` | `SliceSst` enum (eMBB / URLLC / mMTC / V2X); `Snssai` (8-bit SST + 24-bit SD with packed / unpacked codecs); `SliceProfile` (latency budget, min/max throughput, reliability target, priority, `allowGeo`); default profiles per TS 22.261 Table 7.1-1. |
-| `model/ntn-slice-selector.h` | `NtnSliceSelector` — DSCP / port-range / app-label rule chain, first-match-wins, default fallback; maps a flow to its S-NSSAI. |
-| `model/slice-orchestrator-xapp.h` | `SliceOrchestratorXapp` — PRB allocator with min-throughput reservation + priority-weighted unmet-demand sharing; `Step()` / `StepWithShares({snssai → fraction})` for RL override; `Tick` trace source exports per-slice allocated PRBs, served Mbps, satisfaction. |
-| `model/slice-isolation-monitor.h` | `SliceIsolationMonitor` — rolling per-slice latency / loss-rate windows; `RecordPacket()` / `EvaluateAll()` returns `BreachEvent` records for latency-p99 and reliability breaches. |
-| `helper/ntn-slice-helper.h` | `NtnSliceHelper::ThreeSliceDefault()` — ready-wired selector + orchestrator + monitor + the three default slices; GEO helpers `ShouldSkipGeo(slice)` and `IsGeoSatellite(altKm)` (altitudes at or above the conservative 30 000 km boundary are treated as GEO-class; GEO proper is 35 786 km). |
-
-A pre-built Grafana dashboard (`dashboards/ntn-slice.json` — per-slice satisfaction, served-vs-demand panels) can be imported into the Grafana stack that ships with the [ntn-observability](https://github.com/Muhammaduazir69/ntn-observability) module.
+The library links `nr` (5G-LENA), `ntn-traffic` and `ntn-constellation`; the examples also use `ntn-cho` and, for the older three, `mmwave` and `lte`. The toolkit tree has all of them. `INSTALL.md` lists the details.
 
 ## Examples
 
-Build all examples with `./ns3 configure --enable-examples --enable-tests && ./ns3 build`. Each example produces the binary `build/contrib/ntn-slice/examples/ns3.43-<name>-default`.
+| Example | What it shows | Command |
+|---|---|---|
+| `ntn-slice-pass-leo` | Three slices on one 5G-LENA cell while the satellite recedes; policies `pf`, `qos`, `bwp`, `static`, `predict`, `reactive`; one JSON line with per-window elevation, delay-critical p99, deadline misses, rates, quota and bytes per RBG | `./ns3 run "ntn-slice-pass-leo --policy=predict"` |
+| `ntn-slice-tenants-leo` | Two elastic tenants and an mMTC slice; tenant A buys `--contractMbps`; policies `pf`, `qos`, `policed`, `limiter`, `static`, `contract`, `contract_eph`, `contract_trim`; tenant B pauses to show who may borrow | `./ns3 run "ntn-slice-tenants-leo --policy=limiter"` |
+| `ntn-slice-quota-leo` | eMBB, URLLC and mMTC with the partition enforced by the MAC; `pf`, `bwp`, `static`, `reactive`; per-slice delay percentiles and the RBG share actually granted | `./ns3 run "ntn-slice-quota-leo --policy=static"` |
+| `ntn-three-slice-leo-geo` | Three slices over LEO and GEO with URLLC GEO mode-skip; latency from the real LEO and GEO slant ranges, delivery gated by measured TBLER | `./ns3 run "ntn-three-slice-leo-geo --simTime=30"` |
+| `ntn-slice-isolation-traffic` | Slices sharing one mmwave cell under eMBB saturation; writes `slices.csv` with per-slice SINR, throughput, delay and breach flags | `./ns3 run "ntn-slice-isolation-traffic --simSeconds=15 --numUes=9"` |
+| `ntn-slice-real-stack` | Minimal shared-cell recipe with the isolation monitor on measured delivery | `./ns3 run "ntn-slice-real-stack --duration=15 --numUes=9"` |
 
-### ntn-three-slice-leo-geo
-
-Three slices (eMBB / URLLC / mMTC) coexisting on a LEO + GEO NTN, with URLLC enforcing GEO mode-skip routing. The orchestrator runs at 1 Hz on top of a real mmwave NR cell (SGP4 LEO pass, TR 38.811 UEs): delivery is gated by the cell's *measured* TBLER, and per-slice latency is the *real* geometry — LEO slant/c for LEO-served slices, the ~36 000 km GEO slant/c (~120 ms one-way) for GEO-served ones — so the GEO-skip decision is validated against physics, not a hardcoded constant.
-
-```bash
-./ns3 run "ntn-three-slice-leo-geo --simTime=30 --csv=/tmp/three-slice.csv"
-```
-
-```bash
-LD_LIBRARY_PATH=build/lib \
-  ./build/contrib/ntn-slice/examples/ns3.43-ntn-three-slice-leo-geo-default \
-  --simTime=30 --csv=/tmp/three-slice.csv
-```
-
-Outputs:
-- Per-slice KPI CSV at `--csv` (default `ntn-three-slice.csv`) — per tick: demand / served Mbps, allocated PRBs, satisfaction, p99 latency and latency / reliability breach flags per slice.
-- `sim_health.csv` in `--outputDir` (default `ntn-three-slice-output`), written by `NtnRealStackHelper::WriteHealthReport()`.
-- Console summary: measured LEO SINR / TBLER, max URLLC p99 latency and breach counts.
-
-Key args: `--simTime` (sim duration, s; default 30) · `--numUes` (UEs on the measured LEO cell; default 3) · `--urllcViaGeo` (force URLLC over GEO; gates the GEO-skip test) · `--totalPrb` (total PRB budget; default 273) · `--satEirpDbm` (LEO EIRP / gNB Tx power, dBm) · `--csv` (per-slice KPI CSV path) · `--outputDir` (output directory).
-
-### ntn-slice-isolation-traffic
-
-Three slices **share one real mmwave NR cell** under genuine contention: the eMBB slice saturates the cell while URLLC and mMTC must hold their SLAs. UEs are assigned round-robin to slices (`ue % 3`) and carry `NtnOranApplication` per-slice traffic profiles (`MixedBouquet`). Per-slice SINR comes off the mmwave PHY trace, per-slice delivered bytes off the sinks, latency from the real slant geometry — all fed to the real `SliceIsolationMonitor`, which flags breaches.
+## Tests
 
 ```bash
-./ns3 run "ntn-slice-isolation-traffic --simSeconds=15 --numUes=9"
-```
-
-```bash
-LD_LIBRARY_PATH=build/lib \
-  ./build/contrib/ntn-slice/examples/ns3.43-ntn-slice-isolation-traffic-default \
-  --simSeconds=15 --numUes=9
-```
-
-Outputs: console isolation summary (measured cell SINR / TBLER / total throughput, per-slice measured throughput and SINR, SLA breach verdict under eMBB saturation); a **per-slice breakdown `slices.csv`** (columns `slice,five_qi,sst,bwp,sinr_db,throughput_mbps,mean_owd_ms,rx_pkts,lost_pkts,latency_breach,reliability_breach,provenance`, one row each for eMBB / URLLC / mMTC); and `sim_health.csv` — all in `--outputDir` (default `ntn-slice-isolation-output`), nothing is hardcoded. `slices.csv` exposes the real per-BWP isolation (distinct per-slice SINR / throughput / delay) that the aggregate `sim_health.csv` hides. In a representative run the eMBB slice saturates the shared cell (~15 Mbps) while URLLC's 5 ms latency budget **breaches** over the LEO slant (~8.56 ms measured one-way delay, `latency_breach=1`) — that breach is the expected, physically-correct result of the orbital latency floor (TS 23.501 5QI PDB judged against real geometry), not a simulator defect.
-
-Key args: `--simSeconds` (sim duration, s; default 15) · `--numUes` (UEs on the shared cell, slice = `ue % 3`; default 9) · `--satEirpDbm` (satellite EIRP / gNB Tx power, dBm) · `--backhaulMs` (feeder + core one-way delay, ms) · `--outputDir` (output directory).
-
-### ntn-slice-real-stack
-
-The shared-cell isolation recipe in its minimal form: all slices on **one** real mmwave cell, per-slice SINR and throughput measured from that cell, and the `SliceIsolationMonitor` evaluating SLA breaches against measured delivery plus the real geometric NTN latency — URLLC's 5 ms budget realistically breaches over the LEO slant while eMBB's 50 ms budget holds.
-
-```bash
-./ns3 run "ntn-slice-real-stack --duration=15 --numUes=9"
-```
-
-```bash
-LD_LIBRARY_PATH=build/lib \
-  ./build/contrib/ntn-slice/examples/ns3.43-ntn-slice-real-stack-default \
-  --duration=15 --numUes=9
-```
-
-Outputs: per-slice measured throughput / SINR table, per-slice SLA breach evaluation on the console, and `sim_health.csv` in `--outputDir` (default `ntn-slice-real-stack-output`).
-
-Key args: `--duration` (sim duration, s; default 15) · `--numUes` (UEs sharing the cell; default 9) · `--altitude` (satellite altitude, km; default 550) · `--satEirpDbm` (satellite EIRP, dBm) · `--outputDir` (output directory).
-
-## Build, run & test
-
-```bash
-./ns3 configure --enable-examples --enable-tests
-./ns3 build
 ./test.py -s ntn-slice
+./test.py -s ntn-slice-quota-scheduler
 ```
 
-The `ntn-slice` suite has 7 unit tests (S-NSSAI pack/unpack round-trip, selector first-match-wins, URLLC min-throughput preservation under contention, isolation-monitor breach detection, URLLC GEO mode-skip, three-slice co-existence, RL-shares honoured).
+`ntn-slice` (`Type::UNIT`, 9 cases): S-NSSAI round trips, selector first match, URLLC minimum under eMBB load, p99 breach detection, GEO mode-skip, three-slice coexistence, RL shares, cumulative loss, and the monitor under `Simulator::Run()`. `ntn-slice-quota-scheduler` (`Type::SYSTEM`, 3 cases): each saturated slice gets at least its quota, an idle slice's quota goes to a slice with data, and the contract trim converges despite leftovers and rounding.
 
-See [INSTALL.md](INSTALL.md) for setup and dependencies. For the full toolkit, see [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).
+## Dependencies
 
----
+ns-3.43 with `nr` (5G-LENA) for the quota scheduler; `ntn-traffic`, `ntn-constellation`, `ntn-cho`; `mmwave` and `lte` for the three shared-cell examples.
 
-## Standards implemented
+## Scope and limitations
 
-3GPP TS 23.501 (network slicing, S-NSSAI, 5QI and the standardized QoS characteristics), TS 22.261 (service requirements and demand profiles), TS 38.300 (QoS flow to DRB mapping), TS 38.101-5 (NTN FR1 channel bandwidths, which constrain what a slice can be allocated), TR 38.821 (NTN latency budgets).
+- The quota scheduler acts on the downlink only; the uplink is scheduled by the parent PF scheduler unchanged.
+- `SliceOrchestratorXapp` is an open-loop shadow allocator: its PRB decisions are computed and logged but do not drive any MAC. In the three mmwave examples the 5QI and S-NSSAI are packet labels the MAC never reads, and isolation there is observed, not enforced. Enforcement is the 5G-LENA quota scheduler path.
+- The V2X SST value (4) is defined but has no default profile.
+- The Results are one cell, one satellite pass geometry and 12 seeds; the queue-proportional baseline and the block counters exist only in the study patch.
 
-## Keywords
+## Standards
 
-network slicing, 5G slicing, S-NSSAI, 5QI, slice SLA, eMBB, URLLC, mMTC, V2X slice, QoS flow, dedicated bearer, TFT, PRB allocation, slice isolation, latency percentile, p99 latency, reliability target, GEO latency floor, satellite slicing, non-terrestrial network, ns-3.
+3GPP TS 23.501 (S-NSSAI, 5QI and standardized QoS characteristics), TS 22.261 (service requirements and demand profiles), TS 38.300 (QoS flow to DRB mapping), TS 38.101-5 (NTN FR1 channel bandwidths), TR 38.811 and TR 38.821 (NTN channel and latency budgets).
 
-## Author
+## Citation
 
-**Muhammad Uzair**, Independent Researcher
-[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+If you use this module, please cite the toolkit article:
 
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
-a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
-Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+```bibtex
+@article{uzair2026ns3ntntoolkit,
+  author  = {Uzair, Muhammad and others},
+  title   = {ns3-ntn-toolkit: An Integrated ns-3 Platform for {6G} Non-Terrestrial Networks},
+  journal = {IEEE Open Journal of the Communications Society},
+  year    = {2026},
+  doi     = {10.1109/OJCOMS.2026.3745010}
+}
+```
 
 ## License
 
 GPL-2.0-only, matching ns-3.
+
+## Contact
+
+**Muhammad Uzair**, Independent Researcher. muhammaduzairr69@gmail.com, [ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit); mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

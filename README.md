@@ -5,27 +5,26 @@
 <h1 align="center">ns3-ntn-toolkit</h1>
 
 <p align="center">
-  <strong>An integrated ns-3.43 platform for 6G non-terrestrial networks: LEO constellations,
-  3GPP NR-NTN protocol stacks, O-RAN control loops, terahertz links and reinforcement-learning
-  interfaces in a single tree that builds and runs as one.</strong>
+  <strong>A pre-integrated ns-3.43 simulation platform for 6G non-terrestrial networks:
+  LEO satellite constellations, 3GPP NR-NTN protocol stacks, O-RAN control loops,
+  terahertz links and reinforcement-learning agents, in one tree that clones, builds and runs.</strong>
 </p>
 
 <p align="center">
-  <a href="https://doi.org/10.1109/OJCOMS.2026.3745010">Paper (IEEE OJ-COMS)</a>
-  &nbsp;·&nbsp;
-  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Documentation</a>
-  &nbsp;·&nbsp;
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">GitHub</a>
   &nbsp;·&nbsp;
   <a href="https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit">GitLab</a>
   &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/">Documentation</a>
+  &nbsp;·&nbsp;
   <a href="https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit">Docker Hub</a>
   &nbsp;·&nbsp;
-  <a href="https://huggingface.co/spaces/Muhammaduazir69/ns3-ntn-toolkit-demo">Hugging Face demo</a>
+  <a href="INSTALL.md">Install guide</a>
+  &nbsp;·&nbsp;
+  <a href="SCOPE_AND_LIMITATIONS.md">What it does not model</a>
 </p>
 
 <p align="center">
-  <a href="https://doi.org/10.1109/OJCOMS.2026.3745010"><img src="https://img.shields.io/badge/DOI-10.1109%2FOJCOMS.2026.3745010-00629B.svg" alt="DOI 10.1109/OJCOMS.2026.3745010"/></a>
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-Rel--17%20%2F%2018%20%2F%2019%20NTN-orange.svg" alt="3GPP Rel-17/18/19 NTN"/>
@@ -33,70 +32,51 @@
   <img src="https://img.shields.io/badge/THz-100%20GHz%20to%201%20THz-success.svg" alt="THz 100 GHz to 1 THz"/>
   <img src="https://img.shields.io/badge/Sionna%20RT-ray%20tracing-red.svg" alt="Sionna RT"/>
   <img src="https://img.shields.io/badge/RL-Gymnasium%201.0-yellow.svg" alt="Gymnasium 1.0"/>
-  <img src="https://img.shields.io/badge/modules-14-informational.svg" alt="14 modules"/>
+  <img src="https://img.shields.io/badge/modules-14%20custom-informational.svg" alt="14 custom modules"/>
   <img src="https://img.shields.io/badge/examples-93-informational.svg" alt="93 examples"/>
+  <a href="https://doi.org/10.1109/OJCOMS.2026.3745010"><img src="https://img.shields.io/badge/DOI-10.1109%2FOJCOMS.2026.3745010-00629B.svg" alt="DOI 10.1109/OJCOMS.2026.3745010"/></a>
 </p>
-
----
-
-## Publication
-
-The toolkit is described and evaluated in the following open-access article:
-
-> M. Uzair, B. G. Aldahlan, A. A. Albar, H. Althumali and A. Alghammas,
-> "ns3-ntn-toolkit: An Integrated ns-3 Platform for 6G Non-Terrestrial Networks,"
-> *IEEE Open Journal of the Communications Society*, vol. 7, pp. 13440–13467, 2026,
-> doi: [10.1109/OJCOMS.2026.3745010](https://doi.org/10.1109/OJCOMS.2026.3745010).
-
-<p align="center">
-  <img src="docs/paper1_fig1.png" alt="Fig. 1 of the article: the system the platform models, with space, aerial, ground and measurement layers; a LEO Walker shell with optical inter-satellite links and an on-board Space RIC; HAPS and UAV tiers; a feeder gateway, gNB, near-RT RIC with E2 and A1 interfaces, and served households, handsets and vehicles; and a measurement rail from instrumented packets to controllers" width="960"/>
-</p>
-
-<p align="center"><sub><b>Fig. 1 of the article.</b> The system the platform models. Height is altitude and link color is carrier. E2 reaches a satellite over the feeder bearer. The rail underneath shows the measurement path: packets leave an application, cross a modeled radio, and are read back at the sink, where every KPI is computed.</sub></p>
-
-The article reports, among other results:
-
-- Over ten seeds, the measured cell reproduces the TR 38.821 zenith-to-edge decay to within 0.49 ± 1.30 dB, and a nadir-fixed beam follows the TR 38.811 pattern to 2.71 ± 0.21 dB RMS across a 39 dB excursion.
-- A closed O-RAN control loop measures 104 ms end to end, 26 µs of it computation, and a priority-based arbiter resolves the 39,000 conflicts raised by thirteen concurrent applications.
-- In an archived geometry-driven scenario, the time-to-exit trigger removes every ping-pong and cuts handovers by 71 % against A3.
-
-The release cited in the article is **v2.6.1** (GitHub and GitLab tag, Docker image `uzairdocker69/ns3-ntn-toolkit:2.6.1`).
-
----
-
-## Overview
-
-Simulating a 6G non-terrestrial network usually requires combining separate codebases: an
-orbital propagator that works with two-line element sets, a cellular stack that works in slots
-and RNTIs, a channel model written for terrestrial street canyons, and a control framework that
-assumes a stationary gNB. Their coordinate frames, time bases and units rarely agree.
-
-ns3-ntn-toolkit performs that integration once. It is a fork of **ns-3.43** carrying
-**14 custom modules** and three vendored upstreams, wired so that a satellite's propagated
-position drives a real NR spectrum PHY, a handover decision travels over an Xn interface with
-the corresponding propagation delay, and every KPI a scenario reports is computed from packets
-that crossed the modeled air interface.
-
-The defining design choice is that **the decision plane and the measurement plane are the
-same**. When a handover trigger fires, the terminal moves to a different cell whose SINR is then
-measured; the decision is not logged beside an unrelated number.
-
-**Intended users.** Researchers in LEO satellite communications, NR-NTN mobility management,
-satellite O-RAN and RIC placement, sub-terahertz and terahertz links, space-air-ground
-integrated networks, and reinforcement learning for satellite radio resource management.
 
 <p align="center">
   <img src="docs/architecture.png" alt="ns3-ntn-toolkit architecture: orbital and mobility, protocol L1 to L3, physical layer, control and learning, and operations layers over vendored SNS3 satellite and mmWave NR, on an unmodified ns-3.43 simulation core" width="960"/>
 </p>
 
-<p align="center"><sub>Software architecture. Amber arrows follow one run from left to right: orbit state, beam trigger, THz xApps and KPI export.</sub></p>
+<p align="center"><sub>Architecture as published in the accompanying manuscript. Amber arrows follow one run left to right: orbit state, beam trigger, THz xApps, KPI export.</sub></p>
+
 ---
 
-## Quick start
+## What this is
+
+Simulating a 6G non-terrestrial network usually means assembling four unrelated
+codebases and hoping their coordinate frames, time bases and units agree. An
+orbital propagator that speaks TLEs. A cellular stack that speaks slots and RNTIs.
+A channel model written for a terrestrial street canyon. A control framework that
+expects a terrestrial gNB to be sitting still.
+
+This toolkit is that assembly, done once and kept honest. It is a fork of
+**ns-3.43** carrying **14 custom modules** and three vendored upstreams, wired so
+that a satellite's propagated position drives a real NR spectrum PHY, a real handover
+decision rides a real Xn interface with a real propagation delay, and every KPI a
+scenario prints came off a packet that actually crossed the air interface.
+
+The distinguishing property is not breadth. It is that the **decision plane and
+the measurement plane are the same plane**. A handover trigger that fires moves a
+terminal onto a different cell whose SINR is then measured, rather than
+incrementing a counter beside an unrelated number.
+
+**Who it is for.** Researchers working on LEO satellite communications, NR-NTN
+mobility management, satellite O-RAN and RIC placement, sub-terahertz and
+terahertz links, space-air-ground integrated networks, and reinforcement learning
+for satellite radio resource management, who would rather spend their time on the
+contribution than on the integration.
+
+---
+
+## Try it in 60 seconds
 
 ### Docker, no build required
 
-The complete toolkit, prebuilt: ns-3.43, all 14 modules, the SNS3 `satellite` stack,
+The whole toolkit, prebuilt: ns-3.43, all 14 modules, the SNS3 `satellite` stack,
 the mmWave and 5G-LENA `nr` NR stacks, the Python tooling and the digital-twin
 server.
 
@@ -130,58 +110,53 @@ the troubleshooting table are in **[INSTALL.md](INSTALL.md)**.
 ## The 14 modules
 
 Each module is also published as a standalone repository on GitHub and GitLab, so
-it can be dropped into an existing ns-3 tree on its own.
+it can be dropped into an existing ns-3 tree on its own. `ntn-traffic` and
+`ntn-fapi` live only in this repository.
 
-### Orbital and mobility
-
-| Module | What it gives you |
-|---|---|
-| **[`ntn-constellation`](contrib/ntn-constellation)** | Orbital propagation from TLEs (Vallado SGP4) or from orbital elements (Kepler with J2 secular rates), Walker-Delta and Walker-Star shell generation, contact-graph routing and scheduling across inter-satellite links, limb-clearance geometry, and shipped presets for Starlink-class, OneWeb-class and Iridium-class shells. Calibrated against the TR 38.821 free-space corpus. |
-| **[`ntn-sagin`](contrib/ntn-sagin)** | Space-air-ground integrated networking: ground, UAV, HAPS and LEO layers with a multi-layer router, TR 36.777 air-to-ground propagation with a declared validated-height boundary, and store-and-forward across contact gaps. |
-| **[`ntn-v2x`](contrib/ntn-v2x)** | Satellite-assisted vehicle-to-everything: NR sidelink PC5 Mode 2, SAE J2735 basic safety messages encoded the way the standard encodes them, SUMO trace ingestion, and a runtime transmit gate so a relay decision can actually gate a flow. |
-
-### Protocol, L1 to L3
-
-| Module | What it gives you |
-|---|---|
-| **[`ntn-traffic`](contrib/ntn-traffic)** | `NtnRealStackHelper`, the dual-backend spine every other module builds on. Assembles a real mmWave or 5G-LENA `nr` cell (SpectrumPhy, LDPC error model, HARQ, RLC, PDCP, RRC, EPC, GTP) under satellite mobility, with TR 38.811 excess loss, per-BWP loss chaining, NTN-stretched timers and an in-band application header that makes delay, jitter and loss measurable rather than derived. |
-| **[`ntn-cho`](contrib/ntn-cho)** | Conditional handover for LEO. Time-to-exit estimation from real two-body propagation, and the standardized NTN trigger set: TS 38.331 CondEvent A3, D1, T1 on its absolute epoch, Rel-18 D2 on a moving ephemeris reference, plus the TR 38.821-studied elevation and timing-advance mechanisms. |
-| **[`ntn-rrc`](contrib/ntn-rrc)** | NR-NTN radio resource control: SIB19 broadcast with `cellSpecificKoffset` consumed by the scheduler rather than merely published, off by default and added to the gNB `N2Delay` when `SetKOffsetConsumption(true)` (the `koffset_slots_consumed` health row records which a run had), timing advance that differs between transparent and regenerative payloads because the feeder leg is in the geometry, and DRX that gates a real flow. |
-| **[`ntn-fapi`](contrib/ntn-fapi)** | An SCF-222 FAPI MAC-PHY adapter that decorates a live NR SAP, with per-UE HARQ state and a latency gate anchored to the geometric floor of the link it runs on. |
-| **[`ntn-slice`](contrib/ntn-slice)** | Network slicing over NTN: eMBB, URLLC and mMTC slices with per-5QI and per-S-NSSAI dedicated bearers, TFT filters, and SLA percentiles taken from a delay histogram rather than from a mean. |
-
-### Physical layer
-
-| Module | What it gives you |
-|---|---|
-| **[`thz-ntn`](contrib/thz-ntn)** | Sub-terahertz and terahertz NTN links from 100 GHz to 1 THz: ITU-R P.676-13 molecular absorption over a layered atmosphere, P.838-3 rain, P.840 fog, P.618-13 tropospheric scintillation with the correct elevation exponent, Tatarskii turbulence, pointing error, and reconfigurable intelligent surfaces. |
-| **[`ntn-sionna`](contrib/ntn-sionna)** | A bridge to NVIDIA Sionna RT for GPU ray tracing, with a channel impulse response propagation model, a calibrator against the closed-form TR 38.811 reference, and provenance on every query so a run says whether it was ray traced or fell back. |
-
-### Control and learning
-
-| Module | What it gives you |
-|---|---|
-| **[`oran-ntn`](contrib/oran-ntn)** | Space O-RAN: E2AP termination, E2SM-KPM under TS 28.552 measurement names, E2SM-RC control actions that a scenario wires to a real handover (the framework supplies the hook; two of the eleven examples install it), A1 policy distribution, a multi-tier RIC (on-board real-time, gateway, cloud) whose E2 latency comes from live slant geometry, transparent and Rel-19 regenerative payload options, a WG3 conflict-mitigation taxonomy, and a FlexRIC bridge. |
-| **[`ns3-ai-ntn`](contrib/ns3-ai-ntn)** | A fork of ns3-ai carrying a Gymnasium 1.0 environment set for NTN: handover selection, beam management, slice admission and power control, with a versioned shared-memory contract so the C++ and Python sides cannot silently disagree. |
-
-### Operations
-
-| Module | What it gives you |
-|---|---|
-| **[`ntn-observability`](contrib/ntn-observability)** | One scene recorder feeding NetSimulyzer, CZML for Cesium globes, InfluxDB line protocol and Grafana dashboards, with links and topology exported alongside positions, and a documented simulation-time anchor. |
-| **[`ntn-digital-twin`](contrib/ntn-digital-twin)** | A FastAPI digital twin that predicts handovers from live ephemeris and actuates them back into a running simulation, sharing one A3 guard implementation with the exporter so prediction and actuation cannot drift apart. |
+| Module | Layer | What it gives you | Repository |
+|---|---|---|---|
+| **[`ntn-constellation`](contrib/ntn-constellation)** | Orbital and mobility | SGP4 from TLEs, Kepler + J2 for generated Walker shells, ISL contact-graph routing, constellation presets | [ntn-constellation](https://github.com/Muhammaduazir69/ntn-constellation) |
+| **[`ntn-sagin`](contrib/ntn-sagin)** | Orbital and mobility | ground, UAV, HAPS and LEO layers, TR 36.777 air-to-ground channel, store and forward across contact gaps | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) |
+| **[`ntn-v2x`](contrib/ntn-v2x)** | Orbital and mobility | NR sidelink PC5 Mode 2, SAE J2735 basic safety messages, SUMO traces, a relay decision that gates the flow | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) |
+| **[`ntn-traffic`](contrib/ntn-traffic)** | Protocol, L1 to L3 | `NtnRealStackHelper`: the measured NR NTN data plane (PHY, HARQ, RLC, PDCP, RRC, EPC) every module builds on | [toolkit only](https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-traffic) |
+| **[`ntn-cho`](contrib/ntn-cho)** | Protocol, L1 to L3 | conditional handover with time-to-exit and the TS 38.331 NTN trigger set (A3, D1, D2, T1) | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) |
+| **[`ntn-rrc`](contrib/ntn-rrc)** | Protocol, L1 to L3 | SIB19 with `cellSpecificKoffset` consumed by the scheduler, payload-aware timing advance, DRX that gates a flow | [ntn-rrc](https://github.com/Muhammaduazir69/ntn-rrc) |
+| **[`ntn-fapi`](contrib/ntn-fapi)** | Protocol, L1 to L3 | SCF-222 FAPI MAC-PHY adapter on a live NR SAP with per-UE HARQ state | [toolkit only](https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-fapi) |
+| **[`ntn-slice`](contrib/ntn-slice)** | Protocol, L1 to L3 | eMBB, URLLC and mMTC with per-5QI bearers and SLA percentiles from a delay histogram | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) |
+| **[`thz-ntn`](contrib/thz-ntn)** | Physical | 100 GHz to 1 THz on ITU-R P.676-13, P.618-13, P.838-3 and P.840, pointing error, RIS | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) |
+| **[`ntn-sionna`](contrib/ntn-sionna)** | Physical | NVIDIA Sionna RT ray tracing with per-query provenance and a TR 38.811 calibrator | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) |
+| **[`oran-ntn`](contrib/oran-ntn)** | Control and learning | Space O-RAN: E2 and A1 loops on a measured radio, RIC placement from live slant geometry, A1 intent leases | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) |
+| **[`ns3-ai-ntn`](contrib/ns3-ai-ntn)** | Control and learning | ns3-ai fork: Gymnasium 1.0 over versioned shared memory, AI-RAN inference contract | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) |
+| **[`ntn-observability`](contrib/ntn-observability)** | Operations | one scene recorder feeding InfluxDB, Grafana, NetSimulyzer and Cesium, with a reproducibility manifest | [ntn-observability](https://github.com/Muhammaduazir69/ntn-observability) |
+| **[`ntn-digital-twin`](contrib/ntn-digital-twin)** | Operations | FastAPI constellation twin whose handover schedule ns-3 actuates; one shared A3 guard | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) |
+| **[`satellite (SNS3)`](contrib/satellite)** | Vendored upstream | SGP4 mobility, DVB-S2 and RCS2 link results, antenna patterns, TLE corpus | [sns3-satellite](https://github.com/sns3/sns3-satellite) |
 
 ---
 
-## Measured results
+## Results at a glance
 
-Two campaigns ship with the tree. Both can be reproduced from the committed CSV files
-under `papers/sim_runs/`; the handover campaign is the one reported in the article.
+Every number below is measured in a stored run and traced, in the module README,
+to its data path, run count and the script that draws the figure.
+
+| Module | At a glance | Details |
+|---|---|---|
+| `oran-ntn` | An A1 intent lease cuts the time a cell falls short of its intent from 5.7 % to 3.3 % at one gateway; on-board near-RT control avoids the 19 % deadline misses ground-only control has with one or two gateways (240 runs, 10 seeds per point). | [results](contrib/oran-ntn/README.md#results) |
+| `ns3-ai-ntn` | Gym transfers cost about 18x fewer CPU cycles than ns3-gym (upstream benchmark, 6 seeds); `OranNtnGymHandover` steps on a measured radio. | [results](contrib/ns3-ai-ntn/README.md#results) |
+| `ntn-observability` | A 60 s LEO pass read back from the exported line protocol: SINR about 25 dB, 4.7 Mb/s, elevation 89 to 51 degrees. | [results](contrib/ntn-observability/README.md#results) |
+| `ntn-digital-twin` | A deterministic 66-satellite twin run exports 5 handovers in 45 min for ns-3 to actuate. | [results](contrib/ntn-digital-twin/README.md#results) |
+| `ntn-cho` | TTE-aware CHO: 134.6 handovers per run against 463.3 for A3, with 0 % ping-pong (10 seeds). | [results](contrib/ntn-cho/README.md#results) |
+| other modules | Each module README carries its measured results with source paths and run counts. | [ntn-constellation](contrib/ntn-constellation/README.md#results), [ntn-sagin](contrib/ntn-sagin/README.md#results), [ntn-v2x](contrib/ntn-v2x/README.md#results), [ntn-traffic](contrib/ntn-traffic/README.md#results), [ntn-rrc](contrib/ntn-rrc/README.md#results), [ntn-fapi](contrib/ntn-fapi/README.md#results), [ntn-slice](contrib/ntn-slice/README.md#results), [thz-ntn](contrib/thz-ntn/README.md#results), [ntn-sionna](contrib/ntn-sionna/README.md#results) |
+
+
+### Conditional handover and xApp routing in detail
+
+Two campaigns shipped with the tree, both reproducible from the committed CSVs
+under `papers/sim_runs/`.
 
 **Conditional handover over a LEO shell.** Ten seeds, a 780 km Walker shell at
 86.4 degrees inclination, four algorithms on the same geometry and the same
-traffic. The comparison concerns not only how often a handover succeeds but also how much
-signaling churn each algorithm incurs to achieve that success.
+traffic. The comparison is not about who hands over most successfully; it is
+about how much churn each one buys that success with.
 
 | Algorithm | Handovers per run | Success | Ping-pong |
 |---|---:|---:|---:|
@@ -190,34 +165,40 @@ signaling churn each algorithm incurs to achieve that success.
 | Location-based | 199.5 ± 56.0 | 98.69% | 57.07% |
 | **TTE-aware** | **134.6 ± 16.3** | **83.14%** | **0.00%** |
 
-The location-based rule has the highest success rate, but it hands over on geometry
-alone, so more than half of its handovers return to the source cell. The TTE-aware rule
-reaches 83% success with 71% fewer handovers than the A3 baseline and no ping-pong, because
-its decision accounts for how long the target cell will remain serviceable rather than only
-its current signal quality. Intervals are 95% confidence intervals over the ten seeds.
+Location-based wins on success rate and pays for it: it hands over on geometry
+alone, so more than half of its handovers come straight back. TTE-aware reaches
+83% success on a third of the A3 baseline's handover count with no ping-pong at
+all, because the decision is conditioned on how long the target will still be
+serviceable rather than on how good it looks right now. The intervals are 95%
+confidence over the ten seeds.
 
-**O-RAN xApp routing.** One multi-xApp configuration, five active xApps: 7,738
-near-real-time decisions producing **71,967** successful actions, with the E2
-control loop measured end to end rather than per component. The two counts differ by an
-order of magnitude because one decision fans out to many actuations; Doppler compensation
-accounts for 4,272 of the decisions and 68,489 of the actions. The metrics file reports
-both counts per xApp, since the action count alone would overstate the decision engine.
+**O-RAN xApp routing.** One 600 s run of `oran-ntn-full-scenario` with five
+active xApps and 71 E2 nodes: 7,738 near-real-time decisions producing **71,967**
+recorded actions and 0 conflicts. The two counts differ by an order of magnitude
+because one decision fans out to many actions, and Doppler compensation
+dominates: 4,272 of the decisions, 68,489 of the actions. Reporting only the
+larger number would flatter the decision engine, so the metrics file carries
+both, per xApp. In this scenario the RC path records actions; the examples that
+actuate the radio are listed in the
+[oran-ntn README](contrib/oran-ntn/README.md#examples).
 
 ---
 
-## Verification and provenance
+## What makes the numbers trustworthy
 
-Three mechanisms in the tree allow a reader who did not write the code to check its
-claims.
+Simulation platforms are easy to overclaim and hard to check. Three mechanisms in
+this tree exist specifically to make the claims checkable by someone who did not
+write them.
 
 **Provenance on every metric.** Every scenario built on `NtnRealStackHelper`
-writes a health record (`sim_health.csv`) that labels each value with how it was
-obtained: measured in band, modeled from a closed form, or configured. A value computed
-from an equation therefore cannot be reported as if it were measured from packets. Of the
-93 buildable examples, 72 write this record; the other 21 do not instantiate a radio
-(calculators, trace tools and the THz sweeps).
+writes a health record (`sim_health.csv`) labelling each row with how its value
+was obtained: measured in band, modeled from a closed form, or configured. A
+number that came from an equation cannot be printed as if it came from a packet.
+Measured across the 93 buildable examples, 72 write one; the other 21 do not
+stand up a radio at all (calculators, trace tools, the THz sweeps) and so have
+nothing to attest.
 
-**Automated gates.** `tools/check_ntn_standards.py` runs 17 gates covering the
+**Gates that can fail.** `tools/check_ntn_standards.py` runs 17 gates covering the
 TR 38.821 Set-1 link budget, orbital geometry, the published latency bands and all
 six NTN handover trigger classes, each asserted on its own firing count rather
 than on a handover the radio would have performed anyway. `tools/check_doc_claims.py` fails the build when
@@ -225,11 +206,12 @@ a README makes a capability claim the code contradicts, or quotes a number the
 committed data does not carry. `tools/check_dashboard_producers.py` walks each
 dashboard panel back through the metric schema to the code that emits it.
 
-**Documented scope.** [SCOPE_AND_LIMITATIONS.md](SCOPE_AND_LIMITATIONS.md) lists what
-the toolkit does not model, so that users can rely on an explicit scope rather than an
-inferred one. It covers, among other items, the absence of Rel-19 AI/ML lifecycle
-management, the multi-tap NTN-TDL that is not implemented, and the cases in which
-propagation delay is applied on the transport leg rather than the air interface.
+**A stated boundary.** [SCOPE_AND_LIMITATIONS.md](SCOPE_AND_LIMITATIONS.md) is the
+authoritative list of what the toolkit does not model, written so that a reviewer
+can rely on an explicit scope rather than an inferred one. Among other things: the
+absence of Rel-19 AI/ML lifecycle management, the multi-tap NTN-TDL that is not
+implemented, and where propagation delay rides the transport leg rather than the
+air interface.
 
 ---
 
@@ -317,7 +299,15 @@ simulator.
 
 ## Citing this work
 
-If the toolkit contributes to a publication, please cite the article:
+If the toolkit contributes to a publication, please cite the article that
+describes it. Machine-readable metadata is in [CITATION.cff](CITATION.cff); the
+[citation page](https://muhammaduazir69.github.io/ns3-ntn-toolkit/cite/) also has
+an entry for the software release (v2.6.1 is the version the article describes).
+
+> M. Uzair, B. G. Aldahlan, A. A. Albar, H. Althumali and A. Alghammas,
+> "ns3-ntn-toolkit: An integrated ns-3 platform for 6G non-terrestrial networks,"
+> *IEEE Open Journal of the Communications Society*, vol. 7, pp. 13440-13467,
+> 2026, doi: [10.1109/OJCOMS.2026.3745010](https://doi.org/10.1109/OJCOMS.2026.3745010).
 
 ```bibtex
 @article{uzair2026ns3ntntoolkit,
@@ -333,17 +323,15 @@ If the toolkit contributes to a publication, please cite the article:
 }
 ```
 
-Machine-readable metadata for the software release is in [CITATION.cff](CITATION.cff); GitHub's
-"Cite this repository" button uses it. The
-[citation page](https://muhammaduazir69.github.io/ns3-ntn-toolkit/cite/) carries the same entry.
-
 ---
 
-## Author
+## Contact
 
-**Muhammad Uzair**, Independent Researcher
-[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
-muhammaduzairr69@gmail.com
+**Muhammad Uzair**, Independent Researcher.
+Email [muhammaduzairr69@gmail.com](mailto:muhammaduzairr69@gmail.com),
+ORCID [0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680).
+Questions and bug reports are welcome as
+[GitHub issues](https://github.com/Muhammaduazir69/ns3-ntn-toolkit/issues).
 
 ## License
 

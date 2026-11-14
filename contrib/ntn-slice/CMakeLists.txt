@@ -3,6 +3,7 @@ set(source_files
     model/slice-orchestrator-xapp.cc
     model/slice-isolation-monitor.cc
     helper/ntn-slice-helper.cc
+    model/ntn-slice-quota-scheduler.cc
 )
 
 set(header_files
@@ -11,10 +12,13 @@ set(header_files
     model/slice-orchestrator-xapp.h
     model/slice-isolation-monitor.h
     helper/ntn-slice-helper.h
+    model/ntn-slice-quota-scheduler.h
+    model/ntn-slice-contract-trim.h
 )
 
 set(test_sources
     test/ntn-slice-test-suite.cc
+    test/ntn-slice-quota-scheduler-test.cc
 )
 
 build_lib(
@@ -23,5 +27,10 @@ build_lib(
   HEADER_FILES ${header_files}
   LIBRARIES_TO_LINK
     ${libcore}
+    ${libnr}
+    ${libntn-traffic}
+    ${libntn-constellation}
+    ${libmobility}
+    ${libnetwork}
   TEST_SOURCES ${test_sources}
 )

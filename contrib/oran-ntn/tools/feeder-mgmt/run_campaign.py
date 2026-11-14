@@ -17,7 +17,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-NS3 = "/home/uzair/6g_ntn_ns3/ns-3-dev"
+NS3 = os.environ.get("NS3_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 BIN = os.path.join(NS3, "build/contrib/oran-ntn/examples/ns3.43-oran-ntn-feeder-mgmt-optimized")
 RUNS = os.path.join(HERE, "runs")
 SEEDS = range(1, 11)

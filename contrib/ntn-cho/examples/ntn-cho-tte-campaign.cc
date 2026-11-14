@@ -138,6 +138,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <set>
 #include <sstream>
 #include <unordered_map>
@@ -369,6 +370,17 @@ struct Params
     //  (the rule of Noreen and Schotten, CCNC 2026, mapped onto moving cells).
     bool measFallback = false;
     bool tteRank = false;
+    // Recent-work baselines (Oct 2026), re-implemented from the published
+    // descriptions:
+    //  rankEntropy: among the admitted candidates above the quality floor, the
+    //  target maximizes an entropy-weighted score of filtered SINR and predicted
+    //  remaining service time (Wang et al., IEEE TVT 2026).
+    //  policy "geo": execute when the geodesic distance from the terminal to a
+    //  candidate's sub-satellite point, read from the broadcast ephemeris, is
+    //  shorter than to the serving satellite's by geoHysM; target is the nearest
+    //  such candidate (Lee and Kim, IEEE TVT 2026).
+    bool rankEntropy = false;
+    double geoHysM = 10000.0;
     // N1-N3 (new policies)
     bool rankByUsable = false;       // rank by expected usable time to exit
     bool prepareByTte = false;       // prepared set by predicted score, not by L3
@@ -868,6 +880,98 @@ NetElevDeg(const UeCtx& u, uint32_t sat, const LinkState& ls)
     return ntngeo::GeodeticElevationDeg(u.tickPos, pp);
 }
 
+// Entropy weight method (Wang et al., IEEE TVT 2026): min-max normalize each
+// benefit attribute over the candidates, weight attribute j by 1 - E_j with E_j
+// its normalized Shannon entropy, and return the index of the largest score.
+size_t
+EntropyArgmax(const std::vector<double>& a, const std::vector<double>& b)
+{
+    const size_t n = a.size();
+    std::vector<std::vector<double>> x(2, std::vector<double>(n));
+    for (int j = 0; j < 2; ++j)
+    {
+        const auto& v = (j == 0) ? a : b;
+        const double lo = *std::min_element(v.begin(), v.end());
+        const double hi = *std::max_element(v.begin(), v.end());
+        for (size_t i = 0; i < n; ++i)
+        {
+            // a small floor keeps every share positive, as is usual for this method
+            x[j][i] = (hi > lo) ? 1e-3 + (v[i] - lo) / (hi - lo) : 1.0;
+        }
+    }
+    double w[2];
+    for (int j = 0; j < 2; ++j)
+    {
+        const double sum = std::accumulate(x[j].begin(), x[j].end(), 0.0);
+        double e = 0.0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            const double q = x[j][i] / sum;
+            e -= q * std::log(q);
+        }
+        w[j] = 1.0 - e / std::log(static_cast<double>(n));
+    }
+    const double ws = w[0] + w[1];
+    const double w0 = (ws > 0.0) ? w[0] / ws : 0.5;
+    size_t best = 0;
+    double bestS = -1.0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double sc = w0 * x[0][i] + (1.0 - w0) * x[1][i];
+        if (sc > bestS)
+        {
+            bestS = sc;
+            best = i;
+        }
+    }
+    return best;
+}
+
+// Geodesic distance (m) on the sphere of radius R_E between the terminal and
+// the sub-satellite point of a satellite at ECEF position r.
+double
+GeodesicToSubSatM(const Vector& ue, const Vector& r)
+{
+    const double nu = std::sqrt(ue.x * ue.x + ue.y * ue.y + ue.z * ue.z);
+    const double nr = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z);
+    const double c = (ue.x * r.x + ue.y * r.y + ue.z * r.z) / (nu * nr);
+    return kRe * std::acos(std::max(-1.0, std::min(1.0, c)));
+}
+
+// Lee and Kim (IEEE TVT 2026), as we read it: the terminal hands over when a
+// prepared candidate's sub-satellite point, from the broadcast ephemeris, is
+// closer than the serving one's by the hysteresis; the candidate must pass the
+// quality floor Q (the A4 leg of the other location conditions).
+uint16_t
+GeoTarget(const UeCtx& u)
+{
+    Vector pp;
+    Vector pv;
+    if (!g_pred->GetPredictedSatEcef(static_cast<uint32_t>(u.serving), pp, pv))
+    {
+        return NtnChoAlgorithm::INVALID_CELL_ID;
+    }
+    const double ds = GeodesicToSubSatM(u.tickPos, pp);
+    double best = ds - g_p.geoHysM;
+    uint16_t target = NtnChoAlgorithm::INVALID_CELL_ID;
+    for (uint32_t s : u.candidates)
+    {
+        const auto ls = u.links.find(s);
+        if (s == static_cast<uint32_t>(u.serving) || ls == u.links.end() || !ls->second.covered ||
+            ls->second.l3 < g_p.qualityThDb || !g_pred->GetPredictedSatEcef(s, pp, pv))
+        {
+            continue;
+        }
+        const double d = GeodesicToSubSatM(u.tickPos, pp);
+        if (d < best)
+        {
+            best = d;
+            target = CellOf(s);
+        }
+    }
+    return target;
+}
+
 double
 ExecMarginFor(const UeCtx& u)
 {
@@ -1211,6 +1315,39 @@ Decide(size_t idx)
             u.rrcWinDirty = true;
             u.sigTarget = pt;
             u.sigEnd = end;
+        }
+    }
+    if (g_p.policy == "geo")
+    {
+        target = GeoTarget(u);
+    }
+    if (g_p.rankEntropy && !isTteFamily && target != NtnChoAlgorithm::INVALID_CELL_ID)
+    {
+        // Entropy weight method over two benefit attributes, filtered SINR and
+        // predicted remaining service time, of the admitted candidates.
+        std::vector<uint16_t> ids;
+        std::vector<double> a;
+        std::vector<double> b;
+        for (const auto& [cellId, info] : u.cho->GetCandidates())
+        {
+            if (!info.admitted || info.sinr_dB < g_p.qualityThDb ||
+                SatOf(cellId) == static_cast<uint32_t>(u.serving))
+            {
+                continue;
+            }
+            const auto ls = u.links.find(SatOf(cellId));
+            if (ls == u.links.end())
+            {
+                continue;
+            }
+            ids.push_back(cellId);
+            a.push_back(ls->second.l3);
+            b.push_back(
+                u.tte->ComputeTte(geo, u.tickVel, SatOf(cellId), 0, g_tteGainTh).tte.GetSeconds());
+        }
+        if (ids.size() > 1)
+        {
+            target = ids[EntropyArgmax(a, b)];
         }
     }
     if (g_p.tteRank && !isTteFamily && target != NtnChoAlgorithm::INVALID_CELL_ID)
@@ -1735,6 +1872,9 @@ main(int argc, char* argv[])
     cmd.AddValue("traceUe", "terminal index to trace at 1 s (-1 = none)", p.traceUe);
     cmd.AddValue("measFallback", "serving-floor fallback for the standardized conditions", p.measFallback);
     cmd.AddValue("tteRank", "rank the admitted candidates by predicted time to exit", p.tteRank);
+    cmd.AddValue("rankEntropy", "rank admitted candidates by entropy-weighted SINR and service time",
+                 p.rankEntropy);
+    cmd.AddValue("geoHysM", "hysteresis of the geodesic-distance condition (m)", p.geoHysM);
     cmd.AddValue("decisionPeriodS", "decision period (s); default = the 100 ms measurement period",
                  p.decisionPeriodS);
     cmd.AddValue("tteCacheS", "candidate prediction cache refresh (s); 0 = recompute always",
@@ -1832,7 +1972,7 @@ main(int argc, char* argv[])
     {
         p.assumedSigmaCrossM = p.ephSigmaCrossM;
     }
-    const std::set<std::string> policies{"a3", "d2", "t1", "elev", "tte-eager", "mst", "tte-cho"};
+    const std::set<std::string> policies{"a3", "d2", "t1", "elev", "tte-eager", "mst", "tte-cho", "geo"};
     NS_ABORT_MSG_IF(policies.count(p.policy) == 0, "unknown --policy " << p.policy);
 
     RngSeedManager::SetSeed(1);
@@ -2270,6 +2410,14 @@ main(int argc, char* argv[])
             c.ephSigmaRadialM = p.assumedSigmaRadialM;
             c.ephSigmaAlongM = p.assumedSigmaAlongM;
             c.ephSigmaCrossM = p.assumedSigmaCrossM;
+        }
+        else if (p.policy == "geo")
+        {
+            // The algorithm's own condition never fires; the geodesic condition
+            // is evaluated in Decide().
+            c.triggerType = NtnChoAlgorithm::TRIGGER_EVENT_A3;
+            c.a3Offset_dB = 1e3;
+            c.a3TimeToTrigger = MilliSeconds(0);
         }
         else if (p.policy == "elev")
         {

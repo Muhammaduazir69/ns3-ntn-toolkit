@@ -34,6 +34,7 @@
 #include <ns3/traced-callback.h>
 
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -96,8 +97,39 @@ class ContactGraphScheduler : public Object
     /// the pointer; the caller owns the object.
     void RegisterSatellite(uint32_t id, Ptr<Sgp4MobilityModel> sat);
 
+    /// Restrict ISL checks to registered candidate pairs (terminal-limited
+    /// topologies such as +Grid). With no candidates registered every pair is
+    /// checked, which is the all-feasible policy and costs O(n^2) per tick.
+    void RegisterIslCandidate(uint32_t a, uint32_t b, bool crossPlane = false);
+    /// Take cross-plane candidate links down while either endpoint is above
+    /// this geocentric latitude (deg), the rule constellations use where the
+    /// relative motion of adjacent planes outruns the terminals' pointing.
+    /// 0 disables it. Applied by the sampler and by PredictContactEndS alike.
+    void SetCrossPlaneLatCutoffDeg(double deg) { m_crossLatCutoffDeg = deg; }
+    size_t NumIslCandidates() const { return m_islCandidates.size(); }
+
+    /**
+     * \brief Time until a contact that is up now goes down, from the ephemeris.
+     *
+     * Steps the propagator ahead from Simulator::Now() in \p stepS increments
+     * with the same down rule the sampler applies (GSL: elevation below
+     * MinElevationDeg - GateHysteresisDeg; ISL: range above the cap or limb
+     * blocked), then bisects the last step to 10 ms. Returns \p horizonS when
+     * the contact outlives the horizon and 0 when it is already down. For a GSL
+     * pass the satellite ID as \p a and the ground-station ID as \p b.
+     */
+    double PredictContactEndS(uint32_t a, uint32_t b, bool isl, double horizonS,
+                              double stepS = 5.0) const;
+
     /// Register a ground station at (lat, lon, alt=0 m MSL).
     void RegisterGroundStation(uint32_t id, double lat_deg, double lon_deg);
+
+    /// P7: the ground links that can occur in the run. With a list set, only these are sampled, and a
+    /// satellite well below the mask is skipped until it could first reach it at the rate bound below;
+    /// transitions still land on the same sampling grid.
+    void SetGslCandidates(const std::vector<std::pair<uint32_t, uint32_t>>& satGs);
+    /// P7: refresh the candidate ISLs only every k-th tick (k = 1 is the original behavior).
+    void SetIslRefreshEvery(uint32_t k) { m_islEvery = k; }
 
     /// Start the periodic visibility sampler. Schedules through the
     /// Simulator::Schedule path; the user only needs to call Stop() when
@@ -160,11 +192,35 @@ class ContactGraphScheduler : public Object
 
     std::map<uint32_t, Ptr<Sgp4MobilityModel>> m_sats;
     std::map<uint32_t, GsRecord> m_gss;
+    std::vector<std::pair<uint32_t, uint32_t>> m_islCandidates;
+    std::set<std::pair<uint32_t, uint32_t>> m_crossPlane;
+    double m_crossLatCutoffDeg{0.0};
+    bool CrossPlaneBlocked(uint32_t a, const Vector& pa, uint32_t b, const Vector& pb) const;
+
+    bool ContactUpAt(uint32_t a, uint32_t b, bool isl, double offsetS) const;
+    static double ElevationDeg(const Vector& satEcef, double latDeg, double lonDeg);
+    void CheckIslPair(double t, uint32_t a, Ptr<Sgp4MobilityModel> ma, uint32_t b,
+                      Ptr<Sgp4MobilityModel> mb);
 
     /// Visibility state: keyed by (sat_id, gs_id) for GSL or (sat_a, sat_b)
     /// for ISL (with sat_a < sat_b).
     std::map<std::pair<uint32_t, uint32_t>, bool> m_gslState;
     std::map<std::pair<uint32_t, uint32_t>, bool> m_islState;
+
+    struct GslCand
+    {
+        uint32_t sat;
+        uint32_t gs;
+        Ptr<Sgp4MobilityModel> mob;
+        double latDeg;
+        double lonDeg;
+        Vector gsEcef;
+        bool up{false};
+        double nextCheck{0.0};
+    };
+    std::vector<GslCand> m_gslCand;
+    uint32_t m_islEvery{1};
+    uint64_t m_tickN{0};
 
     uint64_t m_gslUp{0};
     uint64_t m_gslDown{0};

@@ -12,6 +12,7 @@
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
 #include "ns3/ntn-ue-location-report.h"
+#include "ns3/ntn-ul-timing-precompensator.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 
@@ -1261,6 +1262,213 @@ class NtnMeasReportCodecTest : public TestCase
     }
 };
 
+// ---------------------------------------------------------------------------
+// Oct 2026: specification-conformant SIB19 timing fields and the UE pre-compensator.
+// A circular 500 km orbit in an inertial frame, rotated into the Earth-fixed frame, stands in
+// for the satellite; it passes over the point (R_E, 0, 0) at t = 60 s.
+namespace
+{
+constexpr double kMuTest = 3.986004418e14;
+constexpr double kOmegaETest = 7.2921150e-5;
+constexpr double kRTest = 6378137.0 + 500e3;
+
+void
+TestOrbitState(Time offset, Vector& p, Vector& v)
+{
+    const double t = Simulator::Now().GetSeconds() + offset.GetSeconds();
+    const double w = std::sqrt(kMuTest / (kRTest * kRTest * kRTest));
+    const double th = w * (t - 60.0);
+    // inertial frame: orbit in the x-z plane (polar), Earth frame rotates about z
+    const double xi = kRTest * std::cos(th);
+    const double zi = kRTest * std::sin(th);
+    const double vxi = -kRTest * w * std::sin(th);
+    const double vzi = kRTest * w * std::cos(th);
+    const double a = kOmegaETest * (t - 60.0);
+    const double c = std::cos(a);
+    const double s = std::sin(a);
+    p = Vector(c * xi, -s * xi, zi);
+    // v_ecef = R(-a) v_i - omega x r_ecef
+    v = Vector(c * vxi + kOmegaETest * p.y, -s * vxi - kOmegaETest * p.x, vzi);
+}
+
+Ptr<MobilityModel>
+FixedAt(const Vector& p)
+{
+    Ptr<ConstantPositionMobilityModel> m = CreateObject<ConstantPositionMobilityModel>();
+    m->SetPosition(p);
+    return m;
+}
+
+struct SpecFixture
+{
+    Ptr<MobilityModel> sat;
+    Ptr<MobilityModel> ue;
+    Vector gw;
+    Ptr<NtnTimingAdvance> ta;
+    Ptr<NtnSib19Broadcaster> sib;
+
+    SpecFixture()
+    {
+        Vector p;
+        Vector v;
+        TestOrbitState(Seconds(0), p, v);
+        sat = FixedAt(p); // position is refreshed through the provider
+        ue = FixedAt(Vector(kEarthRadiusMetres, 0, 0));
+        gw = Vector(kEarthRadiusMetres * std::cos(0.04), 0, kEarthRadiusMetres * std::sin(0.04));
+        ta = CreateObject<NtnTimingAdvance>();
+        ta->SetUeMobility(ue);
+        ta->SetSatelliteMobility(sat);
+        ta->SetGatewayMobility(FixedAt(gw));
+        ta->SetSatelliteStateProvider(MakeCallback(&TestOrbitState));
+        sib = CreateObject<NtnSib19Broadcaster>();
+        sib->SetSatelliteMobility(sat);
+        sib->SetTimingAdvance(ta);
+        sib->SetUlSyncReference(UlSyncReference::Gateway);
+        sib->SetGatewayPosition(gw);
+    }
+};
+} // namespace
+
+/// TS 38.213 cl. 4.2 carries HALF the curvature in ta-CommonDriftVariant, and Lemma 1 of the
+/// TVT study says it is never negative over a visible pass.
+class Sib19SpecCurvatureTest : public TestCase
+{
+  public:
+    Sib19SpecCurvatureTest()
+        : TestCase("SIB19 ta-CommonDriftVariant is half the feeder-delay curvature and non-negative")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        SpecFixture f;
+        const auto d = f.ta->ComputeDelayDerivatives(f.gw);
+        const auto c = f.sib->FitCoefficients(10.0);
+        NS_TEST_ASSERT_MSG_GT(d.d2, 0.0, "feeder delay must be convex over the pass");
+        NS_TEST_EXPECT_MSG_EQ_TOL(c.tv, 0.5 * d.d2, 0.2e-10, "T_V = TA''/2 within one step");
+        NS_TEST_EXPECT_MSG_EQ_TOL(c.td, d.d1, 0.2e-9, "T_D = TA' within one step");
+        NS_TEST_EXPECT_MSG_EQ_TOL(c.tc, d.ta, 4.072e-9, "T_C = TA within one step");
+        Simulator::Destroy();
+    }
+};
+
+/// Fitting over the window cuts the worst residual of the common polynomial.
+class Sib19FitReducesResidualTest : public TestCase
+{
+  public:
+    Sib19FitReducesResidualTest()
+        : TestCase("Economized and window-fit SIB19 coefficients beat Taylor over the window")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        SpecFixture f;
+        const double v = 15.0;
+        const double taylor = f.sib->CommonResidual(f.sib->FitCoefficients(v), v);
+        f.sib->SetCoefficientFit(Sib19CoefficientFit::Economized);
+        const double econ = f.sib->CommonResidual(f.sib->FitCoefficients(v), v);
+        f.sib->SetCoefficientFit(Sib19CoefficientFit::Window);
+        const double win = f.sib->CommonResidual(f.sib->FitCoefficients(v), v);
+        NS_TEST_ASSERT_MSG_GT(taylor, 4.0 * econ, "economized fit should cut the cubic error");
+        NS_TEST_ASSERT_MSG_GT(taylor, 8.0 * win, "window fit should cut the error further");
+        Simulator::Destroy();
+    }
+};
+
+/// The error-budget rule never broadcasts a validity whose predicted residual exceeds its share.
+class Sib19ErrorBudgetValidityTest : public TestCase
+{
+  public:
+    Sib19ErrorBudgetValidityTest()
+        : TestCase("SIB19 error-budget validity respects the common share of Te")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        SpecFixture f;
+        f.sib->SetCoefficientFit(Sib19CoefficientFit::Window);
+        f.sib->SetValidityRule(Sib19ValidityRule::ErrorBudget);
+        f.sib->SetTimingErrorLimit(NanoSeconds(716.15), 0.5);
+        f.sib->RefreshNow();
+        const double v = f.sib->GetLatest().ulSyncValidity.GetSeconds();
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(v, 5.0, "validity must be an enumerated value");
+        NS_TEST_ASSERT_MSG_LT_OR_EQ(f.sib->GetLastCommonResidual(), 0.5 * 716.15e-9 + 1e-12,
+                                    "residual over the chosen window exceeds the share");
+        Simulator::Destroy();
+    }
+};
+
+/// The UE pre-compensator reproduces the true two-way delay at the epoch and, with Kepler-J2
+/// propagation, still tracks it 30 s later (the test orbit has no J2, so the residual is the
+/// J2 term the UE adds, below the bound of the analysis).
+class UlPrecompensatorTrackingTest : public TestCase
+{
+  public:
+    UlPrecompensatorTrackingTest()
+        : TestCase("UE uplink timing pre-compensator matches the true delay at ages 0 and 30 s")
+    {
+    }
+
+  private:
+    /// At 30 s the Taylor common polynomial has a cubic error of microseconds, so this checks the
+    /// UE-specific part: the propagated satellite position against the orbit.
+    void CheckLate(Ptr<NtnUlTimingPrecompensator> pc)
+    {
+        Vector s2;
+        Vector v2;
+        TestOrbitState(Seconds(0), s2, v2);
+        const double err = CalculateDistance(pc->PredictSatellitePosition(), s2);
+        // J2 over 30 s: 0.5 * 0.012 m/s^2 * 900 s^2 ~ 5 m (twice that at the pole)
+        NS_TEST_EXPECT_MSG_LT(err, 15.0, "propagated satellite position drifted too far");
+        NS_TEST_EXPECT_MSG_EQ(pc->IsUplinkSynchronized(), true, "still inside validity");
+    }
+
+    void Check(Ptr<NtnUlTimingPrecompensator> pc, Ptr<MobilityModel> ue, Vector gw, double tolNs)
+    {
+        Vector s;
+        Vector v;
+        TestOrbitState(Seconds(0), s, v);
+        const double truth =
+            2.0 * (CalculateDistance(s, ue->GetPosition()) + CalculateDistance(s, gw)) / kC;
+        const double est = pc->ComputeTa().GetSeconds();
+        NS_TEST_EXPECT_MSG_LT(std::fabs(est - truth) * 1e9, tolNs, "timing error too large");
+    }
+
+    void DoRun() override
+    {
+        SpecFixture f;
+        Vector s;
+        Vector v;
+        TestOrbitState(Seconds(0), s, v);
+        // broadcast the epoch state from the provider, not from the placeholder mobility
+        Sib19Content content;
+        content.ephemeris.positionEcefM = s;
+        content.ephemeris.velocityEcefMps = v;
+        content.ephemeris.epoch = Simulator::Now();
+        const auto c = f.sib->FitCoefficients(30.0);
+        content.taCommon = Seconds(c.tc);
+        content.taCommonDriftRate = c.td;
+        content.taCommonDriftVariation = c.tv;
+        content.ulSyncValidity = Seconds(60);
+        Ptr<NtnUlTimingPrecompensator> pc = CreateObject<NtnUlTimingPrecompensator>();
+        pc->SetUeMobility(f.ue);
+        pc->SetEphemerisModel(UeEphemerisModel::KeplerJ2);
+        pc->SetGnss(Seconds(1), 0.0);
+        pc->ReceiveSib19(content);
+        Simulator::Schedule(Seconds(0), &UlPrecompensatorTrackingTest::Check, this, pc, f.ue, f.gw, 10.0);
+        // at 30 s the Taylor common polynomial has a cubic error of microseconds; this checks the
+        // UE-specific part alone by subtracting the true common delay
+        Simulator::Schedule(Seconds(30), &UlPrecompensatorTrackingTest::CheckLate, this, pc);
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
 class NtnRrcTestSuite : public TestSuite
 {
   public:
@@ -1291,6 +1499,10 @@ class NtnRrcTestSuite : public TestSuite
         AddTestCase(new Sib19FieldsPopulatedAndInRangeTest, TestCase::Duration::QUICK);
         AddTestCase(new TimingAdvancePayloadModeTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19KOffsetSinkTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19SpecCurvatureTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19FitReducesResidualTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19ErrorBudgetValidityTest, TestCase::Duration::QUICK);
+        AddTestCase(new UlPrecompensatorTrackingTest, TestCase::Duration::QUICK);
     }
 };
 

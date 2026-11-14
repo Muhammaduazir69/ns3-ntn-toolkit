@@ -1,208 +1,196 @@
 <h1 align="center">ntn-sionna</h1>
 
-<p align="center"><strong>GPU ray tracing for NTN links through NVIDIA Sionna RT, with provenance on every query</strong></p>
+<p align="center"><strong>GPU ray tracing for the last kilometer of an NTN link: NVIDIA Sionna RT bridged into ns-3, with provenance on every query</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/Sionna%20RT-GPU%20ray%20tracing-red.svg" alt="Sionna RT GPU ray tracing"/>
-  <img src="https://img.shields.io/badge/calibration-vs%20TR%2038.811-orange.svg" alt="calibrated against TR 38.811"/>
+  <img src="https://img.shields.io/badge/3GPP-TR%2038.811-orange.svg" alt="3GPP TR 38.811"/>
+  <img src="https://img.shields.io/badge/ITU--R-P.676%20%C2%B7%20P.618%20%C2%B7%20P.681-orange.svg" alt="ITU-R P.676, P.618, P.681"/>
   <img src="https://img.shields.io/badge/examples-12-informational.svg" alt="12 examples"/>
 </p>
 
 <p align="center">
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-sionna/">Docs</a>
+  &nbsp;·&nbsp;
   <a href="INSTALL.md">Install</a>
   &nbsp;·&nbsp;
   <a href="#examples">Examples</a>
   &nbsp;·&nbsp;
-  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-sionna/">Docs</a>
+  <a href="#results">Results</a>
 </p>
 
 ---
 
-A closed-form NTN channel is fine until the last kilometre, where buildings and terrain decide whether the link exists. This module bridges ns-3 to NVIDIA Sionna RT so that segment can be ray traced on a GPU, over a socket, so the GPU does not have to be the machine running the simulation.
+## Why this module
 
-The part worth emphasizing is not the tracing, it is the honesty about when tracing did not happen. A missing or failed transport used to degrade silently to closed-form free space with no log and no trace source, and the flagship comparison example never contacted a server at all: its "multipath" was four taps typed into the source. Now every run prints which path produced its numbers, the ray-traced and fallback evaluations are counted separately, and `RequireLiveTransport` makes a missing server fatal where a traced result is load-bearing.
+A closed-form NTN channel such as TR 38.811 is fast and reproducible, but it folds every building into one shadowing term and one LOS-probability table. For a street-level user that is the part that decides whether the link exists. `ntn-sionna` lets ns-3 ask a ray tracer instead: an opt-in `PropagationLossModel` streams `{tx, rx, freq_hz}` to a Sionna RT server that keeps the scene resident on a GPU, over a socket, so the GPU need not be on the machine running the simulation.
 
-The bridge ships a channel impulse response propagation model, a cache keyed on the geometry that actually changes the answer, and a calibrator that compares traced output against the closed-form TR 38.811 reference under its own declared configuration rather than a hardcoded one.
+The part worth stressing is honesty about when tracing did not happen. A missing server used to degrade silently to free space. Now traced and fallback evaluations are counted separately, every run reports which path produced its numbers, and `SetRequireLiveTransport(true)` makes a missing server fatal where a traced result is load-bearing. Caching and replay transports let a whole simulation run with no GPU at all, and a calibrator compares traced loss against the TR 38.811 reference under its own declared configuration.
+
+## System design
+
+<p align="center">
+  <img src="doc/figures/ntn-sionna-architecture.png" alt="ntn-sionna architecture: ns-3 propagation loss models query transports (UDP, pybind, caching, replay) which reach sionna-server.py and Sionna RT; responses carry path loss and path count back; outputs feed the calibrator and the ntn-traffic radio stack" width="100%"/>
+</p>
+
+*Figure 1. Classes and data flow. The ns-3 side (C++, `bridge/`) sends queries through a pluggable transport; `sionna-server.py` answers from a scene held on the GPU. The cascade model adds the ITU-R atmosphere that Sionna RT does not model; the CIR model applies caller-supplied taps with per-tap Doppler. A stub server with the same wire protocol serves the tests. Source: [`doc/figures/make_architecture.py`](doc/figures/make_architecture.py).*
+
+## Results
+
+The results below are a ray-tracing study of street-level LEO links in four city scenes. They were computed with **Sionna RT 2.0.1 directly from Python**, the solver this bridge serves, by the study scripts in `paper/tvt-2026-urban-los/` of the toolkit tree (`sky_maps2.py` for the sky maps, `analysis2.py`, `analysis3.py` and `loss_summary.py` for the statistics; commands in `sim/README_runs.md`). **They did not pass through the ns-3 bridge**; they show what the traced channel says that the closed-form default does not.
+
+**Experiment.** The Munich, Paris, Florence and San Francisco scenes shipped with Sionna RT; 300 outdoor users per city at 1.5 m, two independent user realizations; 2 GHz, isotropic antennas; LOS, reflection and edge diffraction to depth 3 with 10^9 rays per user; a direction grid from 15 to 85 degrees elevation and 0 to 355 degrees azimuth in 5 degree steps. Intervals are 95 % cluster-bootstrap intervals over users. Every number is ray traced, none is a field measurement.
+
+<p align="center">
+  <img src="doc/figures/ntn-sionna-los-probability.png" alt="LOS probability against elevation in Munich, Paris, Florence and San Francisco: ray traced with 95 percent bands, a first-facade model, an idealized canyon, the Schreiber et al. fit and the TR 38.811 urban and dense-urban tables" width="100%"/>
+</p>
+
+*Figure 2. LOS probability against elevation for street-level users: ray traced (markers, 95 % cluster-bootstrap band), a first-facade model built from the same city (solid), an idealized canyon (dash-dot), the S-band fit of Schreiber et al. at 1.5 m (dotted) and the TR 38.811 tables (crosses).*
+
+| City | LOS probability at 30 degrees (ray traced) |
+|---|---:|
+| Florence (compact medieval center) | 26 % |
+| Munich (old town, squares, avenues) | 36 % |
+| San Francisco (hilly mid-rise grid) | 49 % |
+| Paris (Etoile, radiating avenues) | 71 % |
+
+Of the two TR 38.811 tables, the better one per city had a mean error of 4 to 11 percentage points and a largest error of 7 to 21 points against the traced curve. A second user realization moved the mean LOS at 30 degrees by at most 3 points.
+
+<p align="center">
+  <img src="doc/figures/ntn-sionna-excess-loss.png" alt="Excess loss of blocked directions against elevation for four cities with 0.3 m concrete facades, against the TR 38.811 clutter loss, the Schreiber et al. fit and ITU-R P.681 measured bad-state values" width="60%"/>
+</p>
+
+*Figure 3. Excess loss of blocked directions against elevation, smooth 0.3 m concrete facades: censored median per city with 10th to 90th percentile band, against the TR 38.811 clutter loss for NLOS at S band, the Schreiber et al. fit and the ITU-R P.681 Annex 2 bad-state total measured at 2.2 GHz.*
+
+| Censored median excess loss, blocked directions, 0.3 m concrete (dB) | 15 to 30 deg | 30 to 60 deg | 60 to 85 deg |
+|---|---:|---:|---:|
+| Munich | 21.2 | 20.5 | 28.9 |
+| Paris | 18.6 | 22.3 | 21.3 |
+| Florence | 26.0 | 19.5 | 19.7 |
+| San Francisco | 19.9 | 21.2 | 19.9 |
+| TR 38.811 clutter loss (reference) | 31.1 | 27.6 | 25.8 |
+
+Below 60 degrees every city lay under the TR 38.811 clutter value, by 3 to 13 dB with smooth concrete over both realizations (intervals about plus or minus 3 dB), 6 to 14 dB with the shipped marble and 11 to 15 dB with rough concrete. Medians are censored: directions no ray reached (1 to 12 % with smooth concrete) count as above any finite value, so they lean high. Above 60 degrees the sign is unsettled. Values are copied from `paper/tvt-2026-urban-los/make_macros2.py`, written by `sim/make_macros2.py`.
+
+**Module-level check you can run.** The bridge's own calibration path is `sionna-calibration-harness`, which drives `SionnaCalibrator` against the TR 38.811 reference and reports the residual with its gate. No stored output of a live-server run is kept in the tree, so run it against your server:
+
+```bash
+python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 &
+./ns3 run "sionna-calibration-harness --host=127.0.0.1 --port=8765"
+```
+
+## Architecture and classes
+
+| Class | Header (`bridge/`) | Role |
+|---|---|---|
+| `NtnSionnaChannel` | `ns3-sionna-channel.h` | Opt-in `PropagationLossModel`; FSPL fallback on timeout, counted and optionally fatal (`SetRequireLiveTransport`) |
+| `SionnaTransport`, `SionnaNoneTransport` | `sionna-transport.h` | Transport contract; request carries optional array and RIS configuration and `los_only` |
+| `SionnaUdpTransport` | `sionna-udp-transport.h` | UDP client of a live `sionna-server.py` |
+| `SionnaPybindTransport` | `sionna-pybind-transport.h` | In-process transport (built with `ENABLE_SIONNA_PYBIND11`) |
+| `SionnaCachingTransport` | `sionna-caching-transport.h` | 4-D LRU decorator; array, RIS and `los_only` are part of the key |
+| `SionnaReplayTransport` (`SionnaReplayWriter`, `SionnaReplayReader`) | `sionna-replay-transport.h` | Record once, replay without a GPU |
+| `SionnaBatchClient` | `sionna-batch-client.h` | Synchronous and asynchronous batched queries |
+| `NtnSionnaCascadeChannel` | `ntn-sionna-cascade-channel.h` | Traced loss plus `NtnAtmosphericLossChain` |
+| `NtnAtmosphericLossChain` (`Itu618`, `Itu676`, `Itu681`) | `ntn-atmospheric-loss-chain.h` | Gaseous, rain and LMS shadowing chain |
+| `NtnAtmosphericPropagationLossModel` | `ntn-atmospheric-propagation-loss-model.h` | ITU-R excess only, chainable on any spectrum channel without double-counting FSPL |
+| `SionnaCirPropagationLossModel` | `sionna-cir-propagation-loss-model.h` | Multipath CIR with per-tap Doppler from the endpoints' live velocity; taps are supplied by the caller |
+| `CirDopplerSynthesizer` | `cir-doppler-synth.h` | Advances a CIR snapshot by Doppler rotation |
+| `SionnaCalibrator` | `sionna-calibrator.h` | Residual of traced loss against a reference model, with a declared LOS mode and reach |
+
+Python side: `bridge/sionna-server.py` (scene loaded once, JSON over UDP, default port 8765, LOS-only or full multipath), `tools/` (`osm_to_sionna_scene.py`, `lidar_dem_ingest.py`, `probe_sionna_env.py`), `test/sionna-stub-server.py` (same protocol, closed-form FSPL).
 
 ## Quick start
 
 Inside the toolkit, where the module is already present and built:
 
 ```bash
-python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8899 &
-./ns3 run "leo-pass-sionna-vs-tr38811 --sionnaServer=127.0.0.1:8899"
+python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 &
+./ns3 run "leo-pass-sionna-vs-tr38811 --sionnaServer=127.0.0.1:8765"
+./ns3 run "ntn-sionna-leo-downlink-traffic --simSeconds=60 --rainMmH=10"
 ```
 
 Standalone, into an existing ns-3.43 tree:
 
 ```bash
 git clone -b ntn-sionna-v2 https://github.com/Muhammaduazir69/ntn-sionna.git contrib/ntn-sionna
-./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```
 
-`INSTALL.md` in this directory carries the full dependency list. Most examples in
-this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
-toolkit tree is the path of least resistance.
-
-## Overview
-
-Closed-form path-loss models like 3GPP TR 38.811 are fast and reproducible, but they collapse every reflective object in the world into a single scalar shadowing term. For physical-layer research that depends on ray-level effects — beamforming in cluttered scenes, multipath fading on a moving satellite-to-ground link, RIS-assisted recovery of a blocked NLOS link — a real ray tracer is the right tool, and NVIDIA's [Sionna RT](https://nvlabs.github.io/sionna/api/rt.html) is the open-source state of the art.
-
-`ntn-sionna` wires Sionna RT into ns-3 as an **opt-in** `PropagationLossModel`. A small Python server keeps the Mitsuba scene resident on the GPU between queries; the C++ side streams `{tx, rx, freq_hz}` into it over a pluggable transport and gets `{path_loss_db, n_paths, compute_ms}` back. Around that core the module adds:
-
-- **Cascade composition** — the GPU-traced geometry is composed with the ITU-R atmospheric chain (gaseous + rain + LMS shadowing) so the link budget reflects molecular absorption and weather that Sionna RT does not model.
-- **Headless-friendly transports** — UDP for a live GPU server, plus **caching** and **replay** transports that let an entire simulation run with **no live Sionna GPU at all**, falling back to closed-form FSPL when nothing answers.
-- **Calibration against 3GPP TR 38.811** — a residual calibrator and harness that check the ray-traced channel against the closed-form reference within a configurable dB gate.
-
-The closed-form TR 38.811 channel remains the simulation default; the ray-traced channel is available the moment a user opts in.
-
-## What changed in v2.5
-
-See [CHANGELOG.md](CHANGELOG.md) for the full history.
-
-- **Cascade / caching / RIS channel bridges** — `NtnSionnaCascadeChannel` composes Sionna RT with the ITU-R `NtnAtmosphericLossChain`; `SionnaCachingTransport` is a 4-D LRU decorator over any transport; RIS Tx surfaces are carried in the request and installed in the scene per query.
-- **Sionna calibrator** — `SionnaCalibrator` measures the residual of the ray-traced channel against a reference propagation model and feeds the calibration harness.
-- **Batch client + replay transport + CIR Doppler synthesis** — `SionnaBatchClient` for async batched queries, `SionnaReplayTransport` (writer + reader) for record/replay runs without a GPU, and `CirDopplerSynthesizer` to advance a captured CIR snapshot to a Doppler-shifted offset.
-- **Channel plug-ins for real radio stacks** — `NtnAtmosphericPropagationLossModel` re-homes the ITU-R chain as a real `PropagationLossModel` charging pure atmospheric *excess* (no FSPL double-count), and `SionnaCirPropagationLossModel` applies a **multipath CIR** (per-tap Doppler) to ns-3 packets so the measured SINR exhibits genuine constructive/destructive fading. Note the Sionna RT server returns only a **scalar path loss** (the wire `Response` carries `path_loss_db` + a path *count*, no taps); the CIR taps fed to this model are supplied by the caller — in the example they are a **hand-authored synthetic Rician profile**, not ray-traced. Both chain onto any spectrum channel.
-- **Measured-radio `*-traffic` examples** — seven drivers run on a **real mmwave NR NTN cell** (`NtnRealStackHelper` from `contrib/ntn-traffic`: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) with genuine SGP4 Walker mobility. The channel physics sits in the packet path as chained `PropagationLossModel`s; traffic is `NtnOranApplication` QoS flows (in-band 5QI / S-NSSAI / seq / timestamp payload headers) with KPIs measured at `NtnOranSink` and the PHY trace — SINR, TBLER and goodput are measured, not asserted.
-- **Verification** — physics-only examples (channel-model comparisons, RIS link budget, calibration harness) run cleanly with or without a live GPU server; the `*-traffic` examples carry real packets over the real radio.
-
-## Models / bridges / key classes
-
-| Class | Header | Role |
-|---|---|---|
-| `NtnSionnaChannel` | `bridge/ns3-sionna-channel.h` | Opt-in `PropagationLossModel`; queries Sionna over a transport, FSPL fall-back on timeout |
-| `SionnaTransport` / `SionnaNoneTransport` | `bridge/sionna-transport.h` | Abstract transport + null transport; carries the request incl. optional `RisConfig` |
-| `SionnaUdpTransport` | `bridge/sionna-udp-transport.h` | UDP client to a live `sionna-server.py` |
-| `SionnaPybindTransport` | `bridge/sionna-pybind-transport.h` | In-process pybind transport (no socket) |
-| `SionnaCachingTransport` | `bridge/sionna-caching-transport.h` | 4-D LRU caching decorator over any inner transport |
-| `SionnaReplayTransport` (`SionnaReplayWriter` / `SionnaReplayReader`) | `bridge/sionna-replay-transport.h` | Record/replay transport — run without a live GPU |
-| `SionnaBatchClient` | `bridge/sionna-batch-client.h` | Async batched query client |
-| `NtnSionnaCascadeChannel` | `bridge/ntn-sionna-cascade-channel.h` | Sionna RT base + ITU-R atmospheric cascade |
-| `NtnAtmosphericLossChain` (`Itu618`/`Itu676`/`Itu681`) | `bridge/ntn-atmospheric-loss-chain.h` | Composite gaseous + rain + LMS attenuation chain |
-| `NtnAtmosphericPropagationLossModel` | `bridge/ntn-atmospheric-propagation-loss-model.h` | ITU-R atmospheric **excess** as a real `PropagationLossModel` — chains onto a Friis spectrum channel without double-counting FSPL |
-| `SionnaCirPropagationLossModel` | `bridge/sionna-cir-propagation-loss-model.h` | Multipath-CIR fading (per-tap Doppler via `CirDopplerSynthesizer`) as a real `PropagationLossModel`; applies **caller-supplied** taps (synthetic Rician in the examples — Sionna RT itself returns only a scalar path loss) |
-| `SionnaCalibrator` | `bridge/sionna-calibrator.h` | Residual calibration of Sionna RT vs a reference propagation model |
-| `CirDopplerSynthesizer` | `bridge/cir-doppler-synth.h` | Synthesise a Doppler-shifted CIR from a captured snapshot |
-
-Python side: `bridge/sionna-server.py` (live GPU server loading a Mitsuba scene once, JSON-over-UDP wire format, LOS-only and full-multipath modes).
+No GPU is needed to build or to run any example: without a server the channel falls back to free space and says so. A live server needs CUDA and Sionna RT; `INSTALL.md` has the version matrix.
 
 ## Examples
 
-All 12 examples build to `build/contrib/ntn-sionna/examples/ns3.43-<NAME>-default`. Each can be run two ways — through the `./ns3 run` wrapper or by invoking the built binary directly:
+Measured-radio examples (NR or mmwave NTN cell from `ntn-traffic`, SGP4 Walker mobility, SINR, TBLER and goodput off the PHY trace and sinks):
 
-```bash
-./ns3 run "<NAME> --arg=value"
-./build/contrib/ntn-sionna/examples/ns3.43-<NAME>-default --arg=value
-```
-
-No GPU is required for any example. The physics examples tolerate a missing Sionna server — with no transport answering, the channel falls back to closed-form FSPL so smoke runs still finish; with a live (or replay/caching) transport they print real ray-traced figures. The measured-radio examples run the ITU-R chain and array/CIR plug-ins closed-form, so they are fully headless.
-
-### Measured-radio examples
-
-These run a real mmwave NR NTN cell (`NtnRealStackHelper`: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) with SGP4 Walker satellite mobility projected into the local ENU frame. The channel physics is chained into the packet path as real `PropagationLossModel`s (`AddExtraPropagationLoss`), traffic is `NtnOranApplication` QoS flows, and SINR / TBLER / goodput are measured off the PHY trace and `NtnOranSink`. They link the sibling toolkit modules `ntn-traffic`, `ntn-cho`, `ntn-constellation` and the in-tree `mmwave` stack (all present in the toolkit tree).
-
-| Example | What it shows | Key args |
+| Example | What it shows | Command |
 |---|---|---|
-| `ntn-sionna-leo-downlink-traffic` | Ku-band LEO downlink with the ITU-R cascade (P.676 gaseous + P.618/P.838 rain + optional P.681 LMS) live in the packet path; per-second elevation / attenuation / SINR / TBLER / goodput | `simSeconds freqGHz satEirpDbm rainMmH lms outputDir` |
-| `ntn-sionna-rain-event-traffic` | Convective rain cell sweeps over a Ka-band gateway mid-pass; the rain schedule reconfigures the live chain, so the measured SINR and goodput dip and recover | `simSeconds freqGHz satEirpDbm peakRainMmH outputDir` |
-| `ntn-sionna-ris-relay-traffic` | Direct path blocked mid-sim (NLOS), then a RIS engages; blockage and RIS gain are live channel reconfigurations the measured SINR responds to | `simSeconds freqGHz satEirpDbm blockageDb risRows risCols blockFraction risOnFraction outputDir` |
-| `ntn-sionna-mimo-traffic` | SISO vs N×N MIMO terminals on one shared cell; the array gain is a per-UE channel plug-in, so the SISO/MIMO gap is measured, not asserted | `simSeconds freqGHz satEirpDbm rows cols outputDir` |
-| `ntn-sionna-constellation-handover-traffic` | UE follows the best satellite of an SGP4 Walker constellation; candidates are projected from the one measured link via the ephemeris Friis ratio; hand-overs logged with genuine orbital timing | `simSeconds freqGHz satEirpDbm numSats hysteresisDb outputDir` |
-| `ntn-sionna-composed-channel-traffic` | Standard ns-3 `SetNext()` composition — Friis → ITU-R excess → Nakagami fading → spectrum PHY; the `oran-ntn` TR 38.811 model is evaluated on the same live geometry beside the measured SINR | `simSeconds freqGHz satEirpDbm rainRateMmH outputDir` |
-| `ntn-sionna-cir-real-stack` | Synthetic Rician CIR (LOS + reflected taps, per-tap Doppler — **hand-authored, not ray-traced**) on `SionnaCirPropagationLossModel`; the measured SINR exhibits genuine multipath fading variance a scalar path loss cannot reproduce | `duration numUes altitude satEirpDbm freqGhz platformSpeed outputDir` |
+| `leo-pass-sionna-vs-tr38811` | A LEO pass with traced multipath when `--sionnaServer` is set, a labeled parametric profile otherwise; TR 38.811 free space printed as the reference column; replay file written | `./ns3 run "leo-pass-sionna-vs-tr38811 --sionnaServer=127.0.0.1:8765"` |
+| `ntn-sionna-leo-downlink-traffic` | ITU-R cascade (P.676, P.618/P.838, optional P.681 LMS) in the packet path | `./ns3 run "ntn-sionna-leo-downlink-traffic --rainMmH=10 --lms=1"` |
+| `ntn-sionna-rain-event-traffic` | A rain cell crosses a Ka-band gateway mid-pass | `./ns3 run ntn-sionna-rain-event-traffic` |
+| `ntn-sionna-ris-relay-traffic` | Blockage, then a RIS engages, as live channel changes | `./ns3 run "ntn-sionna-ris-relay-traffic --risRows=32 --risCols=32"` |
+| `ntn-sionna-mimo-traffic` | SISO and N x N terminals on one cell | `./ns3 run ntn-sionna-mimo-traffic` |
+| `ntn-sionna-constellation-handover-traffic` | Best-satellite following over a Walker constellation | `./ns3 run ntn-sionna-constellation-handover-traffic` |
+| `ntn-sionna-composed-channel-traffic` | Friis, ITU-R excess and Nakagami chained with `SetNext()` | `./ns3 run ntn-sionna-composed-channel-traffic` |
+| `ntn-sionna-cir-real-stack` | Synthetic Rician CIR (hand-authored taps, not traced) on `SionnaCirPropagationLossModel` | `./ns3 run ntn-sionna-cir-real-stack` |
 
-```bash
-./ns3 run "ntn-sionna-leo-downlink-traffic --simSeconds=60 --rainMmH=10 --lms=1"
-./build/contrib/ntn-sionna/examples/ns3.43-ntn-sionna-ris-relay-traffic-default --risRows=32 --risCols=32 --blockageDb=30
-```
+Channel examples (no data plane):
 
-**Outputs:** per-second trace tables (elevation, attenuation, SINR, TBLER, goodput) and a measured-KPI summary on stdout, plus per-run KPI files and a `sim_health.csv` gate report under `--outputDir`.
-
-### Physics / channel examples
-
-These exercise the channel models, link budget, and calibration directly (no data plane).
-
-| Example | What it shows | Key args |
+| Example | What it shows | Command |
 |---|---|---|
-| `leo-pass-sionna-vs-tr38811` | Sweeps elevation 90°→0° across a LEO pass; logs Sionna PL vs TR 38.811 PL per step and self-checks the ±3 dB gate | `host port freqHz altKm steps timeoutMs` |
-| `mmimo-vs-codebook-leo` | SISO vs N×N cross-pol array under the atmospheric cascade across a pass; reports rain + gaseous breakdown | `host port freqHz altKm rainMmH steps rows cols timeoutMs` |
-| `ris-assisted-leo-link` | Before/after a RIS focused at the UE during a pass; per-sample RIS gain + aggregate min/max/mean | `host port freqHz altKm rainMmH steps rows cols risPosX risPosZ phaseProfile timeoutMs` |
-| `city-block-4ue-cache` | AODT-style 4-UE city block over a `SionnaCachingTransport`; per-UE Rx and running cache hit / miss / evictions | `host port freqHz altKm rainMmH steps timeoutMs spatialResM timeBucketUs` |
-| `sionna-calibration-harness` | Drives `SionnaCalibrator` to measure ray-traced residual vs the reference model | `host port losOnly timeoutMs` |
+| `sionna-calibration-harness` | `SionnaCalibrator` residual against TR 38.811 | `./ns3 run "sionna-calibration-harness --host=127.0.0.1 --port=8765"` |
+| `mmimo-vs-codebook-leo` | SISO against N x N cross-pol array under the cascade | `./ns3 run mmimo-vs-codebook-leo` |
+| `ris-assisted-leo-link` | Before and after a RIS focused at the UE | `./ns3 run ris-assisted-leo-link` |
+| `city-block-4ue-cache` | Four UEs over `SionnaCachingTransport`; hit, miss and eviction counts | `./ns3 run "city-block-4ue-cache --spatialResM=50"` |
+
+## Tests
 
 ```bash
-./ns3 run "leo-pass-sionna-vs-tr38811 --steps=30 --altKm=550 --freqHz=2e9"
-./build/contrib/ntn-sionna/examples/ns3.43-city-block-4ue-cache-default --steps=60 --spatialResM=50 --timeBucketUs=100000
+./test.py -s ntn-sionna                  # C++ suite
+pytest contrib/ntn-sionna/test/          # Python server tests
+pytest contrib/ntn-sionna/tools/tests/   # geospatial tool tests
 ```
 
-**Outputs:** per-step PL / Rx / gain / residual tables on stdout; the LEO-pass and calibration drivers self-check their dB gate.
+The `ntn-sionna` C++ suite (`Type::UNIT`, 44 test cases) runs against the stub server and covers the FSPL fallback and its counting, a mid-run server kill, the UDP wire format with MIMO and RIS fields and `los_only`, the atmospheric chain and cascade, cache keys, quantization, time buckets and LRU eviction, the batch client, replay, CIR Doppler against v·k/lambda and the calibrator detecting a 3 dB offset.
 
-## Sionna setup
+## Dependencies
 
-The bridge does **not** require a live Sionna GPU to run:
+ns-3.43 core, network, mobility and propagation; `ntn-traffic`, `ntn-constellation`, `ntn-cho`, `mmwave` or `nr` for the measured-radio examples. For live tracing: Python 3, CUDA and Sionna RT on the server machine.
 
-- **Live GPU path** — start `bridge/sionna-server.py` (needs CUDA, TensorFlow, Sionna RT) and point `SionnaUdpTransport` at it. See [INSTALL.md](INSTALL.md) for the GPU prerequisites and version matrix.
-- **No-GPU paths** — `SionnaReplayTransport` replays a previously recorded query log, and `SionnaCachingTransport` serves cached responses; both run headless. With no transport answering at all, `NtnSionnaChannel` falls back to closed-form FSPL.
-- **Stub server** — `test/sionna-stub-server.py` mimics the wire protocol using closed-form FSPL, so the C++ tests run without Sionna RT installed.
-- **Geospatial tooling** — `tools/` ships `osm_to_sionna_scene.py` (OSM → Sionna scene), `lidar_dem_ingest.py` (AW3D30 + LiDAR → elevation grid), and `probe_sionna_env.py` (env / version gate). See [tools/README.md](tools/README.md).
+## Scope and limitations
 
-## Build, run & test
+- The server returns a scalar path loss and a path count, not taps. The CIR taps used by `SionnaCirPropagationLossModel` in the examples are a hand-authored Rician profile, not ray traced.
+- The closed-form TR 38.811 channel remains the default; tracing happens only where a transport is installed and a server answers.
+- The Results were produced with Sionna RT directly, not through this bridge, and in four shipped scenes with idealized materials; they are not field measurements.
+- Sionna RT does not model the atmosphere; the cascade adds it from the ITU-R chain.
 
-```bash
-# from the ns-3-dev root
-./ns3 configure --enable-examples --enable-tests
-./ns3 build ntn-sionna
+## Standards
 
-# run an example (live, replay/cached, or FSPL-fallback — all work)
-./ns3 run "leo-pass-sionna-vs-tr38811 --steps=30 --altKm=550"
-```
+3GPP TR 38.811 (NTN reference channel, the baseline the traced channel is calibrated against) and TR 38.901; ITU-R P.676 (gaseous), P.618 and P.838 (rain), P.681 (land mobile satellite shadowing). NVIDIA Sionna RT for the ray tracing.
 
-Tests (suite name `ntn-sionna`):
+## Citation
 
-```bash
-./test.py -s ntn-sionna                 # C++ suite
-pytest contrib/ntn-sionna/test/         # Python integration tests
-pytest contrib/ntn-sionna/tools/tests/  # geospatial tool tests
-```
-
-For CUDA / TensorFlow / Sionna RT installation and the supported version matrix, see [INSTALL.md](INSTALL.md).
-
-## Cite this work
+If you use this module, please cite the toolkit article:
 
 ```bibtex
-@misc{uzair2026ntnsionna,
-  author = {Uzair, Muhammad},
-  title  = {ntn-sionna: NVIDIA Sionna RT Bridge for 6G NTN Channel Simulation},
-  year   = {2026},
-  url    = {https://github.com/Muhammaduazir69/ntn-sionna}
+@article{uzair2026ns3ntntoolkit,
+  author  = {Uzair, Muhammad and others},
+  title   = {ns3-ntn-toolkit: An Integrated ns-3 Platform for {6G} Non-Terrestrial Networks},
+  journal = {IEEE Open Journal of the Communications Society},
+  year    = {2026},
+  doi     = {10.1109/OJCOMS.2026.3745010}
 }
 ```
-
----
-
-## Standards implemented
-
-3GPP TR 38.811 (NTN reference channel, the closed-form baseline the traced channel is calibrated against), TR 38.901 (terrestrial channel model), ITU-R P.676-13 (gaseous absorption applied along the traced path). NVIDIA Sionna RT for the ray tracing itself.
-
-## Keywords
-
-ray tracing, Sionna RT, GPU channel modeling, differentiable ray tracing, channel impulse response, CIR, multipath, Doppler, site-specific channel, digital twin channel, OpenStreetMap scene, LiDAR DEM, TR 38.811 calibration, satellite link, LEO pass, non-terrestrial network, ns-3.
-
-## Author
-
-**Muhammad Uzair**, Independent Researcher
-[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
-
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
-a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
-Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
 
 ## License
 
 GPL-2.0-only, matching ns-3.
+
+## Contact
+
+**Muhammad Uzair**, Independent Researcher. muhammaduzairr69@gmail.com, [ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit); mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

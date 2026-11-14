@@ -164,7 +164,7 @@ def plt_setup():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    plt.style.use("/home/uzair/6g_ntn_ns3/papers/templates/ieee.mplstyle")
+    plt.style.use(os.environ.get("IEEE_MPLSTYLE", "default"))
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
     return plt

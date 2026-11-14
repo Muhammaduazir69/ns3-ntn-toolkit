@@ -1,32 +1,95 @@
 <h1 align="center">ntn-rrc</h1>
 
-<p align="center"><strong>NR-NTN control plane: SIB19 ephemeris that reaches the scheduler, payload-aware timing advance, and DRX that gates a real flow</strong></p>
+<p align="center"><strong>NR-NTN control plane for ns-3: SIB19 ephemeris that a UE actually decodes, payload-aware timing advance, and DRX that gates a real flow</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-TS%2038.331%20SIB19-orange.svg" alt="3GPP TS 38.331 SIB19"/>
-  <img src="https://img.shields.io/badge/timing-K__offset%20%C2%B7%20TA%20%C2%B7%20DRX-purple.svg" alt="K_offset timing advance DRX"/>
-  <img src="https://img.shields.io/badge/examples-5-informational.svg" alt="5 examples"/>
+  <img src="https://img.shields.io/badge/3GPP-TS%2038.213%20%C2%A74.2-orange.svg" alt="3GPP TS 38.213 section 4.2"/>
+  <img src="https://img.shields.io/badge/examples-6-informational.svg" alt="6 examples"/>
 </p>
 
 <p align="center">
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-rrc/">Docs</a>
+  &nbsp;·&nbsp;
   <a href="INSTALL.md">Install</a>
   &nbsp;·&nbsp;
   <a href="#examples">Examples</a>
   &nbsp;·&nbsp;
-  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-rrc/">Docs</a>
+  <a href="#results">Results</a>
 </p>
 
 ---
 
-NR over a satellite works because three timing mechanisms absorb a round trip the terrestrial standard never anticipated: a broadcast K_offset that shifts the uplink grant, a timing advance that pre-compensates propagation, and a validity duration after which the terminal must resynchronize. Each is only useful if something downstream consumes it.
+## Why this module
 
-This module makes them consume. The SIB19 broadcaster fires a sink on every refresh and the scheduler prefers the broadcast `cellSpecificKoffset` over any value it could re-derive, reprogramming its N2 delay live. Timing advance differs between transparent and regenerative payloads because the feeder leg is in the geometry: in the shipped test geometry the transparent case is 8.0 ms longer, which is exactly twice 1200 km over c. DRX gates a real flow rather than scaling a measured goodput afterwards.
+NR works over a satellite because three timing mechanisms absorb a round trip the terrestrial standard never planned for: a broadcast K_offset that shifts the uplink grant, a timing advance that pre-compensates propagation, and a validity duration after which the terminal must read SIB19 again. Each is useful only if something downstream consumes it. Stock ns-3 has none of them.
 
-If that sounds like a low bar, it is worth saying that each of those three was a decision island before: computed, logged, and never read.
+`ntn-rrc` adds them and wires them to consumers. The SIB19 broadcaster fills NTN-Config-r17 from a real orbit and quantizes it to the TS 38.331 field steps; a UE-side pre-compensator decodes it, propagates the satellite with a chosen orbit model and forms its own timing advance; the scheduler in the sibling `ntn-traffic` module can read the broadcast `cellSpecificKoffset`. Timing advance includes the feeder leg for a transparent payload, so the payload mode is not a label: in the shipped test geometry the transparent advance is 8.0 ms longer, twice 1200 km over c. DRX gates a real flow rather than scaling a measured goodput afterwards.
+
+## System design
+
+<p align="center">
+  <img src="doc/figures/ntn-rrc-architecture.png" alt="ntn-rrc architecture: orbit and terminal inputs feed NtnTimingAdvance and NtnSib19Broadcaster on the network side; SIB19 is broadcast to NtnUlTimingPrecompensator on the UE side; K_offset, measured SINR and DRX gating connect to the ntn-traffic radio stack" width="100%"/>
+</p>
+
+*Figure 1. Classes and data flow. Orbit and terminal mobility (SGP4 from `ntn-constellation`, TR 38.811 UE classes from `ntn-cho`, an optional gateway for the feeder leg) feed the timing advance; the broadcaster turns it into SIB19 content, the codec serializes it, and the UE-side pre-compensator decodes it. Cross-module hooks reach the uplink scheduler (K_offset) and the PHY trace (measured SINR) of the `ntn-traffic` radio stack. Source: [`doc/figures/make_architecture.py`](doc/figures/make_architecture.py).*
+
+## Results
+
+The numbers below come from an uplink timing pre-compensation study run with this module's `ntn-rrc-ul-timing` example (`NtnSib19Broadcaster` plus `NtnUlTimingPrecompensator` on SGP4 orbits). The study binary is that example with one addition that is not yet merged here: SIB19 content announced 0.64 s ahead of its epoch (`--leadS`), as the si-Periodicity requires. The patch, its regression check and the campaign scripts are in `paper/tvt-2026-uplink-timing/` of the toolkit tree (`ns3_patch/`, `run_ns3_campaign.py`, `make_macros.py`).
+
+**Experiment.** 400 LEO passes, 100 on each of four shells drawn from real element sets (357, 470 and 571 km Starlink shells, 1201 km OneWeb), with the closest approach drawn uniformly over a day, a 900 s window around it, a 25 degree elevation mask and 3 m GNSS error. Every scheme runs on the same passes (paired design, one noise seed per pass). The timing error limit is T_e' = 456 ns, the 716 ns NTN limit of TS 38.133 minus a 260 ns implementation allowance.
+
+<p align="center">
+  <img src="doc/figures/ntn-rrc-timing-error.png" alt="UE-side timing error against information age for four orbit propagators, and common-delay error of Taylor, economized and window-fit SIB19 coefficients" width="100%"/>
+</p>
+
+*Figure 2. Timing error against information age on the 470 km shell. (a) UE-side error for four propagators: closed-form bound (lines), Monte Carlo 99th percentile (filled) and ns-3 99th percentile (hollow, pooled over 40 passes). (b) Common-delay error with the gateway as reference point: Taylor coefficients against age; economized and window-fit coefficients against the validity window. Dotted red lines mark T_e and T_e'.*
+
+<p align="center">
+  <img src="doc/figures/ntn-rrc-sib19-decodings.png" alt="SIB19 decodings per pass and share of time with timing error above the limit, per shell and scheme" width="100%"/>
+</p>
+
+*Figure 3. ns-3 comparison over 400 passes (100 per shell, paired; the L and T60 schemes over 160). (a) SIB19 decodings per pass, mean with 95 % bootstrap interval over passes. (b) Share of served time with timing error above T_e'; shares below 0.01 % are not drawn.*
+
+| Reference point | Scheme | Mean validity (s) | SIB19 decodings per pass | Passes above T_e' | Largest error (ns) |
+|---|---|---:|---:|---:|---:|
+| Satellite | B0, fixed 5 s on a 2.56 s grid | 5.0 | 109.1 | 0 | 153 |
+| Satellite | B1, fixed 5 s on a 1 s grid | 5.0 | 56.5 | 0 | 159 |
+| Satellite | No expiry (V = 900 s), Kepler-J2 UE | 900.0 | 1.0 | 0 | 207 |
+| Satellite | Error-budget rule (`--validity=budget`) | 612.9 | 1.6 | 0 | 162 |
+| Gateway | T5, Taylor coefficients, 5 s | 5.0 | 48.3 | 0 | 393 |
+| Gateway | T-shell, Taylor, fixed table per shell | 6.2 | 37.8 | 0 | 393 |
+| Gateway | W-shell, window fit, fixed table per shell | 17.5 | 14.1 | 0 | 294 |
+| Gateway | Error-budget rule, window fit | 25.1 | 10.4 | 0 | 370 |
+
+What the data say: with the gateway as reference point, replacing Taylor coefficients by the window fit (`--fit=window`) cut decodings by a factor of 2.7 at the same validity table without a violation, and sizing the validity per epoch cut them by a further 1.35. Long validities with Taylor coefficients do fail: a fixed 60 s exceeded T_e' 76.4 % of the time. With the satellite as reference point no common term is broadcast, and a Kepler-J2 UE held one SIB19 for the whole pass. Values are copied from `paper/tvt-2026-uplink-timing/make_macros.py`, which `sim/make_macros.py` writes from `sim/out_r4` and `sim/out_r5`.
+
+Two smaller stored runs of the in-tree examples, single seed each:
+
+| Run | Output on disk | What it shows |
+|---|---|---|
+| `ntn-rrc-real-stack` (default arguments) | `ns-3-dev/ntn-rrc-real-stack-output/ntn-rrc-real-stack-ta.csv` | 48 samples over 24 s of a 550 km pass: slant range 550.1 to 576.8 km, total TA 3669 to 3847 us, measured SINR 18.6 to 21.9 dB (median 19.8 dB) after the first sample |
+| `ntn-rrc-drx-data-traffic --drxOn=false` | `ns-3-dev/ntn-rrc-drx-data-traffic-output/drx_metrics.csv` | DRX disabled reference: awake fraction 1, measured goodput 17.66 Mb/s |
+
+## Architecture and classes
+
+| Class / API | Header | Role |
+|---|---|---|
+| `NtnTimingAdvance` | `model/ntn-timing-advance.h` | `ComputeTotalTa()` = 2(d_service + d_feeder)/c, `ComputeCommonTa()`, `ComputeUeSpecificTa()`, `ComputeTaDriftRate()`, `ComputeTaDriftVariation()`. The feeder leg is included for a transparent payload once a gateway mobility is set; a warning is logged when it is missing. |
+| `EphemerisInfo`, `Sib19Content`, `Sib19Codec` | `model/ntn-sib19.h` | NTN-Config-r17 content (ECEF state vector, `ta-Common`, drift and drift variation, `ul-SyncValidityDuration`, K_offset, `kMac`), fixed-layout serialization at the TS 38.331 field steps. |
+| `NtnSib19Broadcaster` | `model/ntn-sib19.h` | Periodic broadcaster driven by the live orbit. Uplink sync reference point (`UlSyncReference`: gateway or satellite), coefficient fit (`Sib19CoefficientFit`: Taylor, economized, window), validity rule (`Sib19ValidityRule`: slot over drift, error budget, fixed). Derives `K_offset = ceil(RTT / slot) + 1`. |
+| `NtnUlTimingPrecompensator` | `model/ntn-ul-timing-precompensator.h` | UE side: decodes SIB19, propagates the satellite (`UeEphemerisModel`: linear, gravity-ECEF, Kepler, Kepler-J2) from the last GNSS fix and forms TA(t) = 2\|s(t) - p\|/c + T_C + T_D tau + T_V tau^2. |
+| `NtnRachWindow`, `NtnRachWindowVerdict` | `model/ntn-rach-window.h` | The RAR window a given round trip demands and whether the configured `ra-ResponseWindow` can express it (TS 38.213 section 8.1, TR 38.821 section 7.3). |
+| `NtnMeasReportCodec`, `NtnMeasQuantity` | `model/ntn-meas-report.h` | MeasurementReport content quantized to TS 38.133 level indices (RSRP, RSRQ, SINR), saturating at the range ends. |
+| `NtnDrxStateMachine`, `NtnDrxConfig` | `model/ntn-drx.h` | Connected-mode DRX (`Active`, `OnDuration`, `ShortSleep`, `LongSleep`) plus an NTN `AwaitingPass` state between visibility windows. |
+| `NtnUeLocationReporter` | `model/ntn-ue-location-report.h` | Periodic, event-triggered and on-demand GNSS reports; closed-form ECEF and WGS-84 conversion. |
+| `PayloadMode`, `TaReferenceFrame`, `GnssCapability` | `model/ntn-rrc-types.h` | Transparent or regenerative payload, TA reference frame, UE GNSS capability. |
+| `NtnRrcHelper` | `helper/ntn-rrc-helper.h` | Installs timing advance, SIB19 broadcaster, location reporter and DRX on node pairs. |
 
 ## Quick start
 
@@ -34,182 +97,75 @@ Inside the toolkit, where the module is already present and built:
 
 ```bash
 ./ns3 run ntn-rrc-real-stack
-./ns3 run ntn-rrc-leo-pass
-./ns3 run ntn-rrc-drx-data-traffic
+./ns3 run "ntn-rrc-ul-timing --model=kepler-j2 --ref=gateway --fit=window --validity=budget"
+./ns3 run "ntn-rrc-drx-data-traffic --simSeconds=20 --numUes=4 --drxOn=true"
 ```
 
 Standalone, into an existing ns-3.43 tree:
 
 ```bash
 git clone -b ntn-rrc-v2 https://github.com/Muhammaduazir69/ntn-rrc.git contrib/ntn-rrc
-./ns3 configure --enable-modules='' --enable-examples --enable-tests
-./ns3 build
-```
-
-`INSTALL.md` in this directory carries the full dependency list. Most examples in
-this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
-toolkit tree is the path of least resistance.
-
-## Overview
-
-LEO non-terrestrial networks introduce one-way delays and Doppler trajectories that the terrestrial 5G RRC stack was never specified for: a single-leg propagation can exceed 17 ms at low elevation, common timing-advance values drift by tens of microseconds-per-second, and the assistance information broadcast in SIB1 says nothing about satellite ephemerides. The 3GPP NTN work item (Release-17 onward) closes these gaps with new IEs, new SIB types, and new MAC behaviours — but most ns-3 distributions still carry only the terrestrial RRC.
-
-`ntn-rrc` adds the NTN-specific RRC procedures as a clean, optional contrib module:
-
-- **SIB19 ephemeris broadcast** — periodic broadcaster (default 160 ms) snapshots fresh satellite ephemeris (ECEF state vector), the common timing advance, and its drift rate into a fixed-layout 124-byte codec frame (TS 38.331 §6.3.2). The `cellSpecificKoffset` / `kMac` fields are now **derived** from the common TA rather than broadcast as zero: `NtnSib19Broadcaster::RefreshNow()` computes `K_offset = ceil(RTT / slot) + 1` (TS 38.213 §4.2, RTT = `ComputeCommonTa()` = 2·d/c, slot = 1 ms / 2^μ from `SetNumerology()`, default μ=1 / 30 kHz SCS) — ≈9–10 slots for a LEO-600 geometry. *Honest scope:* the frame is serialized to a `TracedCallback` / private buffer for observers — it is **not** carried on BCCH/PDSCH and **no UE decodes it**. SIB19 *populates* `K_offset`; actually *consuming* it in the NR scheduler's UL grant timing is a separate cross-module hook — `NtnRealStackHelper::SetKOffsetConsumption()` in the sibling `ntn-traffic` module — and the mmwave MAC still never reads it.
-- **Timing advance** — ephemeris-driven TA pre-compensation decomposed into a SIB19-broadcast **common** term plus a per-UE **UE-specific** residual. `ComputeTotalTa()` is the round-trip service-link delay `2·d/c` for **both** payload modes (TS 38.213 §4.2.2). `ComputeTaDriftRate()` differentiates the slant range over a small step; using the `2·d/c` round-trip consistently (a prior mode-dependent multiplier poisoned the regenerative drift) now keeps the LEO drift rate **< 25 µs/s** (TR 38.821 §6.3.3). Each example emits a per-run TA time-series (`ta_total = 2·slant/c`, `ta_drift = d(slant)/dt`) to its `*-ta.csv`.
-- **Pass-aware DRX** — NR connected-mode DRX state machine (`Active / OnDuration / ShortSleep / LongSleep`) extended with an NTN `AwaitingPass` deep-sleep state between visibility windows (TS 38.321 + TR 38.821 §6.3.4).
-- **UE location report** — GNSS-assisted reporting in periodic / event-triggered / on-demand modes, with closed-form ECEF↔WGS-84 conversion (TS 38.331 §5.7.4).
-
-## What changed in v2.5
-
-See [CHANGELOG.md](CHANGELOG.md) for this module's history.
-
-- **SIB19 now populates `cellSpecificKoffset` / `kMac`.** `NtnSib19Broadcaster` derives the K_offset from the common TA (`ceil(RTT / slot) + 1`, TS 38.213 §4.2) with the configured numerology instead of broadcasting zero — ≈9–10 slots on a LEO-600 geometry. SIB19 *populates* the value; consuming it in the NR scheduler's UL timing is the `ntn-traffic` cross-module hook `NtnRealStackHelper::SetKOffsetConsumption()`.
-- **Timing-advance drift-rate fix.** `ComputeTaDriftRate()` now differentiates `2·d/c` consistently (the earlier mode-dependent multiplier poisoned the regenerative branch), bringing the LEO drift rate within the TR 38.821 §6.3.3 bound (**< 25 µs/s**). Each run emits a TA time-series (`ta_total`, `ta_drift`) to its `*-ta.csv`.
-- **DRX duty-cycle metrics file.** `ntn-rrc-drx-data-traffic` now writes `drx_metrics.csv` — the connected-mode DRX duty cycle (awake fraction), power-saving fraction, per-state residency, and measured vs DRX-effective goodput. A representative run: duty cycle **0.125** (40 ms on-duration / 320 ms long cycle), **~87 %** power-saving.
-- **All examples now run on a real mmwave NR NTN cell.** Every example builds the radio through `NtnRealStackHelper` (from the sibling `ntn-traffic` module): SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC, with real UDP traffic over the radio and the DL SINR/TBLER/throughput **measured off the mmwave PHY trace** — no closed-form SINR, no synthetic link models. Each example also writes a `sim_health.csv` with phy-trace provenance. (The "RRC" here is the mmwave **ideal RRC**, `UseIdealRrc=true` — bearers are set up synchronously at attach with no over-the-air RRC PDU exchange; the SIB19 / TA / measurement-report machinery in this module runs alongside it as assistance/accounting, not wired into that MAC/RRC. The core is the LTE **EPC** — MME/SGW/PGW, S1-AP, real GTP-U — not a 5GC.)
-- **Real mobility everywhere.** Serving satellites fly genuine SGP4 orbits — a Walker-Delta element from `ntn-constellation` (`Sgp4MobilityModel`) in `ntn-rrc-leo-pass`, `ntn-rrc-full-stack`, `ntn-rrc-drx-data-traffic`, and `ntn-rrc-real-stack`, or a real TLE through the SNS3 `SatSGP4MobilityModel` in `ntn-rrc-from-tle`. UEs move under 3GPP TR 38.811 §6.1.1.1 class mobility (`NtnTr38811MobilityModel` from `ntn-cho`), placed under the satellite's t=0 sub-point so a real overhead pass occurs.
-- **RRC measurement reports on measured radio** — `ntn-rrc-leo-pass` and `ntn-rrc-real-stack` fire a connection-quality measurement report when the **measured** DL SINR crosses a threshold, alongside the live TA/SIB19 machinery.
-- **`ntn-rrc-from-tle` ships a default ISS TLE** (`data/iss-zarya.tle`) and runs with zero arguments — it auto-discovers the bundled TLE relative to the working directory and defaults the scenario start.
-
-## Models, helpers & key classes
-
-| Class / API | Header | Role |
-|---|---|---|
-| `NtnTimingAdvance` | `model/ntn-timing-advance.h` | `ComputeTotalTa()`, `ComputeCommonTa()`, `ComputeUeSpecificTa()`, `ComputeTaDriftRate()` (s/s), `GetSlantRangeMetres()`. Consumes a UE + satellite `MobilityModel` pair and a reference (beam-centre) position. |
-| `EphemerisInfo`, `Sib19Content` | `model/ntn-sib19.h` | NTN-Config-r17 assistance data: ECEF ephemeris state vector, `taCommon`, drift rate/variation, UL-sync validity, K-offsets, payload mode, cell id. |
-| `Sib19Codec` | `model/ntn-sib19.h` | Fixed-layout little-endian serialise/parse; `kSerialisedBytes = 124`; rejects under-size buffers. |
-| `NtnSib19Broadcaster` | `model/ntn-sib19.h` | Periodic broadcaster (default 160 ms); re-derives content from mobility + TA each tick; `RefreshNow()`, `GetLatest()`, `Broadcast` trace. |
-| `NtnDrxStateMachine`, `NtnDrxConfig`, `DrxState` | `model/ntn-drx.h` | NR DRX cycles plus NTN `AwaitingPass`; `NotifyDataActivity()`, `NotifyNextPass()`, `GetTimeInState()`, `StateChange` trace; `NtnDrxConfig::IsValid()` rejects malformed cycles. |
-| `NtnUeLocationReporter`, `UeLocationReport`, `LocationReportMode` | `model/ntn-ue-location-report.h` | Periodic / event-triggered / on-demand GNSS reporting; `EcefToGeodeticWgs84()` / `GeodeticWgs84ToEcef()` (Heikkinen closed-form); `Report` trace; `ReportNow()`. |
-| `PayloadMode`, `TaReferenceFrame` | `model/ntn-rrc-types.h` | Transparent vs regenerative payload; TA reference frame. |
-| `NtnRrcHelper` | `helper/ntn-rrc-helper.h` | Façade: `SetPayloadMode()`, `SetReferencePosition()`, `InstallTimingAdvance()`, `InstallSib19Broadcaster()`, `InstallUeLocationReporter()`, `InstallDrx()`. |
-
-## Examples
-
-All five examples are built when `--enable-examples` is configured. Each block gives the `./ns3 run` form and the direct-binary form (binaries live under `build/contrib/ntn-rrc/examples/` as `ns3.43-<name>-default`). Every example runs real UDP traffic over a real mmwave NR NTN cell and writes a `sim_health.csv` to `--outputDir`.
-
-### ntn-rrc-leo-pass
-
-Ephemeris-driven Timing Advance + SIB19 on a real mmwave NR NTN cell over a genuine SGP4 LEO pass, sampled twice per second. Produces the classic NTN "smile" curve from the live slant-range geometry; an RRC measurement report fires whenever the measured DL SINR drops below the threshold.
-
-```bash
-./ns3 run "ntn-rrc-leo-pass --simTime=20 --transparent=true --outputDir=ntn-rrc-leo-pass-output"
-```
-```bash
-LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-leo-pass-default \
-    --simTime=20 --transparent=true --outputDir=ntn-rrc-leo-pass-output
-```
-
-**Outputs (in `--outputDir`):** `ntn-rrc-leo-pass-ta.csv` (columns `time_s,slant_km,ta_total_us,ta_common_us,ta_ue_us,ta_drift_us_per_s,measured_sinr_db`) and `sim_health.csv`; summary on stdout (measured mean SINR, measured DL throughput, final slant/TA, SIB19 refreshes, measurement reports).
-**Key args:** `--simTime` (s), `--numUes`, `--altitude` (km), `--satEirpDbm`, `--freqGhz`, `--transparent` (true=transparent / false=regenerative), `--outputDir`.
-
-### ntn-rrc-full-stack
-
-End-to-end pass exercising all four NTN-RRC components at once — TA pre-comp, SIB19 broadcast, UE GNSS reporting, and the DRX state machine — over a real SGP4 Walker orbit with TR 38.811 class UEs under the sub-point and real traffic on the mmwave cell. The beam-centre reference is offset ~50 km north of the sub-point so the UE-specific TA residual (`ta_ue`) is genuinely non-zero.
-
-```bash
-./ns3 run "ntn-rrc-full-stack --simTime=20 --transparent=true --passAwareDrx=true --prefix=ntn-rrc-full"
-```
-```bash
-LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-full-stack-default \
-    --simTime=20 --transparent=true --passAwareDrx=true --prefix=ntn-rrc-full
-```
-
-**Outputs (in `--outputDir`):** `<prefix>-ta.csv` (`time_s,ta_total_us,ta_common_us,ta_ue_us,measured_sinr_db`), `<prefix>-sib19.csv` (`time_s,broadcast_seq,cell_id,sat_x,sat_y,sat_z,ta_common_us,drift_rate_us_per_s`), `<prefix>-ue.csv` (`time_s,sequence,lat_deg,lon_deg,alt_m`), `<prefix>-drx.csv` (`time_s,state,active_ms,onDuration_ms,shortSleep_ms,longSleep_ms,awaitingPass_ms`); `sim_health.csv`.
-**Key args:** `--simTime` (s), `--numUes`, `--altitude` (km), `--satEirpDbm`, `--transparent` (payload mode), `--passAwareDrx` (enable `AwaitingPass` deep sleep), `--prefix` (CSV filename prefix), `--outputDir`.
-
-### ntn-rrc-from-tle
-
-Reads a real 3-line TLE, drives a SNS3 `SatSGP4MobilityModel` from it, and runs the mmwave NR cell under the satellite. The UEs are auto-placed at the satellite's t=0 sub-point so a real overhead pass occurs; Timing Advance is logged from the live SGP4 geometry next to the measured DL SINR. Ships with a bundled ISS TLE (`data/iss-zarya.tle`) and **runs with no arguments** — `--tle` is optional.
-
-```bash
-./ns3 run "ntn-rrc-from-tle"
-```
-```bash
-LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-from-tle-default
-```
-
-With an explicit TLE and scenario start:
-
-```bash
-./ns3 run "ntn-rrc-from-tle --tle=contrib/ntn-rrc/data/iss-zarya.tle --start=2024-01-01T12:00:00"
-```
-```bash
-LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-from-tle-default \
-    --tle=contrib/ntn-rrc/data/iss-zarya.tle --start=2024-01-01T12:00:00
-```
-
-**Outputs (in `--outputDir`):** `ntn-rrc-from-tle.csv` (columns `time_s,sat_x_m,sat_y_m,sat_z_m,slant_km,ta_total_us,ta_drift_rate_us_per_s,measured_sinr_db`) and `sim_health.csv`; summary on stdout (sub-point, measured mean SINR, measured throughput, final slant).
-**Key args:** `--tle` (3-line TLE file; defaults to the bundled ISS TLE), `--start` (scenario start UTC, `YYYY-MM-DDTHH:MM:SS`; the `T` separator avoids whitespace truncation), `--simTime` (s), `--numUes`, `--satEirpDbm`, `--step` (sample period s), `--transparent` (payload mode), `--outputDir`.
-
-### ntn-rrc-drx-data-traffic
-
-Real UDP downlink to UEs on the mmwave NR cell with the NTN RRC procedures running on the live geometry: SIB19 broadcast, live timing advance, and the connected-mode DRX cycle. The summary reports the measured link KPIs together with the DRX on-duty fraction and the resulting effective goodput (measured goodput × on-duty) — the power-saving vs throughput trade-off. Compare `--drxOn=true` vs `--drxOn=false`.
-
-```bash
-./ns3 run "ntn-rrc-drx-data-traffic --simSeconds=20 --numUes=4 --drxOn=true"
-```
-```bash
-LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-drx-data-traffic-default \
-    --simSeconds=20 --numUes=4 --drxOn=true
-```
-
-**Outputs (in `--outputDir`):** per-second console trace (slant range, TA, DRX state, measured SINR), a summary line (measured SINR/TBLER/goodput, DRX on-duty %, effective goodput), `drx_metrics.csv`, and `sim_health.csv`. `drx_metrics.csv` has columns `metric,value,unit,provenance` and rows `drx_enabled`, `drx_long_cycle_ms`, `drx_on_duration_ms`, `duty_cycle_awake_frac`, `power_saving_frac`, per-state residency (`time_active_s`, `time_on_duration_s`, `time_short_sleep_s`, `time_long_sleep_s`, `time_awaiting_pass_s`), `measured_goodput_mbps`, and `drx_effective_goodput_mbps`. The awake fraction is read straight off the DRX state machine (Active + OnDuration time, driven by real DL traffic via `NotifyDataActivity()`), not a static multiplier. A representative run reports a duty cycle of 0.125 (= 40 ms on-duration / 320 ms long cycle) and ~87% power-saving.
-**Key args:** `--simSeconds` (s), `--numUes`, `--leoAltKm`, `--freqGHz`, `--satEirpDbm`, `--drxOn` (enable DRX gating), `--drxLongCycleMs`, `--drxOnDurationMs`, `--outputDir`.
-
-### ntn-rrc-real-stack
-
-Real-stack flagship: `NtnTimingAdvance` + `NtnSib19Broadcaster` (TS 38.331 NTN-Config) on the real mmwave NR cell, with SIB19 re-broadcast every si-period from the live ephemeris while packets traverse the radio. The TA total/common/UE-specific decomposition and drift come from the real slant-range geometry, and the RRC connection-quality measurement report triggers on the measured DL SINR.
-
-```bash
-./ns3 run "ntn-rrc-real-stack --duration=20 --numUes=4"
-```
-```bash
-LD_LIBRARY_PATH=build/lib ./build/contrib/ntn-rrc/examples/ns3.43-ntn-rrc-real-stack-default \
-    --duration=20 --numUes=4
-```
-
-**Outputs (in `--outputDir`):** `ntn-rrc-real-stack-ta.csv` (columns `time_s,slant_km,ta_total_us,ta_common_us,ta_ue_us,ta_drift_us_per_s,measured_sinr_db`) and `sim_health.csv`; summary on stdout (measured mean SINR, measured DL throughput, final slant/TA, SIB19 refreshes, measurement reports).
-**Key args:** `--duration` (s), `--numUes`, `--altitude` (km), `--satEirpDbm`, `--freqGhz`, `--transparent` (payload mode), `--outputDir`.
-
-## Build, run & test
-
-```bash
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```
 
-Run the unit-test suite:
+The model library needs only core ns-3 modules, but most examples build on `ntn-traffic` (the real-stack spine), `ntn-constellation` (SGP4) and `ntn-cho` (TR 38.811 UE mobility), so the toolkit tree is the path of least resistance. `INSTALL.md` lists every dependency.
+
+## Examples
+
+| Example | What it shows | Command |
+|---|---|---|
+| `ntn-rrc-ul-timing` | UE-side uplink timing pre-compensation over a real pass: SIB19 broadcast every `--sibPeriod`, decoded by the UE, timing error against the true two-way delay every 100 ms, written to `--out` | `./ns3 run "ntn-rrc-ul-timing --fit=window --validity=budget --out=ul.csv"` |
+| `ntn-rrc-leo-pass` | TA and SIB19 on a real mmwave NR NTN cell over an SGP4 pass; measurement reports fire on the measured DL SINR | `./ns3 run "ntn-rrc-leo-pass --simTime=20 --transparent=true"` |
+| `ntn-rrc-full-stack` | TA, SIB19, GNSS reporting and DRX together; beam-center reference offset 50 km so the UE-specific TA is non-zero | `./ns3 run "ntn-rrc-full-stack --simTime=20 --passAwareDrx=true"` |
+| `ntn-rrc-from-tle` | The same cell driven by a real TLE through SNS3 `SatSGP4MobilityModel`; runs with no arguments on the bundled ISS TLE | `./ns3 run ntn-rrc-from-tle` |
+| `ntn-rrc-drx-data-traffic` | Real UDP downlink with DRX gating; writes `drx_metrics.csv` (awake fraction from the state machine, measured goodput) | `./ns3 run "ntn-rrc-drx-data-traffic --drxOn=true"` |
+| `ntn-rrc-real-stack` | Flagship: SIB19 re-broadcast from the live ephemeris while packets cross the radio; TA decomposition to `ntn-rrc-real-stack-ta.csv` | `./ns3 run "ntn-rrc-real-stack --duration=20 --numUes=4"` |
+
+Every radio example writes `sim_health.csv` with the provenance of each measured KPI to `--outputDir`.
+
+## Tests
 
 ```bash
 ./test.py -s ntn-rrc
 ```
 
-The suite (`Type::UNIT`) covers the closed-form TA (transparent and regenerative), the common/UE-specific decomposition, the LEO drift-rate bound, SIB19 codec round-trip and truncation rejection, broadcaster cadence, ECEF↔WGS-84 round-trip, all three location-report modes, the standard DRX cycle and data-activity override, pass-aware deep sleep, and invalid-config rejection.
+The `ntn-rrc` suite (`Type::UNIT`, 28 test cases) covers closed-form TA for both payloads and the feeder leg, the common and UE-specific split, the LEO drift-rate bound, SIB19 codec round trip and truncation rejection, broadcaster cadence and K_offset, the UE pre-compensator, RACH window and measurement-report quantization, ECEF and WGS-84 round trips, the three location-report modes, and DRX including pass-aware sleep and invalid configurations.
 
-For full setup notes (SNS3 / satellite-module dependency, the `ntn-traffic` / `ntn-cho` / `ntn-constellation` sibling modules used by the examples, toolkit layout) see [INSTALL.md](INSTALL.md).
+## Dependencies
 
----
+ns-3.43 core, network and mobility. Examples additionally use `ntn-traffic`, `ntn-constellation`, `ntn-cho`, the in-tree `mmwave` or `nr` stack, and SNS3 `satellite` for `ntn-rrc-from-tle`.
 
-## Standards implemented
+## Scope and limitations
 
-3GPP TS 38.331 (SIB19, cellSpecificKoffset, kmac, ul-SyncValidityDuration, epochTime, ephemeris broadcast), TS 38.213 section 4.2 (K_offset and timing advance), TS 38.211 section 4.1 (frame timing), TS 38.321 section 5.1.4 (random access and TA), TR 38.821 (transparent and regenerative payload timing budgets).
+- SIB19 is serialized to a trace source and a buffer, and decoded by `NtnUlTimingPrecompensator`; it is not carried on BCCH or PDSCH of the radio stack.
+- K_offset is consumed only where `NtnRealStackHelper::SetKOffsetConsumption()` (in `ntn-traffic`) is enabled; the mmwave MAC never reads it.
+- The radio examples use the mmwave ideal RRC (`UseIdealRrc=true`): bearers are set up at attach with no over-the-air RRC PDU exchange, and the core is the LTE EPC, not a 5GC. The machinery here runs alongside that RRC as assistance and accounting.
+- The 0.64 s lead used in the Results section is in the study patch, not yet in this tree.
 
-## Keywords
+## Standards
 
-NR-NTN RRC, SIB19, ephemeris broadcast, cellSpecificKoffset, K_offset, timing advance, TA, uplink synchronization, ul-SyncValidityDuration, DRX, discontinuous reception, transparent payload, regenerative payload, feeder link, service link, round-trip time compensation, satellite 5G, non-terrestrial network, ns-3.
+3GPP TS 38.331 (SIB19, NTN-Config-r17, MeasurementReport), TS 38.213 section 4.2 (timing advance, K_offset) and section 8.1 (RAR window), TS 38.211 section 4.3.1, TS 38.321 (DRX, random access), TS 38.133 (timing error limits, measurement quantization), TR 38.821 (NTN timing budgets).
 
-## Author
+## Citation
 
-**Muhammad Uzair**, Independent Researcher
-[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+If you use this module, please cite the toolkit article:
 
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
-a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
-Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+```bibtex
+@article{uzair2026ns3ntntoolkit,
+  author  = {Uzair, Muhammad and others},
+  title   = {ns3-ntn-toolkit: An Integrated ns-3 Platform for {6G} Non-Terrestrial Networks},
+  journal = {IEEE Open Journal of the Communications Society},
+  year    = {2026},
+  doi     = {10.1109/OJCOMS.2026.3745010}
+}
+```
 
 ## License
 
 GPL-2.0-only, matching ns-3.
+
+## Contact
+
+**Muhammad Uzair**, Independent Researcher. muhammaduzairr69@gmail.com, [ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit); mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

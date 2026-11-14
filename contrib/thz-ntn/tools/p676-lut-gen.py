@@ -74,7 +74,7 @@ def p835_global_annual(alt_km: float, wv_scale: float = 1.0) -> tuple[float, flo
         T = 214.65 - 2.0 * (hp - 71.0)
         P = 0.03956649 * (214.65 / (214.65 - 2.0 * (hp - 71.0))) ** (-34.1632 / 2.0)
     else:
-        T, P = 186.946, 0.003743
+        T, P = 186.946, 0.00373405  # continuity with the 71-84.852 km segment
     rho = 7.5 * wv_scale * math.exp(-h / 2.0)
     # THZ-15: P.835-6 floors e/P at 2e-6 (not the mass mixing ratio).
     e = rho * T / 216.7

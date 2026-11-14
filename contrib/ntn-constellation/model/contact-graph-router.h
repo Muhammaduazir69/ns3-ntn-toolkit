@@ -28,6 +28,7 @@
 #include <ns3/object.h>
 
 #include <atomic>
+#include <functional>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -89,6 +90,46 @@ class ContactGraphRouter : public Object
         double total_weight;
     };
     WeightedPath ShortestPathWeighted(uint32_t src, uint32_t dst) const;
+
+    /// Dijkstra on the edges for which \p keep returns true.
+    using EdgeFilter = std::function<bool(uint32_t, uint32_t)>;
+    WeightedPath ShortestPathWeightedFiltered(uint32_t src,
+                                              uint32_t dst,
+                                              const EdgeFilter& keep) const;
+
+    /// P7: Dijkstra with an edge cost computed from (u, v, weight); returned total_weight is the true weight sum.
+    using EdgeCost = std::function<double(uint32_t, uint32_t, double)>;
+    WeightedPath ShortestPathCost(uint32_t src, uint32_t dst, const EdgeCost& cost) const;
+
+    /**
+     * \brief Longest-lived path within a delay stretch of the shortest one.
+     *
+     * The lifetime of a path is the smallest residual contact time of its
+     * edges, \p residualS(a, b). Among the paths whose weight is at most
+     * (1 + \p eps) times the shortest, this returns one of maximum lifetime.
+     * It starts from the shortest path and, while the shortest path over the
+     * edges that outlive the current lifetime stays within the bound, moves to
+     * it. Each step raises the lifetime strictly, and when the step fails no
+     * path that outlives the current one meets the bound, so the result is
+     * exact. Residuals are queried lazily, only for edges Dijkstra relaxes.
+     *
+     * Routes that would end within \p minLifetimeS are not admissible: a
+     * caller that needs time to switch passes its guard here, and the stretch
+     * bound is then taken against the shortest route that outlives it. When
+     * no route outlives the guard the shortest route is returned.
+     */
+    struct LifetimePath
+    {
+        std::vector<uint32_t> path;
+        double total_weight;
+        double lifetime_s;
+        uint32_t dijkstra_runs;
+    };
+    LifetimePath LifetimeAwarePath(uint32_t src,
+                                   uint32_t dst,
+                                   double eps,
+                                   const std::function<double(uint32_t, uint32_t)>& residualS,
+                                   double minLifetimeS = 0.0) const;
 
     /**
      * \brief SAGIN-7: minimum-HOP path over the same contact graph.
@@ -154,6 +195,17 @@ class ContactGraphRouter : public Object
         return (a <= b) ? std::pair<uint32_t, uint32_t>{a, b}
                          : std::pair<uint32_t, uint32_t>{b, a};
     }
+
+    /// P7: flat adjacency for Dijkstra and for weight lookups, neighbors kept in ascending order so ties
+    /// resolve as in the map-based version. m_adj and m_edges stay for the rest of the interface.
+    std::vector<std::vector<std::pair<uint32_t, double>>> m_flat;
+    mutable std::vector<double> m_dist;
+    mutable std::vector<uint32_t> m_pred;
+    mutable std::vector<uint32_t> m_stamp;
+    mutable uint32_t m_stampNow{0};
+    void FlatAdd(uint32_t a, uint32_t b, double w);
+    void FlatErase(uint32_t a, uint32_t b);
+    void FlatSet(uint32_t a, uint32_t b, double w);
 
     /// Adjacency map: node -> set of neighbours.
     std::map<uint32_t, std::set<uint32_t>> m_adj;

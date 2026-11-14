@@ -59,6 +59,23 @@ class SaginCustodyQueue : public Object
 
     /// How long an item may stay in custody before it is discarded as stale.
     void SetLifetime(Time t) { m_lifetime = t; }
+    /// Keep only the newest packet of each source: when set, Offer() first removes any queued packet
+    /// whose key equals the new packet's key (a status update supersedes the older one).
+    using KeyFunction = std::function<uint64_t(Ptr<const Packet>)>;
+    void SetReplaceSameSource(KeyFunction key) { m_key = std::move(key); }
+    uint64_t GetReplaced() const { return m_replaced; }
+    /// Drain the newest item first (last come, first served) instead of in
+    /// arrival order. With contacts long enough to empty the queue the order
+    /// does not matter; when a contact ends mid-drain, LCFS has delivered the
+    /// freshest updates and FCFS the stalest.
+    void SetLastComeFirstServed(bool on) { m_lcfs = on; }
+    /// Measure the lifetime end to end: when set, an item's age is Now() minus
+    /// the origin time this function reads from the packet (for instance the
+    /// generation timestamp of a status update), not the time it entered this
+    /// queue. A custody lifetime meant for the whole delivery then means the
+    /// same thing at every hop.
+    using OriginFunction = std::function<Time(Ptr<const Packet>)>;
+    void SetOriginFunction(OriginFunction f) { m_origin = std::move(f); }
     Time GetLifetime() const { return m_lifetime; }
 
     /// Offer a packet. Accepted into custody when the contact is DOWN, or
@@ -106,6 +123,10 @@ class SaginCustodyQueue : public Object
     uint64_t m_expired{0};
     uint64_t m_droppedSpace{0};
     Time m_maxCustody{};
+    KeyFunction m_key;
+    uint64_t m_replaced{0};
+    bool m_lcfs{false};
+    OriginFunction m_origin;
 };
 
 } // namespace ntnsagin

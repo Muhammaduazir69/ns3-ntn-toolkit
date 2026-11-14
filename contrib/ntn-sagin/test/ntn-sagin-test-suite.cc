@@ -531,7 +531,7 @@ class OpenSkyImporterParseTest : public TestCase
         sagin::OpenSkyAdsbImporter imp;
         const std::string candidates[] = {
             "contrib/ntn-sagin/data/opensky-sample-trace.csv",
-            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/ntn-sagin/data/"
+            "../../contrib/ntn-sagin/data/"
             "opensky-sample-trace.csv",
         };
         std::map<std::string, sagin::OpenSkyAdsbTrace> traces;
@@ -693,7 +693,7 @@ class OpenSkySimulatorTimeReplayTest : public TestCase
         sagin::OpenSkyAdsbImporter imp;
         const std::string candidates[] = {
             "contrib/ntn-sagin/data/opensky-sample-trace.csv",
-            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/ntn-sagin/data/"
+            "../../contrib/ntn-sagin/data/"
             "opensky-sample-trace.csv",
         };
         std::map<std::string, sagin::OpenSkyAdsbTrace> traces;
@@ -777,7 +777,7 @@ class AisImporterParseTest : public TestCase
         sagin::AisDanishImporter imp;
         const std::string candidates[] = {
             "contrib/ntn-sagin/data/ais-sample-trace.csv",
-            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/ntn-sagin/data/"
+            "../../contrib/ntn-sagin/data/"
             "ais-sample-trace.csv",
         };
         std::map<uint32_t, sagin::AisMaritimeTrace> traces;
@@ -924,7 +924,7 @@ class AisSimulatorTimeReplayTest : public TestCase
         sagin::AisDanishImporter imp;
         const std::string candidates[] = {
             "contrib/ntn-sagin/data/ais-sample-trace.csv",
-            "/home/uzair/6g_ntn_ns3/ns-3-dev/contrib/ntn-sagin/data/"
+            "../../contrib/ntn-sagin/data/"
             "ais-sample-trace.csv",
         };
         std::map<uint32_t, sagin::AisMaritimeTrace> traces;
@@ -2631,6 +2631,87 @@ class SaginCustodyQueueTest : public TestCase
     }
 };
 
+/// Paper 6: LCFS custody drains the newest update first, and a contact that
+/// ends mid-drain (forwarder budget exhausted) leaves the oldest behind. FCFS
+/// would deliver the two oldest instead; a drain that ignored the flag fails.
+class SaginCustodyLcfsTest : public TestCase
+{
+  public:
+    SaginCustodyLcfsTest()
+        : TestCase("Paper 6: LCFS custody drains newest first and keeps the oldest when cut short")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace ns3::ntnsagin;
+        std::vector<uint32_t> delivered;
+        uint32_t budget = 2;
+        Ptr<SaginCustodyQueue> q = CreateObject<SaginCustodyQueue>();
+        q->SetForwardCallback([&](Ptr<Packet> p) {
+            if (budget == 0)
+            {
+                return false;
+            }
+            --budget;
+            delivered.push_back(p->GetSize());
+            return true;
+        });
+        q->SetCapacityBytes(10000);
+        q->SetLifetime(Seconds(100));
+        q->SetLastComeFirstServed(true);
+        q->SetContactUp(false);
+        for (uint32_t i = 1; i <= 4; ++i)
+        {
+            q->Offer(Create<Packet>(10 * i));
+        }
+        q->SetContactUp(true);
+        NS_TEST_ASSERT_MSG_EQ(delivered.size(), 2u, "the budget allows two deliveries");
+        if (delivered.size() == 2)
+        {
+            NS_TEST_EXPECT_MSG_EQ(delivered[0], 40u, "newest first");
+            NS_TEST_EXPECT_MSG_EQ(delivered[1], 30u, "then the next newest");
+        }
+        NS_TEST_EXPECT_MSG_EQ(q->GetInCustody(), 2u, "the two oldest stay in custody");
+    }
+};
+
+/// Paper 6: with an origin function the custody lifetime is end to end. An
+/// item generated 50 s before it enters the queue expires once it is 60 s old
+/// counted from generation, i.e. 10 s after entry; one generated at entry
+/// survives. Counting from entry, as the queue did before, would keep both.
+class SaginCustodyOriginLifetimeTest : public TestCase
+{
+  public:
+    SaginCustodyOriginLifetimeTest()
+        : TestCase("Paper 6: custody lifetime counted from the origin time is end to end")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using namespace ns3::ntnsagin;
+        Ptr<SaginCustodyQueue> q = CreateObject<SaginCustodyQueue>();
+        q->SetForwardCallback([](Ptr<Packet>) { return true; });
+        q->SetLifetime(Seconds(60));
+        std::map<uint32_t, double> born{{10, -50.0}, {20, 0.0}}; // keyed by packet size
+        q->SetOriginFunction([&born](Ptr<const Packet> p) {
+            return Seconds(born.at(p->GetSize()));
+        });
+        q->SetContactUp(false);
+        q->Offer(Create<Packet>(10));
+        q->Offer(Create<Packet>(20));
+        Simulator::Schedule(Seconds(15), [q]() { q->ExpireStale(); });
+        Simulator::Stop(Seconds(16));
+        Simulator::Run();
+        NS_TEST_EXPECT_MSG_EQ(q->GetExpired(), 1u, "the item born 50 s earlier expired at 60 s of age");
+        NS_TEST_EXPECT_MSG_EQ(q->GetInCustody(), 1u, "the fresh item is still held");
+        Simulator::Destroy();
+    }
+};
+
 /// SAGIN-2: custody has a lifetime, and expiry is reported.
 class SaginCustodyExpiryTest : public TestCase
 {
@@ -2696,6 +2777,8 @@ class NtnSaginTestSuite : public TestSuite
         AddTestCase(new SaginCongestionAwareRoutingTest, TestCase::Duration::QUICK);
         AddTestCase(new SaginCustodyQueueTest, TestCase::Duration::QUICK);
         AddTestCase(new SaginCustodyExpiryTest, TestCase::Duration::QUICK);
+        AddTestCase(new SaginCustodyLcfsTest, TestCase::Duration::QUICK);
+        AddTestCase(new SaginCustodyOriginLifetimeTest, TestCase::Duration::QUICK);
         AddTestCase(new HapsAltitudeStableTest, TestCase::Duration::QUICK);
         AddTestCase(new UavPatrolReturnsToStartTest, TestCase::Duration::QUICK);
         AddTestCase(new A2gPathLossSpotCheckTest, TestCase::Duration::QUICK);

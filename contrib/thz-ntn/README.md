@@ -1,448 +1,200 @@
 <h1 align="center">thz-ntn</h1>
 
-<p align="center"><strong>Sub-terahertz and terahertz non-terrestrial links, 100 GHz to 1 THz, on the ITU-R recommendations rather than fitted curves</strong></p>
+<p align="center"><strong>Sub-terahertz and terahertz non-terrestrial links for ns-3, 100 GHz to 1 THz, built on the ITU-R recommendations rather than fitted curves</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
-  <img src="https://img.shields.io/badge/band-100%20GHz%20%E2%80%93%201%20THz-success.svg" alt="100 GHz to 1 THz"/>
-  <img src="https://img.shields.io/badge/ITU--R-P.676%20%C2%B7%20P.618%20%C2%B7%20P.838%20%C2%B7%20P.840-orange.svg" alt="ITU-R P.676 P.618 P.838 P.840"/>
-  <img src="https://img.shields.io/badge/examples-17-informational.svg" alt="17 examples"/>
+  <img src="https://img.shields.io/badge/band-100%20GHz%20to%201%20THz-success.svg" alt="100 GHz to 1 THz"/>
+  <img src="https://img.shields.io/badge/ITU--R-P.676--13%20%C2%B7%20P.835--6%20%C2%B7%20P.838%20%C2%B7%20P.840%20%C2%B7%20P.618-orange.svg" alt="ITU-R P.676-13, P.835-6, P.838, P.840, P.618"/>
+  <img src="https://img.shields.io/badge/examples-18%20built-informational.svg" alt="18 built examples"/>
 </p>
 
 <p align="center">
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/thz-ntn/">Docs</a>
+  &nbsp;·&nbsp;
   <a href="INSTALL.md">Install</a>
   &nbsp;·&nbsp;
   <a href="#examples">Examples</a>
   &nbsp;·&nbsp;
-  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/thz-ntn/">Docs</a>
+  <a href="#results">Results</a>
 </p>
 
 ---
 
-Above 100 GHz the atmosphere stops being a detail. Molecular absorption, rain, fog and turbulence each move the link budget by tens of decibels, and a model that gets one of them wrong by a factor of two will produce a coverage map that looks plausible and is not.
+## Why this module
 
-This module implements each from its recommendation and cites it: ITU-R P.676-13 line-by-line gaseous absorption integrated over a layered atmosphere, P.838-3 rain, P.840 cloud and fog, P.618-13 tropospheric scintillation with the elevation exponent the recommendation actually specifies, and a Tatarskii phase structure function for turbulence. Three of those replaced hand-invented terms that had been off by up to a factor of two at 300 GHz, or discontinuous by half across two kilohertz of frequency.
+Above 100 GHz the atmosphere stops being a detail. Molecular absorption, rain, fog and scintillation each move a space-to-ground budget by tens of decibels, and a model that gets one of them wrong by a factor of two still produces a coverage map that looks plausible.
 
-On top of the atmosphere: ultra-massive MIMO, reconfigurable intelligent surfaces, integrated sensing and communication, beam tracking with pointing error, and alpha-mu fading. Each model reports its own provenance, so a run that calls the integrator below its validated elevation, or that used an unsourced term, says so rather than returning a confident number.
+`thz-ntn` implements each term from its recommendation and says which one: ITU-R P.676-13 Annex 1 line-by-line absorption (44 O2 and 35 H2O lines) integrated over the P.835-6 reference atmospheres, P.838-3 rain, P.840 cloud and fog, and P.618-13 scintillation. On top of the channel it adds ultra-massive MIMO arrays with beam squint, reconfigurable intelligent surfaces (RIS), EKF beam tracking with pointing error, integrated sensing and communication (ISAC), inter-satellite links and alpha-mu fading. The losses enter ns-3 as real `PropagationLossModel`s, so they attenuate packets instead of decorating a CSV.
+
+## System design
+
+<p align="center">
+  <img src="doc/figures/thz-ntn-architecture.png" alt="thz-ntn architecture: ITU-R atmosphere and weather classes, antenna, beam and RIS classes, and sensing and link classes feed ThzNtnChannelModel, ThzNtnPropagationLossModel and ThzNtnLinkErrorModel; a dashed loop through oran-ntn switches the RIS" width="100%"/>
+</p>
+
+*Figure 1. Classes and data flow. The atmosphere, weather, antenna and pointing terms feed three consumers: `ThzNtnChannelModel` for the analytic sweeps, `ThzNtnPropagationLossModel` chained on the mmwave NR spectrum channel (carrier at most 100 GHz, the limit of the 3GPP model), and `ThzNtnLinkErrorModel`, which carries IP packets at 300 GHz on a point-to-point link. The RIS can be switched by an xApp through `oran-ntn`. Source: [`doc/figures/make_architecture.py`](doc/figures/make_architecture.py).*
+
+## Results
+
+The results verify the absorption engine, `ThzNtnMolecularAbsorption`, which the channel, link-budget and propagation-loss classes all call. They come from a study that swept the engine with the `thz-ntn-absorption-sweep` example and compared it with a reference: the same P.676-13 Annex 1 kernel and P.835-6 atmospheres integrated along a refracted ray, plus the P.676-13 Annex 2 and P.676-12 approximations. Sweeps, scripts and outputs are in `paper/thz-2026-gaseous-absorption/` of the toolkit tree (`cpp_sweeps.sh` runs the example; `analysis.py` writes the numbers).
+
+**Experiment.** Deterministic evaluations on fixed grids, so no random seeds apply. The six P.835-6 atmospheres, each scaled to the precipitable water vapor (PWV) columns from 0.5 to 50 mm that it can hold, give 26 realizable atmospheres; with seven elevations from 10 to 90 degrees they form the operable domain at each window. A Python transcription of the engine reproduced all 88 263 C++ sweep points to a relative difference below 1e-7.
+
+<p align="center">
+  <img src="doc/figures/thz-ntn-slant-loss.png" alt="Slant gaseous loss at 30 degrees elevation from 300 GHz to 1 THz for a dry 2 mm and a 10 mm atmosphere, with the 340, 410, 460, 670 and 850 GHz windows shaded" width="70%"/>
+</p>
+
+*Figure 2. Slant gaseous loss at 30 degrees from Annex 1 (reference) in a dry high-latitude winter atmosphere at 2 mm PWV and in the P.835-6 Section 1.1 atmosphere at 10 mm, with the P.676-13 Annex 2 form (valid to 350 GHz) and the P.676-12 form. Shaded bands mark where each window center was searched.*
+
+<p align="center">
+  <img src="doc/figures/thz-ntn-shortcut-errors.png" alt="Largest loss and usable-bandwidth deviation of each shortcut from the reference at the five window centers" width="100%"/>
+</p>
+
+*Figure 3. Largest deviation of each shortcut from the refracted Annex 1 reference at the window centers. (a) Loss over the operable domain; (b) usable bandwidth on the controlled grid. "Module quadrature" is the engine as shipped.*
+
+| Window center (GHz) | 341.5 | 409.0 | 464.0 | 668.5 | 849.5 |
+|---|---:|---:|---:|---:|---:|
+| Slant loss at 30 degrees, Sec. 1.1 atmosphere, 10 mm PWV (dB) | 20.7 | 39.8 | 91.5 | 142.5 | 174.6 |
+| Slant loss at 30 degrees, high-latitude winter, 2 mm PWV (dB) | 5.1 | 10.1 | 21.7 | 35.0 | 43.1 |
+| Operable conditions (atmosphere x elevation) | 128 | 88 | 37 | 19 | 12 |
+
+| Check of the engine | Largest deviation found |
+|---|---|
+| Shipped straight-ray quadrature against the refracted reference, all windows, operable domain | 0.27 dB |
+| Flat-Earth cosecant law against the reference | 0.64 dB |
+| Regenerated lookup table (`data/hitran2024-lut-subthz.csv`) against the in-process kernel, within 5 GHz of a window center | 0.057 dB (0.74 %) |
+| Quadrature raised from 10 to 200 sub-steps per slab | 0.02 % |
+| Engine against ITU-Rpy at the five centers and 10, 30, 90 degrees | 1.0 % |
+| Usable bandwidth, any of the geometric shortcuts | at most one 0.5 GHz grid step |
+
+What the data say: the geometric and numerical simplifications inside the engine cost a fraction of a decibel, while the choice of absorption model does not: the P.676-12 form and a column-only model are off by several to tens of decibels (Figure 3a). Above 600 GHz even the most favorable realizable sea-level atmosphere costs 32.7 dB at 850 GHz and 30 degrees, so the operable domain shrinks quickly with frequency. Against the independent *am* 14.0 line-by-line model in zenith, P.676-13 lies within 7 % at 340, 410 and 460 GHz and 6 to 18 % higher at 670 and 850 GHz. The same study found and fixed four defects in the engine (a stale lookup-table generator, a table that overrode the configured atmosphere, invented seasonal profiles, a floor on the wrong mixing ratio), each with a regression test. Values are copied from `paper/thz-2026-gaseous-absorption/run_all.sh` and `am_macros.tex`.
+
+## Architecture and classes
+
+| Class (header under `model/`) | Role |
+|---|---|
+| `ThzNtnMolecularAbsorption` (`thz-ntn-molecular-absorption.h`) | P.676-13 Annex 1 line-by-line absorption over the P.835-6 atmospheres; `WaterVapourScale`, `HumidityProfile` and `IntegrationSteps` attributes |
+| `HitranLut` (`thz-ntn-hitran-lut.h`, namespace `ns3::thzntn`) | Tabulated P.676-13 specific attenuation, 100 to 1000 GHz in 1 GHz steps; used only in the atmosphere it declares (legacy file name) |
+| `Itu838RainModel`, `Itu618LossModel`, `Itu676AbsorptionModel`, `Itu681LmsModel` (`thz-ntn-itu-recommendations.h`) | Reference implementations, unit-tested against ITU-R values |
+| `ThzNtnWeatherAttenuation`, `ThzNtnScintillation` | Rain, cloud, fog, snow; P.618 amplitude and phase scintillation |
+| `ThzNtnFreeSpaceLoss`, `ThzNtnChannelModel` | FSPL and the composite cascade |
+| `ThzNtnPropagationLossModel`, `ThzNtnPointingLossModel` | Atmospheric and pointing excess as `PropagationLossModel`s for a live spectrum channel |
+| `ThzNtnLinkErrorModel` | Per-packet decode against the current received power, for packet traffic above 100 GHz |
+| `ThzNtnAntennaArray`, `ThzNtnBeamforming` | UPA, UCA and Cassegrain arrays, DFT codebook, `ComputeBeamSquintLoss_dB()` |
+| `ThzNtnBeamTracking`, `ThzNtnPointingError` | EKF or ephemeris-based tracking; vibration, refraction and latency pointing terms |
+| `ThzNtnRis`, `ThzNtnRisController`, `ThzNtnRisServiceModel`, `ThzNtnRisXapp` | RIS gain 20 log10(N) with perfect CSI, phase quantization loss; O-RAN service model and xApp |
+| `ThzNtnIsac`, `ThzNtnIsacScheduler`, `ThzNtnIsacProcessor` | Debris ranging, comm and sensing split of sub-bands |
+| `ThzNtnIslChannel`, `ThzNtnIslLink` | Inter-satellite link budget and lifecycle |
+| `ThzNtnAlphaMuFading`, `ThzNtnHardwareImpairments` | alpha-mu small-scale fading; PA, phase noise, ADC, I/Q impairments |
+| `ThzNtnPhy`, `ThzNtnPhySat`, `ThzNtnPhyGround`, `ThzNtnMac`, `ThzNtnMacScheduler`, `ThzNtnLinkBudget`, `ThzNtnWaveform`, `ThzNtnSpectrum` | PHY and MAC abstractions, link budget, waveform candidates, transmission windows |
+| `ThzNtnNyusimReference`, `ThzNtnNyusimCalibrator` | NYUSIM 140 GHz calibration reference (`data/nyusim-140-reference.csv`) |
+| `ThzNtnHelper` (`helper/thz-ntn-helper.h`) | Builds channels and ISL channels and attaches mobility |
 
 ## Quick start
 
 Inside the toolkit, where the module is already present and built:
 
 ```bash
-./ns3 run "thz-ntn-demo --example=8"
+./ns3 run "thz-ntn-absorption-sweep --mode=inproc --elevs=30 --out=sweep.csv"
 ./ns3 run thz-ntn-leo-ground
-./ns3 run thz-ntn-isl
+./ns3 run "thz-ntn-real-stack --rainMmH=25"
 ```
 
-Standalone, into an existing ns-3.43 tree:
+Standalone, into an existing ns-3.43 tree (the GitHub repository of this module is `ns3-thz-ntn`):
 
 ```bash
 git clone -b thz-ntn-v2 https://github.com/Muhammaduazir69/ns3-thz-ntn.git contrib/thz-ntn
-./ns3 configure --enable-modules='' --enable-examples --enable-tests
+./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```
 
-`INSTALL.md` in this directory carries the full dependency list. Most examples in
-this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
-toolkit tree is the path of least resistance.
-
-## Overview
-
-`thz-ntn` is a physics-grounded PHY layer for non-terrestrial links operating in the
-**100 GHz – 1 THz** band (D-band and sub-THz). The composite channel cascades:
-
-- **Free-space path loss** (`ThzNtnFreeSpaceLoss`) with correct frequency/distance scaling
-- **Molecular absorption** from the **ITU-R P.676-13 Annex 1** line-by-line model
-  (`ThzNtnMolecularAbsorption`) over the ITU-R P.835-6 Section 1.1 reference atmosphere.
-  The in-process line database is the full P.676-13 set (**44 O2 lines from
-  Table 1 + 35 H2O lines from Table 2**) with the standard resonant line shape
-  and the dry/Debye continuum; it supersedes the earlier hand-scaled "HITRAN"
-  intensities and reproduces the ITU-Rpy P.676-13 validation set to within ~2 %.
-  Gaseous absorption is therefore **non-monotonic across 2–90 GHz, peaking at
-  the 60 GHz O2 complex** (not a monotone rise with frequency). The optional
-  lookup-table path (`HitranLut` in namespace `ns3::thzntn`,
-  `data/hitran2024-lut-subthz.csv` — the file keeps its legacy name) is an exact
-  grid sample of the same P.676-13 kernel, regenerated by `tools/p676-lut-gen.py`
-  (which replaced the old `hitran2024-lut-gen.py`); no external HITRAN `.par`
-  file is needed, as P.676-13 Annex 1 is self-contained
-- **Weather attenuation** (rain / fog / snow) per ITU-R P.838-3 (rain) / P.840 (fog) extended to THz
-- **ITU-R P.618 scintillation** (amplitude + phase, AR(1) time series)
-- **alpha-mu small-scale fading** (`ThzNtnAlphaMuFading`)
-- **Composite pointing error** (vibration, J2 perturbation, atmospheric refraction,
-  tracking latency)
-- **Hardware impairments** (PA, phase noise, ADC SQNR, I/Q imbalance)
-
-On top of the channel it provides **ultra-massive MIMO** arrays (UPA / UCA / Cassegrain)
-with DFT codebooks and beam-squint analysis, **RIS** (space / aerial / ground), an
-**ISAC** sensing subsystem for space-debris ranging, an **EKF beam tracker** for LEO
-passes, **atmospheric transmission windows** (140 / 220 / 340 / 410 / 460 GHz), and a
-**NYUSIM-140** calibration reference. The model is cross-validated against ITU-R
-P.676-13, P.618-13, and S. Paine's *am* atmospheric model.
-
-## What changed in v2.5
-
-See [CHANGELOG.md](CHANGELOG.md) for the full history.
-
-- **THz physics is now a real channel plug-in.** `ThzNtnPropagationLossModel`
-  re-homes the molecular-absorption and weather calculators as an ns-3
-  `PropagationLossModel` that is chained onto a real mmwave NR NTN spectrum
-  channel (via `NtnRealStackHelper::AddExtraPropagationLoss` from
-  `contrib/ntn-traffic`), so the atmospheric loss attenuates actual packets and
-  shows up in the **measured** SINR / TBLER / goodput.
-- **All traffic examples were converted to the real radio.** They run a full
-  mmwave NR NTN stack (SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) with
-  SGP4/Walker satellite mobility and TR 38.811 ground terminals, and carry
-  `NtnOranApplication` QoS flows (in-band 24-byte payload headers with
-  5QI / S-NSSAI / sequence / timestamp) whose KPIs are measured at
-  `NtnOranSink`. Each writes an honest `sim_health.csv`.
-- **Atmospheric-window fields are documented as INDEPENDENT inputs.**
-  `AtmosphericWindow::peakTransmittance` (best-case in-band factor at band centre)
-  and `AtmosphericWindow::maxZenithAttenuation_dB` (worst-case one-way zenith gaseous
-  loss) are consumed **multiplicatively** in `ComputeTransmittance`
-  (`T_eff = peakTransmittance · 10^(−atten/10) · freqFactor`). They are **not inverses
-  of each other** — both are required, distinct inputs.
-- **Physics verified numerically correct:** FSPL frequency/distance scaling, radar
-  range^4 SNR, RCS dBsm ↔ m^2 conversion, RIS `20·log10(N)` array gain, UM-MIMO
-  `10·log10(N)` gain with `1/√N` beamwidth narrowing, Fraunhofer near-field boundary,
-  and Shannon capacity.
-- **alpha-mu fading**, an **ITU-R P.676-13 gaseous-absorption LUT**
-  (`tools/p676-lut-gen.py`, an exact grid sample of the in-process P.676-13
-  kernel; see Overview), **NYUSIM-140** calibration reference, and a **RIS
-  service model + xApp** for O-RAN-style closed-loop control.
-- **Geometry fix (2026-06 audit).** `thz-ntn-dband-constellation` used a
-  broken hand-rolled spherical conversion (geocentric x-y ring of radius
-  Re+h with a flat-Earth z = h against local-frame terminals) that placed
-  every "550 km" satellite ~6900 km from the terminals at ~4° elevation; its
-  outputs were wrong. It now uses real `Sgp4MobilityModel` orbits projected
-  into a local ENU frame (`|ECEF position| = Re + altitude`). The
-  `thz-ntn-ris-assisted` satellite is now placed on the actual line of sight
-  at the requested elevation instead of at zenith.
-- **Mobility maturation (2026-06 audit).** The analytic examples that model a
-  pass or a constellation (`leo-ground`, `isl`, `full-stack`,
-  `dband-constellation`) now derive their time-varying geometry from real
-  SGP4 Walker elements instead of triangular/sinusoidal profiles; the
-  remaining parametric geometries (`um-mimo`, `ris-assisted`, `isac`) are the
-  point of those sweeps and are explicitly labelled analysis-only.
-- **AI flow monitor.** Every measured-radio example calls
-  `rs.EnableAiFlowMonitor("<example-name>")` after traffic install, producing
-  the toolkit-standard KPM flow series alongside `sim_health.csv`.
-
-## Models, helpers & key classes
-
-Derived from `model/*.h`:
-
-| Class / file | Role |
-|---|---|
-| `ThzNtnSpectrum` (`thz-ntn-spectrum`) | Atmospheric transmission windows + THz band classification; `ComputeTransmittance`, `GetStandardWindows`, `GetBestWindow` |
-| `ThzNtnMolecularAbsorption` (`thz-ntn-molecular-absorption`) | ITU-R P.676-13 Annex 1 line-by-line gaseous absorption (44 O2 + 35 H2O lines) over the ITU-R P.835-6 Section 1.1 reference atmosphere |
-| `HitranLut` (`thz-ntn-hitran-lut`, namespace `ns3::thzntn`) | Bundled specific-attenuation lookup table (`data/hitran2024-lut-subthz.csv`, legacy filename) — an exact grid sample of the ITU-R P.676-13 kernel, regenerated by `tools/p676-lut-gen.py` (see Overview) |
-| `Itu838RainModel`, `Itu618LossModel`, `Itu676AbsorptionModel`, `Itu681LmsModel` (`thz-ntn-itu-recommendations`) | ITU-R P.838-3 / P.618-13 / P.676-13 / P.681-11 reference implementations |
-| `ThzNtnAlphaMuFading` (`thz-ntn-alpha-mu-fading`) | alpha-mu small-scale fading distribution |
-| `ThzNtnFreeSpaceLoss`, `ThzNtnChannelModel` | FSPL + composite cascade propagation loss |
-| `ThzNtnPropagationLossModel` (`thz-ntn-propagation-loss-model`) | Atmospheric excess loss (gaseous absorption + rain/fog/snow) as a real `PropagationLossModel`, chainable onto a live spectrum channel |
-| `ThzNtnWeatherAttenuation`, `ThzNtnScintillation`, `ThzNtnPointingError`, `ThzNtnHardwareImpairments` | Weather, scintillation, pointing, and RF-chain impairments |
-| `ThzNtnAntennaArray`, `ThzNtnBeamforming` (`um-mimo`) | UPA / UCA / Cassegrain arrays, DFT codebook, `ComputeBeamSquintLoss_dB` |
-| `ThzNtnBeamTracking` (`thz-ntn-beam-tracking`) | EKF / position-based satellite-ephemeris beam tracker |
-| `ThzNtnRis` (`thz-ntn-ris`), `ThzNtnRisController` | Reconfigurable intelligent surface, N^2 scaling + phase quantisation loss |
-| `ThzNtnRisServiceModel` (`thz-ntn-ris-service-model`), `ThzNtnRisXapp` (`thz-ntn-ris-xapp`) | O-RAN service model + xApp for closed-loop RIS control |
-| `ThzNtnIsac`, `ThzNtnIsacProcessor`, `ThzNtnIsacScheduler` (`thz-ntn-isac*`) | Integrated sensing & communication (debris CRLB ranging, comm/sense scheduling) |
-| `ThzNtnNyusimReference`, `ThzNtnNyusimCalibrator` (`thz-ntn-nyusim-*`) | NYUSIM-140 GHz calibration reference + calibrator |
-| `ThzNtnIslChannel`, `ThzNtnIslLink` | Inter-satellite link channel + link budget / routing |
-| `ThzNtnPhy`, `ThzNtnPhySat`, `ThzNtnPhyGround`, `ThzNtnMac`, `ThzNtnMacScheduler` | PHY/MAC stack (SpectrumValue + SINR, MCS selection) |
-| `ThzNtnLinkBudget`, `ThzNtnWaveform` | Link-budget utility; 5 candidate waveforms (OFDM / DFT-s-OFDM / OTFS / AFDM / SC-FDE) |
-| `ThzNtnHelper` (`helper/`) | Top-level helper: build channels, ISL channels, attach mobility |
+The analytic examples need only the module plus `ntn-constellation` and `ntn-cho` for SGP4 geometry; the measured-radio examples build on `ntn-traffic` and the in-tree `mmwave` stack. `INSTALL.md` lists every dependency.
 
 ## Examples
 
-Each example has two equivalent run forms:
+Analytic examples (link budgets and sweeps, no packet data plane; each prints an `[analytic-tool]` banner):
+
+| Example | What it shows | Command |
+|---|---|---|
+| `thz-ntn-absorption-sweep` | Slant gaseous loss over frequency, elevation and PWV; `inproc`, `lut` or `lutfile` engine paths | `./ns3 run "thz-ntn-absorption-sweep --mode=lut --pwvs=none"` |
+| `thz-ntn-altitude-relay` | Absorption avoided by lifting the lower endpoint above the water vapor | `./ns3 run thz-ntn-altitude-relay` |
+| `thz-ntn-leo-ground` | LEO-to-ground sub-THz budget over an SGP4 pass, `pass_timeseries.csv` | `./ns3 run "thz-ntn-leo-ground --freq=300e9"` |
+| `thz-ntn-isl` | ISL SNR, capacity and Doppler between two SGP4 neighbors | `./ns3 run thz-ntn-isl` |
+| `thz-ntn-um-mimo` | Array gain, DFT codebook and wideband beam squint | `./ns3 run "thz-ntn-um-mimo --numElements=128"` |
+| `thz-ntn-ris-assisted` | Direct against RIS-assisted SNR, N^2 scaling, quantization loss | `./ns3 run "thz-ntn-ris-assisted --risSize=64"` |
+| `thz-ntn-dband-constellation` | D-band UT association on real Walker geometry | `./ns3 run thz-ntn-dband-constellation` |
+| `thz-ntn-full-stack` | Downlink, RIS, ISL, ISAC and EKF tracking together on two SGP4 orbits | `./ns3 run thz-ntn-full-stack` |
+| `thz-ntn-demo` | Eight analytic sections over the module APIs, CSV output | `./ns3 run "thz-ntn-demo --example=0"` |
+
+Packet examples (measured SINR, TBLER and goodput; mmwave NR cell unless noted, carrier at most 100 GHz):
+
+| Example | What it shows | Command |
+|---|---|---|
+| `thz-ntn-native-300ghz-traffic` | IP traffic at 300 GHz over Friis plus the module's loss chain on a point-to-point link (no NR PHY, MAC or HARQ) | `./ns3 run "thz-ntn-native-300ghz-traffic --freqGhz=300"` |
+| `thz-ntn-real-stack` | Gaseous absorption and rain chained on the cell; rain applied in the second half | `./ns3 run "thz-ntn-real-stack --rainMmH=25"` |
+| `thz-ntn-leo-ground-downlink-traffic` | Downlink over a receding SGP4 satellite with absorption on real packets | `./ns3 run thz-ntn-leo-ground-downlink-traffic` |
+| `thz-ntn-isl-traffic` | NR link between two cross-plane SGP4 satellites, analytic ISL budget alongside | `./ns3 run thz-ntn-isl-traffic` |
+| `thz-ntn-beam-tracking` | EKF fed by the measured SINR; prediction error becomes a live pointing loss | `./ns3 run "thz-ntn-beam-tracking --trackingMode=EKF"` |
+| `thz-ntn-ris-relay-traffic` | Blockage, then RIS engagement, as live channel events | `./ns3 run "thz-ntn-ris-relay-traffic --blockageDb=30"` |
+| `thz-ntn-isac-coexist-traffic` | `ThzNtnIsacScheduler` comm share gates the downlink | `./ns3 run thz-ntn-isac-coexist-traffic` |
+| `thz-ntn-weather-traffic` | Fog, rain and snow phases on the live cell | `./ns3 run "thz-ntn-weather-traffic --rainMmH=25"` |
+| `thz-ntn-ric-controlled-traffic` | KPM to `oran-ntn`; an xApp engages the RIS when SINR drops | `./ns3 run "thz-ntn-ric-controlled-traffic --xapp=1"` |
+
+`thz-ntn-isac.cc` is kept out of the build (`if(FALSE)` in `examples/CMakeLists.txt`) until the ISAC scheduler redesign.
+
+## Tests
 
 ```bash
-./ns3 run thz-ntn-<name>                                   # ns3 wrapper
-./ns3 run "thz-ntn-<name> --arg=value"                     # with arguments
-# or run the built binary directly:
-./build/contrib/thz-ntn/examples/ns3.43-thz-ntn-<name>-default
+./test.py -s thz-ntn
 ```
 
-### Analytic examples (link budgets / sweeps — analysis-only, no measured radio)
+The `thz-ntn` suite (`Type::UNIT`, 49 test cases) covers FSPL, P.676-13 zenith absorption against reference values, the bundled lookup table (coverage, agreement with the in-process kernel, bypass in a foreign atmosphere), the P.835-6 profiles and `WaterVapourScale`, P.838-3 coefficients, P.618 rain and scintillation scaling, P.681 LMS, pointing and hardware terms, array gain and codebooks, RIS gain, ISAC range resolution and scheduler modes, NYUSIM calibration, alpha-mu fading, the RIS service model and xApp, and a link budget and error model above 100 GHz. Several cases run under `Simulator::Run()` (HAPS ascent, rain event, alpha-mu trace).
 
-All examples in this group are **analysis-only**: they drive the module's
-physics APIs (link budgets, scaling laws, sensing equations) and print/CSV the
-results — there is **no measured packet data plane** (each prints an
-`[analytic-tool]` banner and carries an "analysis-only" header comment).
-Where a pass or constellation is part of the scenario (`leo-ground`, `isl`,
-`full-stack`, `dband-constellation`), the geometry comes from **real SGP4
-Walker orbits** projected into a local ENU frame; where a single parametric
-sweep IS the experiment (`um-mimo`, `ris-assisted`, the unbuilt `isac`), the
-parametric geometry is kept and physically consistent.
+## Dependencies
 
-#### thz-ntn-leo-ground
-LEO-to-ground sub-THz downlink link budget over a pass (gated by molecular
-absorption). The elevation-sweep table is parametric; the per-second pass time
-series is driven by a real SGP4 element (zenith at t=0, receding).
-- **Key args:** `--freq` (Hz, def 225e9), `--altitude` (km, def 550), `--txPower` (dBm,
-  def 34.77), `--bandwidth` (Hz, def 10e9), `--txGain` (dBi, def 40), `--rxGain` (dBi,
-  def 45), `--simTime` (s, def 60), `--outputDir` (def `thz-leo-ground-out`).
-- **Outputs:** `thz-leo-ground-out/pass_timeseries.csv` + `sim_health.csv`.
+ns-3.43 core, network, mobility, propagation and spectrum; `ntn-constellation` and `ntn-cho` for SGP4 and terminal geometry; `ntn-traffic`, `mmwave` and `lte` for the measured-radio examples; `oran-ntn` for the RIC-controlled example.
 
-```bash
-./ns3 run thz-ntn-leo-ground
-./ns3 run "thz-ntn-leo-ground --freq=300e9 --altitude=600"
+## Scope and limitations
+
+- The engine integrates a straight ray; the refracted reference differs by at most 0.27 dB at the windows (Results). Spectroscopy is P.676-13, not HITRAN; the lookup table keeps a legacy file name.
+- The NR packet examples are capped at 100 GHz by the in-tree 3GPP spectrum model. Above that, packets run only in `thz-ntn-native-300ghz-traffic`, which has no NR PHY, MAC or HARQ; read its throughput as link-limited transport.
+- `ThzNtnIsacProcessor`, `ThzNtnIslLink` and `ThzNtnWaveform` have neither an example nor a test. `ThzNtnAlphaMuFading`, the RIS controller, service model and xApp, the NYUSIM classes and the `Itu*` reference models are unit-tested but not used by an example.
+- Tesseral orbit terms and terrain are outside this module; geometry comes from `ntn-constellation`.
+
+## Standards
+
+ITU-R P.676-13 (gaseous attenuation), P.835-6 (reference atmospheres), P.838-3 (rain), P.840 (clouds and fog), P.618-13 (Earth-space propagation, scintillation), P.681-11 (land mobile satellite). 3GPP TR 38.811 and TR 38.821 for NTN geometry, TR 38.901 for the terrestrial baseline.
+
+## Animations
+
+<p align="center">
+  <img src="docs/thz_beam_tracking.gif" alt="EKF beam tracking over a LEO pass" width="48%"/>
+  <img src="docs/thz_ris_sweep.gif" alt="RIS phase sweep" width="48%"/>
+</p>
+
+## Citation
+
+If you use this module, please cite the toolkit article:
+
+```bibtex
+@article{uzair2026ns3ntntoolkit,
+  author  = {Uzair, Muhammad and others},
+  title   = {ns3-ntn-toolkit: An Integrated ns-3 Platform for {6G} Non-Terrestrial Networks},
+  journal = {IEEE Open Journal of the Communications Society},
+  year    = {2026},
+  doi     = {10.1109/OJCOMS.2026.3745010}
+}
 ```
-
-#### thz-ntn-isl
-Inter-satellite link SNR / capacity / Doppler vs separation (vacuum, 300 GHz).
-The distance-sweep table is parametric; the per-second time series uses two
-real SGP4 cross-plane neighbours of a Starlink-class shell (separation and
-range-rate Doppler from the live orbits).
-- **Key args:** `--freq` (Hz, def 300e9), `--txPower` (dBm, def 30), `--bandwidth` (Hz,
-  def 20e9), `--txGain` (dBi, def 40), `--rxGain` (dBi, def 40), `--simTime` (s),
-  `--outputDir` (def `thz-isl-out`).
-- **Outputs:** `thz-isl-out/isl_timeseries.csv` + `sim_health.csv`.
-
-```bash
-./ns3 run thz-ntn-isl
-./ns3 run "thz-ntn-isl --freq=300e9 --bandwidth=20e9"
-```
-
-#### thz-ntn-um-mimo
-Ultra-massive MIMO array + beam-squint analysis: configures frequency / bandwidth /
-element count, builds a DFT codebook, and reads worst-case wideband squint loss from
-`ComputeBeamSquintLoss_dB()`.
-- **Key args:** `--freq` (Hz, def 300e9), `--numElements` (per side, def 32),
-  `--cassegrainDiam` (m, def 0.45).
-- **Outputs:** console report (no CSV).
-
-```bash
-./ns3 run thz-ntn-um-mimo
-./ns3 run "thz-ntn-um-mimo --numElements=128"
-```
-
-#### thz-ntn-ris-assisted
-Direct vs RIS-assisted SNR, N^2 scaling law, and quantisation loss; cascaded path loss
-from actual Sat / RIS / GT mobility positions. The satellite is placed
-parametrically on the line of sight at the requested `--elevation` (the
-configurable elevation IS the experiment), consistent with the parametric
-slant range.
-- **Key args:** `--freq` (Hz, def 300e9), `--risSize` (elements per side, def 64),
-  `--elevation` (deg, def 30), `--txPower` (dBm, def 34.77).
-- **Outputs:** console report (no CSV).
-
-```bash
-./ns3 run thz-ntn-ris-assisted
-./ns3 run "thz-ntn-ris-assisted --risSize=64 --elevation=30"
-```
-
-#### thz-ntn-dband-constellation
-D-band constellation UT-to-satellite association and link budgets on real SGP4
-geometry: slot-0 satellites of `--numSats` adjacent Walker planes (72 × 22,
-53°), ENU-projected. **Geometry fix (2026-06):** the previous hand-rolled
-placement put every satellite ~6900 km from the terminals at ~4° elevation;
-pre-fix outputs of this example should be discarded.
-- **Key args:** `--numSats` (def 4), `--numUts` (def 10), `--freq` (Hz, def 140e9),
-  `--altitude` (km, def 550), `--txPower` (dBm, def 30).
-- **Outputs:** console report (no CSV).
-
-```bash
-./ns3 run thz-ntn-dband-constellation
-./ns3 run "thz-ntn-dband-constellation --numSats=8 --freq=140e9"
-```
-
-#### thz-ntn-full-stack
-Integration demo: downlink link budget + RIS assist, ISL SNR/capacity from satellite
-mobility, ISAC debris sensing, EKF beam tracking, and achievable spectral efficiency.
-Both satellites fly real SGP4 orbits (adjacent Walker planes, common ENU frame):
-the downlink elevation profile and the ISL separation come from genuine orbital
-dynamics, evaluated in scheduled per-second simulator events.
-- **Key args:** `--duration` (s, def 30), `--preset` (def `TeraLink-225GHz`),
-  `--debrisRangeKm` (km, def 0.5).
-- **Outputs:** console report (no CSV).
-
-```bash
-./ns3 run thz-ntn-full-stack
-./ns3 run "thz-ntn-full-stack --preset=TeraLink-225GHz --debrisRangeKm=0.5"
-```
-
-### Real-radio examples (mmwave NR NTN stack, measured KPIs)
-
-These run a full mmwave NR NTN cell via `NtnRealStackHelper` (SpectrumPhy + MAC +
-HARQ + RLC/PDCP + RRC + EPC) with **SGP4/Walker satellite mobility** and TR 38.811
-ground terminals. The THz physics enter the packet path as live channel plug-ins
-(`ThzNtnPropagationLossModel`, `NtnStaticExtraLossModel`), traffic is carried by
-`NtnOranApplication` QoS flows measured at `NtnOranSink`, and each example writes
-`<outputDir>/sim_health.csv` plus a console KPI summary (measured SINR / TBLER /
-goodput). Every example in this group also enables the toolkit's AI flow
-monitor (`rs.EnableAiFlowMonitor("<example-name>")`) right after traffic
-install, exporting the standard per-flow KPM series. The carrier is capped at
-**100 GHz** (sub-THz / W-band) by the 3GPP spectrum model; the higher-band
-studies stay in the analytic examples above.
-
-#### thz-ntn-real-stack
-Flagship channel-plugin demo: gaseous absorption + rain chained onto the real mmwave
-channel; toggling rain mid-run visibly degrades the measured link.
-- **Key args:** `--duration` (s, def 16), `--numUes` (def 4), `--altitude` (km, def 550),
-  `--freqGhz` (def 100), `--satEirpDbm` (def 92), `--rainMmH` (def 4, applied in the
-  2nd half), `--outputDir` (def `thz-ntn-real-stack-output`).
-
-```bash
-./ns3 run thz-ntn-real-stack
-./ns3 run "thz-ntn-real-stack --duration=16 --freqGhz=100 --rainMmH=25"
-```
-
-#### thz-ntn-leo-ground-downlink-traffic
-End-to-end downlink over a receding SGP4 satellite: molecular absorption
-(`ThzNtnPropagationLossModel`) attenuates the real packets; FSPL comes from the
-stack's own Friis model over the live geometry.
-- **Key args:** `--simSeconds` (def 60), `--freqGHz` (def 100, capped at 100),
-  `--satEirpDbm` (def 115), `--outputDir` (def `thz-ntn-leo-ground-downlink-output`).
-
-```bash
-./ns3 run thz-ntn-leo-ground-downlink-traffic
-./ns3 run "thz-ntn-leo-ground-downlink-traffic --simSeconds=40"
-```
-
-#### thz-ntn-isl-traffic
-Real mmwave NR ISL between two cross-plane SGP4 satellites of a Starlink-class
-Walker shell; `ThzNtnIslChannel`'s analytic budget is printed beside the measured SINR.
-- **Key args:** `--simSeconds`, `--freqGHz` (capped at 100), `--islEirpDbm`,
-  `--numPlanes`, `--satsPerPlane`, `--outputDir` (def `thz-ntn-isl-traffic-output`).
-
-```bash
-./ns3 run thz-ntn-isl-traffic
-./ns3 run "thz-ntn-isl-traffic --numPlanes=6 --satsPerPlane=10"
-```
-
-#### thz-ntn-beam-tracking
-EKF beam tracking of a real SGP4 pass, closed over the real radio: the EKF is fed
-the measured DL SINR, and its prediction error maps through the `ThzNtnAntennaArray`
-3-dB beamwidth to a pointing loss applied as a live channel reconfiguration —
-`EKF` and `POSITION_BASED` modes produce measurably different links.
-- **Key args:** `--trackingMode` (`EKF` | `POSITION_BASED`), `--updateRate` (Hz, def 10),
-  `--simSeconds` (def 40), `--freqGHz` (capped at 100), `--satEirpDbm`, `--arraySize`
-  (NxN side, def 32), `--measNoiseDeg` (def 0.05), `--outputDir` (def `thz-beam-track-out`).
-
-```bash
-./ns3 run thz-ntn-beam-tracking
-./ns3 run "thz-ntn-beam-tracking --trackingMode=POSITION_BASED --updateRate=10"
-```
-
-#### thz-ntn-ris-relay-traffic
-RIS recovers a blocked THz link mid-simulation: blockage and RIS engagement are
-live channel events on the real cell.
-- **Key args:** `--simSeconds`, `--freqGHz` (capped at 100), `--satEirpDbm`,
-  `--blockageDb`, `--risX`, `--risY`, `--reflEff` (0–1), `--blockFraction`,
-  `--risOnFraction`, `--outputDir` (def `thz-ntn-ris-relay-output`).
-
-```bash
-./ns3 run thz-ntn-ris-relay-traffic
-./ns3 run "thz-ntn-ris-relay-traffic --risX=32 --risY=32 --blockageDb=30"
-```
-
-#### thz-ntn-isac-coexist-traffic
-ISAC comm/sense coexistence: the real `ThzNtnIsacScheduler` partitions the sub-band
-grid per ISAC mode (COMM_ONLY → … → SENSING_ONLY) and its comm share gates the live
-downlink TDM-style, so measured goodput tracks the scheduler's decisions.
-- **Key args:** `--simSeconds`, `--freqGHz` (capped at 100), `--satEirpDbm`,
-  `--numSubBands`, `--numUes`, `--outputDir` (def `thz-ntn-isac-coexist-output`).
-
-```bash
-./ns3 run thz-ntn-isac-coexist-traffic
-./ns3 run "thz-ntn-isac-coexist-traffic --simSeconds=50 --numSubBands=20"
-```
-
-#### thz-ntn-weather-traffic
-Weather front (fog / rain / snow phases) as a live channel plug-in on the real cell:
-the weather attenuates real packets.
-- **Key args:** `--simSeconds`, `--freqGHz`, `--satEirpDbm`, `--rainMmH`,
-  `--fogLwc` (g/m^3), `--snowMmH`, `--outputDir` (def `thz-ntn-weather-traffic-output`).
-
-```bash
-./ns3 run thz-ntn-weather-traffic
-./ns3 run "thz-ntn-weather-traffic --rainMmH=25"
-```
-
-#### thz-ntn-ric-controlled-traffic
-Closed-loop thz-ntn × oran-ntn demo on the real radio: a KPM tick reads the measured
-DL SINR off the mmwave PHY trace and submits it via `OranNtnE2Node`; an xApp engages
-the ground RIS (its `ComputeSnrGain_dB()` applied as a live channel reconfiguration)
-when intrinsic SINR falls below the threshold. Goodput collapses on a mid-run
-urban-canyon blockage and recovers when the xApp engages the RIS.
-- **Key args:** `--simSeconds`, `--freqGHz` (capped at 100), `--satEirpDbm`,
-  `--blockageDb`, `--sinrThreshDb`, `--xapp` (0/1), `--risN`, `--humidityProfile`,
-  `--outputDir` (def `thz-ntn-ric-controlled-output`).
-
-```bash
-./ns3 run thz-ntn-ric-controlled-traffic
-./ns3 run "thz-ntn-ric-controlled-traffic --simSeconds=40 --xapp=1"
-```
-
-> Note: two sources in `examples/` are not built: `thz-ntn-isac.cc` (legacy ISAC API,
-> excluded pending the Q4 2026 ISAC scheduler redesign) and `thz-ntn-demo.cc`
-> (not registered in `examples/CMakeLists.txt`). Both carry analysis-only
-> header labels.
-
-## Experimental components
-
-The following exported classes ship with the module but are **not yet
-exercised by any example** (2026-06 orphan audit). Their headers carry a
-matching `\warning`. Nothing here is scheduled for deletion; each item is
-either example-pending or test-validated.
-
-| Class | Status |
-|---|---|
-| `ThzNtnIsacProcessor` (`thz-ntn-isac-processor`) | **Experimental — no example or test.** Range-Doppler/CFAR/tracking processor; example pending the Q4 2026 ISAC scheduler redesign |
-| `ThzNtnIslLink` (`thz-ntn-isl-link`) | **Experimental — no example or test.** ISL lifecycle/routing manager; the measured ISL path uses `NtnRealStackHelper` instead (`thz-ntn-isl-traffic`) |
-| `ThzNtnWaveform` (`thz-ntn-waveform`) | **Experimental — no example or test.** 5-candidate waveform selector (OFDM / DFT-s-OFDM / OTFS / AFDM / SC-FDE) |
-| `ThzNtnAlphaMuFading` | Unit-tested (`test/thz-ntn-test-suite.cc`); no example yet |
-| `ThzNtnRisController` | Unit-tested; consumed by `ThzNtnRisServiceModel`; no example yet |
-| `ThzNtnRisServiceModel` | Unit-tested; no example yet (the measured RIS loop in `thz-ntn-ric-controlled-traffic` drives `ThzNtnRis` directly) |
-| `ThzNtnRisXapp` | Unit-tested; no example yet |
-| `ThzNtnNyusimCalibrator` / `ThzNtnNyusimReference` | Unit-tested against `data/nyusim-140-reference.csv`; no example yet |
-| `Itu838RainModel` / `Itu618LossModel` / `Itu676AbsorptionModel` / `Itu681LmsModel` | Unit-tested against ITU-R reference values; the example channel cascade uses the module's own weather/absorption/scintillation classes |
-
-Cross-module consumers worth knowing about: `HitranLut` is consumed in-module
-by `ThzNtnMolecularAbsorption`; `ThzNtnPhy` is the base class of
-`ThzNtnPhySat` / `ThzNtnPhyGround`; `ThzNtnSpectrum` is unit-tested and used
-by the (unbuilt) `thz-ntn-demo` dataset generator.
-
-## Build, run & test
-
-```bash
-# from the ns-3-dev root
-./ns3 configure --enable-examples --enable-tests
-./ns3 build thz-ntn
-
-# run any example
-./ns3 run thz-ntn-leo-ground
-
-# run the test suite (38 unit tests)
-./test.py --suite=thz-ntn
-```
-
-For full setup and dependency notes see [INSTALL.md](INSTALL.md).
-
----
-
-## Standards implemented
-
-ITU-R P.676-13 (gaseous attenuation by atmospheric gases), P.618-13 (propagation data for Earth-space paths), P.838-3 (specific attenuation model for rain), P.840 (attenuation due to clouds and fog), P.835-6 (reference standard atmospheres). 3GPP TR 38.811 and TR 38.821 for the NTN geometry, TR 38.901 for the terrestrial channel baseline.
-
-## Keywords
-
-terahertz communication, THz, sub-THz, D-band, 6G terahertz, molecular absorption, ITU-R P.676, atmospheric attenuation, rain attenuation, ITU-R P.838, fog attenuation, tropospheric scintillation, ITU-R P.618, atmospheric turbulence, Tatarskii, pointing error, ultra-massive MIMO, UM-MIMO, reconfigurable intelligent surface, RIS, integrated sensing and communication, ISAC, beam tracking, inter-satellite link, LEO ground link, non-terrestrial network, ns-3.
-
-## Author
-
-**Muhammad Uzair**, Independent Researcher
-[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
-
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
-a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
-Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
 
 ## License
 
 GPL-2.0-only, matching ns-3.
+
+## Contact
+
+**Muhammad Uzair**, Independent Researcher. muhammaduzairr69@gmail.com, [ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit); mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

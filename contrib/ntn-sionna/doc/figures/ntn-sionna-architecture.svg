@@ -1,0 +1,528 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="792pt" height="518.4pt" viewBox="0 0 792 518.4" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-11-14T07:07:16.125869</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 518.4 
+L 792 518.4 
+L 792 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 14.4 356.4 
+L 270 356.4 
+L 270 97.2 
+L 14.4 97.2 
+z
+" clip-path="url(#p5933be704d)" style="fill: #ffffff; stroke: #808080; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 288 356.4 
+L 518.4 356.4 
+L 518.4 97.2 
+L 288 97.2 
+z
+" clip-path="url(#p5933be704d)" style="fill: #ffffff; stroke: #808080; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 536.4 356.4 
+L 777.6 356.4 
+L 777.6 97.2 
+L 536.4 97.2 
+z
+" clip-path="url(#p5933be704d)" style="fill: #ffffff; stroke: #808080; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 14.4 504 
+L 777.6 504 
+L 777.6 385.2 
+L 14.4 385.2 
+z
+" clip-path="url(#p5933be704d)" style="fill: #ffffff; stroke: #808080; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_1">
+    <path d="M 18 17.28 
+L 42.48 17.28 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #e54c5e; stroke-width: 1.9; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_2">
+    <path d="M 167.415844 17.28 
+L 191.895844 17.28 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #35b44a; stroke-width: 1.9; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_3">
+    <path d="M 375.093668 17.28 
+L 399.573668 17.28 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #7f8fb3; stroke-width: 2.5; stroke-linecap: square"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #1a1a1a" x="20.16" y="109.9485" transform="rotate(-0 20.16 109.9485)">ns-3 side (C++, bridge/)</text>
+   </g>
+   <g id="text_2">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #1a1a1a" x="293.76" y="109.8315" transform="rotate(-0 293.76 109.8315)">Transports</text>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #1a1a1a" x="542.16" y="109.8315" transform="rotate(-0 542.16 109.8315)">Python side</text>
+   </g>
+   <g id="text_4">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #1a1a1a" x="20.16" y="397.8315" transform="rotate(-0 20.16 397.8315)">Calibration and consumers</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 8.4px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #1a1a1a" x="48.24" y="19.4535" transform="rotate(-0 48.24 19.4535)">Query {tx, rx, freq_hz}</text>
+   </g>
+   <g id="text_6">
+    <text style="font-weight: 700; font-size: 8.4px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #1a1a1a" x="197.655844" y="19.4535" transform="rotate(-0 197.655844 19.4535)">Response {path_loss_db, n_paths}</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 8.4px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #1a1a1a" x="405.333668" y="19.457437" transform="rotate(-0 405.333668 19.457437)">Loss into the ns-3 channel</text>
+   </g>
+   <g id="patch_6">
+    <path d="M 259.2 140.4 
+Q 279 140.4 297.011146 140.4 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #e54c5e; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 292.611146 138.2 
+L 297.011146 140.4 
+L 292.611146 142.6 
+z
+" clip-path="url(#p5933be704d)" style="fill: #e54c5e; stroke: #e54c5e; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 500.4 140.4 
+Q 523.8 140.4 545.411146 140.4 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #e54c5e; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 541.011146 138.2 
+L 545.411146 140.4 
+L 541.011146 142.6 
+z
+" clip-path="url(#p5933be704d)" style="fill: #e54c5e; stroke: #e54c5e; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 547.2 162 
+Q 523.8 162 502.188854 162 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #35b44a; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 506.588854 164.2 
+L 502.188854 162 
+L 506.588854 159.8 
+z
+" clip-path="url(#p5933be704d)" style="fill: #35b44a; stroke: #35b44a; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 298.8 162 
+Q 279 162 260.988854 162 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #35b44a; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 265.388854 164.2 
+L 260.988854 162 
+L 265.388854 159.8 
+z
+" clip-path="url(#p5933be704d)" style="fill: #35b44a; stroke: #35b44a; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 656.64 172.8 
+Q 656.64 177.12 656.64 178.980325 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+    <path d="M 658.84 174.580325 
+L 656.64 178.980325 
+L 654.44 174.580325 
+z
+" clip-path="url(#p5933be704d)" style="fill: #7f8fb3; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 141.84 172.8 
+Q 141.84 177.12 141.84 178.980325 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+    <path d="M 144.04 174.580325 
+L 141.84 178.980325 
+L 139.64 174.580325 
+z
+" clip-path="url(#p5933be704d)" style="fill: #7f8fb3; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 187.2 356.4 
+Q 187.2 395.28 187.2 431.700325 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+    <path d="M 189.4 427.300325 
+L 187.2 431.700325 
+L 185 427.300325 
+z
+" clip-path="url(#p5933be704d)" style="fill: #7f8fb3; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_4">
+    <path d="M 244.8 356.4 
+L 244.8 378 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #7f8fb3; stroke-width: 2.2"/>
+   </g>
+   <g id="line2d_5">
+    <path d="M 244.8 378 
+L 396 378 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #7f8fb3; stroke-width: 2.2"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 396 378 
+Q 396 406.08 396 431.700325 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+    <path d="M 398.2 427.300325 
+L 396 431.700325 
+L 393.8 427.300325 
+z
+" clip-path="url(#p5933be704d)" style="fill: #7f8fb3; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 514.8 465.12 
+Q 523.8 465.12 530.340325 465.12 
+" clip-path="url(#p5933be704d)" style="fill: none; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+    <path d="M 525.940325 462.92 
+L 530.340325 465.12 
+L 525.940325 467.32 
+z
+" clip-path="url(#p5933be704d)" style="fill: #7f8fb3; stroke: #7f8fb3; stroke-width: 2.2; stroke-linecap: round"/>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 6.8px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #606060" x="788.4" y="515.6085" transform="rotate(-0 788.4 515.6085)">Muhammad Uzair, Independent Researcher</text>
+   </g>
+   <g id="patch_15">
+    <path d="M 18.864 80.64 
+L 773.136 80.64 
+Q 777.6 80.64 777.6 76.176 
+L 777.6 40.464 
+Q 777.6 36 773.136 36 
+L 18.864 36 
+Q 14.4 36 14.4 40.464 
+L 14.4 76.176 
+Q 14.4 80.64 18.864 80.64 
+z
+" clip-path="url(#p5933be704d)" style="fill: #3a71ae; stroke: #3a71ae; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 29.952 172.8 
+L 254.448 172.8 
+Q 259.2 172.8 259.2 168.048 
+L 259.2 130.032 
+Q 259.2 125.28 254.448 125.28 
+L 29.952 125.28 
+Q 25.2 125.28 25.2 130.032 
+L 25.2 168.048 
+Q 25.2 172.8 29.952 172.8 
+z
+" clip-path="url(#p5933be704d)" style="fill: #ee822f; stroke: #ee822f; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_17">
+    <path d="M 29.952 228.96 
+L 254.448 228.96 
+Q 259.2 228.96 259.2 224.208 
+L 259.2 186.192 
+Q 259.2 181.44 254.448 181.44 
+L 29.952 181.44 
+Q 25.2 181.44 25.2 186.192 
+L 25.2 224.208 
+Q 25.2 228.96 29.952 228.96 
+z
+" clip-path="url(#p5933be704d)" style="fill: #91ace0; stroke: #91ace0; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_18">
+    <path d="M 29.952 285.12 
+L 254.448 285.12 
+Q 259.2 285.12 259.2 280.368 
+L 259.2 242.352 
+Q 259.2 237.6 254.448 237.6 
+L 29.952 237.6 
+Q 25.2 237.6 25.2 242.352 
+L 25.2 280.368 
+Q 25.2 285.12 29.952 285.12 
+z
+" clip-path="url(#p5933be704d)" style="fill: #91ace0; stroke: #91ace0; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 29.952 341.28 
+L 254.448 341.28 
+Q 259.2 341.28 259.2 336.528 
+L 259.2 298.512 
+Q 259.2 293.76 254.448 293.76 
+L 29.952 293.76 
+Q 25.2 293.76 25.2 298.512 
+L 25.2 336.528 
+Q 25.2 341.28 29.952 341.28 
+z
+" clip-path="url(#p5933be704d)" style="fill: #b6c7ea; stroke: #8fa9df; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_20">
+    <path d="M 303.552 172.8 
+L 502.848 172.8 
+Q 507.6 172.8 507.6 168.048 
+L 507.6 130.032 
+Q 507.6 125.28 502.848 125.28 
+L 303.552 125.28 
+Q 298.8 125.28 298.8 130.032 
+L 298.8 168.048 
+Q 298.8 172.8 303.552 172.8 
+z
+" clip-path="url(#p5933be704d)" style="fill: #3d7199; stroke: #3d7199; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 303.552 228.96 
+L 502.848 228.96 
+Q 507.6 228.96 507.6 224.208 
+L 507.6 186.192 
+Q 507.6 181.44 502.848 181.44 
+L 303.552 181.44 
+Q 298.8 181.44 298.8 186.192 
+L 298.8 224.208 
+Q 298.8 228.96 303.552 228.96 
+z
+" clip-path="url(#p5933be704d)" style="fill: #3d7199; stroke: #3d7199; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_22">
+    <path d="M 303.552 285.12 
+L 502.848 285.12 
+Q 507.6 285.12 507.6 280.368 
+L 507.6 242.352 
+Q 507.6 237.6 502.848 237.6 
+L 303.552 237.6 
+Q 298.8 237.6 298.8 242.352 
+L 298.8 280.368 
+Q 298.8 285.12 303.552 285.12 
+z
+" clip-path="url(#p5933be704d)" style="fill: #b6c7ea; stroke: #8fa9df; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_23">
+    <path d="M 303.552 341.28 
+L 502.848 341.28 
+Q 507.6 341.28 507.6 336.528 
+L 507.6 298.512 
+Q 507.6 293.76 502.848 293.76 
+L 303.552 293.76 
+Q 298.8 293.76 298.8 298.512 
+L 298.8 336.528 
+Q 298.8 341.28 303.552 341.28 
+z
+" clip-path="url(#p5933be704d)" style="fill: #b6c7ea; stroke: #8fa9df; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_24">
+    <path d="M 551.952 172.8 
+L 762.048 172.8 
+Q 766.8 172.8 766.8 168.048 
+L 766.8 130.032 
+Q 766.8 125.28 762.048 125.28 
+L 551.952 125.28 
+Q 547.2 125.28 547.2 130.032 
+L 547.2 168.048 
+Q 547.2 172.8 551.952 172.8 
+z
+" clip-path="url(#p5933be704d)" style="fill: #75bd42; stroke: #75bd42; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_25">
+    <path d="M 551.952 228.96 
+L 762.048 228.96 
+Q 766.8 228.96 766.8 224.208 
+L 766.8 186.192 
+Q 766.8 181.44 762.048 181.44 
+L 551.952 181.44 
+Q 547.2 181.44 547.2 186.192 
+L 547.2 224.208 
+Q 547.2 228.96 551.952 228.96 
+z
+" clip-path="url(#p5933be704d)" style="fill: #75bd42; stroke: #75bd42; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_26">
+    <path d="M 551.952 285.12 
+L 762.048 285.12 
+Q 766.8 285.12 766.8 280.368 
+L 766.8 242.352 
+Q 766.8 237.6 762.048 237.6 
+L 551.952 237.6 
+Q 547.2 237.6 547.2 242.352 
+L 547.2 280.368 
+Q 547.2 285.12 551.952 285.12 
+z
+" clip-path="url(#p5933be704d)" style="fill: #fef1c7; stroke: #f3d98a; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_27">
+    <path d="M 551.952 341.28 
+L 762.048 341.28 
+Q 766.8 341.28 766.8 336.528 
+L 766.8 298.512 
+Q 766.8 293.76 762.048 293.76 
+L 551.952 293.76 
+Q 547.2 293.76 547.2 298.512 
+L 547.2 336.528 
+Q 547.2 341.28 551.952 341.28 
+z
+" clip-path="url(#p5933be704d)" style="fill: #fef1c7; stroke: #f3d98a; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_28">
+    <path d="M 31.32 495.36 
+L 253.08 495.36 
+Q 259.2 495.36 259.2 489.24 
+L 259.2 440.28 
+Q 259.2 434.16 253.08 434.16 
+L 31.32 434.16 
+Q 25.2 434.16 25.2 440.28 
+L 25.2 489.24 
+Q 25.2 495.36 31.32 495.36 
+z
+" clip-path="url(#p5933be704d)" style="fill: #dae3f2; stroke: #b9c8e3; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_29">
+    <path d="M 283.32 495.36 
+L 508.68 495.36 
+Q 514.8 495.36 514.8 489.24 
+L 514.8 440.28 
+Q 514.8 434.16 508.68 434.16 
+L 283.32 434.16 
+Q 277.2 434.16 277.2 440.28 
+L 277.2 489.24 
+Q 277.2 495.36 283.32 495.36 
+z
+" clip-path="url(#p5933be704d)" style="fill: #dae3f2; stroke: #b9c8e3; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_30">
+    <path d="M 538.92 495.36 
+L 760.68 495.36 
+Q 766.8 495.36 766.8 489.24 
+L 766.8 440.28 
+Q 766.8 434.16 760.68 434.16 
+L 538.92 434.16 
+Q 532.8 434.16 532.8 440.28 
+L 532.8 489.24 
+Q 532.8 495.36 538.92 495.36 
+z
+" clip-path="url(#p5933be704d)" style="fill: #dae3f2; stroke: #b9c8e3; stroke-width: 0.9; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 10px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #ffffff" x="396" y="51.9795" transform="rotate(-0 396 51.9795)">Opt-in: the closed-form TR 38.811 channel stays the default</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 8.4px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #ffffff" x="396" y="67.6359" transform="rotate(-0 396 67.6359)">every run reports which path produced its numbers: ray traced, cached, replayed or FSPL fallback; RequireLiveTransport makes a missing server fatal</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #ffffff" x="142.2" y="141.765281" transform="rotate(-0 142.2 141.765281)">NtnSionnaChannel</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(83.445938 154.617684)">PropagationLossModel; counts traced</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(87.724688 162.205903)">and fallback evaluations separately</text>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="142.2" y="197.925281" transform="rotate(-0 142.2 197.925281)">NtnSionnaCascadeChannel</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(71.489609 210.820341)">traced geometry + NtnAtmosphericLossChain</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(78.634531 218.408559)">(P.676 gas, P.618/P.838 rain, P.681 LMS)</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="142.2" y="254.08125" transform="rotate(-0 142.2 254.08125)">SionnaCirPropagationLossModel</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(94.150469 266.9787)">multipath taps, per-tap Doppler</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(78.99 274.484887)">(CirDopplerSynthesizer); taps from caller</text>
+   </g>
+   <g id="text_17">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="142.2" y="310.188844" transform="rotate(-0 142.2 310.188844)">NtnAtmosphericPropagationLossModel</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(82.931328 323.097684)">ITU-R excess only, no double-counted</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(81.309297 330.685903)">FSPL; chains on any spectrum channel</text>
+   </g>
+   <g id="text_19">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #ffffff" x="403.2" y="141.817687" transform="rotate(-0 403.2 141.817687)">SionnaUdpTransport</text>
+   </g>
+   <g id="text_20">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(369.355547 154.6587)">socket to a live server</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(361.377188 162.164887)">(GPU on another machine)</text>
+   </g>
+   <g id="text_21">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #ffffff" x="403.2" y="197.92125" transform="rotate(-0 403.2 197.92125)">SionnaPybindTransport</text>
+   </g>
+   <g id="text_22">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #ffffff" x="403.2" y="214.612809" transform="rotate(-0 403.2 214.612809)">in-process, no socket</text>
+   </g>
+   <g id="text_23">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="403.2" y="254.08125" transform="rotate(-0 403.2 254.08125)">SionnaCachingTransport</text>
+   </g>
+   <g id="text_24">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(353.012188 266.988872)">4-D LRU keyed on the geometry</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(365.066953 274.474716)">that changes the answer</text>
+   </g>
+   <g id="text_25">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="403.2" y="310.24125" transform="rotate(-0 403.2 310.24125)">SionnaReplayTransport</text>
+   </g>
+   <g id="text_26">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(358.260547 323.189887)">record once, replay headless</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(356.118438 330.675731)">SionnaBatchClient for batches</text>
+   </g>
+   <g id="text_27">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #ffffff" x="657" y="141.708844" transform="rotate(-0 657 141.708844)">sionna-server.py</text>
+   </g>
+   <g id="text_28">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(601.751953 154.656075)">Mitsuba scene resident on the GPU</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(617.707578 162.167512)">LOS-only or full multipath</text>
+   </g>
+   <g id="text_29">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #ffffff" x="657" y="197.925281" transform="rotate(-0 657 197.925281)">Sionna RT</text>
+   </g>
+   <g id="text_30">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(621.404453 210.777684)">ray tracing, radio maps</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #ffffff" transform="translate(621.793281 218.365903)">(NVIDIA, open source)</text>
+   </g>
+   <g id="text_31">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="657" y="254.085281" transform="rotate(-0 657 254.085281)">tools/</text>
+   </g>
+   <g id="text_32">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(617.31 266.988872)">osm_to_sionna_scene.py</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(590.782187 274.474716)">lidar_dem_ingest.py, probe_sionna_env.py</text>
+   </g>
+   <g id="text_33">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="657" y="310.24125" transform="rotate(-0 657 310.24125)">test/sionna-stub-server.py</text>
+   </g>
+   <g id="text_34">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(607.403359 323.273559)">same wire protocol, closed-form</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(609.923359 330.677372)">FSPL, for tests without Sionna</text>
+   </g>
+   <g id="text_35">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="142.2" y="454.749281" transform="rotate(-0 142.2 454.749281)">SionnaCalibrator</text>
+   </g>
+   <g id="text_36">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(92.98125 472.569141)">residual of traced loss against a</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(83.514844 480.157359)">reference model (TR 38.811), dB gate</text>
+   </g>
+   <g id="text_37">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="396" y="454.74525" transform="rotate(-0 396 454.74525)">NtnRealStackHelper (ntn-traffic)</text>
+   </g>
+   <g id="text_38">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(333.898516 472.569141)">mmwave NR cell, SGP4 Walker mobility</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(343.343594 480.157359)">measured SINR, TBLER, goodput</text>
+   </g>
+   <g id="text_39">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1a1a1a" x="649.8" y="454.801687" transform="rotate(-0 649.8 454.801687)">Outputs</text>
+   </g>
+   <g id="text_40">
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(592.158828 472.702359)">per-step PL tables, *_kpm_series.csv</text>
+    <text style="font-size: 7px; font-family: 'Arial', 'Nimbus Sans', 'Liberation Sans', 'DejaVu Sans', sans-serif; fill: #1a1a1a" transform="translate(626.652969 480.106172)">sim_health.csv</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p5933be704d">
+   <rect x="0" y="0" width="792" height="518.4"/>
+  </clipPath>
+ </defs>
+</svg>

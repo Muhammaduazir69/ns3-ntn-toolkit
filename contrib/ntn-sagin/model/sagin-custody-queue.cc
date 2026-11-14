@@ -43,6 +43,23 @@ SaginCustodyQueue::Offer(Ptr<Packet> p)
 
     // Either the contact is down, or there is already a backlog and this packet
     // must queue behind it - forwarding it now would reorder the stream.
+    if (m_key)
+    {
+        const uint64_t k = m_key(p);
+        for (auto it = m_queue.begin(); it != m_queue.end();)
+        {
+            if (m_key(it->pkt) == k)
+            {
+                m_bytes -= it->pkt->GetSize();
+                it = m_queue.erase(it);
+                ++m_replaced;
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
     const uint64_t sz = p->GetSize();
     while (m_bytes + sz > m_capacityBytes && !m_queue.empty())
     {
@@ -87,6 +104,25 @@ SaginCustodyQueue::ExpireStale()
         return;
     }
     const Time now = Simulator::Now();
+    if (m_origin)
+    {
+        // Origin ages need not follow queue order (keep-newest and LCFS), so
+        // every item is checked.
+        for (auto it = m_queue.begin(); it != m_queue.end();)
+        {
+            if (now - m_origin(it->pkt) > m_lifetime)
+            {
+                m_bytes -= it->pkt->GetSize();
+                it = m_queue.erase(it);
+                ++m_expired;
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        return;
+    }
     while (!m_queue.empty() && (now - m_queue.front().enqueued) > m_lifetime)
     {
         m_bytes -= m_queue.front().pkt->GetSize();
@@ -105,7 +141,7 @@ SaginCustodyQueue::Drain()
     const Time now = Simulator::Now();
     while (!m_queue.empty())
     {
-        Item& front = m_queue.front();
+        Item& front = m_lcfs ? m_queue.back() : m_queue.front();
         if (!m_forward(front.pkt))
         {
             // The forwarder refused. Custody is retained and the drain stops:
@@ -119,7 +155,14 @@ SaginCustodyQueue::Drain()
             m_maxCustody = held;
         }
         m_bytes -= front.pkt->GetSize();
-        m_queue.pop_front();
+        if (m_lcfs)
+        {
+            m_queue.pop_back();
+        }
+        else
+        {
+            m_queue.pop_front();
+        }
         ++m_fwdCustody;
     }
 }

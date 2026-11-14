@@ -72,3 +72,17 @@ build_lib_example(
     ${libapplications}
     ${libntn-traffic}
 )
+
+# Ground-to-ground routing over a +Grid Walker shell under snapshot, on-demand,
+# merged-snapshot and lifetime-aware recomputation, on a real IPv4 data plane.
+build_lib_example(
+  NAME ntn-constellation-route-lifetime
+  SOURCE_FILES ntn-constellation-route-lifetime.cc
+  LIBRARIES_TO_LINK
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libpoint-to-point}
+    ${libinternet}
+    ${libapplications}
+)

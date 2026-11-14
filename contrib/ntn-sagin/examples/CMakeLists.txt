@@ -146,3 +146,17 @@ build_lib_example(
     ${libapplications}
     ${libflow-monitor}
 )
+
+build_lib_example(
+  NAME sagin-store-forward-iot
+  SOURCE_FILES sagin-store-forward-iot.cc
+  LIBRARIES_TO_LINK
+    ${libntn-sagin}
+    ${libntn-constellation}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libpoint-to-point}
+    ${libinternet}
+    ${libapplications}
+)

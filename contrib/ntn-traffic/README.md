@@ -1,269 +1,187 @@
 <h1 align="center">ntn-traffic</h1>
 
-<p align="center"><strong>The real-stack spine: a full 5G NR NTN data plane under satellite mobility, with every KPI measured in band</strong></p>
+<p align="center"><strong>The real-stack spine: a 5G NR NTN data plane under satellite mobility, with every KPI measured in band</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
-  <img src="https://img.shields.io/badge/3GPP-TR%2038.811%20%2F%2038.821-orange.svg" alt="3GPP TR 38.811 and TR 38.821"/>
-  <img src="https://img.shields.io/badge/backends-mmWave%20%2B%205G--LENA%20nr-purple.svg" alt="mmWave and 5G-LENA nr backends"/>
+  <img src="https://img.shields.io/badge/3GPP-TR%2038.811%20%7C%20TR%2038.821-orange.svg" alt="3GPP TR 38.811 and TR 38.821"/>
+  <img src="https://img.shields.io/badge/backends-mmWave%20%7C%205G--LENA%20nr-purple.svg" alt="mmWave and 5G-LENA nr backends"/>
   <img src="https://img.shields.io/badge/examples-11-informational.svg" alt="11 examples"/>
 </p>
 
 <p align="center">
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
-  &nbsp;·&nbsp;
-  <a href="INSTALL.md">Install</a>
-  &nbsp;·&nbsp;
-  <a href="#examples">Examples</a>
-  &nbsp;·&nbsp;
+  &nbsp;|&nbsp;
   <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/ntn-traffic/">Docs</a>
+  &nbsp;|&nbsp;
+  <a href="INSTALL.md">Install</a>
+  &nbsp;|&nbsp;
+  <a href="#examples">Examples</a>
+  &nbsp;|&nbsp;
+  <a href="#results">Results</a>
 </p>
 
 ---
 
-`NtnRealStackHelper` is the part of this toolkit that makes everything else measurable. It assembles a genuine NR cell, either the mmWave FR2 backend or 5G-LENA `nr` at FR1, and puts it under satellite mobility: a real SpectrumPhy, a real LDPC error model, real RLC and PDCP with timers relaxed to the slant round trip, a real RRC, and a real EPC with GTP tunnelling. HARQ with an NTN-stretched process pool is available and **off by default**, as section 1 below already said and this sentence used to contradict: one shipped example calls `SetHarqEnabled`, two call `SetNtnHarqProfile`, and `SetRlcAmEnabled` has no callers at all, so every shipped run carries RLC UM rather than AM.
+## Why this module
 
-What that buys you is provenance. Delay, jitter and loss come from an in-band application header carrying a sequence number and a transmit timestamp through the GTP tunnel, so they are properties of packets that crossed the air interface rather than quantities derived from geometry afterwards. Every scenario writes a health record that labels each KPI measured, modeled or configured, which means a reader can tell the difference without reading your code.
+Most satellite network studies compute their KPIs from a closed form: slant range over the speed of light for latency, a Shannon bound for throughput, a threshold for loss. That is fast, and it makes the mechanism under study impossible to falsify, because the KPI cannot disagree with the model that produced it. `ntn-traffic` exists so that it can disagree.
 
-The helper also owns the NTN physics the cell needs: TR 38.811 excess loss with the scenario shadow-fading tables, per-BWP loss chaining and power split, the satellite beam pattern, a spectrum seam that composes rather than replaces, and geometry-derived service-link, X2 and backhaul delays taken over the worst case across every gNB and UE pair rather than a single sample.
+`NtnRealStackHelper` assembles a genuine NR cell, either the mmWave backend or 5G-LENA `nr` at FR1, and puts it under satellite mobility: a real SpectrumPhy, an LDPC error model, RLC and PDCP with timers relaxed to the slant round trip, RRC, and an EPC with GTP tunneling. Delay, jitter and loss then come from an in-band header that carries a sequence number and a transmit timestamp through the tunnel, so they are properties of packets that crossed the air interface. Every scenario writes a health record that labels each KPI as measured, modeled or configured, so a reader can tell the difference without reading the code. This module is the spine the other toolkit modules build their examples on, which is why it ships only inside the toolkit tree.
 
-## Quick start
+## System design
 
-Inside the toolkit, where the module is already present and built:
+<p align="center">
+  <img src="doc/figures/ntn_traffic_architecture.png" alt="ntn-traffic architecture: NtnRealStackHelper, NR cell, channel models, ORAN applications, flow monitor" width="100%"/>
+</p>
 
-```bash
-./ns3 run ntn-real-stack-smoke
-./ns3 run "ntn-tr38821-calibration --outputDir=out/"
-./ns3 run ntn-oran-qos-flows
-```
-
-This module ships **only** inside the toolkit tree; there is no standalone
-repository for it. It is the spine the other modules' examples are built on,
-which is the reason it is not separable. `INSTALL.md` in this directory carries
-the full dependency list.
-
-## Overview
-
-`ntn-traffic` is the module every other toolkit module composes for a real data plane. It now ships three layers:
-
-1. **`NtnRealStackHelper`** — builds a genuine NR-style air interface from the in-tree `mmwave` module (SpectrumPhy, MAC scheduler, HARQ, AMC, RLC/PDCP, RRC, EPC) between caller-supplied satellite (gNB) and ground (UE) nodes that carry their own mobility models (SGP4, TR 38.811, HAPS). The link is NTN-ized: free-space path loss valid at LEO range, a mmWave-NR PHY at an S-band carrier (FR2 numerology — 60 kHz SCS — **not** a 3GPP NR-NTN FR1 band/numerology; the 2.0 GHz carrier has no assigned 3GPP band number, sitting in the n256 uplink, and the 50 MHz default bandwidth exceeds the 20/30 MHz NTN-FR1 max), the "satellite EIRP" applied as a conducted Tx-power scalar to a terrestrial 8×8 `UniformPlanarArray` gNB with SVD beamforming (array gain added separately by the spectrum model — **not** a reflector beam with a 3 dB footprint or a TR 38.821-derived link budget), HARQ off by default. Every headline KPI is **measured**, not computed: SINR/TBLER from the PHY `RxPacketTraceUe` trace, throughput/delay/jitter/loss from in-band header bytes at the application sinks.
-2. **The ORAN application suite** (`NtnOranApplication`, `NtnOranSink`, `NtnOranPayloadHeader`, `NtnCommandAndControlApp`) — QoS-flow-aware traffic sources whose every packet carries its 5QI / S-NSSAI / QFI identity and measurement primitives (sequence number, TX timestamp) as **real serialized bytes**, so per-flow KPIs survive GTP re-encapsulation through the EPC. This suite replaces bare `OnOffApplication` as the standard traffic source across the toolkit's modules and examples.
-3. **`NtnOranAiFlowMonitor`** — an AI-native measurement layer over the ORAN flows, built on the real ns-3 FlowMonitor infrastructure: per-flow KPM time series under official 3GPP TS 28.552 / O-RAN E2SM-KPM metric names, sliding-window AI feature vectors, EWMA z-score anomaly events, and XML/CSV/InfluxDB/E2 exporters.
-
-The module also retains NTN-oriented traffic generators with NTN-appropriate defaults: the **3GPP HTTP** model (over a satellite bent-pipe / regenerative link), the **NRTV** near-real-time video model over TCP/UDP, a CBR application, a legacy `TrafficTimeTag` for per-packet latency tracking (superseded by the in-band header timestamp), and the lightweight `NtnRealisticTrafficHelper` point-to-point data plane used by earlier examples.
-
-## What changed in v2.5
-
-See the toolkit [CHANGELOG](../../CHANGELOG.md).
-
-- **ORAN application suite** with the in-band `NtnOranPayloadHeader` (24-byte wire header), six 3GPP traffic profiles with 5QI-correct defaults, a measuring sink (one-way delay, RFC 3550 jitter, sequence-gap loss, throughput from received bytes), and a platform command-and-control telemetry app with a battery model.
-- **`NtnOranAiFlowMonitor`** — ORAN-flow classifier/probe pair plugged into the real ns-3 `FlowMonitor`, KPM series under TS 28.552 names, AI feature windows, anomaly detection, four exporters.
-- **`NtnRealStackHelper`** — the real-radio NTN cell helper with `InstallOranFlow()`, `EnableOranFlowMonitor()`, a satellite **payload-option model** (Transparent / RegenerativeRu / RegenerativeRuDu / FullGnb, each with its own user-plane delay composition), and `SetFeederGeometry()` for live feeder-delay updates from the actual satellite/gateway mobility.
-- **TR 38.821 calibration example** validating the measured radio against the official 3GPP link-budget methodology (Set-1 LEO-600, S-band, handheld UE).
-- **The spatial channel tracks the satellite.** `ThreeGppChannelModel::UpdatePeriod` was pinned to 0, which that model reads as "never regenerate", so the beam was recomputed from real geometry every 100 ms while the clusters it multiplied stayed at the t=0 look angle. Measured on `ntn-real-stack-smoke` over 60 s with four UEs: 10.32 dB of DL SINR frozen against 27.83 dB tracking, TBLER 0.122 against 0.0012. The default is now 100 ms, matching the beamforming cadence so the two halves agree by construction. `SetChannelUpdatePeriod()` still exposes it.
-- **SRS sizing.** `NrGnbRrc::SrsPeriodicity` defaults to 40 and was never set, so a cell ran out of SRS configuration indices around 22 UEs and the resulting RNTI-0 collision was fatal. The helper sizes it to the UE count, never below the default, so small scenarios are unchanged. The spine now carries 100 UEs.
-- **Half-duplex collisions are dropped and counted, not fatal.** `sim_health.csv` gains `halfduplex_ulctrl_drops`, `halfduplex_data_drops` and `halfduplex_srs_rx_drops` on every `nr` run. Measured on `ntn-cho-full-constellation` over 20 s these run between 0 and 0.006 percent of transport blocks, but read them next to `phy_rx_tb`: a large count means the node is over-subscribed and its throughput figure means something different.
-- **`SetTddPattern()`** overrides the all-flexible ns-3 slot pattern. Opt-in, not the default, because the pattern changes how every scenario schedules.
-- **`NtnTdlSpectrumPropagationLossModel`** makes the frequency-selective tapped-delay-line reachable from a spectrum channel through `AddSpectrumChannelLoss()`. It was previously a plain Object nothing could attach. The tap table remains a documented stand-in, not TR 38.811 Table 6.9.2, so "NTN-TDL" is still not claimable.
-- **`GetScsKhz()`**, and the second NR spine is gone: `NtnNrStackHelper` was written when this helper was mmwave-only and carried none of the audit fixes, so its one example moved to `SetRadioBackend(Nr)` and the duplicate was deleted.
-- `OnOffApplication` is no longer used by toolkit module examples; `NtnOranApplication` QoS flows are the standard traffic source (the legacy `NtnRealisticTrafficHelper` P2P path still uses OnOff internally).
-
-## Models, helpers & key classes
-
-### ORAN application suite (`model/`)
-
-- **`NtnOranPayloadHeader`** — the in-band user-plane header carried by every ORAN packet as real bytes (so QoS identity and measurement primitives ride *inside* the GTP tunnel, immune to FlowMonitor byte-tag stripping). Wire format (24 bytes, network order): version (u8), payload type (u8), per-flow sequence number (u32), TX timestamp in ns (u64), 5QI (u8, TS 23.501), S-NSSAI SST (u8) + SD (u24, TS 23.003), QFI (u8, 6 bits used, TS 38.415), srcId (u16), dstId (u16). Payload types: `EMBB_VIDEO`, `URLLC_CMD`, `MMTC_READING`, `CNC_TELEMETRY`, `KPM_REPORT`, `FH_SAMPLE`, `VOICE`, `BACKGROUND`.
-- **`NtnOranApplication`** — attribute-driven traffic source with TS 23.501 Table 5.7.4-1 profiles, each presetting 5QI/QFI/payload type and cadence (explicit attributes override): `CONVERSATIONAL_VOICE` (5QI 1, deterministic 20 ms vocoder cadence), `EMBB_VIDEO` (5QI 2, frame bursts at `FrameRate`, bytes from `DataRate`), `URLLC_PERIODIC` (5QI 82, small deterministic-period commands), `MMTC_PERIODIC` (NB-IoT-style periodic sensor reports), `POISSON_BACKGROUND` (5QI 9, exponential inter-arrivals), `CBR_SATURATING` (back-to-back CBR at `DataRate`, eMBB full-buffer). `SetFlowIdentity(fiveQi, sst, sd, srcId, dstId)` stamps the slice/QoS identity.
-- **`NtnOranSink`** — measuring server. Per QoS flow (keyed by the in-band srcId + 5QI + S-NSSAI) it computes one-way delay (RX time minus in-band TX timestamp), RFC 3550 interarrival jitter, loss from sequence-number gaps, and throughput from received bytes over the flow's active span — all measured at the application from bytes that crossed the real radio and GTP tunnel. Also parses `NtnCncTelemetry` records (`GetLatestTelemetry`).
-- **`NtnCommandAndControlApp`** — platform C&C telemetry as a real application: each period it samples the node's real ns-3 `MobilityModel` (SGP4 satellite / HAPS / UAV), derives attitude from the velocity frame, updates a linear battery model (`BatteryCapacityWh` / `PowerDrawW`), and sends the telemetry record after an `NtnOranPayloadHeader` (payload type `CNC_TELEMETRY`, 5QI 69 mission-critical signalling). Late or lost C&C is a real failure mode.
-- **`NtnStaticExtraLossModel`** — a runtime-settable scalar excess loss (dB, negative = gain) as a real `PropagationLossModel`, for chaining onto the live channel via `NtnRealStackHelper::AddExtraPropagationLoss()`; lets scenario events (blockage, RIS engage/release, beam-pointing loss) show up in the *measured* SINR/TBLER.
-
-### AI-native flow monitor (`model/ntn-oran-ai-flow-monitor.h`)
-
-- **`NtnOranFlowClassifier`** (`: FlowClassifier`) — flows keyed by the ORAN QoS identity in real packet bytes (srcId + dstId + 5QI + S-NSSAI), the way a DRB/QoS flow is keyed in TS 38.415, instead of the IP 5-tuple.
-- **`NtnOranFlowProbe`** (`: FlowProbe`) — one probe per measurement point (traffic source, each sink); reports every packet into a real `ns3::FlowMonitor` with the in-band sequence number as packet id.
-- **`NtnOranAiFlowMonitor`** — the KPM/AI layer: per-flow KPI time series at a configurable granularity period (default 1 s) under official names — `DRB.UEThpDl`, `DRB.RlcSduDelayDl`, `DRB.PacketLossRateDl`, `DRB.PdcpSduVolumeDl`, plus `L1M.RS-SINR` / `TB.TotNbrDl` / `TB.ErrTotNbrDl` from the PHY trace when attached to `NtnRealStackHelper`; sliding-window AI feature vectors (`GetFeatures`: mean/slope of throughput, delay, loss, SINR, plus jitter) for xApps / `ns3-ai-ntn`; an EWMA z-score anomaly detector per flow per metric (`RegisterAnomalyCallback`); exporters: FlowMonitor XML (`SerializeToXmlFile`), wide CSV (`WriteCsv`), InfluxDB line protocol (`WriteInfluxLp`), and E2SM-KPM-shaped indication callbacks (`RegisterE2Consumer`) for the `oran-ntn` E2 node.
+<p align="center"><em>Figure 1. The caller supplies satellite and ground nodes that already carry mobility, plus any module physics; <code>NtnRealStackHelper</code> builds the NR NTN cell and chains the NTN channel models onto it. ORAN applications carry their QoS identity and timestamps in band through GTP, and <code>NtnOranAiFlowMonitor</code> turns the flows into KPM series for oran-ntn, ns3-ai-ntn and the exporters. Source: <code>doc/figures/make_architecture.py</code>.</em></p>
 
 ### Real-radio helper (`helper/ntn-real-stack-helper.h`)
 
-- **`NtnRealStackHelper`** — the headline API for radio-true scenarios:
-  - Config (before `Build`): `SetSimTime`, `SetOutputDir`, `SetRunTag`, `SetCarrierFrequencyHz` (default 2 GHz S-band), `SetBandwidthHz`, `SetSatEirpDbm`, `SetUeTxPowerDbm`, `SetBackhaulDelay`, `SetHarqEnabled` (off by default — terrestrial HARQ timers break over the slant), `SetNtnHarqProfile(true)` (optional NTN-stretched HARQ profile: turns HARQ on and rescales the only HARQ timing knobs mmwave exposes — `MmWavePhyMacCommon::HarqDlTimeout` and `NumHarqProcess` — from the slant geometry of the nodes passed to `Build()`, budgeting 4 HARQ rounds over the radio round trip, LEO-600 one-way ~2.2 ms at zenith; the default remains exactly today's behavior, HARQ off), `SetRlcAmEnabled`, `SetUplink`, `SetGates`, `SetStrictGates`.
-  - **Payload options** (`SetPayloadOption`): user-plane extra delay composed from the live feeder slant range — `Transparent` (bent pipe, 2 × slant/c), `RegenerativeRu` (O-RU on sat, Open-FH 7.2x over the feeder: slant/c + 0.25 ms), `RegenerativeRuDu` (O-DU on sat, F1 midhaul: slant/c + 0.15 ms), `FullGnb` (full gNB on sat, GTP backhaul: slant/c + 0.05 ms — the default). `SetFeederGeometry(satMobility, gwMobility)` re-evaluates the EPC backhaul delay every second from the real feeder geometry; `ComputePayloadExtraDelay(slantRangeM)` exposes the model.
-  - **Uplink timing — NTN K_offset consumption** (`SetKOffsetConsumption(bool)`, default OFF, nr backend): when on, `Build()` derives the NTN cell-specific K_offset from the *service-link round-trip* geometry — `ComputeKOffsetSlots()` = `ceil(RTT / slot) + 1`, matching the SIB19 `cellSpecificKoffset` derivation — and programs it into the scheduler's UL DCI→PUSCH gap by extending `NrGnbPhy::N2Delay` (TS 38.213 §4.2). This pushes each UE's uplink grant past the round trip so the delayed downlink no longer collides with the UE's uplink slot ("Cannot TX while RX"), and is the unlock that lets `SetAirInterfaceDelay(true)` run **single-UE / downlink-heavy uplink** under a real air-interface propagation delay. `GetConsumedKOffsetSlots()` returns the K_offset applied (0 when off); `GetGnbN2Delay(gnbIdx, bwp)` reads back the N2Delay actually programmed on a built gNB PHY (= base N2Delay + consumed K_offset). **Scope/honesty:** this consumes the populated K_offset into UL PUSCH timing only; *fully* enabling multi-UE uplink additionally needs per-UE Timing Advance and NTN-aware SRS/PUCCH timing that the vendored nr v3.3 lacks (deferred to the ns-3.48 / nr v5.0 migration). It required raising the vendored nr `N2Delay` cap from 4→320 slots (ntn-patch 05 in `contrib/nr/ntn-patches/`).
-  - Build & traffic: `Build(gnbNodes, ueNodes)` (both must already carry a `MobilityModel`), `InstallTraffic(profile, start, stop)` with pre-canned mixes (`NbIotPeriodic`, `EmbbStreaming`, `UrllcPings`, `ConversationalVoice`, `MixedBouquet`) — all backed by `NtnOranApplication` flows — or `InstallOranFlow(ueIdx, fiveQi, sst, sd, profile, start, stop)` for one explicit QoS flow with full slice identity.
-  - Measurement: **`EnableAiFlowMonitor(outputPrefix)` is the canonical KPM wiring** — one call (any time after `Build()`, before or after installing traffic) creates the `NtnOranAiFlowMonitor`, wires the PHY source, attaches every flow the helper installed (including flows installed later), and auto-exports `<outputPrefix>_kpm_series.csv` / `.lp` at end of simulation; `GetAiFlowMonitor()` returns the monitor for anomaly callbacks / E2 consumers. The older `EnableOranFlowMonitor()` (manual attach + manual export, must be called after traffic install) is kept for existing callers. `Collect()` aggregates after `Simulator::Run()`; accessors `GetMeanDlSinrDb`, `GetMeanDlTbler`, `GetDlCorruptFraction`, `GetRxThroughputMbps`, `GetMeanDelayMs`, `GetMeanJitterMs`, `GetAppLossRatio`, `GetCellMeanSinrDb`, and per-UE `GetUeRnti` / `GetUeRecentSinrDb` / `GetUeMeanSinrDb` / `GetUeRecentTbler` / `GetUeRxBytes` for CHO/RIC/slice logic.
-  - Extensibility: `AddExtraPropagationLoss(Ptr<PropagationLossModel>)` chains module physics (THz absorption, Sionna RT, A2G TR 38.811) onto the real channel; `RegisterPeriodicCallback(period, cb)` runs module logic on the real event queue; `GetMmWaveHelper` / `GetEpcHelper` / `GetRemoteHost` / device containers for custom wiring.
-  - `WriteHealthReport()` emits `sim_health.csv` whose `HealthGates` assert trace provenance: minimum transport blocks decoded at the UE PHY, a measured app-throughput floor, SINR-from-PHY-trace and active-error-model requirements (strict mode fails the run on a missed gate). Its `air_interface` tag is **derived from the actual carrier** (backend `nr`/`mmwave` × band `fr1`/`fr2`/`thz` per TS 38.104: FR1 ≤ 7.125 GHz, FR2 ≤ 71 GHz, `thz` above) rather than a hardcoded `fr1`, so e.g. a THz example at 100 GHz is labelled `nr-thz-ntn` instead of mislabelling as FR1.
+| Area | API | Notes |
+|---|---|---|
+| Build | `Build(gnbNodes, ueNodes)`, `SetRadioBackend`, `SetCarrierFrequencyHz`, `SetBandwidthHz`, `SetSatEirpDbm`, `SetUeTxPowerDbm` | Both node sets must already carry a `MobilityModel` (SGP4, TR 38.811, HAPS). Default carrier 2 GHz. |
+| Payload | `SetPayloadOption`, `SetFeederGeometry`, `ComputePayloadExtraDelay` | `Transparent` (2 x slant/c), `RegenerativeRu` (slant/c + 0.25 ms), `RegenerativeRuDu` (slant/c + 0.15 ms), `FullGnb` (slant/c + 0.05 ms, default); feeder delay re-evaluated every second from live geometry. |
+| HARQ and RLC | `SetHarqEnabled`, `SetNtnHarqProfile`, `SetRlcAmEnabled` | HARQ is off by default because terrestrial timers break over the slant; the NTN profile rescales the HARQ timeout and process count from the geometry. Shipped runs carry RLC UM. |
+| Uplink timing | `SetKOffsetConsumption`, `ComputeKOffsetSlots`, `GetGnbN2Delay` | Opt-in, nr backend: K_offset = ceil(RTT / slot) + 1, programmed into the UL DCI to PUSCH gap (TS 38.213 Section 4.2). Uses a vendored nr patch that raises the `N2Delay` cap. |
+| Channel | `AddExtraPropagationLoss`, `AddSpectrumChannelLoss`, `SetChannelUpdatePeriod`, `SetTddPattern` | Chains module physics (THz, Sionna RT, A2G) onto the live channel; the 3GPP channel regenerates every 100 ms so clusters follow the satellite. |
+| Traffic | `InstallTraffic(profile, start, stop)`, `InstallOranFlow(ueIdx, fiveQi, sst, sd, profile, start, stop)` | Canned mixes backed by `NtnOranApplication`. |
+| Measurement | `EnableAiFlowMonitor(prefix)`, `Collect()`, `GetMeanDlSinrDb`, `GetMeanDlTbler`, `GetRxThroughputMbps`, `GetMeanDelayMs`, `GetUeRecentSinrDb`, `WriteHealthReport()` | `sim_health.csv` gates assert trace provenance (transport blocks decoded, SINR from the PHY trace, an active error model); its `air_interface` tag is derived from the carrier per TS 38.104. |
 
-### Lightweight P2P data plane (`helper/ntn-realistic-traffic-helper.h`)
+### ORAN application suite and flow monitor (`model/`)
 
-- **`NtnRealisticTrafficHelper`** — the original helper that drops a UDP data plane over point-to-point links (InternetStack + per-UE P2P + FlowMonitor) into any scenario so `Simulator::Run()` exercises packets instead of returning instantly. Config (`SetSimTime`, `SetProfile`, `SetGates`, ...), `InstallUes(n)` or `AttachExistingUes(...)`, then `Wire()`; `RegisterPeriodicCallback` hooks; `UpdateUeLink(ueIndex, oneWayDelay, per)` couples per-UE link delay and packet-error rate to live orbital geometry (see `doc/DYNAMIC_LINK_COUPLING.md`); `WriteHealthReport()` emits `sim_health.csv` with event-activity gates. Profiles: `NbIotPeriodic`, `EmbbStreaming`, `UrllcPings`, `DigitalTwinTelemetry`, `MixedBouquet` (default). No radio physics — for radio-true KPIs use `NtnRealStackHelper`.
+| Class | Role |
+|---|---|
+| `NtnOranPayloadHeader` | 24-byte in-band header: version, payload type, per-flow sequence (u32), TX timestamp in ns (u64), 5QI, S-NSSAI SST and SD, QFI, source and destination IDs. Rides inside the GTP tunnel, so it survives re-encapsulation. |
+| `NtnOranApplication` | Traffic source with TS 23.501 profiles: conversational voice (5QI 1), eMBB video (5QI 2), URLLC periodic (5QI 82), mMTC periodic, Poisson background (5QI 9), saturating CBR. |
+| `NtnOranSink` | Per QoS flow: one-way delay from the in-band timestamp, RFC 3550 jitter, loss from sequence gaps, throughput over the active span. |
+| `NtnCommandAndControlApp` | Platform telemetry (5QI 69) sampled from the node's real mobility, with a battery model. |
+| `NtnOranAiFlowMonitor`, `NtnOranFlowClassifier`, `NtnOranFlowProbe` | Built on ns-3 FlowMonitor; flows keyed by QoS identity instead of the IP 5-tuple; KPM series under TS 28.552 names (`DRB.UEThpDl`, `DRB.RlcSduDelayDl`, `DRB.PacketLossRateDl`, `L1M.RS-SINR`, ...); sliding-window features; EWMA z-score anomalies; XML, CSV, InfluxDB line protocol and E2SM-KPM-shaped exporters. |
+| `NtnTr38811ExcessLossModel`, `NtnSatBeamGainModel`, `NtnSpectrumSeamModel`, `NtnTdlSpectrumPropagationLossModel`, `NtnStaticExtraLossModel` | TR 38.811 excess loss with the scenario shadow-fading tables; the TR 38.811 Section 6.4.1 circular-aperture (Airy) beam pattern; a spectrum seam that composes losses; a frequency-selective tapped delay line (stand-in tap table); a runtime scalar loss for blockage or RIS events. |
 
-### Classic traffic models (`model/`, `stats/`)
+The module also keeps the classic generators: 3GPP HTTP over a satellite link, NRTV video over TCP or UDP, a CBR application, and the lightweight `NtnRealisticTrafficHelper` point-to-point data plane (no radio physics).
 
-- 3GPP HTTP (`three-gpp-http-satellite-client`, `three-gpp-http-variables`) with `three-gpp-http-satellite-helper`; NRTV (`nrtv-header`, `nrtv-tcp-client`, `nrtv-tcp-server`, `nrtv-udp-server`, `nrtv-variables`, `nrtv-video-worker`) with `nrtv-helper`; `cbr-application` with `cbr-helper`. Application KPI collectors under `stats/` (`ApplicationStatsHelper` delay/throughput family).
-- **Legacy / experimental** (kept for compatibility, not exercised by any current example or test): `TrafficTimeTag` (per-packet latency byte-tag — superseded by the in-band `NtnOranPayloadHeader` timestamp, which survives GTP re-encapsulation) and `HistogramPlotHelper` (gnuplot histogram helper). Plotting helper `client-rx-trace-plot` is still used by the NRTV example. Prefer `NtnOranSink` / `NtnOranAiFlowMonitor` for new measurement code.
+## Results
 
-## Examples
+Measured radio against the 3GPP TR 38.821 Section 6.1.3 link-budget method, from a ten-seed campaign of the two shipped calibration examples (stored in the toolkit workspace under `papers/paper1_ojcoms_toolkit/revision_experiments/r1_seeds/`: per-seed run folders, `r1_calibration_samples.csv`, `r1_arraygain_samples.csv` and the summaries, September 2026). Study case Set-1 LEO-600, S-band downlink, handheld terminal, mmwave backend, a real SGP4 satellite at 600 km. Commands: `ntn-tr38821-calibration --simSeconds=600 --radio=mmwave --RngRun=1..10`, and `ntn-tr38821-array-gain-calibration` with `--boresightMode=point` and `nadir`, RngRun 1 to 10. The figure is built by `doc/figures/make_results.py`.
 
-Listed in `examples/CMakeLists.txt`; all build to `build/contrib/ntn-traffic/examples/`.
+<p align="center">
+  <img src="doc/figures/ntn_traffic_calibration.png" alt="Measured SINR against the TR 38.821 closed form, and measured beam pattern against the Airy pattern" width="100%"/>
+</p>
 
-### ntn-oran-qos-flows
+<p align="center"><em>Figure 2. (a) SINR measured off the PHY trace against the TR 38.821 closed-form CNR over the pass, elevation at or above 10 deg, 10 seeds x 132 samples; the dashed line is the closed form shifted by the mean measured offset. (b) Beam pattern recovered from the paired difference of a fixed-boresight and a steered run sampled at the same instants, against the analytic TR 38.811 Airy pattern, 10 seeds x 118 pairs.</em></p>
 
-The flagship ORAN-NTN example. One real LEO cell (`NtnRealStackHelper`: mmwave SpectrumPhy + MAC + RLC/PDCP + RRC + EPC, SGP4 satellite at zenith receding with genuine dynamics) carries four 3GPP QoS flows side by side, each an `NtnOranApplication` with its own 5QI / S-NSSAI in real packet bytes — UE0 5QI 1 conversational voice, UE1 5QI 2 eMBB video bursts, UE2 5QI 82 URLLC commands, UE3 5QI 9 mMTC reports — plus the satellite's own C&C telemetry (5QI 69) flowing to an SMO endpoint over a feeder link with the physical zenith delay. UEs move under TR 38.811 mobility classes (`NtnTr38811MobilityHelper`, MixedContinental). The AI-native KPM layer runs over all four flows via the canonical `EnableAiFlowMonitor("ntn-oran-qos-flows")` wiring.
+| Measured (10 seeds, mean with 95 % Student-t half-width across seeds) | Value |
+|---|---|
+| Offset of measured SINR over the TR closed form, elevation at or above 10 deg | 4.06 ± 0.22 dB |
+| Within-run spread of that offset (standard deviation) | 2.47 dB |
+| SINR decay from zenith to 10 deg: measured / TR free-space prediction | 10.47 ± 1.30 dB / 9.97 dB |
+| Beam pattern, fixed ground point: angles swept / RMS error / bias | 1.90 to 5.73 deg (0.87 beamwidths) / 2.85 ± 0.24 dB / 0.32 ± 0.58 dB |
+| Beam pattern, nadir-fixed: angles swept / RMS error | 1.27 to 50.5 deg / 2.71 ± 0.21 dB |
 
-```sh
+Reading this honestly: the measured decay follows the TR free-space prediction within its interval, and the constant offset is the array gain of the spectrum model, reported rather than calibrated away. The examples' own pass or fail gates are stricter than the aggregate. On these 600 s runs the calibration example printed FAIL every time, because its spread gate is evaluated over all samples, including geometry below the horizon. The array-gain example's pattern gate (RMS under 3 dB) passed in all ten nadir runs and in five of the ten fixed-ground-point runs.
+
+## Quick start
+
+`ntn-traffic` ships only inside the toolkit tree; there is no standalone repository for it.
+
+```bash
+./ns3 run ntn-real-stack-smoke
 ./ns3 run "ntn-oran-qos-flows --simSeconds=40"
-```
-
-- **Outputs:** a live per-flow delay table and anomaly events on stdout; end-of-run per-flow measured KPIs (rx packets, one-way delay, jitter, loss, throughput per 5QI/S-NSSAI), last C&C telemetry, and a measured cell summary (SINR, TBLER, throughput); files `ntn-oran-qos-flows_kpm_series.csv` / `.lp` (InfluxDB line protocol; auto-exported by `EnableAiFlowMonitor`) in the working directory, plus `oran_flow_monitor.xml` and `sim_health.csv` in `--outputDir` (default `ntn-oran-qos-flows-output`).
-- **Key args:** `--simSeconds`, `--leoAltKm` (default 550), `--freqGHz` (default 2, S-band carrier — mmWave-NR FR2 numerology, not a 3GPP NR-NTN FR1 band/numerology), `--satEirpDbm`, `--outputDir`.
-
-### ntn-tr38821-calibration
-
-Calibrates the toolkit's measured radio against the official 3GPP **TR 38.821 Sec. 6.1.3** link-budget methodology — study case Set-1 LEO-600, S-band downlink, handheld UE (EIRP density 34 dBW/MHz → 48.77 dBW over 30 MHz; G/T −31.62 dB/K; reference CNR 15.78 dB at 90° elevation). The satellite is a real SGP4 element at 600 km; every 2 s the example computes the TR closed-form CNR at the live slant range and compares it with the SINR measured off the PHY trace. Two calibration gates: the measured-minus-TR offset must stay constant across the pass (std < 1.5 dB — the offset itself is the known beamforming array gain of the spectrum model, reported, not hidden), and the measured SINR decay between zenith and pass end must match the TR FSPL delta within 1 dB.
-
-```sh
 ./ns3 run "ntn-tr38821-calibration --simSeconds=120"
 ```
 
-- **Outputs:** a per-sample table (slant range, TR CNR, measured SINR, offset) and a final `CALIBRATED`/`FAIL` verdict on stdout; `sim_health.csv` in `--outputDir`. Exit code is non-zero on a failed gate, so it doubles as a CI check.
-- **Key args:** `--simSeconds`, `--outputDir`.
+Minimal use in your own scenario:
 
-### ntn-tr38821-array-gain-calibration
-
-Companion experiment to the calibration above, answering the obvious question about its constant offset: **is the satellite array gain angle-dependent, or was a constant substituted for a function?** It is angle-dependent — `NtnSatBeamGainModel` implements the **TR 38.811 Sec. 6.4.1** normalized circular-aperture (Airy) pattern *G*(θ)/*G*<sub>max</sub> = 4|*J*<sub>1</sub>(*u*)/*u*|², with *u* pinned by the TR 38.821 Set-1 LEO-600 S-band 3 dB beamwidth (4.4127°). The original calibration simply never exercises it, because it runs a *steered* spot beam whose boresight tracks the terminal (θ ≡ 0 ⇒ 0 dB pattern contribution). This example runs the same LEO-600 pass twice, changing only where the beam points: **regime A** steered (θ ≈ 0, constant residual — this *is* the published offset) and **regime B** with the boresight pinned (default: a fixed ground cell centre offset along the ground track; `--boresightMode=nadir` for a body-fixed nadir beam), so the UE traverses the mainlobe, the first null and the sidelobes. Because both regimes sample identical geometry at identical instants, the *paired* difference `[residual_B − residual_A] − G_analytic(θ)` cancels FSPL, the TR 38.811 excess-loss terms and the constant array-gain offset alike, leaving only the angular term.
-
-```sh
-./ns3 run "ntn-tr38821-array-gain-calibration --simSeconds=120"
+```cpp
+NtnRealStackHelper rs;
+rs.SetSimTime(Seconds(30));
+rs.SetOutputDir("out");
+rs.Build(satNodes, ueNodes);                  // nodes already carry mobility
+rs.InstallOranFlow(0, 82, 2, 0x000001, NtnOranApplication::URLLC_PERIODIC, Seconds(1), Seconds(29));
+rs.EnableAiFlowMonitor("my-run");
+Simulator::Stop(Seconds(30));
+Simulator::Run();
+rs.Collect();
+rs.WriteHealthReport();
+Simulator::Destroy();
 ```
 
-- **Outputs:** `array_gain_calibration.csv` (per sample, both regimes: `regime, boresight, t_s, elevation_deg, slant_km, theta_offboresight_deg, tr_cnr_db, measured_cnr_db, residual_db, analytic_pattern_db, model_theta_deg, model_rolloff_db, paired_pattern_err_db`) and `array_gain_summary.csv` (per regime: sample count, θ range, residual mean/σ/range, and for regime B the max/RMS pattern-fidelity error) in `--outputDir` (default `ntn-tr38821-array-gain-output`), plus a stdout summary and three gates (steered θ ≡ 0; regime B sweeps > half the 3 dB beamwidth; paired pattern RMS error < `--patternTolDb`). The `analytic_pattern_db` column is `NtnSatBeamGainModel::GainDbAtThetaDeg(θ)` — a pure closed form, recomputable from the pattern equation alone.
-- **Key args:** `--simSeconds`, `--samplePeriodS`, `--beamwidthDeg`, `--rolloffFloorDb`, `--boresightMode` (`point`\|`nadir`\|`direction`), `--boresightOffsetKm`, `--excessLoss`, `--patternTolDb`, `--outputDir`.
+`InstallOranFlow` takes the UE index, 5QI, SST, SD, an `NtnOranApplication::Profile` and the start and stop times. `INSTALL.md` lists the dependencies.
 
-### ntn-real-stack-smoke
+## Examples
 
-Minimal validation of `NtnRealStackHelper`: a single LEO gNB (SGP4 Walker serving satellite) over a handful of TR 38.811-mobility ground UEs, eMBB streaming over the real radio, measured SINR/TBLER/throughput reported via the health gates.
+All build to `build/contrib/ntn-traffic/examples/`.
 
-```sh
-./ns3 run "ntn-real-stack-smoke --simTime=10 --numUes=4 --altKm=600"
-```
+| Example | What it shows | Command |
+|---|---|---|
+| `ntn-oran-qos-flows` | One real LEO cell carrying four QoS flows (5QI 1, 2, 82, 9) plus satellite C&C telemetry (5QI 69); TR 38.811 terminals; KPM series, anomalies and per-flow measured KPIs. | `./ns3 run "ntn-oran-qos-flows --simSeconds=40"` |
+| `ntn-tr38821-calibration` | Measured SINR against the TR 38.821 closed-form CNR every 2 s over an SGP4 pass; prints a verdict and exits non-zero on a failed gate. | `./ns3 run "ntn-tr38821-calibration --simSeconds=120"` |
+| `ntn-tr38821-array-gain-calibration` | The same pass twice, steered and fixed boresight, so the paired difference isolates the beam pattern. Writes `array_gain_calibration.csv` and `array_gain_summary.csv`. | `./ns3 run "ntn-tr38821-array-gain-calibration --simSeconds=120"` |
+| `ntn-real-stack-smoke` | A single SGP4 gNB over a few TR 38.811 terminals, eMBB streaming, health gates. | `./ns3 run "ntn-real-stack-smoke --simTime=10 --numUes=4 --altKm=600"` |
+| `ntn-nr-fr1-demo` | The 5G-LENA backend at FR1: 30 kHz SCS, 2.185 GHz (band n256 downlink), 20 MHz. | `./ns3 run "ntn-nr-fr1-demo --simTime=2 --numerology=1"` |
+| `ntn-nr-deep-integration-demo` | Native NR stats, three-slice BWPs with the QoS scheduler, MIMO with measured rank, armed A3 + X2 handover (no handover fires here by design). | `./ns3 run ntn-nr-deep-integration-demo` |
+| `ntn-nr-handover-pass` | A real NR A3-RSRP + X2 handover on a 600 km pass; one handover at the shipped defaults. Keep `--numUes=1`. | `./ns3 run ntn-nr-handover-pass` |
+| `ntn-scalability-load-regimes` | Offered load measured from application counters, wall clock, peak RSS, and whether a run is bound by geometry or by the packet plane. Appends rows to `scalability_regimes.csv`. | `./ns3 run "ntn-scalability-load-regimes --regime=embb --sats=66 --ues=30 --duration=60"` |
+| `ntn-cbr-leo-link` | CBR over one point-to-point LEO link with a TR 38.821-derived delay and a receive error model; FlowMonitor summary. | `./ns3 run "ntn-cbr-leo-link --simTime=10 --intervalMs=5"` |
+| `nrtv-p2p-example` | NRTV video over a point-to-point link; writes a gnuplot client trace. | `./ns3 run "nrtv-p2p-example --time=10 --protocol=UDP"` |
+| `nrtv-variables-plot` | Histograms of the NRTV traffic-model distributions. | `./ns3 run "nrtv-variables-plot --numOfSamples=100000"` |
 
-- **Outputs:** a one-line measured summary and `sim_health.csv` in `--outputDir` (default `ntn-real-stack-smoke-out`).
-- **Key args:** `--simTime`, `--numUes`, `--altKm`, `--satEirpDbm`, `--freqGhz`, `--bwMhz`, `--outputDir`.
+## Tests
 
-### ntn-nr-fr1-demo
-
-Proves the **5G-LENA (`nr`) FR1 NTN radio spine** on the `NtnRealStackHelper` NR backend: a real NR data plane at FR1 numerology (30 kHz SCS) on an S-band 2.185 GHz carrier (3GPP band n256 downlink, TS 38.101-5 Table 5.2-1) with 20 MHz bandwidth — the FR1 regime the FR2-locked `mmwave` path cannot reach. Topology: one LEO gNB at ~600 km with a few ground UEs directly below.
-
-```sh
-./ns3 run "ntn-nr-fr1-demo --simTime=2 --numerology=1"
-```
-
-- **Outputs:** measured NR summary on stdout (mean DL SINR / TBLER, PHY transport blocks, throughput).
-- **Key args:** `--simTime` (s, def 2), `--numUes` (def 3), `--altitudeKm` (def 600), `--numerology` (0 = 15 kHz, 1 = 30 kHz; def 1), `--satEirpDbm` (def 70), `--freqGhz` (def 2), `--bwMhz` (def 20, the NTN-FR1 max), `--outputDir` (def `./`).
-
-### ntn-nr-deep-integration-demo
-
-Exercises the four **NR deep-integration enablers** the toolkit adds to `NtnRealStackHelper` (nr backend), each turning a piece of 5G-LENA machinery into a *measured* quantity: **D** native NR stats + measured MCS / MIMO rank / PRB utilisation + NTN-stretched HARQ pool; **C** QoS slices (three 5QIs → three BWPs + the OfdmaQos scheduler + per-5QI dedicated bearers); **B** real MIMO via `SetupMimoPmi` (measured rank); **A** the armed A3-RSRP + X2 handover. Two satellites (gNBs) plus ground UEs.
-
-```sh
-./ns3 run "ntn-nr-deep-integration-demo"          # all four enablers
-./ns3 run "ntn-nr-deep-integration-demo --slices=0" # isolate single-BWP
-```
-
-- **Outputs:** a measured four-enabler summary on stdout (mean DL SINR / TBLER / MCS / MIMO rank / PRB, per-slice per-BWP SINR / TB counts, handover count) and the native NR PDCP/RLC/MAC/PHY stat files (`NrDlMacStats.txt`, `NrDl*RlcStats*`, `NrDl*PdcpStats*`, `RxPacketTrace.txt`) under `--outputDir`. They used to land in the process working directory, because `NrPhyRxTrace` keeps its results folder in a static that defaults to empty and nothing set it.
-- **Key args:** `--slices` (per-slice BWPs / Enabler C, def true), `--simTime` (s, def 10), `--numUes` (def 6), `--altitudeKm` (def 600), `--satEirpDbm` (def 70), `--bwMhz` (def 30 → 3 × 10 MHz BWPs), `--outputDir` (def `./nr-deep-demo/`).
-- **Note:** the handover count is **0** here by design — the neighbour satellite sits only 20 km to the side over a short sim, so both slant ranges hug 600 km and the RSRP hysteresis is never crossed. For a *firing* handover on a realistic pass, see **ntn-nr-handover-pass** below.
-
-### ntn-nr-handover-pass
-
-The dedicated proof of **Enabler A**: a real NR inter-satellite **A3-RSRP + X2 handover** on a realistic 600 km LEO pass. The serving satellite starts overhead the UE and flies off toward the horizon at true LEO ground-track speed (~7.5 km/s) while the neighbour rises to overhead; the UE's *measured* neighbour RSRP (sensed on each cell's PSS) crosses the serving cell by the hysteresis, the A3 event fires, and the serving gNB triggers an X2 handover. `GetHandoverCount()` counts the completions.
-
-```sh
-./ns3 run "ntn-nr-handover-pass"
-```
-
-- **Outputs:** the A3 trigger and a measured summary on stdout — sat altitude/speed, A3 hysteresis/TTT, mean DL SINR, PHY transport blocks, and **`[A] Handovers done: N`** (N = 1 at the shipped defaults). Add `NS_LOG=NrA3RsrpHandoverAlgorithm=level_logic` to watch the neighbour-vs-serving RSRP decision.
-- **Key args:** `--simTime` (s, def 90), `--numUes` (def 1 — see note), `--altitudeKm` (def 600), `--hystDb` (A3 hysteresis, dB, def 2), `--tttMs` (A3 time-to-trigger, ms, def 512), `--neighbourBehindKm` (neighbour start offset behind serving, km, def 600).
-- **Note:** keep `--numUes=1` for a clean run. `numUes>1` drives several UEs through the handover at once and hits a separate, structural limitation of the vendored 5G-LENA v3.3 X2 handover data-forwarding path (it pushes a PDCP control PDU through a build that only supports DATA PDUs); the A3/X2 decision itself fires correctly regardless.
-
-### nrtv-p2p-example
-
-Two nodes over a point-to-point link: an NRTV video server streams to a client; a `ClientRxTracePlot` records the Rx traffic.
-
-```sh
-./ns3 run "nrtv-p2p-example --time=10 --protocol=UDP"
-```
-
-- **Outputs:** an NRTV client trace gnuplot file `NRTV-<protocol>-client-trace.plt` (e.g. `NRTV-UDP-client-trace.plt`) in the working directory — render it with `gnuplot NRTV-UDP-client-trace.plt`. This example does **not** print metrics to stdout.
-- **Key args:** `--time` (simulation time, s), `--protocol` (`TCP` or `UDP`, upper case), `--verbose` (enable trace logging).
-
-### nrtv-variables-plot
-
-Draws samples from the NRTV traffic-model random-variable distributions and plots histograms.
-
-```sh
-./ns3 run "nrtv-variables-plot --numOfSamples=100000"
-```
-
-- **Outputs:** gnuplot `.plt` files in the working directory — `nrtv-num-of-frames.plt`, `nrtv-slice-size.plt`, `nrtv-slice-encoding-delay.plt`, `nrtv-idle-time.plt` (render with `gnuplot *.plt`).
-- **Key args:** `--numOfSamples` (number of samples drawn per distribution; default 100000).
-
-### ntn-cbr-leo-link
-
-A minimal CBR data plane over a single point-to-point LEO link — the lightweight, radio-physics-free path for latency / loss studies. The link carries a TR 38.821-derived one-way propagation delay and a receive-side error model, and `FlowMonitor` reports the measured throughput / delay / jitter end to end.
-
-```sh
-./ns3 run "ntn-cbr-leo-link --simTime=10 --intervalMs=5"
-```
-
-- **Outputs:** a measured `FlowMonitor` summary on stdout (throughput, mean delay, jitter).
-- **Key args:** `--simTime` (s, def 10), `--intervalMs` (CBR inter-packet interval, ms, def 5), `--pktSize` (payload bytes, def 1024), `--errorRate` (per-packet loss on the rx device, def 0.01), `--delayMs` (one-way prop delay, ms, def 12.885 ≈ LEO-600 RTD 25.77 ms), `--dataRateMbps` (link rate, def 50).
-
-### three-gpp-http-example
-
-The 3GPP HTTP traffic model (browsing sessions of a main object plus embedded objects with reading-time gaps), retained for NTN web-browsing studies over a satellite bent-pipe or regenerative link. Exercised by the **`ntn-http-satellite`** system suite, which runs a browsing session across `Simulator::Run()` over a link with a real one-way delay and asserts that the measured page-load time clears the round trip. This paragraph used to point at a `three-gpp-http-client-server-test` suite instead; that file was a stale fork of the upstream ns-3 test, was never listed in `TEST_SOURCES`, did not compile against ns-3.43, and collided with upstream on its log-component name, so nothing had ever run it.
-
-```sh
-./test.py -s three-gpp-http-client-server-test
-```
-
-## Build, run & test
-
-The module builds as part of the ns3-ntn-toolkit tree:
-
-```sh
-./ns3 configure --enable-examples --enable-tests
-./ns3 build
+```bash
+./test.py -s ntn-real-stack-helper
 ./test.py -s ntn-oran-application
 ./test.py -s ntn-oran-ai-flow-monitor
+./test.py -s ntn-spectrum-seam
+./test.py -s ntn-tdl-spectrum
+./test.py -s ntn-http-satellite
 ./test.py -s cbr-test
 ./test.py -s nrtv
 ```
 
-The module ships four test suites: `ntn-oran-application` (unit — payload-header packet round-trip, in-band measurement of a known link delay, sequence-gap loss against a real `RateErrorModel`, C&C telemetry round-trip with real mobility + battery state), `ntn-oran-ai-flow-monitor` (unit — KPM series vs. sink ground truth, a mid-run error burst showing up as KPM loss + anomaly event, multi-slice flow classification, XML/CSV/Influx exporter round-trips), `cbr-test` (unit), and `nrtv` (system). See [INSTALL](../../INSTALL.md) for full toolkit setup.
+Eight suites, 55 test cases in all. `ntn-real-stack-helper` alone has 40, among them EIRP budget gates, X2 and feeder delays that follow geometry, K_offset consumed and not consumed, one-way delay bounded by the speed of light, slice BWP isolation, beam-gain angle dependence, channel update period, an independent budget oracle, and health gates that can fail.
 
----
+## Dependencies
 
-## Standards implemented
+ns-3.43 `core`, `network`, `internet`, `applications`, `point-to-point`, `propagation`, `mobility`, `flow-monitor`, `lte`, the toolkit's vendored `mmwave` and `nr` (with the ntn patches in `contrib/nr/ntn-patches/`), and `magister-stats`.
 
-3GPP TR 38.811 (NTN channel model, shadow-fading sigma tables, Rician K-factor, aperture), TR 38.821 (Set-1 LEO-600 and GEO reference parameters, handover interruption budget), TS 38.101-5 (NTN FR1 bands n255 and n256, channel bandwidths), TS 38.213 (K_offset, timing advance), TS 38.214 (CQI and MCS tables), TS 38.300, TS 38.321, TS 38.331, TS 38.423 (Xn), TS 28.552 (performance measurements), TR 38.901.
+## Scope and limitations
 
-## Keywords
+- **mmwave backend numerology.** On the mmwave path the S-band carrier runs with FR2 numerology (60 kHz SCS) on a terrestrial 8 x 8 array gNB, with the satellite EIRP applied as a conducted transmit power; it is not a reflector beam with a 3 dB footprint. Use `SetRadioBackend` for 5G-LENA at FR1.
+- **HARQ off, RLC UM by default.** Turn them on deliberately; the defaults reflect what the terrestrial timers tolerate over the slant.
+- **Multi-UE uplink.** K_offset consumption enables single-UE or downlink-heavy uplink under a real air-interface delay; full multi-UE uplink also needs per-UE timing advance and NTN-aware SRS and PUCCH timing, which the vendored nr v3.3 lacks.
+- **TDL tap table.** `NtnTdlSpectrumPropagationLossModel` uses a documented stand-in, not TR 38.811 Table 6.9.2, so "NTN-TDL" is not claimable.
+- **Multi-UE NR handover.** `ntn-nr-handover-pass` with more than one UE hits a limitation of the vendored 5G-LENA X2 data-forwarding path; the A3 and X2 decision itself fires.
+- Half-duplex collisions are dropped and counted (`halfduplex_*_drops` in `sim_health.csv`) rather than fatal; read them next to `phy_rx_tb`.
 
-5G NR NTN, NR-NTN data plane, ns-3 satellite simulation, SpectrumPhy, LDPC error model, HARQ, RLC, PDCP, RRC, EPC, GTP tunnel, TR 38.811 channel model, TR 38.821 link budget, EIRP, satellite beam pattern, bandwidth part, BWP, MCS, CQI, measured SINR, one-way delay, jitter, throughput, 5G-LENA, mmWave, LEO satellite, non-terrestrial network.
+## Standards
 
-## Author
+3GPP TR 38.811 (NTN channel, shadow fading, beam pattern), TR 38.821 (Set-1 LEO-600 link budget), TS 38.101-5 (NTN FR1 bands n255 and n256), TS 38.213 (K_offset), TS 38.104 (frequency ranges), TS 23.501 (5QI, QFI, S-NSSAI), TS 38.415, TS 28.552 (KPM), RFC 3550 (jitter).
 
-**Muhammad Uzair**, Independent Researcher
-[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+## Citation
 
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
-a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
-Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+If you use this module, please cite the toolkit article:
+
+```bibtex
+@article{uzair2026ns3ntn,
+  author  = {Uzair, Muhammad and others},
+  title   = {ns3-ntn-toolkit: An Integrated ns-3 Platform for {6G} Non-Terrestrial Networks},
+  journal = {IEEE Open Journal of the Communications Society},
+  year    = {2026},
+  doi     = {10.1109/OJCOMS.2026.3745010}
+}
+```
 
 ## License
 
-GPL-2.0-only, matching ns-3.
+GPL-2.0-only, matching ns-3. See [LICENSE](LICENSE).
+
+## Contact
+
+**Muhammad Uzair**, Independent Researcher
+muhammaduzairr69@gmail.com · [ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit), an integrated ns-3.43 platform for 6G non-terrestrial network research. Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).

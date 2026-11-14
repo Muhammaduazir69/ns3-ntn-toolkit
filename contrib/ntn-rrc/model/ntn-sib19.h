@@ -25,6 +25,40 @@ namespace ntnrrc
 
 class NtnTimingAdvance;
 
+/// Where the uplink time synchronization reference point sits (TS 38.213 cl. 4.2): the
+/// common delay ta-Common describes the satellite-to-reference-point leg.
+enum class UlSyncReference : uint8_t
+{
+    BeamCenterLegacy = 0, ///< toolkit convention before Oct 2026: beam centre plus feeder
+    Gateway = 1,          ///< reference at the gNB / gateway (transparent payload): feeder leg
+    Satellite = 2         ///< reference at the satellite: no common delay is broadcast
+};
+
+/// How the network turns the delay derivatives at the epoch into the three coefficients.
+enum class Sib19CoefficientFit : uint8_t
+{
+    Taylor = 0,    ///< T_C, T_D, T_V = TA, TA', TA''/2 at the epoch
+    Economized = 1, ///< Chebyshev economization of the cubic Taylor term over the window
+    Window = 2      ///< least squares of the predicted orbit at Chebyshev nodes of the window
+};
+
+/// How ul-SyncValidityDuration is chosen.
+enum class Sib19ValidityRule : uint8_t
+{
+    SlotOverDrift = 0, ///< legacy: time for the common TA to drift by one slot
+    ErrorBudget = 1,   ///< largest enumerated value whose predicted timing error fits Te
+    Fixed = 2          ///< the fit window, unchanged (e.g. 5 s, TS 38.133 Table A.3.36.5-1)
+};
+
+/// Satellite propagator assumed at the UE when sizing the validity.
+enum class UeEphemerisModel : uint8_t
+{
+    Linear = 0,      ///< straight line in ECEF
+    GravityEcef = 1, ///< two-body gravity in the rotating frame, no frame terms
+    Kepler = 2,      ///< two-body in an inertial frame
+    KeplerJ2 = 3     ///< two-body plus J2
+};
+
 /**
  * Satellite ephemeris carried inside NTN-Config-r17 (TS 38.331 §6.3.2).
  *
@@ -65,7 +99,7 @@ struct Sib19Content
     TaReferenceFrame taFrame{TaReferenceFrame::BeamCenter};
     Time taCommon{Seconds(0)};                     //!< broadcast TA_common
     double taCommonDriftRate{0.0};                 //!< s/s
-    double taCommonDriftVariation{0.0};            //!< (s/s)/s
+    double taCommonDriftVariation{0.0};            //!< T_V (s/s^2): HALF the curvature, TS 38.213 cl. 4.2
     Time ulSyncValidity{Seconds(900)};             //!< how long UE may keep using this block
     uint32_t cellSpecificKoffset{0};               //!< NR scheduling offset (slots)
     uint32_t kMac{0};                              //!< MAC-side offset (slots)
@@ -126,6 +160,53 @@ class NtnSib19Broadcaster : public Object
     /// = 1 ms / 2^numerology. Default 1 (30 kHz SCS).
     void SetNumerology(uint8_t mu) { m_numerology = mu; }
 
+    /// Uplink time synchronization reference point (TS 38.213 cl. 4.2). Gateway needs
+    /// SetGatewayPosition(); Satellite broadcasts a zero common delay.
+    void SetUlSyncReference(UlSyncReference ref) { m_ulRef = ref; }
+    void SetGatewayPosition(const Vector& ecef) { m_gatewayPos = ecef; }
+    void SetCoefficientFit(Sib19CoefficientFit fit) { m_fit = fit; }
+    /// Window of the economized fit when the validity rule does not set it.
+    void SetFitWindow(Time window) { m_fitWindow = window; }
+    void SetValidityRule(Sib19ValidityRule rule) { m_validityRule = rule; }
+    /// Uplink timing error limit Te (TS 38.133 cl. 7.1.2) and the share of it given to the
+    /// common-delay polynomial; the rest goes to the UE's ephemeris propagation.
+    void SetTimingErrorLimit(Time te, double commonShare = 0.5)
+    {
+        m_te = te;
+        m_commonShare = commonShare;
+    }
+    void SetAssumedUeModel(UeEphemerisModel m) { m_ueModel = m; }
+    /// One-sigma error of the network's own orbit prediction (position m, velocity m/s) and the
+    /// multiple z of sigma at which its norm is budgeted (3: P(|eta| > 3 sigma) about 0.4 % for an
+    /// along-track-dominated error); zero sigma means the network trusts its orbit exactly.
+    void SetOrbitErrorBudget(double sigmaPosM, double sigmaVelMps, double z = 3.0)
+    {
+        m_odPos = sigmaPosM;
+        m_odVel = sigmaVelMps;
+        m_z = z;
+    }
+    /// Part of Te reserved for the UE's own position (GNSS error, motion since the fix).
+    void SetUeAllowance(Time a) { m_ueAllowance = a; }
+    /// Number of refreshes at which no enumerated validity met the budget (5 s was broadcast).
+    uint64_t GetInfeasibleCount() const { return m_infeasible; }
+    /// The three broadcast coefficients (s, s/s, s/s^2), already quantized.
+    struct Coefficients
+    {
+        double tc{0.0};
+        double td{0.0};
+        double tv{0.0};
+    };
+    /// Coefficients the network would broadcast for a validity window of `window` seconds.
+    Coefficients FitCoefficients(double window) const;
+    /// Largest deviation of the coefficients from the predicted common delay over [0, window] (s).
+    double CommonResidual(const Coefficients& c, double window) const;
+    /// Residual of the last broadcast over its own validity window (s).
+    double GetLastCommonResidual() const { return m_lastCommonResidual; }
+    /// Predicted worst-case ephemeris-propagation error over [0, v] for the assumed UE model (s).
+    double PredictEphemerisError(double v) const;
+    /// Residual line-of-sight acceleration left by a UE propagator at radius r (m/s^2).
+    static double ResidualAcceleration(UeEphemerisModel m, double radiusM);
+
     /// Force an immediate refresh of the broadcast content.
     void RefreshNow();
     /// Most recent broadcast content (by reference; do not mutate).
@@ -163,6 +244,23 @@ class NtnSib19Broadcaster : public Object
     uint16_t m_cellId{0};
     PayloadMode m_payloadMode{PayloadMode::Transparent};
     uint8_t m_numerology{1}; // R3: for K_offset slot conversion
+    UlSyncReference m_ulRef{UlSyncReference::BeamCenterLegacy};
+    Vector m_gatewayPos{0.0, 0.0, 0.0};
+    Sib19CoefficientFit m_fit{Sib19CoefficientFit::Taylor};
+    Time m_fitWindow{Seconds(10)};
+    Sib19ValidityRule m_validityRule{Sib19ValidityRule::SlotOverDrift};
+    Time m_te{NanoSeconds(716.15)}; ///< Te_NTN, FR1-NTN 30/30 kHz, TS 38.133 Table 7.1C.2-1
+    double m_commonShare{0.5};
+    UeEphemerisModel m_ueModel{UeEphemerisModel::KeplerJ2};
+    double m_lastCommonResidual{0.0};
+    double m_odPos{0.0};
+    double m_odVel{0.0};
+    double m_z{3.0};
+    Time m_ueAllowance{Seconds(0)};
+    uint64_t m_infeasible{0};
+    static Coefficients Quantize(Coefficients c);
+    double CommonDelayAt(double tau) const;
+
     Time m_period{MilliSeconds(160)};
     bool m_running{false};
     EventId m_event;

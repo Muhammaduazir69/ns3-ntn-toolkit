@@ -653,16 +653,20 @@ class NtnSidelinkMode2Test : public TestCase
         NS_TEST_ASSERT_MSG_EQ(selfRxA, false, "half-duplex: a UE must never receive its own TX");
         NS_TEST_ASSERT_MSG_GT(chA->GetTxTotal(), 0u, "every UE must autonomously transmit");
         // Neighbours 20/40 m away are well within range -> high short-range PRR.
-        double prrNearA = chA->GetPrrWithinRange(45.0);
+        // TR 37.885 PRR counts half-duplex misses: with 5 subchannels the 4 UEs
+        // often share a slot, so the PRR is lower than collisions alone imply.
+        double prrNearA = chA->GetPrrWithinRangeExcludingHalfDuplex(45.0);
         NS_TEST_ASSERT_MSG_GT(prrNearA, 0.9,
-                              "with a wide pool, in-range PRR must be high (sensing avoids collisions)");
+                              "with a wide pool, in-range PRR without half duplex must be high (sensing avoids collisions)");
+        NS_TEST_ASSERT_MSG_LT(chA->GetPrrWithinRange(45.0), prrNearA,
+                              "half-duplex misses must lower the TR 37.885 PRR");
 
         // Case B: degenerate pool (1 subchannel) — all UEs forced to contend for
         // the same subchannel -> co-channel collisions -> PRR drops.
         bool selfRxB = false;
         std::vector<uint32_t> rxB;
         auto chB = RunScenario(4, 1, selfRxB, rxB);
-        double prrNearB = chB->GetPrrWithinRange(45.0);
+        double prrNearB = chB->GetPrrWithinRangeExcludingHalfDuplex(45.0);
 
         NS_TEST_ASSERT_MSG_EQ(selfRxB, false, "half-duplex holds under contention too");
         NS_TEST_ASSERT_MSG_LT(prrNearB, prrNearA,

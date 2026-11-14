@@ -577,7 +577,12 @@ NtnRealStackHelper::BuildNrRadio()
     {
         sched = Scheduler::OfdmaQos;
     }
-    switch (sched)
+    if (!m_schedulerTypeName.empty())
+    {
+        m_nr->SetSchedulerTypeId(TypeId::LookupByName(m_schedulerTypeName));
+    }
+    else
+        switch (sched)
     {
     case Scheduler::OfdmaRR:
         m_nr->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerOfdmaRR"));

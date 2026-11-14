@@ -106,6 +106,48 @@ NtnTimingAdvance::GetFeederRangeMetres() const
     return CalculateDistance(m_gw->GetPosition(), m_sat->GetPosition());
 }
 
+void
+NtnTimingAdvance::SetSatelliteStateProvider(SatStateProvider provider)
+{
+    m_satState = provider;
+}
+
+Vector
+NtnTimingAdvance::GetSatellitePositionAt(Time offset) const
+{
+    NS_ASSERT_MSG(m_sat, "Satellite mobility must be set");
+    if (!m_satState.IsNull())
+    {
+        Vector p;
+        Vector v;
+        m_satState(offset, p, v);
+        return p;
+    }
+    const Vector p = m_sat->GetPosition();
+    const Vector v = m_sat->GetVelocity();
+    const double t = offset.GetSeconds();
+    return Vector(p.x + v.x * t, p.y + v.y * t, p.z + v.z * t);
+}
+
+NtnTimingAdvance::DelayDerivatives
+NtnTimingAdvance::ComputeDelayDerivatives(const Vector& point, Time offset, Time h) const
+{
+    // Five-point stencils: O(h^4) for the first two derivatives, O(h^2) for the third.
+    const double s = h.GetSeconds();
+    double f[5];
+    for (int k = -2; k <= 2; ++k)
+    {
+        const Vector p = GetSatellitePositionAt(offset + Seconds(k * s));
+        f[k + 2] = 2.0 * CalculateDistance(p, point) / kSpeedOfLight;
+    }
+    DelayDerivatives d;
+    d.ta = f[2];
+    d.d1 = (f[0] - 8.0 * f[1] + 8.0 * f[3] - f[4]) / (12.0 * s);
+    d.d2 = (-f[0] + 16.0 * f[1] - 30.0 * f[2] + 16.0 * f[3] - f[4]) / (12.0 * s * s);
+    d.d3 = (-f[0] + 2.0 * f[1] - 2.0 * f[3] + f[4]) / (2.0 * s * s * s);
+    return d;
+}
+
 double
 NtnTimingAdvance::GetSlantRangeMetres() const
 {

@@ -8,6 +8,7 @@
 #include "ntn-rrc-types.h"
 
 #include <ns3/nstime.h>
+#include <ns3/callback.h>
 #include <ns3/object.h>
 #include <ns3/traced-callback.h>
 #include <ns3/vector.h>
@@ -100,6 +101,30 @@ class NtnTimingAdvance : public Object
     double ComputeTaDriftVariation(Time eps = MilliSeconds(10)) const;
 
     /// Slant range in metres from `m_ue` to `m_sat` at the current sim time.
+    /// Satellite ECEF position and velocity at Simulator::Now() + offset. When a provider is
+    /// set (for example Sgp4MobilityModel::GetEcefStateAt), the derivatives below come from
+    /// the orbit the satellite actually flies; otherwise from a straight-line projection,
+    /// which omits the orbital acceleration (about 8 m/s^2 in LEO) and so mis-states the
+    /// curvature of the delay by several percent and its rate of change by far more.
+    typedef Callback<void, Time, Vector&, Vector&> SatStateProvider;
+    void SetSatelliteStateProvider(SatStateProvider provider);
+    bool HasSatelliteStateProvider() const { return !m_satState.IsNull(); }
+    /// Satellite ECEF position at Now() + offset (provider, else straight-line projection).
+    Vector GetSatellitePositionAt(Time offset) const;
+
+    /// Two-way delay from the satellite to a fixed Earth-fixed point and its first three
+    /// time derivatives (s, s/s, s/s^2, s/s^3), by five-point central differences of step h.
+    struct DelayDerivatives
+    {
+        double ta{0.0};
+        double d1{0.0};
+        double d2{0.0};
+        double d3{0.0};
+    };
+    DelayDerivatives ComputeDelayDerivatives(const Vector& earthFixedPoint,
+                                             Time offset = Seconds(0),
+                                             Time h = Seconds(0.5)) const;
+
     double GetSlantRangeMetres() const;
     /// Same, but to the reference position (used for TA_common).
     double GetReferenceRangeMetres() const;
@@ -115,6 +140,7 @@ class NtnTimingAdvance : public Object
     Ptr<MobilityModel> m_gw; ///< RRC-2: feeder/gateway endpoint (Transparent mode)
     Vector m_referencePos{0.0, 0.0, 0.0};
     PayloadMode m_payloadMode{PayloadMode::Transparent};
+    SatStateProvider m_satState; ///< true-orbit state at an offset, if available
 
     TracedCallback<Time, Time, Time> m_taTrace; //!< (total, common, ue-specific)
 };

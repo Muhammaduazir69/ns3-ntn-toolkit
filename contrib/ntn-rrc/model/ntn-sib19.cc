@@ -12,6 +12,7 @@
 #include <ns3/mobility-model.h>
 #include <ns3/simulator.h>
 
+#include <algorithm>
 #include <cstring>
 
 namespace ns3
@@ -344,7 +345,11 @@ NtnSib19Broadcaster::RefreshNow()
         // UE extrapolating its timing between broadcasts uses a straight line
         // without it, which is worst at the closest approach of a LEO pass where
         // the drift reverses sign fastest.
-        m_latest.taCommonDriftVariation = m_ta->ComputeTaDriftVariation();
+        // TS 38.213 cl. 4.2 writes the two-way common delay as
+        // T_C + T_D tau + T_V tau^2, so ta-CommonDriftVariant is HALF the second
+        // derivative. Broadcasting the full curvature doubled the quadratic term
+        // at any UE that follows the specification.
+        m_latest.taCommonDriftVariation = 0.5 * m_ta->ComputeTaDriftVariation();
 
         // ul-SyncValidityDuration-r17 is how long the UE may keep using this
         // block. TS 38.331 gives it an enumerated set; 900 s is its MAXIMUM,
@@ -384,12 +389,247 @@ NtnSib19Broadcaster::RefreshNow()
         }
     }
 
+    // Oct 2026: specification-conformant common delay (reference point at the gateway or
+    // at the satellite), coefficient fit over the validity window, validity checked against
+    // the network's own orbit prediction, and quantization to the TS 38.331 field steps.
+    if (m_ta && m_ulRef != UlSyncReference::BeamCenterLegacy)
+    {
+        static const double kEnum[] = {5, 10, 15, 20, 25, 30, 35, 40,
+                                       45, 50, 55, 60, 120, 180, 240, 900};
+        if (m_ta->HasSatelliteStateProvider())
+        {
+            // the broadcast state vector is the network's own prediction, errors included
+            m_latest.ephemeris.positionEcefM = m_ta->GetSatellitePositionAt(Seconds(0));
+            const Vector p1 = m_ta->GetSatellitePositionAt(Seconds(0.5));
+            const Vector p0 = m_ta->GetSatellitePositionAt(Seconds(-0.5));
+            m_latest.ephemeris.velocityEcefMps = Vector(p1.x - p0.x, p1.y - p0.y, p1.z - p0.z);
+        }
+        Coefficients cf;
+        double window = m_fitWindow.GetSeconds();
+        if (m_validityRule == Sib19ValidityRule::ErrorBudget)
+        {
+            double chosen = 0.0;
+            // With the reference point at the satellite there is no common term, so the UE side
+            // gets the whole limit; otherwise it gets the share left after the common term.
+            const double ueShare =
+                (m_ulRef == UlSyncReference::Satellite ? 1.0 : 1.0 - m_commonShare) *
+                    m_te.GetSeconds() -
+                m_ueAllowance.GetSeconds();
+            for (double v : kEnum)
+            {
+                const Coefficients c = FitCoefficients(v);
+                if (CommonResidual(c, v) <= m_commonShare * m_te.GetSeconds() &&
+                    PredictEphemerisError(v) <= ueShare)
+                {
+                    chosen = v;
+                }
+            }
+            if (chosen == 0.0)
+            {
+                // no enumerated value meets the budget: broadcast the smallest and count it
+                ++m_infeasible;
+                chosen = kEnum[0];
+            }
+            window = chosen;
+            m_latest.ulSyncValidity = Seconds(window);
+        }
+        cf = FitCoefficients(window);
+        if (m_validityRule == Sib19ValidityRule::Fixed)
+        {
+            m_latest.ulSyncValidity = Seconds(window);
+        }
+        if (m_validityRule == Sib19ValidityRule::SlotOverDrift)
+        {
+            // legacy rule on the broadcast drift: time to drift by one scheduling slot
+            const double slot = 1.0e-3 / std::pow(2.0, static_cast<double>(m_numerology));
+            const double v = (std::fabs(cf.td) > 0.0) ? slot / std::fabs(cf.td) : 900.0;
+            double chosen = kEnum[0];
+            for (double e : kEnum)
+            {
+                if (e <= v)
+                {
+                    chosen = e;
+                }
+            }
+            m_latest.ulSyncValidity = Seconds(chosen);
+        }
+        m_lastCommonResidual = CommonResidual(cf, window);
+        m_latest.taCommon = Seconds(cf.tc);
+        m_latest.taCommonDriftRate = cf.td;
+        m_latest.taCommonDriftVariation = cf.tv;
+        auto q = [](double x, double step) { return std::round(x / step) * step; };
+        Vector& p = m_latest.ephemeris.positionEcefM;
+        Vector& u = m_latest.ephemeris.velocityEcefMps;
+        p = Vector(q(p.x, 1.3), q(p.y, 1.3), q(p.z, 1.3));
+        u = Vector(q(u.x, 0.06), q(u.y, 0.06), q(u.z, 0.06));
+    }
+
     m_latestBytes.assign(Sib19Codec::kSerialisedBytes, 0);
     const auto written =
         Sib19Codec::Serialise(m_latest, m_latestBytes.data(), m_latestBytes.size());
     NS_ASSERT(written == Sib19Codec::kSerialisedBytes);
 
     m_broadcastTrace(m_latest);
+}
+
+double
+NtnSib19Broadcaster::ResidualAcceleration(UeEphemerisModel m, double r)
+{
+    constexpr double kMu = 3.986004418e14;
+    constexpr double kRe = 6378137.0;
+    constexpr double kJ2 = 1.08262668e-3;
+    constexpr double kOmegaE = 7.2921150e-5;
+    switch (m)
+    {
+    case UeEphemerisModel::Linear:
+        // gravity (two-body plus the largest J2 term) and the frame terms of the rotating frame
+        return kMu / (r * r) * (1.0 + 3.0 * kJ2 * (kRe / r) * (kRe / r)) +
+               2.0 * kOmegaE * std::sqrt(kMu / r) + kOmegaE * kOmegaE * r;
+    case UeEphemerisModel::GravityEcef:
+        // what the rotating-frame two-body propagator leaves out: Coriolis, centrifugal and J2
+        return 2.0 * kOmegaE * std::sqrt(kMu / r) + kOmegaE * kOmegaE * r +
+               1.5 * kJ2 * kMu * kRe * kRe / std::pow(r, 4) * 2.0;
+    case UeEphemerisModel::Kepler:
+        // J2 acceleration, largest over latitude (factor 2 at the poles)
+        return 1.5 * kJ2 * kMu * kRe * kRe / std::pow(r, 4) * 2.0;
+    case UeEphemerisModel::KeplerJ2:
+    default:
+        // Higher zonal terms and drag left by a J2 propagator. 1.1e-3 m/s^2 is calibrated on the
+        // effective residual against SGP4 on the 2026 Starlink and OneWeb element sets (0.68e-3 to
+        // 0.85e-3 m/s^2 at the 99th percentile over the four shells), rounded up.
+        (void)r;
+        return 1.1e-3;
+    }
+}
+
+NtnSib19Broadcaster::Coefficients
+NtnSib19Broadcaster::Quantize(Coefficients c)
+{
+    // TS 38.331 NTN-Config-r17: ta-Common 0..66485757 x 4.072 ns, ta-CommonDrift
+    // -257303..257303 x 0.2 ns/s, ta-CommonDriftVariant 0..28949 x 0.02 ns/s^2 (unsigned).
+    auto q = [](double x, double step, double lo, double hi) {
+        return std::min(hi, std::max(lo, std::round(x / step))) * step;
+    };
+    c.tc = q(c.tc, 4.072e-9, 0.0, 66485757.0);
+    c.td = q(c.td, 0.2e-9, -257303.0, 257303.0);
+    c.tv = q(c.tv, 0.2e-10, 0.0, 28949.0);
+    return c;
+}
+
+double
+NtnSib19Broadcaster::CommonDelayAt(double tau) const
+{
+    if (m_ulRef != UlSyncReference::Gateway)
+    {
+        return 0.0;
+    }
+    const Vector s = m_ta->GetSatellitePositionAt(Seconds(tau));
+    return 2.0 * CalculateDistance(s, m_gatewayPos) / NtnTimingAdvance::kSpeedOfLight;
+}
+
+NtnSib19Broadcaster::Coefficients
+NtnSib19Broadcaster::FitCoefficients(double window) const
+{
+    Coefficients c;
+    if (m_ulRef != UlSyncReference::Gateway)
+    {
+        return c; // reference at the satellite: no common delay
+    }
+    const auto d = m_ta->ComputeDelayDerivatives(m_gatewayPos);
+    c.tc = d.ta;
+    c.td = d.d1;
+    c.tv = 0.5 * d.d2;
+    if (m_fit == Sib19CoefficientFit::Economized)
+    {
+        // Best uniform quadratic approximation of tau^3 over [0, V]:
+        // (3/2) V tau^2 - (9/16) V^2 tau + V^3/32, error V^3/32 (Chebyshev T3).
+        const double a = d.d3 / 6.0;
+        const double tv = c.tv + 1.5 * a * window;
+        if (tv >= 0.0)
+        {
+            c.tc += a * window * window * window / 32.0;
+            c.td -= a * 9.0 / 16.0 * window * window;
+            c.tv = tv;
+            return Quantize(c);
+        }
+        // the unsigned field cannot carry the economized curvature: fall through to the
+        // constrained window fit, which handles T_V = 0
+    }
+    if (m_fit != Sib19CoefficientFit::Taylor)
+    {
+        // Least squares of the predicted delay at 16 Chebyshev nodes of [0, V] in the scaled
+        // variable u = tau / V, with the curvature held inside the unsigned field.
+        constexpr int kN = 16;
+        double S[5] = {0, 0, 0, 0, 0};
+        double B[3] = {0, 0, 0};
+        for (int i = 0; i < kN; ++i)
+        {
+            const double u = 0.5 * (1.0 - std::cos((2.0 * (i + 1) - 1.0) * M_PI / (2.0 * kN)));
+            const double y = CommonDelayAt(u * window);
+            double up = 1.0;
+            for (int k = 0; k < 5; ++k)
+            {
+                S[k] += up;
+                if (k < 3)
+                {
+                    B[k] += up * y;
+                }
+                up *= u;
+            }
+        }
+        auto det3 = [](double a, double b, double c2, double d, double e, double f, double g,
+                       double hh, double ii) {
+            return a * (e * ii - f * hh) - b * (d * ii - f * g) + c2 * (d * hh - e * g);
+        };
+        const double D = det3(S[0], S[1], S[2], S[1], S[2], S[3], S[2], S[3], S[4]);
+        double c0 = det3(B[0], S[1], S[2], B[1], S[2], S[3], B[2], S[3], S[4]) / D;
+        double c1 = det3(S[0], B[0], S[2], S[1], B[1], S[3], S[2], B[2], S[4]) / D;
+        double c2 = det3(S[0], S[1], B[0], S[1], S[2], B[1], S[2], S[3], B[2]) / D;
+        if (c2 < 0.0)
+        {
+            const double d2 = S[0] * S[2] - S[1] * S[1];
+            c0 = (B[0] * S[2] - S[1] * B[1]) / d2;
+            c1 = (S[0] * B[1] - S[1] * B[0]) / d2;
+            c2 = 0.0;
+        }
+        c.tc = c0;
+        c.td = c1 / window;
+        c.tv = c2 / (window * window);
+    }
+    return Quantize(c);
+}
+
+double
+NtnSib19Broadcaster::CommonResidual(const Coefficients& c, double window) const
+{
+    if (m_ulRef != UlSyncReference::Gateway)
+    {
+        return 0.0;
+    }
+    double worst = 0.0;
+    constexpr int kGrid = 41;
+    for (int i = 0; i < kGrid; ++i)
+    {
+        const double tau = window * i / (kGrid - 1.0);
+        const double e = c.tc + c.td * tau + c.tv * tau * tau - CommonDelayAt(tau);
+        worst = std::max(worst, std::fabs(e));
+    }
+    // the feeder delay is predicted from an orbit that errs by up to z sigma
+    return worst + 2.0 * m_z * (m_odPos + m_odVel * window) / NtnTimingAdvance::kSpeedOfLight;
+}
+
+double
+NtnSib19Broadcaster::PredictEphemerisError(double v) const
+{
+    const Vector p = m_sat->GetPosition();
+    const double r = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+    // (2/c) [ (1/2) a v^2 + |dp| + |dv| v ]: quantization of the state vector, as vector norms
+    // of half a step per axis (1.13 m, 0.052 m/s), and the network's own orbit error at z sigma
+    const double qp = 0.5 * 1.3 * std::sqrt(3.0);
+    const double qv = 0.5 * 0.06 * std::sqrt(3.0);
+    return (ResidualAcceleration(m_ueModel, r) * v * v +
+            2.0 * (qp + qv * v + m_z * (m_odPos + m_odVel * v))) /
+           NtnTimingAdvance::kSpeedOfLight;
 }
 
 const Sib19Content&

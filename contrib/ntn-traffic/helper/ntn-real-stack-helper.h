@@ -721,6 +721,8 @@ class NtnRealStackHelper
     };
     /// Select the NR MAC scheduler (nr backend only). Call before Build().
     void SetScheduler(Scheduler s) { m_scheduler = s; }
+    /// Select an NR MAC scheduler by TypeId name (nr backend only); overrides SetScheduler when non-empty.
+    void SetSchedulerTypeName(const std::string& name) { m_schedulerTypeName = name; }
     Scheduler GetScheduler() const { return m_scheduler; }
 
     /// One network slice = a dedicated NR bandwidth part carrying one 5QI.
@@ -1238,6 +1240,7 @@ class NtnRealStackHelper
     bool m_nrNativeTraces{false};                 // D: EnableTraces() native stat files
     Scheduler m_scheduler{Scheduler::TdmaRR};     // C: NR MAC scheduler
     std::vector<SliceSpec> m_slices;              // C: per-slice BWPs (empty = 1 BWP)
+    std::string m_schedulerTypeName;              // C: custom scheduler TypeId (empty = enum choice)
     bool m_handover{false};
     uint64_t m_handoverRefusals{0};
     std::string m_lastHandoverRefusal;                       // A: NR inter-cell handover

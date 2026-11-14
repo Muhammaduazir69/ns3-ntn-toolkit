@@ -2666,6 +2666,198 @@ class NtnXnHandoverProcedureTestCase : public TestCase
     }
 };
 
+/// Route lifetime (Paper 7): the lifetime-aware path is the longest-lived path
+/// within the delay stretch, and collapses to the shortest path at eps = 0.
+///
+/// Three disjoint routes from 1 to 5: A (weight 200, lifetime 10 s), B (204,
+/// 50 s) and C (300, 500 s). With eps = 0.05 only A and B meet the bound, so B
+/// must win; with eps = 0.6 C does; with eps = 0 A does. A search that stopped
+/// after one pruning step, or that ignored the bound, fails one of the three.
+class ContactGraphRouterLifetimeAwarePathTest : public TestCase
+{
+  public:
+    ContactGraphRouterLifetimeAwarePathTest()
+        : TestCase("LifetimeAwarePath returns the max-min lifetime path within the stretch bound")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<ContactGraphRouter> r = CreateObject<ContactGraphRouter>();
+        Ptr<ContactGraphScheduler> sched = CreateObject<ContactGraphScheduler>();
+        r->Attach(sched);
+        sched->m_contactUp({0, 1, 2, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 2, 5, true, true, 100.0, 0.0});
+        sched->m_contactUp({0, 1, 3, true, true, 102.0, 0.0});
+        sched->m_contactUp({0, 3, 5, true, true, 102.0, 0.0});
+        sched->m_contactUp({0, 1, 4, true, true, 150.0, 0.0});
+        sched->m_contactUp({0, 4, 5, true, true, 150.0, 0.0});
+        std::map<std::pair<uint32_t, uint32_t>, double> life{{{1, 2}, 10.0},
+                                                             {{2, 5}, 100.0},
+                                                             {{1, 3}, 50.0},
+                                                             {{3, 5}, 60.0},
+                                                             {{1, 4}, 500.0},
+                                                             {{4, 5}, 500.0}};
+        auto res = [&](uint32_t a, uint32_t b) {
+            return life.at({std::min(a, b), std::max(a, b)});
+        };
+        auto p0 = r->LifetimeAwarePath(1, 5, 0.0, res);
+        NS_TEST_ASSERT_MSG_EQ(p0.path.size(), 3u, "eps 0: a two-hop path");
+        NS_TEST_EXPECT_MSG_EQ(p0.path[1], 2u, "eps 0: the shortest route A");
+        NS_TEST_EXPECT_MSG_EQ_TOL(p0.lifetime_s, 10.0, 1e-9, "eps 0: lifetime of A");
+        auto p1 = r->LifetimeAwarePath(1, 5, 0.05, res);
+        NS_TEST_EXPECT_MSG_EQ(p1.path[1], 3u, "eps 0.05: route B");
+        NS_TEST_EXPECT_MSG_EQ_TOL(p1.lifetime_s, 50.0, 1e-9, "eps 0.05: lifetime of B");
+        NS_TEST_EXPECT_MSG_EQ_TOL(p1.total_weight, 204.0, 1e-9, "eps 0.05: weight of B");
+        auto p2 = r->LifetimeAwarePath(1, 5, 0.6, res);
+        NS_TEST_EXPECT_MSG_EQ(p2.path[1], 4u, "eps 0.6: route C");
+        NS_TEST_EXPECT_MSG_EQ_TOL(p2.lifetime_s, 500.0, 1e-9, "eps 0.6: lifetime of C");
+        NS_TEST_EXPECT_MSG_GT(p2.dijkstra_runs, 2u, "C is reached through B");
+        // A route that ends within the switch guard is not admissible: with a
+        // 20 s guard, A (10 s) is out and the bound is taken against B.
+        auto p3 = r->LifetimeAwarePath(1, 5, 0.0, res, 20.0);
+        NS_TEST_EXPECT_MSG_EQ(p3.path[1], 3u, "guard 20 s, eps 0: route B");
+        NS_TEST_EXPECT_MSG_EQ_TOL(p3.lifetime_s, 50.0, 1e-9, "guard 20 s: lifetime of B");
+        auto p4 = r->LifetimeAwarePath(1, 5, 0.0, res, 1000.0);
+        NS_TEST_EXPECT_MSG_EQ(p4.path[1], 2u, "no route outlives the guard: shortest");
+    }
+};
+
+/// Route lifetime (Paper 7): PredictContactEndS, asked at the instant a ground
+/// contact comes up, must say when the sampler will take it down.
+///
+/// An 11-satellite plane passes a ground station at 53 deg N for one orbit with
+/// a 1 s sampler and the default 2 deg hysteresis. At every GSL up event the
+/// predicted end is stored; at the matching down event the sampler's time must
+/// fall in [predicted, predicted + one tick], because the sampler sees the drop
+/// at the first tick after it. A predictor that used the up threshold instead
+/// of the down threshold ends passes early by tens of seconds and fails.
+class ContactSchedulerPredictContactEndTest : public TestCase
+{
+  public:
+    ContactSchedulerPredictContactEndTest()
+        : TestCase("PredictContactEndS matches the sampled GSL down events of an orbit")
+    {
+    }
+
+  private:
+    std::map<uint32_t, double> m_pred;
+    std::vector<double> m_err;
+    Ptr<ContactGraphScheduler> m_cg;
+
+    void OnUp(ContactEvent ev)
+    {
+        if (!ev.is_isl)
+        {
+            m_pred[ev.node_a] = ev.timestamp_s + m_cg->PredictContactEndS(ev.node_a, ev.node_b, false, 3000.0);
+        }
+    }
+
+    void OnDown(ContactEvent ev)
+    {
+        auto it = m_pred.find(ev.node_a);
+        if (!ev.is_isl && it != m_pred.end())
+        {
+            m_err.push_back(ev.timestamp_s - it->second);
+            m_pred.erase(it);
+        }
+    }
+
+    void DoRun() override
+    {
+        WalkerConfig cfg;
+        cfg.inclination_deg = 53.0;
+        cfg.total_sats = 11;
+        cfg.num_planes = 1;
+        cfg.phasing_f = 0;
+        cfg.altitude_km = 550.0;
+        cfg.epoch_unix_s = 1577836800.0;
+        auto elts = WalkerConstellation::BuildDelta(cfg);
+        m_cg = CreateObject<ContactGraphScheduler>();
+        m_cg->SetSamplingInterval(Seconds(1.0));
+        m_cg->SetMinElevationDeg(10.0);
+        for (size_t i = 0; i < elts.size(); ++i)
+        {
+            Ptr<Sgp4MobilityModel> s = CreateObject<Sgp4MobilityModel>();
+            s->SetElements(elts[i]);
+            m_cg->RegisterSatellite(static_cast<uint32_t>(i + 1), s);
+        }
+        m_cg->RegisterGroundStation(101, 53.0, 0.0);
+        m_cg->m_contactUp.ConnectWithoutContext(
+            MakeCallback(&ContactSchedulerPredictContactEndTest::OnUp, this));
+        m_cg->m_contactDown.ConnectWithoutContext(
+            MakeCallback(&ContactSchedulerPredictContactEndTest::OnDown, this));
+        m_cg->Start();
+        Simulator::Stop(Seconds(6000.0));
+        Simulator::Run();
+        m_cg->Stop();
+        NS_TEST_ASSERT_MSG_GT(m_err.size(), 0u, "at least one complete pass");
+        for (double e : m_err)
+        {
+            NS_TEST_EXPECT_MSG_GT_OR_EQ(e, -0.02, "down not before the predicted end");
+            NS_TEST_EXPECT_MSG_LT_OR_EQ(e, 1.02, "down within one tick of the predicted end");
+        }
+        Simulator::Destroy();
+    }
+};
+
+/// Route lifetime (Paper 7): registered ISL candidates restrict the topology.
+///
+/// Four satellites in one plane at 90 deg spacing are all mutually within a
+/// 10,000 km cap and clear of the limb only for neighbours. With no candidates
+/// every feasible pair comes up; with the single candidate (1, 2) only that
+/// link may, which is how a terminal-limited +Grid topology is expressed.
+class ContactSchedulerIslCandidateTest : public TestCase
+{
+  public:
+    ContactSchedulerIslCandidateTest()
+        : TestCase("RegisterIslCandidate restricts ISL checks to the candidate pairs")
+    {
+    }
+
+  private:
+    size_t Active(bool restrict)
+    {
+        WalkerConfig cfg;
+        cfg.inclination_deg = 53.0;
+        cfg.total_sats = 8;
+        cfg.num_planes = 1;
+        cfg.phasing_f = 0;
+        cfg.altitude_km = 1200.0;
+        cfg.epoch_unix_s = 1577836800.0;
+        auto elts = WalkerConstellation::BuildDelta(cfg);
+        Ptr<ContactGraphScheduler> cg = CreateObject<ContactGraphScheduler>();
+        cg->SetSamplingInterval(Seconds(1.0));
+        cg->SetMaxIslRangeM(10.0e6);
+        for (size_t i = 0; i < elts.size(); ++i)
+        {
+            Ptr<Sgp4MobilityModel> s = CreateObject<Sgp4MobilityModel>();
+            s->SetElements(elts[i]);
+            cg->RegisterSatellite(static_cast<uint32_t>(i + 1), s);
+        }
+        if (restrict)
+        {
+            cg->RegisterIslCandidate(2, 1);
+        }
+        cg->Start();
+        Simulator::Stop(Seconds(3.0));
+        Simulator::Run();
+        const size_t n = cg->NumActiveIsl();
+        cg->Stop();
+        Simulator::Destroy();
+        return n;
+    }
+
+    void DoRun() override
+    {
+        const size_t all = Active(false);
+        const size_t one = Active(true);
+        NS_TEST_EXPECT_MSG_GT(all, 1u, "all-feasible policy: several links");
+        NS_TEST_EXPECT_MSG_EQ(one, 1u, "one candidate: one link");
+    }
+};
+
 class NtnConstellationTestSuite : public TestSuite
 {
   public:
@@ -2712,6 +2904,9 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new IslLimbTestKeepsAtmosphericClearanceTest, Duration::QUICK);
         AddTestCase(new ContactGraphRouterRegenSimulatorTimeTest,
                     Duration::QUICK);
+        AddTestCase(new ContactGraphRouterLifetimeAwarePathTest, Duration::QUICK);
+        AddTestCase(new ContactSchedulerPredictContactEndTest, Duration::QUICK);
+        AddTestCase(new ContactSchedulerIslCandidateTest, Duration::QUICK);
     }
 };
 

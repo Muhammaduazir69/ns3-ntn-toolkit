@@ -4,6 +4,7 @@
 
 #include "contact-graph-router.h"
 
+#include <cmath>
 #include <limits>
 
 #include <set>
@@ -56,17 +57,61 @@ ContactGraphRouter::Attach(Ptr<ContactGraphScheduler> scheduler)
 }
 
 void
+ContactGraphRouter::FlatAdd(uint32_t a, uint32_t b, double w)
+{
+    if (m_flat.size() <= a)
+    {
+        m_flat.resize(a + 1);
+    }
+    auto& v = m_flat[a];
+    auto it = std::lower_bound(v.begin(), v.end(), std::make_pair(b, -1e300));
+    if (it != v.end() && it->first == b)
+    {
+        it->second = w;
+    }
+    else
+    {
+        v.insert(it, {b, w});
+    }
+}
+
+void
+ContactGraphRouter::FlatErase(uint32_t a, uint32_t b)
+{
+    if (a >= m_flat.size())
+    {
+        return;
+    }
+    auto& v = m_flat[a];
+    v.erase(std::remove_if(v.begin(), v.end(), [b](const auto& x) { return x.first == b; }), v.end());
+}
+
+void
+ContactGraphRouter::FlatSet(uint32_t a, uint32_t b, double w)
+{
+    if (a >= m_flat.size())
+    {
+        return;
+    }
+    for (auto& x : m_flat[a])
+    {
+        if (x.first == b)
+        {
+            x.second = w;
+            return;
+        }
+    }
+}
+
+void
 ContactGraphRouter::UpdateEdgeWeight(const ContactEvent& ev)
 {
     // Refresh the weight of an edge that is already in the graph. Deliberately
     // does NOT insert: an update for an edge we never saw come up would mean
     // the transition traces and this one disagree, and silently inventing the
     // edge would hide that.
-    const auto key = CanonicalEdge(ev.node_a, ev.node_b);
-    if (m_edges.count(key) != 0)
-    {
-        m_edgeWeights[key] = ev.range_m;
-    }
+    FlatSet(ev.node_a, ev.node_b, ev.range_m);
+    FlatSet(ev.node_b, ev.node_a, ev.range_m);
 }
 
 void
@@ -85,6 +130,8 @@ ContactGraphRouter::HandleContactEvent(const ContactEvent& ev)
         // Seed the weight from the contact-up range; OnContactUpdate keeps
         // it current for the rest of the pass.
         m_edgeWeights[key] = ev.range_m;
+        FlatAdd(ev.node_a, ev.node_b, ev.range_m);
+        FlatAdd(ev.node_b, ev.node_a, ev.range_m);
     }
     else
     {
@@ -96,13 +143,15 @@ ContactGraphRouter::HandleContactEvent(const ContactEvent& ev)
             ++m_removed;
         }
         m_edgeWeights.erase(key);
+        FlatErase(ev.node_a, ev.node_b);
+        FlatErase(ev.node_b, ev.node_a);
     }
 }
 
 bool
 ContactGraphRouter::HasEdge(uint32_t a, uint32_t b) const
 {
-    return m_edges.count(CanonicalEdge(a, b)) != 0;
+    return !std::isnan(EdgeWeight(a, b));
 }
 
 size_t
@@ -121,12 +170,17 @@ ContactGraphRouter::Neighbours(uint32_t node) const
 double
 ContactGraphRouter::EdgeWeight(uint32_t a, uint32_t b) const
 {
-    auto it = m_edgeWeights.find(CanonicalEdge(a, b));
-    if (it == m_edgeWeights.end())
+    if (a < m_flat.size())
     {
-        return std::numeric_limits<double>::quiet_NaN();
+        for (const auto& x : m_flat[a])
+        {
+            if (x.first == b)
+            {
+                return x.second;
+            }
+        }
     }
-    return it->second;
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 void
@@ -199,12 +253,13 @@ ContactGraphRouter::ShortestPathWeightedRegenOnly(uint32_t src,
         }
         for (uint32_t v : nbIt->second)
         {
-            const auto wEdge = m_edgeWeights.find(CanonicalEdge(u, v));
-            if (wEdge == m_edgeWeights.end())
+            // Weight from the flat adjacency, which UpdateEdgeWeight keeps current.
+            const double we = EdgeWeight(u, v);
+            if (std::isnan(we))
             {
                 continue;
             }
-            const double newW = w + wEdge->second;
+            const double newW = w + we;
             auto dvIt = dist.find(v);
             if (dvIt == dist.end() || newW < dvIt->second)
             {
@@ -287,18 +342,93 @@ ContactGraphRouter::ShortestPathHops(uint32_t src, uint32_t dst) const
 ContactGraphRouter::WeightedPath
 ContactGraphRouter::ShortestPathWeighted(uint32_t src, uint32_t dst) const
 {
+    return ShortestPathWeightedFiltered(src, dst, nullptr);
+}
+
+ContactGraphRouter::LifetimePath
+ContactGraphRouter::LifetimeAwarePath(uint32_t src,
+                                      uint32_t dst,
+                                      double eps,
+                                      const std::function<double(uint32_t, uint32_t)>& residualS,
+                                      double minLifetimeS) const
+{
+    auto lifetimeOf = [&](const std::vector<uint32_t>& p) {
+        double l = std::numeric_limits<double>::infinity();
+        for (size_t k = 0; k + 1 < p.size(); ++k)
+        {
+            l = std::min(l, residualS(p[k], p[k + 1]));
+        }
+        return l;
+    };
+    WeightedPath best = ShortestPathWeighted(src, dst);
+    LifetimePath out{best.path, best.total_weight, 0.0, 1};
+    if (best.path.empty())
+    {
+        return out;
+    }
+    if (minLifetimeS > 0.0 && lifetimeOf(best.path) <= minLifetimeS)
+    {
+        WeightedPath alive = ShortestPathWeightedFiltered(src, dst, [&](uint32_t a, uint32_t b) {
+            return residualS(a, b) > minLifetimeS;
+        });
+        ++out.dijkstra_runs;
+        if (alive.path.empty())
+        {
+            out.lifetime_s = lifetimeOf(best.path);
+            return out;
+        }
+        best = alive;
+        out.path = best.path;
+        out.total_weight = best.total_weight;
+    }
+    const double bound = (1.0 + eps) * best.total_weight;
+    out.lifetime_s = lifetimeOf(best.path);
+    while (true)
+    {
+        const double cur = out.lifetime_s;
+        WeightedPath p = ShortestPathWeightedFiltered(src, dst, [&](uint32_t a, uint32_t b) {
+            return residualS(a, b) > cur;
+        });
+        ++out.dijkstra_runs;
+        if (p.path.empty() || p.total_weight > bound)
+        {
+            return out;
+        }
+        out.path = p.path;
+        out.total_weight = p.total_weight;
+        out.lifetime_s = lifetimeOf(p.path);
+    }
+}
+
+ContactGraphRouter::WeightedPath
+ContactGraphRouter::ShortestPathWeightedFiltered(uint32_t src,
+                                                 uint32_t dst,
+                                                 const EdgeFilter& keep) const
+{
     ++m_queries;
     if (src == dst)
     {
         return {{src}, 0.0};
     }
-    // Dijkstra. dist[node] = shortest known weight from src.
-    std::map<uint32_t, double> dist;
-    std::map<uint32_t, uint32_t> pred;
+    // Dijkstra over the flat adjacency; same relaxation order and tie rule as the map version.
+    const size_t n = m_flat.size();
+    if (src >= n || dst >= n)
+    {
+        return {{}, std::numeric_limits<double>::infinity()};
+    }
+    if (m_dist.size() < n)
+    {
+        m_dist.resize(n);
+        m_pred.resize(n);
+        m_stamp.assign(n, 0);
+        m_stampNow = 0;
+    }
+    ++m_stampNow;
+    const uint32_t st = m_stampNow;
     using QEntry = std::pair<double, uint32_t>; // (weight, node)
-    std::priority_queue<QEntry, std::vector<QEntry>, std::greater<QEntry>>
-        pq;
-    dist[src] = 0.0;
+    std::priority_queue<QEntry, std::vector<QEntry>, std::greater<QEntry>> pq;
+    m_dist[src] = 0.0;
+    m_stamp[src] = st;
     pq.push({0.0, src});
     while (!pq.empty())
     {
@@ -306,41 +436,97 @@ ContactGraphRouter::ShortestPathWeighted(uint32_t src, uint32_t dst) const
         pq.pop();
         if (u == dst)
         {
-            // Reconstruct path.
             std::vector<uint32_t> path{dst};
             uint32_t c = dst;
             while (c != src)
             {
-                c = pred.at(c);
+                c = m_pred[c];
                 path.push_back(c);
             }
             std::reverse(path.begin(), path.end());
             return {std::move(path), w};
         }
-        auto dit = dist.find(u);
-        if (dit == dist.end() || w > dit->second)
+        if (w > m_dist[u])
         {
             continue; // stale
         }
-        auto nbIt = m_adj.find(u);
-        if (nbIt == m_adj.end())
+        for (const auto& [v, we] : m_flat[u])
+        {
+            if (keep && !keep(u, v))
+            {
+                continue;
+            }
+            const double newW = w + we;
+            if (m_stamp[v] != st || newW < m_dist[v])
+            {
+                m_stamp[v] = st;
+                m_dist[v] = newW;
+                m_pred[v] = u;
+                pq.push({newW, v});
+            }
+        }
+    }
+    return {{}, std::numeric_limits<double>::infinity()};
+}
+
+ContactGraphRouter::WeightedPath
+ContactGraphRouter::ShortestPathCost(uint32_t src, uint32_t dst, const EdgeCost& cost) const
+{
+    ++m_queries;
+    const size_t n = m_flat.size();
+    if (src >= n || dst >= n)
+    {
+        return {{}, std::numeric_limits<double>::infinity()};
+    }
+    if (m_dist.size() < n)
+    {
+        m_dist.resize(n);
+        m_pred.resize(n);
+        m_stamp.assign(n, 0);
+        m_stampNow = 0;
+    }
+    ++m_stampNow;
+    const uint32_t st = m_stampNow;
+    using QEntry = std::pair<double, uint32_t>;
+    std::priority_queue<QEntry, std::vector<QEntry>, std::greater<QEntry>> pq;
+    m_dist[src] = 0.0;
+    m_stamp[src] = st;
+    pq.push({0.0, src});
+    while (!pq.empty())
+    {
+        const auto [w, u] = pq.top();
+        pq.pop();
+        if (u == dst)
+        {
+            std::vector<uint32_t> path{dst};
+            uint32_t c = dst;
+            double total = 0.0;
+            while (c != src)
+            {
+                total += EdgeWeight(c, m_pred[c]);
+                c = m_pred[c];
+                path.push_back(c);
+            }
+            std::reverse(path.begin(), path.end());
+            return {std::move(path), total};
+        }
+        if (w > m_dist[u])
         {
             continue;
         }
-        for (uint32_t v : nbIt->second)
+        for (const auto& [v, we] : m_flat[u])
         {
-            const auto wEdge =
-                m_edgeWeights.find(CanonicalEdge(u, v));
-            if (wEdge == m_edgeWeights.end())
+            const double ce = cost(u, v, we);
+            if (!std::isfinite(ce))
             {
-                continue; // edge raced out
+                continue;
             }
-            const double newW = w + wEdge->second;
-            auto dvIt = dist.find(v);
-            if (dvIt == dist.end() || newW < dvIt->second)
+            const double newW = w + ce;
+            if (m_stamp[v] != st || newW < m_dist[v])
             {
-                dist[v] = newW;
-                pred[v] = u;
+                m_stamp[v] = st;
+                m_dist[v] = newW;
+                m_pred[v] = u;
                 pq.push({newW, v});
             }
         }

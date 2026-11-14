@@ -55,3 +55,47 @@ build_lib_example(
     ${libmmwave}
     ${liblte}
 )
+
+
+# Slice partition enforced by the MAC: NtnSliceQuotaScheduler, static or closed-loop quotas, on a LEO pass.
+build_lib_example(
+  NAME ntn-slice-quota-leo
+  SOURCE_FILES ntn-slice-quota-leo.cc
+  LIBRARIES_TO_LINK
+    ${libntn-slice}
+    ${libntn-traffic}
+    ${libntn-constellation}
+    ${libnr}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libntn-cho}
+)
+
+build_lib_example(
+  NAME ntn-slice-pass-leo
+  SOURCE_FILES ntn-slice-pass-leo.cc
+  LIBRARIES_TO_LINK
+    ${libntn-slice}
+    ${libntn-traffic}
+    ${libntn-constellation}
+    ${libnr}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libntn-cho}
+)
+
+build_lib_example(
+  NAME ntn-slice-tenants-leo
+  SOURCE_FILES ntn-slice-tenants-leo.cc
+  LIBRARIES_TO_LINK
+    ${libntn-slice}
+    ${libntn-traffic}
+    ${libntn-constellation}
+    ${libnr}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libntn-cho}
+)

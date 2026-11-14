@@ -111,6 +111,8 @@ class NtnSlUeMac : public Object
     void SetSelectionWindow(uint32_t t1Slots, uint32_t t2Slots);
     void SetReservationPeriod(uint32_t prsvpSlots) { m_prsvpSlots = prsvpSlots; }
     void SetRsrpThresholdDbm(double dbm) { m_rsrpThreshDbm = dbm; }
+    /// P8: message arrivals on a fixed period with a random phase, so reselection does not fire a message early.
+    void SetAlignReselection(bool on) { m_align = on; }
     void SetPacketBytes(uint32_t bytes) { m_pktBytes = bytes; }
 
     int64_t AssignStreams(int64_t stream);
@@ -124,6 +126,8 @@ class NtnSlUeMac : public Object
 
     /// Run Mode-2 sensing-based selection for the next transmission. Returns the grant.
     NtnSlGrant SelectResource(uint64_t nowSlot);
+    /// P8: selection window after the arrival slot of the next periodic message; sensing is pruned at nowSlot.
+    NtnSlGrant SelectResourceAt(uint64_t nowSlot, uint64_t arrivalSlot);
     /// Called by the channel when this UE decodes a peer's SCI reservation.
     void SenseReservation(uint64_t slot, uint32_t subch, double rsrpDbm);
     /// Called by the channel to deliver a decoded data packet.
@@ -144,6 +148,8 @@ class NtnSlUeMac : public Object
     uint32_t m_prsvpSlots{100};//!< resource reservation interval (e.g. 100 ms @ mu=0)
     double m_rsrpThreshDbm{-110.0};
     uint32_t m_pktBytes{190};
+    bool m_align{false};        //!< P8: align reselection with the message period
+    uint64_t m_arrival{0};      //!< P8: arrival slot of the current message
 
     // sensing memory: (slot,subch) -> best sensed SL-RSRP (dBm), for reservations
     // announced by peers within the sensing window.
@@ -224,6 +230,8 @@ class NtnSlChannel : public Object
     /// Minimum post-detection SINR for a PSSCH decode (dB). TS 38.214: the
     /// lowest MCS (QPSK, R=120/1024) needs roughly -2 dB at 10% BLER.
     void SetDecodeSinrDb(double db) { m_decodeSinrDb = db; }
+    /// P8: TR 37.885 urban channel (LOS, NLOSv, NLOS per pair of vehicles) instead of the highway LOS law.
+    void SetUrbanChannel(bool on, double nlosP = 0.0);
     double GetDecodeSinrDb() const { return m_decodeSinrDb; }
 
     /// Thermal noise + noise figure over one subchannel (dBm).
@@ -249,6 +257,10 @@ class NtnSlChannel : public Object
     double GetPrr() const { return m_rxAttempt ? double(m_rxSuccess) / m_rxAttempt : 0.0; }
     /// PRR restricted to receivers within \p rangeM of the transmitter.
     double GetPrrWithinRange(double rangeM) const;
+    /// PRR over the receptions that were not lost to half duplex, i.e. what
+    /// path loss and co-channel interference alone leave; GetPrrWithinRange
+    /// counts half-duplex misses as failures, as TR 37.885 does.
+    double GetPrrWithinRangeExcludingHalfDuplex(double rangeM) const;
 
     /// V2X-5: mean PC5 one-way delay in ms over every successful reception.
     ///
@@ -299,6 +311,19 @@ class NtnSlChannel : public Object
     double m_decodeSinrDb{-2.0};    //!< TS 38.214 lowest MCS at 10% BLER
     Ptr<NormalRandomVariable> m_shadowRv;
     Ptr<NormalRandomVariable> m_nlosvRv;
+    // P8: urban channel; per pair of mobility models, the condition and the distance at which it was drawn. It is
+    // kept until the pair's distance has changed by a shadowing correlation distance (TR 37.885: 10 to 13 m).
+    bool m_urban{false};
+    double m_nlosP{0.0};
+    struct PairState
+    {
+        int cond;
+        double d0;
+    };
+    mutable std::map<std::pair<const void*, const void*>, PairState> m_pair;
+    Ptr<UniformRandomVariable> m_condRv;
+    Ptr<NormalRandomVariable> m_stdNormal;
+    double UrbanLossDb(Ptr<MobilityModel> tx, Ptr<MobilityModel> rx) const;
     std::vector<Ptr<MobilityModel>> m_extraBlockers;
 
     // pending grants per UE for the current period
@@ -315,7 +340,7 @@ class NtnSlChannel : public Object
     double m_delayMaxS{0.0};
     uint64_t m_delayCount{0};
     // range-bucketed
-    struct RangeBucket { double range; uint64_t attempt; uint64_t success; };
+    struct RangeBucket { double range; uint64_t attempt; uint64_t success; uint64_t halfDuplex{0}; };
     mutable std::vector<RangeBucket> m_rangeBuckets;
 };
 

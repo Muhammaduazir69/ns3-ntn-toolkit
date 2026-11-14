@@ -1,753 +1,300 @@
 <h1 align="center">oran-ntn</h1>
 
-<p align="center"><strong>Space O-RAN: E2 and A1 control loops that actuate a real radio, across on-board, aerial, gateway and cloud RIC placements</strong></p>
+<p align="center"><strong>Space O-RAN for ns-3: E2 and A1 control loops over a measured NR NTN radio, with the RIC placed on board, at a gateway or in the cloud</strong></p>
 
 <p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/O--RAN-E2AP%20%C2%B7%20KPM%20%C2%B7%20RC%20%C2%B7%20A1-purple.svg" alt="O-RAN E2AP KPM RC A1"/>
-  <img src="https://img.shields.io/badge/RIC-on--board%20%C2%B7%20gateway%20%C2%B7%20cloud-orange.svg" alt="three RIC tiers"/>
-  <img src="https://img.shields.io/badge/examples-11-informational.svg" alt="11 examples"/>
+  <img src="https://img.shields.io/badge/RIC-on--board%20%C2%B7%20HAPS%20%C2%B7%20gateway%20%C2%B7%20cloud-orange.svg" alt="four RIC placements"/>
+  <img src="https://img.shields.io/badge/examples-12-informational.svg" alt="12 examples"/>
+  <a href="https://doi.org/10.1109/OJCOMS.2026.3745010"><img src="https://img.shields.io/badge/DOI-10.1109%2FOJCOMS.2026.3745010-00629B.svg" alt="DOI"/></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">Toolkit</a>
   &nbsp;·&nbsp;
+  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/oran-ntn/">Docs</a>
+  &nbsp;·&nbsp;
   <a href="INSTALL.md">Install</a>
   &nbsp;·&nbsp;
-  <a href="#examples">Examples</a>
+  <a href="#results">Results</a>
   &nbsp;·&nbsp;
-  <a href="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/oran-ntn/">Docs</a>
+  <a href="#examples">Examples</a>
 </p>
 
 ---
 
-Putting a RAN Intelligent Controller in space is an architecture question before it is an algorithm question: where the RIC sits decides how stale its view is when a decision lands. This module makes that question measurable. Three placements, on-board real-time, at the gateway, and in the cloud, each with an E2 latency taken from live slant geometry rather than a configured constant.
+## Why this module
 
-The control loop is closable, and two examples close it. `SetRcActionCallback` is the framework hook; `oran-ntn-ric-controlled-traffic` drives a beam parameter through it and `oran-ntn-gym-handover-example` drives `NtnRealStackHelper::TriggerHandover`. The other nine examples record decisions without actuating, which the helper's requested-versus-completed counters make visible. E2SM-KPM indications carry measurements under TS 28.552 names off a real radio; E2SM-RC control actions actuate a real handover through the RRC; A1 policies distribute and are enforced. The metric that matters here is not how many decisions an xApp made but how many changed anything, so the helper records both, and a decision that named a cell with no radio behind it is reported as a decision rather than a handover.
+Putting a RAN Intelligent Controller (RIC) in space is an architecture question
+before it is an algorithm question. Where the RIC sits decides how stale its view
+is when a decision lands, and whether the satellite can still act when its feeder
+link to the ground is down. `oran-ntn` makes those questions measurable in ns-3.
+The RIC placement is an experiment variable whose E2 latency comes from live slant
+geometry, the KPIs the xApps read are measured on a real NR NTN cell, and the
+helper counts how many decisions changed anything, not only how many were made.
+A decision that names a cell with no radio behind it is reported as a decision,
+not as a handover.
 
-Also here: transparent and Rel-19 regenerative payload options with an on-board gNB that refuses to originate a handover it cannot serve, an on-board store-and-forward buffer for feeder outages, the WG3 conflict-mitigation taxonomy, and a FlexRIC bridge for wire-level E2AP. The in-simulation E2 transport is an ns-3 header with toolkit-internal type values, not ASN.1 APER over SCTP, and the module says so where it matters.
+## System design
+
+<p align="center">
+  <img src="doc/figures/oran_ntn_design.png" alt="oran-ntn system design: SMO and Non-RT RIC, Near-RT RIC and RIC placement on the ground; Space RIC, RT RIC, E2 node and payload options on the satellite; A1, E2 and feeder interfaces; a measured NR NTN data plane underneath that produces KPM and receives RC actions" width="960"/>
+</p>
+
+<p align="center"><sub>Ground segment, space segment and the measured data plane. A1 intents (red) reach the Near-RT RIC directly and the Space RIC over the feeder with a lease. E2 (green) carries KPM up and RC actions down; on the ground path it crosses the feeder link (blue), whose delay follows the live slant range. Dashed boxes are optional or not on the in-simulation path. O1 is not modeled. Script: <code>doc/figures/make_oran_ntn_design.py</code>.</sub></p>
+
+How a control loop runs:
+
+1. `NtnRealStackHelper` (from `ntn-traffic`) stands up an NR NTN cell on an SGP4
+   orbit: SpectrumPhy, MAC with HARQ and AMC, RLC, PDCP, RRC and EPC. UEs move
+   under TR 38.811 mobility classes.
+2. Per-UE SINR and TBLER are measured on that cell and packed into E2SM-KPM
+   indications under TS 28.552 names. Every KPM row carries its provenance
+   (`phy-trace` or, for scale-out cells, `geometry-budget`).
+3. `OranNtnE2Node` sends each indication one feeder delay up to the Near-RT RIC,
+   optionally aligned to the 100 ms RIC tick. During a feeder outage it buffers
+   them (store and forward) and the Space RIC takes over on board.
+4. xApps decide; the conflict manager resolves contention; the RC action travels
+   one feeder delay back down and reaches a registered actuator, for example
+   `NtnRealStackHelper::TriggerHandover` or a beam loss model on the live channel.
+5. The next KPM report shows whether the action changed the radio.
+
+## Results
+
+All numbers below come from stored runs. Each figure has a script that reads the
+raw files, so the plot can be regenerated and checked.
+
+### Stale A1 intents, lease fallback and control placement under feeder outages
+
+<p align="center">
+  <img src="doc/figures/oran_ntn_results.png" alt="Three panels against the number of gateways: (a) share of time the cell falls short of its A1 intent, (b) mean age of the intent an on-board controller enforces, (c) near-RT deadline misses, for six control strategies" width="960"/>
+</p>
+
+<p align="center"><sub>Example <code>oran-ntn-feeder-mgmt</code>, 550 km Walker-Delta shell, 1 to 4 gateways, 6 strategies, 10 seeds each, 1 h simulated per run (240 runs, one binary, sha256 prefix <code>3232e23199cd6002</code>). Markers are means, bars are 95 % t-intervals over seeds; on log axes the lower whisker is clipped at 10 % of the mean. Data: <code>paper/tnsm-2026-stale-a1-intents/runs.tar.xz (runs/main/)</code> in the toolkit workspace; per-configuration table: <a href="doc/figures/oran_ntn_results_summary.csv"><code>doc/figures/oran_ntn_results_summary.csv</code></a>; script: <code>doc/figures/make_oran_ntn_results.py</code>.</sub></p>
+
+What the campaign shows, at one gateway unless stated (mean ± 95 % interval over 10 seeds):
+
+| Strategy | Time short of intent | Mean age of enforced intent | Near-RT deadline misses |
+|---|---:|---:|---:|
+| Ground only | 8.27 % ± 1.26 | about 0 s | 19.57 % ± 1.08 |
+| On-board only (intent held without expiry) | 5.71 % ± 1.29 | 6.45 s ± 6.36 | 0.002 % |
+| Reactive hybrid (heartbeat failover) | 5.74 % ± 1.26 | 6.45 s ± 6.39 | 0.32 % ± 0.02 |
+| On-board + lease | 3.22 % ± 0.40 | 0.031 s ± 0.028 | 0.002 % |
+| Reactive + lease | 3.26 % ± 0.39 | 0.031 s ± 0.028 | 0.33 % ± 0.03 |
+| PAL (contact-plan prediction + lease) | 3.26 % ± 0.39 | 0.031 s ± 0.028 | 0.18 % ± 0.02 |
+
+- **Stale intents.** A satellite that keeps enforcing an A1 intent it cannot
+  refresh holds it for 6.45 s on average at one gateway. Giving the on-board copy
+  a lease, after which it falls back to a safe intent, cuts that age to about
+  30 ms and the time short of intent from about 5.7 % to about 3.3 %. The lease
+  does the work: on-board, reactive and predictive hosts with the same lease land
+  within each other's intervals.
+- **More gateways close the gap.** With 3 or 4 gateways the feeder is rarely
+  down, and every strategy sits between 3.3 % and 3.9 %.
+- **Control placement.** Ground-only near-RT control misses about 19 % of its
+  deadlines with one or two gateways (the feeder delay alone breaks the budget),
+  and still about 2 % with four. Moving near-RT control on board removes almost
+  all misses; contact-plan prediction (PAL) roughly halves the misses of the
+  reactive hybrid, from 0.32 % to 0.18 %.
+
+> Scope of this campaign. `oran-ntn-feeder-mgmt` has no radio stack: cell demand
+> is a stochastic session process and the slice share is a control parameter, not
+> scheduled PRBs. Orbits (SGP4 on Walker elements), feeder visibility and the
+> control plane are real: every E2, A1, heartbeat and lease message is a UDP
+> packet on ns-3 point-to-point links whose delay follows the live slant range.
+> E2AP over SCTP is not simulated. The campaign binary was built from this
+> example plus the default-off campaign options in
+> `paper/tnsm-2026-stale-a1-intents/ns3_patch/`.
+
+### Five concurrent xApps on the full constellation scenario
+
+One run of `oran-ntn-full-scenario --duration=600 --numUes=20` (seed 1), stored in
+`papers/sim_runs/oran-ntn/run1/` (`xapp_metrics.csv`, `ric_metrics.txt`): 71 E2
+nodes, 5 xApps, 0 conflicts, 0 policy violations.
+
+| xApp | Decisions | Actions recorded | p95 decision latency |
+|---|---:|---:|---:|
+| ho-predict | 464 | 464 | 0.033 ms |
+| beam-hop | 2,994 | 2,994 | 0.026 ms |
+| slice-manager | 6 | 18 | 0.033 ms |
+| doppler-comp | 4,272 | 68,489 | 0.080 ms |
+| tn-ntn-steering | 2 | 2 | 0.005 ms |
+| **Total** | **7,738** | **71,967** | |
+
+One decision can fan out to many actions, which is why Doppler compensation
+dominates the action count. In this scenario the RC path records actions; it does
+not actuate the radio unless the scenario registers an actuator (see
+[Honest scope](#honest-scope)). The decision latency is xApp computation only,
+not the end-to-end loop.
+
+## Classes
+
+| Area | Classes | Header |
+|---|---|---|
+| Near-RT RIC | `OranNtnNearRtRic`, `OranNtnE2Termination`, `OranNtnSdl`, `OranNtnConflictManager` | `model/oran-ntn-near-rt-ric.h`, `model/oran-ntn-conflict-manager.h` |
+| RT tier and placement | `OranNtnRtRic` (loop period below 10 ms or it refuses to start), `OranNtnRicPlacement` (`OnBoardSatellite`, `Haps`, `GroundGateway`, `GroundCloud`; `ComputeE2Delay()`, `BindToGeometry()`) | `model/oran-ntn-rt-ric.h`, `model/oran-ntn-ric-placement.h` |
+| Space RIC | `OranNtnSpaceRic` (`EnterAutonomousMode()` on feeder loss), `OranNtnSpaceRicInference`, `OranNtnIslHeader` | `model/oran-ntn-space-ric.h` |
+| E2 and service models | `OranNtnE2Node` (feeder delay each way, store-and-forward buffer, `AlignToControlLoop`), canonical KPM IDs, KPM / RC / CCC / ephemeris models behind `OranNtnServiceModelRegistry`, E2SM-RC Style 3 | `model/oran-ntn-e2-interface.h`, `model/oran-ntn-kpm-canonical-ids.h`, `model/oran-ntn-service-model*.h` |
+| A1 and intent leasing | `OranNtnA1PolicyManager`, `OranNtnA1Adapter`, OSC-aligned schema registry (`a1-policies/`), `OranNtnAuthorityLease`, `OranNtnContactPlan` | `model/oran-ntn-a1-interface.h`, `model/oran-ntn-authority-lease.h`, `model/oran-ntn-contact-plan.h` |
+| Cross-domain SMO | `OranNtnNwdaf`, `OranNtnTpnController`, `OranNtnCrossDomainSmo` | `model/oran-ntn-cross-domain.h` |
+| Payload and platform | `NtnFhSplitModel` (Opt 2, 7.2a, 7.2b, 8; `ChooseBestSplit()`), `NtnPlatformSpec` (UAV, HAP, LEO, MEO, GEO), `OranNtnRoleSwitch` (RU to RU+DU to full gNB) | `model/oran-ntn-fh-split.h`, `model/ntn-platform-spec.h` |
+| xApps | `OranNtnXappBase` (serving cell resolved by identity) and HO Predict, Beam Hop, Slice Manager, Doppler Comp, TN-NTN Steering; advanced xApps in the same directory | `model/oran-ntn-xapp-*.h` |
+| AI inference | `OranNtnOnnxXapp` (ONNX Runtime optional, heuristic fallback), gym environments, `OranNtnFederatedLearning` | `model/oran-ntn-onnx-xapp.h`, `model/oran-ntn-gym-*.h` |
+| Digital-twin loop | `OranNtnTwinPredictionConsumer` (loads the twin's `t_s,ueId,recommendedGnbId,confidence` file and fires `HANDOVER_TRIGGER` at `t_s`) | `model/oran-ntn-twin-prediction-consumer.h` |
+| Disaggregated gNB | `OranNtnSplitGnbEntity`, `OranNtnF1Interface`, `OranNtnOfhInterface` | `model/oran-ntn-split-gnb.h` |
+| Helpers | `OranNtnHelper` (RICs, E2 nodes, A1, xApps, CSV writers, `RegisterBeamLossModel`, `SetHandoverActuator`), `OranNtnSplitGnbHelper` | `helper/` |
 
 ## Quick start
 
-Inside the toolkit, where the module is already present and built:
-
-```bash
-./ns3 run "oran-ntn-full-scenario --simTime=600 --xapps=ho,beamhop,slice,doppler,tnntn"
-./ns3 run oran-ntn-ric-placement-ab
-./ns3 run "ntn-e2e-full-stack --duration=60 --numUes=8"
-```
-
-Standalone, into an existing ns-3.43 tree:
-
-```bash
-git clone -b oran-ntn-v2 https://github.com/Muhammaduazir69/oran-ntn.git contrib/oran-ntn
-./ns3 configure --enable-modules='' --enable-examples --enable-tests
-./ns3 build
-```
-
-`INSTALL.md` in this directory carries the full dependency list. Most examples in
-this module build on `ntn-traffic`, the toolkit's real-stack spine, so the
-toolkit tree is the path of least resistance.
-
-## Overview
-
-`oran-ntn` brings the O-RAN disaggregated RAN control architecture to
-non-terrestrial networks. It models the WG3 **Near-Real-Time RIC** with
-xApp lifecycle management, an E2AP-style termination, A1 policy ingest from
-a Non-RT RIC, and a multi-xApp **conflict manager**. KPM telemetry is
-exported both as a flat record stream and in a **canonical KPM**
-encoding (stable measurement IDs / labels). On top of the WG2/WG3 ground
-control plane it adds an on-board **Space-RIC** that takes over autonomously
-when the satellite loses its feeder link, and — new in the AI-native
-release — a **real-time RIC tier** (`OranNtnRtRic`) co-located with the
-O-DU on the satellite, whose control loop is hard-bounded below the O-RAN
-10 ms RT limit and acts directly on measured PHY KPIs.
-
-The module is built around a **real data plane**: it links against
-`ntn-traffic`, whose `NtnRealStackHelper` stands up an actual mmwave NR NTN
-cell (SpectrumPhy + MAC + HARQ/AMC + RLC/PDCP + RRC + EPC) on SGP4 satellite
-orbits with TR 38.811 UE mobility. The KPIs the RICs consume are measured
-in-band on that stack; where a scenario scales beyond what a per-packet PHY
-can simulate (the full-scenario constellation), the remaining cells get a
-TR 38.821-style link budget evaluated over the same live SGP4 geometry, and
-every KPM row is tagged with its provenance (`phy-trace` vs
-`geometry-budget`) — there are no synthetic/sine KPI generators. RIC
-**placement** (on-board / HAPS / gateway / cloud) is an experiment variable
-whose E2 latency is computed from the live slant geometry, and the
-satellite **payload architecture** (transparent / regenerative O-RU /
-O-RU+O-DU / full gNB), **fronthaul split**, **platform class**, and
-**functional role switching** are first-class measurable models.
-
-### Transport realism (read before citing E2 results)
-
-E2AP-over-SCTP is **not** simulated. E2 indications and RC actions are
-delay-modeled simulator events: one feeder-link delay on the measurement
-uplink (E2 node → RIC) **and one on the control downlink (RIC → E2 node,
-via `OranNtnE2Node::ReceiveRcAction()`)**, optionally aligned to the
-Near-RT RIC control-loop tick. This is the same substitution ns-3 mainline
-applies to the S1-AP/X2-AP control planes (direct calls / UDP instead of
-SCTP), and the delay model is stated in `model/oran-ntn-e2-interface.h`.
-Wire-level E2 (E2AP/ASN.1-PER over real SCTP) via `flexric-bridge/` is
-roadmapped (W8, gated on the FlexRIC Docker run); the bridge's transport
-stub is not yet connected to the in-sim E2 nodes.
-
-`OranNtnE2Node` attributes controlling the E2 loop model:
-
-| Attribute | Default | Meaning |
-|---|---|---|
-| `FeederLinkDelay` | 20 ms (4 ms from `CreateSatelliteE2Nodes`) | One-way feeder delay applied to EACH direction (indication uplink, RC-action downlink) |
-| `MaxBufferSize` | 1000 | On-board store-and-forward buffer for reports during feeder outage |
-| `AlignToControlLoop` | false | When true, delivered indications are queued and dispatched only on the next RIC control-loop tick (measure → feeder → loop tick → feeder → apply) instead of executing xApps inline |
-| `ControlLoopPeriod` | 100 ms | Near-RT RIC tick period used by `AlignToControlLoop` |
-| `UnixEpochOffset` | 0 | Offset (s) added to indication timestamps; set a Unix epoch to produce wall-clock-like stamps for external consumers (FlexRIC bridge) |
-
-### Control-loop realism (read before citing "closed-loop" results)
-
-The framework control loop is **open by default**: every xApp routed through
-the Near-RT RIC ends at a registered RC-action handler
-(`OranNtnE2Node::SetRcActionCallback`) whose default implementation **records
-the decision** (`action_log.csv`, traces, SDL `last_action_*`) and returns
-success — it does **not** itself actuate handover, scheduling, PRB allocation,
-or beam selection on the live mmwave stack. So the shipped multi-xApp
-scenarios (e.g. `oran-ntn-full-scenario`) are **measure → decide → log**, not
-measure → act → measure.
-
-The one example that truly **closes** a measured→act→measured loop is
-`oran-ntn-ric-controlled-traffic`: it wires the action callback so an
-E2SM-RC `BEAM_SWITCH` lands a real beam gain on the live channel, and the
-subsequently measured SINR/TBLER/goodput recover. Treat that example as the
-reference for actuation; the rest demonstrate the RIC decision logic, not
-RAN actuation. (The cross-domain SMO example manipulates offered-rate caps /
-routes / edge rates directly in example code, outside the xApp→E2 action
-path.)
-
-The `OranNtnHelper` beam and handover actuator hooks
-(`RegisterBeamLossModel` / `SetHandoverActuator`) are **verified callable**
-through the full RIC → E2 termination → E2 node → RC path by
-`OranNtnHelperActuatorsWiredTest`: a `BEAM_SWITCH` rewrites the live channel
-loss model and a `HANDOVER_TRIGGER` reaches the wired actuator with the
-correct target. Honesty still holds, though: these hooks must be **wired by
-a scenario**. When no actuator is registered, the generic RC path honestly
-logs `actuated=false` (it never fakes success), so the shipped multi-xApp
-scenarios remain measure → decide → log unless a scenario opts in.
-
-## What changed in v2.5
-
-See [`CHANGELOG.md`](CHANGELOG.md) and the toolkit
-[`../../CHANGELOG.md`](../../CHANGELOG.md) for earlier releases (v2 realism
-fixes, the original RIC/xApp framework).
-
-- **Multi-tier RIC.** `OranNtnRtRic` adds the real-time tier (<10 ms,
-  enforced at `Start()`) next to the existing Near-RT RIC and Space-RIC;
-  `OranNtnRicPlacement` makes RIC siting (on-board satellite, HAPS, ground
-  gateway, ground cloud) an experiment variable with E2 delay derived from
-  the live slant range.
-- **Cross-domain SMO.** `OranNtnNwdaf` (per-slice analytics + SLA-risk
-  score from measured KPM), `OranNtnTpnController` (transport-path ranking
-  and per-slice switching), and `OranNtnCrossDomainSmo` (one closed loop
-  coordinating RAN quota, transport path, and edge compute).
-- **ONNX inference xApp.** `OranNtnOnnxXapp` loads `.onnx` models exported
-  from the toolkit gym environments and infers on live measured feature
-  vectors. ONNX Runtime is an **optional** dependency auto-detected at
-  configure time; without it the xApp transparently falls back to a
-  caller-registered heuristic, so every example still runs.
-- **Payload & fronthaul models.** `NtnFhSplitModel` (split options Opt 2 /
-  7.2a / 7.2b / Opt 8 with one-way latency bounds and fronthaul-rate
-  multipliers, plus `ChooseBestSplit()`), `NtnPlatformSpec` (UAV / HAPS /
-  LEO / MEO / GEO platform classes with latency bands and enforceable UAV
-  endurance), and `OranNtnRoleSwitch` (regenerative-payload role elevation
-  RU → RU+DU → full gNB on measured triggers: battery telemetry, fronthaul
-  latency, injected failures — with a real service-interruption window).
-- **Five new examples** (see below): RIC-placement A/B, cross-domain slice
-  adaptation, payload-options A/B, per-platform latency validation, and a
-  post-disaster emergency-communication flagship.
-- **Two new test suites**: `oran-ntn-multi-tier-ric` and `oran-ntn-ws4`.
-
-## Earlier changes
-
-- **Digital-twin C++ consumer.** `OranNtnTwinPredictionConsumer`
-  (`model/oran-ntn-twin-prediction-consumer.h`) closes the twin↔sim loop:
-  it loads the Python digital twin's handover-prediction file and, on
-  `Start()`, schedules each prediction to actuate a `HANDOVER_TRIGGER` into
-  the running E2/CHO loop at the predicted time (confidence-gated). See the
-  new feature section below.
-- **Gym serving-cell resolved by identity.** `OranNtnXappBase` now tracks a
-  UE's *true* serving cell (`SetUeServingCell` / `GetUeServingCell` /
-  `GetUeServingReport`) published by the RAN or on handover, instead of the
-  previous "last report in the window" `std::map` ordering artifact (which
-  really returned the highest gnbId). The gym observation, action, and
-  SINR-slope all read this identity-resolved baseline.
-- **Gym example closes the action leg.** `oran-ntn-gym-handover-example`
-  now calls `ExecuteActions` with a greedy A3-offset policy AND feeds the
-  PHY-KPM extractor from the measured radio
-  (`RegisterRnti` / `IngestMeasuredSample`), so `GetRealKpmReport` SINR
-  tracks the measured serving SINR.
-- **O-RAN actuator wiring, verified by test.** A new core-suite test
-  (`OranNtnHelperActuatorsWiredTest`) drives the `OranNtnHelper` beam +
-  handover actuators (`RegisterBeamLossModel` / `SetHandoverActuator`)
-  end-to-end through the RIC → E2 termination → E2 node → RC path;
-  companion gates `OranNtnRlActionImprovesSinrTest` and
-  `OranNtnTwinConsumerClosesLoopTest` verify the RL action leg and the
-  twin-consumer loop.
-
-## Models, helpers & key classes
-
-Derived from `model/*.h` and `helper/*.h`.
-
-### Near-RT RIC platform
-- `OranNtnNearRtRic` (`model/oran-ntn-near-rt-ric.h`) — RIC kernel: xApp
-  lifecycle, E2 termination, an `OranNtnSdl` shared-data layer, action
-  routing, and metrics aggregation.
-- `OranNtnConflictManager` (`model/oran-ntn-conflict-manager.h`) — multi-xApp
-  conflict resolution; strategy selectable via `ConflictResolutionStrategy`
-  (`PRIORITY_BASED`, `TEMPORAL`, `MERGE`, …). Writes `conflict_log.csv`.
-
-### Multi-tier RIC (real-time tier & placement)
-- `OranNtnRtRic` (`model/oran-ntn-rt-ric.h`) — real-time RIC co-located
-  with the O-DU on the satellite, so its loop sees zero feeder-link
-  latency. Registers named `RtAction`s evaluated per UE per loop against
-  measured PHY KPIs (per-UE SINR / TBLER wired from `NtnRealStackHelper`
-  accessors); a loop period ≥ 10 ms refuses to start (O-RAN RT bound).
-- `OranNtnRicPlacement` (`model/oran-ntn-ric-placement.h`) — RIC siting as
-  an experiment variable (`Site::OnBoardSatellite`, `Site::Haps`,
-  `Site::GroundGateway`, `Site::GroundCloud`). `ComputeE2Delay()` derives
-  the one-way E2 latency from the current slant range plus site terms;
-  `BindToGeometry()` keeps an `OranNtnE2Node`'s feeder delay tracking the
-  live slant range of the real (SGP4 / TR 38.811) mobility models.
-
-### Cross-domain SMO
-All in `model/oran-ntn-cross-domain.h`:
-- `OranNtnNwdaf` — CN-domain analytics function: consumes
-  `NtnOranAiFlowMonitor` KPM indications (measured, in-band) and maintains
-  per-slice load / delay / loss EWMAs plus an SLA-risk score from the
-  delay-budget headroom and trend.
-- `OranNtnTpnController` — transport-domain controller: ranks registered
-  transport paths by live latency (provider callbacks) and switches the
-  active path per slice within its latency budget.
-- `OranNtnCrossDomainSmo` — closed coordination loop across RAN (A1-style
-  radio quota), transport (path selection via the TPN controller), and
-  CN/edge (compute allocation), driven by NWDAF analytics only.
-
-### AI-native inference
-- `OranNtnOnnxXapp` (`model/oran-ntn-onnx-xapp.h`) — wiring for a
-  train → export → infer lifecycle: train offline on the toolkit gym
-  environments (`ns3-ai-ntn`; note those envs are synthetic), export to
-  `.onnx`, load with ONNX Runtime, and infer on live measured feature
-  vectors. **No trained `.onnx` ships**, so the default run path is the
-  registered heuristic policy, not a learned model. ONNX Runtime itself is
-  a real, optional dependency auto-detected by CMake (`onnxruntime_cxx_api.h`
-  + `libonnxruntime`); when it (or a model) is absent, `Infer()` runs the
-  heuristic. `IsOnnxAvailable()` / `IsModelLoaded()` report which path is
-  live.
-- Gym environments (`model/oran-ntn-gym-*.h`) — handover, beam-hop, slice,
-  steering, predictive; plus `OranNtnFederatedLearning` aggregators.
-
-### Digital-twin prediction consumer (twin↔sim loop)
-- `OranNtnTwinPredictionConsumer`
-  (`model/oran-ntn-twin-prediction-consumer.h`) — the C++ side of the
-  twin↔sim loop. The Python digital twin (`ntn-digital-twin`) runs the SAME
-  Walker elements and SHARED EPOCH as the C++ simulation and predicts, ahead
-  of time, which satellite each UE should be served by; its
-  `emit_predictions_file` helper writes a plain newline-delimited file with
-  the contract `t_s,ueId,recommendedGnbId,confidence` (`t_s` is seconds from
-  the shared epoch, i.e. simulation time). The consumer loads that file
-  (`LoadPredictionsFromFile`; blank/`#` lines ignored, malformed lines
-  skipped with a warning — no silent fabrication) and, on `Start()`,
-  schedules each prediction whose confidence ≥ a floor to fire a
-  caller-supplied submit callback at its `t_s`. Wire that callback to an
-  xApp's `SubmitAction` (`HANDOVER_TRIGGER`) or to
-  `NtnRealStackHelper::TriggerHandover` and the twin's foresight actuates a
-  real handover in the running E2/CHO loop. A CHO algorithm can instead poll
-  `GetRecommendation()` to rank candidates by the twin's latest applicable
-  guidance — a Non-RT-RIC / rApp policy query. Verified end-to-end by
-  `OranNtnTwinConsumerClosesLoopTest`.
-
-### Payload, fronthaul split, platform & role switch
-- `NtnFhSplitModel` (`model/oran-ntn-fh-split.h`) — 3GPP TR 38.801 / O-RAN
-  WG4 fronthaul split options with one-way latency bounds and
-  fronthaul-rate multipliers relative to the user-plane rate
-  (Opt 2: 1.5–10 ms, ~1.05×; Opt 7.2a: ≤0.25 ms, ~10×; Opt 7.2b:
-  ≤0.25 ms, ~7×; Opt 8: ≤0.25 ms, ~16×). `IsFeasible()` checks a split
-  against the measured feeder one-way delay and available capacity;
-  `ChooseBestSplit()` returns the most centralized feasible option —
-  at LEO slant delays every lower-PHY split fails, which is the standard
-  argument for regenerative payloads.
-- `NtnPlatformSpec` (`model/ntn-platform-spec.h`) — per-platform-class
-  constraints (UAV untethered/tethered, HAP, LEO, MEO, GEO): payload mass,
-  bus power, endurance, one-way latency class, network role.
-  `ScheduleEnduranceEnd()` enforces a UAV's endurance with a real
-  end-of-service event.
-- `OranNtnRoleSwitch` (`model/ntn-platform-spec.h`) — SMO-side functional
-  role switching (RU → RU+DU → full gNB) on measured triggers: battery
-  fraction, measured fronthaul latency vs. the split bound, and injected
-  failures. Each switch applies after a configurable service-interruption
-  window and is recorded as a `SwitchEvent`.
-
-### E2 interface & KPM
-- `OranNtnE2Node` / `OranNtnE2Termination` (`model/oran-ntn-e2-interface.h`) —
-  E2AP-style subscription / indication path; `OranNtnE2Node` carries the
-  feeder-link availability flag that drives Space-RIC autonomy.
-- Canonical KPM IDs (`model/oran-ntn-kpm-canonical-ids.h`) — stable
-  measurement and label identifiers under `ns3::oranntn::kpm` /
-  `ns3::oranntn::label`, used to emit `kpm_canonical.csv`.
-- KPM / RC / CCC / ephemeris service models behind a plugin ABI
-  (`model/oran-ntn-service-model*.h`, `OranNtnServiceModelRegistry`),
-  including E2SM-RC Style 3 connected-mode mobility
-  (`model/oran-ntn-rc-style3.h`).
-- Hand-written ASN.1 PER codec for E2AP / E2SM-KPM / E2SM-RC (`asn1/`) — a
-  self-consistent, test-only encoder/decoder. It round-trips against itself
-  but is **not bit-conformant Aligned-PER** (full-byte CHOICE index,
-  octet-aligned preambles, no extension markers), so it would not decode on
-  an asn1c peer; see the header. The companion SCTP/TCP E2 listener
-  (`flexric-bridge/e2-listener.cc`) echoes frame **types** and does not decode
-  payloads. Neither is on the in-sim control path (see *Transport realism*).
-  FlexRIC-compatible field names live in `model/oran-ntn-flexric-types.h`.
-- `OranNtnDataRepository` (`model/oran-ntn-data-repository.h`) — NIST-style
-  data repository (in-memory; SQLite-backed when ns-3 is configured with
-  SQLite).
-
-### A1 policy
-- `OranNtnA1PolicyManager` / `OranNtnA1Adapter`
-  (`model/oran-ntn-a1-interface.h`) — A1 policy ingest from the Non-RT RIC;
-  orbit-aware constellation policies are generated by the helper.
-- OSC-aligned A1 policy schema registry
-  (`model/oran-ntn-a1-policy-schema.h`, JSON schemas in `a1-policies/`).
-
-### Space-RIC (on-board)
-- `OranNtnSpaceRic` (`model/oran-ntn-space-ric.h`) — on-board RIC that enters
-  autonomous mode on feeder-link outage (`EnterAutonomousMode()` /
-  `ExitAutonomousMode()`), consuming local KPM via `ProcessLocalKpm()`.
-- `OranNtnSpaceRicInference` (`model/oran-ntn-space-ric-inference.h`) — local
-  inference path for KPM-driven decisions while the ground RIC is
-  unreachable.
-- `OranNtnIslHeader` (`model/oran-ntn-isl-header.h`) — ISL transport header.
-
-### Satellite bridge, PHY & disaggregated gNB
-- `OranNtnSatBridge` (`model/oran-ntn-sat-bridge.h`) — orbit geometry,
-  link budget / C/N₀, ISL topology, mmWave hooks.
-- `OranNtnMmwaveBeamforming`, `OranNtnChannelModel`, `OranNtnNtnScheduler`,
-  `OranNtnPhyKpmExtractor`, `OranNtnDualConnectivity`,
-  `OranNtnMmimoCodebook`, `OranNtnMmimoPrecoderXapp`.
-- CU/DU/RU split with per-entity E2 termination: `OranNtnSplitGnbEntity`,
-  `OranNtnF1Interface`, `OranNtnOfhInterface`
-  (`model/oran-ntn-split-gnb.h`, `-f1-`, `-ofh-`), built via
-  `OranNtnSplitGnbHelper`.
-
-### xApps
-All derive from `OranNtnXappBase` (`model/oran-ntn-xapp-base.h`). The full
-scenario starts five simultaneously: HO Predict, Beam Hop, Slice Manager,
-Doppler Comp, and TN-NTN Steering (`model/oran-ntn-xapp-*.h`). Additional
-advanced xApps (interference mgmt, energy harvest, predictive alloc,
-multi-connectivity, ISAC, THz beam/RIS/spectrum) ship in the same directory.
-
-`OranNtnXappBase` resolves a UE's serving cell **by identity**:
-`SetUeServingCell` records the true RRC-connected cell (published by the RAN
-via `NtnRealStackHelper::GetUeServingCellId`, or by the xApp itself when it
-actuates a `HANDOVER_TRIGGER`), and `GetUeServingReport` returns that cell's
-most recent KPM report — falling back to the newest report by timestamp, not
-the highest-gnbId `std::map` artifact. This is what O-RAN WG3 E2SM-KPM means
-by "serving cell" (CGI/PCI), and it is the baseline the gym environments read
-for their observation, action, and SINR-slope.
-
-### Helpers
-- `OranNtnHelper` (`helper/oran-ntn-helper.h`) — one-call construction of the
-  Non-RT RIC, Near-RT RIC, satellite/terrestrial E2 nodes, Space-RICs, A1
-  policies, and xApps; KPM injection (`InjectKpmReport`); and the CSV writers
-  (`WriteAllMetrics`).
-- `OranNtnSplitGnbHelper` (`helper/oran-ntn-split-gnb-helper.h`) — builds the
-  disaggregated CU/DU/RU gNB with per-entity E2 terminations.
-
-## Experimental components (orphan-disposition pass, audit 2026-06-12)
-
-Every exported class was re-checked against `examples/` and `test/`. Three
-tiers (also annotated with doxygen `\warning` / `\note` in the headers):
-
-**Experimental — not yet exercised by any example or test; API may change:**
-
-| Class | Header |
-|---|---|
-| `OranNtnGymBeamHop`, `OranNtnGymPredictive`, `OranNtnGymSlice`, `OranNtnGymSteering` (`OranNtnGymHandover` is now exercised — example + RL test) | `model/oran-ntn-gym-*.h` |
-| `OranNtnXappThzBeamMgmt`, `OranNtnXappThzRis`, `OranNtnXappThzSpectrum` | `model/oran-ntn-xapp-thz-*.h` |
-| `OranNtnMmWaveBeamforming` | `model/oran-ntn-mmwave-beamforming.h` |
-| `OranNtnHelper` Phase 2–5 methods (`SetupMmWaveNtnStack`, `SetupDualConnectivity`, `SetupAiIntegration`, `EnablePhyKpmExtraction`, `CreateAllAdvancedXapps`, `SetupIslNetwork`, `SetupFederatedLearning`, `GetSatBridge`) | `helper/oran-ntn-helper.h` — **declared but not implemented; calling them is a link error** |
-
-**Exercised by unit tests only (no example yet):**
-
-`OranNtnRtRic`, `OranNtnSatBridge`, `OranNtnScheduler`,
-`OranNtnDualConnectivity`, `OranNtnFederatedLearning`,
-`OranNtnPhyKpmExtractor`, `OranNtnDataRepository` (+ in-memory/SQLite
-backends), `OranNtnIslHeader`, `OranNtnMmimoPrecoderXapp` /
-`OranNtnMmimoTwoStageComposer`, the service-model plugin set
-(`OranNtnServiceModel{,Kpm,Rc,Ccc,NtnEphemeris}`,
-`OranNtnServiceModelRegistry`), the E2SM-RC Style 3 shapes
-(`oran-ntn-rc-style3.h`), the split-gNB set (`OranNtnSplitGnbEntity`,
-`OranNtnF1Interface`, `OranNtnOfhInterface`, via `OranNtnSplitGnbHelper`),
-and the advanced xApps (`OranNtnXappEnergyHarvest`,
-`OranNtnXappInterferenceMgmt`, `OranNtnXappIsac`, `OranNtnXappMultiConn`,
-`OranNtnXappPredictiveAlloc`).
-
-**Looked orphaned in-module but are consumed elsewhere (documented in the
-headers):**
-
-- `OranNtnChannelModel` — chained onto the real spectrum channel by
-  ntn-sionna's `ntn-sionna-composed-channel-traffic` example (plus unit
-  tests).
-- `OranNtnE2Termination` and `OranNtnSdl` — internal components of
-  `OranNtnNearRtRic`, so they run in every RIC example.
-- `OranNtnSpaceRicInference` — consumed internally by `OranNtnSpaceRic` in
-  every Space-RIC example.
-
-Nothing was deleted; per-orphan disposition (wire an example, keep as
-experimental, or remove) is tracked in the toolkit audit document.
-
-## Examples
-
-All examples build to `build/contrib/oran-ntn/examples/` and can be
-launched through `./ns3 run "<name> [--args]"` or by the direct binary path
-`build/contrib/oran-ntn/examples/ns3.43-<name>-default`.
-
-| Example | What it measures |
-|---|---|
-| `oran-ntn-full-scenario` | end-to-end constellation + 5 xApps + Space-RIC autonomy |
-| `oran-ntn-real-stack-scenario` | Near-RT RIC driven by measured mmwave PHY KPM |
-| `oran-ntn-ric-controlled-traffic` | closed RIC loop changing delivered goodput |
-| `ntn-e2e-full-stack` | RIC + slice SLA + observability on one shared cell |
-| `oran-ntn-ric-placement-ab` | control-loop reaction time per RIC placement |
-| `oran-ntn-cross-domain-slice` | NWDAF + SMO + TPN path switch at the latency crossover |
-| `oran-ntn-payload-options-ab` | measured one-way delay per payload architecture |
-| `ntn-platform-latency-validation` | per-platform RTT vs. its latency band |
-| `oran-ntn-emergency-communication` | disaster recovery via role switch + emergency slice |
-| `oran-ntn-gym-handover-example` | `OranNtnGymHandover` RL env on the measured radio, action leg closed |
-
-### oran-ntn-full-scenario
-
-End-to-end O-RAN NTN scenario on **real orbital geometry**: every satellite
-of the LEO Walker-Delta constellation (default 6 planes × 11 = 66 sats) is
-an ns-3 node under `Sgp4MobilityModel`; UEs are TR 38.811 class mobility at
-real ground positions; the serving satellite per UE is selected by live
-max-elevation, and elevation/slant/Doppler/TTE in every KPM report come
-from the live mobility models. UEs anchored to the first `--numRealCells`
-satellites ride a **real measured mmwave NR NTN cell**
-(`NtnRealStackHelper`, provenance `phy-trace`); the scale-out UEs get a
-TR 38.821-style CNR budget over the same geometry using the same radio
-constants the anchored cells run (provenance `geometry-budget`). On top:
-Non-RT RIC with orbit-aware A1 policies, Near-RT RIC with 5 xApps and
-conflict resolution, on-board Space-RICs, and a scheduled feeder-link
-outage that triggers autonomous mode. All E2 nodes run with
-`AlignToControlLoop=true` (see *Transport realism* above).
+Inside the toolkit, where the module is present and built:
 
 ```bash
 ./ns3 run "oran-ntn-full-scenario --duration=90 --numUes=30 --numRealCells=1"
-```
-
-**Outputs:** written to `--outputDir` —
-`kpm_feed.csv` (**every injected KPM row with its `provenance` column:
-`phy-trace` | `geometry-budget`**), `kpm_dataset.csv`, `kpm_canonical.csv`,
-`action_log.csv`, `conflict_log.csv`, `xapp_metrics.csv`,
-`space_ric_metrics.csv`, `ric_metrics.txt`, `sim_health.csv`,
-`full_scenario_kpm_series.csv` (AI flow monitor).
-
-**Key args:** `--duration` (s, default 90), `--numUes` (default 30),
-`--numRealCells` (default 1; 0 = budget-only), `--realUesPerCell`,
-`--numPlanes`, `--satsPerPlane`, `--altitude`, `--inclination`,
-`--numTnGnbs`, `--kpmInterval`, `--minElev`, `--satEirpDbm`, `--freqGhz`,
-`--bwMhz`, `--enableSpaceRic`,
-`--conflictStrategy` {`priority`,`temporal`,`merge`,`reject_lower`}
-(`reject_lower` is an alias of `priority`: the lower-priority action is
-rejected), `--enableFL`, `--outputDir`.
-
-> An empty `conflict_log.csv` is *correct* for the shipped xApp mix: the
-> active xApps contend on disjoint resource keys, so the conflict manager
-> has nothing to resolve.
-
-### oran-ntn-real-stack-scenario
-
-The real-stack flagship. The KPM that drives the Near-RT RIC + xApps is
-built from **measured** per-UE SINR/TBLER of a real mmwave NR NTN access
-link (`NtnRealStackHelper`), and the satellite enrichment data (elevation,
-Doppler, time-to-exit) comes from real SGP4 Walker orbits — the serving LEO
-passes zenith and recedes while in-plane neighbours approach. UEs move under
-TR 38.811 class mobility. The real radio runs on the serving cell over a
-tractable UE set while the wider Walker constellation provides the orbital
-and handover context (the accepted ns-O-RAN pattern).
-
-```bash
-./ns3 run "oran-ntn-real-stack-scenario --duration=30 --numUes=6"
-```
-
-**Key args:** `--duration`, `--numUes`, `--numSats`, `--altitude`,
-`--satEirpDbm`, `--freqGhz`, `--bwMhz`, `--minElev`, `--conflictStrategy`,
-`--outputDir` (CSV outputs as in the full scenario).
-
-### oran-ntn-ric-controlled-traffic
-
-A closed RIC control loop over a **real measured data plane**: a real
-mmwave NR NTN Ka-band cell (`NtnRealStackHelper`) on a real SGP4 orbit
-streams downlink to a ground UE. An `OranNtnE2Node` reports E2-KPM
-(intrinsic measured SINR) each second; the mMIMO precoder xApp consumes
-each indication and, when SINR drops below threshold, selects a beam from
-an `OranNtnMmimoCodebook` and issues an **E2SM-RC `BEAM_SWITCH` action back
-through `ReceiveRcAction()`** — the beam gain lands on the live channel one
-feeder delay later, and the measured SINR/TBLER/goodput recover. Loop
-timing is honest: feeder delay on each leg plus alignment to the 100 ms RIC
-tick (`AlignToControlLoop=true`). Beam state is scoped per cell (keyed by
-E2 cellId), so the pattern is safe to copy into multi-satellite scenarios.
-Compare `--xapp=1` vs `--xapp=0`.
-
-```bash
 ./ns3 run "oran-ntn-ric-controlled-traffic --simSeconds=40 --xapp=1"
-```
-
-**Outputs:** per-second progress lines (elevation, measured + intrinsic
-SINR, beam state, TBLER, goodput) and an end-of-run summary on stdout;
-`sim_health.csv` in `--outputDir`.
-
-**Key args:** `--simSeconds`, `--xapp`, `--numTx`, `--sinrThreshDb`,
-`--satEirpDbm`, `--leoAltKm`, `--freqGHz`, `--outputDir`.
-
-### ntn-e2e-full-stack
-
-Composition example: **one** real mmwave NR NTN cell whose measured PHY
-SINR simultaneously drives (a) the oran-ntn Near-RT RIC + xApps (measured
-KPM → RC actions), (b) the `ntn-slice` `SliceIsolationMonitor` (per-slice
-SLA on measured KPIs), and (c) a measured-KPI observability CSV. One
-NodeContainer, one channel, one packet flow, many consumers.
-
-```bash
-./ns3 run "ntn-e2e-full-stack --duration=15 --numUes=9"
-```
-
-**Key args:** `--duration`, `--numUes`, `--altitude`, `--satEirpDbm`,
-`--outputDir`.
-
-### oran-ntn-ric-placement-ab
-
-RIC placement as a measured experiment variable. One real mmwave NR NTN
-cell (Ka 20 GHz, SGP4 satellite) is hit by periodic deep fades (a real
-extra-loss model in the channel chain). A beam-restoration xApp reacts to
-50 ms KPM reports — but **both** legs of its loop (KPM uplink, control
-downlink) ride the E2 latency of the chosen RIC placement, computed by
-`OranNtnRicPlacement` from the live slant range:
-
-- `--placement=onboard` — processing only (Space-RIC),
-- `--placement=gateway` — slant/c + processing,
-- `--placement=cloud` — slant/c + 20 ms backhaul + processing.
-
-Two measured outcomes per placement with identical control logic:
-control-loop **reaction time** (fade onset → beam actuation), and PHY
-**recovery time** (TBLER back under 0.2). The latter is largely
-placement-invariant because the real AMC also adapts MCS to the fade — a
-genuine lower-layer self-healing effect the experiment surfaces honestly.
-
-```bash
 for p in onboard gateway cloud; do
   ./ns3 run "oran-ntn-ric-placement-ab --simSeconds=40 --placement=$p"
 done
+./ns3 run "oran-ntn-feeder-mgmt --strategy=pal --shell=550 --numGw=1 --simSeconds=3600 --run=1"
 ```
 
-**Key args:** `--simSeconds`, `--placement`, `--fadePeriodS`, `--fadeDurS`,
-`--satEirpDbm`, `--outputDir`.
-
-### oran-ntn-cross-domain-slice
-
-The representative cross-domain closed loop on a real routed data plane:
-two real SGP4 Walker satellites form two transport paths whose P2P delays
-are re-set every second from the live slant geometry (satA serves at t=0
-and recedes; satB trails on the same plane). Three `NtnOranApplication`
-QoS flows (URLLC SST=2 / eMBB SST=1 / mMTC SST=3) cross gateway → edge
-server, each packet carrying its slice identity in-band.
-`NtnOranAiFlowMonitor` produces per-slice KPM (TS 28.552 names), consumed
-by `OranNtnNwdaf`; `OranNtnOnnxXapp` flags URLLC degradation from the
-measured feature window; `OranNtnCrossDomainSmo` then actuates three
-domains — RAN quota (live eMBB offered-rate cap), transport path
-(`OranNtnTpnController` re-routes the static route to satB), and edge
-compute (edge-link service rate). Watch the measured URLLC one-way delay
-climb as satA recedes, then snap back when the TPN switches to the rising
-satB.
+Standalone, into an existing ns-3.43 tree (most examples also need `ntn-traffic`,
+so the toolkit tree is the easier path):
 
 ```bash
-./ns3 run "oran-ntn-cross-domain-slice --simSeconds=120"
-```
-
-**Key args:** `--simSeconds`, `--leoAltKm`.
-
-### oran-ntn-payload-options-ab
-
-The four satellite payload architectures measured on one real scenario.
-A real mmwave NR NTN cell serves a ground UE from an SGP4 LEO satellite;
-the EPC backhaul behind the satellite is driven live from the real feeder
-slant range per the selected option
-(`NtnRealStackHelper::SetFeederGeometry`):
-
-- `--payload=transparent` — user plane rides the RF feeder leg too,
-- `--payload=ru` — O-RU on sat, Open-FH over the feeder,
-- `--payload=rudu` — O-DU on sat, F1 midhaul over the feeder,
-- `--payload=fullgnb` — full gNB on sat, GTP backhaul.
-
-The one-way delay is **measured** by `NtnOranSink` from in-band timestamps
-that crossed radio + GTP + backhaul, and the measured feeder delay is
-checked against `NtnFhSplitModel` feasibility (LEO latencies rule out the
-lower-PHY splits).
-
-```bash
-for p in transparent ru rudu fullgnb; do
-  ./ns3 run "oran-ntn-payload-options-ab --payload=$p"
-done
-```
-
-**Key args:** `--simSeconds`, `--payload`, `--outputDir`.
-
-### ntn-platform-latency-validation
-
-Validates the toolkit's user-plane latency per NTN platform class with real
-packets. For each class (UAV, HAP, LEO, MEO, GEO) a bent-pipe path
-UE → platform → gateway is built from two P2P legs whose delay is the
-physical slant/c at the 10° cell-edge elevation; an `NtnOranApplication`
-URLLC flow crosses it, the sink measures the one-way delay from in-band
-timestamps, and the reported round trip must land in the platform's
-latency band. Runs all five classes in one process; no arguments required.
-
-```bash
-./ns3 run "ntn-platform-latency-validation"
-```
-
-**Key args:** `--simSeconds` (per-class measurement duration).
-
-### oran-ntn-emergency-communication
-
-Post-disaster use case, end to end on a real LEO cell. Timeline (everything
-measured, in-band): normal eMBB operation on four ground UEs; at t=20 s the
-terrestrial gateway fails and `OranNtnRoleSwitch` elevates the satellite to
-a full on-board gNB (failure-injected switch with a real 500 ms
-service-interruption window) while the feeder re-points to a surviving
-gateway; at t=22 s emergency responders join with two URLLC flows on a
-**dedicated emergency slice (SST=5)** and the SMO protects them RIC-style by
-throttling the eMBB quota. Reports the measured recovery timeline
-(disaster → first emergency byte delivered) and per-slice OWD/loss/
-throughput before and after, from `NtnOranSink` and the KPM monitor on the
-real radio.
-
-```bash
-./ns3 run "oran-ntn-emergency-communication --simSeconds=60"
-```
-
-**Key args:** `--simSeconds`, `--disasterAt`, `--outputDir`.
-
-### oran-ntn-e2-termination
-
-A standalone, **two-process** E2 end-to-end driver over a **real SCTP association** (the
-transport the O-RAN E2 interface mandates). Run it twice as separate OS processes — one as
-the RIC (listener), one as the agent that opens the E2AP association and sends RIC
-indications — to exercise the actual on-the-wire E2 setup + indication handshake rather than
-an in-process stub.
-
-```sh
-# terminal 1 — RIC (listener)
-./ns3 run "oran-ntn-e2-termination --role=ric --port=36421"
-# terminal 2 — agent (connects + sends indications)
-./ns3 run "oran-ntn-e2-termination --role=agent --port=36421 --indications=5"
-```
-
-**Outputs:** console — the RIC prints setup-requests handled and indications forwarded; the
-process exits non-zero if the E2 setup / indication handshake did not complete, so it doubles
-as a CI check.
-**Key args:** `--role` (`ric` | `agent`; default `ric`), `--proto` (`sctp` | `tcp`; default
-`sctp`), `--host` (bind/connect host; default `127.0.0.1`), `--port` (E2 port; default
-`36421`), `--duration` (RIC listen seconds; default 8), `--indications` (agent: number of RIC
-indications to send; default 5).
-
-### oran-ntn-gym-handover-example
-
-Boots the `OranNtnGymHandover` RL environment on a **measured** radio. A real
-Walker/SGP4 constellation (serving + candidate satellites) feeds a real NR-NTN
-access link (`NtnRealStackHelper`); the ho-predict xApp is fed measured PHY
-SINR every 100 ms and publishes the UE's serving cell by identity
-(`SetUeServingCell`), so the gym reads the correct baseline. Each control cycle
-the example pulls the observation from the measured plane and **closes the
-action leg**: a greedy A3-offset policy (best candidate must beat serving by
-`a3OffsetDb`) chooses the discrete action and calls `ExecuteActions`, so the RL
-decision travels the xApp → RIC → E2 → RC path (the gate-10 test
-`OranNtnRlActionImprovesSinrTest` proves the end-to-end actuation). It also
-feeds the PHY-KPM extractor from the real radio
-(`RegisterRnti` / `IngestMeasuredSample`) so `GetRealKpmReport` SINR is a
-genuine measured producer.
-
-Default (`--gym=0`) steps the env in-process with no Python peer (sweep-safe);
-`--gym=1` registers `OpenGymInterface::Get()` so an `ns3_ai_ntn.envs` RL agent
-can connect over shared memory (blocks for the peer, so it is opt-in).
-
-```bash
-./ns3 run "oran-ntn-gym-handover-example --duration=30 --numSats=3 --numUes=2"
-```
-
-**Key args:** `--duration`, `--numUes`, `--numSats` (serving + candidates),
-`--gym`, `--outputDir`.
-
-## Build, run & test
-
-The module builds with the parent toolkit from the ns-3 root:
-
-```bash
-cd ns-3-dev
+git clone -b oran-ntn-v2 https://github.com/Muhammaduazir69/oran-ntn.git contrib/oran-ntn
 ./ns3 configure --enable-examples --enable-tests
-./ns3 build
+./ns3 build oran-ntn
 ```
 
-To build only this module: `./ns3 build oran-ntn -j$(nproc)`.
-
-Run examples through the wrapper, e.g.:
+With Docker, prebuilt:
 
 ```bash
-./ns3 run "oran-ntn-ric-placement-ab --simSeconds=40 --placement=cloud"
+docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
+  ./ns3 run "oran-ntn-ric-placement-ab --simSeconds=40 --placement=cloud"
 ```
 
-Run the test suites:
+## Examples
+
+Binaries land in `build/contrib/oran-ntn/examples/`; run them with
+`./ns3 run "<name> [--args]"`.
+
+| Example | What it measures | Actuates the radio |
+|---|---|:---:|
+| `oran-ntn-full-scenario` | 66-satellite SGP4 constellation, 5 xApps, conflict resolution, Space RIC autonomy during a feeder outage | no (records decisions) |
+| `oran-ntn-real-stack-scenario` | Near-RT RIC driven by measured mmWave PHY KPM on a real Walker pass | no |
+| `oran-ntn-ric-controlled-traffic` | closed loop: an E2SM-RC `BEAM_SWITCH` lands on the live channel and SINR, TBLER and goodput recover; compare `--xapp=1` with `--xapp=0` | yes |
+| `oran-ntn-gym-handover-example` | `OranNtnGymHandover` on the measured radio; the action leg travels xApp, RIC, E2, RC | yes |
+| `oran-ntn-ric-placement-ab` | reaction time (fade onset to beam actuation) and PHY recovery time per RIC placement | yes (beam restore) |
+| `oran-ntn-feeder-mgmt` | A1 intent leasing and control placement under intermittent feeder links; 12 strategies (see Results) | control plane only, no radio |
+| `ntn-e2e-full-stack` | one cell feeding the RIC, the `ntn-slice` SLA monitor and an observability CSV | no |
+| `oran-ntn-cross-domain-slice` | NWDAF, SMO and TPN path switch at the latency crossover between two satellites | example code sets rates and routes |
+| `oran-ntn-payload-options-ab` | measured one-way delay for transparent, O-RU, O-RU+O-DU and full gNB payloads | n/a |
+| `ntn-platform-latency-validation` | round trip per platform class (UAV, HAP, LEO, MEO, GEO) against its latency band | n/a |
+| `oran-ntn-emergency-communication` | gateway failure, role switch to an on-board gNB, emergency slice SST=5 | yes (role switch) |
+| `oran-ntn-e2-termination` | two-process E2 setup and indications over a real SCTP association (TCP fallback); exits non-zero on failure | n/a |
+
+Common outputs (in `--outputDir`): `kpm_feed.csv` with a `provenance` column,
+`kpm_canonical.csv`, `action_log.csv`, `conflict_log.csv`, `xapp_metrics.csv`,
+`space_ric_metrics.csv`, `ric_metrics.txt` and `sim_health.csv`. An empty
+`conflict_log.csv` is correct for the shipped xApp mix, because the active xApps
+act on disjoint resources.
+
+`OranNtnE2Node` attributes that shape the E2 loop:
+
+| Attribute | Default | Meaning |
+|---|---|---|
+| `FeederLinkDelay` | 20 ms (4 ms from `CreateSatelliteE2Nodes`) | one-way delay applied to each direction |
+| `MaxBufferSize` | 1000 | on-board store-and-forward buffer during a feeder outage |
+| `AlignToControlLoop` | false | queue indications for the next RIC tick instead of running xApps inline |
+| `ControlLoopPeriod` | 100 ms | Near-RT RIC tick used by `AlignToControlLoop` |
+| `UnixEpochOffset` | 0 | offset added to timestamps for external consumers such as FlexRIC |
+
+## Tests
 
 ```bash
-./test.py -s oran-ntn                  # core RIC / SM / A1 / Space-RIC + actuation & twin-loop gates (68 cases)
-./test.py -s oran-ntn-multi-tier-ric   # RT-RIC bound, placement geometry, cross-domain loop, ONNX fallback
+./test.py -s oran-ntn                  # RIC, service models, A1, Space RIC, actuator wiring, twin loop
+./test.py -s oran-ntn-multi-tier-ric   # RT RIC bound, placement geometry, cross-domain loop, ONNX fallback
 ./test.py -s oran-ntn-ws4              # payload delay ladder, FH-split feasibility, endurance, role switch
+./test.py -s oran-ntn-feeder-mgmt      # feeder-management strategies, leases, reconciliation
 ```
 
-(`./ns3 test --suite=<name>` works too.)
+`OranNtnHelperActuatorsWiredTest` drives a `BEAM_SWITCH` and a `HANDOVER_TRIGGER`
+through RIC, E2 termination, E2 node and RC path to the registered actuators;
+`OranNtnRlActionImprovesSinrTest` and `OranNtnTwinConsumerClosesLoopTest` check
+the RL action leg and the twin consumer.
 
-### Dependencies
+## Dependencies
 
-- **Required (in-tree):** `ntn-traffic` (real mmwave NR NTN stack via
-  `NtnRealStackHelper`, `NtnOranApplication`/`NtnOranSink`,
-  `NtnOranAiFlowMonitor`), `mmwave`, `satellite`, `ns3-ai-ntn`. Several
-  examples additionally use `ntn-constellation` (SGP4 / Walker) and
-  `ntn-cho`; `ntn-e2e-full-stack` also uses `ntn-slice`.
-- **Optional, auto-detected at configure time:**
-  - **ONNX Runtime** (`onnxruntime_cxx_api.h` + `libonnxruntime`) — enables
-    real `.onnx` inference in `OranNtnOnnxXapp`; without it the xApp uses
-    its registered heuristic and everything still builds and runs.
-  - **SQLite** — enables the SQLite-backed `OranNtnDataRepository`.
-  - **libsctp** — SCTP transport for the FlexRIC E2 bridge (runtime
-    fallback to TCP when absent).
+- **Required, in tree:** `ntn-traffic` (`NtnRealStackHelper`, `NtnOranApplication`,
+  `NtnOranAiFlowMonitor`), `mmwave`, `satellite`, `ns3-ai-ntn`. Several examples
+  also use `ntn-constellation` and `ntn-cho`; `ntn-e2e-full-stack` uses `ntn-slice`.
+- **Optional, detected at configure time:** ONNX Runtime (`OranNtnOnnxXapp`
+  inference), SQLite (`OranNtnDataRepository` backend), libsctp (FlexRIC bridge,
+  TCP fallback when absent).
 
-For full prerequisites and toolkit-wide setup see [`../../INSTALL.md`](../../INSTALL.md).
+See [INSTALL.md](INSTALL.md) and the toolkit [INSTALL.md](../../INSTALL.md).
 
----
+## Honest scope
 
-## Standards implemented
+- **Transport.** E2 indications and RC actions are delay-modeled simulator events
+  (one feeder delay per direction), the same substitution ns-3 mainline makes for
+  S1-AP and X2-AP. The in-simulation E2 transport is an ns-3 header with
+  toolkit-internal type values, not ASN.1 APER over SCTP.
+- **ASN.1 codec.** `asn1/` holds a hand-written PER codec that round-trips against
+  itself but is not bit-conformant Aligned-PER, so an asn1c peer would not decode
+  it. The FlexRIC listener (`flexric-bridge/e2-listener.cc`) echoes frame types
+  and does not decode payloads; neither is on the in-simulation control path.
+- **Open loop by default.** The default RC handler records the decision and
+  returns success. A scenario closes the loop by registering an actuator
+  (`SetRcActionCallback`, `RegisterBeamLossModel`, `SetHandoverActuator`); without
+  one the generic path logs `actuated=false`.
+- **AI.** No trained `.onnx` model ships. Without ONNX Runtime or a model,
+  `OranNtnOnnxXapp` runs its registered heuristic; `IsModelLoaded()` says which.
+- **Experimental classes.** `OranNtnGymBeamHop`, `OranNtnGymPredictive`,
+  `OranNtnGymSlice`, `OranNtnGymSteering`, the THz xApps and
+  `OranNtnMmWaveBeamforming` are not yet exercised by any example or test.
+  `OranNtnHelper` methods `SetupMmWaveNtnStack`, `SetupDualConnectivity`,
+  `SetupAiIntegration`, `EnablePhyKpmExtraction`, `CreateAllAdvancedXapps`,
+  `SetupIslNetwork`, `SetupFederatedLearning` and `GetSatBridge` are declared but
+  not implemented; calling them is a link error.
+- **O1** is not modeled.
 
-O-RAN Alliance E2AP, E2SM-KPM, E2SM-RC, E2SM-CCC, A1 policy, WG2 non-real-time RIC and WG3 near-real-time RIC architecture and conflict mitigation. 3GPP TS 28.552 (performance measurements), TS 38.331 (reconfiguration with sync), TS 38.413 (NG), TS 38.423 (Xn), TR 38.821 (NTN architecture, transparent and regenerative payloads), TS 38.214 (CQI and MCS tables). ETSI EN 302 307-1 (DVB-S2 MODCOD).
+## Standards
 
-## Keywords
+O-RAN Alliance E2AP, E2SM-KPM, E2SM-RC (including Style 3), E2SM-CCC, A1 policy,
+WG2 Non-RT RIC and WG3 Near-RT RIC architecture and conflict mitigation, WG4
+fronthaul split options. 3GPP TS 28.552, TS 38.331 (reconfiguration with sync),
+TS 38.413, TS 38.423, TR 38.821 (transparent and regenerative payloads),
+TS 38.214. ETSI EN 302 307-1 (DVB-S2 MODCOD).
 
-Space O-RAN, satellite O-RAN, RAN intelligent controller, RIC, near-real-time RIC, non-real-time RIC, xApp, rApp, E2 interface, E2AP, E2SM-KPM, E2SM-RC, A1 policy, FlexRIC, RIC placement, on-board processing, regenerative payload, transparent payload, Rel-19 NTN, store-and-forward, conflict mitigation, TS 28.552, key performance measurement, handover control, non-terrestrial network, ns-3.
+## Citation
 
-## Author
+If this module contributes to a publication, please cite the toolkit article:
 
-**Muhammad Uzair**, Independent Researcher
-[ORCID 0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680)
+> M. Uzair et al., "ns3-ntn-toolkit: An integrated ns-3 platform for 6G
+> non-terrestrial networks," *IEEE Open Journal of the Communications Society*,
+> 2026, doi: [10.1109/OJCOMS.2026.3745010](https://doi.org/10.1109/OJCOMS.2026.3745010).
 
-Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
-a pre-integrated ns-3.43 platform for 6G non-terrestrial network research.
-Mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
+```bibtex
+@article{uzair2026ns3ntntoolkit,
+  author  = {Uzair, Muhammad and others},
+  title   = {ns3-ntn-toolkit: An Integrated ns-3 Platform for 6G Non-Terrestrial Networks},
+  journal = {IEEE Open Journal of the Communications Society},
+  year    = {2026},
+  doi     = {10.1109/OJCOMS.2026.3745010}
+}
+```
 
 ## License
 
 GPL-2.0-only, matching ns-3.
+
+## Contact
+
+**Muhammad Uzair**, Independent Researcher.
+Email [muhammaduzairr69@gmail.com](mailto:muhammaduzairr69@gmail.com),
+ORCID [0009-0002-4104-2680](https://orcid.org/0009-0002-4104-2680).
+Part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit),
+mirrored on [GitLab](https://gitlab.com/ns3-ntn-toolkit).
