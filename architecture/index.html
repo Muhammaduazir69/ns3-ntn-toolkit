@@ -699,6 +699,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inside-the-control-and-operations-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inside the control and operations layers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-the-boundaries-are" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1874,6 +1885,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inside-the-control-and-operations-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inside the control and operations layers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-the-boundaries-are" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1968,11 +1990,12 @@ response attenuates real packets and shows up in the measured SINR.</p>
 <p><code>oran-ntn</code> closes the loop. E2SM-KPM indications carry measurements up, E2SM-RC
 control actions and A1 policies come back down, and the E2 latency between them
 is taken from live slant geometry, which is what makes the RIC placement question
-answerable. <code>ns3-ai-ntn</code> exposes the same loop to a Gymnasium agent.</p>
+answerable. <code>ns3-ai-ntn</code> exposes the same loop to a Gymnasium agent over versioned shared memory.</p>
 <h3 id="operations">Operations<a class="headerlink" href="#operations" title="Permanent link">&para;</a></h3>
 <p><code>ntn-observability</code> records the scene once and exports it four ways.
-<code>ntn-digital-twin</code> runs the prediction outside the simulation and pushes the
-decision back in.</p>
+<code>ntn-digital-twin</code> runs the prediction outside the simulation and hands the
+schedule back in as a file that <code>oran-ntn</code> actuates; simulator state does not
+flow back into the twin.</p>
 <h2 id="one-run-end-to-end">One run, end to end<a class="headerlink" href="#one-run-end-to-end" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart TD
     A["CelesTrak / Space-Track TLEs&lt;br/&gt;or generated Walker elements"] --&gt; B["ntn-constellation&lt;br/&gt;SGP4 from a TLE, Kepler+J2 from elements&lt;br/&gt;ISL contact graph, presets"]
@@ -2042,6 +2065,31 @@ effect is measurable.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="inside-the-control-and-operations-layers">Inside the control and operations layers<a class="headerlink" href="#inside-the-control-and-operations-layers" title="Permanent link">&para;</a></h2>
+<p>Each module page opens with its own system design figure. The four for the control,
+learning and operations layers show how the loops above are built.</p>
+<div class="showcase-grid">
+<figure>
+  <img alt="oran-ntn system design" loading="lazy" src="../media/oran-ntn/oran_ntn_design.png" />
+<br />
+<figcaption><strong>oran-ntn</strong>: ground and space RIC tiers, A1 with leases, E2 over the feeder, and the measured data plane the RC actions land on. <a href="../modules/oran-ntn/">Module page</a></figcaption>
+</figure>
+<figure>
+  <img alt="ns3-ai-ntn system design" loading="lazy" src="../media/ns3-ai-ntn/ns3_ai_ntn_design.png" />
+<br />
+<figcaption><strong>ns3-ai-ntn</strong>: the ns-3 and Python processes, the versioned shared-memory handshake and the AI-RAN inference contract. <a href="../modules/ns3-ai-ntn/">Module page</a></figcaption>
+</figure>
+<figure>
+  <img alt="ntn-observability system design" loading="lazy" src="../media/ntn-observability/ntn_observability_design.png" />
+<br />
+<figcaption><strong>ntn-observability</strong>: measured sources, one scene recorder, and the InfluxDB, Grafana, NetSimulyzer and Cesium sinks. <a href="../modules/ntn-observability/">Module page</a></figcaption>
+</figure>
+<figure>
+  <img alt="ntn-digital-twin system design" loading="lazy" src="../media/ntn-digital-twin/ntn_digital_twin_design.png" />
+<br />
+<figcaption><strong>ntn-digital-twin</strong>: the twin sync loop, the shared A3 guard, and the prediction file that ns-3 actuates. <a href="../modules/ntn-digital-twin/">Module page</a></figcaption>
+</figure>
+</div>
 <h2 id="where-the-boundaries-are">Where the boundaries are<a class="headerlink" href="#where-the-boundaries-are" title="Permanent link">&para;</a></h2>
 <p>An architecture page that only lists what is present is half a document. The
 toolkit's boundaries are stated in

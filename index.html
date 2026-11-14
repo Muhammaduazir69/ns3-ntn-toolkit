@@ -593,6 +593,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#results-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results at a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#frequently-asked-questions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1783,6 +1794,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#results-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results at a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#frequently-asked-questions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1869,7 +1891,7 @@ hide:
 <div class="ntn-stats">
 <div class="stat"><span class="n" data-target="14">14</span><span class="l">integrated ns-3 modules</span></div>
 <div class="stat"><span class="n" data-target="93">0</span><span class="l">runnable examples</span></div>
-<div class="stat"><span class="n" data-target="71967">0</span><span class="l">O-RAN actions actuated, no conflicts</span></div>
+<div class="stat"><span class="n" data-target="71967">0</span><span class="l">O-RAN xApp actions recorded, no conflicts</span></div>
 <div class="stat"><span class="n" data-target="1584">0</span><span class="l">satellites in 32 s on a desktop</span></div>
 </div>
 <h2 id="publication">Publication<a class="headerlink" href="#publication" title="Permanent link">&para;</a></h2>
@@ -1901,10 +1923,10 @@ hide:
 </li>
 <li>
 <p>:material-cogs: <strong>O-RAN Near-RT RIC + FlexRIC bridge</strong></p>
-<p>xApps spanning beam management, slice orchestration, anomaly detection and predictive handover, on three RIC placements whose E2 latency comes from live slant geometry. E2AP, KPM and RC procedures run in-simulator over an ns-3 header with toolkit-internal type values; that is not ASN.1 APER over SCTP, and the FlexRIC bridge is where the wire-level path lives.</p>
+<p>xApps spanning beam management, slice orchestration, anomaly detection and predictive handover, on three RIC placements whose E2 latency comes from live slant geometry. E2AP, KPM and RC procedures run in-simulator over an ns-3 header with toolkit-internal type values; that is not ASN.1 APER over SCTP, and the FlexRIC bridge is the start of a wire-level path (its listener exchanges frame types and does not decode payloads yet).</p>
 </li>
 <li>
-<p>:material-wave: <strong>Sub-THz physics (100 GHz – 1 THz)</strong></p>
+<p>:material-wave: <strong>Sub-THz physics (100 GHz to 1 THz)</strong></p>
 <p>ITU-R P.676-13 line-by-line gaseous absorption over a layered atmosphere, P.618-13 scintillation, P.838-3 rain, P.840 fog. UM-MIMO, RIS quantisation sweep, ISAC CRB analysis.</p>
 </li>
 <li>
@@ -1943,7 +1965,7 @@ hide:
 </div>
 <hr />
 <h2 id="see-it-run">See it run<a class="headerlink" href="#see-it-run" title="Permanent link">&para;</a></h2>
-<p>Every animation below is rendered from a <strong>real ns-3 simulation</strong> in the toolkit, with SINR and throughput measured at the radio, propagated orbits and live O-RAN xApp control loops.</p>
+<p>The animations below are rendered from toolkit runs; each caption says what the clip shows and where it is not a live ns-3 radio.</p>
 <div class="showcase-grid">
 <figure>
   <img alt="TTE-aware conditional handover over a LEO pass" loading="lazy" src="media/ntn_cho_handover_animation.gif" />
@@ -1953,12 +1975,12 @@ hide:
 <figure>
   <img alt="O-RAN constellation with Near-RT RIC" loading="lazy" src="media/oran_ntn_constellation_ric.gif" />
 <br />
-<figcaption><strong>Space O-RAN</strong>: on-board Near-RT RIC steering a 66-satellite constellation through feeder-link outages (<code>oran-ntn</code>).</figcaption>
+<figcaption><strong>Space O-RAN</strong>: Near-RT RIC and on-board Space RIC over a 66-satellite constellation through feeder-link outages (<code>oran-ntn</code>).</figcaption>
 </figure>
 <figure>
   <img alt="O-RAN xApp control decisions" loading="lazy" src="media/oran_ntn_xapp_decisions.gif" />
 <br />
-<figcaption><strong>xApp control loop</strong>: 7,738 near-real-time decisions producing 71,967 actuated E2 actions across 5 concurrent xApps, no conflicts (<code>oran-ntn</code>).</figcaption>
+<figcaption><strong>xApp control loop</strong>: 7,738 near-real-time decisions producing 71,967 recorded actions across 5 concurrent xApps, no conflicts (<code>oran-ntn</code>).</figcaption>
 </figure>
 <figure>
   <img alt="Realistic UE mobility under a constellation" loading="lazy" src="media/ntn_realistic_mobility.gif" />
@@ -1968,12 +1990,12 @@ hide:
 <figure>
   <img alt="THz EKF beam tracking" loading="lazy" src="media/thz_beam_tracking.gif" />
 <br />
-<figcaption><strong>Sub-THz beam tracking</strong>: EKF beam tracker holding a 100 GHz–1 THz link through a LEO pass (<code>thz-ntn</code>).</figcaption>
+<figcaption><strong>Sub-THz beam tracking</strong>: EKF beam tracker holding a 100 GHz to 1 THz link through a LEO pass (<code>thz-ntn</code>).</figcaption>
 </figure>
 <figure>
   <img alt="ns3-ai reinforcement-learning training loop" loading="lazy" src="media/ns3ai_rl_training.gif" />
 <br />
-<figcaption><strong>AI-native control</strong>: RL agents training in-the-loop over the ns3-ai shared-memory bridge (<code>ns3-ai-ntn</code>).</figcaption>
+<figcaption><strong>RL tooling</strong>: a training loop over a synthetic NTN environment and the ns3-ai shared-memory bridge (<code>ns3-ai-ntn</code>).</figcaption>
 </figure>
 </div>
 <hr />
@@ -2002,6 +2024,7 @@ hide:
 <th>Module</th>
 <th>Layer</th>
 <th>What it does</th>
+<th>Repository</th>
 </tr>
 </thead>
 <tbody>
@@ -2009,80 +2032,139 @@ hide:
 <td><a href="modules/ntn-constellation/">ntn-constellation</a></td>
 <td>Orbital</td>
 <td>Vallado SGP4 from TLEs, Kepler+J2 for generated Walker shells, contact-graph routing over inter-satellite links</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-constellation">ntn-constellation</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-sagin/">ntn-sagin</a></td>
 <td>Orbital</td>
 <td>Ground, UAV, HAPS and LEO layers with TR 36.777 air-to-ground and multi-layer routing</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-sagin">ntn-sagin</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-v2x/">ntn-v2x</a></td>
 <td>Orbital</td>
 <td>NR sidelink PC5 Mode 2, SAE J2735 basic safety messages, SUMO traces</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-v2x">ntn-v2x</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-traffic/">ntn-traffic</a></td>
 <td>L1 to L3</td>
 <td>The real-stack spine: NR PHY, HARQ, RLC, PDCP, RRC and EPC under satellite mobility</td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-traffic">toolkit only</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-cho/">ntn-cho</a></td>
 <td>L1 to L3</td>
 <td>Time-to-exit conditional handover, the full TS 38.331 NTN trigger set</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-cho-framework">ntn-cho-framework</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-rrc/">ntn-rrc</a></td>
 <td>L1 to L3</td>
 <td>SIB19 consumed by the scheduler, payload-aware timing advance, gating DRX</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-rrc">ntn-rrc</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-fapi/">ntn-fapi</a></td>
 <td>L1 to L3</td>
 <td>SCF-222 FAPI MAC-PHY adapter on a live NR SAP</td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-fapi">toolkit only</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-slice/">ntn-slice</a></td>
 <td>L1 to L3</td>
 <td>eMBB, URLLC and mMTC with per-5QI bearers and histogram SLA percentiles</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-slice">ntn-slice</a></td>
 </tr>
 <tr>
 <td><a href="modules/thz-ntn/">thz-ntn</a></td>
 <td>Physical</td>
 <td>100 GHz to 1 THz on ITU-R P.676-13, P.618-13, P.838-3 and P.840</td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-thz-ntn">ns3-thz-ntn</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-sionna/">ntn-sionna</a></td>
 <td>Physical</td>
 <td>NVIDIA Sionna RT GPU ray tracing with per-query provenance</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-sionna">ntn-sionna</a></td>
 </tr>
 <tr>
 <td><a href="modules/oran-ntn/">oran-ntn</a></td>
 <td>Control</td>
 <td>Space O-RAN: E2, A1, three RIC placements, regenerative payloads, FlexRIC bridge</td>
+<td><a href="https://github.com/Muhammaduazir69/oran-ntn">oran-ntn</a></td>
 </tr>
 <tr>
 <td><a href="modules/ns3-ai-ntn/">ns3-ai-ntn</a></td>
 <td>Control</td>
 <td>Gymnasium 1.0 environments over a versioned shared-memory bridge</td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-ai">ns3-ai</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-observability/">ntn-observability</a></td>
 <td>Operations</td>
 <td>NetSimulyzer, Cesium CZML, InfluxDB and Grafana from one scene recorder</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-observability">ntn-observability</a></td>
 </tr>
 <tr>
 <td><a href="modules/ntn-digital-twin/">ntn-digital-twin</a></td>
 <td>Operations</td>
 <td>FastAPI twin that predicts handovers and actuates them back into the run</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-digital-twin">ntn-digital-twin</a></td>
 </tr>
 <tr>
 <td><a href="modules/satellite/">satellite (SNS3)</a></td>
 <td>Vendored</td>
 <td>SGP4 mobility, DVB-S2 and RCS2, antenna patterns, TLE corpus</td>
+<td><a href="https://github.com/sns3/sns3-satellite">sns3-satellite</a></td>
 </tr>
 </tbody>
 </table>
 <p><a href="modules/">See all modules →</a></p>
+<hr />
+<h2 id="results-at-a-glance">Results at a glance<a class="headerlink" href="#results-at-a-glance" title="Permanent link">&para;</a></h2>
+<p>Each module page ends its overview with measured results, the data path they came from, the run and seed counts, and the script that draws the figure.</p>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>At a glance</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>oran-ntn</td>
+<td>An A1 intent lease cuts the time a cell falls short of its intent from 5.7 % to 3.3 % at one gateway; on-board near-RT control avoids the 19 % deadline misses ground-only control has with one or two gateways (240 runs, 10 seeds per point).</td>
+<td><a href="modules/oran-ntn/#results">Results</a></td>
+</tr>
+<tr>
+<td>ns3-ai-ntn</td>
+<td>Gym transfers cost about 18x fewer CPU cycles than ns3-gym (upstream benchmark, 6 seeds); <code>OranNtnGymHandover</code> steps on a measured radio.</td>
+<td><a href="modules/ns3-ai-ntn/#results">Results</a></td>
+</tr>
+<tr>
+<td>ntn-observability</td>
+<td>A 60 s LEO pass read back from the exported line protocol: SINR about 25 dB, 4.7 Mb/s, elevation 89 to 51 degrees.</td>
+<td><a href="modules/ntn-observability/#results">Results</a></td>
+</tr>
+<tr>
+<td>ntn-digital-twin</td>
+<td>A deterministic 66-satellite twin run exports 5 handovers in 45 min for ns-3 to actuate.</td>
+<td><a href="modules/ntn-digital-twin/#results">Results</a></td>
+</tr>
+<tr>
+<td>ntn-cho</td>
+<td>TTE-aware CHO: 134.6 handovers per run against 463.3 for A3, with 0 % ping-pong (10 seeds).</td>
+<td><a href="modules/ntn-cho/">Module page</a></td>
+</tr>
+<tr>
+<td>Other modules</td>
+<td>Measured results on each module page.</td>
+<td><a href="modules/">All modules</a></td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h2 id="frequently-asked-questions">Frequently asked questions<a class="headerlink" href="#frequently-asked-questions" title="Permanent link">&para;</a></h2>
 <details class="question">
@@ -2095,10 +2177,10 @@ hide:
 </details>
 <details class="question">
 <summary>Is there an open-source O-RAN simulator for non-terrestrial networks?</summary>
-<p>Yes. The <code>oran-ntn</code> module provides an O-RAN near-RT RIC and an on-board Space RIC with xApps, E2AP, KPM and RC procedures carried in-simulator over an ns-3 header, a FlexRIC bridge for the wire-level ASN.1 path, and TS 28.552 KPM metrics measured at the PHY.</p>
+<p>Yes. The <code>oran-ntn</code> module provides an O-RAN near-RT RIC and an on-board Space RIC with xApps, E2AP, KPM and RC procedures carried in-simulator over an ns-3 header, a FlexRIC bridge toward a wire-level E2AP path, and TS 28.552 KPM metrics measured at the PHY.</p>
 </details>
 <details class="question">
-<summary>Can ns-3 simulate terahertz / sub-THz (100 GHz–1 THz) satellite links?</summary>
+<summary>Can ns-3 simulate terahertz / sub-THz (100 GHz to 1 THz) satellite links?</summary>
 <p>Yes. The <code>thz-ntn</code> module implements ITU-R P.676-13 line-by-line molecular absorption over a layered atmosphere, P.618-13 tropospheric scintillation, P.838-3 rain and P.840 fog, plus RIS, ISAC and EKF beam tracking, as real ns-3 propagation-loss models chained onto the radio, so THz physics attenuate actual packets and show up in the measured SINR.</p>
 </details>
 <details class="question">

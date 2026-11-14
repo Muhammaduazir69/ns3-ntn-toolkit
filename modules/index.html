@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="The fourteen integrated ns-3 modules in ns3-ntn-toolkit - LEO constellations, 5G NR-NTN, conditional handover, O-RAN RIC, sub-THz, Sionna, SAGIN, V2X, slicing, AI/ML.">
+        <meta name="description" content="The fourteen integrated ns-3 modules in ns3-ntn-toolkit - LEO constellations, 5G NR-NTN, conditional handover, O-RAN RIC, sub-THz, Sionna, SAGIN, V2X, slicing, AI/ML, observability and a digital twin.">
       
       
         <meta name="author" content="Muhammad Uzair">
@@ -77,14 +77,14 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="ns3-ntn-toolkit">
   <meta property="og:title" content="Modules - ns-3 non-terrestrial network simulation stack · ns3-ntn-toolkit">
-  <meta property="og:description" content="The fourteen integrated ns-3 modules in ns3-ntn-toolkit - LEO constellations, 5G NR-NTN, conditional handover, O-RAN RIC, sub-THz, Sionna, SAGIN, V2X, slicing, AI/ML.">
+  <meta property="og:description" content="The fourteen integrated ns-3 modules in ns3-ntn-toolkit - LEO constellations, 5G NR-NTN, conditional handover, O-RAN RIC, sub-THz, Sionna, SAGIN, V2X, slicing, AI/ML, observability and a digital twin.">
   <meta property="og:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/modules.png">
   <meta property="og:url" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/modules/">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Modules - ns-3 non-terrestrial network simulation stack · ns3-ntn-toolkit">
-  <meta name="twitter:description" content="The fourteen integrated ns-3 modules in ns3-ntn-toolkit - LEO constellations, 5G NR-NTN, conditional handover, O-RAN RIC, sub-THz, Sionna, SAGIN, V2X, slicing, AI/ML.">
+  <meta name="twitter:description" content="The fourteen integrated ns-3 modules in ns3-ntn-toolkit - LEO constellations, 5G NR-NTN, conditional handover, O-RAN RIC, sub-THz, Sionna, SAGIN, V2X, slicing, AI/ML, observability and a digital twin.">
   <meta name="twitter:image" content="https://muhammaduazir69.github.io/ns3-ntn-toolkit/media/og/modules.png">
 
   <!-- Keywords / robots -->
@@ -1594,10 +1594,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#orbital-mobility-plane" class="md-nav__link">
+  <a href="#orbital-and-mobility" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Orbital &amp; mobility plane
+        Orbital and mobility
       
     </span>
   </a>
@@ -1605,10 +1605,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#protocol-stack-l1l3" class="md-nav__link">
+  <a href="#protocol-l1-to-l3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Protocol stack (L1–L3)
+        Protocol, L1 to L3
       
     </span>
   </a>
@@ -1616,10 +1616,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#physical-layer-channels" class="md-nav__link">
+  <a href="#physical-layer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Physical layer &amp; channels
+        Physical layer
       
     </span>
   </a>
@@ -1627,10 +1627,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#control-intelligence-operations" class="md-nav__link">
+  <a href="#control-and-learning" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Control, intelligence &amp; operations
+        Control and learning
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendored-upstream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendored upstream
       
     </span>
   </a>
@@ -1658,108 +1680,159 @@
 
 
 <h1 id="modules">Modules<a class="headerlink" href="#modules" title="Permanent link">&para;</a></h1>
-<p><strong>ns3-ntn-toolkit ships fourteen integrated <a href="https://www.nsnam.org">ns-3</a> contrib modules</strong> that together simulate a complete 5G/6G non-terrestrial network - orbit to application layer. Every module is independently testable, ships its own examples, and builds from a single <code>./ns3 build</code>. Pick the layer you research; the rest compose around it.</p>
+<p><strong>ns3-ntn-toolkit ships fourteen integrated <a href="https://www.nsnam.org">ns-3</a> contrib modules</strong> plus the vendored SNS3 <code>satellite</code> stack. Together they simulate a 5G/6G non-terrestrial network from orbit to application. Every module builds from one <code>./ns3 build</code>, ships its own examples and tests, and twelve of them are also published as standalone repositories that drop into an existing ns-3.43 tree. <code>ntn-traffic</code> and <code>ntn-fapi</code> live only in the toolkit repository.</p>
 <div class="ntn-purpose">
-<p><strong>How to read this page.</strong> The modules are grouped by the part of the non-terrestrial stack they model. Each links to a deep-dive page with what it simulates, the 3GPP / ITU-R / O-RAN standards it aligns to, concrete use cases, and a runnable example.</p>
+<p><strong>How to read this page.</strong> Modules are grouped by the layer of the stack they model, following the <a href="../architecture/">architecture</a>. Each module page has a system design figure, measured results with their data source, the classes, examples, tests and an honest scope section.</p>
 </div>
-<h2 id="orbital-mobility-plane">Orbital &amp; mobility plane<a class="headerlink" href="#orbital-mobility-plane" title="Permanent link">&para;</a></h2>
+<h2 id="orbital-and-mobility">Orbital and mobility<a class="headerlink" href="#orbital-and-mobility" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Module</th>
 <th>What it simulates</th>
+<th>Repository</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><a href="ntn-constellation/"><strong>ntn-constellation</strong></a></td>
-<td>SGP4/SDP4 LEO/MEO/GEO orbit propagation from real Starlink / OneWeb / Kuiper / Iridium TLEs; Walker-Delta / Walker-Star mega-constellation generators; contact-graph routing.</td>
+<td>SGP4 from real TLEs, Kepler + J2 for generated Walker-Delta and Walker-Star shells, ISL contact-graph routing, constellation presets</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-constellation">ntn-constellation</a></td>
 </tr>
 <tr>
 <td><a href="ntn-sagin/"><strong>ntn-sagin</strong></a></td>
-<td>Space-air-ground integrated networks: HAPS station-keeping, UAV/drone patterns, aviation (ADS-B) and maritime (AIS) UE mobility, high-speed train channels.</td>
+<td>ground, UAV, HAPS and LEO layers, TR 36.777 air-to-ground channel, multi-layer routing, store and forward</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-sagin">ntn-sagin</a></td>
 </tr>
 <tr>
 <td><a href="ntn-v2x/"><strong>ntn-v2x</strong></a></td>
-<td>Vehicle-to-everything over LEO: vehicular UEs (SUMO traces), direct-vs-relay selection on measured SINR, V2X-NTN connectivity for rural and highway coverage.</td>
+<td>NR sidelink PC5 Mode 2, SAE J2735 basic safety messages, SUMO traces, direct-versus-relay selection on measured SINR</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-v2x">ntn-v2x</a></td>
 </tr>
 </tbody>
 </table>
-<h2 id="protocol-stack-l1l3">Protocol stack (L1–L3)<a class="headerlink" href="#protocol-stack-l1l3" title="Permanent link">&para;</a></h2>
+<h2 id="protocol-l1-to-l3">Protocol, L1 to L3<a class="headerlink" href="#protocol-l1-to-l3" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Module</th>
 <th>What it simulates</th>
+<th>Repository</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><a href="ntn-rrc/"><strong>ntn-rrc</strong></a></td>
-<td>3GPP Rel-17/18 NR-NTN control plane: SIB19 ephemeris, common + UE-specific Timing Advance pre-compensation, GNSS UE location reporting, NTN-extended DRX.</td>
+<td><a href="ntn-traffic/"><strong>ntn-traffic</strong></a></td>
+<td><code>NtnRealStackHelper</code>, the measured NR NTN data plane (SpectrumPhy, HARQ, RLC, PDCP, RRC, EPC) the other modules build on</td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-traffic">toolkit only</a></td>
 </tr>
 <tr>
 <td><a href="ntn-cho/"><strong>ntn-cho</strong></a></td>
-<td>Rel-17/18 conditional handover for LEO with the full NTN trigger set (A3, location condEventD1, time condEventT1, timing-advance, elevation, Rel-18 condEventD2) and a TTE-aware algorithm.</td>
+<td>conditional handover with time-to-exit and the TS 38.331 NTN trigger set (A3, D1, D2, T1, timing advance, elevation)</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-cho-framework">ntn-cho-framework</a></td>
+</tr>
+<tr>
+<td><a href="ntn-rrc/"><strong>ntn-rrc</strong></a></td>
+<td>SIB19 ephemeris with <code>cellSpecificKoffset</code> consumed by the scheduler, payload-aware timing advance, GNSS location reports, NTN DRX</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-rrc">ntn-rrc</a></td>
+</tr>
+<tr>
+<td><a href="ntn-fapi/"><strong>ntn-fapi</strong></a></td>
+<td>SCF-222 FAPI MAC-PHY adapter on a live NR SAP, per-UE HARQ state, latency gate</td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-fapi">toolkit only</a></td>
 </tr>
 <tr>
 <td><a href="ntn-slice/"><strong>ntn-slice</strong></a></td>
-<td>5G network slicing over NTN: eMBB / URLLC / mMTC slices sharing a real NR cell with per-slice measured SINR and SLA-breach detection over the LEO slant.</td>
+<td>eMBB, URLLC and mMTC sharing a real NR cell, per-5QI bearers, SLA percentiles from a delay histogram</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-slice">ntn-slice</a></td>
 </tr>
 </tbody>
 </table>
-<h2 id="physical-layer-channels">Physical layer &amp; channels<a class="headerlink" href="#physical-layer-channels" title="Permanent link">&para;</a></h2>
+<h2 id="physical-layer">Physical layer<a class="headerlink" href="#physical-layer" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Module</th>
 <th>What it simulates</th>
+<th>Repository</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><a href="thz-ntn/"><strong>thz-ntn</strong></a></td>
-<td>100 GHz – 1 THz physics for NTN: ITU-R P.676-13 molecular absorption with the P.618, P.838 and P.840 cascade, UM-MIMO, RIS, ISAC, EKF beam tracking.</td>
+<td>100 GHz to 1 THz links: ITU-R P.676-13 absorption with the P.618, P.838 and P.840 cascade, pointing error, RIS, EKF beam tracking</td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-thz-ntn">ns3-thz-ntn</a></td>
 </tr>
 <tr>
 <td><a href="ntn-sionna/"><strong>ntn-sionna</strong></a></td>
-<td>NVIDIA Sionna RT ray-traced channels bridged into ns-3: multi-tap CIR, Doppler synthesis, ITU-R atmospheric cascade, MIMO.</td>
-</tr>
-<tr>
-<td><a href="satellite/"><strong>satellite (SNS3)</strong></a></td>
-<td>The vendored CNES/Magister SNS3 base: SatSGP4 mobility, SatChannel, DVB-S2/S2X/RCS2 link results, inter-satellite links.</td>
+<td>NVIDIA Sionna RT ray-traced channels bridged into ns-3 with per-query provenance and a TR 38.811 calibrator</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-sionna">ntn-sionna</a></td>
 </tr>
 </tbody>
 </table>
-<h2 id="control-intelligence-operations">Control, intelligence &amp; operations<a class="headerlink" href="#control-intelligence-operations" title="Permanent link">&para;</a></h2>
+<h2 id="control-and-learning">Control and learning<a class="headerlink" href="#control-and-learning" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Module</th>
 <th>What it simulates</th>
+<th>Repository</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><a href="oran-ntn/"><strong>oran-ntn + FlexRIC</strong></a></td>
-<td>O-RAN Near-RT RIC + on-board Space RIC with xApps, real E2AP/E2SM ASN.1-PER over SCTP, FlexRIC bridge, measured TS 28.552 KPM.</td>
+<td><a href="oran-ntn/"><strong>oran-ntn</strong></a></td>
+<td>Near-RT RIC, RT RIC and on-board Space RIC with xApps; E2 (KPM, RC) and A1 loops on a measured radio; RIC placement from live slant geometry; A1 intent leases; a FlexRIC bridge (in-simulation E2 is an ns-3 header, not ASN.1 over SCTP)</td>
+<td><a href="https://github.com/Muhammaduazir69/oran-ntn">oran-ntn</a></td>
 </tr>
 <tr>
 <td><a href="ns3-ai-ntn/"><strong>ns3-ai-ntn</strong></a></td>
-<td>AI/ML for satellite RANs: ns3-ai shared-memory bridge, Gymnasium environments, reinforcement-learning control loops.</td>
+<td>ns3-ai fork for ns-3.43: Gymnasium 1.0 over versioned shared memory, an AI-RAN inference contract, NTN RL tooling</td>
+<td><a href="https://github.com/Muhammaduazir69/ns3-ai">ns3-ai</a></td>
 </tr>
+</tbody>
+</table>
+<h2 id="operations">Operations<a class="headerlink" href="#operations" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>What it simulates</th>
+<th>Repository</th>
+</tr>
+</thead>
+<tbody>
 <tr>
 <td><a href="ntn-observability/"><strong>ntn-observability</strong></a></td>
-<td>Measured-KPI observability: InfluxDB + Grafana sinks, NetSimulyzer 3D export, Cesium globe, reproducibility manifests.</td>
+<td>one scene recorder feeding InfluxDB, Grafana, NetSimulyzer and Cesium, TS 28.552 metric names, reproducibility manifests</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-observability">ntn-observability</a></td>
 </tr>
 <tr>
 <td><a href="ntn-digital-twin/"><strong>ntn-digital-twin</strong></a></td>
-<td>Live constellation digital twin: real-time TLE propagation, FastAPI prediction service, closed-loop event driver.</td>
+<td>FastAPI constellation twin with a shared A3 guard; exports a handover schedule that ns-3 actuates</td>
+<td><a href="https://github.com/Muhammaduazir69/ntn-digital-twin">ntn-digital-twin</a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="vendored-upstream">Vendored upstream<a class="headerlink" href="#vendored-upstream" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>What it simulates</th>
+<th>Repository</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="satellite/"><strong>satellite (SNS3)</strong></a></td>
+<td>the SNS3 base: SatSGP4 mobility, satellite channel, DVB-S2, S2X and RCS2 link results, antenna patterns</td>
+<td><a href="https://github.com/sns3/sns3-satellite">sns3-satellite</a></td>
 </tr>
 </tbody>
 </table>
 <hr />
-<p>Each module page is a standalone deep dive. Start with the <a href="../getting-started/">getting-started guide</a> to build the whole toolkit, then jump to the layer you research.</p>
+<p>Start with the <a href="../getting-started/">getting-started guide</a> to build the whole toolkit, then open the layer you research. To cite the toolkit, see <a href="../cite/">Cite</a>.</p>
 
 
 
