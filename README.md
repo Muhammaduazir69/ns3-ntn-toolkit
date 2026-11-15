@@ -11,6 +11,13 @@
 </p>
 
 <p align="center">
+  <a href="https://youtu.be/JNStiBst68I"><img src="https://img.youtube.com/vi/JNStiBst68I/maxresdefault.jpg" alt="NTN Control Center: end-to-end simulation of non-terrestrial networks in ns-3 (video)" width="760"/></a><br/>
+  <a href="https://youtu.be/JNStiBst68I"><img src="https://img.shields.io/badge/YouTube-Watch%20the%205--minute%20demo-red?logo=youtube" alt="Watch on YouTube"/></a><br/>
+  <sub>Watch the NTN Control Center run, visualize and export every module of the toolkit, end to end (5 min).</sub>
+</p>
+
+
+<p align="center">
   <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit">GitHub</a>
   &nbsp;·&nbsp;
   <a href="https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit">GitLab</a>
