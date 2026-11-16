@@ -220,13 +220,70 @@ NtnOranAiFlowMonitor::GranularityTick()
             //   SDU data volume in Mbit (was written in kbit, a factor 1e3 off).
             s.metrics["DRB.PdcpSduVolumeDl"] = dBytes * 8.0 / 1e6; // Mbit
             //   DRB.RlcSduDelayDl §5.1.1.2 — units of 0.1 ms (a value of 10 == 1 ms)
-            s.metrics["DRB.RlcSduDelayDl"] = (dPkts ? dDelaySum / dPkts : 0.0) * 10.0;
+            if (!m_ranKpm)
+            {
+                s.metrics["DRB.RlcSduDelayDl"] = (dPkts ? dDelaySum / dPkts : 0.0) * 10.0;
+            }
+            else
+            {
+                // The application probe keeps its own, honest name.
+                s.metrics["app.OwdDl"] = dPkts ? dDelaySum / dPkts : 0.0; // ms
+            }
             //   DRB.PacketLossRateDl §5.1.3.1 — integer in units of 1e-6 (a 0..1
             //   fraction scaled by 1e6), NOT a raw 0..1 ratio.
             {
                 const double lossFrac =
                     (dPkts + dLost) ? static_cast<double>(dLost) / (dPkts + dLost) : 0.0;
                 s.metrics["DRB.PacketLossRateDl"] = lossFrac * 1e6;
+            }
+            if (m_ranKpm && m_rs && ref.ueIndex >= 0)
+            {
+                // C6: RAN counters, deltas over this granularity period, taken
+                // once per UE and per cell per tick (several flows of one UE
+                // share the UE's DRB counters).
+                if (m_ranTickTime != now)
+                {
+                    m_ranTickTime = now;
+                    m_ranTick.clear();
+                    m_cellPrbTick.clear();
+                }
+                if (m_ranTick.find(ref.ueIndex) == m_ranTick.end())
+                {
+                    const auto c = m_rs->GetUeRanCounters(static_cast<uint32_t>(ref.ueIndex));
+                    RanCursor& rc = m_ranCursor[ref.ueIndex];
+                    auto& v = m_ranTick[ref.ueIndex];
+                    const uint64_t dSdu = c.rlcSdus - rc.rlcSdus;
+                    // TS 28.552 5.1.3.3.1 DRB.RlcSduDelayDl, 0.1 ms units.
+                    v["DRB.RlcSduDelayDl"] =
+                        dSdu ? (c.rlcSduDelaySumMs - rc.rlcDelaySumMs) / dSdu * 10.0 : 0.0;
+                    // TS 28.552 5.1.1.8: transport block COUNTS.
+                    v["TB.TotNbrDl"] = static_cast<double>(c.dlTb - rc.dlTb);
+                    v["TB.ErrTotNbrDl"] = static_cast<double>(c.dlTbErr - rc.dlTbErr);
+                    rc.dlTb = c.dlTb;
+                    rc.dlTbErr = c.dlTbErr;
+                    rc.rlcDelaySumMs = c.rlcSduDelaySumMs;
+                    rc.rlcSdus = c.rlcSdus;
+                }
+                for (const auto& [k, val] : m_ranTick[ref.ueIndex])
+                {
+                    s.metrics[k] = val;
+                }
+                const uint16_t cell = m_rs->GetUeServingCellId(static_cast<uint32_t>(ref.ueIndex));
+                if (cell != 0)
+                {
+                    if (m_cellPrbTick.find(cell) == m_cellPrbTick.end())
+                    {
+                        // TS 28.552 5.1.1.2.x RRU.PrbUsedDl: mean number of DL
+                        // PRBs in use per slot over the period (PRB x symbols/14).
+                        const double tot = m_rs->GetCellDlPrbSlotsUsed(cell);
+                        const double slots =
+                            m_granularity.GetSeconds() / m_rs->GetSlotDuration().GetSeconds();
+                        m_cellPrbTick[cell] =
+                            slots > 0 ? (tot - m_cellPrbCursor[cell]) / slots : 0.0;
+                        m_cellPrbCursor[cell] = tot;
+                    }
+                    s.metrics["RRU.PrbUsedDl"] = m_cellPrbTick[cell];
+                }
             }
             if (m_rs && ref.ueIndex >= 0)
             {
@@ -252,7 +309,7 @@ NtnOranAiFlowMonitor::GranularityTick()
                     // DL HARQ BLER FRACTION (0..1); once an absolute TB counter is
                     // plumbed the canonical relation TB.ErrTotNbrDl / TB.TotNbrDl
                     // == BLER restores the count semantics. Value unit: fraction.
-                    s.metrics["TB.ErrTotNbrDl"] = tbler;
+                    s.metrics[m_ranKpm ? "app.TbBlerDl" : "TB.ErrTotNbrDl"] = tbler;
                 }
             }
             m_series[id].push_back(s);
@@ -385,7 +442,14 @@ NtnOranAiFlowMonitor::WriteCsv(const std::string& path) const
     std::ofstream os(path);
     os << "time_s,flow_id,src_id,dst_id,five_qi,sst,sd,DRB.UEThpDl,"
           "DRB.PdcpSduVolumeDl,DRB.RlcSduDelayDl,DRB.PacketLossRateDl,"
-          "L1M.RS-SINR,TB.ErrTotNbrDl\n";
+          "L1M.RS-SINR,TB.ErrTotNbrDl";
+    // C6: the RAN-counter columns exist only in that mode, appended so the
+    // legacy column layout is byte-identical.
+    if (m_ranKpm)
+    {
+        os << ",TB.TotNbrDl,RRU.PrbUsedDl,app.OwdDl,app.TbBlerDl";
+    }
+    os << "\n";
     // A metric the period did not measure (no UE-side PHY sample for this
     // flow, e.g. an uplink or gateway-side flow) is written as an empty field,
     // the CSV convention for a missing value, never as the text "nan".
@@ -410,7 +474,13 @@ NtnOranAiFlowMonitor::WriteCsv(const std::string& path) const
                << "," << get(s, "DRB.UEThpDl") << "," << get(s, "DRB.PdcpSduVolumeDl")
                << "," << get(s, "DRB.RlcSduDelayDl") << ","
                << get(s, "DRB.PacketLossRateDl") << "," << get(s, "L1M.RS-SINR") << ","
-               << get(s, "TB.ErrTotNbrDl") << "\n";
+               << get(s, "TB.ErrTotNbrDl");
+            if (m_ranKpm)
+            {
+                os << "," << get(s, "TB.TotNbrDl") << "," << get(s, "RRU.PrbUsedDl") << ","
+                   << get(s, "app.OwdDl") << "," << get(s, "app.TbBlerDl");
+            }
+            os << "\n";
         }
     }
 }

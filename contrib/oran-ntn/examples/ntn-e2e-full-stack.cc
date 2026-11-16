@@ -3,37 +3,59 @@
  * Copyright (c) 2026  Muhammad Uzair
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * ntn-e2e-full-stack — Phase 3 of 2026-06 protocol-fidelity audit
- * (composition / silo-breaker).
+ * ntn-e2e-full-stack: one measured data plane, one closed O-RAN loop.
  *
- * The audit's anti-pattern #6: the modules are siloed — each re-derives its own
- * geometry and never shares a data plane. This example proves they COMPOSE on a
- * SINGLE shared data plane: ONE real mmwave NR NTN cell (NtnRealStackHelper)
- * whose MEASURED PHY SINR simultaneously drives
- *   (a) the oran-ntn Near-RT RIC + xApps (measured KPM -> RC actions), and
- *   (b) the ntn-slice SliceIsolationMonitor (per-slice SLA on measured KPIs),
- * and is logged as a measured-KPI CSV (observability). One NodeContainer, one
- * channel, one packet flow, many consumers.
+ * Composition (Wave 2 M2):
+ *   - ntn-constellation: two SGP4 Walker satellites (serving + the in-plane
+ *     neighbour approaching the UEs), each a 5G-LENA gNB (ntn-traffic
+ *     NtnRealStackHelper, nr backend, TR 38.821 Set-1 S-band terminal and
+ *     payload, cell-level SS-RSRP on an Earth-fixed cell beam, feeder from a
+ *     gateway --gwDistanceKm north of the UEs).
+ *   - ntn-slice: the gNB MAC runs NtnSliceQuotaScheduler; MixedBouquet traffic
+ *     marks eMBB 5QI 2, URLLC 5QI 82, mMTC 5QI 9 (TS 23.501 Table 5.7.4-1).
+ *   - oran-ntn: Near-RT RIC + xApps. OranNtnRealStackBinding registers the
+ *     actuators this radio has (handover -> TriggerHandover over X2, slice
+ *     quota -> NtnSliceQuotaScheduler, Tx power -> NrGnbPhy, MCS -> MAC) and
+ *     feeds the E2 nodes from measured counters only (TS 28.552 names). Only
+ *     xApps whose every action has an actuator are admitted.
+ *   - E2: --e2Transport=event (delay events, default) or packet (E2AP as UDP
+ *     datagrams over a per-satellite feeder link with live slant delay; E2
+ *     Setup and RIC Subscription precede the first indication).
+ *   - ntn-observability: control plane and KPM points in line protocol on the
+ *     simulation clock (out/ric.lp).
+ *
+ * The RIC owns mobility: the vendored A3 algorithm is not installed
+ * (SetAutonomousHandover(false)), the stack sends periodic 480 ms RRC
+ * measurement reports, and a handover happens only if an xApp decides it.
+ *
+ * --xapps=0 runs the identical radio with no xApp: the difference between the
+ * two runs is what the RIC actuated.
  *
  * Usage:
- *   ./ns3 run "ntn-e2e-full-stack --duration=15 --numUes=9"
+ *   ntn-e2e-full-stack --duration=15 --numUes=9 [--xapps=0] [--e2Transport=packet]
+ *                      [--feederOutageAt=8 --feederOutageS=1]
  */
 
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 
+#include "ns3/ntn-influx-sink.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-slice-types.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
-#include "ns3/sgp4-mobility-model.h"
-#include "ns3/walker-constellation.h"
 #include "ns3/oran-ntn-a1-interface.h"
+#include "ns3/oran-ntn-e2-interface.h"
+#include "ns3/oran-ntn-e2-transport.h"
 #include "ns3/oran-ntn-helper.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
+#include "ns3/oran-ntn-real-stack-binding.h"
 #include "ns3/oran-ntn-ric-placement.h"
 #include "ns3/oran-ntn-types.h"
+#include "ns3/oran-ntn-xapp-base.h"
+#include "ns3/sgp4-mobility-model.h"
 #include "ns3/slice-isolation-monitor.h"
+#include "ns3/walker-constellation.h"
 
 #include <cmath>
 #include <filesystem>
@@ -41,42 +63,70 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <sstream>
 
 using namespace ns3;
 using namespace ns3::ntnslice;
 
 NS_LOG_COMPONENT_DEFINE("NtnE2eFullStack");
 
+namespace
+{
+std::vector<double>
+ParseList(const std::string& s)
+{
+    std::vector<double> v;
+    std::stringstream ss(s);
+    std::string x;
+    while (std::getline(ss, x, ','))
+    {
+        v.push_back(std::stod(x));
+    }
+    return v;
+}
+} // namespace
+
 int
 main(int argc, char* argv[])
 {
     double duration = 15.0;
     uint32_t numUes = 9;
-    double altitudeKm = 550.0;
-    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
-    std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
+    double altitudeKm = 600.0;
+    bool xapps = true;
+    std::string e2Transport = "event";
+    double feederOutageAt = -1.0;
+    double feederOutageS = 1.0;
+    double gwDistanceKm = 500.0;
+    double e2RateMbps = 10.0;
+    double ueAlongTrack = 0.5; // UE site between the serving (0) and neighbour (1) sub-points
+    double a3OffsetDb = 3.0;
+    std::string initialQuotas = "0.9,0.05,0.05";
     std::string outputDir = "ntn-e2e-full-stack-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
-    cmd.AddValue("numUes", "Number of UEs on the shared cell", numUes);
-    cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm); -1 = backend default", satEirpDbm);
-    cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
+    cmd.AddValue("numUes", "UEs (MixedBouquet: u%3 = 0 mMTC, 1 eMBB, 2 URLLC)", numUes);
+    cmd.AddValue("altitude", "Shell altitude (km)", altitudeKm);
+    cmd.AddValue("xapps", "Run the admitted xApps (0 = same radio, no RIC control)", xapps);
+    cmd.AddValue("e2Transport", "event (delay events) or packet (E2AP datagrams over the feeder)",
+                 e2Transport);
+    cmd.AddValue("feederOutageAt", "packet transport: feeder outage start on E2 node 1 (s, <0 off)",
+                 feederOutageAt);
+    cmd.AddValue("feederOutageS", "packet transport: feeder outage duration (s)", feederOutageS);
+    cmd.AddValue("e2RateMbps", "packet transport: E2 control bearer rate (Mb/s)", e2RateMbps);
+    cmd.AddValue("gwDistanceKm", "Gateway ground distance north of the UE site (km)", gwDistanceKm);
+    cmd.AddValue("ueAlongTrack",
+                 "UE site as a fraction of the way from the serving to the neighbour sub-point",
+                 ueAlongTrack);
+    cmd.AddValue("a3OffsetDb", "ho-predict measured-RSRP A3 offset (dB)", a3OffsetDb);
+    cmd.AddValue("initialQuotas", "initial MAC slice quotas eMBB,URLLC,mMTC", initialQuotas);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(e2Transport != "event" && e2Transport != "packet",
+                    "--e2Transport must be event or packet");
+    std::filesystem::create_directories(outputDir);
 
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55.
-    if (satEirpDbm < 0.0)
-    {
-        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
-    }
-
-    std::cout << "\n=== ntn-e2e-full-stack (COMPOSITION on one shared data plane) ===\n"
-              << "  ONE real mmwave cell -> measured SINR feeds RIC + slice + observability\n"
-              << "  duration: " << duration << " s, UEs: " << numUes << "\n\n";
-
-    // Real NTN mobility architecture: SGP4 serving satellite + TR 38.811 UEs.
+    // ---- Constellation: serving satellite + the approaching in-plane neighbour
     ns3::ntncon::WalkerConfig wcfg;
     wcfg.num_planes = 1;
     wcfg.total_sats = 80;
@@ -84,263 +134,275 @@ main(int argc, char* argv[])
     wcfg.inclination_deg = 53.0;
     wcfg.epoch_unix_s = 1735689600.0;
     const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
-    Ptr<ns3::ntncon::Sgp4MobilityModel> servSat =
-        CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    servSat->SetElements(elements[0]);
+    auto serv = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    serv->SetElementsSgp4(elements[0]);
+    auto nbrA = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    nbrA->SetElementsSgp4(elements[1]);
+    auto nbrB = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    nbrB->SetElementsSgp4(elements[wcfg.total_sats - 1]);
+    double sLat, sLon, sAlt;
+    serv->GetGeodetic(sLat, sLon, sAlt);
+    const Vector site0 = NtnRealStackHelper::GeodeticToEcef(sLat, sLon, 0.0);
+    auto approaching = [&site0](Ptr<ns3::ntncon::Sgp4MobilityModel> s) {
+        const Vector p = s->GetPosition();
+        const Vector v = s->GetVelocity();
+        return (v.x * (site0.x - p.x) + v.y * (site0.y - p.y) + v.z * (site0.z - p.z)) > 0.0;
+    };
+    Ptr<ns3::ntncon::Sgp4MobilityModel> nbr = approaching(nbrA) ? nbrA : nbrB;
+    double nLat, nLon, nAlt;
+    nbr->GetGeodetic(nLat, nLon, nAlt);
+    const double uLat = sLat + ueAlongTrack * (nLat - sLat);
+    const double uLon = sLon + ueAlongTrack * (nLon - sLon);
 
     NodeContainer satNodes;
-    satNodes.Create(1);
-    satNodes.Get(0)->AggregateObject(servSat);
+    satNodes.Create(2);
+    satNodes.Get(0)->AggregateObject(serv);
+    satNodes.Get(1)->AggregateObject(nbr);
     NodeContainer ueNodes;
     ueNodes.Create(numUes);
-
-    double subLat, subLon, subAlt;
-    servSat->GetGeodetic(subLat, subLon, subAlt);
     NtnTr38811MobilityHelper ueMobility(1);
-    auto mobProfile = NtnMobilityScenarios::MixedContinental();
-    auto ueModels = ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
-                                       subLon - 0.03, subLon + 0.03);
+    auto ueModels = ueMobility.Install(ueNodes, NtnMobilityScenarios::MixedContinental(),
+                                       uLat - 0.03, uLat + 0.03, uLon - 0.03, uLon + 0.03);
 
-    // ---- THE shared data plane: one real mmwave NR NTN cell ----
+    // ---- The measured NR stack ----
     NtnRealStackHelper rs;
-    rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
-                                         : NtnRealStackHelper::RadioBackend::Nr);
-    if (radio != "mmwave")
-    {
-        rs.SetNumerology(1); // FR1 30 kHz SCS
-    }
+    rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+    rs.SetNumerology(1);
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-e2e-full-stack");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    rs.ApplyTr38821Set1Defaults(); // S-band 2.185 GHz, 20 MHz, handheld 1T2R, 34 dBW/MHz
+    rs.SetSchedulerTypeName("ns3::ntnslice::NtnSliceQuotaScheduler");
+    rs.SetHandover(true, 3.0, MilliSeconds(256));
+    rs.SetAutonomousHandover(false); // the RIC owns mobility; periodic 480 ms reports
+    Ptr<ConstantPositionMobilityModel> cellCenter = CreateObject<ConstantPositionMobilityModel>();
+    cellCenter->SetPosition(NtnRealStackHelper::GeodeticToEcef(uLat, uLon, 0.0));
+    rs.SetSsbCellBeam(true, cellCenter);
+    rs.SetKpmFromRanCounters(true);
     rs.Build(satNodes, ueNodes);
-    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
-                      Seconds(1.0), Seconds(duration - 0.5));
+    Ptr<MobilityModel> gw =
+        rs.SetFeederGatewayGeodetic(uLat + gwDistanceKm / 111.195, uLon, 0.0);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet, Seconds(1.0),
+                      Seconds(duration - 0.5));
 
-    // ---- Consumer 1: oran-ntn Near-RT RIC + xApps ----
+    // ---- O-RAN ----
     auto helper = CreateObject<OranNtnHelper>();
     helper->SetOutputDirectory(outputDir);
     auto nonRtRic = helper->CreateNonRtRic();
-    auto nearRtRic = helper->CreateNearRtRic();
-    helper->ConnectA1Interface(nearRtRic, nonRtRic);
-    auto satE2Nodes = helper->CreateSatelliteE2Nodes(satNodes, nearRtRic);
+    auto ric = helper->CreateNearRtRic();
+    helper->ConnectA1Interface(ric, nonRtRic);
+    auto e2Nodes = helper->CreateSatelliteE2Nodes(satNodes, ric);
     helper->SetShellAltitudeKm(altitudeKm);
-    // MixedBouquet marks UE u%3 = 0 mMTC (5QI 9), 1 eMBB (5QI 2), 2 URLLC
-    // (5QI 82); declare the same slices to the RIC instead of the helper's
-    // unrelated ueId%3 tag (0 eMBB, 1 URLLC, 2 mMTC).
+
+    auto binding = CreateObject<OranNtnRealStackBinding>();
+    binding->SetInitialQuotas(ParseList(initialQuotas));
+    binding->Bind(helper, &rs);
     for (uint32_t u = 0; u < numUes; ++u)
     {
-        helper->SetUeSliceId(u, (u % 3 == 0) ? 2 : (u % 3 == 1) ? 0 : 1);
+        binding->SetUeSlice(u, (u % 3 == 0) ? 2 : (u % 3 == 1) ? 0 : 1);
     }
-    // The E2 node sat at the helper's constant 4 ms feeder delay. A ground RIC
-    // controlling a LEO cell sees the live satellite-gateway slant on both
-    // legs (O-RAN WG3 E2 over the feeder), so bind it to the geometry: a
-    // gateway about 110 km north of the UE cluster, refreshed every second.
-    Ptr<ConstantPositionMobilityModel> gwMob = CreateObject<ConstantPositionMobilityModel>();
-    gwMob->SetPosition(ntngeo::GeodeticToEcef(subLat + 1.0, subLon, 0.0));
-    Ptr<OranNtnRicPlacement> ricSite = CreateObject<OranNtnRicPlacement>();
-    ricSite->SetSite(OranNtnRicPlacement::Site::GroundGateway);
-    ricSite->BindToGeometry(servSat, gwMob, satE2Nodes.front(), Seconds(1.0));
-    auto xapps = helper->CreateAllXapps(nearRtRic);
-    helper->StartAllXapps(nearRtRic);
+    binding->SetGeometry({serv, nbr},
+                         std::vector<Ptr<MobilityModel>>(ueModels.begin(), ueModels.end()),
+                         rs.GetCarrierFrequencyHz());
+    binding->StartKpm(MilliSeconds(100), Seconds(1.0));
 
-    // ---- Consumer 2: ntn-slice SLA monitor ----
-    SliceProfile profiles[3] = {DefaultEmbb(1), DefaultUrllc(2), DefaultMmtc(3)};
-    SliceIsolationMonitor sliceMon;
-    // The monitor keeps a 200-sample window by default and the histogram below
-    // is replayed in ascending delay order, so only the slowest 200 packets
-    // would survive and "p99" would be the tail maximum. Keep every sample.
-    sliceMon.SetWindow(10000000);
-    for (auto& p : profiles)
+    // E2 transport
+    Ptr<OranNtnE2Transport> transport;
+    std::vector<Ptr<OranNtnRicPlacement>> sites;
+    if (e2Transport == "packet")
     {
-        sliceMon.RegisterSlice(p);
+        transport = CreateObject<OranNtnE2Transport>();
+        transport->SetTraceFile(outputDir + "/e2_trace.csv");
+        transport->SetBearerRate(DataRate(static_cast<uint64_t>(e2RateMbps * 1e6)));
+        transport->Attach(e2Nodes[0], serv, gw);
+        transport->Attach(e2Nodes[1], nbr, gw);
+        transport->Start(Seconds(0.1));
+        if (feederOutageAt >= 0.0)
+        {
+            transport->ScheduleOutage(1, Seconds(feederOutageAt), Seconds(feederOutageS));
+        }
+    }
+    else
+    {
+        // Event delivery bound to the same live satellite-gateway slant.
+        for (uint32_t s = 0; s < 2; ++s)
+        {
+            auto site = CreateObject<OranNtnRicPlacement>();
+            site->SetSite(OranNtnRicPlacement::Site::GroundGateway);
+            site->BindToGeometry(s == 0 ? Ptr<MobilityModel>(serv) : Ptr<MobilityModel>(nbr), gw,
+                                 e2Nodes[s], Seconds(1.0));
+            sites.push_back(site);
+        }
     }
 
-    // ---- Consumer 3: observability — measured-KPI CSV log ----
-    std::filesystem::create_directories(outputDir);
-    std::ofstream kpiLog(outputDir + "/measured_kpi_log.csv");
-    kpiLog << "t_s,ue,measured_sinr_db,source\n";
-
-    // One periodic loop drives ALL consumers from the SAME measured SINR; the
-    // O-RAN enrichment (elevation/Doppler) is computed from the REAL ephemeris.
-    std::map<uint32_t, uint64_t> lastRxBytes; // ue -> last measured DL bytes
-    std::map<uint32_t, double> lastElev;      // ue -> last serving elevation (deg)
-    const double minElevDeg = 10.0;           // service elevation mask for TTE
-    const double kpmIntervalS = 0.1; // matches RegisterPeriodicCallback below
-    auto tick = [&](Time now) {
-        double t = now.GetSeconds();
-        const Vector sp = servSat->GetPosition();
-        const Vector sv = servSat->GetVelocity();
-        for (uint32_t u = 0; u < numUes; ++u)
+    std::map<std::string, Ptr<OranNtnXappBase>> admitted;
+    if (xapps)
+    {
+        admitted = helper->CreateAdmittedXapps(ric);
+        if (auto ho = ric->GetXappByName("ho-predict"))
         {
-            double sinr = rs.GetUeRecentSinrDb(u);
-            if (std::isnan(sinr))
-            {
-                continue;
-            }
-            // (a) RIC: measured KPM + real-ephemeris enrichment. The measured
-            // bytes/TBLER are threaded in so the RIC's xApps act on measured
-            // goodput, not a synthetic SINR formula (Global invariant 2 + 4).
-            const Vector up = ueModels[u]->GetPosition();
-            const Vector uv = ueModels[u]->GetVelocity();
-            const double elev = ntngeo::ElevationDeg(up, sp);
-            const double doppler = ntngeo::DopplerHz(up, uv, sp, sv, 2.0e9);
-            const uint64_t rxBytes = rs.GetUeRxBytes(u);
-            double measTbler = rs.GetUeRecentTbler(u);
-            if (std::isnan(measTbler))
-            {
-                measTbler = -1.0;
-            }
-            double measThp = -1.0;
-            if (auto bit = lastRxBytes.find(u);
-                bit != lastRxBytes.end() && rxBytes >= bit->second)
-            {
-                measThp = (rxBytes - bit->second) * 8.0 / (kpmIntervalS * 1e6);
-            }
-            lastRxBytes[u] = rxBytes;
-            // Time-to-exit from the live elevation rate of THIS UE's serving
-            // link (it was a constant 60 s for every UE and every tick, which
-            // the ho-predict xApp then read as geometry).
-            double elevRate = 0.0;
-            if (auto eit = lastElev.find(u); eit != lastElev.end())
-            {
-                elevRate = (elev - eit->second) / kpmIntervalS;
-            }
-            lastElev[u] = elev;
-            const double tte =
-                (elevRate < -1e-3) ? std::max(1.0, (elev - minElevDeg) / -elevRate) : 600.0;
-            // The serving SINR is read off the PHY trace: claim the measured
-            // provenance (ORAN-03), as the gym example already does.
-            helper->InjectKpmReport(1, u, sinr, sinr - 95.0, tte, elev, doppler,
-                                    measThp, rxBytes, measTbler, /*measPrbUtil=*/-1.0,
-                                    /*sinrMeasured=*/true);
-            // (c) observability: log the measured value.
-            kpiLog << std::fixed << std::setprecision(2) << t << "," << u << "," << sinr
-                   << ",phy-trace\n";
+            ho->SetAttribute("A3OffsetDb", DoubleValue(a3OffsetDb));
         }
-    };
-    rs.RegisterPeriodicCallback(MilliSeconds(100), tick);
+        helper->StartAllXapps(ric);
+    }
+
+    // ---- Observability on the simulation clock ----
+    auto sink = CreateObject<ns3::ntnobs::NtnInfluxSink>();
+    sink->SetTransport(ns3::ntnobs::NtnInfluxSink::Transport::File);
+    sink->SetFilePath(outputDir + "/ric.lp");
+    sink->SetBaseEpoch(Time(0));
+    sink->SetFlushPeriod(Seconds(1.0));
+    sink->Start();
+    helper->SetActionObserver([sink](const E2RcAction& a, bool actuated) {
+        ns3::ntnobs::Point p;
+        p.measurement = "oran_rc";
+        p.tags["xapp"] = a.xappName;
+        p.tags["action_type"] = std::to_string(static_cast<uint32_t>(a.actionType));
+        p.tags["gnb"] = std::to_string(a.targetGnbId);
+        p.fieldsInt["ue"] = a.targetUeId;
+        p.fieldsInt["actuated"] = actuated ? 1 : 0;
+        p.fieldsFloat["parameter1"] = a.parameter1;
+        p.timestamp = Simulator::Now();
+        sink->Push(p);
+    });
+    uint64_t kpmRows = 0;
+    binding->SetReportObserver([sink, &kpmRows](const E2KpmReport& r) {
+        ++kpmRows;
+        ns3::ntnobs::Point p;
+        p.measurement = "oran_kpm";
+        p.tags["gnb"] = std::to_string(r.gnbId);
+        p.tags["ue"] = std::to_string(r.ueId);
+        p.tags["slice"] = std::to_string(r.sliceId);
+        p.fieldsFloat["L1M.RS-SINR"] = r.sinr_dB;
+        p.fieldsFloat["L1M.SS-RSRP"] = r.rsrp_dBm;
+        p.fieldsFloat["DRB.UEThpDl"] = r.throughput_Mbps * 1e3;
+        p.fieldsFloat["DRB.RlcSduDelayDl"] = r.rlcSduDelayDl_ms * 10.0;
+        p.fieldsFloat["RRU.PrbUsedDl"] = r.prbUsedDl;
+        p.timestamp = Simulator::Now();
+        sink->Push(p);
+    });
+    rs.RegisterPeriodicCallback(Seconds(1.0), [sink, binding](Time now) {
+        const auto q = binding->GetQuotas(0);
+        for (size_t s = 0; s < q.size(); ++s)
+        {
+            ns3::ntnobs::Point p;
+            p.measurement = "slice_rrm";
+            p.tags["gnb"] = "1";
+            p.tags["slice"] = std::to_string(s);
+            p.fieldsFloat["quota"] = q[s];
+            p.timestamp = now;
+            sink->Push(p);
+        }
+    });
+
+    std::cout << "\n=== ntn-e2e-full-stack: measured NR stack + O-RAN closed loop ===\n"
+              << "  radio: nr (TR 38.821 Set-1 S band), 2 SGP4 gNBs, " << numUes
+              << " UEs, " << duration << " s, E2 " << e2Transport << ", xApps "
+              << (xapps ? "admitted" : "off") << "\n";
+    std::cout << "  actuators registered:";
+    for (const auto& a : binding->GetRegisteredActuators())
+    {
+        std::cout << " " << a;
+    }
+    std::cout << "\n";
+    for (const auto& a : helper->GetAdmissionLog())
+    {
+        std::cout << "  xApp " << std::setw(18) << std::left << a.xappName
+                  << (a.admitted ? " ADMITTED" : " refused ") << "  (" << a.reason << ")\n";
+    }
 
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
-    kpiLog.close();
+    sink->Flush();
+    sink->Stop();
 
-    // ---- (b) slice: the MEASURED one-way-delay distribution ----
-    //
-    // WF-05. This used to be
-    //     latencyMs = slant/c*1e3 + 5.0;                 // geometry + a magic 5 ms
-    //     for (p = 0; p < rxBytes / 1400; ++p) RecordPacket(..., latencyMs, true);
-    // and the summary then called the result "measured geometry". Two defects
-    // in three lines. The latency was a closed form, identical for every packet
-    // of a UE, so the monitor's p99 was a percentile over N copies of one
-    // number and no percentile SLA could ever breach. And rxBytes/1400 is the
-    // packet estimate the helper documents as wrong for any non-1400 B packet -
-    // this example runs MixedBouquet, whose mMTC flows are 128 B and URLLC 256 B,
-    // so the count was off by up to a factor of ten for two of the three slices.
-    //
-    // Both have real replacements that already existed and were not called:
-    // GetSliceDelayHistogram() returns the pooled measured OWD distribution in
-    // 1 ms bins, and GetUeRxPackets() counts delivered packets correctly for any
-    // size. Replaying the histogram gives the monitor a distribution with actual
-    // spread, so a percentile bound can be breached by a tail rather than only
-    // by the mean.
-    // eMBB / URLLC / mMTC 5QIs in this run. MixedBouquet marks eMBB 5QI 2; this
-    // table said 9 for eMBB, so the eMBB slice was fed the mMTC histogram (and
-    // the mMTC samples were replayed twice) while the real eMBB flows were
-    // never looked at.
+    // ---- Slice SLA on the measured OWD distribution (post-hoc replay) ----
+    SliceProfile profiles[3] = {DefaultEmbb(1), DefaultUrllc(2), DefaultMmtc(3)};
+    SliceIsolationMonitor sliceMon;
+    sliceMon.SetWindow(10000000);
+    for (auto& p : profiles)
+    {
+        sliceMon.RegisterSlice(p);
+    }
     const uint8_t sliceQi[3] = {2, 82, 9};
-    uint64_t replayed = 0;
     for (uint32_t slice = 0; slice < 3; ++slice)
     {
-        const auto hist = rs.GetSliceDelayHistogram(sliceQi[slice]);
-        for (const auto& [delayMsBin, count] : hist)
+        for (const auto& [bin, count] : rs.GetSliceDelayHistogram(sliceQi[slice]))
         {
             for (uint64_t p = 0; p < count; ++p)
             {
-                sliceMon.RecordPacket(profiles[slice].snssai,
-                                      static_cast<double>(delayMsBin), true);
-                ++replayed;
+                sliceMon.RecordPacket(profiles[slice].snssai, static_cast<double>(bin), true);
             }
         }
-    }
-    // Losses are measured too, so the reliability verdict is not asserted.
-    // Each loss is charged to the slice whose flow lost it; every loss used to
-    // be booked against eMBB, which hid a URLLC reliability breach.
-    for (uint32_t slice = 0; slice < 3; ++slice)
-    {
         const uint64_t lost = rs.GetSliceMeasuredStats(sliceQi[slice]).lostPackets;
         for (uint64_t p = 0; p < lost; ++p)
         {
             sliceMon.RecordPacket(profiles[slice].snssai, 0.0, false);
         }
     }
-    // Report the SPREAD, because its absence was the defect. A distribution
-    // stamped with one value has zero range, and a p99 over it equals the mean
-    // by construction - which is how a percentile SLA became unbreachable.
-    {
-        uint32_t lo = 0xFFFFFFFF;
-        uint32_t hi = 0;
-        for (uint32_t slice = 0; slice < 3; ++slice)
-        {
-            for (const auto& [bin, count] : rs.GetSliceDelayHistogram(sliceQi[slice]))
-            {
-                if (count == 0)
-                {
-                    continue;
-                }
-                lo = std::min(lo, bin);
-                hi = std::max(hi, bin);
-            }
-        }
-        if (replayed > 0)
-        {
-            std::cout << "  [slice] replayed " << replayed
-                      << " MEASURED OWD samples spanning " << lo << " to " << hi
-                      << " ms (a closed-form stamp would span 0 ms, which is why the old p99 "
-                         "could never breach)\n";
-        }
-    }
-
-    if (replayed == 0)
-    {
-        // Say so rather than reporting an SLA verdict over an empty sample.
-        std::cout << "  NOTE: no measured OWD samples for these 5QIs; the slice SLA "
-                     "verdict below is over an empty distribution and means nothing\n";
-    }
     auto breaches = sliceMon.EvaluateAll();
-    helper->WriteAllMetrics(nearRtRic);
+    helper->WriteAllMetrics(ric);
 
-    // ---- Composition summary: all three consumers fed by ONE measured SINR ----
-    auto m = nearRtRic->GetMetrics();
-    uint32_t totalXappActions = 0;
-    for (const auto& [name, xapp] : xapps)
+    // ---- Summary ----
+    std::cout << "\n--- measured data plane ---\n"
+              << "  mean DL SINR " << rs.GetMeanDlSinrDb() << " dB, throughput "
+              << rs.GetRxThroughputMbps() << " Mb/s, handovers " << rs.GetHandoverCount()
+              << " (requested " << rs.GetHandoverRequestedCount() << ", refused "
+              << rs.GetHandoverRefusals() << ")\n";
+    for (uint32_t s = 0; s < 3; ++s)
     {
-        totalXappActions += xapp->GetMetrics().successfulActions;
+        const auto st = rs.GetSliceMeasuredStats(sliceQi[s]);
+        std::cout << "  slice 5QI " << std::right << std::setw(2) << +sliceQi[s] << ": thr " << st.thrMbps
+                  << " Mb/s, OWD p50/p95/p99 " << st.p50OwdMs << "/" << st.p95OwdMs << "/"
+                  << st.p99OwdMs << " ms, loss " << st.lossRatio
+                  << (breaches.size() > s && breaches[s].latencyBreach ? " (latency SLA breach)"
+                                                                       : "")
+                  << "\n";
     }
-    uint32_t latencyBreaches = 0;
-    for (const auto& b : breaches)
+    const auto q = binding->GetQuotas(0);
+    std::cout << "  final MAC quotas gNB1:";
+    for (double x : q)
     {
-        if (b.latencyBreach)
-        {
-            ++latencyBreaches;
-        }
+        std::cout << " " << x;
     }
-
-    std::cout << "\n--- COMPOSITION proof: one measured data plane, three consumers ---\n"
-              << "  shared cell measured SINR (mean): " << rs.GetMeanDlSinrDb() << " dB\n"
-              << "  shared cell measured throughput:  " << rs.GetRxThroughputMbps() << " Mbps\n"
-              << "  [RIC]           xApp actions on measured KPM: " << totalXappActions
-              << " (E2 nodes " << m.totalE2Nodes << ")\n"
-              << "  [slice]         SLA latency-breaches on the MEASURED OWD distribution: " << latencyBreaches
-              << "/3\n"
-              << "  [observability] measured-KPI rows logged: " << outputDir
-              << "/measured_kpi_log.csv\n"
-              << "  -> the modules COMPOSE on a shared data plane (silo anti-pattern killed).\n";
+    std::cout << "\n--- O-RAN ---\n"
+              << "  measured KPM reports: serving " << binding->GetServingReports()
+              << ", neighbour (RRC RSRP) " << binding->GetNeighbourReports() << "\n"
+              << "  RC actions routed " << helper->GetTotalRouted() << ", actuated "
+              << helper->GetTotalActuated() << "\n";
+    for (const auto& [t, c] : helper->GetActuationCounters())
+    {
+        std::cout << "    action type " << +t << ": routed " << c.routed << ", actuated "
+                  << c.actuated << "\n";
+    }
+    std::cout << "  actuator outcomes: handovers requested " << binding->GetHandoversRequested()
+              << ", quota updates " << binding->GetQuotaUpdates() << ", Tx power updates "
+              << binding->GetTxPowerUpdates() << "\n";
+    if (transport)
+    {
+        const auto& c = transport->GetCounters();
+        std::cout << "--- E2 over the feeder (packets) ---\n"
+                  << "  E2 Setup done " << c.setupDone << " (last at "
+                  << transport->GetLastSetupDoneTime().GetSeconds() << " s), subscriptions "
+                  << c.subscriptionsDone << ", first indication at "
+                  << transport->GetFirstIndicationTime().GetSeconds() << " s\n"
+                  << "  indications sent " << c.indicationsSent << ", received "
+                  << c.indicationsReceived << ", suppressed before subscription "
+                  << c.indicationsBeforeSubscription << ", decode failures "
+                  << c.decodeFailures << "\n"
+                  << "  indication OWD mean " << transport->GetIndicationOwdMeanMs()
+                  << " ms, sd " << transport->GetIndicationOwdSdMs()
+                  << " ms; mean feeder link delay at send " << transport->GetMeanLinkDelayMs()
+                  << " ms; max indication gap " << transport->GetMaxIndicationGapS() << " s\n"
+                  << "  controls sent " << c.controlsSent << ", received " << c.controlsReceived
+                  << ", acknowledged " << c.controlAcks << ", before setup "
+                  << c.controlsBeforeSetup << "; bytes up " << c.bytesUp << ", down "
+                  << c.bytesDown << "\n";
+    }
+    std::cout << "  observability: " << outputDir << "/ric.lp (" << sink->GetEmittedCount()
+              << " points, simulation clock), KPM rows observed " << kpmRows << "\n";
 
     Simulator::Destroy();
     return 0;

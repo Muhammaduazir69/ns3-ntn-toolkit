@@ -26,6 +26,7 @@
 #include "ns3/oran-ntn-types.h"
 #include "ns3/ptr.h"
 
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -109,6 +110,33 @@ class OranNtnHelper : public Object
      */
     std::map<std::string, Ptr<OranNtnXappBase>> CreateAllXapps(
         Ptr<OranNtnNearRtRic> ric);
+
+    /**
+     * \brief Wave 2 M2 (P0-1): xApp admission against the actuator registry.
+     *
+     * Creates the same catalogue as CreateAllXapps() but registers with the RIC
+     * only the xApps whose every RC action type (E2SM-RC v01.03 control styles)
+     * has an actuator registered with RegisterActuator() or one of the legacy
+     * hooks. An xApp that could only produce "routed, not actuated" actions is
+     * refused at registration with a named reason (GetAdmissionLog()), instead
+     * of being started and filling the action log with decisions that never
+     * reach the radio (0 of 185 / 2594 / 112,807 actuated before this).
+     */
+    std::map<std::string, Ptr<OranNtnXappBase>> CreateAdmittedXapps(Ptr<OranNtnNearRtRic> ric);
+
+    /// One admission verdict per catalogue xApp (CreateAdmittedXapps).
+    struct AdmissionRecord
+    {
+        std::string xappName;
+        bool admitted{false};
+        std::string actionTypes; //!< declared RC action types, ';'-separated
+        std::string reason;      //!< missing actuators when refused
+    };
+    const std::vector<AdmissionRecord>& GetAdmissionLog() const { return m_admission; }
+
+    /// RC action types an xApp of the built-in catalogue can emit (empty if the
+    /// name is unknown). Used by the admission check and by tests.
+    static std::vector<E2RcActionType> GetXappActionTypes(const std::string& xappName);
 
     /**
      * \brief Start all registered xApps
@@ -297,6 +325,46 @@ class OranNtnHelper : public Object
     void SetSliceActuator(RcActuatorCallback cb);
 
     /**
+     * \brief Wave 2 M2 (P0-1): register the actuator of one RC action type.
+     *
+     * The registry is consulted before the legacy hooks above, so a binding to
+     * a measured radio (OranNtnRealStackBinding) decides what an action does.
+     * \param name a short label for the actuator (e.g. "nr-x2-handover"),
+     *        written to actuator_summary.csv.
+     */
+    void RegisterActuator(E2RcActionType type, RcActuatorCallback cb, const std::string& name);
+    /// Whether an action of this type can reach the radio (registry or legacy hook).
+    bool HasActuator(E2RcActionType type) const;
+
+    /**
+     * \brief Wave 2 M2 (P0-2): submit a measured report built by a producer.
+     *
+     * Routes the report to the E2 node named by report.gnbId exactly like
+     * InjectKpmReport does, but derives nothing: every field is the caller's.
+     * \return false if no E2 node has that id.
+     */
+    bool SubmitKpmReport(const E2KpmReport& report);
+
+    /// Per action type: actions that reached the dispatcher (routed by the RIC)
+    /// and how many of them an actuator applied.
+    struct ActuationCounter
+    {
+        uint64_t routed{0};
+        uint64_t actuated{0};
+    };
+    const std::map<uint8_t, ActuationCounter>& GetActuationCounters() const
+    {
+        return m_actuationCounters;
+    }
+    uint64_t GetTotalRouted() const;
+    uint64_t GetTotalActuated() const;
+
+    /// Optional observer called after every dispatched action with the verdict
+    /// (observability export of the control plane, B5).
+    typedef std::function<void(const E2RcAction&, bool)> ActionObserver;
+    void SetActionObserver(ActionObserver obs) { m_actionObserver = std::move(obs); }
+
+    /**
      * \brief Actuate one RC action through the helper's dispatcher.
      *
      * This is the same entry point the RIC installs as its RC callback; it is
@@ -380,6 +448,15 @@ class OranNtnHelper : public Object
     std::map<uint32_t, BeamActuatorState> m_beamActuators;
     RcActuatorCallback m_handoverActuator;
     RcActuatorCallback m_sliceActuator;
+    struct RegisteredActuator
+    {
+        RcActuatorCallback cb;
+        std::string name;
+    };
+    std::map<uint8_t, RegisteredActuator> m_actuators; //!< keyed by E2RcActionType
+    std::map<uint8_t, ActuationCounter> m_actuationCounters;
+    std::vector<AdmissionRecord> m_admission;
+    ActionObserver m_actionObserver;
 
     // Action log
     struct ActionLogEntry

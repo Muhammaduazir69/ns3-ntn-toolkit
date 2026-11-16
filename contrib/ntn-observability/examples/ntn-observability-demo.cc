@@ -305,7 +305,7 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satMob->SetElements(wElements[0]);
+    satMob->SetElementsSgp4(wElements[0]);
     // OBS-03: a real in-plane neighbour. The ISL and handover dashboards query
     // measurements that nothing in the toolkit ever wrote, so both rendered
     // empty forever; with one satellite there was no inter-satellite link to
@@ -314,7 +314,7 @@ main(int argc, char* argv[])
     // from a placed constant.
     Ptr<ns3::ntncon::Sgp4MobilityModel> nbrMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    nbrMob->SetElements(wElements[1]);
+    nbrMob->SetElementsSgp4(wElements[1]);
     NodeContainer satNodes;
     satNodes.Create(2);
     satNodes.Get(0)->AggregateObject(satMob);

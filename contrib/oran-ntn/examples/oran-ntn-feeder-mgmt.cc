@@ -3007,7 +3007,7 @@ main(int argc, char* argv[])
     for (size_t i = 0; i < el.size(); ++i)
     {
         allMob[i] = CreateObject<ntncon::Sgp4MobilityModel>();
-        allMob[i]->SetElements(el[i]);
+        allMob[i]->SetElementsSgp4(el[i]);
     }
     const Vector cell = OranNtnContactPlan::GeodeticToEcef(g.cellLat, g.cellLon, 0.0);
 

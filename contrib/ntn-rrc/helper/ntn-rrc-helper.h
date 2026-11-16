@@ -48,6 +48,25 @@ class NtnRrcHelper
     void SetGatewayMobility(Ptr<MobilityModel> gw) { m_gatewayMob = gw; }
     void SetReferencePosition(const Vector& earthFixedRefPosition);
 
+    /**
+     * \brief Uplink time synchronization reference point for the SIB19 broadcasters
+     * this helper installs (TS 38.213 4.2).
+     *
+     * P0-6: by default the reference follows the payload: at the gateway for a
+     * transparent payload with a gateway supplied (ta-Common is the feeder leg,
+     * kmac absent), at the satellite for a regenerative payload (no common delay,
+     * kmac absent) and for a transparent payload without a gateway. The legacy
+     * beam-centre reference, which put the service link into ta-Common so that a
+     * UE following TS 38.213 counted it twice, stays selectable here.
+     */
+    void SetUlSyncReference(UlSyncReference ref)
+    {
+        m_ulRef = ref;
+        m_ulRefSet = true;
+    }
+    /// The reference InstallSib19Broadcaster() will use with the current settings.
+    UlSyncReference GetEffectiveUlSyncReference() const;
+
     /// Build a NtnTimingAdvance instance bound to the given UE and satellite
     /// mobility models. The returned object retains TraceSource access.
     Ptr<NtnTimingAdvance> InstallTimingAdvance(Ptr<MobilityModel> ueMob,
@@ -74,6 +93,8 @@ class NtnRrcHelper
     PayloadMode m_payloadMode{PayloadMode::Transparent};
     Ptr<MobilityModel> m_gatewayMob;
     Vector m_referencePos{0.0, 0.0, 0.0};
+    UlSyncReference m_ulRef{UlSyncReference::Gateway};
+    bool m_ulRefSet{false};
 };
 
 } // namespace ntnrrc

@@ -4,9 +4,12 @@
 // ntn-cho-leo-basic — smoke test for the CHO algorithm on a REAL mmwave NR NTN
 // cell (NtnRealStackHelper: SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC).
 // Real UDP traffic flows over the radio toward the UEs; the CHO algorithm is
-// exercised on a 200 ms cadence and fed the MEASURED per-UE SINR from the mmwave
-// RxPacketTraceUe trace (no closed-form SINR, no sine-wave jitter). Emits an
-// honest sim_health.csv whose SINR/TBLER carry phy-trace provenance.
+// exercised on a 200 ms cadence and fed MEASURED inputs only (Wave 2 M1, P0-2):
+// the serving SINR at UE 0's PHY and the candidate from UE 0's TS 38.331 5.5.5
+// periodic measurement reports (cell-level SS-RSRP). A fired condition is
+// EXECUTED as a real X2 reconfiguration-with-sync (--execute=1, the default),
+// and the handover KPIs are measured from the UE RRC traces (handover_events.csv).
+// Emits an honest sim_health.csv whose SINR/TBLER carry phy-trace provenance.
 
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
@@ -14,19 +17,19 @@
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
 #include "ns3/ntn-orbit-predictor.h"
+#include "ns3/ntn-ho-kpi-recorder.h"
+#include "ntn-cho-measured-inputs.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 
 #include "ns3/geo-coordinate.h"
-#include "ns3/satellite-antenna-gain-pattern-container.h"
-#include "ns3/satellite-constant-position-mobility-model.h"
-#include "ns3/satellite-env-variables.h"
 #include "ns3/sgp4-mobility-model.h"
-#include "ns3/singleton.h"
 #include "ns3/walker-constellation.h"
 
 #include <cmath>
+#include <filesystem>
 #include <iostream>
+#include <limits>
 
 using namespace ns3;
 
@@ -42,6 +45,7 @@ main(int argc, char* argv[])
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1, 30 kHz SCS) | "mmwave" (FR2)
     std::string outputDir = "ntn-cho-basic-out";
+    bool execute = true;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation time in seconds", simTime);
@@ -51,6 +55,7 @@ main(int argc, char* argv[])
     cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("execute", "execute a fired condition as a real X2 handover (TriggerHandover)", execute);
     cmd.Parse(argc, argv);
 
     const bool useNr = (radio != "mmwave");
@@ -124,7 +129,7 @@ main(int argc, char* argv[])
     const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> servSatMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    servSatMob->SetElements(elements[0]);
+    servSatMob->SetElementsSgp4(elements[0]);
 
     // CHO-23: give the scenario a real second cell.
     //
@@ -137,14 +142,14 @@ main(int argc, char* argv[])
     // neighbour in the same plane is available at no modelling cost.
     Ptr<ns3::ntncon::Sgp4MobilityModel> candSatMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    candSatMob->SetElements(elements[1]);
+    candSatMob->SetElementsSgp4(elements[1]);
     {
         // CHO-27: the candidate must be the in-plane neighbour that APPROACHES
         // the UE field (as in ntn-cho-real-stack); elements[1] can equally be
         // the one ahead, which recedes and can never become a better cell.
         Ptr<ns3::ntncon::Sgp4MobilityModel> behind =
             CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-        behind->SetElements(elements[wcfg.total_sats - 1]);
+        behind->SetElementsSgp4(elements[wcfg.total_sats - 1]);
         double sLat, sLon, sAlt;
         servSatMob->GetGeodetic(sLat, sLon, sAlt);
         const Vector ue0 = ntngeo::GeodeticToEcef(sLat, sLon, 0.0);
@@ -165,40 +170,14 @@ main(int argc, char* argv[])
     NodeContainer ueNodes;
     ueNodes.Create(numUes);
 
-    // Give the helper a constellation before asking it for an algorithm, then
-    // switch the predictor to the analytic beam, which is what the other three
-    // CHO examples do and what this one was missing.
-    Singleton<SatEnvVariables>::Get()->DoInitialize();
-    Singleton<SatEnvVariables>::Get()->SetOutputVariables("ntn-cho-leo-basic", "", true);
-    Ptr<SatAntennaGainPatternContainer> agp = CreateObject<SatAntennaGainPatternContainer>(
-        2,
-        Singleton<SatEnvVariables>::Get()->LocateDataDirectory() +
-            "/scenarios/geo-33E/antennapatterns");
-    NodeContainer auxSats;
-    auxSats.Create(2);
-    Ptr<SatConstantPositionMobilityModel> auxServ =
-        CreateObject<SatConstantPositionMobilityModel>();
-    Ptr<SatConstantPositionMobilityModel> auxCand =
-        CreateObject<SatConstantPositionMobilityModel>();
-    auxServ->SetGeoPosition(GeoCoordinate(servSatMob->GetPosition()));
-    auxCand->SetGeoPosition(GeoCoordinate(candSatMob->GetPosition()));
-    auxSats.Get(0)->AggregateObject(auxServ);
-    auxSats.Get(1)->AggregateObject(auxCand);
-    agp->ConfigureBeamsMobility(0, auxServ);
-    agp->ConfigureBeamsMobility(1, auxCand);
-    ntnHelper->SetupConstellation(auxSats, agp);
-
-    // CHO-2: the shipped SNS3 pattern grids are GEO-referenced and are not
-    // defined for beam id 0, so touching them aborts. The analytic TR 38.811
-    // 6.4.1 beam is what the other CHO examples use; same Set-1 parameters.
+    // P1-H: the predictor takes the real SGP4 satellites and the analytic
+    // steered beam (TR 38.811 6.4.1, Set-1 4.4127 deg) directly, with no SNS3
+    // GEO pattern container and no auxiliary SatMobilityModel stand-ins.
+    ntnHelper->SetupConstellation(std::vector<Ptr<MobilityModel>>{servSatMob, candSatMob},
+                                  /*peakGainDbi=*/30.0,
+                                  /*beamwidth3dbDeg=*/4.4127);
     if (Ptr<NtnOrbitPredictor> orbit = ntnHelper->GetOrbitPredictor())
     {
-        orbit->SetGeometricBeam(/*peakGainDbi=*/30.0, /*beamwidth3dbDeg=*/4.4127);
-        // CHO-23: the aux models above are stationary and exist only to carry
-        // the antenna-pattern plumbing. Bind the predictor's kinematics to the
-        // real propagated orbits, as the other CHO examples do.
-        orbit->SetKinematicsSource(0, servSatMob);
-        orbit->SetKinematicsSource(1, candSatMob);
         NS_ABORT_MSG_IF(orbit->CountFrozenSatellites() > 0,
                         "CHO predictor still has stationary satellites");
     }
@@ -239,7 +218,22 @@ main(int argc, char* argv[])
         rs.SetSatConductedPowerDbm(satEirpDbm);
     }
     rs.SetCarrierFrequencyHz(kCarrierHz);
+    // X2 for TriggerHandover, the vendored A3 left out (the CHO decides). With
+    // A3 off the helper installs the periodical 480 ms RSRP/RSRQ report
+    // (TS 38.331 5.5.4.1) the CHO reads its candidate from.
+    rs.SetHandover(true, 6.0, MilliSeconds(1024));
+    rs.SetAutonomousHandover(false);
+    double cLat, cLon, cAlt;
+    servSatMob->GetGeodetic(cLat, cLon, cAlt);
+    if (useNr)
+    {
+        // Cell-level SS-RSRP (TS 38.215 5.1.1): SSB on an Earth-fixed cell beam.
+        Ptr<ConstantPositionMobilityModel> cellCenter = CreateObject<ConstantPositionMobilityModel>();
+        cellCenter->SetPosition(NtnRealStackHelper::GeodeticToEcef(cLat, cLon, 0.0));
+        rs.SetSsbCellBeam(true, cellCenter);
+    }
     rs.Build(satNodes, ueNodes);
+    std::filesystem::create_directories(outputDir);
     // satEirpDbm was resolved before Build() and handed to the rest of the
     // example; make sure the radio landed on the same conducted power.
     NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
@@ -248,6 +242,11 @@ main(int argc, char* argv[])
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTime - 0.5));
     rs.EnableAiFlowMonitor("ntn-cho-leo-basic"); // WS2 KPM series (TS 28.552 names)
+    Ptr<NtnHoKpiRecorder> hoRec = CreateObject<NtnHoKpiRecorder>(); // P0-3
+    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+    {
+        hoRec->AttachUe(i, ueNodes.Get(i));
+    }
 
     // Radio-agnostic serving cell id (mmwave or nr gNB under the hood).
     const uint16_t servingCell = rs.GetGnbCellId(0);
@@ -263,37 +262,74 @@ main(int argc, char* argv[])
     choAlgo->AddCandidateCell(candCell, 1, 0);
     choAlgo->SetServingCell(servingCell);
     uint32_t choDecisions = 0;
+    uint32_t executions = 0;
+    uint32_t candFromReports = 0;
+    if (execute)
+    {
+        // A fired condition is executed on the radio; the RRC's completion
+        // closes T304 (TS 38.331 5.3.5.8.3).
+        choAlgo->SetHandoverExecutionCallback(
+            Callback<void, uint16_t, uint16_t>([&rs, choAlgo](uint16_t, uint16_t to) {
+                if (!rs.TriggerHandover(0, to))
+                {
+                    choAlgo->NotifyHandoverComplete(to, false);
+                }
+            }));
+        Config::ConnectWithoutContext(
+            "/NodeList/*/DeviceList/*/NrGnbRrc/HandoverEndOk",
+            Callback<void, uint64_t, uint16_t, uint16_t>(
+                [&rs, choAlgo](uint64_t, uint16_t cellId, uint16_t rnti) {
+                    if (cellId == rs.GetUeServingCellId(0) && rnti == rs.GetUeRnti(0))
+                    {
+                        choAlgo->NotifyHandoverComplete(cellId, true);
+                    }
+                }));
+    }
 
-    // CHO exercised every 200 ms on the MEASURED serving SINR (UE 0); the
-    // candidate is ephemeris-predicted off that measured baseline.
+    // CHO exercised every 200 ms on MEASURED inputs (UE 0): serving SINR at the
+    // UE PHY, candidate = serving SINR + reported (Mn - Mp) from the UE's
+    // TS 38.331 5.5.5 reports. Ephemeris slant ranges feed only the RACH-less
+    // TA pre-compensation and the geometric triggers' own inputs.
     rs.RegisterPeriodicCallback(MilliSeconds(200), [&](Time) {
-        const double servSinr = rs.GetUeRecentSinrDb(0);
+        const double servSinr = rs.GetRadioBackend() == NtnRealStackHelper::RadioBackend::Nr
+                                    ? rs.TakeUeSinrWindowMeanDb(0)
+                                    : rs.GetUeRecentSinrDb(0);
         if (std::isnan(servSinr))
         {
             return;
         }
-        // CHO-23: candidate quality from the real slant geometry of the second
-        // satellite, not a constant offset, and the UE position the geometric
-        // triggers need (CHO-21).
+        const uint16_t radioCell = rs.GetUeServingCellId(0);
+        const uint16_t attCell = (radioCell == candCell) ? candCell : servingCell;
+        const uint16_t othCell = (attCell == candCell) ? servingCell : candCell;
         const Vector u = ueMob->GetPosition();
-        const Vector sPos = servSatMob->GetPosition();
-        const Vector cPos = candSatMob->GetPosition();
-        const double servSlant = ntngeo::SlantRangeM(u, sPos);
-        const double candSlant = ntngeo::SlantRangeM(u, cPos);
-        const double servElev = ntngeo::ElevationDeg(u, sPos);
-        const double candElev = ntngeo::ElevationDeg(u, cPos);
-        const double candSinr =
-            servSinr + 20.0 * std::log10(servSlant / std::max(1.0, candSlant));
+        const Vector sPos = (attCell == servingCell ? servSatMob : candSatMob)->GetPosition();
+        const Vector cPos = (attCell == servingCell ? candSatMob : servSatMob)->GetPosition();
+        const ntnchoex::ReportedCandidate rep =
+            ntnchoex::ReadReportedCandidate(rs, 0, othCell, servSinr);
+        const double noGain = std::numeric_limits<double>::quiet_NaN();
 
         choAlgo->UpdateUeKinematics(GeoCoordinate(u), ueMob->GetVelocity());
-        choAlgo->UpdateMeasurement(servingCell, servSinr, std::max(-20.0, (servElev - 45.0) / 5.0));
-        choAlgo->UpdateMeasurement(candCell, candSinr, std::max(-20.0, (candElev - 45.0) / 5.0));
-        choAlgo->UpdateCandidateSlantRange(servingCell, servSlant);
-        choAlgo->UpdateCandidateSlantRange(candCell, candSlant);
+        choAlgo->UpdateMeasurement(attCell, servSinr, noGain);
+        if (rep.fresh)
+        {
+            ++candFromReports;
+            choAlgo->UpdateMeasurement(othCell, rep.candSinrDb, noGain);
+        }
+        choAlgo->UpdateCandidateSlantRange(attCell, ntngeo::SlantRangeM(u, sPos));
+        choAlgo->UpdateCandidateSlantRange(othCell, ntngeo::SlantRangeM(u, cPos));
         choAlgo->EvaluateConditions();
-        if (choAlgo->SelectBestCandidate() != 0)
+        const uint16_t chosen = choAlgo->SelectBestCandidate();
+        if (chosen != 0)
         {
             ++choDecisions;
+            if (execute && chosen != radioCell &&
+                choAlgo->GetState() != NtnChoAlgorithm::CHO_EXECUTING)
+            {
+                ++executions;
+                choAlgo->ExecuteHandover(chosen);
+                hoRec->AnnotateNext(0, choAlgo->GetMechanismStats().lastInterruptionMs,
+                                    "cho:" + triggerType);
+            }
         }
     });
 
@@ -301,9 +337,18 @@ main(int argc, char* argv[])
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
+    hoRec->WriteCsv(outputDir + "/handover_events.csv");
+    hoRec->WriteKpm(outputDir + "/ho_kpm.csv");
 
     std::cout << "  CHO trigger (" << triggerType << ") fired on " << choDecisions
               << " evaluations against real cell " << candCell << "\n"
+              << "  candidate from UE reports:  " << candFromReports << " evaluations"
+              << " (UE 0 reports " << rs.GetUeMeasurementReportCount(0) << ")\n"
+              << "  executed on the radio:      " << executions << " (RRC handovers "
+              << hoRec->GetHandoverCount(true) << " ok, " << hoRec->GetHandoverFailureCount()
+              << " failed; C-plane mean " << hoRec->GetMeanCplaneMs() << " ms, ping-pong(1 s) "
+              << hoRec->GetPingPongCount(Seconds(1)) << ", RLF " << hoRec->GetTotalRlfCount()
+              << ")\n"
               << "  measured mean SINR: " << rs.GetMeanDlSinrDb() << " dB\n"
               << "  measured throughput: " << rs.GetRxThroughputMbps() << " Mbps\n";
     Simulator::Destroy();

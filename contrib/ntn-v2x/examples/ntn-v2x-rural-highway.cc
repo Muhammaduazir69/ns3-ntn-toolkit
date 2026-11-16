@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit, W7)
  *
- * ntn-v2x-rural-highway — a fleet of vehicles on a rural highway pulling
+ * ntn-v2x-rural-highway: a fleet of vehicles on a rural highway pulling
  * connectivity from a single LEO satellite. The vehicle mobility is replayed
  * from a SUMO FCD trace (SumoTraciBridge, trace-replay mode, so CI needs no live
  * SUMO). The LEO link quality is MEASURED off a real mmwave NR cell
@@ -15,7 +15,7 @@
  * is the expected physical outcome, not a defect. The direct/relay/orphan split is therefore
  * driven by the MEASURED radio, not V2xLeoDirect's closed-form budget.
  *
- * Quick test:  --vehicles=40 --simTime=30
+ * Quick test:  --vehicles=16 --simTime=30 (at most 16 vehicles, see the nr limit below)
  */
 #include "ns3/command-line.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
@@ -276,7 +276,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -309,6 +309,10 @@ main(int argc, char* argv[])
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
+    // C6 (Wave 1): KPM from the RAN counters (TS 28.552 DRB.RlcSduDelayDl =
+    // gNB RLC ingress to UE delivery, TB.TotNbrDl / TB.ErrTotNbrDl counts,
+    // RRU.PrbUsedDl) instead of application probes.
+    rs.SetKpmFromRanCounters(true);
     rs.EnableAiFlowMonitor("ntn-v2x-rural-highway"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 

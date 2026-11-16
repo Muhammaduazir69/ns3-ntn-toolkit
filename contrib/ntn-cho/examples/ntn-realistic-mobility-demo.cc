@@ -139,7 +139,7 @@ main(int argc, char** argv)
     wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01
     const auto elements = WalkerConstellation::BuildDelta(wcfg);
     Ptr<Sgp4MobilityModel> serv = CreateObject<Sgp4MobilityModel>();
-    serv->SetElements(elements[0]);
+    serv->SetElementsSgp4(elements[0]);
     NodeContainer servSat;
     servSat.Create(1);
     servSat.Get(0)->AggregateObject(serv);

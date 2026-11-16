@@ -1859,9 +1859,9 @@ NrUeRrc::ApplyMeasConfig(NrRrcSap::MeasConfig mc)
             measReportIt->second.periodicReportTimer.Cancel();
             m_varMeasReportList.erase(measReportIt);
         }
-        NS_ASSERT(m_varMeasConfig.reportConfigList.find(it->reportConfigId)
-                      ->second.reportConfigEutra.triggerType !=
-                  NrRrcSap::ReportConfigEutra::PERIODICAL);
+        // ntn-patch 08: PERIODICAL report configurations are supported
+        // (TS 38.331 5.5.4.1 reportType periodical); see
+        // MeasurementReportTriggering.
 
         // new empty queues for time-to-trigger
         std::list<PendingTrigger_t> s;
@@ -1963,8 +1963,44 @@ NrUeRrc::MeasurementReportTriggering(uint8_t measId)
     auto measReportIt = m_varMeasReportList.find(measId);
     bool isMeasIdInReportList = (measReportIt != m_varMeasReportList.end());
 
-    // we don't check the purpose field, as it is only included for
-    // triggerType == periodical, which is not supported
+    // ntn-patch 08: TS 38.331 5.5.4.1, reportType periodical. When a first
+    // measurement result is available, include a reporting entry for this
+    // measId with numberOfReportsSent = 0 and start the reporting procedure
+    // (5.5.5); SendMeasurementReport then re-arms itself every reportInterval.
+    // The applicable cells are all measured cells on the frequency other than
+    // the serving cell, refreshed on every L1 report so newly detected cells
+    // are included (5.5.5: purpose reportStrongestCells, maxReportCells).
+    if (reportConfigEutra.triggerType == NrRrcSap::ReportConfigEutra::PERIODICAL)
+    {
+        if (m_storedMeasValues.find(m_cellId) == m_storedMeasValues.end())
+        {
+            return; // no serving-cell result yet
+        }
+        if (!isMeasIdInReportList)
+        {
+            VarMeasReport r;
+            r.measId = measId;
+            r.numberOfReportsSent = 0;
+            measReportIt = m_varMeasReportList.emplace(measId, r).first;
+        }
+        measReportIt->second.cellsTriggeredList.clear();
+        for (const auto& [cellId, values] : m_storedMeasValues)
+        {
+            if (cellId != m_cellId)
+            {
+                measReportIt->second.cellsTriggeredList.insert(cellId);
+            }
+        }
+        if (!measReportIt->second.periodicReportTimer.IsPending())
+        {
+            measReportIt->second.periodicReportTimer =
+                Simulator::Schedule(NR_UE_MEASUREMENT_REPORT_DELAY,
+                                    &NrUeRrc::SendMeasurementReport,
+                                    this,
+                                    measId);
+        }
+        return;
+    }
     NS_ASSERT_MSG(reportConfigEutra.triggerType == NrRrcSap::ReportConfigEutra::EVENT,
                   "only triggerType == event is supported");
     // only EUTRA is supported, no need to check for it
@@ -2995,7 +3031,13 @@ NrUeRrc::SendMeasurementReport(uint8_t measId)
     else
     {
         auto servingMeasIt = m_storedMeasValues.find(m_cellId);
-        NS_ASSERT(servingMeasIt != m_storedMeasValues.end());
+        if (servingMeasIt == m_storedMeasValues.end())
+        {
+            // ntn-patch 08: no serving-cell result (e.g. right after a
+            // handover); a periodical entry is re-armed by the next L1 report.
+            NS_LOG_WARN(this << " no serving-cell measurement for measId " << +measId);
+            return;
+        }
         measResults.measResultPCell.rsrpResult =
             nr::EutranMeasurementMapping::Dbm2RsrpRange(servingMeasIt->second.rsrp);
         measResults.measResultPCell.rsrqResult =

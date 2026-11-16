@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 namespace ns3
@@ -48,7 +49,7 @@ ThzNtnRis::GetTypeId()
                           "Operating frequency in Hz",
                           DoubleValue(300.0e9),
                           MakeDoubleAccessor(&ThzNtnRis::m_frequency),
-                          MakeDoubleChecker<double>(100.0e9, 10.0e12))
+                          MakeDoubleChecker<double>(1.0e9, 10.0e12))
             .AddAttribute("Deployment",
                           "Deployment type: SPACE_BORNE, AERIAL, GROUND",
                           StringValue("GROUND"),
@@ -262,6 +263,44 @@ ThzNtnRis::ComputeCascadedPathLoss_dB(Ptr<MobilityModel> tx,
     return cascadedPL;
 }
 
+double
+ThzNtnRis::ComputeCascadedPathLoss_dB(const Vector& tx, const Vector& ris, const Vector& rx) const
+{
+    const double d1 = CalculateDistance(tx, ris);
+    const double d2 = CalculateDistance(ris, rx);
+    const double lambda = GetWavelength();
+    if (d1 <= 0.0 || d2 <= 0.0 || lambda <= 0.0)
+    {
+        return std::numeric_limits<double>::infinity();
+    }
+    const double dx = GetElementSpacing_m();
+    const double nTot = static_cast<double>(GetTotalElements());
+    const double fspl1 = 20.0 * std::log10(4.0 * PI_VAL * d1 / lambda);
+    const double fspl2 = 20.0 * std::log10(4.0 * PI_VAL * d2 / lambda);
+    const double aperture = 20.0 * std::log10(4.0 * PI_VAL * nTot * dx * dx / (lambda * lambda)) +
+                            10.0 * std::log10(std::max(m_reflectionEfficiency, 1e-12)) -
+                            ComputeQuantizationLoss_dB();
+    return fspl1 + fspl2 - aperture;
+}
+
+double
+ThzNtnRis::ComputeLinkSnrGain_dB(const Vector& tx,
+                                 const Vector& ris,
+                                 const Vector& rx,
+                                 double directExtraLossDb) const
+{
+    const double d = CalculateDistance(tx, rx);
+    const double lambda = GetWavelength();
+    if (d <= 0.0 || lambda <= 0.0)
+    {
+        return 0.0;
+    }
+    const double fsplDirect = 20.0 * std::log10(4.0 * PI_VAL * d / lambda);
+    const double aR = std::pow(10.0, (fsplDirect - ComputeCascadedPathLoss_dB(tx, ris, rx)) / 20.0);
+    const double bD = std::pow(10.0, -directExtraLossDb / 20.0);
+    return 20.0 * std::log10((bD + aR) / bD);
+}
+
 // ---------------------------------------------------------------------------
 // Optimal phases from actual 3D geometry
 // ---------------------------------------------------------------------------
@@ -372,7 +411,7 @@ ThzNtnRis::ComputeRisGain_dB(double thetaIn_deg,
 }
 
 double
-ThzNtnRis::ComputeMaxGain_dB() const
+ThzNtnRis::ComputeMaxArrayFactorGain_dB() const
 {
     NS_LOG_FUNCTION(this);
 
@@ -491,7 +530,7 @@ ThzNtnRis::ComputeQuantizationLoss_dB() const
 }
 
 double
-ThzNtnRis::ComputeSnrGain_dB(bool perfectCsi) const
+ThzNtnRis::ComputeArrayFactorGain_dB(bool perfectCsi) const
 {
     NS_LOG_FUNCTION(this << perfectCsi);
 

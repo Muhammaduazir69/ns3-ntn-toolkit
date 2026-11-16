@@ -264,6 +264,18 @@ NrUeNetDevice::GetImsi() const
 uint16_t
 NrUeNetDevice::GetCellId() const
 {
+    // ntn-patch 10: the SERVING cell is the one the UE RRC is synchronized to.
+    // m_targetGnb is written once, by NrHelper::AttachToGnb, and nothing
+    // updates it when an X2 handover (TS 38.331 5.3.5.5.2 reconfigurationWithSync)
+    // moves the UE, so it names the attach-time cell for the rest of the run.
+    // NrUeRrc::m_cellId is the targetPhysCellId of the last reconfiguration
+    // (or the cell selected at attach), so it equals the old answer until the
+    // first handover and follows the UE afterwards. Before the RRC has a cell
+    // (0), fall back to the attach-time gNB exactly as before.
+    if (m_rrc && m_rrc->GetCellId() != 0)
+    {
+        return m_rrc->GetCellId();
+    }
     auto gnb = GetTargetGnb();
     if (gnb)
     {

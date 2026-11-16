@@ -219,7 +219,7 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> servSatMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    servSatMob->SetElements(wElements[0]);
+    servSatMob->SetElementsSgp4(wElements[0]);
     satNodes.Get(0)->AggregateObject(servSatMob);
     double subLat, subLon, subAlt;
     servSatMob->GetGeodetic(subLat, subLon, subAlt);
@@ -322,8 +322,8 @@ main(int argc, char* argv[])
               << "  measured radio throughput:    " << rs.GetRxThroughputMbps() << " Mbps\n"
               << "  FAPI slots: sent=" << g_tbSent << " crcOk=" << g_tbOk << " retx=" << g_tbRetx
               << "\n"
-              << "  FAPI delivered:               " << (realRxBytes / 1000) << " KB  goodput="
-              << goodputMbps << " Mbps\n"
+              << "  UE 0 application delivered:   " << (realRxBytes / 1000) << " KB  goodput="
+              << goodputMbps << " Mbps (UE 0 application bytes; FAPI loop tracks UE 0's RNTI)\n"
               << "  -> CRC.indication driven by the MEASURED error model (real m_corrupt decode).\n";
 
     if (g_bridge)

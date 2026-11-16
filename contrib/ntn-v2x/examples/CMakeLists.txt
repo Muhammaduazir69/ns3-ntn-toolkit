@@ -24,6 +24,8 @@ build_lib_example(
   SOURCE_FILES ntn-v2x-real-stack.cc
   LIBRARIES_TO_LINK
     ${libntn-v2x}
+    ${libthz-ntn}
+    ${libnr}
     ${libntn-cho}
     ${libntn-constellation}
     ${libntn-traffic}
@@ -44,6 +46,7 @@ build_lib_example(
   SOURCE_FILES ntn-v2x-leo-relay-traffic.cc
   LIBRARIES_TO_LINK
     ${libntn-v2x}
+    ${libthz-ntn}
     ${libntn-cho}
     ${libntn-constellation}
     ${libcore}
@@ -53,6 +56,11 @@ build_lib_example(
     ${libinternet}
     ${libapplications}
     ${libntn-traffic}
+    ${libspectrum}
+    ${libpropagation}
+    ${libmmwave}
+    ${liblte}
+    ${libnr}
 )
 
 # Real maritime NTN access: an AIS-replayed vessel UE (ntn-sagin AisMobilityModel

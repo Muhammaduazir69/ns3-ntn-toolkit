@@ -107,6 +107,13 @@ class OranNtnGymHandover : public OpenGymEnv
     double m_hoCostWeight;
     double m_tteBonusWeight;
     double m_elevationContinuityWeight;
+
+    // Wave 2 M2 (P0-5): measured environment
+    bool m_measuredFeatures{false}; //!< feature 5 = measured RRC RSRP margin, not candidate SINR
+    bool m_goodputReward{false};    //!< reward from measured post-action goodput
+    double m_goodputWeight{0.2};    //!< reward per Mb/s of measured goodput
+    double m_postActionGoodput{0.0};
+    std::vector<uint32_t> CandidateGnbs(uint32_t servingGnb) const;
 };
 
 } // namespace ns3

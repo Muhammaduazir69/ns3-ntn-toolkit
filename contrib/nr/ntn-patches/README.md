@@ -9,10 +9,10 @@ SPDX-License-Identifier: GPL-2.0-only
 
 `contrib/nr` is **upstream 5G-LENA `nr` v3.3.1** (the latest release of the
 `5g-lena-v3.3.y` line, 15 Oct 2024) carried on the toolkit's **ns-3.43** base,
-with **five** local adaptation patches applied on top. Nothing else in
+with **eleven** local adaptation patches applied on top. Nothing else in
 the tree diverges from pristine upstream v3.3.1: a full-tree content diff of
-`model/`, `helper/` and `utils/` against pristine v3.3.1 reports only the five
-files below, and no added or removed files.
+`model/` and `helper/` against pristine v3.3.1 reports only the files of the
+eleven patches below, and no added or removed files.
 
 v3.3.y is the newest 5G-LENA line that targets an ns-3.42/3.43-class base;
 therefore the vendored module already tracks the latest upstream release that
@@ -21,11 +21,11 @@ is compatible with this toolkit's ns-3 base. See
 and v5.0 (ns-3.48, the only line with native NTN) are ns-3-base migrations
 rather than in-place `nr` bumps.
 
-## The five patches (apply in order from `contrib/nr/`)
+## The eleven patches (apply in order from `contrib/nr/`)
 
-    for p in ntn-patches/0*.patch; do patch -p1 < "$p"; done
+    for p in ntn-patches/[0-9][0-9]-*.patch; do patch -p1 < "$p"; done
 
-The five (apply in order):
+The eleven (apply in order; the two-digit glob sorts 10 and 11 after 09):
 
 | # | File | Why |
 |---|------|-----|
@@ -34,21 +34,41 @@ The five (apply in order):
 | 03 | `model/nr-pdcp-header.cc` | TS 38.323 §6.2.2/§6.2.3: deserialize a Control PDU (D/C=0) instead of `NS_ASSERT`-aborting. A real X2/Xn handover with non-zero link delay (any NTN feeder/ISL leg) delivers Control PDUs to PDCP; asserting turned a spec-mandated PDU into a crash. |
 | 04 | `model/nr-pdcp.cc` | TS 38.323 §6.2.3: `DoReceivePdu` consumes and discards a Control PDU (status report / RoHC feedback — not modelled here) rather than delivering it upward as an SDU or advancing the RX sequence number. |
 | 05 | `model/nr-gnb-phy.cc` | TS 38.213 §4.2 NTN K_offset: raise the `N2Delay` attribute checker upper bound from 4 to 320 slots. The terrestrial cap of 4 slots cannot hold the NTN cell-specific K_offset (~9–10 slots for a 600 km LEO round trip, far more for MEO/GEO), so `NtnRealStackHelper::SetKOffsetConsumption(true)` can program the geometry-derived K_offset into the UL DCI→PUSCH gap. |
+| 06 | `model/nr-mac-scheduler-tdma.cc` | `AssignRBGTDMA`: with as many active UEs as data symbols the allocator gave every UE one symbol (an 8-byte TB at MCS 0, below the DCI floor), so nothing was ever sent and the cell starved (UE12 livelock). Symbols are now shared so each scheduled UE gets a decodable TB. |
+| 07 | `model/nr-spectrum-phy.cc/.h` | Half-duplex DL control/data conflicts (a UE asked to receive while transmitting, which a ms-scale air delay without UE timing advance produces) are dropped and counted (`GetHalfDuplex*Drops`) instead of aborting the run; the counters feed the boundary A6/A9 diagnosis. |
+| 08 | `model/nr-ue-rrc.cc`, `model/nr-ue-phy.cc` | TS 38.331 5.5.4.1 `reportType periodical`: NrUeRrc asserted that every report configuration is event-triggered; a PERIODICAL configuration now creates a reporting entry with all measured cells and re-arms every `reportInterval` (used by `NtnRealStackHelper::SetPeriodicMeasurementReports`, so a CHO/RIC/xApp decision owner gets per-UE RSRP/RSRQ with A3 off). Opt-in (GlobalValue `NrUeRsrqFromRssi`, default false): SS-RSRQ = N x RSRP / RSSI (TS 38.215 5.1.3) instead of the constant 0 dB; opt-in (GlobalValue `NrUeRsrpLinearAverage`, default false): L1 RSRP averaged in mW (TS 38.215 5.1.1) with a saturating count, because the default dB average divides by a `uint8_t` count that wraps above 255 PSS samples per 200 ms, which produced -1600 dBm L1 samples on ntn-nr-handover-pass. |
+| 09 | `model/nr-gnb-phy.cc`, `helper/nr-helper.cc` | Control, including the PSS/SSB the UE measures, is sent on the gNB's configured cell beam (BeamManager predefined beam) and falls back to quasi-omni exactly as before when none is set (TS 38.215 5.1.1 SS-RSRP is a cell-level quantity). `NrHelper::DoAssignStreamsToChannelObjects` no longer dereferences a null `ThreeGppChannelModel` when another `MatrixBasedChannelModel` is plugged in. |
+| 10 | `model/nr-spectrum-phy.cc`, `model/nr-ue-net-device.cc/.h` | The UE serving cell follows handovers. `NrSpectrumPhy` labelled every UE DL TB in `RxPacketTraceUe` with `GetTargetGnb()->GetCellId()`, and `NrUeNetDevice::GetCellId()` returned the same; `m_targetGnb` is written once by `NrHelper::AttachToGnb` and no X2 handover (TS 38.331 5.3.5.5.2 reconfigurationWithSync) updates it. After the first handover every TB therefore carried the attach-time cell id, so any (cellId, RNTI) consumer lost the UE: `NtnRealStackHelper` per-UE SINR/TBLER went NaN, its per-UE RAN TB counters froze, and per-cell DL stats were credited to the old cell. `NrUeNetDevice::GetCellId()` now returns the cell the UE RRC is synchronized to (`NrUeRrc::GetCellId()`, the `targetPhysCellId` of the last reconfiguration), falling back to the attach-time gNB while the RRC has no cell, and the trace uses it. Identical to the old value until the first handover, so runs without handovers reproduce bit for bit. `GetTargetGnb()` itself is unchanged (setup-time DRB activation and beamforming pairing use it). |
+| 11 | `model/nr-gnb-phy.cc` | Run-to-run determinism. `NrGnbPhy` ordered the DL control messages of a slot with comparator-less `std::list::sort()` / `merge()`, which use `ns3::operator<(Ptr, Ptr)` and therefore compare raw heap addresses: the order in which a UE received, e.g., SIB1 and an UL DCI in the same slot depended on the allocator, so outputs changed with ASLR, the output-path length or any unrelated code change (the ntn-slice paper examples alternated between outputs on one binary). The messages are now ordered by message type with the same (stable) `sort`/`merge`, so messages of one type keep their insertion order. This can change the output of any run (the old order was arbitrary, not standard); it makes every run reproducible. Found by Wave 2 M2. |
+
+Patch 10 changes outputs only after a handover (the UE DL RX trace cell id,
+the per-UE and per-cell statistics built on it, and the UE-side cell id in the
+nr-phy-rx-trace interference files). Patches 08 and 09 change nothing unless a scenario opts in (a PERIODICAL report
+configuration, a predefined beam, or one of the two GlobalValues), so every
+existing run reproduces bit for bit. The `uint8_t` RSRP sample counter wrap in
+the default path is left in place for the same reason and is documented here.
+
 
 ## Reproducing the vendored tree from scratch
 
     # 1. fetch pristine upstream
     git clone --branch 5g-lena-v3.3.y https://gitlab.com/cttc-lena/nr.git nr-v331
     # 2. copy into contrib/nr on the ns-3.43 tree, then:
-    cd contrib/nr && for p in ntn-patches/0*.patch; do patch -p1 < "$p"; done
+    cd contrib/nr && for p in ntn-patches/[0-9][0-9]-*.patch; do patch -p1 < "$p"; done
 
-Verified 2026-07-18: pristine v3.3.1 + these five patches reproduces the
-vendored `model/` files byte-for-byte (0 mismatches).
+Verified 2026-07-18: pristine v3.3.1 + patches 01-05 reproduces the vendored
+`model/` files byte-for-byte (0 mismatches). Verified 2026-11-16 for 01-09:
+the pristine tree (the 2026-07-18 vendored state with 01-05 reverse-applied)
+plus the nine patches reproduces `model/` and `helper/` byte-for-byte
+(`diff -rq`: 0 mismatches). Verified 2026-11-16 (Wave 2 core) for 01-10: the
+same pristine tree plus the ten patches reproduces `model/` and `helper/`
+byte-for-byte (`diff -rq`: 0 mismatches). Verified again for 01-11 the same
+day after patch 11: 0 mismatches.
 
 ## Upgrading later
 
 When the toolkit's ns-3 base moves to 3.44 (→ nr v4.0) or 3.48 (→ nr v5.0,
 native NTN), drop in the pristine upstream `nr` for that base and re-apply
-whichever of these five patches upstream has not itself fixed. Patches 03/04
+whichever of these eleven patches upstream has not itself fixed. Patches 03/04
 (PDCP Control-PDU handling) are the ones most likely still required, since they
 reflect a modelling scope choice, not an ns-3-version quirk.

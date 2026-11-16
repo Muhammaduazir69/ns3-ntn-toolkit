@@ -49,6 +49,10 @@ main(int argc, char* argv[])
     std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
     std::string outputDir = "ntn-oran-qos-flows-output";
 
+    // Wave 1 (C5): feeder from a real gateway north of the UE site (WGS-84).
+
+    double gwDistanceKm = 500.0;
+
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
@@ -59,6 +63,14 @@ main(int argc, char* argv[])
                  satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("gwDistanceKm",
+
+                 "Gateway ground distance north of the UE site (km); <= 0 keeps the 5 ms "
+
+                 "constant backhaul",
+
+                 gwDistanceKm);
+
     cmd.Parse(argc, argv);
 
     // --satEirpDbm < 0 (default): the TR 38.821 Set-1 S-band EIRP density
@@ -124,14 +136,19 @@ main(int argc, char* argv[])
     // antenna being counted twice.
     if (useSet1Density)
     {
-        rs.SetSatEirpDensityDbwMhz(
-            NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        // C4/C7: TR 38.821 Set-1 terminal and payload (34 dBW/MHz, handheld 1T2R, NF 7 dB).
+
+        rs.ApplyTr38821Set1Defaults();
     }
     else
     {
         rs.SetSatConductedPowerDbm(satEirpDbm);
     }
     rs.Build(satNodes, ueNodes);
+    if (gwDistanceKm > 0.0)
+    {
+        rs.SetFeederGatewayGeodetic(subLat + gwDistanceKm / 111.195, subLon, 0.0);
+    }
 
     // Four QoS flows with distinct 5QI / S-NSSAI identity in real bytes.
     const Time start = Seconds(1.0);
@@ -181,7 +198,10 @@ main(int argc, char* argv[])
     // metric names, AI feature windows, EWMA anomaly events. The canonical
     // one-call wiring also auto-exports
     // ntn-oran-qos-flows_kpm_series.{csv,lp} at end of simulation.
-    rs.EnableAiFlowMonitor("ntn-oran-qos-flows");
+    // C6: KPM from gNB-side counters (TS 28.552) and the files under the
+    // output directory (P1-10), not the process working directory.
+    rs.SetKpmFromRanCounters(true);
+    rs.EnableAiFlowMonitor(outputDir + "/ntn-oran-qos-flows");
     Ptr<NtnOranAiFlowMonitor> kpm = rs.GetAiFlowMonitor();
     kpm->RegisterAnomalyCallback([](const NtnOranAiFlowMonitor::AnomalyEvent& ev) {
         std::printf("  [anomaly] t=%.1f flow=%u 5qi=%u %s=%.4f z=%.1f\n",
@@ -213,7 +233,7 @@ main(int argc, char* argv[])
     // (EnableAiFlowMonitor); only the FlowMonitor XML is written manually.
     kpm->SerializeToXmlFile(outputDir + "/oran_flow_monitor.xml");
     std::printf("# KPM: %zu flows, anomalies=%zu, series -> "
-                "ntn-oran-qos-flows_kpm_series.{csv,lp}\n",
+                "<outputDir>/ntn-oran-qos-flows_kpm_series.{csv,lp}\n",
                 kpm->GetKpmSeries().size(), kpm->GetAnomalies().size());
 
     std::printf("# === per-flow measured KPIs (in-band, through GTP + radio) ===\n");

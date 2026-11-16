@@ -133,7 +133,7 @@ main(int argc, char* argv[])
 
     Ptr<ns3::ntncon::Sgp4MobilityModel> anchorSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    anchorSgp4->SetElements(elements[0]);
+    anchorSgp4->SetElementsSgp4(elements[0]);
     double subLat, subLon, subAlt;
     anchorSgp4->GetGeodetic(subLat, subLon, subAlt);
 
@@ -144,7 +144,7 @@ main(int argc, char* argv[])
             (i == 0) ? anchorSgp4 : CreateObject<ns3::ntncon::Sgp4MobilityModel>();
         if (i != 0)
         {
-            sgp4->SetElements(elements[satIdx[i]]);
+            sgp4->SetElementsSgp4(elements[satIdx[i]]);
         }
         satMob[i] = CreateObject<NtnEnuProjectionMobilityModel>();
         satMob[i]->SetSource(sgp4);

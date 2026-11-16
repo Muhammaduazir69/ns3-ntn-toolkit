@@ -60,6 +60,7 @@ main(int argc, char* argv[])
     double rainRateMmH = 0.0;
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-sionna-composed-channel-output";
+    std::string extraFading = "none"; // Wave 2 M3 / NT-07: one small-scale process by default
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
@@ -70,12 +71,17 @@ main(int argc, char* argv[])
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("rainRateMmH", "Rain rate on the ITU-R chain (mm/h)", rainRateMmH);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("extraFading",
+                 "none (default: the 3GPP spatial channel is the only small-scale process) or "
+                 "nakagami (old demo: a second, independent m=3 draw per TB on top)",
+                 extraFading);
     cmd.Parse(argc, argv);
 
     std::printf("# ntn-sionna-composed-channel-traffic (Roadmap §4.2.8, REAL radio)\n");
     std::printf("#   sim=%.0fs freq=%.1fGHz rain=%.1fmm/h\n",
                 simSeconds, freqGHz, rainRateMmH);
-    std::printf("#   chain: Friis -> ITU-R excess -> Nakagami fading -> spectrum PHY\n");
+    std::printf("#   chain: Friis -> ITU-R excess%s -> spectrum PHY (3GPP spatial fading)\n",
+                extraFading == "nakagami" ? " -> Nakagami m=3" : "");
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -91,7 +97,7 @@ main(int argc, char* argv[])
     const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(elements[0]);
+    satSgp4->SetElementsSgp4(elements[0]);
     double subLat, subLon, subAlt;
     satSgp4->GetGeodetic(subLat, subLon, subAlt);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -161,12 +167,17 @@ main(int argc, char* argv[])
     // applies small-scale fading, so this is a second, independent fading
     // realization on the same link (see SCOPE_AND_LIMITATIONS NT-07); it is a
     // composition demo, not a calibrated NTN fading model.
-    Ptr<NakagamiPropagationLossModel> nakagami =
-        CreateObject<NakagamiPropagationLossModel>();
-    nakagami->SetAttribute("m0", DoubleValue(3.0));
-    nakagami->SetAttribute("m1", DoubleValue(3.0));
-    nakagami->SetAttribute("m2", DoubleValue(3.0));
-    rs.AddExtraPropagationLoss(nakagami);
+    // Wave 2 M3: off by default (TR 38.811 6.7 fading should be the only
+    // small-scale term); --extraFading=nakagami keeps the old composition demo.
+    if (extraFading == "nakagami")
+    {
+        Ptr<NakagamiPropagationLossModel> nakagami =
+            CreateObject<NakagamiPropagationLossModel>();
+        nakagami->SetAttribute("m0", DoubleValue(3.0));
+        nakagami->SetAttribute("m1", DoubleValue(3.0));
+        nakagami->SetAttribute("m2", DoubleValue(3.0));
+        rs.AddExtraPropagationLoss(nakagami);
+    }
 
     // (2) oran-ntn's TR 38.811 channel for the same slot, evaluated on the
     // SAME live geometry as a drop-in alternative (printed, not in-path).
@@ -205,9 +216,10 @@ main(int argc, char* argv[])
     rs.WriteHealthReport();
 
     std::printf("# === summary ===  measured cell SINR=%.2f dB TBLER=%.4f "
-                "throughput=%.3f Mbps (ITU-R excess + Nakagami fading composed in "
+                "throughput=%.3f Mbps (ITU-R excess%s composed in "
                 "the real packet path; oran-ntn TR 38.811 shown as drop-in)\n",
-                rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());
+                rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps(),
+                extraFading == "nakagami" ? " + Nakagami fading" : "");
 
     Simulator::Destroy();
     return 0;

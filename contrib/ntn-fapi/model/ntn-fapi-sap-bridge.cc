@@ -413,6 +413,9 @@ NtnFapiSapBridge::OnPhyRx(const mmwave::RxPacketTraceParams& p)
         prx.pduLength = static_cast<uint16_t>(p.m_tbSize);
         rx.pdus.push_back(prx);
         ++m_rxDataCount;
+        m_rxDataBytes += p.m_tbSize;
+        m_perRnti[p.m_rnti].rxData += 1;
+        m_perRnti[p.m_rnti].rxBytes += p.m_tbSize;
     }
 
     // CRC.indication (0x86) — always.
@@ -427,6 +430,8 @@ NtnFapiSapBridge::OnPhyRx(const mmwave::RxPacketTraceParams& p)
     rep.ul_cqi = static_cast<int16_t>(std::lround(std::max(-10.0, sinrDb)));
     crc.crcList.push_back(rep);
     ++m_crcCount;
+    m_perRnti[p.m_rnti].crc += 1;
+    m_perRnti[p.m_rnti].crcFail += crcOk ? 0 : 1;
     m_crcTrace(crc);
 
     // ---- SAP latency (CI gate 15): DL_TTI.request -> CRC.indication --------

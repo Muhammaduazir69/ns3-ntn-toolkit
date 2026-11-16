@@ -303,7 +303,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -404,6 +404,9 @@ main(int argc, char* argv[])
                     ? "LIVE Sionna ray tracer (los_only=false)"
                     : "PARAMETRIC 4-tap profile (hand-specified, NOT ray traced); "
                       "pass --sionnaServer=host:port for a traced CIR");
+    // P0-4: machine-readable provenance (a live server run is
+    // RequireLiveTransport=true, so it aborts rather than falling back).
+    std::printf("raytrace_live=%d\n", g_cirFromServer ? 1 : 0);
     std::printf("# %6s  %8s  %10s  %9s  %9s  %8s\n",
                 "t_s", "elev", "PL_fs_ref", "fade_dB", "sinr_dB", "tbler");
     rs.RegisterPeriodicCallback(Seconds(1.0), &Tick);

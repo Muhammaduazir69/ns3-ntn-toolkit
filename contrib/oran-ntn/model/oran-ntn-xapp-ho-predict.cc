@@ -40,6 +40,21 @@ OranNtnXappHoPredict::GetTypeId()
                           DoubleValue(3.0),
                           MakeDoubleAccessor(&OranNtnXappHoPredict::m_sinrDropThreshold),
                           MakeDoubleChecker<double>(-20.0, 40.0))
+            .AddAttribute("A3OffsetDb",
+                          "Measured-RSRP path (Wave 2 M2): hand over when a neighbour's RRC-reported "
+                          "RSRP exceeds the serving cell's by this offset (TS 38.331 5.5.4.4 A3 "
+                          "entering condition). Used only for candidates whose report carries a "
+                          "measured RSRP and no SINR, i.e. reports from OranNtnRealStackBinding.",
+                          DoubleValue(3.0),
+                          MakeDoubleAccessor(&OranNtnXappHoPredict::m_a3OffsetDb),
+                          MakeDoubleChecker<double>(-30.0, 30.0))
+            .AddAttribute("DecisionsEnabled",
+                          "Wave 2 M2: false keeps the xApp as the KPM database of an RL "
+                          "environment (OranNtnGymHandover) without issuing its own handovers, "
+                          "so the agent is the only mobility decision maker.",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&OranNtnXappHoPredict::m_decisionsEnabled),
+                          MakeBooleanChecker())
             .AddAttribute("TteMinimum",
                           "Minimum TTE required for a candidate satellite",
                           TimeValue(Seconds(30.0)),
@@ -178,8 +193,22 @@ OranNtnXappHoPredict::ProcessKpmReport(const E2KpmReport& report)
     // de-facto serving cell is the strongest beam (standard NTN camp-on-best);
     // building the trend from a single cell — rather than the previous mix of
     // serving + candidate reports — is what makes the slope/R^2 meaningful.
-    state.lastSinrByGnb[report.gnbId] = report.sinr_dB;
     state.lastTteByGnb[report.gnbId] = report.tte_s;
+    if (report.rsrpMeasured)
+    {
+        state.lastRsrpByGnb[report.gnbId] = report.rsrp_dBm;
+    }
+    // A neighbour report from the measured producer carries an RRC RSRP and no
+    // SINR (no SS-SINR is reported for neighbours). Keep it out of the SINR
+    // track, which ranks serving cells by SINR; it is used by the A3 path below.
+    if (!std::isnan(report.sinr_dB))
+    {
+        state.lastSinrByGnb[report.gnbId] = report.sinr_dB;
+    }
+    else if (state.lastSinrByGnb.empty())
+    {
+        return;
+    }
 
     // Identify the serving cell with hysteretic camp-on (how a real UE behaves):
     // keep the current serving beam until another exceeds it by a margin. A
@@ -253,6 +282,10 @@ OranNtnXappHoPredict::DecisionCycle()
     };
 
     double now = Simulator::Now().GetSeconds();
+    if (!m_decisionsEnabled)
+    {
+        return;
+    }
 
     for (auto& [ueId, state] : m_ueStates)
     {
@@ -321,6 +354,32 @@ OranNtnXappHoPredict::DecisionCycle()
             NS_LOG_INFO("UE " << ueId << ": proactive HO on serving TTE="
                         << state.servingTte << " s < min=" << m_tteMinimum.GetSeconds()
                         << " s");
+            needsHandover = true;
+        }
+
+        // Wave 2 M2: measured-RSRP A3 path. When the serving and neighbour
+        // RSRP both come from RRC MeasurementReports (TS 38.331 measResults),
+        // the entering condition Mn > Mp + Off decides, on measured values
+        // only; the neighbour SINR is never extrapolated.
+        uint32_t a3Candidate = 0;
+        double a3Margin = 0.0;
+        {
+            auto sp = state.lastRsrpByGnb.find(state.servingGnbId);
+            if (sp != state.lastRsrpByGnb.end() && std::isfinite(sp->second))
+            {
+                for (const auto& [g, rsrp] : state.lastRsrpByGnb)
+                {
+                    if (g != state.servingGnbId && std::isfinite(rsrp) &&
+                        rsrp - sp->second > m_a3OffsetDb && rsrp - sp->second > a3Margin)
+                    {
+                        a3Candidate = g;
+                        a3Margin = rsrp - sp->second;
+                    }
+                }
+            }
+        }
+        if (a3Candidate != 0)
+        {
             needsHandover = true;
         }
 
@@ -401,6 +460,16 @@ OranNtnXappHoPredict::DecisionCycle()
             }
         }
 
+        if (a3Candidate != 0)
+        {
+            // The measured A3 decision takes precedence over the SINR ranking.
+            bestCandidate = a3Candidate;
+            bestScore = 1.0;
+            bestCandSinr = std::nan("");
+            bestCandTte = state.lastTteByGnb.count(a3Candidate) ? state.lastTteByGnb[a3Candidate]
+                                                                 : std::nan("");
+        }
+
         if (bestCandidate == 0)
         {
             NS_LOG_DEBUG("UE " << ueId << ": No suitable candidate found");
@@ -440,7 +509,8 @@ OranNtnXappHoPredict::DecisionCycle()
         }
 
         // Submit handover action
-        double confidence = std::min(trend.r_squared * bestScore, 1.0);
+        double confidence =
+            (a3Candidate != 0) ? 1.0 : std::min(trend.r_squared * bestScore, 1.0);
         E2RcAction hoAction = BuildAction(E2RcActionType::HANDOVER_TRIGGER,
                                            bestCandidate,
                                            ueId,

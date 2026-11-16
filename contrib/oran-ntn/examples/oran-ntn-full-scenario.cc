@@ -739,7 +739,7 @@ main(int argc, char* argv[])
     for (uint32_t s = 0; s < totalSats; ++s)
     {
         satMobs[s] = CreateObject<Sgp4MobilityModel>();
-        satMobs[s]->SetElements(elements[s]);
+        satMobs[s]->SetElementsSgp4(elements[s]);
         satNodes.Get(s)->AggregateObject(satMobs[s]);
     }
 

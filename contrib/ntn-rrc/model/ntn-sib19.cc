@@ -382,6 +382,37 @@ NtnSib19Broadcaster::RefreshNow()
             }
             m_latest.ulSyncValidity = Seconds(chosen);
         }
+        // P0-6 (TS 38.213 4.2, TS 38.331 NTN-Config-r17 kmac-r17): kMac exists
+        // for the case where the gNB's DL and UL frame timing are NOT aligned,
+        // which happens when the uplink time synchronization reference point is
+        // not at the gNB. With the reference at the gNB/gateway (transparent) or
+        // with the gNB on board (regenerative, reference at the satellite) the
+        // frames are aligned and kmac-r17 is absent (0 here). Only a transparent
+        // payload with the reference at the satellite leaves the feeder round
+        // trip between the gNB's DL and UL frames: kMac = ceil(2 d_feeder / c)
+        // in 15 kHz reference slots (FR1), clamped to 512. The legacy beam-centre
+        // reference keeps its earlier value (kMac = K_offset) for reproducibility.
+        if (m_ulRef != UlSyncReference::BeamCenterLegacy)
+        {
+            uint32_t kmac = 0;
+            if (m_ulRef == UlSyncReference::Satellite && m_payloadMode == PayloadMode::Transparent)
+            {
+                double feederM = m_ta->GetFeederRangeMetres();
+                const bool haveGwPos =
+                    m_gatewayPos.x != 0.0 || m_gatewayPos.y != 0.0 || m_gatewayPos.z != 0.0;
+                if (feederM <= 0.0 && haveGwPos)
+                {
+                    feederM = CalculateDistance(m_sat->GetPosition(), m_gatewayPos);
+                }
+                if (feederM > 0.0)
+                {
+                    const double rttFeederS = 2.0 * feederM / NtnTimingAdvance::kSpeedOfLight;
+                    kmac = static_cast<uint32_t>(std::ceil(rttFeederS / kRefSlotS));
+                    kmac = std::min(std::max<uint32_t>(kmac, 1), kMaxKmac);
+                }
+            }
+            m_latest.kMac = kmac;
+        }
         // RRC-1: hand the broadcast value to whoever schedules with it.
         if (!m_kOffsetSink.IsNull())
         {

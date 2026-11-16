@@ -44,6 +44,8 @@
 #include "ns3/fapi-messages.h"
 #include "ns3/fapi-pdu-types.h"
 #include "ns3/ntn-fapi-sap-bridge.h"
+#include "ns3/ntn-rrc-helper.h"
+#include "ns3/ntn-ue-sib19-consumer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -68,11 +70,15 @@ uint16_t g_ueRnti = 0;
 
 // Reverse FAPI path: feed the real per-TB decode into the bridge, which emits
 // RX_DATA.indication / CRC.indication and closes the SAP latency measurement.
-// Same RxPacketTraceUe trace the helper uses, lazily filtered to UE-0's RNTI.
+// Same RxPacketTraceUe trace the helper uses. P0-9: by default every RNTI of
+// the cell is accounted (SCF 222.10: one CRC report per TB); --fapiRnti=ue0
+// restores the earlier UE-0-only filter.
+bool g_fapiUe0Only = false;
+
 void
 FapiPhyRxTrace(mmwave::RxPacketTraceParams p)
 {
-    if (g_ueRnti == 0 && g_rs)
+    if (g_fapiUe0Only && g_ueRnti == 0 && g_rs)
     {
         g_ueRnti = g_rs->GetUeRnti(0); // RNTI assigned once RRC connects at runtime
         if (g_ueRnti != 0 && g_bridge)
@@ -101,6 +107,8 @@ main(int argc, char* argv[])
     // valid) but the SAP bridge is not installed (nr has a different SAP).
     std::string radio = "mmwave";
     std::string outputDir = "ntn-fapi-real-stack-output";
+    std::string fapiRnti = "all";
+    bool ueTaPrecomp = true;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
@@ -110,11 +118,18 @@ main(int argc, char* argv[])
     cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: mmwave (FR2, FAPI SAP bridge) or nr (FR1)", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("fapiRnti", "FAPI RX_DATA/CRC accounting: all (every RNTI) | ue0", fapiRnti);
+    cmd.AddValue("ueTaPrecomp",
+                 "UE pre-compensates its PRACH from a decoded SIB19 (TS 38.213 4.2); 0 = none, "
+                 "so RACH.indication carries the whole round trip",
+                 ueTaPrecomp);
     std::string netSimOut;
     std::string czmlOut;
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(fapiRnti != "all" && fapiRnti != "ue0", "--fapiRnti=all|ue0");
+    g_fapiUe0Only = (fapiRnti == "ue0");
 
     const bool useNr = (radio == "nr");
     // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
@@ -166,14 +181,14 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> servSatMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    servSatMob->SetElements(wElements[0]);
+    servSatMob->SetElementsSgp4(wElements[0]);
     satNodes.Get(0)->AggregateObject(servSatMob);
     double subLat, subLon, subAlt;
     servSatMob->GetGeodetic(subLat, subLon, subAlt);
     NtnTr38811MobilityHelper ueMobility(1);
     auto mobProfile = NtnMobilityScenarios::MixedContinental();
-    ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
-                       subLon - 0.03, subLon + 0.03);
+    auto ueModels = ueMobility.Install(ueNodes, mobProfile, subLat - 0.03, subLat + 0.03,
+                                       subLon - 0.03, subLon + 0.03);
 
     NtnRealStackHelper rs;
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
@@ -217,6 +232,30 @@ main(int argc, char* argv[])
         NS_ABORT_MSG_IF(!enb, "expected an MmWaveEnbNetDevice on the mmwave backend");
         g_bridge = CreateObject<NtnFapiSapBridge>();
         g_bridge->InstallEnb(enb); // interposes decorators + consumes P5 CONFIG.request
+        // P0-9: the RACH.indication TimingAdvance is the residual the gNB would
+        // measure: the true service-link round trip (gNB on the satellite,
+        // NtnTimingAdvance from the live SGP4 geometry) minus what UE 0
+        // pre-compensated from a SIB19 it decoded (GNSS + broadcast ephemeris,
+        // TS 38.213 4.2). The UE acquires SIB19 before random access.
+        {
+            ntnrrc::NtnRrcHelper rrc;
+            rrc.SetPayloadMode(ntnrrc::PayloadMode::RegenerativeFull);
+            rrc.SetReferencePosition(ntngeo::GeodeticToEcef(subLat, subLon, 0.0));
+            Ptr<ntnrrc::NtnTimingAdvance> ta = rrc.InstallTimingAdvance(ueModels[0], servSatMob);
+            Ptr<ntnrrc::NtnSib19Broadcaster> sib =
+                rrc.InstallSib19Broadcaster(servSatMob, g_bridge->GetCellConfig().phyCellId, ta);
+            sib->RefreshNow();
+            Ptr<ntnrrc::NtnUeSib19Consumer> ue = CreateObject<ntnrrc::NtnUeSib19Consumer>();
+            ue->Setup(ueModels[0], ta);
+            ue->ReceiveWire(sib->GetLatestSerialised());
+            const Time rtt = ta->ComputeTotalTa();
+            const Time pre = ueTaPrecomp ? ue->GetPrecompensator()->ComputeTa() : Time();
+            g_bridge->SetNtnTimingAdvance(rtt, pre);
+            std::cout << "  NTN TA for RACH.indication: round trip " << rtt.GetMicroSeconds()
+                      << " us, UE pre-compensation " << pre.GetNanoSeconds() / 1e3
+                      << " us (from decoded SIB19), residual "
+                      << g_bridge->GetResidualTimingAdvance().GetNanoSeconds() << " ns\n";
+        }
         const auto& cc = g_bridge->GetCarrierConfig();
         std::cout << "  P5 CONFIG.request consumed: cellId=" << g_bridge->GetCellConfig().phyCellId
                   << " dlFreq=" << cc.dlFrequency / 1e3 << " MHz dlBW=" << cc.dlBandwidth
@@ -242,6 +281,10 @@ main(int argc, char* argv[])
 
     const uint64_t realRxBytes = rs.GetUeRxBytes(0);
     const double goodputMbps = (realRxBytes * 8.0) / (duration * 1e6);
+    // P0-9: what crossed FAPI as RX_DATA.indication (decoded TB bytes, MAC PDU
+    // level, so slightly above the application rate), for the cell and per RNTI.
+    const double fapiCellMbps =
+        g_bridge ? (g_bridge->GetRxDataBytes() * 8.0) / (duration * 1e6) : 0.0;
 
     std::cout << "\n--- FAPI Summary (real SCF-222 SAP on MEASURED radio) ---\n"
               << "  measured serving SINR (mean): " << rs.GetMeanDlSinrDb() << " dB\n"
@@ -270,8 +313,27 @@ main(int argc, char* argv[])
                   << " us\n"
                   << "  -> every FAPI message had a REAL mmwave producer + consumer at real slot timing.\n";
     }
-    std::cout << "  FAPI delivered:               " << (realRxBytes / 1000)
-              << " KB  goodput=" << goodputMbps << " Mbps\n";
+    std::cout << "  UE 0 application delivered:   " << (realRxBytes / 1000)
+              << " KB  goodput=" << goodputMbps << " Mbps (application, UE 0 only)\n";
+    if (g_bridge)
+    {
+        std::cout << "  FAPI RX_DATA (cell, " << (g_fapiUe0Only ? "UE 0 RNTI only" : "all RNTIs")
+                  << "): " << g_bridge->GetRxDataBytes() / 1000 << " KB  " << fapiCellMbps
+                  << " Mbps (TB bytes) vs measured radio throughput " << rs.GetRxThroughputMbps()
+                  << " Mbps (application)\n";
+        for (const auto& [rnti, st] : g_bridge->GetPerRntiStats())
+        {
+            std::cout << "    RNTI " << rnti << ": CRC.indication " << st.crc << " (fail "
+                      << st.crcFail << "), RX_DATA " << st.rxData << ", "
+                      << (st.rxBytes * 8.0) / (duration * 1e6) << " Mbps\n";
+        }
+        const auto& rach = g_bridge->LastRachIndication();
+        std::cout << "  RACH.indication: " << g_bridge->GetRachIndicationCount()
+                  << " emitted; last TimingAdvance index "
+                  << (rach.preambles.empty() ? -1 : int(rach.preambles[0].timingAdvance))
+                  << " (0..3846, unit 16x64 Tc/2^mu; residual "
+                  << g_bridge->GetResidualTimingAdvance().GetNanoSeconds() << " ns)\n";
+    }
 
     // Persist the measured SCF-222 SAP latency (CI gate 15) to a result file, not
     // just the console, so the FAPI KPI is inspectable alongside sim_health.csv.
@@ -286,6 +348,11 @@ main(int argc, char* argv[])
         f << "dl_tti_request_count," << g_bridge->GetDlTtiRequestCount() << ",count,fapi-sap\n";
         f << "dl_tti_with_data_count," << g_bridge->GetDlTtiWithDataCount() << ",count,fapi-sap\n";
         f << "crc_indication_count," << g_bridge->GetCrcIndicationCount() << ",count,fapi-sap\n";
+        f << "rx_data_indication_count," << g_bridge->GetRxDataIndicationCount()
+          << ",count,fapi-sap (" << (g_fapiUe0Only ? "ue0" : "all-rnti") << ")\n";
+        f << "rx_data_goodput_mbps," << fapiCellMbps << ",Mbps,fapi RX_DATA TB bytes\n";
+        f << "rach_ta_residual_ns," << g_bridge->GetResidualTimingAdvance().GetNanoSeconds()
+          << ",ns,ntn-timing-advance minus ue sib19 precompensation\n";
         f << "matched_latency_count," << g_bridge->GetMatchedLatencyCount() << ",count,fapi-sap\n";
         // FAPI-2: the latency rows carry WHICH latency they are. On a channel
         // with no propagation model these are the slot pipeline alone, and a

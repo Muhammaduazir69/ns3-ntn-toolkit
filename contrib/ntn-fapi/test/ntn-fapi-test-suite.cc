@@ -103,6 +103,14 @@ class FapiHarqIdIsPerUeTest : public TestCase
         NS_TEST_ASSERT_MSG_NE(harqFor11, harqFor22,
                               "and the two must differ, or one slot-wide value is still being "
                               "handed to every UE");
+
+        // P0-9: with no RNTI filter every TB of the cell is accounted, per RNTI
+        // and in total (SCF 222.10: one CRC report per TB).
+        const auto& per = bridge->GetPerRntiStats();
+        NS_TEST_ASSERT_MSG_EQ(per.size(), 2u, "both RNTIs accounted");
+        NS_TEST_ASSERT_MSG_EQ(per.at(11).crc, 1u, "UE 11: one CRC.indication");
+        NS_TEST_ASSERT_MSG_EQ(per.at(22).rxBytes, 100u, "UE 22: its TB bytes in RX_DATA");
+        NS_TEST_ASSERT_MSG_EQ(bridge->GetRxDataBytes(), 200u, "cell RX_DATA bytes = sum of TBs");
     }
 
     void OnCrc(fapi::CrcIndication ind)

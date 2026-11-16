@@ -3,6 +3,15 @@
 <p align="center"><strong>Satellite-assisted V2X: NR sidelink Mode 2, SAE J2735 basic safety messages, and relay decisions that gate real packets</strong></p>
 
 <p align="center">
+  <a href="https://youtu.be/JNStiBst68I"><img src="https://img.youtube.com/vi/JNStiBst68I/maxresdefault.jpg" alt="NTN Control Center: end-to-end simulation of non-terrestrial networks in ns-3 (video)" width="560"/></a><br/>
+  <a href="https://youtu.be/JNStiBst68I"><img src="https://img.shields.io/badge/YouTube-Watch%20the%205--minute%20demo-red?logo=youtube" alt="Watch on YouTube"/></a><br/>
+  <a href="https://6g-ntn.live"><img src="https://img.shields.io/badge/Live-6g--ntn.live-2ea44f?logo=googlechrome&logoColor=white" alt="Open the live NTN Control Center"/></a><br/>
+  <sub><b>Try it live:</b> <a href="https://6g-ntn.live">6g-ntn.live</a> runs the toolkit's examples in the browser, with open datasets, a scenario gallery and a research forum.</sub><br/>
+  <sub>The NTN Control Center runs and visualizes the ntn-v2x examples on a live 3D globe (5-minute video).</sub>
+</p>
+
+
+<p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-TS%2038.885%20%7C%20TR%2037.885-orange.svg" alt="3GPP TS 38.885 and TR 37.885"/>
@@ -105,9 +114,9 @@ Binaries land at `build/contrib/ntn-v2x/examples/ns3.43-<name>-default`.
 | `ntn-v2x-canyon-relay` | Vehicles in a street canyon report status to a server through LEO satellites; a blocked vehicle names a neighbor in its Mode-2 broadcast and the neighbor forwards over its own uplink. Policies `direct`, `multisat`, `relay`, `blind`, `blindfar`, `random`, `rand2`, `rand3`, `roundrobin`, `anyfwd`, `anyp` and more; shared per-satellite uplink via `--ulKbps`. | `./ns3 run "ntn-v2x-canyon-relay --policy=relay --simSeconds=60"` |
 | `ntn-v2x-pc5-sidelink-bsm` | Highway vehicles broadcast J2735 BSMs directly over PC5 with Mode-2 selection, no gNB; PRR by distance bucket. | `./ns3 run "ntn-v2x-pc5-sidelink-bsm --numVehicles=20 --numSubchannels=5 --duration=4"` |
 | `ntn-v2x-edge-urllc` | A two-vehicle platoon on a real NR LEO cell with a URLLC control slice and an eMBB sensor slice; a hazard xApp consumes measured KPM features every 100 ms with inference on the satellite or on the ground, and the decision latency is the outcome. | `./ns3 run "ntn-v2x-edge-urllc --edge=sat"` |
-| `ntn-v2x-real-stack` | Every vehicle a UE on a real NR NTN cell; the direct-or-relay decision rides the measured per-UE SINR minus blockage, with the closed-form value printed beside it. | `./ns3 run "ntn-v2x-real-stack --duration=20 --numVehicles=8"` |
+| `ntn-v2x-real-stack` | Every vehicle a UE on a real NR NTN cell in a street canyon. Facades and a truck are TR 38.901 7.6.4.2 model-B screens applied per RB on the radio, so blocked vehicles show a lower measured RSRP and SINR. Relay selection on measured SS-RSRP (TS 38.304 8.1 thresholds derived from the noise floor); remote UEs are gated off Uu and their traffic reaches them through the relay UE's Uu bearer and the PC5 Mode-2 sidelink (L3 UE-to-network relay, TS 23.304; discovery and PC5-RRC assumed). KPM from RAN counters. `--scripted=1` keeps the old parity-flag mode. | `./ns3 run "ntn-v2x-real-stack --duration=20 --numVehicles=8"` |
 | `ntn-v2x-rural-highway` | A LEO pass over a rural highway with vehicles replayed from an FCD trace; direct, relay and orphan counts each second from a measured baseline SINR. | `./ns3 run "ntn-v2x-rural-highway --vehicles=40 --simTime=30"` |
-| `ntn-v2x-leo-relay-traffic` | A two-hop data plane, shadowed vehicle to peer vehicle to LEO to server, with real IPv4 forwarding and contact-gated hops; BSM delay, jitter and loss measured at `NtnOranSink`. | `./ns3 run "ntn-v2x-leo-relay-traffic --simSeconds=60 --bsmHz=10"` |
+| `ntn-v2x-leo-relay-traffic` | Default: a two-hop P2P data plane, shadowed vehicle to peer vehicle to LEO to server, with real IPv4 forwarding and hops gated by the closed-form `V2xLeoDirect` budget; BSM delay, jitter and loss measured at `NtnOranSink`. `--v2v=pc5 --uplink=nr`: the V2V hop on the PC5 Mode-2 sidelink with background vehicles and the relay's uplink on the measured NR NTN cell (Set-1, real feeder); e2e delay = PC5 + measured Uu UL OWD. | `./ns3 run "ntn-v2x-leo-relay-traffic --simSeconds=30 --v2v=pc5 --uplink=nr"` |
 | `ntn-v2x-maritime-ais` | A vessel replayed from an AIS track in the Danish Maritime Authority CSV format (via `ntn-sagin`) as a UE of a real NR NTN cell. The shipped default is a small hand-made fixture; pass `--aisTrace` with a real aisdk export for recorded motion. | `./ns3 run "ntn-v2x-maritime-ais --simSeconds=30"` |
 
 ## Tests

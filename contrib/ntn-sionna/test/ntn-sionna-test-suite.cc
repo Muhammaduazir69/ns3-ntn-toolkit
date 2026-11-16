@@ -14,6 +14,10 @@
 #include "ns3/sionna-calibrator.h"
 #include "ns3/cir-doppler-synth.h"
 #include "ns3/sionna-cir-propagation-loss-model.h"
+#include "ns3/sionna-cir-spectrum-loss-model.h"
+#include "ns3/spectrum-model.h"
+#include "ns3/spectrum-signal-parameters.h"
+#include "ns3/spectrum-value.h"
 #include "ns3/sionna-batch-client.h"
 #include "ns3/sionna-pybind-transport.h"
 #include "ns3/sionna-replay-transport.h"
@@ -3317,6 +3321,73 @@ class SionnaCirUsesLiveMobilityTest : public TestCase
     }
 };
 
+
+/// Wave 2 M3: the per-RB CIR plugin keeps the tap delays. A two-tap channel
+/// with equal amplitudes and delay difference dtau has spectral nulls spaced
+/// 1/dtau apart; a single tap is flat; the mean over a band many coherence
+/// bandwidths wide is the CIR mean power (unit mean).
+class SionnaCirSpectrumSelectivityTest : public TestCase
+{
+  public:
+    SionnaCirSpectrumSelectivityTest()
+        : TestCase("M3: SionnaCirSpectrumLossModel per-RB H(f), unit mean power")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const double fc = 2.0e9;
+        CirSnapshot snap;
+        snap.wavelength_m = 299792458.0 / fc;
+        CirPathTap t0;
+        t0.amplitude = {1.0, 0.0};
+        t0.delay_s = 0.0;
+        CirPathTap t1 = t0;
+        t1.delay_s = 100e-9; // nulls every 10 MHz
+        snap.taps = {t0, t1};
+        Ptr<SionnaCirSpectrumLossModel> m = CreateObject<SionnaCirSpectrumLossModel>();
+        m->SetSnapshot(snap);
+        std::vector<std::complex<double>> amps = {t0.amplitude, t1.amplitude};
+        // |1 + exp(-j 2 pi df tau)|^2 / 2 = 1 + cos(2 pi df tau)
+        const auto g = m->GainsAt(amps, {0.0, 2.5e6, 5.0e6});
+        NS_TEST_ASSERT_MSG_EQ_TOL(g[0], 2.0, 1e-9, "in phase at the carrier");
+        NS_TEST_ASSERT_MSG_EQ_TOL(g[1], 1.0, 1e-9, "quadrature at 2.5 MHz");
+        NS_TEST_ASSERT_MSG_LT(g[2], 1e-6, "null at 5 MHz");
+
+        // Through the spectrum API: 100 RBs of 1 MHz around fc.
+        std::vector<double> fcs;
+        for (int i = 0; i < 100; ++i)
+        {
+            fcs.push_back(fc - 50e6 + (i + 0.5) * 1e6);
+        }
+        Ptr<SpectrumModel> sm = Create<SpectrumModel>(fcs);
+        Ptr<SpectrumValue> psd = Create<SpectrumValue>(sm);
+        *psd = 1.0;
+        Ptr<SpectrumSignalParameters> p = Create<SpectrumSignalParameters>();
+        p->psd = psd;
+        Ptr<SpectrumValue> out = m->CalcRxPowerSpectralDensity(p, nullptr, nullptr);
+        double mean = 0.0;
+        for (size_t i = 0; i < out->GetValuesN(); ++i)
+        {
+            mean += (*out)[i];
+        }
+        mean /= out->GetValuesN();
+        NS_TEST_ASSERT_MSG_EQ_TOL(mean, 1.0, 0.02, "unit mean power over 10 coherence bandwidths");
+        // RB centres sit 0.5 MHz off the nulls: deepest RB about 16 dB down.
+        NS_TEST_ASSERT_MSG_GT(m->GetLastSpreadDb(), 10.0, "frequency selective");
+
+        // One tap: flat, 0 dB on every RB.
+        CirSnapshot one = snap;
+        one.taps = {t0};
+        m->SetSnapshot(one);
+        m->CalcRxPowerSpectralDensity(p, nullptr, nullptr);
+        NS_TEST_ASSERT_MSG_LT(m->GetLastSpreadDb(), 1e-9, "single tap is flat");
+        NS_TEST_ASSERT_MSG_EQ_TOL(m->GetLastMeanGainDb(), 0.0, 1e-9, "single tap unit gain");
+        Simulator::Destroy();
+    }
+};
+
 class NtnSionnaTestSuite : public TestSuite
 {
   public:
@@ -3378,6 +3449,7 @@ class NtnSionnaTestSuite : public TestSuite
         AddTestCase(new SionnaFallbackIsVisibleTest, Duration::QUICK);
     AddTestCase(new SionnaCalibratorReportsItsOwnLimitsTest, TestCase::Duration::QUICK);
     AddTestCase(new SionnaProvenanceLineTest, TestCase::Duration::QUICK);
+    AddTestCase(new SionnaCirSpectrumSelectivityTest, TestCase::Duration::QUICK);
     }
 };
 

@@ -38,6 +38,7 @@
 #include "ns3/ntn-rach-window.h"
 #include "ns3/ntn-tdl-spectrum-loss-model.h"
 #include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-earth-blockage-loss-model.h"
 #include "ns3/ntn-repro-manifest.h"
 #include "ns3/ntn-sat-beam-gain-model.h"
 #include "ns3/ntn-tr38811-excess-loss-model.h"
@@ -46,6 +47,10 @@
 #include "ns3/propagation-loss-model.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
+#include "ns3/data-rate.h"
+#include "ns3/spectrum-value.h"
+#include "ns3/spectrum-signal-parameters.h"
+#include "ns3/spectrum-propagation-loss-model.h"
 #include "ns3/three-gpp-channel-model.h"
 
 #include <filesystem>
@@ -3493,6 +3498,775 @@ class NtnTimerRelaxationReachesNrTest : public TestCase
     }
 };
 
+// ===================== Wave 1 tests (16 Nov 2026) =====================
+
+/// C1: Earth occultation geometry (TR 38.821 clause 6.1 elevation mask).
+class EarthBlockageGeometryTest : public TestCase
+{
+  public:
+    EarthBlockageGeometryTest()
+        : TestCase("C1: Earth blockage blocks below-horizon and through-Earth links only")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<NtnEarthBlockageLossModel> m = CreateObject<NtnEarthBlockageLossModel>();
+        const double lat = 45.0;
+        const double lon = 7.0;
+        const Vector ue = NtnRealStackHelper::GeodeticToEcef(lat, lon, 0.0);
+        bool ok = true;
+        // Zenith satellite: clear.
+        NS_TEST_ASSERT_MSG_EQ(m->IsBlocked(ue, NtnRealStackHelper::GeodeticToEcef(lat, lon, 600e3), ok),
+                              false, "zenith satellite must be visible");
+        NS_TEST_ASSERT_MSG_EQ(ok, true, "ECEF frame must be recognised");
+        // Satellite 30 deg of arc away at 600 km: below the horizon.
+        const Vector far = NtnRealStackHelper::GeodeticToEcef(lat - 30.0, lon, 600e3);
+        NS_TEST_ASSERT_MSG_LT(NtnEarthBlockageLossModel::GeodeticElevationDeg(ue, far), 0.0,
+                              "30 deg of arc away a 600 km satellite is below the horizon");
+        NS_TEST_ASSERT_MSG_EQ(m->IsBlocked(ue, far, ok), true, "below-horizon link must be blocked");
+        // 15 deg of arc away at 600 km: about 10 deg elevation, clear.
+        const Vector near = NtnRealStackHelper::GeodeticToEcef(lat - 15.0, lon, 600e3);
+        NS_TEST_ASSERT_MSG_GT(NtnEarthBlockageLossModel::GeodeticElevationDeg(ue, near), 0.0,
+                              "15 deg of arc away a 600 km satellite is above the horizon");
+        NS_TEST_ASSERT_MSG_EQ(m->IsBlocked(ue, near, ok), false, "above-horizon link must be clear");
+        // ISL across the Earth: blocked; neighbours in plane: clear.
+        const Vector s1 = NtnRealStackHelper::GeodeticToEcef(0.0, 0.0, 600e3);
+        NS_TEST_ASSERT_MSG_EQ(m->IsBlocked(s1, NtnRealStackHelper::GeodeticToEcef(0.0, 120.0, 600e3), ok),
+                              true, "an ISL through the Earth must be blocked");
+        NS_TEST_ASSERT_MSG_EQ(m->IsBlocked(s1, NtnRealStackHelper::GeodeticToEcef(0.0, 20.0, 600e3), ok),
+                              false, "an ISL above the limb must be clear");
+        // Terminal to terminal (UE-UE interference) is terrestrial: not judged.
+        NS_TEST_ASSERT_MSG_EQ(m->IsBlocked(ue, NtnRealStackHelper::GeodeticToEcef(lat + 0.05, lon, 0.0), ok),
+                              false, "a ground-to-ground path is not an NTN link");
+        // A flat-frame scenario is passed through, never blocked.
+        NS_TEST_ASSERT_MSG_EQ(m->IsBlocked(Vector(0, 0, 0), Vector(0, 0, 600e3), ok), false,
+                              "flat frame must not be judged");
+        NS_TEST_ASSERT_MSG_EQ(ok, false, "flat frame must be reported as non-geocentric");
+        // The loss itself on a chain: 0 dB clear, the blocked loss otherwise.
+        Ptr<ConstantPositionMobilityModel> a = CreateObject<ConstantPositionMobilityModel>();
+        Ptr<ConstantPositionMobilityModel> b = CreateObject<ConstantPositionMobilityModel>();
+        a->SetPosition(ue);
+        b->SetPosition(far);
+        NS_TEST_ASSERT_MSG_LT(m->CalcRxPower(0.0, a, b), -299.0, "blocked link carries no power");
+        b->SetPosition(near);
+        NS_TEST_ASSERT_MSG_EQ_TOL(m->CalcRxPower(0.0, a, b), 0.0, 1e-12, "clear link adds 0 dB");
+    }
+};
+
+/// Zenith geometry in ECEF for the closed-form and feeder tests.
+static void
+BuildZenithScene(NodeContainer& sats, NodeContainer& ues, double lat, double lon, double altM)
+{
+    sats.Create(1);
+    ues.Create(1);
+    auto sm = CreateObject<ConstantPositionMobilityModel>();
+    sm->SetPosition(NtnRealStackHelper::GeodeticToEcef(lat, lon, altM));
+    sats.Get(0)->AggregateObject(sm);
+    auto um = CreateObject<ConstantPositionMobilityModel>();
+    um->SetPosition(NtnRealStackHelper::GeodeticToEcef(lat, lon, 0.0));
+    ues.Get(0)->AggregateObject(um);
+}
+
+/// C4 + C3: with the TR 38.821 Set-1 terminal and payload, no excess loss and
+/// the LOS plane-wave spatial model, the measured zenith SINR equals the
+/// closed-form budget: EIRP 77.01 dBm spread over the occupied 51 PRB x 12 x
+/// 30 kHz, FSPL at 600 km and 2.185 GHz, two receive branches combined
+/// (+3.01 dB), noise -174 dBm/Hz + NF 7 dB.
+class Set1ZenithClosedFormTest : public TestCase
+{
+  public:
+    Set1ZenithClosedFormTest()
+        : TestCase("C4: Set-1 zenith SINR equals the TR 38.821 closed form (LOS, no excess)")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetCarrierFrequencyHz(2.185e9);
+        rs.SetBandwidthHz(20e6);
+        rs.SetSimTime(Seconds(2.0));
+        rs.SetOutputDir("test-ntn-set1-zenith");
+        rs.ApplyTr38821Set1Defaults();
+        rs.SetTr38811ExcessLoss(false);
+        rs.SetSmallScaleFading(false);
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(0.5),
+                          Seconds(1.9));
+        Simulator::Stop(Seconds(2.0));
+        Simulator::Run();
+        rs.Collect();
+        NS_TEST_ASSERT_MSG_EQ_TOL(rs.GetEffectiveEirpDbm(), 77.0103, 0.01, "Set-1 EIRP over 20 MHz");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rs.GetUeNoiseFigureDb(), 7.0, 1e-9, "Set-1 handheld NF");
+        const double c = 299792458.0;
+        const double fsplDb = 20.0 * std::log10(4.0 * M_PI * 600e3 * 2.185e9 / c);
+        const double occupiedHz = 51.0 * 12.0 * 30e3;
+        const double expected = 77.0103 - 10.0 * std::log10(occupiedHz) - fsplDb +
+                                10.0 * std::log10(2.0) - (-174.0 + 7.0);
+        NS_TEST_ASSERT_MSG_GT(rs.GetPhyRxTb(), 50u, "the link must carry TBs");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rs.GetMeanDlSinrDb(), expected, 0.5,
+                                  "zenith SINR must equal the closed-form budget");
+        Simulator::Destroy();
+    }
+};
+
+/// C5: the backhaul carries feeder slant / c + 50 us (full gNB payload) + the
+/// folded service slant / c from a real gateway.
+class FeederGatewayDelayTest : public TestCase
+{
+  public:
+    FeederGatewayDelayTest()
+        : TestCase("C5: feeder delay from a WGS-84 gateway tracks the serving satellite")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(1.0));
+        rs.SetOutputDir("test-ntn-feeder-gw");
+        rs.Build(sats, ues);
+        Ptr<MobilityModel> gw = rs.SetFeederGatewayGeodetic(40.0 + 500.0 / 111.195, -3.0, 0.0);
+        const double c = 299792458.0;
+        const double feederM = sats.Get(0)->GetObject<MobilityModel>()->GetDistanceFrom(gw);
+        const double serviceM = 600e3;
+        TimeValue d;
+        rs.GetBackhaulChannel()->GetAttribute("Delay", d);
+        NS_TEST_ASSERT_MSG_EQ_TOL(d.Get().GetSeconds() * 1e3,
+                                  (feederM + serviceM) / c * 1e3 + 0.05,
+                                  0.001,
+                                  "backhaul = feeder + 50 us + service");
+        NS_TEST_ASSERT_MSG_GT(rs.GetFeederElevationDeg(), 10.0, "gateway must see the satellite");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rs.ComputeFeederLinkDelay().GetSeconds(), feederM / c, 1e-9,
+                                  "feeder delay from the gateway geometry");
+        Simulator::Destroy();
+    }
+};
+
+/// C2: with the A3 algorithm off, PERIODICAL reports (TS 38.331 5.5.4.1,
+/// 480 ms) still reach the network, for the serving and the neighbour cell,
+/// with RSRQ from the measured RSSI (nr patch 08).
+class PeriodicMeasurementReportTest : public TestCase
+{
+  public:
+    PeriodicMeasurementReportTest()
+        : TestCase("C2: periodic 480 ms measurement reports without A3, per-UE store")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        NodeContainer sats;
+        sats.Create(2);
+        for (uint32_t i = 0; i < 2; ++i)
+        {
+            auto m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(Vector(i == 0 ? 0.0 : 900e3, 0.0, 600e3));
+            sats.Get(i)->AggregateObject(m);
+        }
+        NodeContainer ues;
+        ues.Create(1);
+        auto um = CreateObject<ConstantPositionMobilityModel>();
+        um->SetPosition(Vector(0.0, 0.0, 0.0));
+        ues.Get(0)->AggregateObject(um);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(10.0));
+        rs.SetOutputDir("test-ntn-periodic-meas");
+        rs.SetHandover(true, 3.0, MilliSeconds(256));
+        rs.SetAutonomousHandover(false);
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(9.5));
+        Simulator::Stop(Seconds(10.0));
+        Simulator::Run();
+        NS_TEST_ASSERT_MSG_EQ(rs.GetPeriodicMeasurementReports(), true,
+                              "A3 off must switch the periodical report on");
+        // About 10 s / 0.48 s = 20 reports once the UE is connected.
+        NS_TEST_ASSERT_MSG_GT(rs.GetUeMeasurementReportCount(0), 15u, "periodic reports");
+        const uint16_t serving = rs.GetUeServingCellId(0);
+        const uint16_t other = (serving == rs.GetGnbCellId(0)) ? rs.GetGnbCellId(1)
+                                                               : rs.GetGnbCellId(0);
+        const double rs0 = rs.GetUeServingRsrpDbm(0);
+        const double rn = rs.GetUeNeighbourRsrpDbm(0, other);
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(rs0), true, "serving RSRP reported");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(rn), true, "neighbour RSRP reported without A3");
+        NS_TEST_ASSERT_MSG_GT(rs0, rn, "the zenith cell (600 km) is stronger than the 1082 km one");
+        // RSRQ = N RSRP / RSSI <= 1/12 (one cell); two co-channel cells lower it.
+        const double rq = rs.GetUeServingRsrqDb(0);
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(rq), true, "serving RSRQ reported");
+        NS_TEST_ASSERT_MSG_LT(rq, -10.5, "RSRQ cannot exceed 10 log10(1/12)");
+        NS_TEST_ASSERT_MSG_LT(rs.GetUeMeasReportAge(0, other).GetSeconds(), 0.6,
+                              "the neighbour entry is refreshed every report");
+        Simulator::Destroy();
+    }
+};
+
+/// C6: TS 28.552 KPM from gNB-side counters: TB counts, RLC SDU delay in the
+/// RAN (0.1 ms units, excluding the backhaul) and PRB usage.
+class RanCounterKpmTest : public TestCase
+{
+  public:
+    RanCounterKpmTest()
+        : TestCase("C6: KPM from RAN counters (TB counts, RLC SDU delay, PRB usage)")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(5.0));
+        rs.SetOutputDir("test-ntn-ran-kpm");
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        rs.SetKpmFromRanCounters(true);
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(4.9));
+        rs.EnableAiFlowMonitor("test-ntn-ran-kpm/kpm");
+        Simulator::Stop(Seconds(5.0));
+        Simulator::Run();
+        rs.Collect();
+        const auto c = rs.GetUeRanCounters(0);
+        NS_TEST_ASSERT_MSG_GT(c.dlTb, 50u, "TB counter");
+        NS_TEST_ASSERT_MSG_GT(c.rlcSdus, 50u, "RLC SDU counter");
+        const double meanMs = c.rlcSduDelaySumMs / c.rlcSdus;
+        // Inside the RAN: below the folded backhaul + service, above zero.
+        NS_TEST_ASSERT_MSG_GT(meanMs, 0.1, "RLC SDU delay is a RAN delay, not zero");
+        NS_TEST_ASSERT_MSG_LT(meanMs, rs.GetMeanDelayMs(), "RLC SDU delay excludes the backhaul");
+        double tot = 0;
+        bool sawPrb = false;
+        for (const auto& [id, series] : rs.GetAiFlowMonitor()->GetKpmSeries())
+        {
+            for (const auto& sample : series)
+            {
+                auto it = sample.metrics.find("TB.TotNbrDl");
+                if (it != sample.metrics.end())
+                {
+                    tot += it->second;
+                }
+                auto p = sample.metrics.find("RRU.PrbUsedDl");
+                sawPrb = sawPrb || (p != sample.metrics.end() && p->second > 0.0);
+                NS_TEST_ASSERT_MSG_EQ(sample.metrics.count("app.OwdDl"), 1u,
+                                      "the application probe keeps its own name");
+            }
+        }
+        NS_TEST_ASSERT_MSG_GT(tot, 0.5 * static_cast<double>(c.dlTb),
+                              "KPM TB counts are the RAN counter deltas");
+        NS_TEST_ASSERT_MSG_EQ(sawPrb, true, "PRB usage reported");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(rs.GetIpdvMeanAbsMs()), true, "RFC 3393 IPDV");
+        Simulator::Destroy();
+    }
+};
+
+/// Wave 2 core: SetBroadcastKOffsetSlots takes the SIB19 cellSpecificKoffset
+/// in 15 kHz reference slots (TS 38.331; TS 38.213 4.2) and must convert it to
+/// cell-numerology slots (x 2^mu) whether it is called before or after Build().
+/// The after-Build (SIB19 refresh) path used to write the raw reference value
+/// into N2Delay, so at mu = 1 a refresh halved the UL DCI->PUSCH gap.
+class KOffsetBroadcastUnitsTest : public TestCase
+{
+  public:
+    KOffsetBroadcastUnitsTest()
+        : TestCase("K_offset: broadcast reference slots are x 2^mu before AND after Build")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        for (uint16_t mu : {0, 1, 2})
+        {
+            const uint32_t scale = 1u << mu;
+            // (a) broadcast before Build, refresh after Build.
+            {
+                LeoRig rig;
+                NtnRealStackHelper rs;
+                rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+                rs.SetNumerology(mu);
+                rs.SetKOffsetConsumption(true);
+                rs.SetSatEirpDensityDbwMhz(
+                    NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+                rs.SetBroadcastKOffsetSlots(5);
+                rs.Build(rig.sat, rig.ue);
+                NS_TEST_ASSERT_MSG_EQ(rs.ReferenceToCellSlots(5), 5u * scale, "x 2^mu");
+                NS_TEST_ASSERT_MSG_EQ(rs.GetConsumedKOffsetSlots(), 5u * scale,
+                                      "before Build: 5 reference slots = 5 x 2^mu cell slots");
+                const uint32_t base = rs.GetGnbN2Delay() - rs.GetConsumedKOffsetSlots();
+                NS_TEST_ASSERT_MSG_EQ(base, 2u, "the stack's base N2Delay");
+
+                rs.SetBroadcastKOffsetSlots(7); // SIB19 refresh mid-run
+                Simulator::Stop(MilliSeconds(100));
+                Simulator::Run();
+                NS_TEST_ASSERT_MSG_EQ(rs.GetBroadcastKOffsetSlots(), 7u,
+                                      "the broadcast value is stored in reference slots");
+                NS_TEST_ASSERT_MSG_EQ(rs.GetConsumedKOffsetSlots(), 7u * scale,
+                                      "after Build: the same conversion as before Build");
+                NS_TEST_ASSERT_MSG_EQ(rs.GetGnbN2Delay(), base + 7u * scale,
+                                      "the live gNB PHY N2Delay carries the converted value");
+                Simulator::Destroy();
+            }
+            // (b) no broadcast before Build (geometry-derived K_offset), first
+            // broadcast after Build: same units as (a).
+            {
+                LeoRig rig;
+                NtnRealStackHelper rs;
+                rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+                rs.SetNumerology(mu);
+                rs.SetKOffsetConsumption(true);
+                rs.SetSatEirpDensityDbwMhz(
+                    NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+                rs.Build(rig.sat, rig.ue);
+                NS_TEST_ASSERT_MSG_EQ(rs.GetConsumedKOffsetSlots(), rs.ComputeKOffsetSlots(),
+                                      "no broadcast: geometry-derived, already in cell slots");
+                const uint32_t base = rs.GetGnbN2Delay() - rs.GetConsumedKOffsetSlots();
+                const uint32_t ref = 9; // 9 ms, differs from the ~5 ms derivation
+                rs.SetBroadcastKOffsetSlots(ref);
+                Simulator::Stop(MilliSeconds(100));
+                Simulator::Run();
+                NS_TEST_ASSERT_MSG_EQ(rs.GetConsumedKOffsetSlots(), ref * scale,
+                                      "after-Build broadcast converted to cell slots");
+                NS_TEST_ASSERT_MSG_EQ(rs.GetGnbN2Delay(), base + ref * scale,
+                                      "N2Delay = base + reference x 2^mu");
+                Simulator::Destroy();
+            }
+        }
+    }
+};
+
+/// Wave 2 core (nr patch 10): per-UE measured stats follow the serving cell
+/// across a REAL X2 handover. The vendored nr labelled every UE DL TB with the
+/// attach-time gNB (NrSpectrumPhy used GetTargetGnb(), which no handover
+/// updates), so after the first handover the helper's (cellId, RNTI) keyed
+/// SINR/TBLER went NaN and the per-UE RAN TB counter froze. Two static
+/// satellites, A3 off, one commanded handover at 4 s; the UE must keep
+/// producing SINR samples and TBs, attributed to the TARGET cell.
+class HandoverStatsFollowServingCellTest : public TestCase
+{
+  public:
+    HandoverStatsFollowServingCellTest()
+        : TestCase("nr patch 10: per-UE SINR/TBLER/RAN counters follow the serving cell after a "
+                   "handover")
+    {
+    }
+
+  private:
+    struct Snap
+    {
+        uint64_t dlTb{0};
+        double recentSinrDb{0.0};
+        double windowSinrDb{0.0};
+        double recentTbler{0.0};
+        uint16_t cell{0};
+    };
+
+    static void Take(NtnRealStackHelper* rs, Snap* s)
+    {
+        s->dlTb = rs->GetUeRanCounters(0).dlTb;
+        s->recentSinrDb = rs->GetUeRecentSinrDb(0);
+        s->windowSinrDb = rs->TakeUeSinrWindowMeanDb(0);
+        s->recentTbler = rs->GetUeRecentTbler(0);
+        s->cell = rs->GetUeServingCellId(0);
+    }
+
+    void DoRun() override
+    {
+        NodeContainer sats;
+        sats.Create(2);
+        for (uint32_t i = 0; i < 2; ++i)
+        {
+            auto m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(Vector(i == 0 ? 0.0 : 300e3, 0.0, 600e3));
+            sats.Get(i)->AggregateObject(m);
+        }
+        NodeContainer ues;
+        ues.Create(1);
+        auto um = CreateObject<ConstantPositionMobilityModel>();
+        um->SetPosition(Vector(0.0, 0.0, 0.0));
+        ues.Get(0)->AggregateObject(um);
+
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(10.0));
+        rs.SetOutputDir("test-ntn-ho-serving-stats");
+        rs.SetHandover(true, 3.0, MilliSeconds(256));
+        rs.SetAutonomousHandover(false);
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(9.8));
+
+        Snap pre;
+        Snap mid;
+        Snap end;
+        uint16_t source = 0;
+        uint16_t target = 0;
+        Simulator::Schedule(Seconds(3.9), [&]() {
+            Take(&rs, &pre);
+            source = pre.cell;
+            target = (source == rs.GetGnbCellId(0)) ? rs.GetGnbCellId(1) : rs.GetGnbCellId(0);
+            rs.TriggerHandover(0, target);
+        });
+        Simulator::Schedule(Seconds(6.0), [&]() { Take(&rs, &mid); });
+        Simulator::Schedule(Seconds(9.5), [&]() { Take(&rs, &end); });
+        Simulator::Stop(Seconds(10.0));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_GT(pre.dlTb, 50u, "TBs flow before the handover");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(pre.recentSinrDb), true, "SINR before the handover");
+        NS_TEST_ASSERT_MSG_EQ(rs.GetHandoverCount(), 1u, "exactly one completed X2 handover");
+        NS_TEST_ASSERT_MSG_EQ(mid.cell, target, "the UE is served by the target after it");
+        NS_TEST_ASSERT_MSG_EQ(end.cell, target, "and stays there");
+        // The defect: these went NaN and the TB counter froze at pre-handover.
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(mid.recentSinrDb), true,
+                              "recent SINR found under (target cell, new RNTI)");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(end.recentSinrDb), true, "and keeps updating");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(end.recentTbler), true, "recent TBLER after HO");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(end.windowSinrDb), true, "window SINR after HO");
+        NS_TEST_ASSERT_MSG_GT(mid.dlTb, pre.dlTb + 50, "RAN TB counter keeps counting");
+        NS_TEST_ASSERT_MSG_GT(end.dlTb, mid.dlTb + 100, "in the whole post-handover period");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(rs.GetCellMeanSinrDb(target)), true,
+                              "post-handover TBs are attributed to the target cell");
+        // The target sits 300 km off-zenith (671 km slant vs 600 km): weaker.
+        NS_TEST_ASSERT_MSG_LT(end.recentSinrDb, pre.recentSinrDb + 3.0,
+                              "the post-handover SINR is the target cell's, not a stale copy");
+        Simulator::Destroy();
+    }
+};
+
+/// A fixed-gain per-RB plugin for the seam test (stands in for a THz / Sionna
+/// / RIS / blockage transfer function).
+class FixedGainSpectrumPlugin : public SpectrumPropagationLossModel
+{
+  public:
+    static TypeId GetTypeId()
+    {
+        static TypeId tid = TypeId("ns3::RealStackTestFixedGainSpectrumPlugin")
+                                .SetParent<SpectrumPropagationLossModel>()
+                                .SetGroupName("Test");
+        return tid;
+    }
+
+    explicit FixedGainSpectrumPlugin(double gainDb = 0.0)
+        : m_lin(std::pow(10.0, gainDb / 10.0))
+    {
+    }
+
+  private:
+    Ptr<SpectrumValue> DoCalcRxPowerSpectralDensity(Ptr<const SpectrumSignalParameters> params,
+                                                    Ptr<const MobilityModel>,
+                                                    Ptr<const MobilityModel>) const override
+    {
+        Ptr<SpectrumValue> out = params->psd->Copy();
+        *out *= m_lin;
+        return out;
+    }
+
+    int64_t DoAssignStreams(int64_t) override { return 0; }
+
+    double m_lin;
+};
+
+/// Wave 2 core (M3 finding 0.1): AddSpectrumChannelLoss must change the
+/// MEASURED SINR. SpectrumChannel::AddPhasedArraySpectrumPropagationLossModel
+/// chained the 3GPP model as the seam's m_next and the phased-array base class
+/// replaced the seam's output with m_next's, so every plugin was computed and
+/// discarded. A -10 dB per-RB plugin on a noise-limited single-UE zenith link
+/// must lower the measured mean DL SINR by about 10 dB.
+class SeamPluginChangesMeasuredSinrTest : public TestCase
+{
+  public:
+    SeamPluginChangesMeasuredSinrTest()
+        : TestCase("Wave 2 core: an AddSpectrumChannelLoss plugin changes the measured SINR")
+    {
+    }
+
+  private:
+    static double Run(bool plugin)
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(2.0));
+        rs.SetOutputDir("test-ntn-seam-plugin");
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        rs.SetTr38811ExcessLoss(false);
+        rs.SetSmallScaleFading(false);
+        rs.Build(sats, ues);
+        if (plugin)
+        {
+            rs.AddSpectrumChannelLoss(Create<FixedGainSpectrumPlugin>(-10.0));
+        }
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(0.5),
+                          Seconds(1.9));
+        Simulator::Stop(Seconds(2.0));
+        Simulator::Run();
+        rs.Collect();
+        const double sinr = rs.GetMeanDlSinrDb();
+        Simulator::Destroy();
+        return sinr;
+    }
+
+    void DoRun() override
+    {
+        const double base = Run(false);
+        const double withPlugin = Run(true);
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(base) && std::isfinite(withPlugin), true,
+                              "both runs measured TBs");
+        NS_TEST_ASSERT_MSG_EQ_TOL(base - withPlugin,
+                                  10.0,
+                                  1.5,
+                                  "a -10 dB per-RB plugin lowers the measured SINR by ~10 dB "
+                                  "(it changed nothing before the seam was unchained)");
+    }
+};
+
+/// Wave 2 core (M3 finding 0.3): the EmbbStreaming rate is no longer
+/// hard-coded. Default 5 Mb/s; Config::SetDefault and SetEmbbRate both reach
+/// the installed application.
+class EmbbRateHonoredTest : public TestCase
+{
+  public:
+    EmbbRateHonoredTest()
+        : TestCase("Wave 2 core: EmbbStreaming rate follows SetEmbbRate / Config default")
+    {
+    }
+
+  private:
+    static uint64_t RateOfInstalledClient(int mode)
+    {
+        LeoRig rig;
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        rs.Build(rig.sat, rig.ue);
+        if (mode == 2)
+        {
+            rs.SetEmbbRate(DataRate("12Mb/s"));
+        }
+        ApplicationContainer apps = rs.InstallOranFlow(0,
+                                                       9,
+                                                       1,
+                                                       0,
+                                                       NtnOranApplication::EMBB_VIDEO,
+                                                       Seconds(0.5),
+                                                       Seconds(1.0));
+        DataRateValue v;
+        apps.Get(0)->GetAttribute("DataRate", v);
+        Simulator::Destroy();
+        return v.Get().GetBitRate();
+    }
+
+    void DoRun() override
+    {
+        NS_TEST_ASSERT_MSG_EQ(RateOfInstalledClient(0), 5000000u, "default unchanged: 5 Mb/s");
+        Config::SetDefault("ns3::NtnOranApplication::DataRate", DataRateValue(DataRate("7Mb/s")));
+        NS_TEST_ASSERT_MSG_EQ(RateOfInstalledClient(1), 7000000u,
+                              "Config::SetDefault reaches the installed client");
+        NS_TEST_ASSERT_MSG_EQ(RateOfInstalledClient(2), 12000000u, "SetEmbbRate wins");
+        Config::SetDefault("ns3::NtnOranApplication::DataRate", DataRateValue(DataRate("5Mb/s")));
+    }
+};
+
+/// Wave 2 core (M3 finding 0.2): opt-in ITU-R P.618-13 2.4.1 scintillation,
+/// gas switch and the space-to-space bypass of Ntn38811ExcessLossModel.
+class ExcessLossP618AndIslTest : public TestCase
+{
+  public:
+    ExcessLossP618AndIslTest()
+        : TestCase("Wave 2 core: excess model P.618-13 scintillation, gas switch, ISL bypass")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // Hand-computed P.618-13 2.4.1 at 20 GHz, 30 deg, N_wet 42.5, point
+        // receiver: sigma_ref = 7.85e-3 dB, g(0) = sqrt(3.86 sin(165 deg)) =
+        // 0.99954, sigma = 7.85e-3 x 20^(7/12) x 0.99954 / 0.5^1.2 = 0.10355 dB.
+        const double sigma =
+            Ntn38811ExcessLossModel::P618ScintillationSigmaDb(20e9, 30.0, 42.5, 0.0, 0.5);
+        NS_TEST_ASSERT_MSG_EQ_TOL(sigma, 0.10355, 2e-4, "P.618-13 2.4.1 sigma, hand value");
+        // Aperture averaging lowers it; lower elevation raises it.
+        NS_TEST_ASSERT_MSG_LT(
+            Ntn38811ExcessLossModel::P618ScintillationSigmaDb(20e9, 30.0, 42.5, 1.2, 0.5),
+            sigma,
+            "a 1.2 m dish averages scintillation down");
+        NS_TEST_ASSERT_MSG_GT(
+            Ntn38811ExcessLossModel::P618ScintillationSigmaDb(20e9, 10.0, 42.5, 0.0, 0.5),
+            sigma,
+            "lower elevation, longer turbulent path");
+        // Legacy at 100 GHz zenith was 3.5 dB rms; P.618 with a 0.6 m dish is
+        // a fraction of a dB.
+        NS_TEST_ASSERT_MSG_LT(
+            Ntn38811ExcessLossModel::P618ScintillationSigmaDb(100e9, 90.0, 42.5, 0.6, 0.5),
+            0.5,
+            "P.618 at 100 GHz zenith is well below the legacy 3.5 dB");
+
+        // The P.618 process is time-correlated and has the right spread.
+        {
+            auto m = CreateObject<Ntn38811ExcessLossModel>();
+            m->SetAttribute("CarrierFrequencyHz", DoubleValue(20e9));
+            m->SetAttribute("EnableShadowFading", BooleanValue(false));
+            m->SetAttribute("EnableGasAbsorption", BooleanValue(false));
+            m->SetAttribute("P618Scintillation", BooleanValue(true));
+            m->SetAttribute("ScintillationCoherenceS", DoubleValue(1.0));
+            m->AssignStreams(11);
+            auto gs = CreateObject<ConstantPositionMobilityModel>();
+            gs->SetPosition(Vector(0, 0, 0));
+            auto sat = CreateObject<ConstantPositionMobilityModel>();
+            const double e = 30.0 * M_PI / 180.0;
+            sat->SetPosition(Vector(600e3 * std::cos(e), 0, 600e3 * std::sin(e)));
+            std::vector<double> x;
+            for (int i = 0; i < 4000; ++i)
+            {
+                Simulator::Schedule(MilliSeconds(100 * i), [&]() {
+                    x.push_back(-m->CalcRxPower(0.0, gs, sat));
+                });
+            }
+            Simulator::Run();
+            Simulator::Destroy();
+            double mean = 0.0;
+            for (double v : x)
+            {
+                mean += v;
+            }
+            mean /= x.size();
+            double var = 0.0;
+            double lag1 = 0.0;
+            for (size_t i = 0; i < x.size(); ++i)
+            {
+                var += (x[i] - mean) * (x[i] - mean);
+                if (i > 0)
+                {
+                    lag1 += (x[i] - mean) * (x[i - 1] - mean);
+                }
+            }
+            const double sd = std::sqrt(var / x.size());
+            const double rho = lag1 / var;
+            NS_TEST_ASSERT_MSG_EQ_TOL(sd, sigma, 0.2 * sigma, "marginal sd = P.618 sigma");
+            NS_TEST_ASSERT_MSG_EQ_TOL(rho, std::exp(-0.1), 0.06,
+                                      "AR(1): lag-0.1 s correlation = exp(-0.1 / 1 s)");
+        }
+        // Gas switch and ISL bypass.
+        {
+            auto gs = CreateObject<ConstantPositionMobilityModel>();
+            gs->SetPosition(Vector(0, 0, 0));
+            auto sat = CreateObject<ConstantPositionMobilityModel>();
+            sat->SetPosition(Vector(0, 0, 600e3));
+            auto quiet = [](Ptr<Ntn38811ExcessLossModel> m) {
+                m->SetAttribute("EnableShadowFading", BooleanValue(false));
+                m->SetAttribute("EnableScintillation", BooleanValue(false));
+            };
+            auto withGas = CreateObject<Ntn38811ExcessLossModel>();
+            quiet(withGas);
+            auto noGas = CreateObject<Ntn38811ExcessLossModel>();
+            quiet(noGas);
+            noGas->SetAttribute("EnableGasAbsorption", BooleanValue(false));
+            NS_TEST_ASSERT_MSG_EQ_TOL(withGas->CalcRxPower(0.0, gs, sat), -0.04, 1e-12,
+                                      "S-band zenith gas term 0.04 dB");
+            NS_TEST_ASSERT_MSG_EQ_TOL(noGas->CalcRxPower(0.0, gs, sat), 0.0, 1e-12,
+                                      "gas off: nothing left on a quiet zenith link");
+
+            auto s1 = CreateObject<ConstantPositionMobilityModel>();
+            s1->SetPosition(Vector(0, 0, 6371e3 + 600e3));
+            auto s2 = CreateObject<ConstantPositionMobilityModel>();
+            s2->SetPosition(Vector(600e3, 0, 6371e3 + 600e3));
+            NS_TEST_ASSERT_MSG_EQ(Ntn38811ExcessLossModel::IsSpaceToSpace(s1->GetPosition(),
+                                                                           s2->GetPosition()),
+                                  true,
+                                  "two 600 km satellites");
+            auto isl = CreateObject<Ntn38811ExcessLossModel>();
+            isl->SetAttribute("SkipSpaceToSpace", BooleanValue(true));
+            NS_TEST_ASSERT_MSG_EQ(isl->CalcRxPower(10.0, s1, s2), 10.0,
+                                  "an ISL crosses no troposphere: no excess loss");
+            auto legacy = CreateObject<Ntn38811ExcessLossModel>();
+            NS_TEST_ASSERT_MSG_NE(legacy->CalcRxPower(10.0, s1, s2), 10.0,
+                                  "default (legacy) still applies the Earth-space terms "
+                                  "(gas, shadowing and a signed scintillation draw)");
+            Simulator::Destroy();
+        }
+    }
+};
+
+/// Wave 2 core (M2 request): T300 is clamped at the TS 38.331 maximum. A GEO
+/// at 10 deg elevation (slant ~40,600 km, RTT ~271 ms) made the helper request
+/// T300 = 8 x RTT = 2166 ms and NrUeRrc's attribute checker aborted Build().
+class T300ClampedAtGeoTest : public TestCase
+{
+  public:
+    T300ClampedAtGeoTest()
+        : TestCase("Wave 2 core: T300 clamped at 2000 ms (TS 38.331) for a GEO at 10 deg")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        constexpr double Re = 6371e3;
+        constexpr double h = 35786e3;
+        const double e = 10.0 * M_PI / 180.0;
+        const double slant =
+            std::sqrt(std::pow(Re + h, 2) - std::pow(Re * std::cos(e), 2)) - Re * std::sin(e);
+        NodeContainer sat;
+        sat.Create(1);
+        auto sm = CreateObject<ConstantPositionMobilityModel>();
+        sm->SetPosition(Vector(slant * std::cos(e), 0.0, Re + slant * std::sin(e)));
+        sat.Get(0)->AggregateObject(sm);
+        NodeContainer ue;
+        ue.Create(1);
+        auto um = CreateObject<ConstantPositionMobilityModel>();
+        um->SetPosition(Vector(0.0, 0.0, Re));
+        ue.Get(0)->AggregateObject(um);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        rs.Build(sat, ue); // aborted before the clamp
+        TypeId tid = TypeId::LookupByName("ns3::NrUeRrc");
+        TypeId::AttributeInformation info;
+        NS_TEST_ASSERT_MSG_EQ(tid.LookupAttributeByName("T300", &info), true, "T300 exists");
+        TimeValue tv;
+        tv.DeserializeFromString(info.initialValue->SerializeToString(info.checker),
+                                 info.checker);
+        NS_TEST_ASSERT_MSG_EQ(tv.Get(), MilliSeconds(2000),
+                              "8 x RTT (~2166 ms) clamped to the TS 38.331 maximum ms2000");
+        Simulator::Destroy();
+        // Every later Build() rewrites the four RLC/RRC timer defaults from its
+        // own geometry, so nothing GEO-sized leaks into the next case.
+    }
+};
+
 class NtnRealStackHelperTestSuite : public TestSuite
 {
   public:
@@ -3500,12 +4274,23 @@ class NtnRealStackHelperTestSuite : public TestSuite
         : TestSuite("ntn-real-stack-helper", Type::UNIT)
     {
         AddTestCase(new RealStackEirpBudgetGateTest, Duration::QUICK);
+        AddTestCase(new EarthBlockageGeometryTest, Duration::QUICK);
+        AddTestCase(new Set1ZenithClosedFormTest, Duration::QUICK);
+        AddTestCase(new FeederGatewayDelayTest, Duration::QUICK);
+        AddTestCase(new PeriodicMeasurementReportTest, Duration::QUICK);
+        AddTestCase(new RanCounterKpmTest, Duration::QUICK);
         AddTestCase(new RealStackX2DelayAppliedTest, Duration::QUICK);
         AddTestCase(new NtnRachWindowAppliedTest, Duration::QUICK);
         AddTestCase(new NtnRachWindowOffTest, Duration::QUICK);
         AddTestCase(new NtnFr1BandConformanceTest, Duration::QUICK);
         AddTestCase(new HandoverRefusalIsCountedTest, Duration::QUICK);
         AddTestCase(new KOffsetNotConsumedWhenOffTest, Duration::QUICK);
+        AddTestCase(new KOffsetBroadcastUnitsTest, Duration::QUICK);
+        AddTestCase(new HandoverStatsFollowServingCellTest, Duration::QUICK);
+        AddTestCase(new SeamPluginChangesMeasuredSinrTest, Duration::QUICK);
+        AddTestCase(new EmbbRateHonoredTest, Duration::QUICK);
+        AddTestCase(new ExcessLossP618AndIslTest, Duration::QUICK);
+        AddTestCase(new T300ClampedAtGeoTest, Duration::QUICK);
         AddTestCase(new OwdFloorGateTest, Duration::QUICK);
         AddTestCase(new EirpGateEvaluatedTest, Duration::QUICK);
         AddTestCase(new NtnTdlFrequencySelectivityTest, Duration::QUICK);

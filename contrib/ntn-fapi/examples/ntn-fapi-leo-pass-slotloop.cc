@@ -357,7 +357,8 @@ main(int argc, char* argv[])
     const double goodputMbps = (realRxBytes * 8.0) / (simSeconds * 1e6);
     std::printf("# === ntn-fapi-leo-pass-slotloop summary ===\n"
                 "#   measured SINR=%.2f dB  measured TBLER=%.4f  measured throughput=%.3f Mbps\n"
-                "#   FAPI slots: sent=%lu crcOk=%lu retx=%lu  delivered=%lu KB  goodput=%.3f Mbps\n",
+                "#   FAPI slots (UE 0 RNTI): sent=%lu crcOk=%lu retx=%lu  UE 0 app delivered=%lu KB  "
+                "goodput=%.3f Mbps\n",
                 rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps(),
                 (unsigned long)g_tbSent, (unsigned long)g_tbOk, (unsigned long)g_tbRetx,
                 (unsigned long)(realRxBytes / 1000), goodputMbps);

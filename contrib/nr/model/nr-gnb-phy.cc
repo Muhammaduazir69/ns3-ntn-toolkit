@@ -34,6 +34,25 @@
 #include <unordered_set>
 #include <vector>
 
+
+namespace
+{
+/**
+ * ntn-patch 11: order the control messages of a slot by message type, never by
+ * address. std::list<Ptr<T>>::sort() and merge() without a comparator use
+ * ns3::operator<(Ptr, Ptr), which compares raw heap pointers, so the order in
+ * which a UE received e.g. SIB1 and an UL DCI in the same slot depended on the
+ * allocator: outputs changed with ASLR, the length of the output path or any
+ * unrelated code change. list::sort and list::merge are stable, so messages of
+ * the same type keep their insertion order.
+ */
+bool
+CtrlMsgTypeLess(const ns3::Ptr<ns3::NrControlMessage>& a, const ns3::Ptr<ns3::NrControlMessage>& b)
+{
+    return a->GetMessageType() < b->GetMessageType();
+}
+} // namespace
+
 namespace ns3
 {
 
@@ -913,8 +932,8 @@ NrGnbPhy::RetrievePrepareEncodeCtrlMsgs()
 {
     NS_LOG_FUNCTION(this);
     auto ctrlMsgs = PopCurrentSlotCtrlMsgs();
-    ctrlMsgs.sort();
-    ctrlMsgs.merge(RetrieveMsgsFromDCIs(m_currentSlot));
+    ctrlMsgs.sort(CtrlMsgTypeLess);
+    ctrlMsgs.merge(RetrieveMsgsFromDCIs(m_currentSlot), CtrlMsgTypeLess);
 
     if (m_netDevice != nullptr)
     {
@@ -1195,7 +1214,7 @@ NrGnbPhy::RetrieveDciFromAllocation(const SlotAllocInfo& alloc,
             ctrlMsgs.push_back(msg);
         }
     }
-    ctrlMsgs.sort();
+    ctrlMsgs.sort(CtrlMsgTypeLess);
     return ctrlMsgs;
 }
 
@@ -1221,7 +1240,8 @@ NrGnbPhy::RetrieveMsgsFromDCIs(const SfnSf& currentSlot)
             ctrlMsgs.merge(RetrieveDciFromAllocation(m_currSlotAllocInfo,
                                                      DciInfoElementTdma::DL,
                                                      k0delay,
-                                                     k1delay));
+                                                     k1delay),
+                           CtrlMsgTypeLess);
         }
         else if (SlotAllocInfoExists(targetSlot))
         {
@@ -1230,7 +1250,8 @@ NrGnbPhy::RetrieveMsgsFromDCIs(const SfnSf& currentSlot)
             ctrlMsgs.merge(RetrieveDciFromAllocation(PeekSlotAllocInfo(targetSlot),
                                                      DciInfoElementTdma::DL,
                                                      k0delay,
-                                                     k1delay));
+                                                     k1delay),
+                           CtrlMsgTypeLess);
         }
         else
         {
@@ -1251,7 +1272,8 @@ NrGnbPhy::RetrieveMsgsFromDCIs(const SfnSf& currentSlot)
             ctrlMsgs.merge(RetrieveDciFromAllocation(m_currSlotAllocInfo,
                                                      DciInfoElementTdma::UL,
                                                      k2delay,
-                                                     k1delay));
+                                                     k1delay),
+                           CtrlMsgTypeLess);
         }
         else if (SlotAllocInfoExists(targetSlot))
         {
@@ -1260,14 +1282,15 @@ NrGnbPhy::RetrieveMsgsFromDCIs(const SfnSf& currentSlot)
             ctrlMsgs.merge(RetrieveDciFromAllocation(PeekSlotAllocInfo(targetSlot),
                                                      DciInfoElementTdma::UL,
                                                      k2delay,
-                                                     k1delay));
+                                                     k1delay),
+                           CtrlMsgTypeLess);
         }
         else
         {
             NS_LOG_DEBUG("No allocation found for slot " << targetSlot);
         }
     }
-    ctrlMsgs.sort();
+    ctrlMsgs.sort(CtrlMsgTypeLess);
     return ctrlMsgs;
 }
 
@@ -1476,7 +1499,11 @@ void
 NrGnbPhy::StartVarTti(const std::shared_ptr<DciInfoElementTdma>& dci)
 {
     NS_LOG_FUNCTION(this);
-    ChangeToQuasiOmniBeamformingVector(); // assume the control signal is omni
+    // ntn-patch 09: control (incl. the PSS/SSB that UEs measure SS-RSRP on,
+    // TS 38.215 5.1.1) goes on the cell beam when one is configured as the
+    // predefined beam; BeamManager falls back to quasi-omni otherwise, so an
+    // unconfigured gNB behaves exactly as before.
+    ChangeBeamformingVector(nullptr);
     m_currSymStart = dci->m_symStart;
 
     Time varTtiPeriod;

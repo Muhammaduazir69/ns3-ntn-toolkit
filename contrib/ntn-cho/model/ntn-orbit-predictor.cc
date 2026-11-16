@@ -701,9 +701,19 @@ NtnOrbitPredictor::GetVisibleSatellites(GeoCoordinate uePosition,
         }
 
         // Find best beam for this satellite
-        uint32_t bestBeamId = m_agpContainer->GetBestBeamId(satId, uePosition, true);
-        double bestGain = m_agpContainer->GetBeamGain(satId, bestBeamId, uePosition);
-        double bestGain_dB = (bestGain > 0) ? 10.0 * std::log10(bestGain) : -100.0;
+        uint32_t bestBeamId = 0;
+        double bestGain_dB = -100.0;
+        if (m_agpContainer)
+        {
+            bestBeamId = m_agpContainer->GetBestBeamId(satId, uePosition, true);
+            const double bestGain = m_agpContainer->GetBeamGain(satId, bestBeamId, uePosition);
+            bestGain_dB = (bestGain > 0) ? 10.0 * std::log10(bestGain) : -100.0;
+        }
+        else if (m_geometricBeam)
+        {
+            // P1-H: analytic steered beam, no SNS3 pattern container needed.
+            bestGain_dB = ComputeBeamGain(satId, 0, uePosition);
+        }
 
         if (bestGain_dB >= m_minGainThreshold_dB)
         {
@@ -712,9 +722,11 @@ NtnOrbitPredictor::GetVisibleSatellites(GeoCoordinate uePosition,
             vs.bestBeamId = bestBeamId;
             vs.bestGain_dB = bestGain_dB;
             vs.elevationAngle_deg = elev;
+            Ptr<SatMobilityModel> sm = GetSatelliteMobility(satId);
             vs.slantRange_km =
-                Compute3dDistance(uePosition, GetSatelliteMobility(satId)->GetGeoPosition()) /
-                1000.0;
+                sm ? Compute3dDistance(uePosition, sm->GetGeoPosition()) / 1000.0
+                   : ComputePropagationDelay(uePosition, satId).GetSeconds() * 299792458.0 /
+                         1000.0; // P1-H: kinematics-only satellites
             visible.push_back(vs);
         }
     }

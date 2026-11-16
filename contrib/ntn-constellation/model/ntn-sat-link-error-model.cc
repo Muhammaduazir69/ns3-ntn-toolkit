@@ -5,6 +5,7 @@
 #include "ntn-sat-link-error-model.h"
 
 #include "ns3/double.h"
+#include "ns3/geographic-positions.h"
 #include "ns3/thz-ntn-scintillation.h"
 #include "ns3/thz-ntn-itu-recommendations.h"
 #include "ns3/boolean.h"
@@ -81,9 +82,30 @@ NtnSatLinkErrorModel::GetTypeId()
                           DoubleValue(0.0),
                           MakeDoubleAccessor(&NtnSatLinkErrorModel::m_rainRateMmH),
                           MakeDoubleChecker<double>(0.0, 500.0))
-            .AddAttribute("GroundAltKm", "Ground-station altitude (km MSL).", DoubleValue(0.05),
+            .AddAttribute("GroundAltKm",
+                          "Altitude (km MSL) of the lower endpoint (ground station, aircraft, "
+                          "HAPS). Wave 2 core: the cap was 12 km, so a HAPS at 20 km was "
+                          "evaluated at 12 km; P.676 integrates from this height to 100 km, so "
+                          "any value below 100 km is valid.",
+                          DoubleValue(0.05),
                           MakeDoubleAccessor(&NtnSatLinkErrorModel::m_groundAltKm),
-                          MakeDoubleChecker<double>(0.0, 12.0))
+                          MakeDoubleChecker<double>(0.0, 99.0))
+            .AddAttribute("GroundAltFromGeometry",
+                          "Take the lower endpoint's altitude from its own position (WGS-84 "
+                          "geodetic height in ECEF, z in a local ENU frame) instead of "
+                          "GroundAltKm, so one model serves a UE, an aircraft and a HAPS. "
+                          "Default false (GroundAltKm).",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&NtnSatLinkErrorModel::m_groundAltFromGeometry),
+                          MakeBooleanChecker())
+            .AddAttribute("ExcessLossElevationStepDeg",
+                          "Elevation bin (deg) of the excess-loss cache. 0 (default) caches "
+                          "exact inputs only, which is bit-identical to evaluating P.676/P.618 "
+                          "every packet. A positive step (e.g. 0.01) evaluates once per bin "
+                          "(at the bin centre) per ground altitude, carrier and rain rate.",
+                          DoubleValue(0.0),
+                          MakeDoubleAccessor(&NtnSatLinkErrorModel::m_excessElevStepDeg),
+                          MakeDoubleChecker<double>(0.0, 5.0))
             .AddAttribute("StationLatitudeDeg",
                           "Ground-station latitude (deg), used by the P.618 adjustment factors.",
                           DoubleValue(45.0),
@@ -144,15 +166,20 @@ NtnSatLinkErrorModel::ElevationDegFor(const Vector& lower, const Vector& upper) 
     // its own position vector. The elevation of the upper endpoint is then
     // 90 degrees minus the angle between that zenith and the line of sight.
     const double lr = lower.GetLength();
-    if (lr < 1.0)
-    {
-        return 90.0; // degenerate; treat as no atmospheric path
-    }
     const Vector los(upper.x - lower.x, upper.y - lower.y, upper.z - lower.z);
     const double lsLen = los.GetLength();
     if (lsLen < 1.0)
     {
         return 90.0;
+    }
+    // Wave 2 core: a local ENU (flat) frame has no Earth centre at the origin,
+    // so the position vector is not the zenith there. Same frame test as
+    // Ntn38811ExcessLossModel::ElevationDeg: below half an Earth radius the
+    // frame is ENU and up is +z. ECEF positions are unchanged.
+    if (lr < 0.5 * 6371000.0)
+    {
+        const double s = std::max(-1.0, std::min(1.0, los.z / lsLen));
+        return std::asin(s) * 180.0 / M_PI;
     }
     const double cosZenith =
         (lower.x * los.x + lower.y * los.y + lower.z * los.z) / (lr * lsLen);
@@ -177,7 +204,43 @@ NtnSatLinkErrorModel::ExcessLossDbFor(double elevationDeg) const
     // The ITU slant-path models are not defined below a few degrees, and the
     // toolkit's own scenarios floor service links at 5 to 10 degrees. Clamp
     // rather than extrapolate into a regime the recommendations exclude.
-    const double elev = std::max(elevationDeg, 3.0);
+    double elev = std::max(elevationDeg, 3.0);
+    const double altKm = EffectiveGroundAltKm();
+
+    // Wave 2 core: P.676 line-by-line is about 1.6 ms per call and used to run
+    // for every packet (sagin-sgp4-routed-traffic 2.3 s -> 259 s wall). Cache
+    // the three terms on their inputs; exact inputs by default (bit-identical),
+    // or per ExcessLossElevationStepDeg bin.
+    if (m_excessElevStepDeg > 0.0)
+    {
+        elev = (std::floor(elev / m_excessElevStepDeg) + 0.5) * m_excessElevStepDeg;
+    }
+    // The Enable* switches are part of the key, so toggling one mid-run never
+    // serves a term computed under the other setting.
+    const int flags = (m_enableGaseous ? 1 : 0) + (m_enableRain ? 2 : 0) +
+                      (m_enableScintillation ? 4 : 0);
+    const auto key = std::make_tuple(elev,
+                                     altKm,
+                                     m_carrierHz,
+                                     m_rainRateMmH,
+                                     flags,
+                                     m_antennaDiameterM,
+                                     m_stationLatDeg);
+    {
+        auto it = m_excessCache.find(key);
+        if (it != m_excessCache.end())
+        {
+            m_lastGaseousDb = it->second.gas;
+            m_lastRainDb = it->second.rain;
+            m_lastScintDb = it->second.scint;
+            return m_lastGaseousDb + m_lastRainDb + m_lastScintDb;
+        }
+    }
+    if (m_excessElevStepDeg <= 0.0 && m_excessCache.size() > 4096)
+    {
+        m_excessCache.clear(); // exact-input cache: bound the memory on long runs
+    }
+    ++m_excessEvaluations;
 
     if (m_enableGaseous)
     {
@@ -186,7 +249,7 @@ NtnSatLinkErrorModel::ExcessLossDbFor(double elevationDeg) const
             m_gas = CreateObject<itu::Itu676AbsorptionModel>();
         }
         m_lastGaseousDb = DynamicCast<itu::Itu676AbsorptionModel>(m_gas)
-                              ->SlantPathAttenuationDb(m_carrierHz, elev, m_groundAltKm);
+                              ->SlantPathAttenuationDb(m_carrierHz, elev, altKm);
     }
     if (m_enableRain && m_rainRateMmH > 0.0)
     {
@@ -197,7 +260,7 @@ NtnSatLinkErrorModel::ExcessLossDbFor(double elevationDeg) const
             m_rain = r;
         }
         m_lastRainDb = DynamicCast<itu::Itu618LossModel>(m_rain)->SlantPathRainAttenuationDb(
-            m_carrierHz, elev, m_rainRateMmH, m_groundAltKm, itu::Polarization::circular);
+            m_carrierHz, elev, m_rainRateMmH, altKm, itu::Polarization::circular);
     }
     if (m_enableScintillation)
     {
@@ -216,7 +279,33 @@ NtnSatLinkErrorModel::ExcessLossDbFor(double elevationDeg) const
         m_lastScintDb = DynamicCast<ThzNtnScintillation>(m_scint)
                             ->ComputeScintillationFadeDepth_dB(m_carrierHz, elev, 0.01);
     }
+    m_excessCache[key] = ExcessTerms{m_lastGaseousDb, m_lastRainDb, m_lastScintDb};
     return m_lastGaseousDb + m_lastRainDb + m_lastScintDb;
+}
+
+double
+NtnSatLinkErrorModel::EffectiveGroundAltKm() const
+{
+    if (!m_groundAltFromGeometry || !m_tx || !m_rx)
+    {
+        return m_groundAltKm;
+    }
+    const Vector a = m_tx->GetPosition();
+    const Vector b = m_rx->GetPosition();
+    const Vector lower = (a.GetLength() <= b.GetLength()) ? a : b;
+    double hM = 0.0;
+    if (lower.GetLength() < 0.5 * 6371000.0)
+    {
+        hM = lower.z; // local ENU frame
+    }
+    else
+    {
+        hM = GeographicPositions::CartesianToGeographicCoordinates(
+                 lower,
+                 GeographicPositions::EarthSpheroidType::WGS84)
+                 .z;
+    }
+    return std::max(0.0, std::min(99.0, hM / 1000.0));
 }
 
 double

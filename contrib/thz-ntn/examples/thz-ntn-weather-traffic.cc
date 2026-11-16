@@ -2,34 +2,53 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// thz-ntn-weather-traffic — a weather front (fog → rain → wet snow → clear)
+// thz-ntn-weather-traffic: a weather front (fog -> rain -> wet snow -> clear)
 // passes over the ground station during a sub-THz LEO pass, while REAL traffic
 // flows on a REAL mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy + MAC +
 // HARQ + RLC/PDCP + RRC + EPC).
 //
 // Audit fix (2026-06 protocol-fidelity audit, channel-plugin recipe):
 // the old version folded fog/rain/snow attenuation into a closed-form SNR and
-// drove a P2P RateErrorModel through a sigmoid SnrToPer() — no packet ever saw
+// drove a P2P RateErrorModel through a sigmoid SnrToPer(): no packet ever saw
 // the weather. Here the SAME module physics (ThzNtnWeatherAttenuation +
 // ThzNtnMolecularAbsorption, re-homed as ThzNtnPropagationLossModel) is chained
 // onto the real spectrum channel via AddExtraPropagationLoss(), so each weather
 // phase attenuates the transmitted packets and the dip shows up in the
-// MEASURED SINR / TBLER / goodput — sub-THz is visibly far more sensitive to
+// MEASURED SINR / TBLER / goodput: sub-THz is visibly far more sensitive to
 // rain and wet snow than to fog. Nothing closed-form in the packet path.
 //
 // Mobility is real: the satellite is an SGP4 Walker element projected into the
 // scenario's local ENU frame (genuine pass dynamics); the ground station is a
 // fixed gateway site, as real THz ground stations are.
 //
-// Quick test:  --simSeconds=40 --rainMmH=25
+// Wave 2 M3 (16 Nov 2026): weather caused by geometry and time (default).
+//  - A convective EXCELL rain cell (ThzNtnRainCellField: R = R_peak exp(-r/r0))
+//    is advected over the station by the wind; the attenuation of every RB is
+//    the ITU-R P.838-3 specific attenuation k(f) R^alpha(f) integrated along
+//    the LIVE slant path to the satellite below the P.839 rain height
+//    (ThzNtnSpectrumAtmosphereModel via AddSpectrumChannelLoss), plus P.676
+//    line-by-line gas per RB, an optional P.840 cloud layer, and P.618 2.4.1
+//    scintillation of the declared dish. Nothing is switched on a timer: the
+//    fade grows as the cell arrives and the path tilts with the pass.
+//  - Declared payload (Pt, reflector diameters, aperture law) as in
+//    thz-ntn-leo-ground-downlink-traffic; the legacy TR 38.811 excess model is
+//    not chained (it double counts gas and over-draws scintillation).
+//  - --offeredMbps above capacity makes goodput follow the measured MCS.
+// --scripted=1 restores the pre-Wave-2 timed front (fog -> rain -> wet snow,
+// scalar ThzNtnPropagationLossModel, 115 dBm conducted, mu 1).
+//
+// Quick test:  --simSeconds=40
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/ntn-oran-application.h"
 #include "ns3/sgp4-mobility-model.h"
+#include "ns3/thz-ntn-aperture.h"
 #include "ns3/thz-ntn-pointing-loss-model.h"
 #include "ns3/thz-ntn-propagation-loss-model.h"
+#include "ns3/thz-ntn-spectrum-atmosphere-model.h"
 #include "ns3/walker-constellation.h"
 
 #include <cmath>
@@ -98,10 +117,25 @@ main(int argc, char* argv[])
 {
     double simSeconds = 40.0;
     double freqGHz = 100.0;    // sub-THz / W-band (3GPP spectrum model upper bound)
-    double satEirpDbm = 115.0; // high-gain sub-THz feeder beam (closes ~187 dB FSPL)
+    double satEirpDbm = 115.0; // --scripted=1 only: conducted power of the old run
     double rainMmH = 25.0;
     double fogLwc = 0.5;
     double snowMmH = 10.0;
+    bool scripted = false;
+    // Geometric weather (default).
+    double satTxW = 10.0;
+    double satDishM = 0.5;
+    double gndDishM = 0.6;
+    double eta = 0.6;
+    double nfDb = 7.0;
+    double bandwidthMHz = 100.0;
+    uint32_t numerology = 3;
+    double cellPeakMmH = 30.0; // convective cell peak rate (mm/h)
+    double cellR0Km = 1.5;     // EXCELL e-folding radius (km)
+    double windMps = 20.0;     // advection speed toward east (m/s)
+    double cellStartKm = -1.2; // cell centre east of the station at t = 0 (km)
+    double cloudLwc = 0.0;     // P.840 cloud liquid water content (g/m^3)
+    double offeredMbps = 5.0;
     std::string outputDir = "thz-ntn-weather-traffic-output";
     std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
 
@@ -114,6 +148,20 @@ main(int argc, char* argv[])
     cmd.AddValue("fogLwc", "Fog liquid water content (g/m^3)", fogLwc);
     cmd.AddValue("snowMmH", "Snow rate during the snow phase (mm/h)", snowMmH);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("scripted", "1 = pre-Wave-2 timed weather front (legacy)", scripted);
+    cmd.AddValue("satTxW", "Satellite transmitter output power (W)", satTxW);
+    cmd.AddValue("satDishM", "Satellite reflector diameter (m)", satDishM);
+    cmd.AddValue("gndDishM", "Ground reflector diameter (m)", gndDishM);
+    cmd.AddValue("nfDb", "Ground receiver noise figure (dB)", nfDb);
+    cmd.AddValue("bandwidthMHz", "Channel bandwidth (MHz)", bandwidthMHz);
+    cmd.AddValue("numerology", "NR numerology (3 = 120 kHz, extrapolated)", numerology);
+    cmd.AddValue("cellPeakMmH", "Rain-cell peak rate (mm/h)", cellPeakMmH);
+    cmd.AddValue("cellR0Km", "Rain-cell e-folding radius (km)", cellR0Km);
+    cmd.AddValue("windMps", "Cell advection speed toward east (m/s)", windMps);
+    cmd.AddValue("cellStartKm", "Cell centre east offset at t=0 (km, negative = west)",
+                 cellStartKm);
+    cmd.AddValue("cloudLwc", "Cloud liquid water content (g/m^3)", cloudLwc);
+    cmd.AddValue("offeredMbps", "Offered downlink CBR (Mb/s)", offeredMbps);
     cmd.Parse(argc, argv);
 
     if (freqGHz > 100.0)
@@ -124,7 +172,173 @@ main(int argc, char* argv[])
         freqGHz = 100.0;
     }
 
-    std::printf("# thz-ntn-weather-traffic (REAL radio, weather in the packet path)\n");
+    if (!scripted)
+    {
+        const double fHz = freqGHz * 1e9;
+        const double gSat = ThzNtnAperture::GainDbi(satDishM, fHz, eta);
+        const double gGnd = ThzNtnAperture::GainDbi(gndDishM, fHz, eta);
+        const double ptDbm = 10.0 * std::log10(satTxW * 1e3);
+        const double eirpDbm = ptDbm + gSat;
+        std::printf("# thz-ntn-weather-traffic (measured NR; rain cell advected over the "
+                    "station, per-RB P.838 path integral)\n");
+        std::printf("#   payload: Pt %.1f W, sat dish %.2f m (%.2f dBi), EIRP %.2f dBm; ground "
+                    "dish %.2f m (%.2f dBi), NF %.1f dB\n",
+                    satTxW, satDishM, gSat, eirpDbm, gndDishM, gGnd, nfDb);
+        std::printf("#   air interface: %.0f GHz, mu %u over %.0f MHz (NR numerology "
+                    "EXTRAPOLATED above 71 GHz, TS 38.211 Table 4.2-1 / TS 38.101-2)\n",
+                    freqGHz, numerology, bandwidthMHz);
+        std::printf("#   rain cell: EXCELL peak %.1f mm/h, r0 %.2f km, starts %.2f km east of "
+                    "the station, moving east at %.1f m/s; rain height %.2f km (P.839 "
+                    "mid-latitude summer table); cloud LWC %.2f g/m^3\n",
+                    cellPeakMmH, cellR0Km, cellStartKm, windMps, 3.5, cloudLwc);
+
+        NodeContainer satNodes;
+        satNodes.Create(1);
+        NodeContainer gndNodes;
+        gndNodes.Create(1);
+        ns3::ntncon::WalkerConfig wcfg;
+        wcfg.num_planes = 1;
+        wcfg.total_sats = 80;
+        wcfg.altitude_km = 550.0;
+        wcfg.inclination_deg = 53.0;
+        wcfg.epoch_unix_s = 1735689600.0;
+        const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+        Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
+            CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+        satSgp4->SetElementsSgp4(elements[0]);
+        double subLat, subLon, subAlt;
+        satSgp4->GetGeodetic(subLat, subLon, subAlt);
+        Ptr<NtnEnuProjectionMobilityModel> satEnu =
+            CreateObject<NtnEnuProjectionMobilityModel>();
+        satEnu->SetSource(satSgp4);
+        satEnu->SetReference(subLat, subLon, 0.0);
+        satNodes.Get(0)->AggregateObject(satEnu);
+        MobilityHelper mob;
+        mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+        Ptr<ListPositionAllocator> gndPos = CreateObject<ListPositionAllocator>();
+        gndPos->Add(Vector(0.0, 0.0, 5.0));
+        mob.SetPositionAllocator(gndPos);
+        mob.Install(gndNodes);
+
+        Config::SetDefault("ns3::NtnOranApplication::DataRate",
+                           DataRateValue(DataRate(static_cast<uint64_t>(offeredMbps * 1e6))));
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(numerology);
+        rs.SetSimTime(Seconds(simSeconds));
+        rs.SetOutputDir(outputDir);
+        rs.SetRunTag("thz-ntn-weather-traffic");
+        rs.SetCarrierFrequencyHz(fHz);
+        rs.SetBandwidthHz(bandwidthMHz * 1e6);
+        rs.SetSatEirpTotalDbm(eirpDbm);
+        rs.SetEirpBudgetDbm(eirpDbm, 0.5);
+        rs.SetUeRxAntennaGain(gGnd - 10.0 * std::log10(2.0));
+        rs.SetUeNoiseFigureDb(nfDb);
+        rs.SetSmallScaleFading(false);
+        rs.SetTr38811ExcessLoss(false);
+        rs.Build(satNodes, gndNodes);
+
+        Ptr<ThzNtnRainCellField> field = CreateObject<ThzNtnRainCellField>();
+        field->SetRainHeightFromClimate(itu::Itu618LossModel::ClimateRegion::midlat_summer);
+        ThzNtnRainCellField::Cell cell;
+        cell.x0 = cellStartKm * 1e3;
+        cell.y0 = 0.0;
+        cell.vx = windMps;
+        cell.peakRate = cellPeakMmH;
+        cell.r0 = cellR0Km * 1e3;
+        field->AddCell(cell);
+        Ptr<ThzNtnSpectrumAtmosphereModel> atm = CreateObject<ThzNtnSpectrumAtmosphereModel>();
+        atm->SetRainField(field);
+        atm->SetCloudLwc(cloudLwc);
+        Ptr<ThzNtnScintillation> sc = CreateObject<ThzNtnScintillation>();
+        sc->SetAntennaDiameter(gndDishM);
+        atm->SetScintillation(sc);
+        rs.AddSpectrumChannelLoss(atm);
+        Ptr<ThzNtnPointingLossModel> ptg = CreateObject<ThzNtnPointingLossModel>();
+        ptg->SetAttribute("Beamwidth3dBDeg",
+                          DoubleValue(ThzNtnAperture::Beamwidth3dBDeg(gndDishM, fHz)));
+        rs.AddExtraPropagationLoss(ptg);
+
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(simSeconds - 0.5));
+        // The helper installs its eMBB flows at a fixed 5 Mb/s; apply the offered
+        // load (the DataRate attribute takes effect on a running client).
+        for (uint32_t k = 0; k < rs.GetRemoteHost()->GetNApplications(); ++k)
+        {
+            if (auto app = DynamicCast<NtnOranApplication>(rs.GetRemoteHost()->GetApplication(k)))
+            {
+                app->SetAttribute("DataRate",
+                                  DataRateValue(DataRate(static_cast<uint64_t>(offeredMbps * 1e6))));
+            }
+        }
+        rs.EnableAiFlowMonitor("thz-ntn-weather-traffic");
+
+        const double occHz = rs.GetBwpPrbs() * 12.0 * 15e3 * (1u << numerology);
+        const double noiseDbm = ThzNtnAperture::NoiseDbm(occHz, nfDb);
+        std::printf("# %5s  %7s  %8s  %8s  %8s  %8s  %8s  %8s  %8s  %8s  %9s\n", "t_s", "elev",
+                    "R_stn", "R_pathMx", "rain_dB", "rainSprd", "gas_dB", "budget", "sinr_dB",
+                    "tbler", "goodput");
+        Ptr<MobilityModel> gndMob = gndNodes.Get(0)->GetObject<MobilityModel>();
+        uint64_t lastRx = 0;
+        double sumDry = 0.0;
+        double sumWet = 0.0;
+        uint32_t nDry = 0;
+        uint32_t nWet = 0;
+        rs.RegisterPeriodicCallback(Seconds(1.0), [&, gndMob, satEnu, atm, field](Time now) {
+            const Vector g = gndMob->GetPosition();
+            const Vector sp = satEnu->GetPosition();
+            const double elev = ElevDegEnu(g, sp);
+            const double slant = std::sqrt((sp.x - g.x) * (sp.x - g.x) +
+                                           (sp.y - g.y) * (sp.y - g.y) +
+                                           (sp.z - g.z) * (sp.z - g.z));
+            const double rStn = field->RainRateAt(g.x, g.y, now);
+            const double rain = atm->GetLastRainCentreDb();
+            const double gas = atm->GetLastGasCentreDb();
+            const double sprd = atm->GetLastMaxLossDb() - atm->GetLastMinLossDb();
+            const double budget = eirpDbm - ThzNtnAperture::FsplDb(slant, fHz) - gas - rain +
+                                  atm->GetLastScintillationDb() - ptg->GetLastLossDb() + gGnd -
+                                  noiseDbm;
+            const double sinr = rs.GetUeRecentSinrDb(0);
+            const double tbler = rs.GetUeRecentTbler(0);
+            const uint64_t rx = rs.GetUeRxBytes(0);
+            const double mbps = (rx - lastRx) * 8.0 / 1e6;
+            lastRx = rx;
+            if (now.GetSeconds() >= 2.0)
+            {
+                if (rain < 1.0)
+                {
+                    sumDry += mbps;
+                    ++nDry;
+                }
+                else
+                {
+                    sumWet += mbps;
+                    ++nWet;
+                }
+            }
+            std::printf("  %5.1f  %7.2f  %8.2f  %8.2f  %8.2f  %8.3f  %8.3f  %8.2f  %8.2f  %8.3f  "
+                        "%9.3f\n",
+                        now.GetSeconds(), elev, rStn, atm->GetLastPathRainRate(), rain, sprd,
+                        gas, budget, sinr, tbler, mbps);
+        });
+
+        Simulator::Stop(Seconds(simSeconds));
+        Simulator::Run();
+        rs.Collect();
+        rs.WriteHealthReport();
+        std::printf("# === per-condition MEASURED goodput === rain fade < 1 dB: %u s, %.3f Mb/s; "
+                    "rain fade >= 1 dB: %u s, %.3f Mb/s (offered %.1f Mb/s)\n",
+                    nDry, nDry ? sumDry / nDry : 0.0, nWet, nWet ? sumWet / nWet : 0.0,
+                    offeredMbps);
+        std::printf("# === summary ===  measured cell SINR=%.2f dB TBLER=%.4f "
+                    "throughput=%.3f Mbps (rain cell field on real packets, per-RB P.838/P.676)\n",
+                    rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());
+        Simulator::Destroy();
+        return 0;
+    }
+
+    std::printf("# thz-ntn-weather-traffic --scripted=1 (pre-Wave-2 timed front, legacy power)\n");
     std::printf("#   sim=%.0fs freq=%.0fGHz EIRP=%.1fdBm rain=%.0fmm/h fogLwc=%.2f "
                 "snow=%.0fmm/h\n",
                 simSeconds, freqGHz, satEirpDbm, rainMmH, fogLwc, snowMmH);
@@ -145,7 +359,7 @@ main(int argc, char* argv[])
     const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(elements[0]);
+    satSgp4->SetElementsSgp4(elements[0]);
     double subLat, subLon, subAlt;
     satSgp4->GetGeodetic(subLat, subLon, subAlt);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -187,7 +401,7 @@ main(int argc, char* argv[])
     wx->SetFrequency(freqGHz * 1e9);
     rs.AddExtraPropagationLoss(wx);
 
-    // gap A2 — THz beam pointing impairment now in the measured packet path.
+    // gap A2: THz beam pointing impairment now in the measured packet path.
     Ptr<ThzNtnPointingLossModel> ptg = CreateObject<ThzNtnPointingLossModel>();
     rs.AddExtraPropagationLoss(ptg);
 
@@ -195,7 +409,7 @@ main(int argc, char* argv[])
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("thz-ntn-weather-traffic");
 
-    // Weather front: clear → fog → rain → wet snow → clear across the pass.
+    // Weather front: clear -> fog -> rain -> wet snow -> clear across the pass.
     // Each phase reconfigures the LIVE channel plug-in (packets feel it).
     const double tFog = 0.20 * simSeconds;
     const double tRain = 0.35 * simSeconds;

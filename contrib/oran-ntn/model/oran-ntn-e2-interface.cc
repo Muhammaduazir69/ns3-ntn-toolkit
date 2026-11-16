@@ -6,6 +6,8 @@
  */
 
 #include "oran-ntn-e2-interface.h"
+
+#include "oran-ntn-e2-transport.h"
 #include "oran-ntn-rc-style3.h"
 #include "oran-ntn-service-model-rc.h"
 
@@ -125,6 +127,7 @@ OranNtnE2Node::DoDispose()
     m_rcActionCb = MakeNullCallback<bool, E2RcAction>();
     m_indicationCb = MakeNullCallback<void, E2Indication>();
     m_loopProbe = nullptr;
+    m_transport = nullptr;
     Object::DoDispose();
 }
 
@@ -292,6 +295,13 @@ OranNtnE2Node::EmitIndication(const E2Subscription& sub, const E2KpmReport& repo
     {
         indication.isBuffered = false;
         indication.deliveryDelay = m_feederLinkDelay;
+        if (m_transport)
+        {
+            // Wave 2 M2: the indication crosses the feeder as a packet; its
+            // delivery delay is measured on arrival.
+            m_transport->SendIndication(this, indication);
+            return;
+        }
         // Schedule delivery with feeder link delay
         Simulator::Schedule(m_feederLinkDelay,
                             &OranNtnE2Node::DeliverReport,
@@ -340,6 +350,11 @@ OranNtnE2Node::FlushBufferedReports()
         E2Indication ind = m_reportBuffer.front();
         m_reportBuffer.pop_front();
         ind.deliveryDelay = now - ind.originalTimestamp + m_feederLinkDelay;
+        if (m_transport)
+        {
+            m_transport->SendIndication(this, ind);
+            continue;
+        }
         Simulator::Schedule(m_feederLinkDelay,
                             &OranNtnE2Node::DeliverReport,
                             this,
@@ -442,11 +457,41 @@ OranNtnE2Node::ReceiveRcAction(const E2RcAction& action)
     // itself is not simulated; see the class doc).
     // The routing instant travels with the event so the downlink leg is
     // MEASURED at actuation time rather than assumed to equal FeederLinkDelay.
+    if (m_transport)
+    {
+        // Wave 2 M2: RIC Control as a packet over the feeder.
+        m_transport->SendControl(this, action);
+        return;
+    }
     Simulator::Schedule(m_feederLinkDelay,
                         &OranNtnE2Node::ExecuteRcActionEvent,
                         this,
                         action,
                         Simulator::Now());
+}
+
+void
+OranNtnE2Node::SetPacketTransport(Ptr<OranNtnE2Transport> t)
+{
+    m_transport = t;
+}
+
+Ptr<OranNtnE2Transport>
+OranNtnE2Node::GetPacketTransport() const
+{
+    return m_transport;
+}
+
+void
+OranNtnE2Node::DeliverFromTransport(const E2Indication& indication)
+{
+    DeliverReport(indication);
+}
+
+void
+OranNtnE2Node::ExecuteFromTransport(const E2RcAction& action, Time routedAt)
+{
+    ExecuteRcActionEvent(action, routedAt);
 }
 
 void

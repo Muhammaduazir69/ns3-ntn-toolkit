@@ -116,6 +116,7 @@ main(int argc, char* argv[])
     double risPosZ = 50.0;
     std::string phaseProfile = "focus";
     uint32_t timeoutMs = 200;
+    bool allowFallback = false;
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ris-assisted-leo-link-output";
 
@@ -135,7 +136,18 @@ main(int argc, char* argv[])
     cmd.AddValue("phaseProfile", "RIS phase profile (focus/flat/random)", phaseProfile);
     cmd.AddValue("timeoutMs", "Per-query timeout (ms)", timeoutMs);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("allowFallback", "1 = run free space (labeled) when no Sionna server answers; default 0 aborts (RequireLiveTransport)", allowFallback);
     cmd.Parse(argc, argv);
+    // P0-4 (Wave 2 M3): no silent free-space fallback for a ray-traced
+    // headline. RequireLiveTransport is ON unless --allowFallback=1; without
+    // a Sionna RT server the first query aborts the run (non-zero exit).
+    if (!allowFallback)
+    {
+        std::printf("# RequireLiveTransport=1: the run aborts if the Sionna RT server at "
+                    "the configured host:port does not answer (start "
+                    "bridge/sionna-server.py or test/sionna-stub-server.py); "
+                    "--allowFallback=1 runs closed-form free space, labeled as such\n");
+    }
     g_simTime = duration;
 
     std::printf("\n=== ris-assisted-leo-link (MEASURED real radio + RIS analytic probe) ===\n"
@@ -160,7 +172,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -214,6 +226,7 @@ main(int argc, char* argv[])
     baseNoRis->SetServer(host, port);
     baseNoRis->SetFrequencyHz(freqHz);
     baseNoRis->SetTimeoutMs(timeoutMs);
+    baseNoRis->SetRequireLiveTransport(!allowFallback);
     Ptr<NtnAtmosphericLossChain> chainNoRis = CreateObject<NtnAtmosphericLossChain>();
     chainNoRis->SetFrequencyHz(freqHz);
     chainNoRis->SetRainRateMmH(rainMmH);
@@ -225,6 +238,7 @@ main(int argc, char* argv[])
     baseRis->SetServer(host, port);
     baseRis->SetFrequencyHz(freqHz);
     baseRis->SetTimeoutMs(timeoutMs);
+    baseRis->SetRequireLiveTransport(!allowFallback);
     RisConfig ris;
     ris.pos_x = risPosX;
     ris.pos_y = 0.0;
@@ -269,6 +283,9 @@ main(int argc, char* argv[])
         rs.AddHealthRow("sionna_fallbacks",
                         std::to_string(baseNoRis->GetFallbacks()),
                         "sionna-bridge counter");
+        rs.AddHealthRow("raytrace_live",
+                        baseNoRis->GetFallbacks() == 0 && baseNoRis->GetRayTraced() > 0 ? "1" : "0",
+                        "P0-4: 0 = the RIS probe column is free space (no ray tracing)");
         rs.AddHealthRow("sionna_ray_traced_queries",
                         std::to_string(baseNoRis->GetRayTraced()),
                         "sionna-bridge counter");
@@ -300,5 +317,14 @@ main(int argc, char* argv[])
     // example read it, so on a host without Sionna every run here printed
     // Sionna framing over pure free-space results with nothing to show it.
     std::cout << baseNoRis->ProvenanceLine() << std::endl;
+    // P0-4: label the RIS probe column by what produced it.
+    if (baseNoRis->GetFallbacks() > 0)
+    {
+        std::printf("# RIS probe column: free space (no ray tracing)\nraytrace_live=0\n");
+    }
+    else
+    {
+        std::printf("raytrace_live=1\n");
+    }
     return 0;
 }

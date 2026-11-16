@@ -542,7 +542,10 @@ OranNtnNearRtRic::WriteMetrics(const std::string& filename) const
         ofs << "xApp " << xapp->GetXappName() << " (id=" << id
             << ", priority=" << (int)xapp->GetPriority() << "):\n"
             << "  Decisions: " << xm.totalDecisions << "\n"
-            << "  Successful Actions: " << xm.successfulActions << "\n"
+            // Wave 2 M2 (P0-1): "Successful Actions" meant ROUTED by the RIC and
+            // was read as actuated. Both are printed now, under their own names.
+            << "  Routed Actions: " << xm.successfulActions << "\n"
+            << "  Actuated Actions: " << xm.actuatedActions << "\n"
             << "  Failed Actions: " << xm.failedActions << "\n"
             << "  Conflicts: " << xm.conflictsEncountered
             << " (won " << xm.conflictsWon << ")\n"

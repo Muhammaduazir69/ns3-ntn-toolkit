@@ -148,7 +148,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -188,6 +188,10 @@ main(int argc, char* argv[])
                            10.0 * std::log10(rs.GetBandwidthHz() / 1e6) + 30.0;
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
+    // C6 (Wave 1): KPM from the RAN counters (TS 28.552 DRB.RlcSduDelayDl =
+    // gNB RLC ingress to UE delivery, TB.TotNbrDl / TB.ErrTotNbrDl counts,
+    // RRU.PrbUsedDl) instead of application probes.
+    rs.SetKpmFromRanCounters(true);
     rs.EnableAiFlowMonitor("ntn-v2x-maritime-ais"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 

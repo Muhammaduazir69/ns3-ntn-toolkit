@@ -12,6 +12,8 @@ set(source_files
     model/tr38821-corpus.cc
     # Per-packet C/N0 -> BLER error model for GSL/ISL hops (replaces binary gates).
     model/ntn-sat-link-error-model.cc
+    # C3 (Wave 1): geocentric view of any ECEF mobility for the TR 38.811 channel.
+    model/ntn-geocentric-mobility-adapter.cc
 )
 
 set(header_files
@@ -27,6 +29,7 @@ set(header_files
     # 4.4.11 — TR 38.821 + Starlink calibration corpus (Roadmap §4.4.11)
     model/tr38821-corpus.h
     model/ntn-sat-link-error-model.h
+    model/ntn-geocentric-mobility-adapter.h
 )
 
 set(test_sources

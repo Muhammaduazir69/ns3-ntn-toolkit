@@ -44,6 +44,12 @@ set(source_files
     # Roadmap §4.3.6 — THz-RIS-SM service model + xApp
     model/thz-ntn-ris-service-model.cc
     model/thz-ntn-ris-xapp.cc
+    # Wave 2 M3: spectrum-level (per-RB) plugins and geometry-caused events
+    model/thz-ntn-link-geometry.cc
+    model/thz-ntn-rain-cell-field.cc
+    model/thz-ntn-spectrum-atmosphere-model.cc
+    model/ntn-screen-blockage-model.cc
+    model/thz-ntn-ris-spectrum-model.cc
     # Helper
     helper/thz-ntn-helper.cc
 )
@@ -94,12 +100,20 @@ set(header_files
     # Roadmap §4.3.6 — THz-RIS-SM service model + xApp
     model/thz-ntn-ris-service-model.h
     model/thz-ntn-ris-xapp.h
+    # Wave 2 M3: spectrum-level (per-RB) plugins and geometry-caused events
+    model/thz-ntn-link-geometry.h
+    model/thz-ntn-rain-cell-field.h
+    model/thz-ntn-spectrum-atmosphere-model.h
+    model/ntn-screen-blockage-model.h
+    model/thz-ntn-ris-spectrum-model.h
+    model/thz-ntn-aperture.h
     # Helper
     helper/thz-ntn-helper.h
 )
 
 set(test_sources
     test/thz-ntn-test-suite.cc
+    test/thz-ntn-spectrum-plugins-test.cc
 )
 
 build_lib(

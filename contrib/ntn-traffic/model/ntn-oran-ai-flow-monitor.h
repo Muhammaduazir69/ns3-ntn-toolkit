@@ -210,6 +210,30 @@ class NtnOranAiFlowMonitor : public Object
         int32_t ueIndex;
     };
 
+  public:
+    /// C6 (Wave 1): emit DRB.RlcSduDelayDl, TB.TotNbrDl, TB.ErrTotNbrDl and
+    /// RRU.PrbUsedDl from the RAN counters of the PHY source
+    /// (NtnRealStackHelper::GetUeRanCounters) instead of application probes,
+    /// and keep the probes as app.OwdDl (ms) and app.TbBlerDl (fraction).
+    /// Default false so published KPM series reproduce.
+    void SetRanCounterKpm(bool e) { m_ranKpm = e; }
+    bool GetRanCounterKpm() const { return m_ranKpm; }
+
+  private:
+    bool m_ranKpm{false};
+    struct RanCursor
+    {
+        uint64_t dlTb{0};
+        uint64_t dlTbErr{0};
+        double rlcDelaySumMs{0};
+        uint64_t rlcSdus{0};
+    };
+    std::map<int32_t, RanCursor> m_ranCursor;
+    std::map<uint16_t, double> m_cellPrbCursor;
+    std::map<int32_t, std::map<std::string, double>> m_ranTick; //!< per-UE values this tick
+    std::map<uint16_t, double> m_cellPrbTick;
+    Time m_ranTickTime{Seconds(-1)};
+
     /// Cumulative counters at the previous tick, for windowed deltas.
     struct FlowCursor
     {

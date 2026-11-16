@@ -31,6 +31,11 @@
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
+#include "ns3/nr-spectrum-phy.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-ue-phy.h"
+#include "ns3/ntn-spectrum-seam-model.h"
+#include "ns3/sionna-cir-spectrum-loss-model.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -51,6 +56,8 @@ namespace
 {
 NtnRealStackHelper* g_rs = nullptr;
 Ptr<SionnaCirPropagationLossModel> g_cir;
+Ptr<SionnaCirSpectrumLossModel> g_cirSpec; // Wave 2 M3 per-RB mode
+double g_maxRbSpreadDb = 0.0;
 double g_simTime = 12.0;
 // Measured-SINR fading statistics (the whole point: variance the scalar drops).
 double g_sumSinr = 0.0, g_sumSinr2 = 0.0;
@@ -77,7 +84,16 @@ SampleSinr()
         g_maxSinr = std::max(g_maxSinr, s);
         ++g_nSinr;
     }
-    const double f = g_cir->GetLastFadingDb();
+    double f;
+    if (g_cirSpec)
+    {
+        f = -g_cirSpec->GetLastMeanGainDb();
+        g_maxRbSpreadDb = std::max(g_maxRbSpreadDb, g_cirSpec->GetLastSpreadDb());
+    }
+    else
+    {
+        f = g_cir->GetLastFadingDb();
+    }
     g_minFadeDb = std::min(g_minFadeDb, f);
     g_maxFadeDb = std::max(g_maxFadeDb, f);
     Simulator::Schedule(MilliSeconds(20), &SampleSinr);
@@ -150,9 +166,14 @@ main(int argc, char* argv[])
     double platformSpeed = 0.0; // 0 = use the REAL SGP4 ephemeris velocity
     std::string radio = "nr";   // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-sionna-cir-real-stack-output";
+    bool flatCir = false; // Wave 2 M3: per-RB H(f) by default; 1 = old narrowband collapse
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
+    cmd.AddValue("flatCir",
+                 "1 = old narrowband CIR collapse (scalar, tap delays dropped); default 0 applies "
+                 "H(f) = sum_p a_p exp(-j 2 pi (f - f_c) tau_p) per RB on the spectrum seam (nr)",
+                 flatCir);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
     cmd.AddValue("satEirpDbm",
@@ -192,7 +213,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -243,6 +264,13 @@ main(int argc, char* argv[])
         }
         rs.SetSatConductedPowerDbm(satEirpDbm);
     }
+    const bool perRb = !flatCir && radio != "mmwave";
+    if (perRb)
+    {
+        // One multipath process only: the CIR replaces the 3GPP cluster
+        // fading (LOS plane wave keeps the array and beam gains).
+        rs.SetSmallScaleFading(false);
+    }
     rs.Build(satNodes, ueNodes);
 
     // ---- Channel plug-in: the FULL CIR fades real packets ----
@@ -259,7 +287,19 @@ main(int argc, char* argv[])
     g_cir->SetTxVelocity(platformSpeed > 0.0 ? Vector(platformSpeed, 0.0, 0.0)
                                              : satEnu->GetVelocity());
     g_cir->SetRxVelocity(Vector(0.0, 0.0, 0.0));
-    rs.AddExtraPropagationLoss(g_cir);
+    if (perRb)
+    {
+        g_cirSpec = CreateObject<SionnaCirSpectrumLossModel>();
+        g_cirSpec->SetSnapshot(MakeSnapshot(freqGhz * 1e9, satEnu->GetPosition(),
+                                            ueNodes.Get(0)->GetObject<MobilityModel>()->GetPosition()));
+        rs.AddSpectrumChannelLoss(g_cirSpec);
+        std::printf("# CIR mode: per-RB transfer function on the spectrum seam\n");
+    }
+    else
+    {
+        rs.AddExtraPropagationLoss(g_cir);
+        std::printf("# CIR mode: narrowband collapse (--flatCir=1), tap delays dropped\n");
+    }
 
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));
@@ -285,6 +325,8 @@ main(int argc, char* argv[])
               << "  MEASURED SINR mean:           " << rs.GetMeanDlSinrDb() << " dB\n"
               << "  MEASURED SINR sampled spread: [" << g_minSinr << ", " << g_maxSinr
               << "] dB, std=" << std::sqrt(varSinr) << " dB\n"
+              << "  per-RB CIR gain spread (max): " << g_maxRbSpreadDb << " dB"
+              << (g_cirSpec ? " (frequency selective)" : " (flat mode)") << "\n"
               << "  measured DL TBLER (mean):     " << rs.GetMeanDlTbler() << "\n"
               << "  measured DL throughput:       " << rs.GetRxThroughputMbps() << " Mbps\n"
               << "  -> the SINR spread is multipath fading the scalar path_loss_db drops.\n";

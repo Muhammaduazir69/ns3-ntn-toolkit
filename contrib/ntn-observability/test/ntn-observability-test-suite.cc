@@ -975,11 +975,13 @@ class ObservabilityTimeAnchorTest : public TestCase
         NS_TEST_ASSERT_MSG_GT(shifted, StampOf(simLp),
                               "and it must actually move the stamp");
 
-        // ---- The default is wall-clock, not zero and not the scene epoch ---
+        // ---- Wave 2 M2: the default is the simulation clock, shared by every
+        //      .lp writer (the ntn-traffic KPM series stamps sim time) ---------
         Ptr<NtnInfluxSink> defSink = CreateObject<NtnInfluxSink>();
-        NS_TEST_ASSERT_MSG_GT(defSink->GetBaseEpoch().GetSeconds(), 1.6e9,
-                              "the default base epoch must be a real wall-clock time, or a live "
-                              "dashboard query cannot find the points");
+        NS_TEST_ASSERT_MSG_EQ(defSink->GetBaseEpoch(), Time(0),
+                              "the default base epoch is the simulation clock");
+        NS_TEST_ASSERT_MSG_GT(NtnInfluxSink::WallClockNow().GetSeconds(), 1.6e9,
+                              "the wall clock stays available as an opt-in");
 
         // ---- Each surface must be able to say which anchor it used --------
         const std::string note = simSink->TimeAnchorNote();

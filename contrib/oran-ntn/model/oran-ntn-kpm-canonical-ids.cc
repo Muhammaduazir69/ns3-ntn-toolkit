@@ -41,12 +41,6 @@ CanonicalMetricIds()
 namespace
 {
 
-// Number of PRBs in a single 100 MHz NR carrier at 30 kHz SCS (TS 38.101-1
-// Table 5.3.2-1, an FR1 configuration; the old name said FR2, where 100 MHz at
-// 120 kHz SCS is 66 PRBs). Used as the PRB-availability divisor in the absence
-// of a dedicated cell-config field, so RRU.PrbAvailDl/RRU.PrbUsedDl are only
-// right for a 100 MHz / 30 kHz cell and carry provenance "derived".
-constexpr uint32_t kPrbsPerCarrierFr2_100mhz_30khz = 273;
 
 KpmMeasurement
 MakeMeasurement(const char* id,
@@ -109,42 +103,71 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
     out.push_back(
         MakeMeasurement(kpm::kDrbUeThpUl, 0.0, /*present=*/false, base));
 
-    // DRB.PdcpSduVolumeDL: TS 28.552 §5.1.2.1.1.1 reports the DL PDCP SDU
-    // data volume in Mbit over the granularity period. This used to emit
-    // BYTES (throughput*1e6/8), a factor of 8e6 off the standard's unit.
-    // Stand-in derived from the throughput over a 1 s granularity period
-    // (E2KpmReport carries no period); will be replaced by a proper
-    // integrating counter when the OranNtnDataRepository (§4.1.4) lands.
-    // Provenance tracks the throughput it is derived from.
-    const double volDlMbit = r.throughput_Mbps * 1.0;
-    out.push_back(
-        MakeMeasurement(kpm::kDrbPdcpVolumeDl, volDlMbit, /*present=*/true, base, thpProv));
+    // DRB.PdcpSduVolumeDL: TS 28.552 5.1.2.1.1.1 reports the DL PDCP SDU data
+    // volume in Mbit over the granularity period. A measured report
+    // (OranNtnRealStackBinding) carries the delivered bytes of the period;
+    // otherwise the legacy stand-in (throughput x a 1 s period) is kept with the
+    // throughput's provenance.
+    if (std::isfinite(r.pdcpVolumeDl_Mbit))
+    {
+        out.push_back(MakeMeasurement(kpm::kDrbPdcpVolumeDl,
+                                      r.pdcpVolumeDl_Mbit,
+                                      /*present=*/true,
+                                      base,
+                                      provenance::kMeasured));
+    }
+    else
+    {
+        const double volDlMbit = r.throughput_Mbps * 1.0;
+        out.push_back(MakeMeasurement(kpm::kDrbPdcpVolumeDl,
+                                      volDlMbit,
+                                      /*present=*/true,
+                                      base,
+                                      thpProv));
+    }
 
     out.push_back(
         MakeMeasurement(kpm::kDrbPdcpVolumeUl, 0.0, /*present=*/false, base));
 
-    // RRU.PrbAvailDl/Ul — total PRBs configured for the cell. v2.1 assumes a
-    // single 100 MHz FR2 carrier at 30 kHz SCS = 273 PRBs (cell-config constant).
+    // RRU.PrbAvailDl/Ul: the PRBs configured on the cell's BWP (TS 28.552
+    // 5.1.1.2; N_RB from TS 38.101-1 Table 5.3.2-1, e.g. 51 at 20 MHz / 30 kHz).
+    // Only a report that carries the cell configuration can state it. The
+    // previous code wrote 273 (100 MHz / 30 kHz) for every cell, including the
+    // 51-PRB cells every NR example builds; an unknown cell size is now
+    // present=false, never a constant.
+    const bool prbAvailKnown = r.prbAvailDl > 0.0;
     out.push_back(MakeMeasurement(kpm::kRruPrbAvailDl,
-                                  kPrbsPerCarrierFr2_100mhz_30khz,
-                                  /*present=*/true,
+                                  prbAvailKnown ? r.prbAvailDl : 0.0,
+                                  /*present=*/prbAvailKnown,
                                   base,
-                                  provenance::kDerived));
+                                  provenance::kConfigured));
     out.push_back(MakeMeasurement(kpm::kRruPrbAvailUl,
-                                  kPrbsPerCarrierFr2_100mhz_30khz,
-                                  /*present=*/true,
+                                  prbAvailKnown ? r.prbAvailDl : 0.0,
+                                  /*present=*/prbAvailKnown,
                                   base,
-                                  provenance::kDerived));
+                                  provenance::kConfigured));
 
-    // RRU.PrbUsedDl/Ul — used PRBs from cell-level prbUtilization. If
-    // prbUtilization is NaN (not measured) this is NaN -> synthesized.
-    const double prbUsedDl =
-        r.prbUtilization * static_cast<double>(kPrbsPerCarrierFr2_100mhz_30khz);
-    out.push_back(MakeMeasurement(kpm::kRruPrbUsedDl,
-                                  prbUsedDl,
-                                  /*present=*/true,
-                                  base,
-                                  prbProv));
+    // RRU.PrbUsedDl: mean PRBs used per slot. Measured PRBs when the report
+    // carries them; otherwise utilisation x configured PRBs when both exist;
+    // otherwise not present.
+    if (std::isfinite(r.prbUsedDl))
+    {
+        out.push_back(MakeMeasurement(kpm::kRruPrbUsedDl,
+                                      r.prbUsedDl,
+                                      /*present=*/true,
+                                      base,
+                                      provenance::kMeasured));
+    }
+    else
+    {
+        const double prbUsedDl =
+            prbAvailKnown ? r.prbUtilization * r.prbAvailDl : std::nan("");
+        out.push_back(MakeMeasurement(kpm::kRruPrbUsedDl,
+                                      prbUsedDl,
+                                      /*present=*/prbAvailKnown,
+                                      base,
+                                      prbProv));
+    }
     out.push_back(MakeMeasurement(kpm::kRruPrbUsedUl,
                                   0.0,
                                   /*present=*/false,
@@ -177,10 +200,22 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
     // (OranNtnDataRepository §4.1.4) the canonical relation
     // TB.ErrTotNbrDl / TB.TotNbrDl == harqBler holds with absolute counts.
     // NO new physics is introduced here — the BLER is reused as measured.
-    out.push_back(
-        MakeMeasurement(kpm::kTbTotNbrDl, 0.0, /*present=*/false, base));
-    out.push_back(
-        MakeMeasurement(kpm::kTbErrTotNbrDl, r.harqBler, /*present=*/false, base));
+    if (r.tbTotDl >= 0.0 && r.tbErrDl >= 0.0)
+    {
+        // Measured integer counts of the period (OranNtnRealStackBinding, from
+        // the UE PHY TB trace); TB.ErrTotNbrDl / TB.TotNbrDl is the DL TBLER.
+        out.push_back(MakeMeasurement(kpm::kTbTotNbrDl, r.tbTotDl, /*present=*/true, base,
+                                      provenance::kMeasured));
+        out.push_back(MakeMeasurement(kpm::kTbErrTotNbrDl, r.tbErrDl, /*present=*/true, base,
+                                      provenance::kMeasured));
+    }
+    else
+    {
+        out.push_back(
+            MakeMeasurement(kpm::kTbTotNbrDl, 0.0, /*present=*/false, base));
+        out.push_back(
+            MakeMeasurement(kpm::kTbErrTotNbrDl, r.harqBler, /*present=*/false, base));
+    }
 
     return out;
 }

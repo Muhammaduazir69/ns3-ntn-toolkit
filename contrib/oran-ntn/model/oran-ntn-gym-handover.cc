@@ -17,6 +17,7 @@
 #include <ns3/log.h>
 #include <ns3/simulator.h>
 #include <ns3/spaces.h>
+#include <ns3/boolean.h>
 #include <ns3/uinteger.h>
 
 #include <algorithm>
@@ -66,6 +67,25 @@ OranNtnGymHandover::GetTypeId()
                           "Reward weight for TTE improvement",
                           DoubleValue(0.1),
                           MakeDoubleAccessor(&OranNtnGymHandover::m_tteBonusWeight),
+                          MakeDoubleChecker<double>())
+            .AddAttribute("MeasuredFeatures",
+                          "Wave 2 M2: feature 5 is the best neighbour's RRC-measured RSRP minus "
+                          "the serving cell's (dB, TS 38.331 measResults) instead of a candidate "
+                          "SINR; non-measured features (NaN) are exported as 0.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&OranNtnGymHandover::m_measuredFeatures),
+                          MakeBooleanChecker())
+            .AddAttribute("GoodputReward",
+                          "Wave 2 M2: reward = GoodputWeight x measured serving goodput (Mb/s, "
+                          "delivered bytes of the last KPM period) + HO cost + ping-pong penalty, "
+                          "instead of the SINR/TTE delta.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&OranNtnGymHandover::m_goodputReward),
+                          MakeBooleanChecker())
+            .AddAttribute("GoodputWeight",
+                          "Reward per Mb/s of measured goodput (GoodputReward)",
+                          DoubleValue(0.2),
+                          MakeDoubleAccessor(&OranNtnGymHandover::m_goodputWeight),
                           MakeDoubleChecker<double>())
             .AddAttribute("ElevationContinuityWeight",
                           "Reward weight for elevation angle continuity",
@@ -253,7 +273,23 @@ OranNtnGymHandover::GetObservation()
                 candidates.push_back(r);
             }
         }
-        if (!candidates.empty())
+        if (m_measuredFeatures)
+        {
+            // Measured: the A3 margin of the best neighbour on RRC RSRP.
+            double best = -200.0;
+            const double servRsrp = report.rsrpMeasured ? report.rsrp_dBm : std::nan("");
+            for (const auto& r : candidates)
+            {
+                if (r.rsrpMeasured && std::isfinite(servRsrp) && r.rsrp_dBm - servRsrp > best)
+                {
+                    best = r.rsrp_dBm - servRsrp;
+                    bestCandTte = static_cast<float>(r.tte_s);
+                    bestCandElevation = static_cast<float>(r.elevation_deg);
+                }
+            }
+            bestCandSinr = static_cast<float>(best);
+        }
+        else if (!candidates.empty())
         {
             // Find best candidate by SINR
             auto bestIt = std::max_element(
@@ -283,6 +319,26 @@ OranNtnGymHandover::GetObservation()
     // next GetReward() scores. On the very first observation there is no prior
     // state, so seed "pre" from it and let the first improvement be zero rather
     // than a spurious step from 0 dB.
+    if (m_measuredFeatures)
+    {
+        // An RL agent cannot take NaN: a feature without a measurement is 0.
+        for (float* f : {&servingSinr, &servingTte, &servingElevation, &servingDoppler, &sinrSlope,
+                         &bestCandSinr, &bestCandTte, &bestCandElevation, &prbUtil, &activeUes})
+        {
+            if (!std::isfinite(*f))
+            {
+                *f = 0.0f;
+            }
+        }
+    }
+    if (m_xapp)
+    {
+        bool hs = false;
+        const E2KpmReport sr = m_xapp->GetUeServingReport(m_currentUeId, Seconds(10), hs);
+        m_postActionGoodput =
+            (hs && sr.throughputMeasured && std::isfinite(sr.throughput_Mbps)) ? sr.throughput_Mbps
+                                                                               : 0.0;
+    }
     m_postActionSinr = servingSinr;
     m_postActionTte = servingTte;
     if (!m_haveFirstObservation)
@@ -346,6 +402,15 @@ OranNtnGymHandover::GetReward()
         m_pingPongPenaltyWeight * pingPongPenalty +
         m_hoCostWeight * hoCost +
         m_tteBonusWeight * tteImprovement);
+    if (m_goodputReward)
+    {
+        // Wave 2 M2: the measured goodput the UE got after the last action
+        // (delivered bytes over the KPM period), so an interruption or a worse
+        // cell costs reward through the data plane, not through a formula.
+        reward = static_cast<float>(m_goodputWeight * m_postActionGoodput +
+                                    m_pingPongPenaltyWeight * pingPongPenalty +
+                                    m_hoCostWeight * hoCost);
+    }
 
     m_cumulativeReward += reward;
     m_stepCount++;
@@ -417,6 +482,25 @@ OranNtnGymHandover::ExecuteActions(Ptr<OpenGymDataContainer> action)
                 candidates.push_back(r);
             }
         }
+        if (m_measuredFeatures)
+        {
+            // Action i hands over to the i-th DISTINCT neighbour gNB (ascending
+            // id); the report list holds several reports per gNB, so indexing it
+            // directly named the same cell for every action.
+            std::vector<E2KpmReport> uniq;
+            for (uint32_t g : CandidateGnbs(servingGnb))
+            {
+                for (const auto& r : candidates)
+                {
+                    if (r.gnbId == g)
+                    {
+                        uniq.push_back(r);
+                        break;
+                    }
+                }
+            }
+            candidates.swap(uniq);
+        }
 
         if (candidateIdx < candidates.size())
         {
@@ -431,12 +515,17 @@ OranNtnGymHandover::ExecuteActions(Ptr<OpenGymDataContainer> action)
             hoAction.confidence = 1.0;
             hoAction.executed = false;
 
-            m_xapp->SubmitAction(hoAction);
-            // The RL action moved the UE: update the tracked serving cell so the
-            // next observation reads the new serving baseline (the RAN will also
-            // republish it once the real handover completes).
-            m_xapp->SetUeServingCell(m_currentUeId, candidates[candidateIdx].gnbId);
-            m_handoverExecuted = true;
+            const bool routed = m_xapp->SubmitAction(hoAction);
+            if (!m_measuredFeatures)
+            {
+                // The RL action moved the UE: update the tracked serving cell so the
+                // next observation reads the new serving baseline (the RAN will also
+                // republish it once the real handover completes).
+                m_xapp->SetUeServingCell(m_currentUeId, candidates[candidateIdx].gnbId);
+            }
+            // Measured mode: the serving cell is what the RAN reports after the
+            // handover actually completes, never assumed from the request.
+            m_handoverExecuted = m_measuredFeatures ? routed : true;
             NS_LOG_INFO("RL triggered HO: UE " << m_currentUeId << " -> gNB "
                                                 << candidates[candidateIdx].gnbId);
         }
@@ -452,6 +541,26 @@ OranNtnGymHandover::ExecuteActions(Ptr<OpenGymDataContainer> action)
     }
 
     return true;
+}
+
+std::vector<uint32_t>
+OranNtnGymHandover::CandidateGnbs(uint32_t servingGnb) const
+{
+    std::vector<uint32_t> out;
+    if (!m_xapp)
+    {
+        return out;
+    }
+    for (const auto& r : m_xapp->GetReportsInWindow(Seconds(5)))
+    {
+        if (r.ueId == m_currentUeId && r.gnbId != servingGnb &&
+            std::find(out.begin(), out.end(), r.gnbId) == out.end())
+        {
+            out.push_back(r.gnbId);
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 } // namespace ns3

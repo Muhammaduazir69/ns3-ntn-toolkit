@@ -24,6 +24,8 @@ set(source_files
     model/ntn-tr38811-excess-loss-model.cc
     model/ntn-tdl-spectrum-loss-model.cc
     model/ntn-tdl-spectrum-propagation-loss-model.cc
+    model/ntn-earth-blockage-loss-model.cc
+    model/ntn-los-channel-model.cc
     model/three-gpp-http-satellite-client.cc
     stats/application-stats-helper.cc
     stats/application-stats-delay-helper.cc
@@ -59,6 +61,8 @@ set(header_files
     model/ntn-tr38811-excess-loss-model.h
     model/ntn-tdl-spectrum-loss-model.h
     model/ntn-tdl-spectrum-propagation-loss-model.h
+    model/ntn-earth-blockage-loss-model.h
+    model/ntn-los-channel-model.h
     model/three-gpp-http-satellite-client.h
     stats/application-stats-helper.h
     stats/application-stats-delay-helper.h

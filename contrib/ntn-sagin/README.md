@@ -3,6 +3,15 @@
 <p align="center"><strong>Space-air-ground integrated networking: ground, UAV, HAPS and LEO layers, a router that has to choose between them, and custody across contact gaps</strong></p>
 
 <p align="center">
+  <a href="https://youtu.be/JNStiBst68I"><img src="https://img.youtube.com/vi/JNStiBst68I/maxresdefault.jpg" alt="NTN Control Center: end-to-end simulation of non-terrestrial networks in ns-3 (video)" width="560"/></a><br/>
+  <a href="https://youtu.be/JNStiBst68I"><img src="https://img.shields.io/badge/YouTube-Watch%20the%205--minute%20demo-red?logo=youtube" alt="Watch on YouTube"/></a><br/>
+  <a href="https://6g-ntn.live"><img src="https://img.shields.io/badge/Live-6g--ntn.live-2ea44f?logo=googlechrome&logoColor=white" alt="Open the live NTN Control Center"/></a><br/>
+  <sub><b>Try it live:</b> <a href="https://6g-ntn.live">6g-ntn.live</a> runs the toolkit's examples in the browser, with open datasets, a scenario gallery and a research forum.</sub><br/>
+  <sub>The NTN Control Center runs and visualizes the ntn-sagin examples on a live 3D globe (5-minute video).</sub>
+</p>
+
+
+<p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/3GPP-TR%2036.777%20A2G-orange.svg" alt="3GPP TR 36.777 air-to-ground"/>
@@ -48,7 +57,8 @@ The air-to-ground channel is TR 36.777, and it keeps its own boundary: the recom
 | `SaginA2gPropagationLossModel` | `sagin-a2g-propagation-loss-model.h` | The same model as an ns-3 `PropagationLossModel`; chained onto a real NR spectrum channel it attenuates actual packets, returning the excess over free space to avoid double counting. |
 | `MultiLayerRouter` | `multi-layer-router.h` | Greedy max-elevation path computation over ground, UAV, HAPS and LEO candidates, with a pluggable score callback. Optional congestion awareness (`SetLinkLoadSource`, `SetCongestionAware`, default off): a filling link is penalized and one at the cutoff is rejected; a link of unknown load is scored on elevation, not assumed idle. Returns a `SaginHop` vector. |
 | `SaginSliceRouter` | `sagin-slice-router.h` | Wraps `MultiLayerRouter`: QFI to S-NSSAI to slice profile, layer choice biased by latency budget and a GEO allowance. |
-| `SaginCustodyQueue` | `sagin-custody-queue.h` | Store and forward: holds packets while the next hop is out of contact and drains them when it opens. FCFS by default, `SetLastComeFirstServed`, `SetReplaceSameSource` (keep only the newest per source), per-hop or end-to-end lifetime, byte capacity with oldest-first eviction. Counters: forwarded immediately, forwarded from custody, expired, dropped for space, largest custody delay. |
+| `SaginCustodyQueue` | `sagin-custody-queue.h` | Store and forward: holds packets while the next hop is out of contact and drains them when it opens. FCFS by default, `SetLastComeFirstServed`, `SetReplaceSameSource` (keep only the newest per source), per-hop or end-to-end lifetime, byte capacity with oldest-first eviction. Counters: forwarded immediately, forwarded from custody, expired, dropped for space, largest custody delay. Opt-in `SetCustodyTransfer` adds RFC 5050 5.10 custody transfer: a forwarded bundle stays in custody (and in storage) until `AcceptCustody`, `RefuseCustody` returns it to the queue, an overdue signal triggers a retransmission, and lifetime expiry of retained bundles is counted as a bundle-deletion status report (RFC 9171 6.1.1, reason 1). |
+| `SaginBundleHeader`, `SaginBundleTrailer`, `SaginCustodySignalHeader` | `sagin-bundle-protocol.h` | BPv7 on the wire: the bundle as a CBOR indefinite-length array (RFC 9171 4.1), the 8-item primary block with ipn EIDs, creation timestamp [DTN ms, sequence] and lifetime (4.3.1), the payload block header (4.3.2), and the RFC 5050 6.3 custody signal record (succeeded, reason, subject bundle), CBOR (RFC 8949). |
 | `SaginHelper` | `sagin-helper.h` | Builds a four-layer scene in one call. |
 
 ## Results
@@ -104,7 +114,7 @@ Fourteen programs ship under `examples/`; binaries land at `build/contrib/ntn-sa
 
 | Example | What it shows | Command |
 |---|---|---|
-| `sagin-store-forward-iot` | Buoys report through a sparse LEO fleet (real element sets, Vallado SGP4) with custody on devices and satellites. `--policy` = `bp` (bent pipe), `sf1` (store and forward to the highest satellite), `sfe` (earliest predicted delivery); `--keepNewest`, `--lcfs`, `--lifetimeH`. The server writes one line per received update. | `./ns3 run "sagin-store-forward-iot --policy=sfe --keepNewest=1"` |
+| `sagin-store-forward-iot` | Buoys report through a sparse LEO fleet (real element sets, Vallado SGP4) with custody on devices and satellites. `--policy` = `bp` (bent pipe), `sf1` (store and forward to the highest satellite), `sfe` (earliest predicted delivery); `--keepNewest`, `--lcfs`, `--lifetimeH`. The server writes one line per received update. Defaults reproduce the IoT-J output (0/1 visibility gate, no radio). Options: `--linkModel=satlink` (NtnSatLinkErrorModel per hop and direction on a declared TR 38.821 Set-1 budget; the noise bandwidth is the symbol rate the 1 Mb/s hop needs at QPSK 1/2), `--contacts=cgr` (contacts from ContactGraphScheduler, gateway choice from ContactGraphRouter), `--dtn=bpv7` (BPv7 bundles plus RFC 5050 custody transfer, `--custodyTimeoutS`). | `./ns3 run "sagin-store-forward-iot --policy=sfe --keepNewest=1"` |
 | `ntn-sagin-remote-coverage` | Multi-operator sharing of one LEO cell for a remote village; with `--sharing=1` the second operator's UEs ride the first operator's cell on their own S-NSSAI and the measured per-operator volume gives the cost split. | `./ns3 run "ntn-sagin-remote-coverage --sharing=1"` |
 | `sagin-haps-leo-relay` | Ground UE to UAV relay to HAPS to LEO; the router logs per-hop elevation and range each second while the access hop is a real NR cell with the TR 36.777 channel. The route columns are a geometry trace and do not actuate traffic. | `./ns3 run "sagin-haps-leo-relay --simTime=30 --csv=sagin.csv"` |
 | `sagin-uav-swarm` | Eight UAVs (waypoint, patrol, search) as UEs of a ground gNB over the RMa-AV channel; per-UAV SINR each second. | `./ns3 run "sagin-uav-swarm --simTime=30 --fcGHz=2.0"` |
@@ -116,7 +126,7 @@ Fourteen programs ship under `examples/`; binaries land at `build/contrib/ntn-sa
 | `sagin-maritime-leo-traffic` | A vessel terminal under `AisMobilityModel` served by a passing LEO over a real NR cell. | `./ns3 run "sagin-maritime-leo-traffic --simSeconds=30 --vesselSpeedKn=20"` |
 | `sagin-hst-leo-traffic` | A high-speed-train terminal served by a passing LEO over a real NR cell. | `./ns3 run "sagin-hst-leo-traffic --simSeconds=30 --trainSpeedKmh=500"` |
 | `sagin-adsb-flight-leo-traffic` | An in-flight terminal replayed from an ADS-B trace, served by a passing LEO. | `./ns3 run "sagin-adsb-flight-leo-traffic --simSeconds=30"` |
-| `sagin-sgp4-routed-traffic` | SGP4 shell plus contact-graph routing on a real IP data plane: contacts bring interfaces up and down, delays follow the slant range, global routing reroutes the live flow, cross-checked each second against the router's Dijkstra path. | `./ns3 run "sagin-sgp4-routed-traffic --simSeconds=120 --altKm=550 --inclDeg=53"` |
+| `sagin-sgp4-routed-traffic` | SGP4 shell plus contact-graph routing on a real IP data plane: contacts bring interfaces up and down, delays follow the slant range, global routing reroutes the live flow (recomputed on contact events only), cross-checked each second against the router's Dijkstra path. Each hop direction loses packets through NtnSatLinkErrorModel on a declared payload (Set-1 Ka satellite, VSAT HAPS/gateway terminals, 23 GHz ISL dishes, DVB-S2 8PSK 3/4), so a hop near the elevation floor is partly lossy; `--linkModel=gate` restores the old binary budget. Prints owd p95 and per-hop loss. | `./ns3 run "sagin-sgp4-routed-traffic --simSeconds=120 --altKm=550 --inclDeg=53"` |
 | `ntn-sagin-orphan-mobility-showcase` | A HAPS flying a loiter racetrack, a ground to HAPS to LEO packet plane, relay geometry and Doppler from live positions, optional NetSimulyzer JSON and Cesium CZML. | `./ns3 run "ntn-sagin-orphan-mobility-showcase --duration=120"` |
 
 ## Tests
@@ -125,7 +135,7 @@ Fourteen programs ship under `examples/`; binaries land at `build/contrib/ntn-sa
 ./test.py -s ntn-sagin
 ```
 
-`test/ntn-sagin-test-suite.cc` registers 42 test cases: HAPS, UAV, aeronautical, OpenSky, AIS and HST mobility (importers, interpolation, replay under simulator time), the TR 36.777 path loss, LOS probability, fading, validated height band and signed excess loss, the multi-layer router (scorers, congestion awareness, gating a data plane), slice routing, and the custody queue (forwarding, expiry, LCFS, end-to-end lifetime).
+`test/sagin-bpv7-test.cc` (suite `ntn-sagin-bpv7`) checks the CBOR primary block and custody signal round trip and the custody-transfer accounting (accept, refuse, timer retransmission, lifetime deletion reports) under `Simulator::Run()`. `test/ntn-sagin-test-suite.cc` registers 42 test cases: HAPS, UAV, aeronautical, OpenSky, AIS and HST mobility (importers, interpolation, replay under simulator time), the TR 36.777 path loss, LOS probability, fading, validated height band and signed excess loss, the multi-layer router (scorers, congestion awareness, gating a data plane), slice routing, and the custody queue (forwarding, expiry, LCFS, end-to-end lifetime).
 
 ## Dependencies
 
@@ -135,7 +145,7 @@ Fourteen programs ship under `examples/`; binaries land at `build/contrib/ntn-sa
 
 ## Scope and limitations
 
-- **Custody, not DTN.** `SaginCustodyQueue` holds and drains packets. There is no RFC 5050 bundle format, no custody signaling and no fragmentation.
+- **Partial DTN.** `SaginCustodyQueue` holds and drains packets; with `--dtn=bpv7` the store-and-forward example carries real BPv7 primary blocks and RFC 5050 custody signals over the same radio hops. Not implemented: block CRCs (CRC type 0), extension blocks (previous node, bundle age, hop count), fragmentation, BPSec (RFC 9172), administrative records wrapped in bundles (the custody signal is a bare record over UDP), status reports on the wire (they are counted), a convergence layer (LTP RFC 5326, TCPCL RFC 9174; one bundle per UDP datagram) and SABR route computation (CCSDS 734.3-B-1; the `sfe` policy uses the example's own ephemeris plan).
 - **Routers compute paths.** `MultiLayerRouter` and `SaginSliceRouter` return hop vectors and install no forwarding table. In `sagin-haps-leo-relay` and `sagin-aeronautical` the route is a geometry trace that no measured KPI validates; `sagin-multihop-traffic` is the example where the route is actuated.
 - **Regenerative payload.** `RegenMode` in `ntn-constellation` filters Dijkstra transit and decides whether a satellite may run an Xn handover (`NtnXnHandover`: HANDOVER REQUEST, ACKNOWLEDGE, SN STATUS TRANSFER, UE CONTEXT RELEASE over the ISL, 20.01 ms at 1500 km measured). The XnAP messages are an ns-3 `Header` with toolkit-internal type values, not ASN.1 APER, and the Xn path is not yet wired to the `NrGnbNetDevice` that `NtnRealStackHelper` can build on a satellite. In `sagin-sgp4-routed-traffic` the satellites are plain IP routers. Treat ISL paths as transparent unless you wire that yourself.
 - **A2G validity.** TR 36.777 is validated to 300 m aerial height; calls above it are recorded, not hidden.

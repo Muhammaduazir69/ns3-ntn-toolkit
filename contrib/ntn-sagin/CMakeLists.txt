@@ -5,6 +5,8 @@ set(source_files
     model/sagin-a2g-propagation-loss-model.cc
     model/multi-layer-router.cc
     model/sagin-custody-queue.cc
+    # Wave 2 M3: BPv7 primary block + RFC 5050 custody signal (CBOR)
+    model/sagin-bundle-protocol.cc
     model/aeronautical-scenario.cc
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
     model/opensky-adsb-trace.cc
@@ -30,6 +32,7 @@ set(header_files
     model/sagin-a2g-propagation-loss-model.h
     model/multi-layer-router.h
     model/sagin-custody-queue.h
+    model/sagin-bundle-protocol.h
     model/aeronautical-scenario.h
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
     model/opensky-adsb-trace.h
@@ -50,6 +53,7 @@ set(header_files
 
 set(test_sources
     test/ntn-sagin-test-suite.cc
+    test/sagin-bpv7-test.cc
 )
 
 build_lib(

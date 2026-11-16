@@ -201,6 +201,14 @@ OranNtnXappSliceManager::ProcessKpmReport(const E2KpmReport& report)
         }
     }
 
+    if (std::isnan(report.sliceThroughput_Mbps) && std::isnan(report.sliceLatency_ms) &&
+        std::isnan(report.uePrbShareDl))
+    {
+        // Wave 2 M2: a neighbour-cell report (measured RSRP only) carries no
+        // slice measurement; it must not overwrite this cell's slice state.
+        return;
+    }
+
     // Update per-slice metrics from report
     state.latestThroughput[sliceId] = report.sliceThroughput_Mbps;
     state.latestLatency[sliceId] = report.sliceLatency_ms;
@@ -209,6 +217,19 @@ OranNtnXappSliceManager::ProcessKpmReport(const E2KpmReport& report)
     // Estimate demand based on PRB utilization and throughput
     // Higher utilization with lower throughput indicates congestion (high demand)
     double utilization = report.prbUtilization;
+    if (!std::isnan(report.uePrbShareDl))
+    {
+        // Measured per-UE PRB share (OranNtnRealStackBinding): the slice's
+        // demand is what its own UEs used, not the whole cell's utilisation,
+        // which is the same number for every slice and made a saturated cell
+        // look like three over-demanding slices.
+        state.uePrbShare[sliceId][report.ueId] = report.uePrbShareDl;
+        utilization = 0.0;
+        for (const auto& [ue, share] : state.uePrbShare[sliceId])
+        {
+            utilization += share;
+        }
+    }
     state.demandEstimate[sliceId] = utilization;
 
     // Update running average metrics

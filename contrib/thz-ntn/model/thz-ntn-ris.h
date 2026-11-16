@@ -169,10 +169,22 @@ class ThzNtnRis : public Object
                              double phiOut_deg) const;
 
     /**
-     * \brief Compute maximum achievable RIS gain (perfect alignment).
-     * \return maximum gain in dB
+     * \brief Peak ARRAY-FACTOR gain of the panel relative to ONE element
+     *        (perfect alignment): 20 log10(N) + element gain + efficiency.
+     *
+     * This is NOT a link gain. Relative to the direct satellite link the RIS
+     * ray is FSPL_direct - PL_cascaded (ComputeCascadedPathLoss_dB), which
+     * includes the second hop's spreading loss; use ComputeLinkSnrGain_dB()
+     * for the improvement a RIS gives a link.
      */
-    double ComputeMaxGain_dB() const;
+    double ComputeMaxArrayFactorGain_dB() const;
+    /// Deprecated name of ComputeMaxArrayFactorGain_dB() (it was read as a link gain).
+    [[deprecated("array-factor gain vs one element, not a link gain: use "
+                 "ComputeMaxArrayFactorGain_dB() or ComputeLinkSnrGain_dB()")]]
+    double ComputeMaxGain_dB() const
+    {
+        return ComputeMaxArrayFactorGain_dB();
+    }
 
     /**
      * \brief Set per-element phase profile manually.
@@ -199,11 +211,40 @@ class ThzNtnRis : public Object
     double ComputeQuantizationLoss_dB() const;
 
     /**
-     * \brief Compute SNR gain from RIS.
-     * \param perfectCsi true if perfect CSI is available (N^2 scaling)
-     * \return SNR gain in dB
+     * \brief Array-factor power gain of the panel relative to ONE element:
+     *        20 log10(N) with perfect CSI (coherent), 10 log10(N) without,
+     *        minus phase quantization, plus reflection efficiency.
+     *
+     * NOT a gain over the direct link (see ComputeLinkSnrGain_dB()).
      */
-    double ComputeSnrGain_dB(bool perfectCsi) const;
+    double ComputeArrayFactorGain_dB(bool perfectCsi) const;
+    /// Deprecated name of ComputeArrayFactorGain_dB() (it was read as a link gain).
+    [[deprecated("array-factor gain vs one element, not a link gain: use "
+                 "ComputeArrayFactorGain_dB() or ComputeLinkSnrGain_dB()")]]
+    double ComputeSnrGain_dB(bool perfectCsi) const
+    {
+        return ComputeArrayFactorGain_dB(perfectCsi);
+    }
+
+    /**
+     * \brief Far-field cascaded path loss TX -> RIS -> RX from positions
+     *        (Tang et al., IEEE TWC 20(1), 2021, eq. (7), unit element
+     *        pattern): FSPL(d1) + FSPL(d2) - 20 log10(4 pi N dx dy / lambda^2)
+     *        - 10 log10(eta) + quantization loss, at the configured frequency.
+     */
+    double ComputeCascadedPathLoss_dB(const Vector& tx, const Vector& ris, const Vector& rx) const;
+
+    /**
+     * \brief SNR improvement (dB) a phase-aligned RIS gives the link tx -> rx
+     *        over the direct path alone, from the live geometry:
+     *        10 log10( (b_d + a_r)^2 / b_d^2 ),  b_d = 10^(-L_dir/20),
+     *        a_r = 10^((FSPL_direct - PL_cascaded)/20).
+     * \param directExtraLossDb blockage on the direct path (dB)
+     */
+    double ComputeLinkSnrGain_dB(const Vector& tx,
+                                 const Vector& ris,
+                                 const Vector& rx,
+                                 double directExtraLossDb = 0.0) const;
 
     /**
      * \brief Determine whether distance falls within RIS near field.

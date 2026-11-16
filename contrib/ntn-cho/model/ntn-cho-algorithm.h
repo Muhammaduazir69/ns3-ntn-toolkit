@@ -372,6 +372,16 @@ class NtnChoAlgorithm : public Object
         // ---- RACH-less execution (RCHO; orthogonal to the trigger) ----
         bool rachLess = false;                  //!< skip RACH using ephemeris TA
         /**
+         * P0-8: a RACH-less handover still sends RRCReconfigurationComplete to
+         * the target on the pre-allocated uplink grant (TS 38.300 9.2.3.2,
+         * Rel-18 RACH-less handover), one service-link traversal. When true (the
+         * default) the modeled interruption of a RACH-less execution includes
+         * that leg, slant / c, whenever the target slant range is known. False
+         * reproduces the earlier pricing, which omitted it; the paper campaign
+         * examples set it false explicitly to keep their published outputs.
+         */
+        bool countRachLessCompletion = true;
+        /**
          * Fallback NTN RACH duration when no slant range is known for the
          * target. When the target's slant range IS known, the RACH cost is
          * computed slant-dependently instead of using this constant (a fixed

@@ -12,6 +12,7 @@
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
 #include "ns3/ntn-geodetic-fixed-mobility-model.h"
+#include "ns3/ntn-ho-kpi-recorder.h"
 #include "ns3/ntn-measurement-model.h"
 #include "ns3/ntn-orbit-predictor.h"
 #include "ns3/ntn-rach-window.h"
@@ -714,7 +715,7 @@ class NtnChoSlantRachInterruptionTestCase : public TestCase
  * \brief Test RACH-less (RCHO) execution with ephemeris TA pre-compensation
  *
  * With rachLess = true and a known target slant range the RACH is skipped:
- * the interruption is only choExecutionDelay and the pre-computed TA equals
+ * the interruption is choExecutionDelay plus the Complete leg (slant/c, P0-8) and the pre-computed TA equals
  * the slant round-trip 2*slant/c (recorded in microseconds). Without a known
  * slant range the execution falls back to the RACH path.
  */
@@ -750,10 +751,28 @@ class NtnChoRachLessExecutionTestCase : public TestCase
         NS_TEST_ASSERT_MSG_EQ(stats.rachExecutions, 0, "no RACH paid");
         NS_TEST_ASSERT_MSG_EQ_TOL(stats.lastPreCompTaUs, 2.0 * slant / kC * 1e6, 0.01,
                                   "pre-computed TA = slant round-trip (us)");
+        // P0-8: the RRCReconfigurationComplete leg on the configured grant
+        // (TS 38.300 9.2.3.2) adds one service-link traversal, slant / c.
         NS_TEST_ASSERT_MSG_EQ_TOL(stats.lastInterruptionMs,
-                                  static_cast<double>(config.choExecutionDelay.GetMilliSeconds()),
-                                  0.1,
-                                  "RACH-less interruption = execution delay only");
+                                  static_cast<double>(config.choExecutionDelay.GetMilliSeconds()) +
+                                      slant / kC * 1e3,
+                                  0.01,
+                                  "RACH-less interruption = execution delay + Complete leg");
+        {
+            // countRachLessCompletion = false reproduces the earlier pricing.
+            Ptr<NtnChoAlgorithm> legacy = CreateObject<NtnChoAlgorithm>();
+            NtnChoAlgorithm::ChoConfig lc = config;
+            lc.countRachLessCompletion = false;
+            legacy->Configure(lc);
+            legacy->SetServingCell(1);
+            legacy->AddCandidateCell(2, 1, 0);
+            legacy->UpdateCandidateSlantRange(2, slant);
+            legacy->ExecuteHandover(2);
+            NS_TEST_ASSERT_MSG_EQ_TOL(legacy->GetMechanismStats().lastInterruptionMs,
+                                      static_cast<double>(lc.choExecutionDelay.GetMilliSeconds()),
+                                      0.01,
+                                      "legacy pricing: execution delay only");
+        }
 
         // rachLess configured but NO slant known -> must pay the RACH.
         algo->AddCandidateCell(3, 2, 0);
@@ -2724,6 +2743,74 @@ class VehicularHeadingKeepsRoadDirectionTestCase : public TestCase
     }
 };
 
+/**
+ * \ingroup ntn-cho-test
+ * \brief P0-3: the handover KPI recorder measures C-plane and U-plane
+ * interruption, ping-pong and time of stay from the RRC event times and the
+ * packet arrivals it is given, inside a running simulation.
+ *
+ * Timeline (UE 0, packets every 10 ms from 0.5 s): connected to cell 1 at
+ * 0.1 s; HandoverStart 1 -> 2 at 2.000 s, HandoverEndOk at 2.004 s; packets
+ * pause from 1.995 s to 2.030 s; return HandoverStart 2 -> 1 at 2.5 s, end at
+ * 2.503 s (a ping-pong inside 1 s); RLF at 3 s.
+ */
+class NtnHoKpiRecorderMeasuresTestCase : public TestCase
+{
+  public:
+    NtnHoKpiRecorderMeasuresTestCase()
+        : TestCase("P0-3: handover KPI recorder measures interruption, ping-pong, ToS, RLF")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<NtnHoKpiRecorder> rec = CreateObject<NtnHoKpiRecorder>();
+        rec->SetPingPongWindow(Seconds(1));
+        Simulator::Schedule(Seconds(0.1), &NtnHoKpiRecorder::NotifyConnected, rec, 0u, uint16_t(1));
+        for (int i = 0; i < 300; ++i)
+        {
+            const double t = 0.5 + 0.01 * i;
+            if (t > 1.9955 && t < 2.0295)
+            {
+                continue; // no packet during the interruption
+            }
+            Simulator::Schedule(Seconds(t), &NtnHoKpiRecorder::NotifyRx, rec, 0u);
+        }
+        Simulator::Schedule(Seconds(1.0), [rec]() { rec->AnnotateNext(0, 52.0, "cho:pcho"); });
+        Simulator::Schedule(Seconds(2.0), &NtnHoKpiRecorder::NotifyHandoverStart, rec, 0u,
+                            uint64_t(7), uint16_t(1), uint16_t(2));
+        Simulator::Schedule(Seconds(2.004), &NtnHoKpiRecorder::NotifyHandoverEnd, rec, 0u,
+                            uint64_t(7), uint16_t(2), true);
+        Simulator::Schedule(Seconds(2.5), &NtnHoKpiRecorder::NotifyHandoverStart, rec, 0u,
+                            uint64_t(7), uint16_t(2), uint16_t(1));
+        Simulator::Schedule(Seconds(2.503), &NtnHoKpiRecorder::NotifyHandoverEnd, rec, 0u,
+                            uint64_t(7), uint16_t(1), true);
+        Simulator::Schedule(Seconds(3.0), &NtnHoKpiRecorder::NotifyRadioLinkFailure, rec, 0u,
+                            uint16_t(1));
+        Simulator::Stop(Seconds(4));
+        Simulator::Run();
+
+        const auto r = rec->GetUeRecords(0);
+        NS_TEST_ASSERT_MSG_EQ(r.size(), 2u, "two handovers recorded");
+        NS_TEST_ASSERT_MSG_EQ_TOL(r[0].CplaneMs(), 4.0, 1e-6, "C-plane = end - start");
+        // last packet before 2.0 s is 1.99 s, first after 2.004 s is 2.03 s
+        NS_TEST_ASSERT_MSG_EQ_TOL(r[0].UplaneGapMs(), 40.0, 1e-3, "U-plane gap from packet times");
+        NS_TEST_ASSERT_MSG_EQ((r[0].UplaneGapMs() >= r[0].CplaneMs()), true, "U-plane gap >= C-plane");
+        NS_TEST_ASSERT_MSG_EQ_TOL(r[0].timeOfStayS, 1.9, 1e-9, "time of stay from connection");
+        NS_TEST_ASSERT_MSG_EQ_TOL(r[0].modeledInterruptionMs, 52.0, 1e-9, "annotation attached");
+        NS_TEST_ASSERT_MSG_EQ(r[0].decidedBy, std::string("cho:pcho"), "decision maker attached");
+        NS_TEST_ASSERT_MSG_EQ(r[0].pingPong, false, "first handover is not a ping-pong");
+        NS_TEST_ASSERT_MSG_EQ(r[1].pingPong, true, "return within 1 s is a ping-pong");
+        NS_TEST_ASSERT_MSG_EQ(rec->GetPingPongCount(Seconds(0.4)), 0u, "outside a 0.4 s window");
+        NS_TEST_ASSERT_MSG_EQ(rec->GetPingPongCount(Seconds(5)), 1u, "inside a 5 s window");
+        NS_TEST_ASSERT_MSG_EQ_TOL(r[1].timeOfStayS, 0.496, 1e-9, "ToS on cell 2");
+        NS_TEST_ASSERT_MSG_EQ(rec->GetRlfCount(0), 1u, "RLF counted");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rec->GetMedianInterArrivalMs(0), 10.0, 1e-3, "median IAT");
+        Simulator::Destroy();
+    }
+};
+
 class NtnChoTestSuite : public TestSuite
 {
   public:
@@ -2737,6 +2824,7 @@ class NtnChoTestSuite : public TestSuite
         AddTestCase(new NtnChoCombineWithA4TttTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnChoSlantRachInterruptionTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnChoRachLessExecutionTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new NtnHoKpiRecorderMeasuresTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnGeodeticFixedMobilityTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnTteEstimatorComputeTteTestCase, TestCase::Duration::QUICK);
         AddTestCase(new NtnChoStandardizedTriggersTestCase, TestCase::Duration::QUICK);

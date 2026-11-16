@@ -21,6 +21,7 @@
 #include <ns3/boolean.h>
 #include <ns3/double.h>
 #include <ns3/enum.h>
+#include <ns3/global-value.h>
 #include <ns3/log.h>
 #include <ns3/node.h>
 #include <ns3/pointer.h>
@@ -28,6 +29,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 
 namespace ns3
 {
@@ -37,6 +39,24 @@ const Time NR_DEFAULT_PMI_INTERVAL_SB{MilliSeconds(2)};  // Subband PMI update i
 
 NS_LOG_COMPONENT_DEFINE("NrUePhy");
 NS_OBJECT_ENSURE_REGISTERED(NrUePhy);
+
+// ntn-patch 08: opt-in SS-RSRQ (TS 38.215 5.1.3), RSRQ = N x RSRP / RSSI with
+// RSSI = sum over all measured co-channel cells of their PSS power over the N
+// RBs (12 N REs each, synchronous cells transmitting on the measured symbols)
+// plus thermal noise k T0 F B. Off by default: the vendored stack reports 0.
+// ntn-patch 09: TS 38.215 5.1.1 defines SS-RSRP as the LINEAR average of the
+// power contributions; the vendored stack averages dB values, so one near-zero
+// sample (a beam null) drags the 200 ms L1 result down by hundreds of dB.
+static GlobalValue g_nrUeRsrpLinearAverage("NrUeRsrpLinearAverage",
+                                           "Average L1 RSRP samples in mW (TS 38.215 5.1.1) "
+                                           "instead of in dB",
+                                           BooleanValue(false),
+                                           MakeBooleanChecker());
+static GlobalValue g_nrUeRsrqFromRssi("NrUeRsrqFromRssi",
+                                      "Compute RSRQ from the measured RSRPs and noise "
+                                      "(TS 38.215 5.1.3) instead of reporting 0 dB",
+                                      BooleanValue(false),
+                                      MakeBooleanChecker());
 
 NrUePhy::NrUePhy()
 {
@@ -1360,6 +1380,14 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
     NS_LOG_DEBUG("RSRP value updated: " << rsrp << " dBm"
                                         << " for Cell Id: " << cellId << " RNTI: " << m_rnti);
 
+    // ntn-patch 09: accumulate in mW when linear averaging is enabled.
+    BooleanValue linAvg;
+    g_nrUeRsrpLinearAverage.GetValue(linAvg);
+    if (linAvg.Get())
+    {
+        rsrp = std::pow(10.0, rsrp / 10.0);
+    }
+
     // store RSRP measurements
     std::map<uint16_t, UeMeasurementsElement>::iterator itMeasMap =
         m_ueMeasurementsMap.find(cellId);
@@ -1377,6 +1405,18 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
                                                     << " number of entries: " << +newEl.rsrpNum);
 
         m_ueMeasurementsMap.insert(std::pair<uint16_t, UeMeasurementsElement>(cellId, newEl));
+    }
+    else if (linAvg.Get())
+    {
+        // ntn-patch 09: rsrpSum holds the running LINEAR mean. rsrpNum is a
+        // uint8_t and wraps past 255 samples (about 1.3 kHz of PSS at mu = 1),
+        // which in the legacy dB path divides a 300-sample sum by a wrapped
+        // count (the -1600 dBm L1 reports seen on ntn-nr-handover-pass); here
+        // the count saturates and the mean stays a mean.
+        auto& el = (*itMeasMap).second;
+        const uint8_t n = std::min<uint8_t>(el.rsrpNum, 254);
+        el.rsrpSum += (rsrp - el.rsrpSum) / static_cast<double>(n + 1);
+        el.rsrpNum = n + 1;
     }
     else
     {
@@ -1397,6 +1437,28 @@ NrUePhy::ReportUeMeasurements()
 
     NrUeCphySapUser::UeMeasurementsParameters ret;
 
+    BooleanValue linAvgReport;
+    g_nrUeRsrpLinearAverage.GetValue(linAvgReport);
+    // ntn-patch 08: RSSI over the measurement bandwidth, if RSRQ is enabled.
+    BooleanValue rsrqOn;
+    g_nrUeRsrqFromRssi.GetValue(rsrqOn);
+    double rssiMw = 0.0;
+    const double nRb = static_cast<double>(std::max<uint32_t>(1, GetRbNum()));
+    if (rsrqOn.Get())
+    {
+        for (const auto& [cell, el] : m_ueMeasurementsMap)
+        {
+            if (el.rsrpNum != 0)
+            {
+                rssiMw += 12.0 * nRb *
+                          (linAvgReport.Get() ? el.rsrpSum
+                                              : std::pow(10.0, (el.rsrpSum / el.rsrpNum) / 10.0));
+            }
+        }
+        const double bwHz = nRb * 12.0 * 15000.0 * std::pow(2.0, GetNumerology());
+        rssiMw += std::pow(10.0, (-174.0 + 10.0 * std::log10(bwHz) + m_noiseFigure) / 10.0);
+    }
+
     std::map<uint16_t, UeMeasurementsElement>::iterator it;
     for (it = m_ueMeasurementsMap.begin(); it != m_ueMeasurementsMap.end(); it++)
     {
@@ -1405,6 +1467,11 @@ NrUePhy::ReportUeMeasurements()
         if ((*it).second.rsrpNum != 0)
         {
             avg_rsrp = (*it).second.rsrpSum / static_cast<double>((*it).second.rsrpNum);
+            if (linAvgReport.Get())
+            {
+                // running linear mean in mW -> dBm
+                avg_rsrp = 10.0 * std::log10(std::max((*it).second.rsrpSum, 1e-300));
+            }
         }
         else
         {
@@ -1430,7 +1497,11 @@ NrUePhy::ReportUeMeasurements()
         NrUeCphySapUser::UeMeasurementsElement newEl;
         newEl.m_cellId = (*it).first;
         newEl.m_rsrp = avg_rsrp;
-        newEl.m_rsrq = avg_rsrq; // LEAVE IT 0 FOR THE MOMENT
+        if (rsrqOn.Get() && rssiMw > 0.0 && (*it).second.rsrpNum != 0)
+        {
+            avg_rsrq = 10.0 * std::log10(nRb * std::pow(10.0, avg_rsrp / 10.0) / rssiMw);
+        }
+        newEl.m_rsrq = avg_rsrq; // 0 unless NrUeRsrqFromRssi (ntn-patch 08)
         ret.m_ueMeasurementsList.push_back(newEl);
         ret.m_componentCarrierId = GetBwpId();
 

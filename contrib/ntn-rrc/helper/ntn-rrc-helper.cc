@@ -60,7 +60,30 @@ NtnRrcHelper::InstallSib19Broadcaster(Ptr<MobilityModel> satMob,
     bc->SetCellId(cellId);
     bc->SetPayloadMode(m_payloadMode);
     bc->SetPeriod(period);
+    // P0-6: reference point by payload (TS 38.213 4.2).
+    const UlSyncReference ref = GetEffectiveUlSyncReference();
+    bc->SetUlSyncReference(ref);
+    if (m_gatewayMob)
+    {
+        // Gateway reference: the common delay is the feeder leg. Satellite
+        // reference on a transparent payload: kMac needs the feeder geometry.
+        bc->SetGatewayPosition(m_gatewayMob->GetPosition());
+    }
     return bc;
+}
+
+UlSyncReference
+NtnRrcHelper::GetEffectiveUlSyncReference() const
+{
+    if (m_ulRefSet)
+    {
+        return m_ulRef;
+    }
+    if (m_payloadMode == PayloadMode::Transparent && m_gatewayMob)
+    {
+        return UlSyncReference::Gateway;
+    }
+    return UlSyncReference::Satellite;
 }
 
 Ptr<NtnUeLocationReporter>

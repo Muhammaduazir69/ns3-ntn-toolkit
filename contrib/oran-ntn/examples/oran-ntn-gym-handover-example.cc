@@ -28,6 +28,21 @@
  *   --gym=1: registers OpenGymInterface::Get() so a Python RL agent
  *     (ns3_ai_ntn.envs Ns3Env) can connect over shared memory and train. Blocks
  *     waiting for the peer, so it is opt-in.
+ *
+ * Wave 2 M2 (P0-5), --kpm=measured (default): the observation comes from the
+ * measured KPM producer (OranNtnRealStackBinding): serving SINR off the PHY
+ * trace, serving and neighbour RSRP from the RRC MeasurementReports, goodput
+ * from delivered bytes; feature 5 is the best neighbour's measured RSRP margin
+ * (no Friis extrapolation, no RSRP = SINR - 95, no 600 s TTE). The vendored
+ * A3 is not installed (SetAutonomousHandover(false)) and ho-predict only keeps
+ * the KPM database (DecisionsEnabled=false), so the agent is the only
+ * mobility decision maker; its HANDOVER actions reach NtnRealStackHelper::
+ * TriggerHandover through the RIC and the binding's actuator registry. The
+ * reward is the measured goodput after the action minus the HO cost and the
+ * ping-pong penalty. Paired Python agent: oran-ntn/tools/
+ * oran_ntn_gym_handover_agent.py (ns3ai_gym_env.Ns3Env API).
+ * In-process policies (--gym=0): --policy=stay|greedy|forceHo (--forceHoAt).
+ * --kpm=legacy keeps the previous injected KPM (labelled derived candidates).
  */
 
 #include "ns3/core-module.h"
@@ -41,6 +56,7 @@
 #include "ns3/oran-ntn-xapp-ho-predict.h"
 #include "ns3/oran-ntn-phy-kpm-extractor.h"
 #include "ns3/oran-ntn-ric-placement.h"
+#include "ns3/oran-ntn-real-stack-binding.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 
@@ -77,6 +93,10 @@ main(int argc, char* argv[])
                               // which is n256 UPLINK and never conformant as a DL carrier.
     double minElevDeg = 10.0;
     bool gym = false; // --gym=1 opens the Python RL peer; default steps in-process
+    std::string kpm = "measured";
+    std::string policy = "greedy";
+    double forceHoAt = 10.0;
+    double a3OffsetDb = 3.0;
     std::string outputDir = "oran-ntn-gym-handover-output";
 
     CommandLine cmd(__FILE__);
@@ -84,9 +104,18 @@ main(int argc, char* argv[])
     cmd.AddValue("numUes", "Ground UEs", numUes);
     cmd.AddValue("numSats", "Satellites (serving + candidates)", numSats);
     cmd.AddValue("gym", "Open the ns3-ai Python RL peer (blocks for a connection)", gym);
+    cmd.AddValue("kpm", "measured (binding, default) or legacy (injected, derived candidates)",
+                 kpm);
+    cmd.AddValue("policy", "in-process policy: stay | greedy (measured A3 margin) | forceHo",
+                 policy);
+    cmd.AddValue("forceHoAt", "forceHo: time of the single commanded handover (s)", forceHoAt);
+    cmd.AddValue("a3OffsetDb", "greedy policy: RSRP margin that triggers a handover (dB)",
+                 a3OffsetDb);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
     numSats = std::max<uint32_t>(numSats, 2);
+    NS_ABORT_MSG_IF(kpm != "measured" && kpm != "legacy", "--kpm must be measured or legacy");
+    const bool measured = (kpm == "measured");
 
     // ---- Real Walker-Delta constellation (SGP4) ----
     WalkerConfig wcfg;
@@ -103,7 +132,7 @@ main(int argc, char* argv[])
     for (uint32_t s = 0; s < numSats; ++s)
     {
         satMobs[s] = CreateObject<Sgp4MobilityModel>();
-        satMobs[s]->SetElements(elements[s % wcfg.total_sats]);
+        satMobs[s]->SetElementsSgp4(elements[s % wcfg.total_sats]);
         satNodes.Get(s)->AggregateObject(satMobs[s]);
     }
 
@@ -131,6 +160,17 @@ main(int argc, char* argv[])
     rs.SetRunTag("oran-ntn-gym-handover");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
     rs.SetHandover(true, /*hysteresisDb=*/3.0, MilliSeconds(256));
+    if (measured)
+    {
+        // The agent owns mobility: no vendored A3 (periodic 480 ms RRC
+        // reports instead) and SS-RSRP on an Earth-fixed cell beam, so the
+        // reported RSRP is cell level (TS 38.215 5.1.1).
+        rs.SetAutonomousHandover(false);
+        Ptr<ConstantPositionMobilityModel> cellCenter =
+            CreateObject<ConstantPositionMobilityModel>();
+        cellCenter->SetPosition(NtnRealStackHelper::GeodeticToEcef(subLat, subLon, 0.0));
+        rs.SetSsbCellBeam(true, cellCenter);
+    }
     rs.Build(satNodes, ueNodes);
     g_rs = &rs;
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(1.0),
@@ -144,11 +184,41 @@ main(int argc, char* argv[])
     // InjectKpmReport drops a report whose gNB id has no E2 node, so these must
     // exist for the measured KPM to reach the xApp.
     auto satE2Nodes = helper->CreateSatelliteE2Nodes(satNodes, nearRtRic);
-    auto xapps = helper->CreateAllXapps(nearRtRic);
-    helper->StartAllXapps(nearRtRic);
+    Ptr<OranNtnRealStackBinding> binding;
+    std::map<std::string, Ptr<OranNtnXappBase>> xapps;
+    if (measured)
+    {
+        // Actuator registry on the measured stack; only xApps whose actions
+        // reach the radio are admitted (ho-predict, tn-ntn-steering here).
+        binding = CreateObject<OranNtnRealStackBinding>();
+        binding->Bind(helper, &rs);
+        for (uint32_t u = 0; u < numUes; ++u)
+        {
+            binding->SetUeSlice(u, 0); // EmbbStreaming, 5QI 2
+        }
+        std::vector<Ptr<MobilityModel>> sm(satMobs.begin(), satMobs.end());
+        binding->SetGeometry(sm, std::vector<Ptr<MobilityModel>>(ueModels.begin(), ueModels.end()),
+                             freqGhz * 1e9);
+        binding->StartKpm(MilliSeconds(100), Seconds(1.0));
+        xapps = helper->CreateAdmittedXapps(nearRtRic);
+    }
+    else
+    {
+        xapps = helper->CreateAllXapps(nearRtRic);
+    }
     Ptr<OranNtnXappHoPredict> hoPredict =
         DynamicCast<OranNtnXappHoPredict>(nearRtRic->GetXappByName("ho-predict"));
     NS_ABORT_MSG_IF(!hoPredict, "ho-predict xApp not found");
+    if (measured)
+    {
+        // ho-predict is the KPM database of the env; the agent decides.
+        hoPredict->SetAttribute("DecisionsEnabled", BooleanValue(false));
+        if (auto steer = nearRtRic->GetXappByName("tn-ntn-steering"))
+        {
+            nearRtRic->DeregisterXapp(steer->GetXappId());
+        }
+    }
+    helper->StartAllXapps(nearRtRic);
 
     // ORAN-01 / AI-01 FIX: give the RC path a real actuator. Without this the
     // helper logs "action LOGGED ONLY -- no handover actuator wired" and reports
@@ -158,6 +228,7 @@ main(int argc, char* argv[])
     // The RC action names an E2 node id (1-based satellite index); the radio
     // wants an NR cell id. Map through GetGnbCellId rather than relying on the
     // two numberings happening to coincide.
+    if (!measured)
     helper->SetHandoverActuator(MakeCallback(+[](E2RcAction action) -> bool {
         if (action.targetGnbId == 0)
         {
@@ -188,6 +259,11 @@ main(int argc, char* argv[])
     Ptr<OranNtnGymHandover> env = CreateObject<OranNtnGymHandover>();
     env->SetXapp(hoPredict);
     env->SetMaxCandidates(numSats - 1);
+    if (measured)
+    {
+        env->SetAttribute("MeasuredFeatures", BooleanValue(true));
+        env->SetAttribute("GoodputReward", BooleanValue(true));
+    }
 
     // ---- D3: a REAL production feed for the PHY-KPM extractor. The extractor's
     //      RegisterRnti/IngestMeasuredSample were previously only exercised by
@@ -210,6 +286,27 @@ main(int argc, char* argv[])
     const double kpmIntervalS = 0.1;
     uint32_t g_steps = 0;
     double g_obsSum = 0.0;
+    uint32_t g_hoActions = 0;
+    double g_rewardSum = 0.0;
+    if (measured)
+    {
+        // The RAN publishes each UE's actual serving cell to the env; the
+        // binding feeds the measured KPM.
+        rs.RegisterPeriodicCallback(Seconds(kpmIntervalS), [&](Time) {
+            for (uint32_t ue = 0; ue < numUes; ++ue)
+            {
+                const uint16_t cell = rs.GetUeServingCellId(ue);
+                for (uint32_t s = 0; s < numSats; ++s)
+                {
+                    if (cell != 0 && rs.GetGnbCellId(s) == cell)
+                    {
+                        hoPredict->SetUeServingCell(ue, s + 1);
+                    }
+                }
+            }
+        });
+    }
+    else
     rs.RegisterPeriodicCallback(Seconds(kpmIntervalS), [&](Time) {
         for (uint32_t ue = 0; ue < numUes; ++ue)
         {
@@ -349,8 +446,23 @@ main(int argc, char* argv[])
             // and travels the xApp -> RIC -> E2 -> RC path (see the gate-10 test
             // for the end-to-end actuation proof). Action 0 = stay; action 1 =
             // hand over to the best candidate.
-            const double a3OffsetDb = 3.0;
-            uint32_t chosen = (bestCandSinr > servingSinr + a3OffsetDb) ? 1u : 0u;
+            uint32_t chosen = 0;
+            if (!measured)
+            {
+                chosen = (bestCandSinr > servingSinr + 3.0) ? 1u : 0u;
+            }
+            else if (policy == "greedy")
+            {
+                // feature 5 = measured RSRP margin of the best neighbour (dB)
+                chosen = (bestCandSinr > a3OffsetDb) ? 1u : 0u;
+            }
+            else if (policy == "forceHo")
+            {
+                const double t = Simulator::Now().GetSeconds();
+                chosen = (t >= forceHoAt && t < forceHoAt + 1.0) ? 1u : 0u;
+            }
+            g_hoActions += chosen ? 1 : 0;
+            g_rewardSum += reward;
             auto act = CreateObject<OpenGymDiscreteContainer>(numSats); // 0=stay, 1..=candidate
             act->SetValue(chosen);
             env->ExecuteActions(act);
@@ -394,10 +506,10 @@ main(int argc, char* argv[])
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
-    if (gym)
-    {
-        OpenGymInterface::Get()->NotifySimulationEnd();
-    }
+    // The episode is closed by the NotifySimulationEnd scheduled at
+    // duration - 10 ms. A second call here blocked forever on the shared-memory
+    // semaphore once the Python peer had closed (found by the first paired run,
+    // Wave 2 M2), so it is not repeated.
 
     // AI-07: name WHICH feature is measured.
     //
@@ -407,6 +519,20 @@ main(int argc, char* argv[])
     // rule at `chosen = (bestCandSinr > servingSinr + 3.0)` actually keys on.
     // A statement true of one feature, printed as a claim about the whole
     // observation, is how a derived number acquires a measured reputation.
+    if (measured)
+    {
+        std::printf("# === measured summary === kpm=measured policy=%s steps=%u ho_actions=%u "
+                    "routed=%llu actuated=%llu handovers_completed=%u episode_reward=%.3f "
+                    "goodput=%.3f Mbps serving_reports=%llu neighbour_reports=%llu\n",
+                    gym ? "python-agent" : policy.c_str(), g_steps, g_hoActions,
+                    static_cast<unsigned long long>(helper->GetTotalRouted()),
+                    static_cast<unsigned long long>(helper->GetTotalActuated()),
+                    rs.GetHandoverCount(), g_rewardSum, rs.GetRxThroughputMbps(),
+                    static_cast<unsigned long long>(binding->GetServingReports()),
+                    static_cast<unsigned long long>(binding->GetNeighbourReports()));
+        helper->WriteAllMetrics(nearRtRic);
+    }
+    if (!measured)
     std::printf("# === summary === gym steps=%u  mean|servingSINR| from env obs=%.2f dB "
                 "(feature 0 is MEASURED, off RxPacketTraceUe; feature 5 "
                 "bestCandSinr is a free-space slant-range extrapolation and is "

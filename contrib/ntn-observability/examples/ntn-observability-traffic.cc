@@ -141,7 +141,7 @@ main(int argc, char* argv[])
     const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(elements[0]);
+    satSgp4->SetElementsSgp4(elements[0]);
     double subLat, subLon, subAlt;
     satSgp4->GetGeodetic(subLat, subLon, subAlt);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -174,12 +174,17 @@ main(int argc, char* argv[])
     // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
     // reports "not asserted" rather than certifying an uncalibrated budget.
     rs.SetSatConductedPowerDbm(satEirpDbm);
+    // Wave 2 M2: TS 28.552 KPM from the RAN counters (DRB.RlcSduDelayDl from
+    // RLC, TB.TotNbrDl / TB.ErrTotNbrDl as integer counts, RRU.PrbUsedDl);
+    // TB.ErrTotNbrDl used to carry a BLER fraction (e.g. 1.56e-11).
+    rs.SetKpmFromRanCounters(true);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     // Canonical KPM wiring: per-flow TS 28.552 series auto-exported to
     // ntn-observability-traffic_kpm_series.{csv,lp} at end of simulation.
-    rs.EnableAiFlowMonitor("ntn-observability-traffic");
+    rs.EnableAiFlowMonitor(outputDir.empty() ? std::string("ntn-observability-traffic")
+                                             : outputDir + "/ntn-observability-traffic");
 
     // Observability sink.
     Ptr<NtnInfluxSink> influx = CreateObject<NtnInfluxSink>();

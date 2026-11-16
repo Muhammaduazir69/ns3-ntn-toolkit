@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Muhammad Uzair
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// sagin-sgp4-routed-traffic — Roadmap §4.4.4 + §4.4.5 (SGP4-driven SAGIN with
+// sagin-sgp4-routed-traffic: Roadmap §4.4.4 + §4.4.5 (SGP4-driven SAGIN with
 // graph shortest-path ISL routing over the live contact graph).
 //
 // This example COMPOSES two contrib modules into one real ns-3 data plane:
@@ -22,7 +22,7 @@
 // are gated by the contact graph: when the scheduler reports a contact UP we
 // bring the corresponding ns-3 Ipv4 interface UP, set its channel delay from the
 // real slant range and gate usability on an honest binary link budget (closes /
-// does not close — no sigmoid PER); on a contact DOWN we bring the interface
+// does not close; no sigmoid PER); on a contact DOWN we bring the interface
 // DOWN. After every transition we call
 // Ipv4GlobalRoutingHelper::RecomputeRoutingTables(), so ns-3's own global
 // routing re-routes the live UDP flow over whatever space path currently exists.
@@ -36,8 +36,28 @@
 // Everything is sim-time driven and parameter-dynamic (--simSeconds, --handover
 // gap via --leadSeconds, --minElevDeg, --dataRateMbps ...). Nothing is hardcoded.
 //
+// Wave 2 M3 (default --linkModel=satlink): each space hop direction carries a
+// ntn-constellation NtnSatLinkErrorModel: per-packet Es/No from the LIVE SGP4
+// slant range (FSPL + ITU-R P.676 gas + P.618 scintillation at the lower end)
+// through the DVB-S2 waterfall of the declared MODCOD, so a link near the
+// elevation floor loses a FRACTION of its packets instead of being either
+// perfect or dead. Declared payload (no fixed 95 dBm / -100 dBm pair):
+//   satellite Ka user/feeder downlink: TR 38.821 Table 6.1.1.1-1 Set-1 LEO-600
+//     EIRP density 4 dBW/MHz, G/T 13 dB/K;
+//   HAPS terminal and gateway: Table 6.1.1.1-2 VSAT, 33 dBm + 43.2 dBi (30 GHz
+//     uplink, 46.2 dBW), G/T 15.9 dB/K;
+//   ISL: ITU-R inter-satellite band 22.55-23.55 GHz, 10 W into a 0.5 m dish
+//     (eta 0.6, 39.6 dBi) at both ends, T_sys 500 K (G/T 12.6 dB/K);
+//   MODCOD: DVB-S2 8PSK 3/4, 2.228 b/symbol, QEF Es/No 7.91 dB (EN 302 307-1
+//     Table 13); noise bandwidth = --spaceCapMbps / 2.228.
+// Routing is unchanged: the ContactGraphScheduler transitions bring the
+// interfaces up and down and ns-3 global routing is recomputed on exactly
+// those events (counted: route_recomputes == router edge events on mapped
+// edges). --linkModel=gate restores the old binary budget gate.
+//
 // Quick test:  --simSeconds=360 --dataRateMbps=4
 #include "ns3/applications-module.h"
+#include "ns3/boolean.h"
 #include "ns3/command-line.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/core-module.h"
@@ -53,6 +73,7 @@
 
 #include "ns3/contact-graph-router.h"
 #include "ns3/contact-graph-scheduler.h"
+#include "ns3/ntn-sat-link-error-model.h"
 #include "ns3/orbital-elements.h"
 #include "ns3/sgp4-mobility-model.h"
 
@@ -95,6 +116,40 @@ struct SpaceLink
     // geometry instead of keeping whatever the contact-up event carried.
     Ptr<MobilityModel> mobA, mobB;
     bool up = false;
+    // Wave 2 M3 --linkModel=satlink: graded per-packet error models, A = rx at
+    // the first node (b -> a), B = rx at the second node (a -> b).
+    Ptr<ntncon::NtnSatLinkErrorModel> slA, slB;
+    uint64_t rxA = 0, rxB = 0, lostA = 0, lostB = 0;
+    std::string name;
+};
+
+bool g_satlink = true;
+uint64_t g_routeRecomputes = 0;
+
+/// Counts and forwards to the graded model (per-hop measured BLER).
+class CountingErrorModel : public ErrorModel
+{
+  public:
+    static TypeId GetTypeId()
+    {
+        static TypeId tid = TypeId("SaginRoutedCountingErrorModel").SetParent<ErrorModel>();
+        return tid;
+    }
+    Ptr<ntncon::NtnSatLinkErrorModel> inner;
+    uint64_t* rx{nullptr};
+    uint64_t* lost{nullptr};
+
+  private:
+    bool DoCorrupt(Ptr<Packet> p) override
+    {
+        ++*rx;
+        const bool bad = inner->IsCorrupt(p);
+        *lost += bad ? 1 : 0;
+        return bad;
+    }
+    void DoReset() override
+    {
+    }
 };
 
 std::map<std::pair<uint32_t, uint32_t>, SpaceLink> g_links;
@@ -122,8 +177,8 @@ double g_minSnrDb = 6.0; // decode threshold for the binary link-budget gate
 // Bring an ns-3 Ipv4 link up/down to mirror a contact-graph transition, set
 // the channel delay from the true slant range, and gate usability on an
 // HONEST binary link budget: a Ka GSL/ISL with high-gain dishes either closes
-// its budget (clean decode at these SNRs) or is unusable. No sigmoid PER —
-// partial-loss radio behaviour belongs to the real-stack (mmwave) examples;
+// its budget (clean decode at these SNRs) or is unusable. No sigmoid PER:
+// partial-loss radio behavior belongs to the real-stack (mmwave) examples;
 // this example's contribution is real contact-driven ROUTING.
 // SAGIN-1: set a link's propagation delay and binary budget from a range.
 // Both the contact-up event and the periodic refresh go through here so the
@@ -131,6 +186,12 @@ double g_minSnrDb = 6.0; // decode threshold for the binary link-budget gate
 void
 SetLinkFromRange(SpaceLink& l, double rangeM)
 {
+    if (g_satlink)
+    {
+        // The error models read the live geometry per packet; only the delay is set here.
+        l.chan->SetAttribute("Delay", TimeValue(Seconds(rangeM / kC)));
+        return;
+    }
     const double sinr = g_eirpDbm - FsplDb(rangeM, g_freqHz) - g_noiseDbm;
     const bool budgetCloses = sinr >= g_minSnrDb;
     l.chan->SetAttribute("Delay", TimeValue(Seconds(rangeM / kC)));
@@ -190,6 +251,7 @@ ApplyContact(ContactEvent ev)
     }
     // ns-3 global routing follows the contact graph.
     Ipv4GlobalRoutingHelper::RecomputeRoutingTables();
+    ++g_routeRecomputes;
 }
 
 // Per-second reporting: print the Dijkstra path the contact-graph router picks
@@ -249,6 +311,22 @@ Report(double simSeconds)
                 wp.path.empty()  ? "n/a"
                 : sameRoute      ? "AGREES (hop-count route is the same)"
                                  : "DIFFERS from the printed path");
+    if (g_satlink && (static_cast<uint64_t>(now) % 10 == 0))
+    {
+        // Model BLER of every up hop at this instant, both directions.
+        std::printf("    hops:");
+        for (auto& [key, l] : g_links)
+        {
+            if (!l.up)
+            {
+                continue;
+            }
+            std::printf(" %s[EsNo %.2f/%.2f dB BLER %.3g/%.3g]", l.name.c_str(),
+                        l.slB->CurrentEsNoDb(), l.slA->CurrentEsNoDb(), l.slB->CurrentBler(),
+                        l.slA->CurrentBler());
+        }
+        std::printf("\n");
+    }
     if (!wp.path.empty() && !sameRoute)
     {
         std::printf("    NOTE (SAGIN-7): packets follow the minimum-HOP route "
@@ -282,7 +360,8 @@ MakeSpaceLink(uint32_t idA,
               Ptr<Node> b,
               double capacityMbps,
               Ipv4AddressHelper& ipv4,
-              const std::string& subnet)
+              const std::string& subnet,
+              const std::string& name = "")
 {
     PointToPointHelper p2p;
     p2p.SetDeviceAttribute(
@@ -310,6 +389,7 @@ MakeSpaceLink(uint32_t idA,
     l.mobB = b->GetObject<MobilityModel>();
     l.ifA = ifc.Get(0).second;
     l.ifB = ifc.Get(1).second;
+    l.name = name;
     // Start DOWN; the first contact-up event brings the link in.
     l.ipA->SetDown(l.ifA);
     l.ipB->SetDown(l.ifB);
@@ -331,6 +411,7 @@ main(int argc, char* argv[])
     double spaceCapMbps = 50.0;
     double accessCapMbps = 100.0;
     double eirpDbm = 95.0;
+    std::string linkModel = "satlink";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
@@ -344,7 +425,13 @@ main(int argc, char* argv[])
     cmd.AddValue("eirpDbm", "Space-link EIRP (dBm, tx power + antenna gain)", eirpDbm);
     cmd.AddValue("minSnrDb", "Decode threshold for the binary link-budget gate (dB)",
                  g_minSnrDb);
+    cmd.AddValue("linkModel",
+                 "satlink (NtnSatLinkErrorModel per hop, declared budget, default) | gate (legacy "
+                 "binary budget with --eirpDbm/--minSnrDb)",
+                 linkModel);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_UNLESS(linkModel == "satlink" || linkModel == "gate", "--linkModel=satlink|gate");
+    g_satlink = (linkModel == "satlink");
 
     const double a = kRe + altKm * 1000.0;
     const double n = std::sqrt(kMu / (a * a * a)); // mean motion, rad/s
@@ -442,11 +529,99 @@ main(int argc, char* argv[])
         mkFixed(gw.Get(0), srv.Get(0), accessCapMbps, 1.0, "10.0.9.0"); // GW->server
 
     // Five gated SPACE links.
-    MakeSpaceLink(kSatA, kGs1, nSatA.Get(0), haps.Get(0), spaceCapMbps, ipv4, "10.1.1.0");
-    MakeSpaceLink(kSatB, kGs1, nSatB.Get(0), haps.Get(0), spaceCapMbps, ipv4, "10.1.2.0");
-    MakeSpaceLink(kSatA, kSatB, nSatA.Get(0), nSatB.Get(0), spaceCapMbps, ipv4, "10.1.3.0");
-    MakeSpaceLink(kSatA, kGs2, nSatA.Get(0), gw.Get(0), spaceCapMbps, ipv4, "10.1.4.0");
-    MakeSpaceLink(kSatB, kGs2, nSatB.Get(0), gw.Get(0), spaceCapMbps, ipv4, "10.1.5.0");
+    MakeSpaceLink(kSatA, kGs1, nSatA.Get(0), haps.Get(0), spaceCapMbps, ipv4, "10.1.1.0", "satA-HAPS");
+    MakeSpaceLink(kSatB, kGs1, nSatB.Get(0), haps.Get(0), spaceCapMbps, ipv4, "10.1.2.0", "satB-HAPS");
+    MakeSpaceLink(kSatA, kSatB, nSatA.Get(0), nSatB.Get(0), spaceCapMbps, ipv4, "10.1.3.0", "ISL");
+    MakeSpaceLink(kSatA, kGs2, nSatA.Get(0), gw.Get(0), spaceCapMbps, ipv4, "10.1.4.0", "satA-GW");
+    MakeSpaceLink(kSatB, kGs2, nSatB.Get(0), gw.Get(0), spaceCapMbps, ipv4, "10.1.5.0", "satB-GW");
+
+    // Wave 2 M3: graded per-hop error models on the declared payload.
+    constexpr double kSpecEff = 2.228;   // DVB-S2 8PSK 3/4 (EN 302 307-1 Table 13)
+    constexpr double kQefEsNoDb = 7.91;  // same table, QEF Es/No
+    const double noiseBwHz = spaceCapMbps * 1e6 / kSpecEff;
+    const double bwMhzDb = 10.0 * std::log10(noiseBwHz / 1e6);
+    const double satKaEirpDbw = 4.0 + bwMhzDb;   // Set-1 LEO-600 Ka 4 dBW/MHz
+    const double vsatEirpDbw = 33.0 + 43.2 - 30.0; // Set-1 VSAT uplink
+    const double islGainDbi = 10.0 * std::log10(0.6 * std::pow(M_PI * 0.5 * 23e9 / kC, 2.0));
+    const double islEirpDbw = 10.0 + islGainDbi;
+    const double islGtDbK = islGainDbi - 10.0 * std::log10(500.0);
+    Ptr<ConstantPositionMobilityModel> hapsMob;
+    Ptr<ConstantPositionMobilityModel> gwMob;
+    if (g_satlink)
+    {
+        auto ecef = [](double latDeg, double lonDeg, double altM) {
+            const double kA = 6378137.0;
+            const double f = 1.0 / 298.257223563;
+            const double e2 = f * (2.0 - f);
+            const double la = latDeg * M_PI / 180.0;
+            const double lo = lonDeg * M_PI / 180.0;
+            const double nn = kA / std::sqrt(1.0 - e2 * std::sin(la) * std::sin(la));
+            return Vector((nn + altM) * std::cos(la) * std::cos(lo),
+                          (nn + altM) * std::cos(la) * std::sin(lo),
+                          (nn * (1.0 - e2) + altM) * std::sin(la));
+        };
+        const double hapsAltM = 20000.0; // HAPS station altitude (stratosphere)
+        hapsMob = CreateObject<ConstantPositionMobilityModel>();
+        hapsMob->SetPosition(ecef(gs1Lat, gs1Lon, hapsAltM));
+        gwMob = CreateObject<ConstantPositionMobilityModel>();
+        gwMob->SetPosition(ecef(gs2Lat, gs2Lon, 0.0));
+        // groundEnd: the lower endpoint is a ground station or the HAPS. Its
+        // altitude is taken from its own position (GroundAltFromGeometry,
+        // WGS-84 height, up to 99 km), so P.676 gas integrates from the HAPS's
+        // real 20 km and not from a cap. Tropospheric scintillation (P.618-13
+        // 2.4.1, a turbulent layer in the lowest kilometres) is switched off
+        // for a station above the troposphere (> 12 km). An ISL has no ground
+        // end (its elevation-based guard returns no excess loss anyway).
+        auto mk = [&](Ptr<MobilityModel> tx, Ptr<MobilityModel> rx, double eirp, double gt,
+                      double fHz, bool groundEnd, double stationAltKm, double latDeg) {
+            Ptr<ntncon::NtnSatLinkErrorModel> e = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            e->SetAttribute("EirpDbw", DoubleValue(eirp));
+            e->SetAttribute("RxGtDbK", DoubleValue(gt));
+            e->SetAttribute("BandwidthHz", DoubleValue(noiseBwHz));
+            e->SetAttribute("CarrierHz", DoubleValue(fHz));
+            e->SetAttribute("ThresholdEsNoDb", DoubleValue(kQefEsNoDb));
+            e->SetAttribute("GroundAltFromGeometry", BooleanValue(groundEnd));
+            if (stationAltKm > 12.0)
+            {
+                e->SetAttribute("EnableScintillation", BooleanValue(false));
+            }
+            e->SetAttribute("StationLatitudeDeg", DoubleValue(latDeg));
+            e->SetEndpoints(tx, rx);
+            return e;
+        };
+        auto wire = [&](uint32_t idA, uint32_t idB, Ptr<ntncon::NtnSatLinkErrorModel> rxAtA,
+                        Ptr<ntncon::NtnSatLinkErrorModel> rxAtB) {
+            SpaceLink& l = g_links[Canon(idA, idB)];
+            l.slA = rxAtA;
+            l.slB = rxAtB;
+            Ptr<CountingErrorModel> ca = CreateObject<CountingErrorModel>();
+            ca->inner = rxAtA;
+            ca->rx = &l.rxA;
+            ca->lost = &l.lostA;
+            Ptr<CountingErrorModel> cb = CreateObject<CountingErrorModel>();
+            cb->inner = rxAtB;
+            cb->rx = &l.rxB;
+            cb->lost = &l.lostB;
+            l.chan->GetDevice(0)->SetAttribute("ReceiveErrorModel", PointerValue(ca));
+            l.chan->GetDevice(1)->SetAttribute("ReceiveErrorModel", PointerValue(cb));
+        };
+        // Node A of each MakeSpaceLink call is the satellite (first argument).
+        // sat -> HAPS (Ka 20 GHz downlink) received at HAPS = B; HAPS -> sat (30 GHz) at A.
+        const double hapsKm = hapsAltM / 1e3;
+        wire(kSatA, kGs1, mk(hapsMob, satA, vsatEirpDbw, 13.0, 30e9, true, hapsKm, gs1Lat),
+             mk(satA, hapsMob, satKaEirpDbw, 15.9, 20e9, true, hapsKm, gs1Lat));
+        wire(kSatB, kGs1, mk(hapsMob, satB, vsatEirpDbw, 13.0, 30e9, true, hapsKm, gs1Lat),
+             mk(satB, hapsMob, satKaEirpDbw, 15.9, 20e9, true, hapsKm, gs1Lat));
+        wire(kSatA, kSatB, mk(satB, satA, islEirpDbw, islGtDbK, 23e9, false, 0.0, 0.0),
+             mk(satA, satB, islEirpDbw, islGtDbK, 23e9, false, 0.0, 0.0));
+        wire(kSatA, kGs2, mk(gwMob, satA, vsatEirpDbw, 13.0, 30e9, true, 0.0, gs2Lat),
+             mk(satA, gwMob, satKaEirpDbw, 15.9, 20e9, true, 0.0, gs2Lat));
+        wire(kSatB, kGs2, mk(gwMob, satB, vsatEirpDbw, 13.0, 30e9, true, 0.0, gs2Lat),
+             mk(satB, gwMob, satKaEirpDbw, 15.9, 20e9, true, 0.0, gs2Lat));
+        std::printf("#   satlink budget: DVB-S2 8PSK 3/4 (QEF %.2f dB) in %.2f MHz; sat Ka EIRP %.2f dBW "
+                    "G/T 13 dB/K; VSAT EIRP %.1f dBW G/T 15.9 dB/K; ISL EIRP %.1f dBW G/T %.1f dB/K\n",
+                    kQefEsNoDb, noiseBwHz / 1e6, satKaEirpDbw, vsatEirpDbw, islEirpDbw, islGtDbK);
+    }
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
@@ -502,6 +677,49 @@ main(int argc, char* argv[])
                 (unsigned long)g_router->EdgesAddedTotal(),
                 (unsigned long)g_router->EdgesRemovedTotal(),
                 (unsigned long)g_router->RouteQueries());
+    // Wave 2 M3: one-way delay p95 from the sink's 0.1 ms histogram, and the
+    // per-hop measured packet loss.
+    {
+        std::vector<uint64_t> h;
+        uint64_t total = 0;
+        for (const auto& [k, st] : g_sink->GetFlowStats())
+        {
+            if (h.empty())
+            {
+                h.assign(st.delayHistFine.size(), 0);
+            }
+            for (size_t i = 0; i < st.delayHistFine.size() && i < h.size(); ++i)
+            {
+                h[i] += st.delayHistFine[i];
+                total += st.delayHistFine[i];
+            }
+        }
+        double p95 = std::nan("");
+        uint64_t cum = 0;
+        for (size_t i = 0; i < h.size() && total > 0; ++i)
+        {
+            cum += h[i];
+            if (cum >= 0.95 * total)
+            {
+                p95 = (i + 0.5) * NtnOranSink::FlowStats::kFineBinMs;
+                break;
+            }
+        }
+        std::printf("#   owd_p95=%.2f ms  route_recomputes=%lu (contact transitions on data-plane "
+                    "edges; router edge events %lu)\n",
+                    p95, (unsigned long)g_routeRecomputes,
+                    (unsigned long)(g_router->EdgesAddedTotal() + g_router->EdgesRemovedTotal()));
+    }
+    if (g_satlink)
+    {
+        for (auto& [key, l] : g_links)
+        {
+            std::printf("#   hop %-9s  a->b rx=%lu lost=%lu (%.4f)  b->a rx=%lu lost=%lu (%.4f)\n",
+                        l.name.c_str(), (unsigned long)l.rxB, (unsigned long)l.lostB,
+                        l.rxB ? double(l.lostB) / l.rxB : 0.0, (unsigned long)l.rxA,
+                        (unsigned long)l.lostA, l.rxA ? double(l.lostA) / l.rxA : 0.0);
+        }
+    }
     Simulator::Destroy();
     return 0;
 }

@@ -142,12 +142,16 @@ class OranNtnXappHoPredict : public OranNtnXappBase
         // (strongest beam) so the SINR trend is built from one cell, not a mix.
         std::map<uint32_t, double> lastSinrByGnb;
         std::map<uint32_t, double> lastTteByGnb;
+        /// Wave 2 M2: RRC-measured RSRP per cell (NaN when not reported).
+        std::map<uint32_t, double> lastRsrpByGnb;
     };
 
     std::map<uint32_t, UeHoState> m_ueStates;
 
     // Configuration
     double m_sinrDropThreshold;     //!< SINR threshold for HO (dB)
+    double m_a3OffsetDb{3.0};        //!< measured-RSRP A3 offset (TS 38.331 5.5.4.4)
+    bool m_decisionsEnabled{true};   //!< false = KPM database only (an RL agent decides)
     Time m_tteMinimum;              //!< Min TTE for candidate
     Time m_proactiveLeadTime;       //!< How far ahead to predict
     Time m_pingPongGuardTime;       //!< Min time between HOs

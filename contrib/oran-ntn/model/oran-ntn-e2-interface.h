@@ -50,6 +50,8 @@
 namespace ns3
 {
 
+class OranNtnE2Transport;
+
 // ============================================================================
 //  E2 Subscription Management
 // ============================================================================
@@ -250,6 +252,21 @@ class OranNtnE2Node : public Object
     void SetLoopLatencyProbe(Ptr<OranNtnLoopLatencyProbe> probe);
     Ptr<OranNtnLoopLatencyProbe> GetLoopLatencyProbe() const;
 
+    // ---- Wave 2 M2 (P0-4): E2 as packets over the feeder (opt-in) ----
+    /**
+     * \brief Bind a packet transport. While bound, indications and RC actions
+     * no longer travel as Simulator::Schedule(FeederLinkDelay) events: they are
+     * handed to the transport, which sends them as packets over this node's
+     * feeder link and calls DeliverFromTransport / ExecuteFromTransport on
+     * arrival. Without a transport (the default) behaviour is unchanged.
+     */
+    void SetPacketTransport(Ptr<OranNtnE2Transport> t);
+    Ptr<OranNtnE2Transport> GetPacketTransport() const;
+    /// RIC-side arrival of an indication that crossed the feeder as a packet.
+    void DeliverFromTransport(const E2Indication& indication);
+    /// Agent-side arrival of a RIC Control sent at `routedAt`.
+    void ExecuteFromTransport(const E2RcAction& action, Time routedAt);
+
     // ---- Trace sources ----
     TracedCallback<uint32_t, E2KpmReport> m_kpmReportSent;
     TracedCallback<uint32_t, E2RcAction, bool> m_rcActionExecuted;
@@ -308,6 +325,7 @@ class OranNtnE2Node : public Object
     RcActionCallback m_rcActionCb;
     IndicationCallback m_indicationCb;
     Ptr<OranNtnLoopLatencyProbe> m_loopProbe; //!< null = instrumentation off
+    Ptr<OranNtnE2Transport> m_transport;      //!< null = event-delay delivery
 
     std::deque<E2Indication> m_alignedQueue; //!< Held for the next loop tick
     EventId m_alignedDispatchEvent;

@@ -57,6 +57,15 @@ Ntn38811ExcessLossModel::GetTypeId()
                           BooleanValue(true),
                           MakeBooleanAccessor(&Ntn38811ExcessLossModel::m_enableShadowFading),
                           MakeBooleanChecker())
+            .AddAttribute("Tr38811Scintillation",
+                          "C3 (Wave 1): replace the legacy P.618 tropospheric draw with the "
+                          "TR 38.811 clause 6.6.6 fade term the ns-3 NTN models use: below "
+                          "6 GHz the ionospheric term 6.22 f_GHz^-1.5 dB (clause 6.6.6.1.4; "
+                          "1.93 dB at 2.185 GHz), above it the tropospheric Table 6.6.6.2.1-1 "
+                          "value at the quantized elevation. Default false (legacy).",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&Ntn38811ExcessLossModel::m_tr38811Scint),
+                          MakeBooleanChecker())
             .AddAttribute("EnableScintillation",
                           "Apply ITU-R P.618 tropospheric scintillation.",
                           BooleanValue(true),
@@ -93,7 +102,55 @@ Ntn38811ExcessLossModel::GetTypeId()
                           "for this long instead of being redrawn per transport block.",
                           DoubleValue(1.0),
                           MakeDoubleAccessor(&Ntn38811ExcessLossModel::m_scintCoherenceS),
-                          MakeDoubleChecker<double>(0.0));
+                          MakeDoubleChecker<double>(0.0))
+            .AddAttribute("P618Scintillation",
+                          "Wave 2 core: ITU-R P.618-13 2.4.1 tropospheric scintillation "
+                          "(sigma_ref = 3.6e-3 + 1e-4 N_wet, effective path length with "
+                          "h_L = 1000 m, aperture averaging g(x), sigma = sigma_ref f^(7/12) "
+                          "g(x) / sin(el)^1.2) as a zero-mean Gaussian AR(1) process in "
+                          "simulated time with time constant ScintillationCoherenceS. "
+                          "Replaces the legacy draw (0.5 sqrt(f/2)/sin(el)^(11/12), redrawn "
+                          "independently every coherence time). Default false (legacy). "
+                          "Tr38811Scintillation takes precedence when both are set.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&Ntn38811ExcessLossModel::m_p618Scint),
+                          MakeBooleanChecker())
+            .AddAttribute("P618WetRefractivity",
+                          "P.618-13 2.4.1 step 1: wet term of the surface refractivity N_wet "
+                          "(ppm), from ITU-R P.453 for the site (median about 40-50 at mid "
+                          "latitudes).",
+                          DoubleValue(42.5),
+                          MakeDoubleAccessor(&Ntn38811ExcessLossModel::m_p618NwetPpm),
+                          MakeDoubleChecker<double>(0.0, 200.0))
+            .AddAttribute("P618AntennaDiameterM",
+                          "P.618-13 2.4.1 step 4: ground antenna diameter (m) for the "
+                          "aperture-averaging factor; 0 = point receiver (handheld), g = 1.",
+                          DoubleValue(0.0),
+                          MakeDoubleAccessor(&Ntn38811ExcessLossModel::m_p618DiameterM),
+                          MakeDoubleChecker<double>(0.0, 100.0))
+            .AddAttribute("P618AntennaEfficiency",
+                          "P.618-13 2.4.1 step 4: antenna efficiency eta (0.5 if unknown).",
+                          DoubleValue(0.5),
+                          MakeDoubleAccessor(&Ntn38811ExcessLossModel::m_p618Efficiency),
+                          MakeDoubleChecker<double>(0.01, 1.0))
+            .AddAttribute("EnableGasAbsorption",
+                          "Apply the band-zenith P.676 gas term / sin(el). Turn off when a "
+                          "spectrum plugin (per-RB P.676) already carries gas, to avoid "
+                          "counting it twice.",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&Ntn38811ExcessLossModel::m_enableGas),
+                          MakeBooleanChecker())
+            .AddAttribute("SkipSpaceToSpace",
+                          "Return no excess loss (gas, shadowing, scintillation, fast "
+                          "fading) on a link whose two ends are both above 100 km: an ISL "
+                          "or sat-sat interference path crosses no troposphere, and the "
+                          "Earth-space terms evaluated at its near-zero 'elevation' reach "
+                          "tens of dB. Default false because skipping those links also "
+                          "skips their random draws, which shifts the shared random "
+                          "streams of every other link in existing runs.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&Ntn38811ExcessLossModel::m_skipSpaceToSpace),
+                          MakeBooleanChecker());
     return tid;
 }
 
@@ -206,6 +263,10 @@ Ntn38811ExcessLossModel::DoCalcRxPower(double txPowerDbm,
                                        Ptr<MobilityModel> a,
                                        Ptr<MobilityModel> b) const
 {
+    if (m_skipSpaceToSpace && IsSpaceToSpace(a->GetPosition(), b->GetPosition()))
+    {
+        return txPowerDbm; // no troposphere on the path
+    }
     const double elevDeg = ElevationDeg(a, b);
     // Clamp at 5 deg minimum elevation for the slant-path scaling (TR 38.811
     // does not define geometry below the horizon mask).
@@ -217,7 +278,7 @@ Ntn38811ExcessLossModel::DoCalcRxPower(double txPowerDbm,
     const double zenithGasDb = (m_freqHz < 6.0e9)    ? 0.04   // S/L-band
                                : (m_freqHz < 30.0e9) ? 0.10   // C/Ku-band
                                                      : 0.30;  // Ka-band+
-    const double atmosphericDb = zenithGasDb / sinElev;
+    const double atmosphericDb = m_enableGas ? zenithGasDb / sinElev : 0.0;
 
     // --- Clutter loss (TR 38.811 §6.6.2): the spec sets CL = 0 dB in LOS, and
     //     this model runs the always-LOS satellite link, so clutter is 0. (The
@@ -297,7 +358,53 @@ Ntn38811ExcessLossModel::DoCalcRxPower(double txPowerDbm,
     // --- Tropospheric scintillation (ITU-R P.618): sigma grows with sqrt(freq)
     //     and shrinks with elevation^(-11/12). Coherence is seconds-scale, so
     //     hold the sample for m_scintCoherenceS rather than redrawing per TB. ---
-    if (m_enableScintillation)
+    if (m_enableScintillation && m_tr38811Scint)
+    {
+        // TR 38.811 clause 6.6.6.1.4 (ionospheric, f < 6 GHz) and Table
+        // 6.6.6.2.1-1 (tropospheric, f >= 6 GHz, elevation quantized to 10 deg,
+        // clamped at 10 deg), the fade terms of the mainline ThreeGppNTN models.
+        const double fGHz = m_freqHz / 1.0e9;
+        if (fGHz < 6.0)
+        {
+            st.scintDb = 6.22 / std::pow(fGHz, 1.5);
+        }
+        else
+        {
+            static const double kTropo[] = {1.08, 0.48, 0.30, 0.22, 0.17, 0.13, 0.12, 0.12, 0.12};
+            const int q = (elevDeg < 10.0) ? 10 : static_cast<int>(std::round(elevDeg / 10.0) * 10);
+            st.scintDb = kTropo[std::clamp(q / 10 - 1, 0, 8)];
+        }
+    }
+    else if (m_enableScintillation && m_p618Scint)
+    {
+        // P.618-13 2.4.1: zero-mean Gaussian with the recommendation's sigma,
+        // correlated in time: x <- rho x + sqrt(1 - rho^2) N(0,1),
+        // rho = exp(-dt / Tc), Tc = ScintillationCoherenceS. Unit-variance
+        // state scaled at read time, so the marginal stays sigma(el)^2 as the
+        // elevation moves.
+        const Time now = Simulator::Now();
+        if (!st.scintValid)
+        {
+            st.scintUnit = m_scintRng->GetValue();
+            st.scintValid = true;
+            st.lastScintTime = now;
+        }
+        else if (now > st.lastScintTime)
+        {
+            const double dt = (now - st.lastScintTime).GetSeconds();
+            const double rho = (m_scintCoherenceS > 0.0) ? std::exp(-dt / m_scintCoherenceS) : 0.0;
+            st.scintUnit = rho * st.scintUnit +
+                           std::sqrt(std::max(0.0, 1.0 - rho * rho)) * m_scintRng->GetValue();
+            st.lastScintTime = now;
+        }
+        st.scintDb = P618ScintillationSigmaDb(m_freqHz,
+                                              elevDeg,
+                                              m_p618NwetPpm,
+                                              m_p618DiameterM,
+                                              m_p618Efficiency) *
+                     st.scintUnit;
+    }
+    else if (m_enableScintillation)
     {
         const Time now = Simulator::Now();
         if ((now - st.lastScintTime).GetSeconds() >= m_scintCoherenceS)
@@ -341,6 +448,58 @@ Ntn38811ExcessLossModel::DoCalcRxPower(double txPowerDbm,
                          << " scint=" << scintDb << " fade=" << fadeLossDb
                          << " excess=" << excessDb << "dB");
     return txPowerDbm - excessDb;
+}
+
+double
+Ntn38811ExcessLossModel::P618ScintillationSigmaDb(double freqHz,
+                                                  double elevDeg,
+                                                  double nWetPpm,
+                                                  double diameterM,
+                                                  double efficiency)
+{
+    // ITU-R P.618-13 section 2.4.1 (valid 4-55 GHz, elevation >= 5 deg; used
+    // here as the documented extrapolation outside that range).
+    const double fGHz = freqHz / 1.0e9;
+    const double el = std::max(elevDeg, 5.0) * M_PI / 180.0;
+    const double sinEl = std::sin(el);
+    // Step 2: sigma_ref = 3.6e-3 + 1e-4 N_wet (dB).
+    const double sigmaRef = 3.6e-3 + 1.0e-4 * nWetPpm;
+    // Step 3: effective path length, h_L = 1000 m.
+    constexpr double hL = 1000.0;
+    const double L = 2.0 * hL / (std::sqrt(sinEl * sinEl + 2.35e-4) + sinEl);
+    // Step 4: effective diameter.
+    const double dEff = std::sqrt(efficiency) * diameterM;
+    // Step 5: antenna averaging factor g(x), x = 1.22 D_eff^2 f / L.
+    double g = 1.0;
+    if (dEff > 0.0)
+    {
+        const double x = 1.22 * dEff * dEff * (fGHz / L);
+        const double arg = 3.86 * std::pow(x * x + 1.0, 11.0 / 12.0) *
+                               std::sin(11.0 / 6.0 * std::atan(1.0 / x)) -
+                           7.08 * std::pow(x, 5.0 / 6.0);
+        // Above x = 7.0 the recommendation says the prediction is not valid
+        // (the argument turns negative); clamp at full averaging.
+        g = (arg > 0.0) ? std::sqrt(arg) : 0.0;
+    }
+    else
+    {
+        // x = 0: g = sqrt(3.86 sin(11 pi / 12)) = 0.99954.
+        g = std::sqrt(3.86 * std::sin(11.0 / 6.0 * M_PI / 2.0));
+    }
+    // Step 6: sigma = sigma_ref f^(7/12) g(x) / sin(el)^1.2.
+    return sigmaRef * std::pow(fGHz, 7.0 / 12.0) * g / std::pow(sinEl, 1.2);
+}
+
+bool
+Ntn38811ExcessLossModel::IsSpaceToSpace(const Vector& pa, const Vector& pb)
+{
+    auto altM = [](const Vector& p) {
+        const double r = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+        // ECEF when the radius is near/above an Earth radius, else local ENU
+        // (same frame test as ElevationDeg).
+        return (r > 0.5 * EARTH_RADIUS_M) ? (r - EARTH_RADIUS_M) : p.z;
+    };
+    return altM(pa) > 100e3 && altM(pb) > 100e3;
 }
 
 int64_t

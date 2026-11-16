@@ -95,6 +95,9 @@ namespace provenance
 inline constexpr const char* kMeasured    = "measured";
 inline constexpr const char* kDerived     = "derived";
 inline constexpr const char* kSynthesized = "synthesized";
+/// A cell-configuration quantity (e.g. RRU.PrbAvailDl from the BWP): neither
+/// measured nor estimated.
+inline constexpr const char* kConfigured  = "configured";
 } // namespace provenance
 
 /// A single canonical KPM measurement. `value` is in WG3-canonical units

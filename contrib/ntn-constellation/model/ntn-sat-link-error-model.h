@@ -22,6 +22,9 @@
 #ifndef NTN_SAT_LINK_ERROR_MODEL_H
 #define NTN_SAT_LINK_ERROR_MODEL_H
 
+#include <map>
+#include <tuple>
+
 #include "ns3/error-model.h"
 #include "ns3/mobility-model.h"
 #include "ns3/vector.h"
@@ -141,6 +144,30 @@ class NtnSatLinkErrorModel : public ErrorModel
     mutable double m_lastGaseousDb{0.0};
     mutable double m_lastRainDb{0.0};
     mutable double m_lastScintDb{0.0};
+
+    // ---- Wave 2 core: altitude, frame and cost ------------------------------
+    /// Ground-station altitude (km) used by P.676/P.618: GroundAltKm, or the
+    /// lower endpoint's own altitude when GroundAltFromGeometry is set.
+    double EffectiveGroundAltKm() const;
+    bool m_groundAltFromGeometry{false};
+    /// Elevation quantization (deg) of the excess-loss cache; 0 = exact inputs
+    /// only (bit-identical to the uncached model).
+    double m_excessElevStepDeg{0.0};
+    struct ExcessTerms
+    {
+        double gas{0.0};
+        double rain{0.0};
+        double scint{0.0};
+    };
+    /// Key: (elevation or its bin, ground altitude, carrier, rain rate,
+    /// enable bits, aperture, station latitude).
+    mutable std::map<std::tuple<double, double, double, double, int, double, double>, ExcessTerms>
+        m_excessCache;
+    mutable uint64_t m_excessEvaluations{0}; //!< ITU evaluations actually run
+
+  public:
+    /// How many times the ITU terms were actually evaluated (cache misses).
+    uint64_t GetExcessLossEvaluations() const { return m_excessEvaluations; }
 };
 
 } // namespace ntncon

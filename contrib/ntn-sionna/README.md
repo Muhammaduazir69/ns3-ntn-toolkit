@@ -3,6 +3,15 @@
 <p align="center"><strong>GPU ray tracing for the last kilometer of an NTN link: NVIDIA Sionna RT bridged into ns-3, with provenance on every query</strong></p>
 
 <p align="center">
+  <a href="https://youtu.be/JNStiBst68I"><img src="https://img.youtube.com/vi/JNStiBst68I/maxresdefault.jpg" alt="NTN Control Center: end-to-end simulation of non-terrestrial networks in ns-3 (video)" width="560"/></a><br/>
+  <a href="https://youtu.be/JNStiBst68I"><img src="https://img.shields.io/badge/YouTube-Watch%20the%205--minute%20demo-red?logo=youtube" alt="Watch on YouTube"/></a><br/>
+  <a href="https://6g-ntn.live"><img src="https://img.shields.io/badge/Live-6g--ntn.live-2ea44f?logo=googlechrome&logoColor=white" alt="Open the live NTN Control Center"/></a><br/>
+  <sub><b>Try it live:</b> <a href="https://6g-ntn.live">6g-ntn.live</a> runs the toolkit's examples in the browser, with open datasets, a scenario gallery and a research forum.</sub><br/>
+  <sub>The NTN Control Center runs and visualizes the ntn-sionna examples on a live 3D globe (5-minute video).</sub>
+</p>
+
+
+<p align="center">
   <a href="https://www.nsnam.org"><img src="https://img.shields.io/badge/ns--3-3.43-blue.svg" alt="ns-3.43"/></a>
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"><img src="https://img.shields.io/badge/license-GPL--2.0-green.svg" alt="GPL-2.0"/></a>
   <img src="https://img.shields.io/badge/Sionna%20RT-GPU%20ray%20tracing-red.svg" alt="Sionna RT GPU ray tracing"/>
@@ -121,7 +130,16 @@ git clone -b ntn-sionna-v2 https://github.com/Muhammaduazir69/ntn-sionna.git con
 ./ns3 build
 ```
 
-No GPU is needed to build or to run any example: without a server the channel falls back to free space and says so. A live server needs CUDA and Sionna RT; `INSTALL.md` has the version matrix.
+No GPU is needed to build or to run the measured-radio examples. The four examples whose headline is ray traced (`mmimo-vs-codebook-leo`, `city-block-4ue-cache`, `ris-assisted-leo-link`, `sionna-calibration-harness`) run with `RequireLiveTransport` on by default: without a server they exit non-zero with a message naming `RequireLiveTransport`, and `--allowFallback=1` runs closed-form free space with the headline printed as "free space (no ray tracing)" and `raytrace_live=0`. `leo-pass-sionna-vs-tr38811` prints `raytrace_live=1` only with `--sionnaServer` (then fallback is fatal); otherwise it labels its parametric profile.
+
+Server paths:
+
+| Server | Command | What answers |
+|---|---|---|
+| Live Sionna RT | `python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 --freq-hz 12e9` | Sionna RT 2.0.1 path solver on the `simple_reflector` scene (or `--scene-xml`); CPU Dr.Jit backend is enough (about 40 s start-up here). A request without an array descriptor is traced with the SISO default (fixed 16 Nov 2026: it used to inherit the previous request's array). A reply with no traced path carries `fspl_fallback: true`. |
+| Protocol stub | `python3 contrib/ntn-sionna/test/sionna-stub-server.py --port 0` (prints `PORT=<n>`) | Closed-form FSPL with the same wire protocol. It exercises the transport, not ray tracing: a run against it reports `raytrace_live=1` because a server answered, but every number is free space. |
+
+A live server needs Sionna RT; `INSTALL.md` has the version matrix.
 
 ## Examples
 
@@ -130,9 +148,9 @@ Measured-radio examples (NR or mmwave NTN cell from `ntn-traffic`, SGP4 Walker m
 | Example | What it shows | Command |
 |---|---|---|
 | `leo-pass-sionna-vs-tr38811` | A LEO pass with traced multipath when `--sionnaServer` is set, a labeled parametric profile otherwise; TR 38.811 free space printed as the reference column; replay file written | `./ns3 run "leo-pass-sionna-vs-tr38811 --sionnaServer=127.0.0.1:8765"` |
-| `ntn-sionna-leo-downlink-traffic` | ITU-R cascade (P.676, P.618/P.838, optional P.681 LMS) in the packet path | `./ns3 run "ntn-sionna-leo-downlink-traffic --rainMmH=10 --lms=1"` |
-| `ntn-sionna-rain-event-traffic` | A rain cell crosses a Ka-band gateway mid-pass | `./ns3 run ntn-sionna-rain-event-traffic` |
-| `ntn-sionna-ris-relay-traffic` | Blockage, then a RIS engages, as live channel changes | `./ns3 run "ntn-sionna-ris-relay-traffic --risRows=32 --risCols=32"` |
+| `ntn-sionna-leo-downlink-traffic` | Declared Ku payload (10 W, 0.7 m satellite aperture, 0.6 m gateway dish, eta 0.6) with an independent budget line; ITU-R cascade (P.676, P.618/P.838, optional P.681 LMS) in the packet path (`--legacyConductedDbm=75` restores the old knob) | `./ns3 run "ntn-sionna-leo-downlink-traffic --rainMmH=10 --lms=1"` |
+| `ntn-sionna-rain-event-traffic` | TR 38.821 Set-1 Ka payload; a moving EXCELL rain cell on the satellite ground track, integrated per RB (P.838-3) along the live slant path below the P.839 rain height, so the fade comes from the pass geometry (`--scripted=1 --legacyConductedDbm=95` restores the old schedule) | `./ns3 run ntn-sionna-rain-event-traffic` |
+| `ntn-sionna-ris-relay-traffic` | Declared Ku payload (Pt, apertures); the descending satellite drops behind a building facade (TR 38.901 7.6.4.2 model B screen) and a RIS on the opposite facade, engaged by a controller on the measured SINR, adds a coherent per-RB ray (Tang 2021 law on live geometry) (`--scripted=1 --legacyConductedDbm=75` restores the old timeline) | `./ns3 run ntn-sionna-ris-relay-traffic` |
 | `ntn-sionna-mimo-traffic` | SISO and N x N terminals on one cell | `./ns3 run ntn-sionna-mimo-traffic` |
 | `ntn-sionna-constellation-handover-traffic` | Best-satellite following over a Walker constellation | `./ns3 run ntn-sionna-constellation-handover-traffic` |
 | `ntn-sionna-composed-channel-traffic` | Friis, ITU-R excess and Nakagami chained with `SetNext()` | `./ns3 run ntn-sionna-composed-channel-traffic` |

@@ -21,6 +21,7 @@
 #define ORAN_NTN_TYPES_H
 
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -142,6 +143,39 @@ struct E2KpmReport
     /// closes at this Es/N0 and `modCod` is the weakest entry reported for
     /// reference, NOT a scheme the link can actually run.
     bool modCodCloses = false;
+
+    // === Measured RAN counters (Wave 2 M2: one measured KPM producer) ===
+    // Filled only by OranNtnRealStackBinding from the NR stack's own counters
+    // (MAC/PHY/RLC/PDCP and RRC measurement reports). Every field defaults to
+    // "unknown" so a report built anywhere else exports these as present=false
+    // instead of inheriting an invented value.
+    /// RRU.PrbAvailDl: PRBs configured on the cell's DL BWP (TS 38.101-1
+    /// Table 5.3.2-1 / TS 38.101-5), e.g. 51 at 20 MHz and 30 kHz. <0 = unknown.
+    double prbAvailDl = -1.0;
+    /// RRU.PrbUsedDl (TS 28.552 5.1.1.2.1): mean DL PRBs used per slot over the
+    /// granularity period, from the PHY TB trace. NaN = not measured.
+    double prbUsedDl = std::numeric_limits<double>::quiet_NaN();
+    /// TB.TotNbrDl / TB.ErrTotNbrDl (TS 28.552 5.1.1.7): DL transport blocks
+    /// received and received in error in the period (integer counts). <0 = unknown.
+    double tbTotDl = -1.0;
+    double tbErrDl = -1.0;
+    /// DRB.RlcSduDelayDl (TS 28.552 5.1.1.1.1): mean DL RLC SDU delay in ms
+    /// (gNB RLC ingress to UE PDCP delivery) over the period. NaN = not measured.
+    double rlcSduDelayDl_ms = std::numeric_limits<double>::quiet_NaN();
+    /// DRB.PdcpSduVolumeDL (TS 28.552 5.1.2.1.1.1): DL PDCP SDU volume in Mbit
+    /// over the period, from the delivered bytes. NaN = not measured.
+    double pdcpVolumeDl_Mbit = std::numeric_limits<double>::quiet_NaN();
+    /// This UE's share of the cell's DL PRBs in the period (PRB x symbol/14 of
+    /// its TBs over configured PRBs x slots), measured. NaN = not measured.
+    double uePrbShareDl = std::numeric_limits<double>::quiet_NaN();
+    /// Granularity period of the counters above (s); 0 = unknown.
+    double granularityPeriod_s = 0.0;
+    /// rsrp_dBm / rsrq_dB came from an RRC MeasurementReport (TS 38.331
+    /// measResults, TS 38.133 mapping), not from a formula.
+    bool rsrpMeasured = false;
+    bool rsrqMeasured = false;
+    /// latency_ms is the measured DRB delay above, not slant/c plus a constant.
+    bool latencyMeasured = false;
 };
 
 // ============================================================================

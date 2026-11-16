@@ -55,6 +55,10 @@ main(int argc, char* argv[])
     std::string outputDir = "./nr-deep-demo/";
     bool slices = true; // Enabler C on/off (diagnostic: isolate multi-BWP)
 
+    // Wave 1 (C5): feeder from a real gateway north of the UE site (WGS-84).
+
+    double gwDistanceKm = 500.0;
+
     CommandLine cmd(__FILE__);
     cmd.AddValue("slices", "Enable per-slice BWPs (Enabler C)", slices);
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
@@ -65,6 +69,14 @@ main(int argc, char* argv[])
                  satEirpDbm);
     cmd.AddValue("bwMhz", "Channel bandwidth (MHz)", bwMhz);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("gwDistanceKm",
+
+                 "Gateway ground distance north of the UE site (km); <= 0 keeps the 5 ms "
+
+                 "constant backhaul",
+
+                 gwDistanceKm);
+
     cmd.Parse(argc, argv);
 
     // ---- Two satellites (gNBs) in view + ground UEs ---------------------
@@ -132,7 +144,9 @@ main(int argc, char* argv[])
     const bool eirpFromTr38821 = satEirpDbm < 0.0 && freqGhz * 1e9 > 1.0e9 && freqGhz * 1e9 <= 7.125e9;
     if (eirpFromTr38821)
     {
-        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        // C4/C7: TR 38.821 Set-1 terminal and payload (34 dBW/MHz, handheld 1T2R, NF 7 dB).
+
+        rs.ApplyTr38821Set1Defaults();
     }
     else
     {
@@ -143,7 +157,7 @@ main(int argc, char* argv[])
         rs.SetSatConductedPowerDbm(satEirpDbm);
     }
     rs.SetUeTxPowerDbm(23.0);
-    rs.SetBackhaulDelay(MilliSeconds(5));
+    rs.SetBackhaulDelay(MilliSeconds(5)); // used only when no gateway is wired (--gwDistanceKm <= 0)
 
     // Enabler C: three slices -> three BWPs + OfdmaQos + per-5QI bearers.
     if (slices)
@@ -152,6 +166,14 @@ main(int argc, char* argv[])
     }
     // Enabler A: NR inter-cell handover across the two satellites.
     rs.SetHandover(true, /*hysteresisDb=*/3.0, /*ttt=*/MilliSeconds(256));
+    // C2: A3 on cell-level SS-RSRP. Both satellites put their SSB on a cell
+    // beam steered at the Earth-fixed cell around the UEs, so the measured
+    // difference is the path difference, not a quasi-omni pattern ripple.
+    {
+        Ptr<ConstantPositionMobilityModel> cellCenter = CreateObject<ConstantPositionMobilityModel>();
+        cellCenter->SetPosition(NtnRealStackHelper::GeodeticToEcef(subLat, subLon, 0.0));
+        rs.SetSsbCellBeam(true, cellCenter);
+    }
     // Enabler D: native NR stat files + NTN-stretched HARQ pool.
     rs.SetNrNativeTraces(true);
     rs.SetNtnHarqProfile(true);
@@ -159,6 +181,14 @@ main(int argc, char* argv[])
     rs.SetMimo(/*gnbRows=*/8, /*gnbCols=*/8, /*ueRows=*/2, /*ueCols=*/2, /*rankLimit=*/2);
 
     rs.Build(gnbNodes, ueNodes);
+
+    if (gwDistanceKm > 0.0)
+
+    {
+
+        rs.SetFeederGatewayGeodetic(subLat + gwDistanceKm / 111.195, subLon, 0.0);
+
+    }
     // MixedBouquet assigns eMBB(5QI2)/URLLC(5QI82)/mMTC(5QI9) round-robin -> each
     // slice's dedicated bearer routes it to its BWP.
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,

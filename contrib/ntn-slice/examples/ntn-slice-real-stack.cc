@@ -94,7 +94,7 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> servSatMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    servSatMob->SetElements(wElements[0]);
+    servSatMob->SetElementsSgp4(wElements[0]);
     satNodes.Get(0)->AggregateObject(servSatMob);
     double subLat, subLon, subAlt;
     servSatMob->GetGeodetic(subLat, subLon, subAlt);

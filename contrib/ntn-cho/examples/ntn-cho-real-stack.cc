@@ -6,7 +6,7 @@
  * ntn-cho-real-stack — real-stack flagship for ntn-cho, on the REAL NTN
  * mobility architecture:
  *
- *   - Satellites: Kepler+J2-secular propagated Walker-Delta orbits
+ *   - Satellites: SGP4 (Vallado) Walker-Delta orbits from synthesized TLEs
  *     (ntn-constellation Sgp4MobilityModel; full Vallado SGP4 available via
  *     SetUseVallado). The serving satellite starts at zenith over the UE
  *     field and recedes; the in-plane neighbour genuinely approaches. The
@@ -24,9 +24,21 @@
  *                        max predicted time-of-stay candidate
  *   --rachLess           RCHO: ephemeris/GNSS TA pre-compensation skips RACH
  *
- * Candidate link prediction is ephemeris-based (3GPP NTN CHO design): the
- * candidate SINR is the MEASURED serving SINR corrected by the real Friis
- * range ratio 20*log10(servSlant/candSlant) from the live Kepler+J2 slant ranges.
+ * Decision inputs (Wave 2 M1, P0-2): every quantity the CHO decides on is
+ * MEASURED. The serving SINR comes from the UE PHY; the candidate is the UE's
+ * own TS 38.331 5.5.5 measurement report (periodic, 480 ms, L3-filtered at the
+ * UE per 5.5.3.2), on a cell-level SS-RSRP (SSB on an Earth-fixed cell beam,
+ * TS 38.215 5.1.1). The candidate quality handed to the algorithm is the
+ * serving SINR plus the reported RSRP difference (candidate minus serving):
+ * same receiver, same noise and interference, so the difference carries the
+ * measured link imbalance. No Friis extrapolation and no elevation-to-gain map
+ * enters the decision. `--candSource=friis` restores the earlier ephemeris
+ * extrapolation for comparison only.
+ *
+ * Handover KPIs (P0-3) are MEASURED by NtnHoKpiRecorder from the UE RRC traces
+ * (HandoverStart, HandoverEndOk/Error, RadioLinkFailure) and the UE's packet
+ * arrivals: C-plane and U-plane interruption, ping-pong, time of stay, RLF.
+ * The algorithm's priced interruption is written next to them as "modeled".
  *
  * Usage:
  *   ./ns3 run "ntn-cho-real-stack --duration=60 --trigger=pcho --rachLess=1"
@@ -39,11 +51,9 @@
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
 #include "ns3/ntn-orbit-predictor.h"
+#include "ns3/ntn-ho-kpi-recorder.h"
+#include "ntn-cho-measured-inputs.h"
 
-#include <ns3/satellite-antenna-gain-pattern-container.h>
-#include <ns3/satellite-constant-position-mobility-model.h>
-#include <ns3/satellite-env-variables.h>
-#include <ns3/singleton.h>
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-scene-recorder.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
@@ -53,6 +63,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <limits>
 #include <iostream>
 #include <vector>
 
@@ -76,9 +88,15 @@ uint16_t g_serving = 0;
 uint32_t g_handovers = 0;
 uint32_t g_evals = 0;
 double g_simTime = 60.0;
+std::string g_candSource = "rrc"; // rrc (measured reports) | friis (legacy prediction)
+std::string g_trigger;
+Ptr<NtnHoKpiRecorder> g_hoRec;
+FILE* g_trace = nullptr;
+uint32_t g_ticksWithReport = 0;
+uint32_t g_ticksAfter2s = 0;
 
 // Optional 3D scene trace (NetSimulyzer + Cesium CZML). Off unless --netSim or
-// --czml is given; when on, the recorder streams the Kepler+J2 sat + TR 38.811
+// --czml is given; when on, the recorder streams the SGP4 sat + TR 38.811
 // UE positions and the MEASURED serving SINR, and logs each handover.
 Ptr<ntnobs::NtnSceneRecorder> g_scene;
 uint32_t g_sinrSeries = 0;
@@ -95,15 +113,18 @@ ChoTick()
     }
     ++g_evals;
     const Vector u = g_ueMob->GetPosition();        // TR 38.811 UE, ECEF
-    const Vector sPos = g_servMob->GetPosition();   // Kepler+J2 serving sat, ECEF
-    const Vector cPos = g_candMob->GetPosition();   // Kepler+J2 candidate sat, ECEF
+    const Vector sPos = g_servMob->GetPosition();   // SGP4 serving sat, ECEF
+    const Vector cPos = g_candMob->GetPosition();   // SGP4 candidate sat, ECEF
     const double servElev = ntngeo::ElevationDeg(u, sPos);
     const double candElev = ntngeo::ElevationDeg(u, cPos);
     const double servSlant = ntngeo::SlantRangeM(u, sPos);
     const double candSlant = ntngeo::SlantRangeM(u, cPos);
 
-    // Serving SINR is MEASURED from the real mmwave PHY (UE 0).
-    const double servSinr = g_rs->GetUeRecentSinrDb(0);
+    // Serving SINR is MEASURED at UE 0's PHY: linear mean of its decoded TBs
+    // over the last tick (nr), or the helper's last TB SINR (mmwave).
+    const double servSinr = g_rs->GetRadioBackend() == NtnRealStackHelper::RadioBackend::Nr
+                                ? g_rs->TakeUeSinrWindowMeanDb(0)
+                                : g_rs->GetUeRecentSinrDb(0);
     if (std::isnan(servSinr))
     {
         Simulator::Schedule(Seconds(1.0), &ChoTick);
@@ -142,13 +163,39 @@ ChoTick()
     {
         g_cho->SetServingCell(radioCell); // radio moved without a CHO decision
     }
-    const double candMeas = g_rs->GetCellMeanSinrDb(othCell);
-    const bool candIsMeasured = !onCand && !std::isnan(candMeas);
-    const double candSinr =
-        candIsMeasured ? candMeas
-                       : servSinr + 20.0 * std::log10(attSlant / std::max(1.0, othSlant));
-    const double servGain = std::max(-20.0, (attElev - 45.0) / 5.0);
-    const double candGain = std::max(-20.0, (othElev - 45.0) / 5.0);
+    // P0-2: the candidate comes from the UE's own measurement reports
+    // (TS 38.331 5.5.5, periodic 480 ms; already L3-filtered at the UE per
+    // 5.5.3.2, so it is not filtered again here). Mp and Mn are cell-level
+    // SS-RSRP of the serving and the neighbour cell (TS 38.215 5.1.1).
+    const ntnchoex::ReportedCandidate rep =
+        ntnchoex::ReadReportedCandidate(*g_rs, 0, othCell, servSinr);
+    const double servRsrp = rep.servRsrpDbm;
+    const double candRsrp = rep.candRsrpDbm;
+    const Time age = Seconds(rep.ageS);
+    // Ephemeris extrapolation, kept only as a printed comparison column (and as
+    // the decision input under --candSource=friis).
+    const double candFriis = servSinr + 20.0 * std::log10(attSlant / std::max(1.0, othSlant));
+    double candSinr = std::numeric_limits<double>::quiet_NaN();
+    std::string candSrc = "none";
+    if (g_candSource == "friis")
+    {
+        candSinr = candFriis;
+        candSrc = "friis-pred";
+    }
+    else if (rep.fresh)
+    {
+        candSinr = rep.candSinrDb;
+        candSrc = "rrc-report";
+    }
+    if (Simulator::Now() >= Seconds(2.0))
+    {
+        ++g_ticksAfter2s;
+        g_ticksWithReport += (candSrc == "rrc-report") ? 1 : 0;
+    }
+    // No beam-gain input: the decision uses measured quantities only (the old
+    // (elev-45)/5 mapping was invented). NaN marks the field as not provided.
+    const double noGain = std::numeric_limits<double>::quiet_NaN();
+    const bool candIsMeasured = (candSrc == "rrc-report");
 
     // CHO-21, same defect as ntn-cho-handover-traffic. D1, D2, T1 and the TTE
     // estimator evaluate against m_uePosition, and this scenario never set it,
@@ -156,14 +203,26 @@ ChoTick()
     // default-constructed coordinate while the radio flew the real orbit.
     g_cho->UpdateUeKinematics(GeoCoordinate(u), g_ueMob->GetVelocity());
 
-    g_cho->UpdateMeasurement(attCell, servSinr, servGain);
-    g_cho->UpdateMeasurement(othCell, candSinr, candGain);
+    g_cho->UpdateMeasurement(attCell, servSinr, noGain);
+    if (!std::isnan(candSinr))
+    {
+        g_cho->UpdateMeasurement(othCell, candSinr, noGain);
+    }
     // Live ephemeris slant ranges -> RACH-less TA pre-compensation (RCHO).
     g_cho->UpdateCandidateSlantRange(attCell, attSlant);
     g_cho->UpdateCandidateSlantRange(othCell, othSlant);
     g_cho->EvaluateConditions();
 
     uint16_t chosen = g_cho->SelectBestCandidate();
+    if (g_trace)
+    {
+        std::fprintf(g_trace,
+                     "%.1f,%u,%u,%.3f,%.2f,%.2f,%.3f,%s,%.3f,%.3f,%.2f,%.2f,%.1f,%.1f,%u,%u\n",
+                     Simulator::Now().GetSeconds(), attCell, othCell, servSinr, servRsrp,
+                     candRsrp, candSinr, candSrc.c_str(), age.GetSeconds(), candFriis, attElev,
+                     othElev, attSlant / 1e3, othSlant / 1e3, chosen,
+                     static_cast<unsigned>(g_cho->GetState()));
+    }
     // CHO-25: no new decision while a reconfiguration is in flight (T304,
     // TS 38.331 section 5.3.5.8.3), and the reference is the radio's cell.
     const uint16_t curCell = (radioCell != 0) ? radioCell : g_cho->GetServingCellId();
@@ -176,15 +235,18 @@ ChoTick()
         // (see main()). The outcome arrives asynchronously from the RRC; T304
         // runs until then, so a failed handover is now actually representable.
         g_cho->ExecuteHandover(chosen);
+        // P0-3: the measured record of this handover carries the algorithm's
+        // priced value as a separate, labeled column.
+        g_hoRec->AnnotateNext(0, g_cho->GetMechanismStats().lastInterruptionMs, "cho:" + g_trigger);
         if (g_scene)
         {
             g_scene->OnHandover(g_ueNodeId, g_servSatNodeId, g_candSatNodeId);
         }
         const auto st = g_cho->GetMechanismStats();
-        std::printf("  %6.1fs  HANDOVER cell %u -> %u  (servSINR meas=%.1f dB, candSINR "
-                    "%s=%.1f dB, interruption=%.1f ms%s)\n",
+        std::printf("  %6.1fs  HANDOVER cell %u -> %u  (servSINR meas=%.1f dB, cand=%s "
+                    "%.1f dB, modeled interruption=%.2f ms%s)\n",
                     Simulator::Now().GetSeconds(), curCell, chosen, servSinr,
-                    candIsMeasured ? "meas" : "pred", candSinr,
+                    candIsMeasured ? "meas-rsrp" : candSrc.c_str(), candSinr,
                     st.lastInterruptionMs,
                     st.rachLessExecutions > 0 ? ", RACH-less" : "");
         g_serving = chosen;
@@ -215,6 +277,14 @@ main(int argc, char* argv[])
     bool rachLess = true;
     uint32_t satsPerPlane = 80; // 4.5 deg in-plane spacing -> ~500 km along-track
     std::string outputDir = "ntn-cho-real-stack-output";
+    std::string candSource = "rrc";
+    bool cellBeam = true;
+    bool set1 = true;
+    bool fading = true;
+    std::string channel = "legacy";
+    uint32_t pchoMinSamples = 16;
+    double gwDistanceKm = 500.0;
+    double ppWindowS = 1.0;
     std::string netSimOut; // NetSimulyzer JSON trace (empty = off)
     std::string czmlOut;   // Cesium CZML trace (empty = off)
 
@@ -232,12 +302,33 @@ main(int argc, char* argv[])
     cmd.AddValue("rachLess", "RACH-less execution (ephemeris TA pre-comp)", rachLess);
     cmd.AddValue("satsPerPlane", "Walker in-plane satellites (spacing)", satsPerPlane);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("candSource",
+                 "CHO candidate input: rrc (UE measurement reports, measured RSRP) | friis "
+                 "(legacy ephemeris extrapolation, comparison only)",
+                 candSource);
+    cmd.AddValue("cellBeam", "SSB on an Earth-fixed cell beam (cell-level SS-RSRP, nr only)", cellBeam);
+    cmd.AddValue("channel",
+                 "legacy (toolkit excess-loss chain) | ns3ntn (TR 38.811 path loss, condition and "
+                 "NTN fast fading, C3)",
+                 channel);
+    cmd.AddValue("pchoMinSamples",
+                 "PCHO: minimum 1 s samples before the linear forecast is trusted (span >= 2x "
+                 "the 8 s horizon; reports are quantized to 1 dB, TS 38.133)",
+                 pchoMinSamples);
+    cmd.AddValue("fading", "small-scale fading on (false = deterministic LOS plane wave, C3)", fading);
+    cmd.AddValue("set1", "TR 38.821 Set-1 terminal and payload (nr S band)", set1);
+    cmd.AddValue("gwDistanceKm", "feeder gateway distance north of the UEs (km); <= 0 = 5 ms constant",
+                 gwDistanceKm);
+    cmd.AddValue("ppWindowS", "ping-pong window for the measured KPI (s, TS 38.300 15.5.2.2)", ppWindowS);
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON trace output path (empty = off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D trace output path (empty = off)", czmlOut);
     bool liveScene = false;
     cmd.AddValue("liveScene", "Stream live scene frames to stdout (mid-run globe)", liveScene);
     cmd.Parse(argc, argv);
     g_simTime = duration;
+    g_trigger = trigger;
+    NS_ABORT_MSG_IF(candSource != "rrc" && candSource != "friis", "--candSource=rrc|friis");
+    g_candSource = candSource;
 
     const bool useNr = (radio == "nr");
     // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
@@ -265,17 +356,20 @@ main(int argc, char* argv[])
     {
         satEirpDbm = useNr ? 70.0 : 55.0;
     }
-    const double scsKhz = 15.0 * (1u << 1); // FR1 numerology 1 -> 30 kHz (nr only)
 
-    std::cout << "\n=== ntn-cho REAL-STACK (Kepler+J2 orbits + TR 38.811 UEs) ===\n"
+    std::cout << "\n=== ntn-cho REAL-STACK (SGP4 (Vallado) orbits + TR 38.811 UEs) ===\n"
               << "  radio spine: " << (useNr ? "5G-LENA nr FR1 (30 kHz SCS) [A5(i)]" : "mmwave FR2")
               << " at " << freqGhz << " GHz, EIRP " << satEirpDbm << " dBm\n"
-              << "  serving + candidate: Kepler+J2 Walker neighbours (real pass dynamics)\n"
+              << "  serving + candidate: SGP4 (Vallado) Walker neighbours (real pass dynamics)\n"
+              << "  CHO candidate input: "
+              << (candSource == "rrc" ? "UE measurement reports (measured SS-RSRP, TS 38.331 5.5.5)"
+                                      : "ephemeris Friis extrapolation (comparison mode)")
+              << "\n"
               << "  UEs: TR 38.811 class mobility (real ns-3 MobilityModel, ECEF)\n"
               << "  mechanism: " << trigger << (rachLess ? " + RACH-less (RCHO)" : "")
               << ", duration " << duration << " s\n\n";
 
-    // ---- Real Walker-Delta orbits (Kepler+J2-secular; Vallado SGP4 via SetUseVallado) ----
+    // ---- Real Walker-Delta orbits (SGP4 (Vallado) via SetElementsSgp4) ----
     WalkerConfig wcfg;
     wcfg.num_planes = 1;
     wcfg.total_sats = satsPerPlane;
@@ -285,11 +379,11 @@ main(int argc, char* argv[])
     const auto elements = WalkerConstellation::BuildDelta(wcfg);
 
     Ptr<Sgp4MobilityModel> serv = CreateObject<Sgp4MobilityModel>();
-    serv->SetElements(elements[0]);
+    serv->SetElementsSgp4(elements[0]);
     Ptr<Sgp4MobilityModel> nbrA = CreateObject<Sgp4MobilityModel>();
-    nbrA->SetElements(elements[1]);
+    nbrA->SetElementsSgp4(elements[1]);
     Ptr<Sgp4MobilityModel> nbrB = CreateObject<Sgp4MobilityModel>();
-    nbrB->SetElements(elements[satsPerPlane - 1]);
+    nbrB->SetElementsSgp4(elements[satsPerPlane - 1]);
 
     // ---- TR 38.811 UEs in a small box at the serving sat's t=0 sub-point ----
     double subLat, subLon, subAlt;
@@ -346,7 +440,13 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-real-stack");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
-    if (eirpFromTr38821)
+    if (eirpFromTr38821 && set1)
+    {
+        // C4: TR 38.821 Set-1 handheld (1T2R, NF 7 dB, 23 dBm) and the Set-1
+        // S-band payload EIRP density (34 dBW/MHz).
+        rs.ApplyTr38821Set1Defaults();
+    }
+    else if (eirpFromTr38821)
     {
         // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 S-band EIRP density. The
         // helper back-computes the conducted power from the bandwidth and
@@ -371,7 +471,33 @@ main(int argc, char* argv[])
     // armed, A3 moved the UE back within about a second of every CHO
     // execution under NTN fading (8 handovers for one CHO decision).
     rs.SetAutonomousHandover(false);
+    // With A3 off the helper installs the TS 38.331 5.5.4.1 periodical
+    // RSRP/RSRQ report (480 ms) on every gNB (Wave 1 C2), so the UE keeps
+    // reporting serving and neighbour cells to the CHO.
+    if (useNr && cellBeam)
+    {
+        // C2: SSB on an Earth-fixed cell beam centred on the UE site, so the
+        // reported SS-RSRP is cell-level (TS 38.215 5.1.1), not whichever UE
+        // each gNB happens to be serving.
+        Ptr<ConstantPositionMobilityModel> cellCenter = CreateObject<ConstantPositionMobilityModel>();
+        cellCenter->SetPosition(NtnRealStackHelper::GeodeticToEcef(subLat, subLon, 0.0));
+        rs.SetSsbCellBeam(true, cellCenter);
+    }
+    NS_ABORT_MSG_IF(channel != "legacy" && channel != "ns3ntn", "--channel=legacy|ns3ntn");
+    if (useNr)
+    {
+        rs.SetChannelModel(channel == "ns3ntn" ? NtnRealStackHelper::ChannelModel::Ns3Tr38811
+                                               : NtnRealStackHelper::ChannelModel::Legacy);
+    }
+    rs.SetSmallScaleFading(fading);
     rs.Build(gnbSats, ueNodes);
+    std::filesystem::create_directories(outputDir);
+    rs.EnableMeasurementTrace(outputDir + "/meas_reports.csv");
+    if (gwDistanceKm > 0.0)
+    {
+        // C5: feeder from a real gateway, tracking the serving satellite.
+        rs.SetFeederGatewayGeodetic(subLat + gwDistanceKm / 111.195, subLon, 0.0);
+    }
     // satEirpDbm was resolved before Build() and handed to the rest of the
     // example; make sure the radio landed on the same conducted power.
     NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
@@ -381,6 +507,22 @@ main(int argc, char* argv[])
                       Seconds(1.0), Seconds(duration - 0.5));
     rs.EnableAiFlowMonitor("ntn-cho-real-stack"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
+    // P0-3: measured handover KPIs from every UE's RRC traces and packet arrivals.
+    g_hoRec = CreateObject<NtnHoKpiRecorder>();
+    g_hoRec->SetPingPongWindow(Seconds(ppWindowS));
+    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+    {
+        g_hoRec->AttachUe(i, ueNodes.Get(i));
+    }
+    g_trace = std::fopen((outputDir + "/cho_decision_trace.csv").c_str(), "w");
+    if (g_trace)
+    {
+        std::fprintf(g_trace,
+                     "t_s,serving_cell,candidate_cell,serv_sinr_meas_db,serv_rsrp_dbm,"
+                     "cand_rsrp_dbm,cand_sinr_db,cand_source,report_age_s,cand_sinr_friis_pred_db,"
+                     "serv_elev_deg,cand_elev_deg,serv_slant_km,cand_slant_km,cho_selected,"
+                     "cho_state\n");
+    }
 
     // ---- The CHO algorithm with the selected novel 6G mechanism ----
     Ptr<NtnChoHelper> choHelper = CreateObject<NtnChoHelper>();
@@ -397,39 +539,15 @@ main(int argc, char* argv[])
     // still named it as the mechanism under test. The DEFAULT trigger here is
     // pcho, so the example's out-of-the-box configuration was measuring nothing.
     {
-        NodeContainer auxSats;
-        auxSats.Create(2);
-        Ptr<SatConstantPositionMobilityModel> auxServ =
-            CreateObject<SatConstantPositionMobilityModel>();
-        Ptr<SatConstantPositionMobilityModel> auxCand =
-            CreateObject<SatConstantPositionMobilityModel>();
-        auxSats.Get(0)->AggregateObject(auxServ);
-        auxSats.Get(1)->AggregateObject(auxCand);
-
-        Singleton<SatEnvVariables>::Get()->DoInitialize();
-        Singleton<SatEnvVariables>::Get()->SetOutputVariables("ntn-cho-real-stack", "", true);
-        Ptr<SatAntennaGainPatternContainer> agp = CreateObject<SatAntennaGainPatternContainer>(
-            2,
-            Singleton<SatEnvVariables>::Get()->LocateDataDirectory() +
-                "/scenarios/geo-33E/antennapatterns");
-        agp->ConfigureBeamsMobility(0, auxServ);
-        agp->ConfigureBeamsMobility(1, auxCand);
-
-        choHelper->SetupConstellation(auxSats, agp);
+        // P1-H: the predictor takes the real SGP4 satellites and the analytic
+        // steered beam (TR 38.811 6.4.1, Set-1 4.4127 deg) directly; no SNS3 GEO
+        // pattern container and no auxiliary SatMobilityModel stand-ins.
+        choHelper->SetupConstellation(std::vector<Ptr<MobilityModel>>{serv, cand},
+                                      /*peakGainDbi=*/30.0,
+                                      /*beamwidth3dbDeg=*/4.4127);
         Ptr<NtnOrbitPredictor> orbit = choHelper->GetOrbitPredictor();
-        if (orbit)
-        {
-            // The aux SatMobilityModels exist only because the pattern
-            // container demands that type; the kinematics come from the REAL
-            // satellites this scenario flies, and the beam is the analytic
-            // steered one, coherent at LEO where the GEO pattern grid is not.
-            orbit->SetKinematicsSource(0, serv);
-            orbit->SetKinematicsSource(1, cand);
-            orbit->SetGeometricBeam(/*peakGainDbi=*/30.0, /*beamwidth3dbDeg=*/4.4127);
-            orbit->SetSteeredBeam(true);
-            NS_ABORT_MSG_IF(orbit->CountFrozenSatellites() > 0,
-                            "CHO predictor still has stationary satellites");
-        }
+        NS_ABORT_MSG_IF(!orbit || orbit->CountFrozenSatellites() > 0,
+                        "CHO predictor still has stationary satellites");
     }
 
     g_cho = choHelper->CreateChoAlgorithm();
@@ -481,6 +599,14 @@ main(int argc, char* argv[])
     cfg.qualityThreshold_dB = 8.0;
     cfg.predictionHorizon = Seconds(8.0);
     cfg.minPredictedTos = Seconds(3.0);
+    // The PCHO forecast is a least-squares line through the 1 s samples,
+    // extrapolated 8 s ahead. On MEASURED inputs the candidate carries the
+    // 1 dB report quantization of TS 38.133 plus fading, and a line fitted
+    // through 4 samples (the class default) turns a 1 dB step into a
+    // 2 dB/8 s trend and fires on it (measured: handovers at 5 s and 8 s with
+    // the candidate 1 to 3 dB below the serving cell). Requiring the fit to
+    // span at least twice the horizon keeps the slope error near 0.02 dB/s.
+    cfg.predictionMinSamples = static_cast<uint8_t>(std::min<uint32_t>(pchoMinSamples, 32));
     g_cho->Configure(cfg);
 
     // GAP C6 FIX: use the REAL cell ids of the two gNBs.
@@ -528,7 +654,7 @@ main(int argc, char* argv[])
                     }));
 
     // ---- Optional 3D scene trace (NetSimulyzer + Cesium CZML) ----
-    // One recorder taps the Kepler+J2 sats + TR 38.811 UEs (all ECEF) and the
+    // One recorder taps the SGP4 sats + TR 38.811 UEs (all ECEF) and the
     // MEASURED serving SINR; fans out to both viewers. Off unless a path is set.
     if (!netSimOut.empty() || !czmlOut.empty() || liveScene)
     {
@@ -576,6 +702,13 @@ main(int argc, char* argv[])
     }
     rs.Collect();
     rs.WriteHealthReport();
+    if (g_trace)
+    {
+        std::fclose(g_trace);
+        g_trace = nullptr;
+    }
+    g_hoRec->WriteCsv(outputDir + "/handover_events.csv");
+    g_hoRec->WriteKpm(outputDir + "/ho_kpm.csv");
 
     const auto st = g_cho->GetMechanismStats();
     std::cout << "\n--- CHO Summary (novel 6G mechanisms on REAL orbits + MEASURED SINR) ---\n"
@@ -589,10 +722,33 @@ main(int argc, char* argv[])
               << "  PCHO trajectory triggers:     " << st.pchoTriggers << "\n"
               << "  RACH-less executions:         " << st.rachLessExecutions << " (RACH paid: "
               << st.rachExecutions << ")\n"
-              << "  last interruption:            " << st.lastInterruptionMs << " ms\n"
+              << "  last interruption (modeled):  " << st.lastInterruptionMs << " ms\n"
               << "  last pre-computed TA:         " << st.lastPreCompTaUs << " us (ephemeris)\n"
               << "  final serving cell:           " << rs.GetUeServingCellId(0)
               << " (radio; last CHO target " << g_serving << ")\n";
+    const double ueReportShare =
+        g_ticksAfter2s ? 100.0 * g_ticksWithReport / g_ticksAfter2s : 0.0;
+    std::cout << "\n--- Measured inputs and handover KPIs (UE RRC traces + packet arrivals) ---\n"
+              << "  UE 0 measurement reports:     " << rs.GetUeMeasurementReportCount(0)
+              << " (TS 38.331 5.5.4.1 periodical, 480 ms)\n"
+              << "  ticks on rrc-report (t>=2s):  " << g_ticksWithReport << "/" << g_ticksAfter2s
+              << " (" << ueReportShare << " %)\n"
+              << "  handovers (RRC, all UEs):     " << g_hoRec->GetHandoverCount(true)
+              << " ok, " << g_hoRec->GetHandoverFailureCount() << " failed\n"
+              << "  C-plane interruption (mean):  " << g_hoRec->GetMeanCplaneMs()
+              << " ms (HandoverEndOk - HandoverStart)\n"
+              << "  U-plane gap (mean):           " << g_hoRec->GetMeanUplaneGapMs()
+              << " ms (UE 0 median packet spacing " << g_hoRec->GetMedianInterArrivalMs(0)
+              << " ms)\n"
+              << "  ping-pong (" << ppWindowS << " s / 5 s):        "
+              << g_hoRec->GetPingPongCount(Seconds(ppWindowS)) << " / "
+              << g_hoRec->GetPingPongCount(Seconds(5)) << "\n"
+              << "  RLF (T310):                   " << g_hoRec->GetTotalRlfCount() << "\n"
+              << "  time of stay (mean):          " << g_hoRec->GetMeanTimeOfStayS() << " s\n"
+              << "  files: " << outputDir << "/handover_events.csv, ho_kpm.csv, "
+              << "cho_decision_trace.csv, meas_reports.csv\n"
+              << "  note: the modeled interruption is the algorithm's priced value; the measured\n"
+              << "        one runs over ideal RRC with no air delay (A6), so it is a lower bound.\n";
 
     Simulator::Destroy();
     return 0;

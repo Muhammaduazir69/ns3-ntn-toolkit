@@ -48,6 +48,8 @@
 #define NTN_REAL_STACK_HELPER_H
 
 #include "ns3/application-container.h"
+#include "ns3/data-rate.h"
+#include "ns3/event-id.h"
 #include "ns3/ipv4-address.h"
 #include "ns3/net-device-container.h"
 #include "ns3/node-container.h"
@@ -60,9 +62,14 @@
 // header is needed here rather than forward-declared like the rest.
 #include "ns3/nr-rrc-sap.h"
 
+#include "ns3/ntn-earth-blockage-loss-model.h"
+#include "ns3/vector.h"
+
 #include <cstdint>
+#include <fstream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <string>
 #include <set>
 #include <vector>
@@ -78,6 +85,8 @@ class PropagationLossModel;
 class SpectrumPropagationLossModel;
 class SpectrumChannel;
 class NtnOranAiFlowMonitor;
+class NtnEarthBlockageLossModel;
+struct BandwidthPartInfo;
 // nr (5G-LENA) backend types — see SetRadioBackend / RadioBackend::Nr.
 class NrHelper;
 class NrPointToPointEpcHelper;
@@ -272,13 +281,24 @@ class NtnRealStackHelper
     /// could drift apart without any test noticing, and the network would then
     /// schedule against a value it had never advertised. When a broadcaster is
     /// wired through NtnSib19Broadcaster::SetKOffsetSink() this becomes the
-    /// single source of truth. Reprograms N2Delay immediately when called after
-    /// Build(), so a refresh mid-pass takes effect.
-    void SetBroadcastKOffsetSlots(uint32_t slots);
+    /// single source of truth. Reprograms N2Delay when called after Build()
+    /// (at a drained boundary), so a refresh mid-pass takes effect.
+    ///
+    /// \param referenceSlots the broadcast cellSpecificKoffset in slots of the
+    ///        15 kHz reference subcarrier spacing (mu = 0, TS 38.331), exactly
+    ///        as carried in SIB19. The helper converts it to slots of the cell
+    ///        numerology (x 2^mu, see ReferenceToCellSlots()) before adding it to
+    ///        N2Delay, on both paths: before Build() and after it. Callers must
+    ///        NOT pre-scale it.
+    void SetBroadcastKOffsetSlots(uint32_t referenceSlots);
 
-    /// The broadcast K_offset in force, or 0 when none was supplied and the
-    /// local derivation is being used.
+    /// The broadcast K_offset in force, in 15 kHz reference slots, or 0 when
+    /// none was supplied and the local derivation is being used.
     uint32_t GetBroadcastKOffsetSlots() const { return m_broadcastKOffsetSlots; }
+
+    /// Convert a K_offset in 15 kHz reference slots to slots of the configured
+    /// numerology (x 2^mu); the unit of N2Delay and GetConsumedKOffsetSlots().
+    uint32_t ReferenceToCellSlots(uint32_t referenceSlots) const;
     /// Compute the K_offset in slots from the current geometry and numerology
     /// (ceil(RTT / slot) + 1), matching the SIB19 cellSpecificKoffset derivation.
     uint32_t ComputeKOffsetSlots() const;
@@ -588,6 +608,90 @@ class NtnRealStackHelper
     /// beam tracks each UE (roll-off 0). Call before Build().
     void SetSatelliteBeam(double beamwidthDeg = 4.4127,
                           Ptr<MobilityModel> beamCenter = nullptr);
+
+    // ---- C1 (Wave 1): Earth occultation ---------------------------------
+    /// Chain NtnEarthBlockageLossModel on every radio link (default ON): a
+    /// ground end sees nothing below \p minElevationDeg about the WGS-84
+    /// normal, and an air/space link whose line of sight crosses the Earth is
+    /// blocked. Flat-frame scenarios are passed through. Call before Build().
+    void SetEarthBlockage(bool enable, double minElevationDeg = 0.0)
+    {
+        m_earthBlockage = enable;
+        m_minElevationDeg = minElevationDeg;
+    }
+    bool GetEarthBlockage() const { return m_earthBlockage; }
+    /// The chained blockage model (null before Build() or when disabled).
+    Ptr<NtnEarthBlockageLossModel> GetEarthBlockageModel() const { return m_blockageModel; }
+
+    // ---- C3 (Wave 1): channel model selection ---------------------------
+    /// Legacy: Friis + Ntn38811ExcessLossModel + TR 38.901 UMi LOS spatial
+    /// model (today's default, kept for reproducibility).
+    /// Ns3Tr38811: the ns-3 mainline TR 38.811 NTN channel on every BWP:
+    /// ThreeGppNTN<Scenario>PropagationLossModel (clause 6.6: path loss, P.676
+    /// gas, clause 6.6.6 scintillation incl. the S-band ionospheric term,
+    /// clutter, shadow fading), ThreeGppNTN<Scenario>ChannelConditionModel
+    /// (Table 6.6.1-1 LOS probability) and ThreeGppChannelModel scenario
+    /// "NTN-<Scenario>" (clause 6.7.2 fast fading). Both endpoints must be
+    /// GeocentricConstantPositionMobilityModel (Sgp4MobilityModel,
+    /// NtnTr38811MobilityModel, or ntn-constellation's
+    /// NtnGeocentricMobilityAdapter). The legacy excess-loss model is not
+    /// chained in this mode (no double counting); elevation is taken about the
+    /// WGS-84 normal at the lower end (src patch 0001).
+    enum class ChannelModel : uint8_t
+    {
+        Legacy,
+        Ns3Tr38811,
+    };
+    void SetChannelModel(ChannelModel m) { m_channelModel = m; }
+    ChannelModel GetChannelModel() const { return m_channelModel; }
+    /// Small-scale fading on the spatial channel (default true). false
+    /// replaces the 3GPP cluster model with NtnLosPhasedArrayModel: one
+    /// deterministic LOS plane wave with the real array/element gains and no
+    /// multipath, which is what TR 38.821 assumes for ISLs and what a
+    /// closed-form link budget assumes. Not combinable with SetMimo().
+    void SetSmallScaleFading(bool f) { m_smallScaleFading = f; }
+    bool GetSmallScaleFading() const { return m_smallScaleFading; }
+
+    // ---- C4 (Wave 1): terminal and payload declarations -----------------
+    /// Element gain (dBi) of every UE antenna element (IsotropicAntennaModel
+    /// "Gain"). Antennas are reciprocal, so it applies to UL too. Call before
+    /// Build().
+    void SetUeRxAntennaGain(double dBi) { m_ueAntennaGainDbi = dBi; }
+    void SetUeAntennaGainDbi(double dBi) { m_ueAntennaGainDbi = dBi; }
+    double GetUeAntennaGainDbi() const { return m_ueAntennaGainDbi; }
+    /// UE receiver noise figure (dB) on both backends. NaN keeps the stack
+    /// default (nr 5 dB). Call before Build().
+    void SetUeNoiseFigureDb(double nf) { m_ueNoiseFigureDb = nf; }
+    /// TR 38.821 Table 6.1.1.1-1/-2 Set-1 terminal and payload:
+    ///  - S band (carrier <= 7.125 GHz): handheld, 1T2R (UE panel 1x2 of
+    ///    0 dBi isotropic elements, i.e. two receive branches combined by the
+    ///    beamformer), NF 7 dB, Tx 23 dBm; satellite EIRP density 34 dBW/MHz.
+    ///  - Ka band: VSAT 39.7 dBi, Tx 33 dBm, G/T 15.9 dB/K expressed as the
+    ///    equivalent noise figure 10 log10(T_sys / 290 K) the stack uses;
+    ///    satellite EIRP density 4 dBW/MHz.
+    /// Opt-in: the helper defaults are untouched so paper runs reproduce.
+    /// Call before Build() and after SetCarrierFrequencyHz()/SetBandwidthHz().
+    void ApplyTr38821Set1Defaults();
+    bool GetTr38821Set1Applied() const { return m_set1Applied; }
+
+    // ---- C5 (Wave 1): feeder link from a real gateway --------------------
+    /// Drive the backhaul delay from the live feeder geometry between the
+    /// SERVING satellite of the UEs (re-resolved after every handover) and
+    /// the gateway \p gwMobility, plus the payload processing term and the
+    /// folded service link (ComputePayloadExtraDelay). Replaces the constant
+    /// SetBackhaulDelay(). Call after Build().
+    void SetFeederGateway(Ptr<MobilityModel> gwMobility);
+    /// Convenience: a gateway at WGS-84 (\p latDeg, \p lonDeg, \p altM) as a
+    /// ConstantPositionMobilityModel in ECEF (the frame Sgp4MobilityModel
+    /// uses). Returns the model so a scenario can also hand it to a contact
+    /// graph. Call after Build().
+    Ptr<MobilityModel> SetFeederGatewayGeodetic(double latDeg, double lonDeg, double altM = 0.0);
+    /// WGS-84 geodetic to ECEF metres (NIMA TR8350.2).
+    static Vector GeodeticToEcef(double latDeg, double lonDeg, double altM);
+    /// Elevation (deg) of the serving satellite seen from the gateway, NaN when
+    /// no gateway is wired.
+    double GetFeederElevationDeg() const;
+
     void SetUeTxPowerDbm(double p) { m_ueTxDbm = p; }
     void SetBackhaulDelay(Time t) { m_backhaulDelay = t; } ///< feeder+core one-way delay
     Time GetBackhaulDelay() const { return m_backhaulDelay; }
@@ -816,6 +920,80 @@ class NtnRealStackHelper
     uint32_t GetHandoverRequestedCount() const { return m_hoRequested; }
     uint32_t GetHandoverCount() const { return m_hoCount; }
 
+    // ---- C2 (Wave 1): measurement plane independent of the A3 decision ----
+    /// One per-UE, per-cell measurement as the network received it in an RRC
+    /// MeasurementReport (TS 38.331 5.5.5): UE-side L3-filtered (TS 38.331
+    /// 5.5.3.2), quantized by the stack's report mapping, time of reception.
+    struct UeCellMeasurement
+    {
+        double rsrpDbm{std::numeric_limits<double>::quiet_NaN()};
+        double rsrqDb{std::numeric_limits<double>::quiet_NaN()};
+        Time time{Seconds(0)};
+        bool serving{false};
+        uint32_t reports{0};
+    };
+    /// Configure a PERIODICAL measurement report (TS 38.331 5.5.4.1 reportType
+    /// periodical, reportQuantity RSRP and RSRQ) on every gNB before attach,
+    /// so the network receives per-UE serving and neighbour RSRP/RSRQ even
+    /// when no A3 algorithm is installed. \p interval must be a TS 38.331
+    /// ReportInterval value (120, 240, 480, 640, 1024, 2048, 5120 or 10240 ms).
+    /// Turned on automatically by SetHandover(true) + SetAutonomousHandover(false).
+    /// Call before Build().
+    void SetPeriodicMeasurementReports(bool enable, Time interval = MilliSeconds(480));
+    bool GetPeriodicMeasurementReports() const;
+    /// Latest reported RSRP (dBm) of \p cellId by UE \p ueIndex, NaN if none.
+    double GetUeNeighbourRsrpDbm(uint32_t ueIndex, uint16_t cellId) const;
+    /// Latest reported RSRQ (dB) of \p cellId by UE \p ueIndex, NaN if none.
+    double GetUeNeighbourRsrqDb(uint32_t ueIndex, uint16_t cellId) const;
+    /// Latest reported serving-cell (measResultPCell) RSRP of UE \p ueIndex.
+    double GetUeServingRsrpDbm(uint32_t ueIndex) const;
+    /// Latest reported serving-cell RSRQ of UE \p ueIndex.
+    double GetUeServingRsrqDb(uint32_t ueIndex) const;
+    /// Age of the latest report of \p cellId by UE \p ueIndex; -1 s if none.
+    Time GetUeMeasReportAge(uint32_t ueIndex, uint16_t cellId) const;
+    /// Measurement reports received from UE \p ueIndex.
+    uint32_t GetUeMeasurementReportCount(uint32_t ueIndex) const;
+    /// All cells UE \p ueIndex has reported, keyed by cell id.
+    std::map<uint16_t, UeCellMeasurement> GetUeMeasurements(uint32_t ueIndex) const;
+    /// Write every received report (and the UE L1 RSRP samples) to \p csvPath:
+    /// time_s,ue,imsi,cell,serving,source,rsrp_dbm,rsrq_db. Call before Run.
+    void EnableMeasurementTrace(const std::string& csvPath);
+    /// Per-flow mean rate of the rate-driven traffic profiles installed by
+    /// InstallTraffic()/InstallOranFlow() (EmbbStreaming and the other
+    /// EmbbVideo/PoissonBackground/CbrSaturating presets). Applies to flows
+    /// installed after the call. Without it the NtnOranApplication DataRate
+    /// attribute default applies (5 Mb/s, or whatever Config::SetDefault set).
+    void SetEmbbRate(DataRate rate)
+    {
+        m_embbRate = rate;
+        m_embbRateSet = true;
+    }
+    /// Write per-UE serving-cell statistics every \p period to \p csvPath:
+    /// time_s,ue,serving_cell,rnti,dl_tb,dl_tb_err,recent_sinr_db,
+    /// cell_mean_sinr_db,recent_tbler (GetUeServingCellId, GetUeRnti,
+    /// GetUeRanCounters, GetUeRecentSinrDb, GetUeMeanSinrDb, GetUeRecentTbler).
+    /// Read-only, so it does not perturb the run. Also enabled for the nr
+    /// backend by the GlobalValue NtnRealStackUeStatsTrace (1 s period), e.g.
+    /// --NtnRealStackUeStatsTrace=out/ue_stats.csv on any example command line.
+    void EnableUeStatsTrace(const std::string& csvPath, Time period = Seconds(1));
+    /// Cell-level SS-RSRP (TS 38.215 5.1.1): every gNB transmits its control
+    /// region, including the PSS/SSB the UE measures, on a CELL beam instead
+    /// of quasi-omni (nr patch 09: the predefined beam of the gNB BeamManager).
+    /// The beam is the gNB array steered at \p cellCenter (Earth-fixed cell,
+    /// TR 38.821 clause 7.3) or, when null, at the gNB's own sub-satellite
+    /// point (Earth-moving beam), refreshed every \p refresh as the satellite
+    /// moves. Data stays on per-UE beams. Also switches the UE L1 RSRP average
+    /// to the linear domain the standard defines (nr patch 09). Call before
+    /// Build().
+    void SetSsbCellBeam(bool enable,
+                        Ptr<MobilityModel> cellCenter = nullptr,
+                        Time refresh = MilliSeconds(100));
+    bool GetSsbCellBeam() const { return m_ssbCellBeam; }
+    /// Measured A3/RSRP handover state from the RRC: completed handovers whose
+    /// target equals the source of the previous one within \p window
+    /// (TS 38.300 15.5.2.2 MRO ping-pong wording).
+    uint32_t GetPingPongCount(Time window = Seconds(5)) const;
+
     // ---- Enabler B: spectrum-level channel plugin + real MIMO ------------
     /// Install a caller-supplied SpectrumPropagationLossModel onto the NR BWP
     /// spectrum channel(s). Unlike AddExtraPropagationLoss() (a scalar dB
@@ -992,6 +1170,42 @@ class NtnRealStackHelper
     /// never emits a measurement report.
     double GetServingRsrpDbm() const;
 
+    // ---- C6 (Wave 1): gNB-side counters for TS 28.552 KPM ----------------
+    /// Cumulative per-UE counters measured inside the RAN, read by
+    /// NtnOranAiFlowMonitor when SetKpmFromRanCounters(true):
+    ///  - dlTb / dlTbErr: DL transport blocks decoded / failed at the UE PHY
+    ///    (TS 28.552 5.1.1.8 TB.TotNbrDl, TB.ErrTotNbrDl are COUNTS);
+    ///  - rlcSduDelaySumMs / rlcSdus: per DRB, the time from the RLC SDU (PDCP
+    ///    PDU) entering the gNB to its delivery at the UE PDCP, i.e. queueing,
+    ///    scheduling, HARQ and (when SetAirInterfaceDelay) propagation:
+    ///    TS 28.552 5.1.3.3.1 DRB.RlcSduDelayDl, TS 38.314 D1 definition;
+    ///  - prbSymSum: sum over this UE's DL TBs of assigned PRBs x symbols / 14,
+    ///    i.e. PRB-slots used (TS 28.552 5.1.1.2 RRU.PrbUsedDl numerator).
+    struct UeRanCounters
+    {
+        uint64_t dlTb{0};
+        uint64_t dlTbErr{0};
+        double rlcSduDelaySumMs{0.0};
+        uint64_t rlcSdus{0};
+        double prbSymSum{0.0};
+    };
+    UeRanCounters GetUeRanCounters(uint32_t ueIndex) const;
+    /// Cumulative PRB-slots used on DL in \p cellId (sum of PRB x symbols/14).
+    double GetCellDlPrbSlotsUsed(uint16_t cellId) const;
+    /// Slot duration of the configured numerology (for PRB-usage averaging).
+    Time GetSlotDuration() const { return MilliSeconds(1) / (1 << m_numerology); }
+    /// Number of PRBs of one BWP (the PRB-usage denominator).
+    uint32_t GetBwpPrbs() const { return m_nrBandRb; }
+    /// Make the AI flow monitor (when enabled) emit DRB.RlcSduDelayDl,
+    /// TB.ErrTotNbrDl, TB.TotNbrDl and RRU.PrbUsedDl from these counters, and
+    /// keep the application probes under app.OwdDl / app.TbBlerDl. Default
+    /// off so published KPM series reproduce. Call before EnableAiFlowMonitor.
+    void SetKpmFromRanCounters(bool e) { m_kpmFromRan = e; }
+    bool GetKpmFromRanCounters() const { return m_kpmFromRan; }
+    /// RFC 3393 IPDV over consecutive-sequence pairs, all DL flows (ms).
+    double GetIpdvMeanAbsMs() const { return m_ipdvMeanAbsMs; }
+    double GetIpdvP95AbsMs() const { return m_ipdvP95AbsMs; }
+
     /// NT-04: how often the folded service-link delay is re-evaluated.
     ///
     /// The fold compensates for the air interface carrying no propagation delay
@@ -1056,8 +1270,24 @@ class NtnRealStackHelper
     uint16_t GetUeServingCellId(uint32_t ueIndex) const;
     /// Most recent measured DL SINR (dB) for the UE, or NaN if no samples yet.
     double GetUeRecentSinrDb(uint32_t ueIndex) const;
-    /// Run-mean measured DL SINR (dB) for the UE, or NaN if no samples.
+    ///
+    /// GetUeRecentSinrDb(), GetUeMeanSinrDb() and GetUeRecentTbler() are keyed
+    /// by (GetUeServingCellId(), GetUeRnti()) and therefore follow the serving
+    /// cell: after a handover they report the TBs received from the NEW cell
+    /// (nr patch 10 labels the UE DL RX trace with the serving cell; before it,
+    /// every TB after the first handover carried the attach cell and these
+    /// getters went NaN). GetUeMeanSinrDb() is the mean since the UE joined its
+    /// current cell. GetUeRanCounters() is keyed by the UE index and is
+    /// cumulative over the run, handovers included.
+    /// Run-mean measured DL SINR (dB) for the UE in its current serving cell,
+    /// or NaN if no samples.
     double GetUeMeanSinrDb(uint32_t ueIndex) const;
+    /// Linear mean (TS 38.215 5.1.6) of the UE's DL TB SINRs since the previous
+    /// call, in dB, for a periodic decision loop (CHO, xApp). Keyed by the UE
+    /// index, so it is continuous across handovers. When no TB arrived in the
+    /// window it returns the last TB's SINR (older, still measured); NaN when
+    /// the UE never decoded a TB. Nr backend. Resets the window.
+    double TakeUeSinrWindowMeanDb(uint32_t ueIndex);
     /// Most recent measured DL TBLER for the UE (from the real error model),
     /// or NaN if no samples yet. Used by FAPI to drive a measured CRC outcome.
     double GetUeRecentTbler(uint32_t ueIndex) const;
@@ -1305,6 +1535,75 @@ class NtnRealStackHelper
     std::map<uint16_t, SinrAccum> m_dlPerCell;
     /// CHO-6: latest reported neighbour RSRP in dBm, keyed by physical cell id.
     std::map<uint16_t, double> m_neighbourRsrpDbm;
+    // ---- Wave 1 state -----------------------------------------------------
+    bool m_earthBlockage{true};
+    double m_minElevationDeg{0.0};
+    Ptr<NtnEarthBlockageLossModel> m_blockageModel;
+    ChannelModel m_channelModel{ChannelModel::Legacy};
+    bool m_smallScaleFading{true};
+    double m_ueAntennaGainDbi{0.0};
+    double m_ueNoiseFigureDb{std::numeric_limits<double>::quiet_NaN()};
+    bool m_set1Applied{false};
+    std::string m_prevElevationModel;
+    int m_prevRsrpLinear{-1};
+    bool m_ssbCellBeam{false};
+    Ptr<MobilityModel> m_cellBeamCenter;
+    Time m_cellBeamRefresh{MilliSeconds(100)};
+    std::vector<Ptr<MobilityModel>> m_nadirCenters;
+    void RefreshCellBeams();
+    double SlantKmToCell(uint32_t ueIndex, uint16_t cellId) const;
+    int m_prevRsrqFromRssi{-1};
+    bool m_periodicMeas{false};
+    bool m_periodicMeasExplicit{false};
+    Time m_periodicMeasInterval{MilliSeconds(480)};
+    std::map<uint32_t, std::map<uint16_t, UeCellMeasurement>> m_ueMeas;
+    std::map<uint32_t, uint32_t> m_ueMeasReports;
+    std::string m_measTracePath;
+    std::shared_ptr<std::ofstream> m_measTrace;
+    struct HoRecord
+    {
+        Time t;
+        uint32_t ue;
+        uint16_t source;
+        uint16_t target;
+    };
+    std::vector<HoRecord> m_hoRecords;
+    std::map<uint64_t, uint16_t> m_lastCellOfImsi;
+    Ptr<MobilityModel> m_feederGwTracked;
+    bool m_kpmFromRan{false};
+    std::map<uint32_t, UeRanCounters> m_ueRan;
+    struct UeSinrWindow
+    {
+        double sumLin{0.0};
+        uint64_t n{0};
+        double lastDb{std::numeric_limits<double>::quiet_NaN()};
+    };
+    std::map<uint32_t, UeSinrWindow> m_ueSinrWin; // per UE index (TakeUeSinrWindowMeanDb)
+    std::shared_ptr<std::ofstream> m_ueStatsTrace;  // EnableUeStatsTrace
+    DataRate m_embbRate{DataRate("5Mb/s")};          // SetEmbbRate
+    bool m_embbRateSet{false};
+    Time m_ueStatsPeriod{Seconds(1)};
+    EventId m_ueStatsEvent;
+    void SampleUeStats();
+    std::map<uint16_t, double> m_cellPrbSlots;
+    std::set<const void*> m_pdcpConnected;
+    double m_ipdvMeanAbsMs{std::numeric_limits<double>::quiet_NaN()};
+    double m_ipdvP95AbsMs{std::numeric_limits<double>::quiet_NaN()};
+    int32_t UeIndexOfImsi(uint64_t imsi) const;
+    int32_t UeIndexOfCellRnti(uint16_t cellId, uint16_t rnti) const;
+    void NrUePhyMeas(uint32_t ueIndex,
+                     uint16_t rnti,
+                     uint16_t cellId,
+                     double rsrp,
+                     double rsrq,
+                     bool isServing,
+                     uint8_t ccId);
+    void ConnectUePdcpTraces();
+    void UePdcpRx(uint32_t ueIndex, uint16_t rnti, uint8_t lcid, uint32_t size, uint64_t delayNs);
+    void NrUeRrcConnTrace(std::string ctx, uint64_t imsi, uint16_t cellId, uint16_t rnti);
+    void RefreshFeederFromServing();
+    void ApplyNs3Tr38811Channel(BandwidthPartInfo* bwp);
+    void ApplyLosOnlySpatialModel();
     /// NT-04: periodic re-evaluation of the folded service-link delay.
     void RefreshBackhaulFold();
     Time m_backhaulRefresh{Seconds(1.0)};

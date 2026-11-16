@@ -16,8 +16,39 @@
 //        the ephemeris: next device contact, then that satellite's next gateway contact)
 // --keepNewest makes every custody queue keep only the newest update of each device.
 // The server writes one line per received update: device, sequence, generation time, reception time.
+//
+// Wave 2 M3 options (the defaults reproduce the IoT-J output byte for byte):
+//   --linkModel=satlink  every device-satellite and satellite-gateway hop gets a ntn-constellation
+//        NtnSatLinkErrorModel per direction: per-packet Es/No from the LIVE slant range (FSPL,
+//        P.676 gas, P.618 scintillation) through the DVB-S2 QPSK 1/2 waterfall (EN 302 307-1
+//        Table 13 QEF threshold 1.0 dB), instead of the 0/1 elevation gate. The geometric gate
+//        stays only for line of sight (elevation >= 0). Declared budget, TR 38.821 Table
+//        6.1.1.1-1/-2 Set-1 LEO-600: device = handheld-class IoT terminal 23 dBm, 0 dBi, G/T
+//        -31.6 dB/K (NF 7 dB), S band 2 GHz; satellite S-band G/T 1.1 dB/K, EIRP density 34 dBW/MHz;
+//        feeder Ka 20/30 GHz: satellite EIRP density 4 dBW/MHz, G/T 13 dB/K; gateway = Set-1
+//        VSAT (G/T 15.9 dB/K, 33 dBm + 43.2 dBi). The noise bandwidth is the symbol rate the hop's
+//        P2P DataRate needs at QPSK 1/2 (0.988 b/symbol), so the radio carries the rate the link
+//        claims. The orbits are the ORBCOMM TLEs; ORBCOMM's own VHF air interface is NOT modeled.
+//   --contacts=cgr  contact windows come from ntn-constellation ContactGraphScheduler (one per
+//        mask, satellites and RegisterGroundStation sites on the same SGP4 models) and a
+//        ContactGraphRouter attached to the gateway scheduler picks the satellite's gateway,
+//        instead of the example's own elevation test. --policy=sfe still plans with the
+//        example's ephemeris plan (the scheduler predicts contact ends, not future starts).
+//   --dtn=bpv7  every update is a BPv7 bundle (RFC 9171 primary block, CBOR, sagin-bundle-
+//        protocol.h) with lifetime = --lifetimeH from its creation timestamp (RFC 9171 4.2.2),
+//        and custody transfer per RFC 5050 5.10 as an extension: a node keeps a forwarded
+//        bundle until the next hop's custody signal (sent back over the same radio hop, so it
+//        can be lost too), retransmits after --custodyTimeoutS, refuses on depleted storage
+//        (reason 4) and answers duplicates with "redundant reception" (reason 3). The server
+//        delivers each bundle once (RFC 9171 5.7) and counts duplicates. Not implemented: CRCs,
+//        extension blocks, fragmentation, BPSec, status reports on the wire (counted only),
+//        LTP/TCPCL convergence layers, SABR (CCSDS 734.3-B-1) route computation.
 
 #include "ns3/applications-module.h"
+#include "ns3/contact-graph-router.h"
+#include "ns3/contact-graph-scheduler.h"
+#include "ns3/ntn-sat-link-error-model.h"
+#include "ns3/sagin-bundle-protocol.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
@@ -28,12 +59,17 @@
 #include "ns3/sgp4-mobility-model.h"
 
 #include <cmath>
+#include <iomanip>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 
 using namespace ns3;
+using ns3::ntnsagin::SaginBundleHeader;
+using ns3::ntnsagin::SaginBundleTrailer;
 using ns3::ntnsagin::SaginCustodyQueue;
+using ns3::ntnsagin::SaginCustodySignalHeader;
 
 NS_LOG_COMPONENT_DEFINE("SaginStoreForwardIot");
 
@@ -43,16 +79,54 @@ constexpr double kC = 299792458.0;
 constexpr double kA = 6378137.0;
 constexpr double kF = 1.0 / 298.257223563;
 constexpr uint16_t kPort = 9000;
+constexpr uint16_t kSigPort = 9002; // custody signals (--dtn=bpv7)
 
 struct Site
 {
     std::string name;
     Vector ecef;
+    double latDeg{0.0};
+    double lonDeg{0.0};
+};
+
+/// --linkModel=satlink: line-of-sight gate (elevation >= 0) in front of the graded
+/// NtnSatLinkErrorModel, with per-hop counters.
+class GatedSatLinkErrorModel : public ErrorModel
+{
+  public:
+    static TypeId GetTypeId()
+    {
+        static TypeId tid = TypeId("GatedSatLinkErrorModel").SetParent<ErrorModel>();
+        return tid;
+    }
+    bool los{false};
+    Ptr<ntncon::NtnSatLinkErrorModel> inner;
+    uint64_t* rx{nullptr};
+    uint64_t* lost{nullptr};
+    double* esnoSum{nullptr};
+
+  private:
+    bool DoCorrupt(Ptr<Packet> p) override
+    {
+        ++*rx;
+        bool bad = true;
+        if (los)
+        {
+            bad = inner->IsCorrupt(p);
+            *esnoSum += inner->LastEsNoDb();
+        }
+        *lost += bad ? 1 : 0;
+        return bad;
+    }
+    void DoReset() override
+    {
+    }
 };
 
 struct Link
 {
     Ptr<RateErrorModel> emA, emB;
+    Ptr<GatedSatLinkErrorModel> slA, slB; // --linkModel=satlink only
     Ptr<PointToPointChannel> chan;
     Ipv4Address addrA, addrB; // A = ground (device or gateway) side, B = satellite side
     bool up{false};
@@ -92,7 +166,7 @@ ReadSites(const std::string& path, uint32_t maxN)
         std::getline(ss, name, ',');
         std::getline(ss, la, ',');
         std::getline(ss, lo, ',');
-        out.push_back({name, Geodetic(std::stod(la), std::stod(lo))});
+        out.push_back({name, Geodetic(std::stod(la), std::stod(lo)), std::stod(la), std::stod(lo)});
     }
     return out;
 }
@@ -127,9 +201,105 @@ uint32_t g_planTicks = 0;
 std::ofstream g_out;
 double g_genStop = 0.0;
 
-void
-SetLink(Link& l, bool up, double rangeM)
+// ---- Wave 2 M3 options ----
+bool g_satlink = false;
+bool g_cgr = false;
+bool g_bpv7 = false;
+std::vector<std::vector<bool>> g_cgrDs; // contact state device-sat from the scheduler
+std::vector<std::vector<bool>> g_cgrSg; // contact state sat-gateway from the scheduler
+Ptr<ntncon::ContactGraphRouter> g_router;
+constexpr uint32_t kGwIdBase = 1001;
+constexpr uint32_t kDevIdBase = 2001;
+uint64_t g_routerGwPicks = 0;
+// per-hop radio counters: 0 device->sat, 1 sat->device (signals), 2 sat->gw, 3 gw->sat (signals)
+uint64_t g_hopRx[4] = {0, 0, 0, 0};
+uint64_t g_hopLost[4] = {0, 0, 0, 0};
+double g_hopEsno[4] = {0, 0, 0, 0};
+// BPv7 bookkeeping
+double g_epochUnix = 0.0;
+uint64_t g_lifetimeMs = 0;
+std::vector<std::set<uint64_t>> g_satSeen; // bundles each satellite took custody of
+std::set<uint64_t> g_srvSeen;
+uint64_t g_delivered = 0;
+uint64_t g_dupAtServer = 0;
+uint64_t g_sigSentOk = 0;
+uint64_t g_sigSentRefused = 0;
+uint64_t g_sigSentRedundant = 0;
+uint64_t g_sigRecv = 0;
+std::vector<Ptr<Socket>> g_devSigSock, g_satSigSock;
+
+bool
+DevSatVisible(uint32_t d, uint32_t k)
 {
+    return g_cgr ? g_cgrDs[d][k] : g_sinDs[d][k] >= g_sinDevMask;
+}
+
+uint64_t
+BundleIdOf(Ptr<const Packet> p)
+{
+    SaginBundleHeader h;
+    p->PeekHeader(h);
+    return h.BundleId();
+}
+
+uint64_t
+BundleSourceKey(Ptr<const Packet> p)
+{
+    SaginBundleHeader h;
+    p->PeekHeader(h);
+    return h.srcNode;
+}
+
+Time
+BundleCreation(Ptr<const Packet> p)
+{
+    SaginBundleHeader h;
+    p->PeekHeader(h);
+    return MilliSeconds(static_cast<int64_t>(h.creationMs) -
+                        static_cast<int64_t>((g_epochUnix - ntnsagin::kDtnEpochUnixS) * 1000.0));
+}
+
+void
+SendCustodySignal(Ptr<Socket> sock, const SaginBundleHeader& b, Address to, bool ok, uint8_t reason)
+{
+    SaginCustodySignalHeader sig;
+    sig.succeeded = ok;
+    sig.reason = reason;
+    sig.srcNode = b.srcNode;
+    sig.srcService = b.srcService;
+    sig.creationMs = b.creationMs;
+    sig.creationSeq = b.creationSeq;
+    Ptr<Packet> p = Create<Packet>();
+    p->AddHeader(sig);
+    const Ipv4Address ip = InetSocketAddress::ConvertFrom(to).GetIpv4();
+    sock->SendTo(p, 0, InetSocketAddress(ip, kSigPort));
+    if (!ok)
+    {
+        ++g_sigSentRefused;
+    }
+    else if (reason == ntnsagin::kCustodyReasonRedundant)
+    {
+        ++g_sigSentRedundant;
+    }
+    else
+    {
+        ++g_sigSentOk;
+    }
+}
+
+void
+SetLink(Link& l, bool up, double rangeM, bool los = false)
+{
+    if (g_satlink)
+    {
+        // Routing still uses the masks (l.up); the radio passes everything in line of sight
+        // through the graded error model.
+        l.up = up;
+        l.slA->los = los;
+        l.slB->los = los;
+        l.chan->SetAttribute("Delay", TimeValue(Seconds(rangeM / kC)));
+        return;
+    }
     l.up = up;
     const double rate = up ? 0.0 : 1.0;
     l.emA->SetRate(rate);
@@ -156,7 +326,7 @@ ChooseSatellite(uint32_t d)
         int bestK = -1;
         for (uint32_t k = 0; k < S; ++k)
         {
-            if (g_sinDs[d][k] < g_sinDevMask)
+            if (!DevSatVisible(d, k))
             {
                 continue; // only satellites visible now can take the packet now
             }
@@ -191,7 +361,7 @@ ChooseSatellite(uint32_t d)
     double bestE = -2.0;
     for (uint32_t k = 0; k < S; ++k)
     {
-        if (g_sinDs[d][k] < g_sinDevMask)
+        if (!DevSatVisible(d, k))
         {
             continue;
         }
@@ -236,6 +406,25 @@ SatelliteForward(uint32_t k, Ptr<Packet> p)
     {
         return false;
     }
+    if (g_cgr)
+    {
+        // ContactGraphRouter: the gateways adjacent to this satellite in the live contact graph
+        // (lowest gateway index first, the same tie rule as the elevation mode).
+        const auto nb = g_router->Neighbours(k + 1);
+        for (uint32_t id : nb)
+        {
+            if (id < kGwIdBase || id >= kGwIdBase + g_gw.size())
+            {
+                continue;
+            }
+            const uint32_t g = id - kGwIdBase;
+            ++g_routerGwPicks;
+            const bool ok = g_satSock[k]->SendTo(p->Copy(), 0, InetSocketAddress(g_sg[k][g].addrA, kPort)) >= 0;
+            g_satUsed[k] += ok ? 1 : 0;
+            return ok;
+        }
+        return false;
+    }
     for (uint32_t g = 0; g < g_gw.size(); ++g)
     {
         if (g_visSg[k][g])
@@ -252,9 +441,32 @@ void
 SatelliteReceive(uint32_t k, Ptr<Socket> s)
 {
     Ptr<Packet> p;
-    while ((p = s->Recv()))
+    Address from;
+    while ((p = s->RecvFrom(from)))
     {
-        g_satQ[k]->Offer(p);
+        if (!g_bpv7)
+        {
+            g_satQ[k]->Offer(p);
+            continue;
+        }
+        // RFC 5050 5.10: take custody (or refuse) and tell the previous custodian.
+        SaginBundleHeader b;
+        p->PeekHeader(b);
+        const uint64_t id = b.BundleId();
+        if (g_satSeen[k].count(id))
+        {
+            SendCustodySignal(g_satSigSock[k], b, from, true, ntnsagin::kCustodyReasonRedundant);
+            continue;
+        }
+        if (g_satQ[k]->Offer(p))
+        {
+            g_satSeen[k].insert(id);
+            SendCustodySignal(g_satSigSock[k], b, from, true, ntnsagin::kCustodyReasonNone);
+        }
+        else
+        {
+            SendCustodySignal(g_satSigSock[k], b, from, false, ntnsagin::kCustodyReasonDepletedStorage);
+        }
     }
 }
 
@@ -262,9 +474,38 @@ void
 GatewayReceive(uint32_t g, Ptr<Socket> s)
 {
     Ptr<Packet> p;
+    Address from;
+    while ((p = s->RecvFrom(from)))
+    {
+        if (g_bpv7)
+        {
+            // The gateway is the last custodian before the server's wired link: it accepts
+            // custody (signal back over the feeder) and hands the bundle on.
+            SaginBundleHeader b;
+            p->PeekHeader(b);
+            SendCustodySignal(g_gwSock[g], b, from, true, ntnsagin::kCustodyReasonNone);
+        }
+        g_gwSock[g]->SendTo(p, 0, InetSocketAddress(g_gwServerAddr[g], kPort + 1));
+    }
+}
+
+void
+CustodySignalReceive(Ptr<SaginCustodyQueue> q, Ptr<Socket> s)
+{
+    Ptr<Packet> p;
     while ((p = s->Recv()))
     {
-        g_gwSock[g]->SendTo(p, 0, InetSocketAddress(g_gwServerAddr[g], kPort + 1));
+        SaginCustodySignalHeader sig;
+        p->RemoveHeader(sig);
+        ++g_sigRecv;
+        if (sig.succeeded)
+        {
+            q->AcceptCustody(sig.BundleId());
+        }
+        else
+        {
+            q->RefuseCustody(sig.BundleId());
+        }
     }
 }
 
@@ -274,6 +515,19 @@ ServerReceive(Ptr<Socket> s)
     Ptr<Packet> p;
     while ((p = s->Recv()))
     {
+        if (g_bpv7)
+        {
+            SaginBundleHeader b;
+            p->RemoveHeader(b);
+            SaginBundleTrailer t;
+            p->RemoveTrailer(t);
+            if (!g_srvSeen.insert(b.BundleId()).second)
+            {
+                ++g_dupAtServer; // RFC 9171 5.7: deliver once
+                continue;
+            }
+        }
+        ++g_delivered;
         SeqTsHeader h;
         p->RemoveHeader(h);
         const uint32_t seq = h.GetSeq();
@@ -305,6 +559,23 @@ Generate(uint32_t d, uint32_t seq, Time period)
     SeqTsHeader h;                      // timestamp = generation time
     h.SetSeq((d << 20) | (seq & 0xFFFFF));
     p->AddHeader(h);
+    if (g_bpv7)
+    {
+        SaginBundleHeader b;
+        b.srcNode = d + 1; // ipn:<device+1>.1
+        b.srcService = 1;
+        b.destNode = 9000; // ipn:9000.1 = the server
+        b.destService = 1;
+        b.reportNode = d + 1;
+        b.reportService = 0;
+        b.creationMs = static_cast<uint64_t>((g_epochUnix - ntnsagin::kDtnEpochUnixS) * 1000.0) +
+                       static_cast<uint64_t>(Simulator::Now().GetMilliSeconds());
+        b.creationSeq = seq;
+        b.lifetimeMs = g_lifetimeMs;
+        b.payloadLength = p->GetSize();
+        p->AddHeader(b);
+        p->AddTrailer(SaginBundleTrailer());
+    }
     ++g_generated;
     g_devQ[d]->Offer(p);
     if (Simulator::Now() + period < Seconds(g_genStop))
@@ -322,15 +593,27 @@ Tick()
     {
         pos[k] = g_sats[k]->GetPosition();
     }
+    if (g_bpv7)
+    {
+        for (auto& q : g_devQ)
+        {
+            q->CheckCustodyTimeouts();
+        }
+        for (auto& q : g_satQ)
+        {
+            q->CheckCustodyTimeouts();
+        }
+    }
     for (uint32_t k = 0; k < S; ++k)
     {
         bool any = false;
         for (uint32_t g = 0; g < g_gw.size(); ++g)
         {
-            const bool v = SinElevation(g_gw[g].ecef, pos[k]) >= g_sinGwMask;
+            const double se = SinElevation(g_gw[g].ecef, pos[k]);
+            const bool v = g_cgr ? g_cgrSg[k][g] : se >= g_sinGwMask;
             g_visSg[k][g] = v;
             any = any || v;
-            SetLink(g_sg[k][g], v, CalculateDistance(g_gw[g].ecef, pos[k]));
+            SetLink(g_sg[k][g], v, CalculateDistance(g_gw[g].ecef, pos[k]), se >= 0.0);
         }
         if (any && !g_satWasUp[k])
         {
@@ -346,9 +629,9 @@ Tick()
         {
             const double se = SinElevation(g_dev[d].ecef, pos[k]);
             g_sinDs[d][k] = se;
-            const bool v = se >= g_sinDevMask;
+            const bool v = DevSatVisible(d, k);
             any = any || v;
-            SetLink(g_ds[d][k], v, CalculateDistance(g_dev[d].ecef, pos[k]));
+            SetLink(g_ds[d][k], v, CalculateDistance(g_dev[d].ecef, pos[k]), se >= 0.0);
         }
         if (any && !g_devWasUp[d])
         {
@@ -434,7 +717,25 @@ main(int argc, char* argv[])
     cmd.AddValue("upBudget", "updates a device may upload per contact with the fleet, 0 = unlimited", g_upBudget);
     cmd.AddValue("feedBudget", "updates a satellite may deliver per gateway contact, 0 = unlimited", g_feedBudget);
     cmd.AddValue("out", "output CSV", out);
+    std::string linkModel = "gate";
+    std::string contacts = "elevation";
+    std::string dtn = "none";
+    double custodyTimeoutS = 30.0;
+    cmd.AddValue("linkModel", "gate (0/1 elevation gate, IoT-J default) | satlink (NtnSatLinkErrorModel)",
+                 linkModel);
+    cmd.AddValue("contacts", "elevation (example's own test, default) | cgr (ContactGraphScheduler/Router)",
+                 contacts);
+    cmd.AddValue("dtn", "none (default) | bpv7 (RFC 9171 bundles + RFC 5050 custody transfer)", dtn);
+    cmd.AddValue("custodyTimeoutS", "custody retransmission timer (s), --dtn=bpv7", custodyTimeoutS);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_UNLESS(linkModel == "gate" || linkModel == "satlink", "--linkModel=gate|satlink");
+    NS_ABORT_MSG_UNLESS(contacts == "elevation" || contacts == "cgr", "--contacts=elevation|cgr");
+    NS_ABORT_MSG_UNLESS(dtn == "none" || dtn == "bpv7", "--dtn=none|bpv7");
+    g_satlink = linkModel == "satlink";
+    g_cgr = contacts == "cgr";
+    g_bpv7 = dtn == "bpv7";
+    g_epochUnix = epochUnix;
+    g_lifetimeMs = static_cast<uint64_t>((lifetimeH > 0 ? lifetimeH * 3600.0 : days * 86400.0) * 1000.0);
     g_sinDevMask = std::sin(devMaskDeg * M_PI / 180.0);
     g_sinGwMask = std::sin(gwMaskDeg * M_PI / 180.0);
 
@@ -474,6 +775,50 @@ main(int argc, char* argv[])
     inet.Install(gwN);
     inet.Install(srvN);
 
+    // --linkModel=satlink: ground endpoints as ECEF mobility for the live slant range.
+    std::vector<Ptr<MobilityModel>> devMob, gwMob;
+    const double accessRateBps = 1e6;           // the hop's P2P DataRate below
+    const double qpskHalfBitsPerSymbol = 0.988; // DVB-S2 QPSK 1/2 (EN 302 307-1 Table 13)
+    const double noiseBwHz = accessRateBps / qpskHalfBitsPerSymbol;
+    const double bwMhzDb = 10.0 * std::log10(noiseBwHz / 1e6);
+    if (g_satlink)
+    {
+        for (const auto& site : g_dev)
+        {
+            Ptr<ConstantPositionMobilityModel> m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(site.ecef);
+            devMob.push_back(m);
+        }
+        for (const auto& site : g_gw)
+        {
+            Ptr<ConstantPositionMobilityModel> m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(site.ecef);
+            gwMob.push_back(m);
+        }
+        std::cout << "# satlink budget (TR 38.821 Set-1 LEO-600): noise BW " << noiseBwHz / 1e6
+                  << " MHz; device EIRP -7 dBW, sat S G/T 1.1 dB/K, sat S EIRP "
+                  << 34.0 + bwMhzDb << " dBW, device G/T -31.6 dB/K; feeder sat Ka EIRP "
+                  << 4.0 + bwMhzDb << " dBW, gw G/T 15.9 dB/K, gw EIRP 46.2 dBW, sat Ka G/T 13 dB/K\n";
+    }
+    auto mkSatLink = [&](Ptr<MobilityModel> tx, Ptr<MobilityModel> rx, double eirpDbw, double gtDbK,
+                         double carrierHz, double latDeg, int hop) {
+        Ptr<ntncon::NtnSatLinkErrorModel> e = CreateObject<ntncon::NtnSatLinkErrorModel>();
+        e->SetAttribute("EirpDbw", DoubleValue(eirpDbw));
+        e->SetAttribute("RxGtDbK", DoubleValue(gtDbK));
+        e->SetAttribute("BandwidthHz", DoubleValue(noiseBwHz));
+        e->SetAttribute("CarrierHz", DoubleValue(carrierHz));
+        e->SetAttribute("ThresholdEsNoDb", DoubleValue(1.0));
+        e->SetAttribute("GroundAltKm", DoubleValue(0.0));
+        e->SetAttribute("StationLatitudeDeg", DoubleValue(latDeg));
+        e->SetEndpoints(tx, rx);
+        Ptr<GatedSatLinkErrorModel> g = CreateObject<GatedSatLinkErrorModel>();
+        g->inner = e;
+        g->rx = &g_hopRx[hop];
+        g->lost = &g_hopLost[hop];
+        g->esnoSum = &g_hopEsno[hop];
+        return g;
+    };
+
     PointToPointHelper p2p;
     p2p.SetDeviceAttribute("DataRate", StringValue("1Mbps"));
     p2p.SetChannelAttribute("Delay", StringValue("5ms"));
@@ -506,6 +851,17 @@ main(int argc, char* argv[])
         for (uint32_t k = 0; k < S; ++k)
         {
             g_ds[d][k] = mkLink(devN.Get(d), satN.Get(k));
+            if (g_satlink)
+            {
+                Link& l = g_ds[d][k];
+                // A = device receives (sat -> device, S band 2.185 GHz), B = sat receives (2.0 GHz).
+                l.slA = mkSatLink(g_sats[k], devMob[d], 34.0 + bwMhzDb, -31.6, 2.185e9, g_dev[d].latDeg, 1);
+                l.slB = mkSatLink(devMob[d], g_sats[k], -7.0, 1.1, 2.0e9, g_dev[d].latDeg, 0);
+                DynamicCast<PointToPointNetDevice>(l.chan->GetDevice(0))
+                    ->SetAttribute("ReceiveErrorModel", PointerValue(l.slA));
+                DynamicCast<PointToPointNetDevice>(l.chan->GetDevice(1))
+                    ->SetAttribute("ReceiveErrorModel", PointerValue(l.slB));
+            }
         }
     }
     g_sg.assign(S, std::vector<Link>(G));
@@ -514,6 +870,17 @@ main(int argc, char* argv[])
         for (uint32_t g = 0; g < G; ++g)
         {
             g_sg[k][g] = mkLink(gwN.Get(g), satN.Get(k));
+            if (g_satlink)
+            {
+                Link& l = g_sg[k][g];
+                // A = gateway receives (Ka 20 GHz), B = sat receives (Ka 30 GHz).
+                l.slA = mkSatLink(g_sats[k], gwMob[g], 4.0 + bwMhzDb, 15.9, 20e9, g_gw[g].latDeg, 2);
+                l.slB = mkSatLink(gwMob[g], g_sats[k], 46.2, 13.0, 30e9, g_gw[g].latDeg, 3);
+                DynamicCast<PointToPointNetDevice>(l.chan->GetDevice(0))
+                    ->SetAttribute("ReceiveErrorModel", PointerValue(l.slA));
+                DynamicCast<PointToPointNetDevice>(l.chan->GetDevice(1))
+                    ->SetAttribute("ReceiveErrorModel", PointerValue(l.slB));
+            }
         }
     }
     p2p.SetDeviceAttribute("DataRate", StringValue("100Mbps"));
@@ -539,12 +906,22 @@ main(int argc, char* argv[])
         q->SetForwardCallback([d](Ptr<Packet> p) { return DeviceForward(d, p); });
         if (keepNewest)
         {
-            q->SetReplaceSameSource(&SourceKey);
+            q->SetReplaceSameSource(g_bpv7 ? &BundleSourceKey : &SourceKey);
         }
         q->SetLastComeFirstServed(lcfs);
-        if (lifetimeE2E)
+        if (lifetimeE2E && !g_bpv7)
         {
             q->SetOriginFunction(&GenTime);
+        }
+        if (g_bpv7)
+        {
+            // RFC 9171 4.2.2: the lifetime runs from the creation timestamp.
+            q->SetOriginFunction(&BundleCreation);
+            q->SetCustodyTransfer(true, Seconds(custodyTimeoutS), &BundleIdOf);
+            Ptr<Socket> sig = Socket::CreateSocket(devN.Get(d), udp);
+            sig->Bind(InetSocketAddress(Ipv4Address::GetAny(), kSigPort));
+            sig->SetRecvCallback(MakeBoundCallback(&CustodySignalReceive, q));
+            g_devSigSock.push_back(sig);
         }
         g_devQ.push_back(q);
     }
@@ -562,12 +939,24 @@ main(int argc, char* argv[])
         q->SetForwardCallback([k](Ptr<Packet> p) { return SatelliteForward(k, p); });
         if (keepNewest)
         {
-            q->SetReplaceSameSource(&SourceKey);
+            q->SetReplaceSameSource(g_bpv7 ? &BundleSourceKey : &SourceKey);
         }
         q->SetLastComeFirstServed(lcfs);
-        if (lifetimeE2E && g_policy != "bp")
+        if (lifetimeE2E && g_policy != "bp" && !g_bpv7)
         {
             q->SetOriginFunction(&GenTime);
+        }
+        if (g_bpv7)
+        {
+            if (g_policy != "bp")
+            {
+                q->SetOriginFunction(&BundleCreation);
+            }
+            q->SetCustodyTransfer(true, Seconds(custodyTimeoutS), &BundleIdOf);
+            Ptr<Socket> sig = Socket::CreateSocket(satN.Get(k), udp);
+            sig->Bind(InetSocketAddress(Ipv4Address::GetAny(), kSigPort));
+            sig->SetRecvCallback(MakeBoundCallback(&CustodySignalReceive, q));
+            g_satSigSock.push_back(sig);
         }
         g_satQ.push_back(q);
     }
@@ -605,6 +994,63 @@ main(int argc, char* argv[])
         // updates during the first (days - 1) days; the last day lets custody drain
         Simulator::Schedule(Seconds(u->GetValue(0, period.GetSeconds())), &Generate, d, 0u, period);
     }
+    g_satSeen.assign(S, {});
+    Ptr<ntncon::ContactGraphScheduler> schedDev;
+    Ptr<ntncon::ContactGraphScheduler> schedGw;
+    if (g_cgr)
+    {
+        // Same SGP4 models, same masks, sampled on the tick grid, no hysteresis (the example's
+        // single-threshold rule); started before Tick so a tick reads this tick's contacts.
+        g_cgrDs.assign(D, std::vector<bool>(S, false));
+        g_cgrSg.assign(S, std::vector<bool>(G, false));
+        schedDev = CreateObject<ntncon::ContactGraphScheduler>();
+        schedGw = CreateObject<ntncon::ContactGraphScheduler>();
+        for (auto [sch, mask] : {std::make_pair(schedDev, devMaskDeg), std::make_pair(schedGw, gwMaskDeg)})
+        {
+            sch->SetSamplingInterval(Seconds(g_tick));
+            sch->SetMinElevationDeg(mask);
+            sch->SetGateHysteresisDeg(0.0);
+            sch->SetMaxIslRangeM(0.0); // ground contacts only
+            for (uint32_t k = 0; k < S; ++k)
+            {
+                sch->RegisterSatellite(k + 1, g_sats[k]);
+            }
+        }
+        for (uint32_t d = 0; d < D; ++d)
+        {
+            schedDev->RegisterGroundStation(kDevIdBase + d, g_dev[d].latDeg, g_dev[d].lonDeg, 0.0);
+        }
+        for (uint32_t g = 0; g < G; ++g)
+        {
+            schedGw->RegisterGroundStation(kGwIdBase + g, g_gw[g].latDeg, g_gw[g].lonDeg, 0.0);
+        }
+        auto onDev = [](bool up, ntncon::ContactEvent ev) {
+            if (ev.is_isl)
+            {
+                return;
+            }
+            g_cgrDs[ev.node_b - kDevIdBase][ev.node_a - 1] = up;
+        };
+        auto onGw = [](bool up, ntncon::ContactEvent ev) {
+            if (ev.is_isl)
+            {
+                return;
+            }
+            g_cgrSg[ev.node_a - 1][ev.node_b - kGwIdBase] = up;
+        };
+        schedDev->m_contactUp.ConnectWithoutContext(
+            Callback<void, ntncon::ContactEvent>([onDev](ntncon::ContactEvent e) { onDev(true, e); }));
+        schedDev->m_contactDown.ConnectWithoutContext(
+            Callback<void, ntncon::ContactEvent>([onDev](ntncon::ContactEvent e) { onDev(false, e); }));
+        schedGw->m_contactUp.ConnectWithoutContext(
+            Callback<void, ntncon::ContactEvent>([onGw](ntncon::ContactEvent e) { onGw(true, e); }));
+        schedGw->m_contactDown.ConnectWithoutContext(
+            Callback<void, ntncon::ContactEvent>([onGw](ntncon::ContactEvent e) { onGw(false, e); }));
+        g_router = CreateObject<ntncon::ContactGraphRouter>();
+        g_router->Attach(schedGw);
+        schedDev->Start();
+        schedGw->Start();
+    }
     Simulator::Schedule(Seconds(0), &Tick);
     Simulator::Stop(Seconds(horizon));
     Simulator::Run();
@@ -628,6 +1074,58 @@ main(int argc, char* argv[])
               << " generated=" << g_generated << " replaced_sat=" << replSat << " replaced_dev=" << replDev
               << " expired_sat=" << expSat << " expired_dev=" << expDev << " dropped_sat=" << dropSat
               << " dropped_dev=" << dropDev << " out=" << out << "\n";
+    if (g_satlink || g_cgr || g_bpv7)
+    {
+        std::cout << "# M3 options: linkModel=" << linkModel << " contacts=" << contacts << " dtn=" << dtn
+                  << "\n";
+        std::cout << "delivered=" << g_delivered << " delivered_ratio=" << std::fixed
+                  << std::setprecision(4) << (g_generated ? double(g_delivered) / g_generated : 0.0)
+                  << std::defaultfloat << "\n";
+    }
+    if (g_satlink)
+    {
+        const char* names[4] = {"dev->sat", "sat->dev", "sat->gw", "gw->sat"};
+        for (int h = 0; h < 4; ++h)
+        {
+            std::cout << "hop " << names[h] << " rx=" << g_hopRx[h] << " lost=" << g_hopLost[h]
+                      << " packet_loss=" << (g_hopRx[h] ? double(g_hopLost[h]) / g_hopRx[h] : 0.0)
+                      << " mean_esno_db=" << (g_hopRx[h] ? g_hopEsno[h] / g_hopRx[h] : 0.0) << "\n";
+        }
+    }
+    if (g_cgr)
+    {
+        std::cout << "cgr: dev_gsl_up=" << schedDev->GslEventsUp() << " dev_gsl_down=" << schedDev->GslEventsDown()
+                  << " gw_gsl_up=" << schedGw->GslEventsUp() << " gw_gsl_down=" << schedGw->GslEventsDown()
+                  << " router_edges_added=" << g_router->EdgesAddedTotal()
+                  << " router_edges_removed=" << g_router->EdgesRemovedTotal()
+                  << " router_gateway_picks=" << g_routerGwPicks << "\n";
+        schedDev->Stop();
+        schedGw->Stop();
+    }
+    if (g_bpv7)
+    {
+        uint64_t acc = 0, ref = 0, retx = 0, delRep = 0, awaiting = 0;
+        for (auto* v : {&g_devQ, &g_satQ})
+        {
+            for (auto& q : *v)
+            {
+                acc += q->GetCustodyAccepted();
+                ref += q->GetCustodyRefused();
+                retx += q->GetCustodyRetransmissions();
+                delRep += q->GetDeletionReports();
+                awaiting += q->GetAwaitingCustody();
+            }
+        }
+        const uint64_t sent = g_sigSentOk + g_sigSentRedundant + g_sigSentRefused;
+        std::cout << "bpv7: bundles_generated=" << g_generated << " bundles_delivered=" << g_delivered
+                  << " duplicates_at_server=" << g_dupAtServer << " bundles_expired=" << (expSat + expDev)
+                  << " deletion_status_reports=" << delRep << " custody_signals_sent=" << sent
+                  << " (accepted=" << g_sigSentOk + g_sigSentRedundant << " of which redundant="
+                  << g_sigSentRedundant << ", refused=" << g_sigSentRefused << ")"
+                  << " custody_signals_received=" << g_sigRecv << " custody_released=" << acc
+                  << " custody_refusals_handled=" << ref << " custody_retransmissions=" << retx
+                  << " still_awaiting_signal=" << awaiting << "\n";
+    }
     g_out.close();
     Simulator::Destroy();
     return 0;

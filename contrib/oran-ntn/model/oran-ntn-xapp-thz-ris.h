@@ -20,6 +20,8 @@
 #ifndef ORAN_NTN_XAPP_THZ_RIS_H
 #define ORAN_NTN_XAPP_THZ_RIS_H
 
+#include "ns3/mobility-model.h"
+#include "ns3/thz-ntn-ris.h"
 #include "oran-ntn-xapp-base.h"
 
 #include <map>
@@ -72,9 +74,40 @@ class OranNtnXappThzRis : public OranNtnXappBase
     /**
      * \brief Estimate achievable gain from RIS reconfiguration
      */
-    double EstimateAchievableGain(double currentGain_dB,
+    double EstimateAchievableGain(uint32_t gnbId,
+                                  double currentGain_dB,
                                   double thzSnr_dB,
                                   double elevation_deg) const;
+
+  public:
+    /**
+     * \brief Wave 2 M2: the geometry the achievable RIS gain is computed from.
+     *
+     * The achievable gain is ThzNtnRis::ComputeLinkSnrGain_dB(tx, ris, rx): the
+     * SNR improvement of the phase-aligned RIS over the direct link alone,
+     * from the live positions (cascaded path loss with the second hop's
+     * spreading loss). It replaced 20 log10(N) x an efficiency factor, which is
+     * an array-factor gain relative to one element and not a link gain. A gNB
+     * without registered geometry has no achievable-gain estimate, so the xApp
+     * issues no RIS reconfiguration for it.
+     */
+    void SetLinkGeometry(uint32_t gnbId,
+                         Ptr<ThzNtnRis> ris,
+                         Ptr<MobilityModel> tx,
+                         Ptr<MobilityModel> risPosition,
+                         Ptr<MobilityModel> rx,
+                         double directExtraLossDb = 0.0);
+
+  private:
+    struct RisGeometry
+    {
+        Ptr<ThzNtnRis> ris;
+        Ptr<MobilityModel> tx;
+        Ptr<MobilityModel> risPos;
+        Ptr<MobilityModel> rx;
+        double directExtraLossDb{0.0};
+    };
+    std::map<uint32_t, RisGeometry> m_geometry;
 
     // Thresholds
     double m_risGainThreshold_dB;      //!< Trigger reconfig when gain below this

@@ -109,6 +109,7 @@ main(int argc, char* argv[])
     double rainMmH = 0.0;
     uint32_t steps = 60;
     uint32_t timeoutMs = 200;
+    bool allowFallback = false;
     double spatialResM = 50.0;
     uint64_t timeBucketUs = 500000; // 500 ms
 
@@ -122,7 +123,18 @@ main(int argc, char* argv[])
     cmd.AddValue("timeoutMs", "Per-query timeout (ms)", timeoutMs);
     cmd.AddValue("spatialResM", "Cache spatial grid (m)", spatialResM);
     cmd.AddValue("timeBucketUs", "Cache time bucket (us)", timeBucketUs);
+    cmd.AddValue("allowFallback", "1 = run free space (labeled) when no Sionna server answers; default 0 aborts (RequireLiveTransport)", allowFallback);
     cmd.Parse(argc, argv);
+    // P0-4 (Wave 2 M3): no silent free-space fallback for a ray-traced
+    // headline. RequireLiveTransport is ON unless --allowFallback=1; without
+    // a Sionna RT server the first query aborts the run (non-zero exit).
+    if (!allowFallback)
+    {
+        std::printf("# RequireLiveTransport=1: the run aborts if the Sionna RT server at "
+                    "the configured host:port does not answer (start "
+                    "bridge/sionna-server.py or test/sionna-stub-server.py); "
+                    "--allowFallback=1 runs closed-form free space, labeled as such\n");
+    }
 
     // --- Shared transport stack: UDP wrapped by caching layer ---
     Ptr<SionnaUdpTransport> udp = CreateObject<SionnaUdpTransport>();
@@ -140,6 +152,7 @@ main(int argc, char* argv[])
         base = CreateObject<NtnSionnaChannel>();
         base->SetTransport(cache);
         base->SetFrequencyHz(freqHz);
+        base->SetRequireLiveTransport(!allowFallback);
         Ptr<NtnAtmosphericLossChain> chain =
             CreateObject<NtnAtmosphericLossChain>();
         chain->SetFrequencyHz(freqHz);
@@ -187,7 +200,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -244,9 +257,14 @@ main(int argc, char* argv[])
     // WF-12: say what produced these numbers. GetFallbacks() existed and no
     // example read it, so on a host without Sionna every run here printed
     // Sionna framing over pure free-space results with nothing to show it.
+    uint64_t fbAll = 0;
     for (const auto& b : bases)
     {
         std::cout << b->ProvenanceLine() << std::endl;
+        fbAll += b->GetFallbacks();
     }
+    // P0-4: label the headline by what produced it.
+    std::printf(fbAll > 0 ? "# headline: free space (no ray tracing)\nraytrace_live=0\n"
+                          : "raytrace_live=1\n");
     return 0;
 }

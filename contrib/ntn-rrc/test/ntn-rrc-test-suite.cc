@@ -12,6 +12,7 @@
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
 #include "ns3/ntn-ue-location-report.h"
+#include "ns3/ntn-ue-sib19-consumer.h"
 #include "ns3/ntn-ul-timing-precompensator.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
@@ -1469,6 +1470,149 @@ class UlPrecompensatorTrackingTest : public TestCase
     }
 };
 
+/**
+ * P0-6: kMac and the uplink sync reference point per TS 38.213 4.2.
+ *
+ * Satellite 600 km above the UE, gateway 250 km downrange (feeder 650 km,
+ * round trip 4.336 ms). kmac-r17 is absent (0) whenever the gNB's DL and UL
+ * frames are aligned: reference at the gateway (transparent) or gNB on board
+ * (regenerative). Transparent with the reference at the satellite leaves the
+ * feeder round trip between the frames: ceil(4.336 ms / 1 ms) = 5. The helper
+ * picks the reference by payload, and the gateway reference broadcasts the
+ * feeder leg alone as ta-Common (no service link, so no double count).
+ */
+class Sib19KmacByReferenceTest : public TestCase
+{
+  public:
+    Sib19KmacByReferenceTest()
+        : TestCase("P0-6: kMac and default UL sync reference follow TS 38.213 4.2")
+    {
+    }
+
+  private:
+    static Sib19Content Run(PayloadMode mode, bool setRef, UlSyncReference ref, UlSyncReference* used)
+    {
+        Ptr<MobilityModel> sat = MakeStaticMob(Vector{0, 0, 600e3});
+        Ptr<MobilityModel> gw = MakeStaticMob(Vector{250e3, 0, 0});
+        NtnRrcHelper helper;
+        helper.SetPayloadMode(mode);
+        helper.SetReferencePosition(Vector{0, 0, 0});
+        helper.SetGatewayMobility(gw);
+        if (setRef)
+        {
+            helper.SetUlSyncReference(ref);
+        }
+        Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(MakeStaticMob(Vector{0, 0, 0}), sat);
+        Ptr<NtnSib19Broadcaster> bc = helper.InstallSib19Broadcaster(sat, 7, ta, MilliSeconds(160));
+        if (used)
+        {
+            *used = helper.GetEffectiveUlSyncReference();
+        }
+        bc->Start();
+        Simulator::Stop(MilliSeconds(10));
+        Simulator::Run();
+        const Sib19Content out = bc->GetLatest();
+        Simulator::Destroy();
+        return out;
+    }
+
+    void DoRun() override
+    {
+        constexpr double kC = 299792458.0;
+        UlSyncReference used = UlSyncReference::BeamCenterLegacy;
+
+        const Sib19Content tGw =
+            Run(PayloadMode::Transparent, false, UlSyncReference::Gateway, &used);
+        NS_TEST_ASSERT_MSG_EQ(static_cast<int>(used), static_cast<int>(UlSyncReference::Gateway),
+                              "transparent with a gateway defaults to the gateway reference");
+        NS_TEST_ASSERT_MSG_EQ(tGw.kMac, 0u, "gateway reference: frames aligned, kmac absent");
+        NS_TEST_ASSERT_MSG_EQ_TOL(tGw.taCommon.GetSeconds(), 2.0 * 650e3 / kC, 1e-8,
+                                  "ta-Common is the feeder round trip only (no service link)");
+        NS_TEST_ASSERT_MSG_GT(tGw.cellSpecificKoffset, 0u, "K_offset still covers the full RTT");
+
+        const Sib19Content regen =
+            Run(PayloadMode::RegenerativeFull, false, UlSyncReference::Gateway, &used);
+        NS_TEST_ASSERT_MSG_EQ(static_cast<int>(used), static_cast<int>(UlSyncReference::Satellite),
+                              "regenerative defaults to the satellite reference");
+        NS_TEST_ASSERT_MSG_EQ(regen.kMac, 0u, "gNB on board: kmac absent");
+        NS_TEST_ASSERT_MSG_EQ_TOL(regen.taCommon.GetSeconds(), 0.0, 1e-12,
+                                  "reference at the satellite: no common delay");
+
+        const Sib19Content tSat =
+            Run(PayloadMode::Transparent, true, UlSyncReference::Satellite, nullptr);
+        NS_TEST_ASSERT_MSG_EQ(tSat.kMac, 5u,
+                              "transparent, reference at the satellite: kMac = ceil(2 x 650 km / c "
+                              "/ 1 ms) = 5");
+
+        const Sib19Content legacy =
+            Run(PayloadMode::Transparent, true, UlSyncReference::BeamCenterLegacy, nullptr);
+        NS_TEST_ASSERT_MSG_EQ(legacy.kMac, legacy.cellSpecificKoffset,
+                              "the legacy beam-centre reference keeps kMac = K_offset");
+    }
+};
+
+/**
+ * P0-7: the UE-side consumer decodes the SIB19 wire image and its TA, formed
+ * from GNSS + broadcast ephemeris + ta-Common (TS 38.213 4.2), matches the true
+ * service + feeder round trip within Te_NTN half a second later with the
+ * gateway reference. With the legacy beam-centre reference the same UE counts
+ * the service link twice (error close to +2 x 600 km / c).
+ */
+class UeSib19ConsumerTest : public TestCase
+{
+  public:
+    UeSib19ConsumerTest()
+        : TestCase("P0-7: UE decodes SIB19 and pre-compensates within Te_NTN (gateway ref)")
+    {
+    }
+
+  private:
+    static double ErrNs(bool legacy)
+    {
+        Ptr<ConstantVelocityMobilityModel> sat = CreateObject<ConstantVelocityMobilityModel>();
+        // ECEF-like geometry: satellite 600 km above a point on the Earth's surface.
+        const double re = 6371e3;
+        sat->SetPosition(Vector{0, 0, re + 600e3});
+        sat->SetVelocity(Vector{7560.0, 0, 0});
+        Ptr<MobilityModel> ue = MakeStaticMob(Vector{0, 0, re});
+        Ptr<MobilityModel> gw = MakeStaticMob(Vector{250e3, 0, re});
+        NtnRrcHelper helper;
+        helper.SetPayloadMode(PayloadMode::Transparent);
+        helper.SetReferencePosition(Vector{0, 0, re});
+        helper.SetGatewayMobility(gw);
+        if (legacy)
+        {
+            helper.SetUlSyncReference(UlSyncReference::BeamCenterLegacy);
+        }
+        Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ue, sat);
+        Ptr<NtnSib19Broadcaster> bc = helper.InstallSib19Broadcaster(sat, 3, ta, MilliSeconds(160));
+        Ptr<NtnUeSib19Consumer> c = CreateObject<NtnUeSib19Consumer>();
+        c->Setup(ue, ta);
+        // linear propagation at the UE: the test satellite flies a straight line
+        c->GetPrecompensator()->SetEphemerisModel(UeEphemerisModel::Linear);
+        double err = 0.0;
+        Simulator::Schedule(Seconds(1.0), [bc, c]() {
+            bc->RefreshNow();
+            c->ReceiveWire(bc->GetLatestSerialised());
+        });
+        Simulator::Schedule(Seconds(1.5), [c, &err]() { err = c->Sample().errNs; });
+        Simulator::Stop(Seconds(2));
+        Simulator::Run();
+        Simulator::Destroy();
+        return err;
+    }
+
+    void DoRun() override
+    {
+        const double eGw = ErrNs(false);
+        NS_TEST_ASSERT_MSG_LT(std::fabs(eGw), 716.15,
+                              "gateway reference: UE TA within Te_NTN (TS 38.133 7.1C.2)");
+        const double eLegacy = ErrNs(true);
+        NS_TEST_ASSERT_MSG_EQ_TOL(eLegacy, 2.0 * 600e3 / 299792458.0 * 1e9, 20000.0,
+                                  "legacy beam-centre reference double counts the service link");
+    }
+};
+
 class NtnRrcTestSuite : public TestSuite
 {
   public:
@@ -1476,6 +1620,8 @@ class NtnRrcTestSuite : public TestSuite
         : TestSuite("ntn-rrc", Type::UNIT)
     {
         AddTestCase(new NtnTimingAdvanceClosedFormTest, TestCase::Duration::QUICK);
+        AddTestCase(new Sib19KmacByReferenceTest, TestCase::Duration::QUICK);
+        AddTestCase(new UeSib19ConsumerTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvanceRegenerativeTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvance38821ReferenceTest, TestCase::Duration::QUICK);
         AddTestCase(new NtnTimingAdvanceCommonAndUeSpecificTest, TestCase::Duration::QUICK);

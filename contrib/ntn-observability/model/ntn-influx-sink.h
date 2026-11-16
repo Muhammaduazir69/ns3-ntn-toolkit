@@ -89,8 +89,11 @@ class NtnInfluxSink : public Object
     /// on a single Grafana axis and land inside a retention-bounded bucket.
     /// Set to Time(0) to opt IN to pure sim-time (epoch 1970) points.
     void SetBaseEpoch(Time epoch);
-    /// The base epoch currently applied (defaults to wall-clock at construction).
+    /// The base epoch currently applied (default 0: pure simulation time, the
+    /// clock of every .lp writer; NTN_INFLUX_WALLCLOCK=1 restores wall clock).
     Time GetBaseEpoch() const;
+    /// Wall-clock time now, for SetBaseEpoch() by live-dashboard users.
+    static Time WallClockNow();
 
     /**
      * \brief OBS-14: one line naming the time anchor this sink is using.

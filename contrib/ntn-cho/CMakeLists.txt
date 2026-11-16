@@ -4,6 +4,8 @@ set(source_files
     model/ntn-cho-algorithm.cc
     model/ntn-measurement-model.cc
     model/ntn-ai-interface.cc
+    # P0-3: handover KPIs measured from the UE RRC traces and packet arrivals.
+    model/ntn-ho-kpi-recorder.cc
     # Real 3GPP TR 38.811 UE-class mobility as an ns-3 MobilityModel (ECEF,
     # SGP4-compatible) -- the toolkit's core NTN UE mobility architecture.
     model/ntn-tr38811-mobility-model.cc
@@ -20,6 +22,7 @@ set(header_files
     model/ntn-cho-algorithm.h
     model/ntn-measurement-model.h
     model/ntn-ai-interface.h
+    model/ntn-ho-kpi-recorder.h
     model/ntn-tr38811-mobility-model.h
     model/ntn-geodetic-fixed-mobility-model.h
     helper/ntn-cho-helper.h

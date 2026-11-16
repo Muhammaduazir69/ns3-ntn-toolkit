@@ -17,8 +17,23 @@
 // part the toolkit was missing: hold on contact-down, drain in order on
 // contact-up, expire what outlives its lifetime, and report delivered against
 // expired against dropped-for-space so a scenario can say what the store-and-
-// forward actually bought. It does not implement RFC 5050 bundle formats,
-// custody signalling or fragmentation, and does not claim to.
+// forward actually bought.
+//
+// Custody transfer (opt-in, SetCustodyTransfer): RFC 5050 clause 5.10 custody
+// semantics, which BPv7 (RFC 9171) removed from the base protocol and left to
+// an extension. With it on, a forwarded bundle is NOT released: it stays in
+// custody (and keeps occupying storage) until the next hop's custody signal
+// arrives. AcceptCustody() releases it ("custody accepted", RFC 5050 6.3
+// succeeded = 1); RefuseCustody() returns it to the queue (refused, the sender
+// keeps custody); no signal within the retransmission timeout returns it to
+// the queue for another attempt (RFC 5050 5.10.1 custody transfer timer).
+// Lifetime applies to retained bundles too (RFC 9171 4.2.2 / 5.4.1: a bundle
+// whose age exceeds its lifetime is deleted, status report reason code 1
+// "lifetime expired", RFC 9171 6.1.1), and the deletion is counted as a
+// generated bundle-deletion status report. The bundle format itself (CBOR
+// primary block) lives in sagin-bundle-protocol.h; fragmentation,
+// convergence-layer (LTP, RFC 5326) and security (BPSec, RFC 9172) are not
+// implemented.
 
 #ifndef SAGIN_CUSTODY_QUEUE_H
 #define SAGIN_CUSTODY_QUEUE_H
@@ -30,6 +45,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 
 namespace ns3
 {
@@ -102,6 +118,27 @@ class SaginCustodyQueue : public Object
     /// Longest time any delivered item spent in custody.
     Time GetMaxCustodyDelay() const { return m_maxCustody; }
 
+    // ---- RFC 5050 5.10 custody transfer (opt-in) ----
+    /// Keep forwarded items until AcceptCustody(); \p id maps a packet to its
+    /// bundle identifier (source EID + creation timestamp, RFC 9171 4.2.7).
+    void SetCustodyTransfer(bool on, Time retransmitTimeout, KeyFunction id);
+    bool GetCustodyTransfer() const { return m_custody; }
+    /// Custody signal "succeeded" from the next hop: release the bundle.
+    /// \return true if a retained bundle with this id was released.
+    bool AcceptCustody(uint64_t id);
+    /// Custody signal "failed": the sender keeps custody; the bundle returns
+    /// to the queue for another attempt.
+    bool RefuseCustody(uint64_t id);
+    /// Return bundles whose custody signal is overdue to the queue.
+    void CheckCustodyTimeouts();
+    uint64_t GetCustodyAccepted() const { return m_custAccepted; }
+    uint64_t GetCustodyRefused() const { return m_custRefused; }
+    uint64_t GetCustodyRetransmissions() const { return m_custRetx; }
+    uint64_t GetAwaitingCustody() const { return m_pending.size(); }
+    /// Bundle-deletion status reports generated (RFC 9171 6.1.1, reason 1
+    /// lifetime expired), one per expired bundle while custody transfer is on.
+    uint64_t GetDeletionReports() const { return m_deletionReports; }
+
   private:
     struct Item
     {
@@ -110,6 +147,8 @@ class SaginCustodyQueue : public Object
     };
 
     void Drain();
+    /// Forwarded: release (no custody transfer) or retain awaiting a signal.
+    void Retain(Item& it);
 
     ForwardCallback m_forward;
     std::deque<Item> m_queue;
@@ -127,6 +166,20 @@ class SaginCustodyQueue : public Object
     uint64_t m_replaced{0};
     bool m_lcfs{false};
     OriginFunction m_origin;
+
+    bool m_custody{false};
+    Time m_custodyTimeout{Seconds(30)};
+    KeyFunction m_id;
+    struct Pending
+    {
+        Item item;
+        Time sent;
+    };
+    std::map<uint64_t, Pending> m_pending;
+    uint64_t m_custAccepted{0};
+    uint64_t m_custRefused{0};
+    uint64_t m_custRetx{0};
+    uint64_t m_deletionReports{0};
 };
 
 } // namespace ntnsagin

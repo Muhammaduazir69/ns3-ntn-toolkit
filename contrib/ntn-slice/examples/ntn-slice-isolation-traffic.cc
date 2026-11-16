@@ -78,7 +78,7 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> servSat =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    servSat->SetElements(wElements[0]);
+    servSat->SetElementsSgp4(wElements[0]);
 
     NodeContainer satNodes;
     satNodes.Create(1);

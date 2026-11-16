@@ -23,6 +23,7 @@
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-meas-report.h"
 #include "ns3/ntn-timing-advance.h"
+#include "ns3/ntn-ue-sib19-consumer.h"
 
 #include <cmath>
 #include <filesystem>
@@ -40,6 +41,7 @@ namespace
 NtnRealStackHelper* g_rs = nullptr;
 Ptr<NtnTimingAdvance> g_ta;
 Ptr<NtnSib19Broadcaster> g_sib;
+Ptr<NtnUeSib19Consumer> g_ueSib; // P0-7: UE-side SIB19 consumer (in-process wire image)
 std::ofstream g_csv;
 double g_simTime = 20.0;
 double g_measThreshDb = 14.0;
@@ -63,8 +65,17 @@ Sample()
     const double drift = g_ta->ComputeTaDriftRate(MilliSeconds(10));
     const double slantKm = g_ta->GetSlantRangeMetres() / 1000.0;
 
+    // P0-7: the UE's TA from the SIB19 it holds (decoded 500 ms ago), then it
+    // decodes the fresh wire image. In-process delivery until SIB19 goes on
+    // the PHY (P1-B); the UE still only sees the parsed bytes.
+    const NtnUeSib19Consumer::SampleResult ueTa =
+        g_ueSib ? g_ueSib->Sample() : NtnUeSib19Consumer::SampleResult{};
     g_sib->RefreshNow();
     ++g_sib19Refresh;
+    if (g_ueSib)
+    {
+        g_ueSib->ReceiveWire(g_sib->GetLatestSerialised());
+    }
 
     // RRC-5: a real TS 38.331 MeasurementReport, not a printf.
     //
@@ -140,7 +151,10 @@ Sample()
               << total.GetMicroSeconds() << "," << common.GetMicroSeconds() << ","
               << residual.GetMicroSeconds() << "," << std::scientific << std::setprecision(3)
               << (drift * 1e6) << "," << std::fixed << std::setprecision(2)
-              << (std::isnan(sinr) ? 0.0 : sinr) << "\n";
+              << (std::isnan(sinr) ? 0.0 : sinr) << "," << std::setprecision(3)
+              << (ueTa.valid ? ueTa.estUs : -1.0) << "," << (ueTa.valid ? ueTa.errNs : 0.0) << ","
+              << (ueTa.valid ? ueTa.ageMs : -1.0) << "," << (ueTa.valid ? int(ueTa.synced) : -1)
+              << "\n";
     }
     Simulator::Schedule(MilliSeconds(500), &Sample);
 }
@@ -220,7 +234,9 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(wElements[0]);
+    satSgp4->SetElementsSgp4(wElements[0]);
+    // UE TA study: a 100 ms SGP4 cache is up to 0.76 km stale (microseconds).
+    satSgp4->SetCacheGranularity(MilliSeconds(1));
     satNodes.Get(0)->AggregateObject(satSgp4);
     Ptr<MobilityModel> satMob = satSgp4;
     double subLat, subLon, subAlt;
@@ -257,6 +273,12 @@ main(int argc, char* argv[])
         // Set-1 S-band reference) is CONDUCTED power at the array input.
         rs.SetSatConductedPowerDbm(satEirpDbm);
     }
+    if (radio != "mmwave")
+    {
+        // P0-7: the nr scheduler consumes K_offset (N2Delay, TS 38.213 4.2);
+        // the broadcast value replaces the local derivation once SIB19 runs.
+        rs.SetKOffsetConsumption(true);
+    }
     rs.Build(satNodes, ueNodes);
     // satEirpDbm was resolved before Build() and handed to the rest of the
     // example; make sure the radio landed on the same conducted power.
@@ -288,12 +310,21 @@ main(int argc, char* argv[])
 
     const uint16_t cellId = rs.GetServingCellId(); // radio-agnostic (mmwave or nr gNB)
     g_sib = rrc.InstallSib19Broadcaster(satMob, cellId, g_ta, MilliSeconds(160));
+    if (radio != "mmwave")
+    {
+        // 15 kHz reference slots on the wire; the helper converts them to
+        // slots of the cell numerology (x 2^mu) itself, before and after Build.
+        g_sib->SetKOffsetSink(
+            Callback<void, uint32_t>([&rs](uint32_t k) { rs.SetBroadcastKOffsetSlots(k); }));
+    }
     g_sib->Start();
+    g_ueSib = CreateObject<NtnUeSib19Consumer>();
+    g_ueSib->Setup(ueMob, g_ta);
 
     std::filesystem::create_directories(outputDir);
     g_csv.open(outputDir + "/ntn-rrc-leo-pass-ta.csv");
     g_csv << "time_s,slant_km,ta_total_us,ta_common_us,ta_ue_us,ta_drift_us_per_s,"
-             "measured_sinr_db\n";
+             "measured_sinr_db,ta_ue_est_us,ta_err_ns,sib19_age_ms,ul_synced\n";
 
     // The serving satellite flies its REAL SGP4 pass: the slant range, TA and
     // measured SINR all evolve with genuine orbital dynamics (no teleports).
@@ -318,7 +349,15 @@ main(int argc, char* argv[])
               << "  SIB19 ephemeris refreshes:    " << g_sib19Refresh << "\n"
               << "  RRC measurement reports:      " << g_measReports
               << "  (on MEASURED SINR < " << g_measThreshDb << " dB)\n"
-              << "  TA/SINR trace:                " << outputDir << "/ntn-rrc-leo-pass-ta.csv\n";
+              << "  TA/SINR trace:                " << outputDir << "/ntn-rrc-leo-pass-ta.csv\n"
+              << "  UE TA from decoded SIB19:     " << g_ueSib->GetSampleCount()
+              << " samples, max |err| " << g_ueSib->GetMaxAbsErrorNs() << " ns (Te_NTN 716.15 ns, "
+              << "violations " << g_ueSib->GetViolationCount() << "), UL synced "
+              << g_ueSib->GetSyncedCount() << "; ta-Common " << g_ueSib->GetHeld().taCommon.GetMicroSeconds()
+              << " us, kMac " << g_ueSib->GetHeld().kMac << "\n"
+              << "  K_offset consumed:            " << rs.GetConsumedKOffsetSlots()
+              << " nr slots (broadcast " << g_ueSib->GetHeld().cellSpecificKoffset
+              << " x 15 kHz slots)\n";
 
     Simulator::Destroy();
     return 0;

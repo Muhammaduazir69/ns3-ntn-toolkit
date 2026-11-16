@@ -218,6 +218,34 @@ NtnOranSink::HandleRead(Ptr<Socket> socket)
             fs.jitterMs += (d - fs.jitterMs) / 16.0;
         }
         fs.lastTransitMs = delayMs;
+        // RFC 3393 section 4.1 IPDV over consecutive sequence numbers.
+        const uint32_t seq = hdr.GetSeq();
+        if (fs.ipdvHaveRef && seq == fs.ipdvLastSeq + 1)
+        {
+            const double ipdv = delayMs - fs.ipdvLastDelayMs;
+            ++fs.ipdvN;
+            fs.ipdvSumMs += ipdv;
+            fs.ipdvSumAbsMs += std::abs(ipdv);
+            if (fs.ipdvHistAbs.empty())
+            {
+                fs.ipdvHistAbs.assign(FlowStats::kIpdvBins, 0u);
+            }
+            const uint32_t bin = static_cast<uint32_t>(std::abs(ipdv) / FlowStats::kIpdvBinMs);
+            if (bin < FlowStats::kIpdvBins)
+            {
+                fs.ipdvHistAbs[bin]++;
+            }
+            else
+            {
+                fs.ipdvOverflow++;
+            }
+        }
+        if (!fs.ipdvHaveRef || seq > fs.ipdvLastSeq)
+        {
+            fs.ipdvHaveRef = true;
+            fs.ipdvLastSeq = seq;
+            fs.ipdvLastDelayMs = delayMs;
+        }
 
         if (hdr.GetPayloadType() == NtnOranPayloadHeader::CNC_TELEMETRY &&
             copy->GetSize() >= NtnCncTelemetry::SERIALIZED_SIZE)

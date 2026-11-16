@@ -68,6 +68,10 @@ main(int argc, char* argv[])
     double minElevDeg = 10.0;
     std::string outputDir = "ntn-constellation-sgp4-output";
 
+    // Wave 1 (C5): feeder from a real gateway north of the UE site (WGS-84).
+
+    double gwDistanceKm = 500.0;
+
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
@@ -78,6 +82,14 @@ main(int argc, char* argv[])
     cmd.AddValue("gsLon", "Ground-station longitude (deg; default = sat sub-point)", gsLonDeg);
     cmd.AddValue("minElev", "Min elevation for in-contact (deg)", minElevDeg);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("gwDistanceKm",
+
+                 "Gateway ground distance north of the UE site (km); <= 0 keeps the 5 ms "
+
+                 "constant backhaul",
+
+                 gwDistanceKm);
+
     cmd.Parse(argc, argv);
 
     const bool useNr = (radio != "mmwave");
@@ -189,7 +201,9 @@ main(int argc, char* argv[])
         // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 S-band EIRP density. The
         // helper back-computes the conducted power from the bandwidth and
         // the array gain, and again in Build().
-        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        // C4/C7: TR 38.821 Set-1 terminal and payload (34 dBW/MHz, handheld 1T2R, NF 7 dB).
+
+        rs.ApplyTr38821Set1Defaults();
     }
     else
     {
@@ -198,6 +212,10 @@ main(int argc, char* argv[])
         rs.SetSatConductedPowerDbm(satEirpDbm);
     }
     rs.Build(satNodes, ueNodes);
+    if (gwDistanceKm > 0.0)
+    {
+        rs.SetFeederGatewayGeodetic(subLat + gwDistanceKm / 111.195, subLon, 0.0);
+    }
     // satEirpDbm was resolved before Build() and handed to the rest of the
     // example; make sure the radio landed on the same conducted power.
     NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,

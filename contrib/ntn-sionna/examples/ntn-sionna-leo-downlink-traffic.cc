@@ -72,7 +72,13 @@ main(int argc, char* argv[])
 {
     double simSeconds = 60.0;
     double freqGHz = 12.0;    // Ku-band gateway downlink
-    double satEirpDbm = 75.0; // Ku feeder beam (closes ~169 dB FSPL with margin)
+    double legacyConductedDbm = -1.0; // > 0: old operating point (75 dBm CONDUCTED)
+    double satTxW = 10.0;    // declared satellite RF power per beam (W)
+    double satDishM = 0.7;   // satellite aperture (36.7 dBi at 12 GHz, eta 0.6)
+    double gwDishM = 0.6;    // ground-station dish (35.3 dBi at 12 GHz, eta 0.6)
+    double gwNfDb = 2.0;     // Ku LNB-class noise figure
+    double eta = 0.6;
+    bool fading = true;
     double rainMmH = 0.0;
     bool lms = false;
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
@@ -81,7 +87,13 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("legacyConductedDbm", "> 0: CONDUCTED gNB power instead of the declared payload (old 75)",
+                 legacyConductedDbm);
+    cmd.AddValue("satTxW", "Satellite RF power per beam (W)", satTxW);
+    cmd.AddValue("satDishM", "Satellite aperture diameter (m)", satDishM);
+    cmd.AddValue("gwDishM", "Ground-station dish diameter (m)", gwDishM);
+    cmd.AddValue("gwNfDb", "Ground-station noise figure (dB)", gwNfDb);
+    cmd.AddValue("fading", "3GPP small-scale fading (0 = LOS plane wave)", fading);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("rainMmH", "Static rain rate over the run (mm/h)", rainMmH);
     cmd.AddValue("lms", "Enable P.681 LMS Markov shadowing (0/1)", lms);
@@ -94,8 +106,9 @@ main(int argc, char* argv[])
 
     std::printf("# ntn-sionna-leo-downlink-traffic (REAL radio, ITU-R cascade in the "
                 "packet path)\n");
-    std::printf("#   sim=%.0fs freq=%.1fGHz EIRP=%.1fdBm rain=%.1fmm/h lms=%s\n",
-                simSeconds, freqGHz, satEirpDbm, rainMmH, lms ? "on" : "off");
+    std::printf("#   sim=%.0fs freq=%.1fGHz rain=%.1fmm/h lms=%s payload=%s\n",
+                simSeconds, freqGHz, rainMmH, lms ? "on" : "off",
+                legacyConductedDbm > 0 ? "legacy conducted" : "declared apertures");
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -114,7 +127,7 @@ main(int argc, char* argv[])
     const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(elements[0]);
+    satSgp4->SetElementsSgp4(elements[0]);
     double subLat, subLon, subAlt;
     satSgp4->GetGeodetic(subLat, subLon, subAlt);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -141,11 +154,50 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-sionna-leo-downlink-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    // Wave 2 M3 (RC1): declared payload. Ku has no TR 38.821 Set-1 entry, so
+    // the apertures are declared and the aperture law G = 10 log10(eta
+    // (pi D / lambda)^2) gives the gains; EIRP = Pt + G_tx. The old 75 dBm
+    // CONDUCTED knob (88 dBm effective EIRP) is --legacyConductedDbm=75.
+    const double lambda = 299792458.0 / (freqGHz * 1e9);
+    auto apertureGainDbi = [&](double d) {
+        return 10.0 * std::log10(eta * std::pow(M_PI * d / lambda, 2.0));
+    };
+    const double gTx = apertureGainDbi(satDishM);
+    const double gRx = apertureGainDbi(gwDishM);
+    const double eirpDecl = 10.0 * std::log10(satTxW * 1e3) + gTx;
+    if (legacyConductedDbm > 0.0)
+    {
+        rs.SetSatConductedPowerDbm(legacyConductedDbm);
+    }
+    else
+    {
+        rs.SetSatEirpTotalDbm(eirpDecl);
+        // Default UE panel 1x2 beamforms toward the satellite (+3.01 dB):
+        // each element carries G_rx - 10 log10(2), the panel totals G_rx.
+        rs.SetUeRxAntennaGain(gRx - 10.0 * std::log10(2.0));
+        rs.SetUeNoiseFigureDb(gwNfDb);
+        // The legacy Ntn38811ExcessLossModel carries its own P.676 gas term
+        // and an iid-per-second "P.618" scintillation draw (about 1.2 dB rms at
+        // 12 GHz, 1.6 dB at 20 GHz): gas would be counted twice next to this
+        // example's atmospheric model, and the draw is not P.618-13 2.4.1.
+        rs.SetTr38811ExcessLoss(false);
+    }
+    rs.SetSmallScaleFading(fading);
     rs.Build(satNodes, gndNodes);
+    if (legacyConductedDbm <= 0.0)
+    {
+        const double slant = satEnu->GetPosition().z - 5.0;
+        const double fspl = 20.0 * std::log10(4.0 * M_PI * slant / lambda);
+        const double occHz = rs.GetBwpPrbs() * 12.0 * rs.GetScsKhz() * 1e3;
+        const double noise = -174.0 + 10.0 * std::log10(occHz) + gwNfDb;
+        std::printf("#   payload: Pt %.1f W, sat aperture %.2f m (%.1f dBi) -> EIRP %.2f dBm "
+                    "(effective %.2f); gateway dish %.2f m (%.1f dBi), NF %.1f dB\n",
+                    satTxW, satDishM, gTx, eirpDecl, rs.GetEffectiveEirpDbm(), gwDishM, gRx,
+                    gwNfDb);
+        std::printf("#   independent budget t=0: FSPL %.2f dB at %.1f km, noise %.2f dBm over "
+                    "%.2f MHz -> SNR %.2f dB (before gas, rain, fading)\n",
+                    fspl, slant / 1e3, noise, occHz / 1e6, eirpDecl - fspl + gRx - noise);
+    }
 
     // Channel plug-in: ITU-R atmospheric EXCESS chained AFTER the built-in
     // Friis loss (no FSPL double-count). LMS adds a stateful Markov fade.

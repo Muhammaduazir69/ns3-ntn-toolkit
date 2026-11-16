@@ -74,6 +74,9 @@ class OranNtnXappSliceManager : public OranNtnXappBase
         std::map<uint8_t, double> latestThroughput;
         std::map<uint8_t, double> latestLatency;
         std::map<uint8_t, double> latestReliability;
+        /// Wave 2 M2: measured PRB share per (slice, UE); the slice's demand is
+        /// the sum over its UEs (only when reports carry uePrbShareDl).
+        std::map<uint8_t, std::map<uint32_t, double>> uePrbShare;
     };
 
     void ReallocateSlices(uint32_t gnbId);

@@ -93,12 +93,14 @@ main(int argc, char* argv[])
     uint16_t port = 8765;
     bool losOnly = true;
     uint32_t timeoutMs = 500;
+    bool allowFallback = false;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("host", "Sionna server host", host);
     cmd.AddValue("port", "Sionna server UDP port", port);
     cmd.AddValue("losOnly", "Request LOS-only multipath suppression", losOnly);
     cmd.AddValue("timeoutMs", "Per-query timeout", timeoutMs);
+    cmd.AddValue("allowFallback", "1 = exit 0 with an empty calibration when no Sionna server answers; default 0 exits non-zero (RequireLiveTransport)", allowFallback);
     cmd.Parse(argc, argv);
 
     Ptr<SionnaUdpTransport> udp = CreateObject<SionnaUdpTransport>();
@@ -178,8 +180,22 @@ main(int argc, char* argv[])
     }
     else
     {
-        std::printf("# (no Sionna server reachable — start "
-                    "sionna-server.py and re-run for a calibration)\n");
+        // P0-4: a calibration with zero ray-traced samples is not a result.
+        std::printf("# (no Sionna server reachable: start bridge/sionna-server.py or "
+                    "test/sionna-stub-server.py and re-run for a calibration)\n");
+        std::printf("raytrace_live=0\n");
+        if (!allowFallback)
+        {
+            std::fprintf(stderr,
+                         "sionna-calibration-harness: RequireLiveTransport: 0 of %zu "
+                         "calibration points were answered by a Sionna RT server; "
+                         "refusing to report an empty calibration as a result "
+                         "(--allowFallback=1 to exit 0)\n",
+                         all.size());
+            return 2;
+        }
+        return 0;
     }
+    std::printf("raytrace_live=%d\n", sionna_ok == all.size() ? 1 : 0);
     return 0;
 }

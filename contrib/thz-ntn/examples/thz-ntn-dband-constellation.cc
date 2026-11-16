@@ -180,7 +180,7 @@ main(int argc, char* argv[])
     {
         Ptr<ns3::ntncon::Sgp4MobilityModel> sgp4 =
             CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-        sgp4->SetElements(elements[i * satsPerPlane]); // plane i, slot 0
+        sgp4->SetElementsSgp4(elements[i * satsPerPlane]); // plane i, slot 0
         if (i == 0)
         {
             sgp4->GetGeodetic(refLat, refLon, refAlt);

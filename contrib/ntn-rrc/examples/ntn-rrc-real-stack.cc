@@ -14,6 +14,19 @@
  * PHY trace (GetUeRecentSinrDb) — not a formula. SIB19 is re-broadcast every
  * si-period from the live ephemeris while packets actually traverse the radio.
  *
+ * Wave 2 M1 (P0-6, P0-7):
+ *  - The UL sync reference point follows the payload (TS 38.213 4.2): at the
+ *    gateway for this transparent payload, so ta-Common is the feeder leg and
+ *    kmac is absent; `--sib19Ref=legacy` restores the beam-centre reference.
+ *  - UE 0 decodes the SIB19 bytes that crossed the radio and hands them to its
+ *    own NtnUlTimingPrecompensator (GNSS fix + broadcast ephemeris + ta-Common,
+ *    TS 38.213 4.2). The sampler writes the UE's estimate, its error against
+ *    the true UE-gNB round trip, the SIB19 age and the UL sync state (T430
+ *    analogue: ul-SyncValidityDuration, TS 38.331 5.2.2.6).
+ *  - The broadcast cellSpecificKoffset is consumed by the nr scheduler
+ *    (N2Delay, TS 38.213 4.2 / 8.3 / 9.2.3), converted from 15 kHz reference
+ *    slots to the cell's numerology.
+ *
  * Usage:
  *   ./ns3 run "ntn-rrc-real-stack --duration=20 --numUes=4"
  */
@@ -30,6 +43,7 @@
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-meas-report.h"
 #include "ns3/ntn-timing-advance.h"
+#include "ns3/ntn-ul-timing-precompensator.h"
 
 #include "ns3/ipv4.h"
 #include "ns3/socket.h"
@@ -40,6 +54,9 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <sstream>
+#include <string>
 
 #include "ns3/ntn-scene-helper.h"
 
@@ -66,6 +83,13 @@ bool g_belowThresh = false;
 Ptr<Socket> g_sib19TxSock;     // on the remote host (EPC PGW side)
 InetSocketAddress g_sib19Dst = InetSocketAddress(Ipv4Address::GetAny(), 0);
 uint32_t g_sib19Delivered = 0; // count of SIB19 packets parsed on the UE side
+// P0-7: UE-side consumer of the decoded SIB19.
+Ptr<NtnUlTimingPrecompensator> g_uePc;
+double g_maxAbsTaErrNs = 0.0;
+uint32_t g_taSamples = 0;
+uint32_t g_taViol = 0;
+uint32_t g_ulSyncedSamples = 0;
+constexpr double kTeNtnNs = 716.15; // Te_NTN FR1 30/30 kHz, TS 38.133 Table 7.1C.2-1
 
 void
 Sib19UeRecv(Ptr<Socket> sock)
@@ -85,6 +109,12 @@ Sib19UeRecv(Ptr<Socket> sock)
             if (parsed.cellId == g_sib->GetLatest().cellId)
             {
                 ++g_sib19Delivered;
+                // P0-7: the UE keeps what it decoded (TS 38.331 5.2.2.4) and
+                // computes its own TA from it (TS 38.213 4.2).
+                if (g_uePc)
+                {
+                    g_uePc->ReceiveSib19(parsed);
+                }
             }
         }
     }
@@ -189,13 +219,45 @@ Sample()
         g_belowThresh = below;
     }
 
+    // P0-7: UE 0's own TA from the decoded SIB19, against the true UE-gNB
+    // round trip (service link + feeder for a transparent payload).
+    double taEstUs = std::numeric_limits<double>::quiet_NaN();
+    double taErrNs = std::numeric_limits<double>::quiet_NaN();
+    double sibAgeMs = std::numeric_limits<double>::quiet_NaN();
+    int ulSynced = -1;
+    if (g_uePc && g_uePc->HasSib19())
+    {
+        const double est = g_uePc->ComputeTa().GetSeconds();
+        taEstUs = est * 1e6;
+        taErrNs = (est - total.GetSeconds()) * 1e9;
+        sibAgeMs = g_uePc->GetInformationAge().GetSeconds() * 1e3;
+        ulSynced = g_uePc->IsUplinkSynchronized() ? 1 : 0;
+        g_maxAbsTaErrNs = std::max(g_maxAbsTaErrNs, std::fabs(taErrNs));
+        g_taViol += (std::fabs(taErrNs) > kTeNtnNs) ? 1 : 0;
+        g_ulSyncedSamples += ulSynced;
+        ++g_taSamples;
+    }
+    // No measurement yet (no TB decoded, no SIB19 decoded): empty CSV fields,
+    // never a placeholder number.
+    auto opt = [](double v, int prec) {
+        if (std::isnan(v))
+        {
+            return std::string();
+        }
+        std::ostringstream o;
+        o << std::fixed << std::setprecision(prec) << v;
+        return o.str();
+    };
     if (g_csv.is_open())
     {
         g_csv << std::fixed << std::setprecision(3) << t << "," << slantKm << ","
               << total.GetMicroSeconds() << "," << common.GetMicroSeconds() << ","
               << residual.GetMicroSeconds() << "," << std::scientific << std::setprecision(3)
               << (drift * 1e6) << "," << std::fixed << std::setprecision(2)
-              << (std::isnan(sinr) ? 0.0 : sinr) << "\n";
+              << opt(sinr, 2) << "," << opt(taEstUs, 3) << "," << opt(taErrNs, 3) << ","
+              << opt(sibAgeMs, 3) << "," << ulSynced << "," << std::setprecision(3)
+              << g_sib->GetLatest().taCommon.GetNanoSeconds() / 1e3 << ","
+              << g_sib->GetLatest().kMac << "\n";
     }
     Simulator::Schedule(MilliSeconds(500), &Sample);
 }
@@ -213,6 +275,10 @@ main(int argc, char* argv[])
                               // which is n256 UPLINK and never conformant as a DL carrier.
     bool transparent = true;
     std::string outputDir = "ntn-rrc-real-stack-output";
+    bool ueTa = true;
+    std::string sib19Ref = "auto";
+    bool kOffset = true;
+    double gnssSigma = 0.0;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
@@ -223,12 +289,22 @@ main(int argc, char* argv[])
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
     cmd.AddValue("transparent", "Transparent (true) vs regenerative (false) payload", transparent);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("ueTa", "UE 0 computes its TA from the decoded SIB19 (TS 38.213 4.2)", ueTa);
+    cmd.AddValue("sib19Ref",
+                 "UL sync reference: auto (gateway if transparent, satellite if regenerative) | "
+                 "legacy (beam centre, double counts the service link) | gateway | satellite",
+                 sib19Ref);
+    cmd.AddValue("kOffset", "nr scheduler consumes the broadcast K_offset (N2Delay)", kOffset);
+    cmd.AddValue("gnssSigma", "UE GNSS horizontal 1-sigma error (m)", gnssSigma);
     std::string netSimOut;
     std::string czmlOut;
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
     g_simTime = duration;
+    NS_ABORT_MSG_IF(sib19Ref != "auto" && sib19Ref != "legacy" && sib19Ref != "gateway" &&
+                        sib19Ref != "satellite",
+                    "--sib19Ref=auto|legacy|gateway|satellite");
 
     const bool useNr = (radio == "nr");
     // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
@@ -279,7 +355,14 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(wElements[0]);
+    satSgp4->SetElementsSgp4(wElements[0]);
+    if (ueTa)
+    {
+        // The 100 ms position cache is up to 0.76 km stale at LEO speed, several
+        // microseconds of delay: a timing study must not use it (as in
+        // ntn-rrc-ul-timing). 1 ms keeps the stale range near 8 m (50 ns).
+        satSgp4->SetCacheGranularity(MilliSeconds(1));
+    }
     satNodes.Get(0)->AggregateObject(satSgp4);
     Ptr<MobilityModel> satMob = satSgp4;
     double subLat, subLon, subAlt;
@@ -316,17 +399,6 @@ main(int argc, char* argv[])
         // Set-1 S-band reference) is CONDUCTED power at the array input.
         rs.SetSatConductedPowerDbm(satEirpDbm);
     }
-    rs.Build(satNodes, ueNodes);
-    // satEirpDbm was resolved before Build() and handed to the rest of the
-    // example; make sure the radio landed on the same conducted power.
-    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
-                    "Set-1 conducted power mismatch: radio "
-                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
-    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
-                      Seconds(1.0), Seconds(duration - 0.5));
-    rs.EnableAiFlowMonitor("ntn-rrc-real-stack"); // WS2 KPM series (TS 28.552 names)
-    g_rs = &rs;
-
     NtnRrcHelper rrc;
     rrc.SetPayloadMode(transparent ? PayloadMode::Transparent : PayloadMode::RegenerativeFull);
     // TA reference = beam centre at the sub-point (ECEF), per TS 38.331.
@@ -350,9 +422,56 @@ main(int argc, char* argv[])
     }
     g_ta = rrc.InstallTimingAdvance(ueMob, satMob);
 
+    if (sib19Ref != "auto")
+    {
+        rrc.SetUlSyncReference(sib19Ref == "legacy"    ? UlSyncReference::BeamCenterLegacy
+                               : sib19Ref == "gateway" ? UlSyncReference::Gateway
+                                                       : UlSyncReference::Satellite);
+    }
+    // Cell id assigned after Build(); the K_offset the scheduler consumes must
+    // be the broadcast one, so the broadcaster exists before the radio.
+    g_sib = rrc.InstallSib19Broadcaster(satMob, 0, g_ta, MilliSeconds(160));
+    g_sib->RefreshNow();
+    const uint32_t koffRef = g_sib->GetLatest().cellSpecificKoffset; // 15 kHz reference slots
+    if (kOffset && radio != "mmwave")
+    {
+        // RRC-1 / P0-7: the scheduler uses the value the network broadcast.
+        // Before Build() the helper converts reference slots to the cell's
+        // numerology itself.
+        rs.SetKOffsetConsumption(true);
+        rs.SetBroadcastKOffsetSlots(koffRef);
+    }
+    rs.Build(satNodes, ueNodes);
     const uint16_t cellId = rs.GetServingCellId(); // radio-agnostic (mmwave or nr gNB)
-    g_sib = rrc.InstallSib19Broadcaster(satMob, cellId, g_ta, MilliSeconds(160));
+    g_sib->SetCellId(cellId);
+    if (kOffset && radio != "mmwave")
+    {
+        // The sink passes the broadcast 15 kHz reference slots unchanged; the
+        // helper converts them to cell-numerology slots (x 2^mu) after Build()
+        // exactly as it does before it.
+        g_sib->SetKOffsetSink(Callback<void, uint32_t>([&rs](uint32_t k) {
+            rs.SetBroadcastKOffsetSlots(k);
+        }));
+    }
     g_sib->Start();
+    if (ueTa)
+    {
+        // P0-7: UE 0's precompensator, fed only by the SIB19 it decodes.
+        g_uePc = CreateObject<NtnUlTimingPrecompensator>();
+        g_uePc->SetUeMobility(ueMob);
+        g_uePc->SetGnss(Seconds(1), gnssSigma);
+        g_uePc->AssignStreams(77);
+    }
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                      Seconds(1.0), Seconds(duration - 0.5));
+    rs.EnableAiFlowMonitor("ntn-rrc-real-stack"); // WS2 KPM series (TS 28.552 names)
+    g_rs = &rs;
+
 
     // ---- real downlink delivery of the serialized SIB19 over the EPC+mmwave DL ----
     // UE-0 IP (interface 1 = the mmwave UE NetDevice assigned by the EPC).
@@ -370,7 +489,8 @@ main(int argc, char* argv[])
     std::filesystem::create_directories(outputDir);
     g_csv.open(outputDir + "/ntn-rrc-real-stack-ta.csv");
     g_csv << "time_s,slant_km,ta_total_us,ta_common_us,ta_ue_us,ta_drift_us_per_s,"
-             "measured_sinr_db\n";
+             "measured_sinr_db,ta_ue_est_us,ta_err_ns,sib19_age_ms,ul_synced,"
+             "sib19_ta_common_us,sib19_kmac\n";
 
     Simulator::Schedule(Seconds(1.0), &Sample);
 
@@ -402,6 +522,26 @@ main(int argc, char* argv[])
               << "  RRC measurement reports:      " << g_measReports
               << "  (triggered on MEASURED SINR < " << g_measThreshDb << " dB)\n"
               << "  TA/SINR trace:                " << outputDir << "/ntn-rrc-real-stack-ta.csv\n";
+    std::cout << "\n--- UE-side SIB19 consumption and K_offset (P0-6, P0-7) ---\n"
+              << "  UL sync reference:            "
+              << (rrc.GetEffectiveUlSyncReference() == UlSyncReference::Gateway     ? "gateway"
+                  : rrc.GetEffectiveUlSyncReference() == UlSyncReference::Satellite ? "satellite"
+                                                                                     : "legacy beam centre")
+              << " (ta-Common " << g_sib->GetLatest().taCommon.GetMicroSeconds()
+              << " us, kMac " << g_sib->GetLatest().kMac << ")\n";
+    if (g_uePc)
+    {
+        std::cout << "  UE TA from decoded SIB19:     " << g_taSamples << " samples, max |err| "
+                  << g_maxAbsTaErrNs << " ns (Te_NTN " << kTeNtnNs << " ns, violations "
+                  << g_taViol << "), UL synced " << g_ulSyncedSamples << "/" << g_taSamples
+                  << "\n";
+    }
+    if (kOffset && radio != "mmwave")
+    {
+        std::cout << "  K_offset broadcast (15 kHz):  " << koffRef << " slots at t=0; consumed "
+                  << rs.GetConsumedKOffsetSlots() << " nr slots (mu=1), gNB N2Delay "
+                  << rs.GetGnbN2Delay() << "\n";
+    }
 
     Simulator::Destroy();
     return 0;

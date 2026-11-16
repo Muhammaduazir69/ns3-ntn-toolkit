@@ -25,9 +25,44 @@
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 
+#include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <memory>
 
 using namespace ns3;
+
+namespace
+{
+
+/// Per-UE serving-cell statistics, sampled every second: serving cell, RNTI,
+/// cumulative DL TBs (RAN counter), last TB SINR / TBLER and the linear mean
+/// SINR of the TBs received in the last second. All are keyed by the serving
+/// cell (nr patch 10), so they keep updating after a handover.
+void
+SampleUeStats(NtnRealStackHelper* rs,
+              std::shared_ptr<std::ofstream> csv,
+              uint32_t numUes,
+              Time period,
+              Time stop)
+{
+    for (uint32_t u = 0; u < numUes; ++u)
+    {
+        const auto c = rs->GetUeRanCounters(u);
+        *csv << std::fixed << std::setprecision(3) << Simulator::Now().GetSeconds() << "," << u
+             << "," << rs->GetUeServingCellId(u) << "," << rs->GetUeRnti(u) << "," << c.dlTb
+             << "," << c.dlTbErr << "," << std::setprecision(3) << rs->GetUeRecentSinrDb(u) << ","
+             << rs->TakeUeSinrWindowMeanDb(u) << "," << std::setprecision(6)
+             << rs->GetUeRecentTbler(u) << "\n";
+    }
+    if (Simulator::Now() + period <= stop)
+    {
+        Simulator::Schedule(period, &SampleUeStats, rs, csv, numUes, period, stop);
+    }
+}
+
+} // namespace
 using ns3::ntncon::Sgp4MobilityModel;
 using ns3::ntncon::WalkerConfig;
 using ns3::ntncon::WalkerConstellation;
@@ -72,6 +107,13 @@ main(int argc, char* argv[])
     double vSatKmps = 7.5; // nominal LEO ground-track speed (display only)
 
     std::string outputDir = "./nr-ho-pass/";
+    // Wave 1 (C2/C4/C5): cell-level SS-RSRP on an Earth-fixed cell beam, the
+    // TR 38.821 Set-1 handheld terminal, and a real gateway for the feeder.
+    bool cellBeam = true;
+    bool set1 = true;
+    double gwDistanceKm = 500.0; // gateway north of the UE site; <= 0 keeps the 5 ms constant
+    std::string channel = "legacy"; // legacy | ns3ntn (C3)
+    bool fading = true;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
@@ -87,6 +129,16 @@ main(int argc, char* argv[])
     // in the repo when the sweep ran from the source root. Every other example
     // takes --outputDir.
     cmd.AddValue("outputDir", "Directory for the run's artifacts", outputDir);
+    cmd.AddValue("cellBeam",
+                 "SSB/control on an Earth-fixed cell beam (TS 38.215 SS-RSRP); 0 = legacy "
+                 "quasi-omni control",
+                 cellBeam);
+    cmd.AddValue("channel", "legacy or ns3ntn (ns-3 mainline TR 38.811 NTN channel)", channel);
+    cmd.AddValue("fading", "Small-scale fading on the spatial channel (0 = LOS plane wave)", fading);
+    cmd.AddValue("set1", "TR 38.821 Set-1 handheld terminal and payload (S band)", set1);
+    cmd.AddValue("gwDistanceKm",
+                 "Gateway ground distance north of the UE site (km); <= 0 = 5 ms constant backhaul",
+                 gwDistanceKm);
     cmd.Parse(argc, argv);
 
     // ---- Two satellites (gNBs) sharing the carrier + ground UEs ----------
@@ -155,7 +207,11 @@ main(int argc, char* argv[])
     // power from the bandwidth and the array gain (again in Build()). An
     // explicit --satEirpDbm keeps meaning conducted power at the array input.
     const bool eirpFromTr38821 = satEirpDbm < 0.0 && freqGhz * 1e9 > 1.0e9 && freqGhz * 1e9 <= 7.125e9;
-    if (eirpFromTr38821)
+    if (eirpFromTr38821 && set1)
+    {
+        rs.ApplyTr38821Set1Defaults();
+    }
+    else if (eirpFromTr38821)
     {
         rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
     }
@@ -168,13 +224,43 @@ main(int argc, char* argv[])
         rs.SetSatConductedPowerDbm(satEirpDbm);
     }
     rs.SetUeTxPowerDbm(23.0);
-    rs.SetBackhaulDelay(MilliSeconds(5));
+    rs.SetBackhaulDelay(MilliSeconds(5)); // used only when no gateway is wired
     rs.SetHandover(true, hystDb, MilliSeconds(static_cast<uint64_t>(tttMs)));
+    NS_ABORT_MSG_IF(channel != "legacy" && channel != "ns3ntn", "unknown --channel " << channel);
+    rs.SetChannelModel(channel == "ns3ntn" ? NtnRealStackHelper::ChannelModel::Ns3Tr38811
+                                           : NtnRealStackHelper::ChannelModel::Legacy);
+    rs.SetSmallScaleFading(fading);
+    if (cellBeam)
+    {
+        // Earth-fixed cell centred on the UE site: both satellites steer their
+        // SSB beam at it, so the measured SS-RSRP difference is the path
+        // difference, not whichever UE each cell happens to be serving.
+        Ptr<ConstantPositionMobilityModel> cellCenter = CreateObject<ConstantPositionMobilityModel>();
+        cellCenter->SetPosition(NtnRealStackHelper::GeodeticToEcef(subLat, subLon, 0.0));
+        rs.SetSsbCellBeam(true, cellCenter);
+    }
 
     rs.Build(gnbNodes, ueNodes);
+    // C2: per-UE L1 RSRP samples and every RRC measurement report.
+    rs.EnableMeasurementTrace(outputDir + "/ho_rsrp_trace.csv");
+    if (gwDistanceKm > 0.0)
+    {
+        // C5: feeder from a real gateway (WGS-84), tracking the serving satellite.
+        rs.SetFeederGatewayGeodetic(subLat + gwDistanceKm / 111.195, subLon, 0.0);
+    }
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(0.5),
                       Seconds(simTime - 0.2));
+    auto ueCsv = std::make_shared<std::ofstream>(outputDir + "/ue_serving_stats.csv");
+    *ueCsv << "time_s,ue,serving_cell,rnti,dl_tb,dl_tb_err,recent_sinr_db,window_sinr_db,"
+              "recent_tbler\n";
+    Simulator::Schedule(Seconds(1.0),
+                        &SampleUeStats,
+                        &rs,
+                        ueCsv,
+                        numUes,
+                        Seconds(1.0),
+                        Seconds(simTime - 0.5));
 
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
@@ -197,6 +283,7 @@ main(int argc, char* argv[])
     std::cout << "  Mean DL SINR         : " << rs.GetMeanDlSinrDb() << " dB\n";
     std::cout << "  PHY RX transport TB  : " << rs.GetPhyRxTb() << "\n";
     std::cout << "  [A] Handovers done   : " << hoCount << "\n";
+    std::cout << "  Ping-pong (<= 5 s)   : " << rs.GetPingPongCount(Seconds(5)) << "\n";
     std::cout << "=================================================\n\n";
 
     if (hoCount == 0)

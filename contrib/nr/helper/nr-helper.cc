@@ -1649,7 +1649,12 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
         {
             Ptr<ThreeGppChannelModel> channel =
                 DynamicCast<ThreeGppChannelModel>(spectrumLossModel->GetChannelModel());
-            currentStream += channel->AssignStreams(currentStream);
+            // ntn-patch 09: another MatrixBasedChannelModel (e.g. a deterministic
+            // LOS model) may be plugged in; it has no random streams to assign.
+            if (channel)
+            {
+                currentStream += channel->AssignStreams(currentStream);
+            }
             m_channelObjectsWithAssignedStreams.emplace_back(spectrumLossModel);
         }
     }

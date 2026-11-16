@@ -130,6 +130,7 @@ build_lib_example(
   NAME ntn-sionna-rain-event-traffic
   SOURCE_FILES ntn-sionna-rain-event-traffic.cc
   LIBRARIES_TO_LINK
+    ${libthz-ntn}
     ${libntn-sionna}
     ${libntn-cho}
     ${libntn-constellation}
@@ -151,6 +152,7 @@ build_lib_example(
   NAME ntn-sionna-ris-relay-traffic
   SOURCE_FILES ntn-sionna-ris-relay-traffic.cc
   LIBRARIES_TO_LINK
+    ${libthz-ntn}
     ${libntn-sionna}
     ${libntn-cho}
     ${libntn-constellation}

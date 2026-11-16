@@ -17,6 +17,7 @@
 #include "ns3/ntn-orbit-predictor.h"
 #include "ns3/ntn-tte-estimator.h"
 
+#include <ns3/mobility-model.h>
 #include <ns3/node-container.h>
 #include <ns3/object.h>
 
@@ -127,6 +128,16 @@ class NtnChoHelper : public Object
      */
     void SetupConstellation(NodeContainer satNodes,
                             Ptr<SatAntennaGainPatternContainer> agpContainer);
+
+    /**
+     * \brief P1-H: set up the predictor from the satellites' own mobility models
+     * (ECEF, e.g. ntncon::Sgp4MobilityModel) and the analytic steered beam
+     * (TR 38.811 6.4.1 parameters), with no SNS3 GEO antenna-pattern container
+     * and no auxiliary SatMobilityModel stand-ins. Satellite id i is sats[i].
+     */
+    void SetupConstellation(const std::vector<Ptr<MobilityModel>>& sats,
+                            double peakGainDbi = 30.0,
+                            double beamwidth3dbDeg = 4.4127);
 
     /**
      * \brief Create a CHO algorithm instance for a UE

@@ -12,7 +12,7 @@
  * budget rather than free-space.
  *
  * Run:
- *   # terminal 1 (optional — without a server the channel falls back to FSPL)
+ *   # terminal 1 (required unless --allowFallback=1: RequireLiveTransport aborts without it)
  *   python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765
  *   # terminal 2
  *   ./ns3 run "mmimo-vs-codebook-leo --rainMmH=25 --rows=8 --cols=8"
@@ -116,6 +116,7 @@ main(int argc, char* argv[])
     uint32_t rows = 8;
     uint32_t cols = 8;
     uint32_t timeoutMs = 200;
+    bool allowFallback = false;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("host", "Sionna server host", host);
@@ -127,13 +128,25 @@ main(int argc, char* argv[])
     cmd.AddValue("rows", "PlanarArray rows", rows);
     cmd.AddValue("cols", "PlanarArray cols", cols);
     cmd.AddValue("timeoutMs", "Per-query timeout (ms)", timeoutMs);
+    cmd.AddValue("allowFallback", "1 = run free space (labeled) when no Sionna server answers; default 0 aborts (RequireLiveTransport)", allowFallback);
     cmd.Parse(argc, argv);
+    // P0-4 (Wave 2 M3): no silent free-space fallback for a ray-traced
+    // headline. RequireLiveTransport is ON unless --allowFallback=1; without
+    // a Sionna RT server the first query aborts the run (non-zero exit).
+    if (!allowFallback)
+    {
+        std::printf("# RequireLiveTransport=1: the run aborts if the Sionna RT server at "
+                    "the configured host:port does not answer (start "
+                    "bridge/sionna-server.py or test/sionna-stub-server.py); "
+                    "--allowFallback=1 runs closed-form free space, labeled as such\n");
+    }
 
     // --- Build SISO channel (cascade + base, no MIMO) ---
     Ptr<NtnSionnaChannel> baseSiso = CreateObject<NtnSionnaChannel>();
     baseSiso->SetServer(host, port);
     baseSiso->SetFrequencyHz(freqHz);
     baseSiso->SetTimeoutMs(timeoutMs);
+    baseSiso->SetRequireLiveTransport(!allowFallback);
 
     Ptr<NtnAtmosphericLossChain> chainSiso =
         CreateObject<NtnAtmosphericLossChain>();
@@ -150,6 +163,7 @@ main(int argc, char* argv[])
     baseMmimo->SetServer(host, port);
     baseMmimo->SetFrequencyHz(freqHz);
     baseMmimo->SetTimeoutMs(timeoutMs);
+    baseMmimo->SetRequireLiveTransport(!allowFallback);
     MimoArrayConfig txArr;
     txArr.rows = static_cast<uint8_t>(rows);
     txArr.cols = static_cast<uint8_t>(cols);
@@ -189,7 +203,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -244,5 +258,14 @@ main(int argc, char* argv[])
     // example read it, so on a host without Sionna every run here printed
     // Sionna framing over pure free-space results with nothing to show it.
     std::cout << baseSiso->ProvenanceLine() << std::endl;
+    // P0-4: label the headline by what produced it.
+    if (baseSiso->GetFallbacks() > 0)
+    {
+        std::printf("# headline: free space (no ray tracing)\nraytrace_live=0\n");
+    }
+    else
+    {
+        std::printf("raytrace_live=1\n");
+    }
     return 0;
 }

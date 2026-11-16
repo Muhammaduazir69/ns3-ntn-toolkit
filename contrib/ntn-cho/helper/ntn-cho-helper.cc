@@ -110,6 +110,37 @@ NtnChoHelper::SetupConstellation(NodeContainer satNodes,
                 << " satellites, " << m_orbitPredictor->GetNumBeamsPerSat() << " beams/sat");
 }
 
+void
+NtnChoHelper::SetupConstellation(const std::vector<Ptr<MobilityModel>>& sats,
+                                 double peakGainDbi,
+                                 double beamwidth3dbDeg)
+{
+    NS_LOG_FUNCTION(this << sats.size());
+    NS_ABORT_MSG_IF(sats.empty(), "SetupConstellation: no satellites");
+    // Plain id carriers: the kinematics come from the registered mobility
+    // models, the gain from the analytic beam, so nothing SNS3 is needed.
+    NodeContainer ids;
+    ids.Create(static_cast<uint32_t>(sats.size()));
+    m_orbitPredictor = CreateObject<NtnOrbitPredictor>();
+    m_orbitPredictor->Initialize(ids, nullptr);
+    for (uint32_t i = 0; i < sats.size(); ++i)
+    {
+        NS_ABORT_MSG_IF(!sats[i], "SetupConstellation: null mobility for satellite " << i);
+        m_orbitPredictor->SetKinematicsSource(i, sats[i]);
+    }
+    m_orbitPredictor->SetGeometricBeam(peakGainDbi, beamwidth3dbDeg);
+    m_orbitPredictor->SetSteeredBeam(true);
+
+    m_tteEstimator = CreateObject<NtnTteEstimator>();
+    m_tteEstimator->SetOrbitPredictor(m_orbitPredictor);
+    m_measurementModel = CreateObject<NtnMeasurementModel>();
+    m_measurementModel->SetOrbitPredictor(m_orbitPredictor);
+    m_measurementModel->SetNtnScenario(m_scenario);
+    m_measurementModel->SetCarrierFrequency(m_carrierFreqHz);
+    m_measurementModel->SetBandwidth(m_bandwidthHz);
+    m_measurementModel->SetSatelliteTxPower(m_satTxPower_dBm);
+}
+
 Ptr<NtnChoAlgorithm>
 NtnChoHelper::CreateChoAlgorithm()
 {

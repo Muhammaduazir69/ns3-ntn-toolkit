@@ -8,6 +8,7 @@
 #include "ns3/boolean.h"
 #include "ns3/config.h"
 #include "ns3/fatal-error.h"
+#include "ns3/global-value.h"
 #include "ns3/data-rate.h"
 #include "ns3/double.h"
 #include "ns3/epc-helper.h"
@@ -44,6 +45,16 @@
 #include "ns3/ntn-oran-sink.h"
 #include "ns3/ntn-sat-beam-gain-model.h"
 #include "ns3/ntn-tr38811-excess-loss-model.h"
+#include "ns3/ntn-earth-blockage-loss-model.h"
+#include "ns3/ntn-static-extra-loss-model.h"
+#include "ns3/ntn-los-channel-model.h"
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/geocentric-constant-position-mobility-model.h"
+#include "ns3/three-gpp-propagation-loss-model.h"
+#include "ns3/nr-common.h"
+#include "ns3/nr-gnb-rrc.h"
+#include "ns3/nr-ue-rrc.h"
+#include "ns3/nr-pdcp.h"
 #include "ns3/packet-sink-helper.h"
 #include "ns3/propagation-loss-model.h"
 #include "ns3/packet-sink.h"
@@ -61,6 +72,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 
 namespace ns3
@@ -69,6 +81,17 @@ namespace ns3
 using namespace mmwave;
 
 NS_LOG_COMPONENT_DEFINE("NtnRealStackHelper");
+
+// Wave 2 core: opt-in per-UE serving-cell statistics trace, settable from any
+// example's command line (--NtnRealStackUeStatsTrace=<csv>) without code
+// changes. Empty (default) writes nothing and schedules nothing.
+static GlobalValue g_ntnRealStackUeStatsTrace(
+    "NtnRealStackUeStatsTrace",
+    "If non-empty, NtnRealStackHelper (nr backend) writes per-UE serving-cell "
+    "statistics (serving cell, RNTI, DL TB counters, recent SINR/TBLER) every "
+    "second to this CSV path (see EnableUeStatsTrace)",
+    StringValue(""),
+    MakeStringChecker());
 
 namespace
 {
@@ -93,7 +116,24 @@ QciAttrName(uint8_t fiveQi)
 } // namespace
 
 NtnRealStackHelper::NtnRealStackHelper() = default;
-NtnRealStackHelper::~NtnRealStackHelper() = default;
+NtnRealStackHelper::~NtnRealStackHelper()
+{
+    m_ueStatsEvent.Cancel();
+    // C3: restore the process-wide elevation convention this helper switched,
+    // so later scenarios in the same process (test-runner) see the default.
+    if (!m_prevElevationModel.empty())
+    {
+        GlobalValue::Bind("GeocentricElevationModel", StringValue(m_prevElevationModel));
+    }
+    if (m_prevRsrpLinear >= 0)
+    {
+        GlobalValue::Bind("NrUeRsrpLinearAverage", BooleanValue(m_prevRsrpLinear == 1));
+    }
+    if (m_prevRsrqFromRssi >= 0)
+    {
+        GlobalValue::Bind("NrUeRsrqFromRssi", BooleanValue(m_prevRsrqFromRssi == 1));
+    }
+}
 
 void
 NtnRealStackHelper::SetNtnHarqProfile(bool enable)
@@ -159,7 +199,13 @@ NtnRealStackHelper::ConfigureNtnRlcRrcTimers()
     // t-StatusProhibit must exceed one RTT so status PDUs are not over-sent.
     const double statusMs = std::max(10.0, rttMs + 5.0);
     // RRC connection (T300) must survive the setup round trip over the slant.
-    const double t300Ms = std::max(100.0, 8.0 * rttMs);
+    //
+    // Wave 2 core: clamped at 2000 ms, the largest value TS 38.331
+    // UE-TimersAndConstants t300 can signal (ENUMERATED ms100 ... ms2000; the
+    // same set in TS 36.331 for the mmwave/LTE class). Unclamped, a GEO at 10
+    // deg (RTT ~271 ms) asked for 2166 ms and NrUeRrc's attribute checker
+    // aborted the run. RTTs up to 250 ms (every LEO/MEO case) are unchanged.
+    const double t300Ms = std::min(2000.0, std::max(100.0, 8.0 * rttMs));
     // WF-13: write BOTH families, because the two backends use different
     // classes and this relaxation was dead on the default one.
     //
@@ -333,6 +379,10 @@ NtnRealStackHelper::BuildMmwaveRadio()
     Config::SetDefault("ns3::MmWavePhyMacCommon::Bandwidth", DoubleValue(m_bwHz));
     Config::SetDefault("ns3::MmWaveEnbPhy::TxPower", DoubleValue(m_satEirpDbm));
     Config::SetDefault("ns3::MmWaveUePhy::TxPower", DoubleValue(m_ueTxDbm));
+    if (std::isfinite(m_ueNoiseFigureDb))
+    {
+        Config::SetDefault("ns3::MmWaveUePhy::NoiseFigure", DoubleValue(m_ueNoiseFigureDb));
+    }
     Config::SetDefault("ns3::MmWaveHelper::RlcAmEnabled", BooleanValue(m_rlcAm));
     Config::SetDefault("ns3::MmWaveHelper::HarqEnabled", BooleanValue(m_harq));
     Config::SetDefault("ns3::MmWaveFlexTtiMacScheduler::HarqEnabled", BooleanValue(m_harq));
@@ -514,7 +564,10 @@ NtnRealStackHelper::ApplyNtnChannelExtras()
     //      measured channel (after Friis FSPL), so the measured SINR carries the
     //      elevation-dependent atmospheric/clutter/shadow/scintillation physics
     //      that previously lived only in the ntn-measurement-model oracle. ----
-    if (m_tr38811)
+    // C3: the mainline TR 38.811 channel already carries gas, scintillation,
+    // clutter and shadow fading; chaining the legacy excess model would count
+    // them twice.
+    if (m_tr38811 && m_channelModel == ChannelModel::Legacy)
     {
         Ptr<Ntn38811ExcessLossModel> excess = CreateObject<Ntn38811ExcessLossModel>();
         excess->SetCarrierFrequencyHz(m_freqHz);
@@ -534,6 +587,25 @@ NtnRealStackHelper::ApplyNtnChannelExtras()
             beam->SetBeamCenter(m_beamCenter);
         }
         AddExtraPropagationLoss(beam);
+    }
+
+    // C4: on mmwave the UE element gain cannot be declared on the array, so it
+    // rides the chain as a negative loss (reciprocal, like the element gain).
+    if (m_backend == RadioBackend::Mmwave && m_ueAntennaGainDbi != 0.0)
+    {
+        Ptr<NtnStaticExtraLossModel> g = CreateObject<NtnStaticExtraLossModel>();
+        g->SetLossDb(-m_ueAntennaGainDbi);
+        g->SetFloorDb(-m_ueAntennaGainDbi);
+        AddExtraPropagationLoss(g);
+    }
+
+    // C1: Earth occultation last, so the existing chain order (and its random
+    // streams) is untouched; a clear link contributes exactly 0 dB.
+    if (m_earthBlockage)
+    {
+        m_blockageModel = CreateObject<NtnEarthBlockageLossModel>();
+        m_blockageModel->SetAttribute("MinElevationDeg", DoubleValue(m_minElevationDeg));
+        AddExtraPropagationLoss(m_blockageModel);
     }
 }
 
@@ -703,19 +775,68 @@ NtnRealStackHelper::BuildNrRadio()
     // no atmosphere, scintillation, shadowing or beam roll-off — biasing exactly
     // the per-slice SINR comparison the slicing feature exists to measure.
     m_nrBaseLossPerBwp.assign(nBwp, nullptr);
+    if (m_channelModel == ChannelModel::Ns3Tr38811)
+    {
+        // C3: the ns-3 TR 38.811 NTN models need geocentric endpoints; check
+        // here rather than let ThreeGppChannelModel abort mid-run.
+        auto geo = [](Ptr<Node> n) {
+            return DynamicCast<GeocentricConstantPositionMobilityModel>(
+                       n->GetObject<MobilityModel>()) != nullptr;
+        };
+        for (uint32_t i = 0; i < m_gnb.GetN(); ++i)
+        {
+            NS_ABORT_MSG_IF(!geo(m_gnb.Get(i)),
+                            "SetChannelModel(Ns3Tr38811): gNB " << i << " mobility is not a "
+                            "GeocentricConstantPositionMobilityModel; use Sgp4MobilityModel or "
+                            "wrap it in ntncon::NtnGeocentricMobilityAdapter");
+        }
+        for (uint32_t i = 0; i < m_ue.GetN(); ++i)
+        {
+            NS_ABORT_MSG_IF(!geo(m_ue.Get(i)),
+                            "SetChannelModel(Ns3Tr38811): UE " << i << " mobility is not a "
+                            "GeocentricConstantPositionMobilityModel; use NtnTr38811MobilityModel "
+                            "or wrap it in ntncon::NtnGeocentricMobilityAdapter");
+        }
+        // src patch 0001: elevation about the WGS-84 normal at the lower end
+        // (the stock ns-3.43 picks the "ground" end by ECEF z and takes |asin|).
+        {
+            StringValue prev;
+            GlobalValue::GetValueByName("GeocentricElevationModel", prev);
+            m_prevElevationModel = prev.Get();
+            GlobalValue::Bind("GeocentricElevationModel", StringValue("Wgs84LowerEnd"));
+        }
+    }
     for (uint8_t cc = 0; cc < nBwp; ++cc)
     {
         BandwidthPartInfoPtr& bwp = band.GetBwpAt(cc, 0);
-        Ptr<FriisPropagationLossModel> friis = CreateObject<FriisPropagationLossModel>();
         // Each BWP sits at its own centre frequency; using the band centre for
         // all of them mis-scales Friis across a wide multi-BWP band.
         const double bwpFreqHz = (bwp->m_centralFrequency > 0.0) ? bwp->m_centralFrequency : m_freqHz;
-        friis->SetAttribute("Frequency", DoubleValue(bwpFreqHz));
-        bwp->m_propagation = friis;
-        m_nrBaseLossPerBwp[cc] = friis;
+        if (m_channelModel == ChannelModel::Ns3Tr38811)
+        {
+            ApplyNs3Tr38811Channel(bwp.get());
+        }
+        else
+        {
+            Ptr<FriisPropagationLossModel> friis = CreateObject<FriisPropagationLossModel>();
+            friis->SetAttribute("Frequency", DoubleValue(bwpFreqHz));
+            bwp->m_propagation = friis;
+        }
+        if (!m_smallScaleFading)
+        {
+            // C3: deterministic LOS plane wave (no multipath), e.g. ISLs.
+            Ptr<ThreeGppSpectrumPropagationLossModel> sp =
+                CreateObject<ThreeGppSpectrumPropagationLossModel>();
+            Ptr<NtnLosChannelModel> los = CreateObject<NtnLosChannelModel>();
+            los->SetAttribute("Frequency", DoubleValue(bwpFreqHz));
+            los->SetAttribute("UpdatePeriod", TimeValue(m_channelUpdatePeriod));
+            sp->SetChannelModel(los);
+            bwp->m_3gppChannel = sp;
+        }
+        m_nrBaseLossPerBwp[cc] = bwp->m_propagation;
         if (cc == 0)
         {
-            m_nrBaseLoss = friis; // back-compat head
+            m_nrBaseLoss = bwp->m_propagation; // back-compat head
         }
     }
 
@@ -738,6 +859,10 @@ NtnRealStackHelper::BuildNrRadio()
     // spectrum model exists.
     for (uint8_t cc = 0; cc < nBwp; ++cc)
     {
+        if (m_channelModel != ChannelModel::Legacy || !m_smallScaleFading)
+        {
+            break; // C3: the TR 38.811 condition model / LOS-only model own this
+        }
         BandwidthPartInfoPtr& bwp = band.GetBwpAt(cc, 0);
         Ptr<ThreeGppSpectrumPropagationLossModel> sp =
             DynamicCast<ThreeGppSpectrumPropagationLossModel>(bwp->m_3gppChannel);
@@ -847,8 +972,20 @@ NtnRealStackHelper::BuildNrRadio()
     // these to enable real spatial multiplexing.
     m_nr->SetUeAntennaAttribute("NumRows", UintegerValue(m_ueRows));
     m_nr->SetUeAntennaAttribute("NumColumns", UintegerValue(m_ueCols));
-    m_nr->SetUeAntennaAttribute("AntennaElement",
-                                PointerValue(CreateObject<IsotropicAntennaModel>()));
+    {
+        // C4: declared UE element gain (reciprocal: UL too). 0 dBi is the
+        // IsotropicAntennaModel default, so the legacy object is unchanged.
+        Ptr<IsotropicAntennaModel> ueElem = CreateObject<IsotropicAntennaModel>();
+        if (m_ueAntennaGainDbi != 0.0)
+        {
+            ueElem->SetAttribute("Gain", DoubleValue(m_ueAntennaGainDbi));
+        }
+        m_nr->SetUeAntennaAttribute("AntennaElement", PointerValue(ueElem));
+    }
+    if (std::isfinite(m_ueNoiseFigureDb))
+    {
+        m_nr->SetUePhyAttribute("NoiseFigure", DoubleValue(m_ueNoiseFigureDb));
+    }
     m_nr->SetGnbAntennaAttribute("NumRows", UintegerValue(m_gnbRows));
     m_nr->SetGnbAntennaAttribute("NumColumns", UintegerValue(m_gnbCols));
     m_nr->SetGnbAntennaAttribute("AntennaElement",
@@ -906,8 +1043,7 @@ NtnRealStackHelper::BuildNrRadio()
         // already works in the configured numerology and needs no scaling.
         if (m_broadcastKOffsetSlots > 0)
         {
-            m_consumedKOffsetSlots =
-                m_broadcastKOffsetSlots * (1u << m_numerology);
+            m_consumedKOffsetSlots = ReferenceToCellSlots(m_broadcastKOffsetSlots);
         }
         else
         {
@@ -1043,6 +1179,44 @@ NtnRealStackHelper::BuildNrRadio()
         }
     }
 
+    // C2: measurement plane without the A3 decision-maker. A scenario that owns
+    // every handover decision (SetAutonomousHandover(false)) still needs the
+    // UE's measurement reports, so configure a TS 38.331 5.5.4.1 PERIODICAL
+    // report (RSRP and RSRQ) on every gNB before the UEs attach; the RRC then
+    // ships it in the connection reconfiguration (nr patch 08 implements the
+    // periodical trigger in NrUeRrc).
+    if (!m_periodicMeasExplicit && m_handover && !m_hoAutonomous)
+    {
+        m_periodicMeas = true;
+    }
+    if (m_periodicMeas)
+    {
+        // nr patch 08: real SS-RSRQ (TS 38.215 5.1.3) in the reports.
+        BooleanValue prevRsrq;
+        GlobalValue::GetValueByName("NrUeRsrqFromRssi", prevRsrq);
+        m_prevRsrqFromRssi = prevRsrq.Get() ? 1 : 0;
+        GlobalValue::Bind("NrUeRsrqFromRssi", BooleanValue(true));
+        NrRrcSap::ReportConfigEutra rc;
+        rc.triggerType = NrRrcSap::ReportConfigEutra::PERIODICAL;
+        rc.purpose = NrRrcSap::ReportConfigEutra::REPORT_STRONGEST_CELLS;
+        rc.triggerQuantity = NrRrcSap::ReportConfigEutra::RSRP;
+        rc.reportQuantity = NrRrcSap::ReportConfigEutra::BOTH;
+        const int64_t ms = m_periodicMeasInterval.GetMilliSeconds();
+        rc.reportInterval = (ms == 120)    ? NrRrcSap::ReportConfigEutra::MS120
+                            : (ms == 240)  ? NrRrcSap::ReportConfigEutra::MS240
+                            : (ms == 640)  ? NrRrcSap::ReportConfigEutra::MS640
+                            : (ms == 1024) ? NrRrcSap::ReportConfigEutra::MS1024
+                            : (ms == 2048) ? NrRrcSap::ReportConfigEutra::MS2048
+                            : (ms == 5120) ? NrRrcSap::ReportConfigEutra::MS5120
+                            : (ms == 10240) ? NrRrcSap::ReportConfigEutra::MS10240
+                                            : NrRrcSap::ReportConfigEutra::MS480;
+        for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+        {
+            Ptr<NrGnbNetDevice> gnbDev = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
+            gnbDev->GetRrc()->AddUeMeasReportConfig(rc);
+        }
+    }
+
     // Enabler D: native 5G-LENA stat calculators (per-DRB PDCP/RLC
     // throughput+delay, per-slot MAC MCS/PRB, PHY RxPacketTrace) written under
     // the output dir. The measured MCS/rank/PRB the helper exposes are captured
@@ -1164,6 +1338,25 @@ NtnRealStackHelper::BuildNrRadio()
         Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/RecvMeasurementReport",
                         MakeCallback(&NtnRealStackHelper::NrMeasurementReport, this));
     }
+    else if (m_periodicMeas)
+    {
+        Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/RecvMeasurementReport",
+                        MakeCallback(&NtnRealStackHelper::NrMeasurementReport, this));
+    }
+    // C2/C6: initial serving cell of each UE (for handover records), and the
+    // UE RRC events after which DRB PDCP entities exist (for RLC SDU delay).
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        Ptr<NrUeNetDevice> ue = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(u));
+        if (ue && ue->GetTargetGnb())
+        {
+            m_lastCellOfImsi[ue->GetImsi()] = ue->GetTargetGnb()->GetCellId();
+        }
+    }
+    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/NrUeRrc/ConnectionReconfiguration",
+                            MakeCallback(&NtnRealStackHelper::NrUeRrcConnTrace, this));
+    Config::ConnectFailSafe("/NodeList/*/DeviceList/*/NrUeRrc/HandoverEndOk",
+                            MakeCallback(&NtnRealStackHelper::NrUeRrcConnTrace, this));
 
     // ---- Measured-KPI PHY sink: DL SINR/TBLER from the UE NrSpectrumPhy ----
     // Feeds the SAME accumulators as the mmwave path via AccumulateDl(). Connect
@@ -1176,6 +1369,14 @@ NtnRealStackHelper::BuildNrRadio()
             Ptr<NrSpectrumPhy> sp = m_nr->GetUePhy(m_ueDevs.Get(i), b)->GetSpectrumPhy();
             sp->TraceConnectWithoutContext("RxPacketTraceUe",
                                            MakeCallback(&NtnRealStackHelper::DlRxTraceNr, this));
+        }
+    }
+    {
+        StringValue ueStatsPath;
+        GlobalValue::GetValueByName("NtnRealStackUeStatsTrace", ueStatsPath);
+        if (!ueStatsPath.Get().empty())
+        {
+            EnableUeStatsTrace(ueStatsPath.Get(), Seconds(1));
         }
     }
 
@@ -1193,6 +1394,16 @@ NtnRealStackHelper::BuildNrRadio()
             NS_LOG_INFO("nr backend: folded service-link delay " << service.GetMilliSeconds()
                                                                  << " ms into the backhaul leg");
         }
+    }
+
+    if (m_ssbCellBeam)
+    {
+        // C2: cell (SSB) beam per gNB, re-steered as the satellites move.
+        BooleanValue prev;
+        GlobalValue::GetValueByName("NrUeRsrpLinearAverage", prev);
+        m_prevRsrpLinear = prev.Get() ? 1 : 0;
+        GlobalValue::Bind("NrUeRsrpLinearAverage", BooleanValue(true));
+        RefreshCellBeams();
     }
 
     NS_LOG_INFO("NtnRealStackHelper nr backend: " << m_enbDevs.GetN() << " gNB, " << m_ueDevs.GetN()
@@ -1285,6 +1496,15 @@ NtnRealStackHelper::NrHandoverEndOk(std::string /*ctx*/,
                                     uint16_t /*rnti*/)
 {
     ++m_hoCount;
+    {
+        // C2: measured handover record (source = the cell the UE last
+        // completed on, target = this cell).
+        const int32_t ue = UeIndexOfImsi(imsi);
+        auto it = m_lastCellOfImsi.find(imsi);
+        const uint16_t src = (it == m_lastCellOfImsi.end()) ? 0 : it->second;
+        m_hoRecords.push_back({Simulator::Now(), static_cast<uint32_t>(std::max(ue, 0)), src, cellId});
+        m_lastCellOfImsi[imsi] = cellId;
+    }
     // 5G-LENA registers an ideal-beamforming task only at attach
     // (NrHelper::AttachToGnb), so after an X2 handover the TARGET gNB had no
     // beam toward the UE and served it with an unsteered vector: its RSRP
@@ -1427,6 +1647,17 @@ NtnRealStackHelper::AddSpectrumChannelLoss(Ptr<SpectrumPropagationLossModel> los
             seam = CreateObject<NtnSpectrumSeamModel>();
             seam->SetInnerModel(installed); // may be null (then the composite is pass-through)
             ch->AddPhasedArraySpectrumPropagationLossModel(seam);
+            // Wave 2 core: cut the chain link the channel just made. ns-3.43
+            // SpectrumChannel::AddPhasedArraySpectrumPropagationLossModel sets
+            // the previously installed model (the 3GPP one, already the seam's
+            // INNER model) as the seam's m_next, and
+            // PhasedArraySpectrumPropagationLossModel::CalcRxPowerSpectralDensity
+            // then REPLACES the seam's result with m_next's, computed from the
+            // original params: every plugin was evaluated and discarded and the
+            // 3GPP model ran twice. The seam already runs the inner model, so it
+            // must be the only link. (Wave 3: the interim per-example unchain
+            // work-arounds in thz-ntn, ntn-sionna and ntn-v2x were removed.)
+            seam->SetNext(nullptr);
             if (!installed)
             {
                 NS_LOG_WARN("no 3GPP phased-array model on this BWP channel; the spectrum "
@@ -1695,6 +1926,10 @@ NtnRealStackHelper::InstallTraffic(TrafficProfile profile, Time start, Time stop
     m_trafficStart = start;
     m_trafficStop = stop;
     NS_ABORT_MSG_IF(!m_built, "InstallTraffic before Build()");
+    if (m_backend == RadioBackend::Nr)
+    {
+        Simulator::Schedule(start, &NtnRealStackHelper::ConnectUePdcpTraces, this);
+    }
 
     for (uint32_t u = 0; u < m_ue.GetN(); ++u)
     {
@@ -1827,7 +2062,15 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
     case NtnOranApplication::POISSON_BACKGROUND:
     case NtnOranApplication::CBR_SATURATING:
     default:
-        client->SetAttribute("DataRate", DataRateValue(DataRate("5Mb/s")));
+        // Wave 2 core: the rate used to be hard-coded to 5 Mb/s here, so a
+        // Config::SetDefault("ns3::NtnOranApplication::DataRate", ...) did
+        // nothing. Now SetEmbbRate() wins, else the attribute's (Config)
+        // default applies; that default is 5 Mb/s, so nothing changes unless
+        // a caller asks.
+        if (m_embbRateSet)
+        {
+            client->SetAttribute("DataRate", DataRateValue(m_embbRate));
+        }
         client->SetAttribute("PacketSize", UintegerValue(1400));
         break;
     }
@@ -2126,17 +2369,34 @@ NtnRealStackHelper::GetGnbN2Delay(uint32_t gnbIdx, uint8_t bwp) const
     return static_cast<uint32_t>(v.Get());
 }
 
-void
-NtnRealStackHelper::SetBroadcastKOffsetSlots(uint32_t slots)
+uint32_t
+NtnRealStackHelper::ReferenceToCellSlots(uint32_t referenceSlots) const
 {
-    m_broadcastKOffsetSlots = slots;
-    if (!m_built || !m_kOffsetConsumption || m_backend != RadioBackend::Nr || slots == 0)
+    // TS 38.331 cellSpecificKoffset is counted in slots of the 15 kHz reference
+    // SCS (mu = 0); a slot of numerology mu is 2^-mu as long (TS 38.211 4.3.2),
+    // so the same time span is 2^mu cell slots.
+    return referenceSlots * (1u << m_numerology);
+}
+
+void
+NtnRealStackHelper::SetBroadcastKOffsetSlots(uint32_t referenceSlots)
+{
+    m_broadcastKOffsetSlots = referenceSlots;
+    if (!m_built || !m_kOffsetConsumption || m_backend != RadioBackend::Nr ||
+        referenceSlots == 0)
     {
         return;
     }
     // Already running: reprogram the live gNB PHYs so a SIB19 refresh mid-pass
     // actually changes how the network schedules, instead of the broadcast
     // value and the scheduler drifting apart for the rest of the run.
+    //
+    // Wave 2 core fix: the argument is in 15 kHz reference slots on BOTH paths.
+    // This path used to write the raw reference value into N2Delay (cell slots)
+    // and compare it against the converted value Build() stored, so at mu = 1 a
+    // SIB19 refresh halved the UL DCI->PUSCH gap. Convert exactly as Build()
+    // does; m_consumedKOffsetSlots is always in cell slots.
+    const uint32_t slots = ReferenceToCellSlots(referenceSlots);
     if (slots == m_consumedKOffsetSlots)
     {
         return;
@@ -2174,7 +2434,8 @@ NtnRealStackHelper::SetBroadcastKOffsetSlots(uint32_t slots)
         }
     });
     NS_LOG_INFO("NtnRealStackHelper: SIB19 refresh -> K_offset "
-                << slots << " slots; N2Delay " << m_baseN2Delay << " -> "
+                << referenceSlots << " reference slots = " << slots
+                << " cell slots (numerology " << m_numerology << "); N2Delay " << m_baseN2Delay << " -> "
                 << (m_baseN2Delay + slots) << " applied after "
                 << guard.GetMilliSeconds() << " ms so no in-flight grant straddles it");
 }
@@ -2278,6 +2539,7 @@ NtnRealStackHelper::EnsureOranMonitor()
     }
     m_oranMonitor = CreateObject<NtnOranAiFlowMonitor>();
     m_oranMonitor->SetPhySource(this);
+    m_oranMonitor->SetRanCounterKpm(m_kpmFromRan);
     m_oranMonitor->Start();
 }
 
@@ -2465,6 +2727,27 @@ NtnRealStackHelper::DlRxTraceNr(::ns3::RxPacketTraceParams params)
     // disambiguate from mmwave::RxPacketTraceParams (in scope via using).
     const double rbFrac =
         static_cast<double>(params.m_rbAssignedNum) / static_cast<double>(m_nrBandRb);
+    if (params.m_tbSize > 0)
+    {
+        // C6: RAN-side TB and PRB counters (TS 28.552 5.1.1.8, 5.1.1.2).
+        const double prbSlots =
+            static_cast<double>(params.m_rbAssignedNum) * static_cast<double>(params.m_numSym) / 14.0;
+        m_cellPrbSlots[static_cast<uint16_t>(params.m_cellId)] += prbSlots;
+        const int32_t ue = UeIndexOfCellRnti(static_cast<uint16_t>(params.m_cellId), params.m_rnti);
+        if (ue >= 0)
+        {
+            UeRanCounters& c = m_ueRan[static_cast<uint32_t>(ue)];
+            c.dlTb += 1;
+            c.dlTbErr += params.m_corrupt ? 1 : 0;
+            c.prbSymSum += prbSlots;
+            // Per-UE decision window (TakeUeSinrWindowMeanDb): keyed by the UE
+            // index, so it is continuous across handovers.
+            UeSinrWindow& w = m_ueSinrWin[static_cast<uint32_t>(ue)];
+            w.sumLin += std::max(params.m_sinr, 1e-30);
+            w.n += 1;
+            w.lastDb = 10.0 * std::log10(std::max(params.m_sinr, 1e-30));
+        }
+    }
     AccumulateDl(params.m_sinr,
                  params.m_tbler,
                  params.m_corrupt,
@@ -2580,11 +2863,59 @@ NtnRealStackHelper::GetSignalResourceElements() const
 
 void
 NtnRealStackHelper::NrMeasurementReport(std::string /*ctx*/,
-                                        uint64_t /*imsi*/,
-                                        uint16_t /*cellId*/,
+                                        uint64_t imsi,
+                                        uint16_t cellId,
                                         uint16_t /*rnti*/,
                                         NrRrcSap::MeasurementReport report)
 {
+    // C2: per-UE store. The vendored stack ENCODES with the TS 36.133 9.1.4 /
+    // 9.1.7 mappings (nr::EutranMeasurementMapping: RSRP = index - 141 dBm,
+    // RSRQ = (index - 40) / 2 dB), so decode with the same functions. The
+    // legacy getters below used the TS 38.133 SS-RSRP offset (index - 156),
+    // 15 dB low; absolute values were wrong, differences were not.
+    {
+        const int32_t ue = UeIndexOfImsi(imsi);
+        if (ue >= 0)
+        {
+            const Time now = Simulator::Now();
+            auto& cells = m_ueMeas[static_cast<uint32_t>(ue)];
+            ++m_ueMeasReports[static_cast<uint32_t>(ue)];
+            auto store = [&](uint16_t c, uint8_t rsrpIdx, uint8_t rsrqIdx, bool haveRsrq, bool serving) {
+                UeCellMeasurement& m = cells[c];
+                m.rsrpDbm = nr::EutranMeasurementMapping::RsrpRange2Dbm(rsrpIdx);
+                m.rsrqDb = haveRsrq ? nr::EutranMeasurementMapping::RsrqRange2Db(rsrqIdx)
+                                    : std::numeric_limits<double>::quiet_NaN();
+                m.time = now;
+                m.serving = serving;
+                ++m.reports;
+                if (m_measTrace)
+                {
+                    *m_measTrace << now.GetSeconds() << "," << ue << "," << imsi << "," << c << ","
+                                 << (serving ? 1 : 0) << ",rrc-report," << m.rsrpDbm << ","
+                                 << m.rsrqDb << "," << SlantKmToCell(ue, c) << "\n";
+                }
+            };
+            for (auto& [c, m] : cells)
+            {
+                m.serving = false;
+            }
+            store(cellId,
+                  report.measResults.measResultPCell.rsrpResult,
+                  report.measResults.measResultPCell.rsrqResult,
+                  true,
+                  true);
+            if (report.measResults.haveMeasResultNeighCells)
+            {
+                for (const auto& n : report.measResults.measResultListEutra)
+                {
+                    if (n.haveRsrpResult)
+                    {
+                        store(n.physCellId, n.rsrpResult, n.rsrqResult, n.haveRsrqResult, false);
+                    }
+                }
+            }
+        }
+    }
     // CHO-6: harvest the NEIGHBOUR measurements a UE actually reports, which is
     // the only standards-defined source of candidate-cell quality. TS 38.133
     // maps the reported RSRP index to dBm as RSRP = index - 156 over the range
@@ -2594,7 +2925,8 @@ NtnRealStackHelper::NrMeasurementReport(std::string /*ctx*/,
     // not neighbours are present, so harvest it before the neighbour guard.
     // TS 38.331 measResultPCell carries the same TS 38.133 index encoding as
     // the neighbour entries.
-    m_servingRsrpDbm = static_cast<double>(report.measResults.measResultPCell.rsrpResult) - 156.0;
+    m_servingRsrpDbm =
+        nr::EutranMeasurementMapping::RsrpRange2Dbm(report.measResults.measResultPCell.rsrpResult);
     if (!report.measResults.haveMeasResultNeighCells)
     {
         return;
@@ -2605,7 +2937,7 @@ NtnRealStackHelper::NrMeasurementReport(std::string /*ctx*/,
         {
             continue;
         }
-        m_neighbourRsrpDbm[n.physCellId] = static_cast<double>(n.rsrpResult) - 156.0;
+        m_neighbourRsrpDbm[n.physCellId] = nr::EutranMeasurementMapping::RsrpRange2Dbm(n.rsrpResult);
     }
 }
 
@@ -2926,6 +3258,25 @@ NtnRealStackHelper::GetUeRecentSinrDb(uint32_t ueIndex) const
 }
 
 double
+NtnRealStackHelper::TakeUeSinrWindowMeanDb(uint32_t ueIndex)
+{
+    auto it = m_ueSinrWin.find(ueIndex);
+    if (it == m_ueSinrWin.end())
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    UeSinrWindow& w = it->second;
+    if (w.n == 0)
+    {
+        return w.lastDb;
+    }
+    const double db = 10.0 * std::log10(std::max(w.sumLin / static_cast<double>(w.n), 1e-30));
+    w.sumLin = 0.0;
+    w.n = 0;
+    return db;
+}
+
+double
 NtnRealStackHelper::GetUeMeanSinrDb(uint32_t ueIndex) const
 {
     const uint32_t key = UeKey(GetUeServingCellId(ueIndex), GetUeRnti(ueIndex));
@@ -2971,6 +3322,11 @@ NtnRealStackHelper::Collect()
     uint64_t owdOverflow = 0;
     uint64_t owdN = 0;
     double owdMax = 0.0;
+    // C6: RFC 3393 IPDV (consecutive-sequence pairs) merged over all DL flows.
+    std::vector<uint64_t> ipdvHist(NtnOranSink::FlowStats::kIpdvBins, 0);
+    uint64_t ipdvN = 0;
+    uint64_t ipdvOverflow = 0;
+    double ipdvSumAbs = 0.0;
     for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
     {
         Ptr<NtnOranSink> oranSink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
@@ -2979,6 +3335,13 @@ NtnRealStackHelper::Collect()
             dlRxBytes += oranSink->GetTotalRx();
             for (const auto& [key, fs] : oranSink->GetFlowStats())
             {
+                ipdvN += fs.ipdvN;
+                ipdvSumAbs += fs.ipdvSumAbsMs;
+                ipdvOverflow += fs.ipdvOverflow;
+                for (size_t b = 0; b < fs.ipdvHistAbs.size() && b < ipdvHist.size(); ++b)
+                {
+                    ipdvHist[b] += fs.ipdvHistAbs[b];
+                }
                 sumDelayMs += fs.sumDelayMs;
                 delaySamples += fs.rxPackets;
                 if (fs.rxPackets > 1)
@@ -3024,6 +3387,22 @@ NtnRealStackHelper::Collect()
     m_meanJitterMs = jitterFlows ? sumJitterMs / jitterFlows : 0.0;
     m_appLossRatio =
         expectedPkts ? static_cast<double>(lostPkts) / expectedPkts : 0.0;
+    if (ipdvN > 0)
+    {
+        m_ipdvMeanAbsMs = ipdvSumAbs / static_cast<double>(ipdvN);
+        const uint64_t target = static_cast<uint64_t>(std::ceil(0.95 * static_cast<double>(ipdvN)));
+        uint64_t acc = 0;
+        m_ipdvP95AbsMs = std::numeric_limits<double>::quiet_NaN();
+        for (size_t b = 0; b < ipdvHist.size(); ++b)
+        {
+            acc += ipdvHist[b];
+            if (acc >= target)
+            {
+                m_ipdvP95AbsMs = (static_cast<double>(b) + 0.5) * NtnOranSink::FlowStats::kIpdvBinMs;
+                break;
+            }
+        }
+    }
 
     // Delay percentiles (bin midpoint, 0.1 ms resolution) and the exact maximum.
     auto quantile = [&](double q) {
@@ -3520,6 +3899,54 @@ NtnRealStackHelper::WriteHealthReport()
     out << "ues," << m_ue.GetN() << ",-,-,config\n";
     out << "gnbs," << m_gnb.GetN() << ",-,-,config\n";
     out << "run_tag," << m_runTag << ",-,-,config\n";
+    // ---- Wave 1 rows (appended so existing row order is unchanged) ----
+    out << "app_ipdv_mean_abs_ms," << (std::isnan(m_ipdvMeanAbsMs) ? std::string("nan") : std::to_string(m_ipdvMeanAbsMs))
+        << ",-,-,rfc3393-consecutive-seq\n";
+    out << "app_ipdv_p95_abs_ms," << (std::isnan(m_ipdvP95AbsMs) ? std::string("nan") : std::to_string(m_ipdvP95AbsMs))
+        << ",-,-,rfc3393-consecutive-seq-hist0.01ms\n";
+    out << "channel_model,"
+        << (m_channelModel == ChannelModel::Ns3Tr38811 ? "ns3-tr38811-ntn" : "legacy-friis+excess")
+        << ",-,-," << (m_smallScaleFading ? "fading-on" : "los-only-no-fading") << "\n";
+    if (m_blockageModel)
+    {
+        out << "earth_blockage_blocked_evals," << m_blockageModel->GetBlockedCount() << ",-,-,"
+            << "geometry-wgs84 (clear " << m_blockageModel->GetClearCount() << ", non-geocentric "
+            << m_blockageModel->GetNonGeocentricCount() << ")\n";
+    }
+    else
+    {
+        out << "earth_blockage_blocked_evals,off,-,-,config\n";
+    }
+    {
+        const double nf = GetUeNoiseFigureDb();
+        const double gUe = m_ueAntennaGainDbi;
+        out << "ue_terminal," << (m_set1Applied ? "tr38821-set1" : "custom") << ",-,-,"
+            << "ue-panel " << +m_ueRows << "x" << +m_ueCols << "\n";
+        out << "ue_element_gain_dbi," << gUe << ",-,-,config\n";
+        // G/T of one branch with T_ant = 290 K (the stack's noise model).
+        out << "ue_g_over_t_dbk," << (gUe - nf - 10.0 * std::log10(290.0)) << ",-,-,"
+            << "derived (NF " << nf << " dB, T0 290 K)\n";
+    }
+    if (m_feederGw && m_feederSat)
+    {
+        out << "backhaul_delay_ms," << ComputeFeederLinkDelay().GetSeconds() * 1e3 << ",-,-,"
+            << "feeder-geometry (gateway elevation " << GetFeederElevationDeg() << " deg)\n";
+    }
+    else
+    {
+        out << "backhaul_delay_ms," << m_backhaulDelay.GetSeconds() * 1e3 << ",-,-,assumed-constant\n";
+    }
+    if (m_periodicMeas || m_handover)
+    {
+        uint32_t reports = 0;
+        for (const auto& [u, n] : m_ueMeasReports)
+        {
+            reports += n;
+        }
+        out << "meas_reports_received," << reports << ",-,-,"
+            << (m_periodicMeas ? "rrc-periodical" : "rrc-event") << "\n";
+        out << "handover_ping_pong_5s," << GetPingPongCount(Seconds(5)) << ",-,-,rrc-trace\n";
+    }
     // Caller-supplied provenance rows, emitted last so they cannot displace a
     // gated row if a module picks a colliding name.
     for (const auto& [metric, value, prov] : m_extraHealthRows)
@@ -3594,6 +4021,550 @@ NtnRealStackHelper::WriteHealthReport()
     if (m_strictGates && !allOk)
     {
         NS_FATAL_ERROR("Honest fidelity gates failed; see " << m_outputDir << "/sim_health.csv");
+    }
+}
+
+// ===================== Wave 1 (16 Nov 2026) =====================
+
+void
+NtnRealStackHelper::ApplyNs3Tr38811Channel(BandwidthPartInfo* bwp)
+{
+    // C3: ns-3 mainline TR 38.811 channel on one BWP. One condition model is
+    // shared by the path loss and the fast fading so both see the same
+    // LOS/NLOS state (TR 38.811 Table 6.6.1-1 elevation-dependent probability).
+    const double f = (bwp->m_centralFrequency > 0.0) ? bwp->m_centralFrequency : m_freqHz;
+    Ptr<ThreeGppPropagationLossModel> pl;
+    Ptr<ThreeGppChannelConditionModel> cond;
+    std::string scen;
+    switch (m_ntnScenario)
+    {
+    case 0:
+        pl = CreateObject<ThreeGppNTNDenseUrbanPropagationLossModel>();
+        cond = CreateObject<ThreeGppNTNDenseUrbanChannelConditionModel>();
+        scen = "NTN-DenseUrban";
+        break;
+    case 1:
+        pl = CreateObject<ThreeGppNTNUrbanPropagationLossModel>();
+        cond = CreateObject<ThreeGppNTNUrbanChannelConditionModel>();
+        scen = "NTN-Urban";
+        break;
+    case 3:
+        pl = CreateObject<ThreeGppNTNRuralPropagationLossModel>();
+        cond = CreateObject<ThreeGppNTNRuralChannelConditionModel>();
+        scen = "NTN-Rural";
+        break;
+    case 2:
+    default:
+        pl = CreateObject<ThreeGppNTNSuburbanPropagationLossModel>();
+        cond = CreateObject<ThreeGppNTNSuburbanChannelConditionModel>();
+        scen = "NTN-Suburban";
+        break;
+    }
+    cond->SetAttribute("UpdatePeriod", TimeValue(m_channelUpdatePeriod));
+    pl->SetAttribute("Frequency", DoubleValue(f));
+    pl->SetChannelConditionModel(cond);
+    bwp->m_propagation = pl;
+    if (m_smallScaleFading)
+    {
+        Ptr<ThreeGppSpectrumPropagationLossModel> sp =
+            CreateObject<ThreeGppSpectrumPropagationLossModel>();
+        sp->SetChannelModelAttribute("Frequency", DoubleValue(f));
+        sp->SetChannelModelAttribute("Scenario", StringValue(scen));
+        sp->SetChannelModelAttribute("ChannelConditionModel", PointerValue(cond));
+        sp->SetChannelModelAttribute("UpdatePeriod", TimeValue(m_channelUpdatePeriod));
+        bwp->m_3gppChannel = sp;
+    }
+}
+
+void
+NtnRealStackHelper::ApplyTr38821Set1Defaults()
+{
+    NS_ABORT_MSG_IF(m_built, "ApplyTr38821Set1Defaults must be called before Build()");
+    m_set1Applied = true;
+    if (m_freqHz <= 7.125e9)
+    {
+        // TR 38.821 Table 6.1.1.1-2, handheld: 1T2R, 0 dBi, NF 7 dB, 23 dBm.
+        m_ueRows = 1;
+        m_ueCols = 2;
+        m_ueAntennaGainDbi = 0.0;
+        m_ueNoiseFigureDb = 7.0;
+        m_ueTxDbm = 23.0;
+        // Table 6.1.1.1-1, Set-1 LEO-600 S band: 34 dBW/MHz.
+        SetSatEirpDensityDbwMhz(kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // Table 6.1.1.1-2, VSAT: 39.7 dBi, 33 dBm, G/T 15.9 dB/K. The stack's
+        // noise is k T0 F with T0 = 290 K, so the declared G/T is carried by
+        // the equivalent figure F = T_sys / T0 with T_sys = G - G/T.
+        m_ueRows = 1;
+        m_ueCols = 1;
+        m_ueAntennaGainDbi = 39.7;
+        const double tSysDbK = 39.7 - 15.9;
+        m_ueNoiseFigureDb = tSysDbK - 10.0 * std::log10(290.0);
+        m_ueTxDbm = 33.0;
+        // Table 6.1.1.1-1, Set-1 LEO-600 Ka band: 4 dBW/MHz.
+        SetSatEirpDensityDbwMhz(4.0);
+    }
+}
+
+Vector
+NtnRealStackHelper::GeodeticToEcef(double latDeg, double lonDeg, double altM)
+{
+    // WGS-84 (NIMA TR8350.2): a = 6378137 m, f = 1/298.257223563.
+    constexpr double a = 6378137.0;
+    constexpr double f = 1.0 / 298.257223563;
+    constexpr double e2 = f * (2.0 - f);
+    const double lat = latDeg * M_PI / 180.0;
+    const double lon = lonDeg * M_PI / 180.0;
+    const double n = a / std::sqrt(1.0 - e2 * std::sin(lat) * std::sin(lat));
+    return Vector((n + altM) * std::cos(lat) * std::cos(lon),
+                  (n + altM) * std::cos(lat) * std::sin(lon),
+                  (n * (1.0 - e2) + altM) * std::sin(lat));
+}
+
+Ptr<MobilityModel>
+NtnRealStackHelper::SetFeederGatewayGeodetic(double latDeg, double lonDeg, double altM)
+{
+    Ptr<ConstantPositionMobilityModel> gw = CreateObject<ConstantPositionMobilityModel>();
+    gw->SetPosition(GeodeticToEcef(latDeg, lonDeg, altM));
+    SetFeederGateway(gw);
+    return gw;
+}
+
+void
+NtnRealStackHelper::SetFeederGateway(Ptr<MobilityModel> gwMobility)
+{
+    NS_ABORT_MSG_IF(!m_built, "SetFeederGateway before Build()");
+    NS_ABORT_MSG_IF(!gwMobility, "SetFeederGateway: null mobility");
+    m_feederGwTracked = gwMobility;
+    m_feederGw = gwMobility;
+    RefreshFeederFromServing();
+    const Time period = m_backhaulRefresh.IsStrictlyPositive() ? m_backhaulRefresh : Seconds(1);
+    RegisterPeriodicCallback(period, [this](Time) { RefreshFeederFromServing(); });
+}
+
+void
+NtnRealStackHelper::RefreshFeederFromServing()
+{
+    // C5: feeder = serving satellite of the UEs to the real gateway. With
+    // several UEs on different satellites the single PGW-to-remote-host channel
+    // carries the mean feeder slant (TR 38.821 Table 4.2-2 one-way = feeder +
+    // service); the service leg is folded by ComputePayloadExtraDelay.
+    if (!m_feederGwTracked || !m_backhaulCh)
+    {
+        return;
+    }
+    double sumM = 0.0;
+    uint32_t n = 0;
+    Ptr<MobilityModel> firstSat;
+    for (uint32_t u = 0; u < m_ue.GetN(); ++u)
+    {
+        const uint16_t cell = GetUeServingCellId(u);
+        for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
+        {
+            if (cell != 0 && GetGnbCellId(g) != cell)
+            {
+                continue;
+            }
+            Ptr<MobilityModel> sm = m_gnb.Get(g)->GetObject<MobilityModel>();
+            if (sm)
+            {
+                if (!firstSat)
+                {
+                    firstSat = sm;
+                }
+                const Vector satE = NtnEarthBlockageLossModel::EcefOf(sm);
+                const Vector gwE = NtnEarthBlockageLossModel::EcefOf(m_feederGwTracked);
+                sumM += CalculateDistance(satE, gwE);
+                ++n;
+            }
+            break;
+        }
+    }
+    if (n == 0)
+    {
+        return;
+    }
+    m_feederSat = firstSat ? firstSat : m_feederSat;
+    m_backhaulCh->SetAttribute("Delay", TimeValue(ComputePayloadExtraDelay(sumM / n)));
+}
+
+double
+NtnRealStackHelper::GetFeederElevationDeg() const
+{
+    if (!m_feederSat || !m_feederGw)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return NtnEarthBlockageLossModel::GeodeticElevationDeg(
+        NtnEarthBlockageLossModel::EcefOf(m_feederGw),
+        NtnEarthBlockageLossModel::EcefOf(m_feederSat));
+}
+
+void
+NtnRealStackHelper::SetPeriodicMeasurementReports(bool enable, Time interval)
+{
+    NS_ABORT_MSG_IF(m_built, "SetPeriodicMeasurementReports must be called before Build()");
+    static const int64_t kAllowedMs[] = {120, 240, 480, 640, 1024, 2048, 5120, 10240};
+    bool ok = false;
+    for (int64_t v : kAllowedMs)
+    {
+        ok = ok || (interval == MilliSeconds(v));
+    }
+    NS_ABORT_MSG_IF(enable && !ok,
+                    "SetPeriodicMeasurementReports: " << interval.GetMilliSeconds()
+                                                      << " ms is not a TS 38.331 ReportInterval");
+    m_periodicMeas = enable;
+    m_periodicMeasExplicit = true;
+    m_periodicMeasInterval = interval;
+}
+
+bool
+NtnRealStackHelper::GetPeriodicMeasurementReports() const
+{
+    return m_periodicMeas;
+}
+
+int32_t
+NtnRealStackHelper::UeIndexOfImsi(uint64_t imsi) const
+{
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        Ptr<NrUeNetDevice> d = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(u));
+        if (d && d->GetImsi() == imsi)
+        {
+            return static_cast<int32_t>(u);
+        }
+    }
+    return -1;
+}
+
+int32_t
+NtnRealStackHelper::UeIndexOfCellRnti(uint16_t cellId, uint16_t rnti) const
+{
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        if (GetUeRnti(u) == rnti && GetUeServingCellId(u) == cellId)
+        {
+            return static_cast<int32_t>(u);
+        }
+    }
+    return -1;
+}
+
+double
+NtnRealStackHelper::GetUeNeighbourRsrpDbm(uint32_t ueIndex, uint16_t cellId) const
+{
+    auto it = m_ueMeas.find(ueIndex);
+    if (it == m_ueMeas.end())
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    auto c = it->second.find(cellId);
+    return (c == it->second.end()) ? std::numeric_limits<double>::quiet_NaN() : c->second.rsrpDbm;
+}
+
+double
+NtnRealStackHelper::GetUeNeighbourRsrqDb(uint32_t ueIndex, uint16_t cellId) const
+{
+    auto it = m_ueMeas.find(ueIndex);
+    if (it == m_ueMeas.end())
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    auto c = it->second.find(cellId);
+    return (c == it->second.end()) ? std::numeric_limits<double>::quiet_NaN() : c->second.rsrqDb;
+}
+
+double
+NtnRealStackHelper::GetUeServingRsrpDbm(uint32_t ueIndex) const
+{
+    return GetUeNeighbourRsrpDbm(ueIndex, GetUeServingCellId(ueIndex));
+}
+
+double
+NtnRealStackHelper::GetUeServingRsrqDb(uint32_t ueIndex) const
+{
+    return GetUeNeighbourRsrqDb(ueIndex, GetUeServingCellId(ueIndex));
+}
+
+Time
+NtnRealStackHelper::GetUeMeasReportAge(uint32_t ueIndex, uint16_t cellId) const
+{
+    auto it = m_ueMeas.find(ueIndex);
+    if (it == m_ueMeas.end())
+    {
+        return Seconds(-1);
+    }
+    auto c = it->second.find(cellId);
+    return (c == it->second.end()) ? Seconds(-1) : Simulator::Now() - c->second.time;
+}
+
+uint32_t
+NtnRealStackHelper::GetUeMeasurementReportCount(uint32_t ueIndex) const
+{
+    auto it = m_ueMeasReports.find(ueIndex);
+    return (it == m_ueMeasReports.end()) ? 0 : it->second;
+}
+
+std::map<uint16_t, NtnRealStackHelper::UeCellMeasurement>
+NtnRealStackHelper::GetUeMeasurements(uint32_t ueIndex) const
+{
+    auto it = m_ueMeas.find(ueIndex);
+    return (it == m_ueMeas.end()) ? std::map<uint16_t, UeCellMeasurement>{} : it->second;
+}
+
+void
+NtnRealStackHelper::EnableUeStatsTrace(const std::string& csvPath, Time period)
+{
+    NS_ABORT_MSG_IF(period <= Seconds(0), "EnableUeStatsTrace: period must be positive");
+    std::error_code ec;
+    const std::filesystem::path p(csvPath);
+    if (p.has_parent_path())
+    {
+        std::filesystem::create_directories(p.parent_path(), ec);
+    }
+    m_ueStatsTrace = std::make_shared<std::ofstream>(csvPath);
+    *m_ueStatsTrace << "time_s,ue,serving_cell,rnti,dl_tb,dl_tb_err,recent_sinr_db,"
+                       "cell_mean_sinr_db,recent_tbler\n";
+    m_ueStatsPeriod = period;
+    if (!m_ueStatsEvent.IsPending())
+    {
+        m_ueStatsEvent = Simulator::Schedule(period, &NtnRealStackHelper::SampleUeStats, this);
+    }
+}
+
+void
+NtnRealStackHelper::SampleUeStats()
+{
+    if (!m_ueStatsTrace)
+    {
+        return;
+    }
+    // Read-only: no window is consumed (TakeUeSinrWindowMeanDb is left to the
+    // caller's own decision loop), so enabling the trace cannot change a run.
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        const UeRanCounters c = GetUeRanCounters(u);
+        *m_ueStatsTrace << std::fixed << std::setprecision(3) << Simulator::Now().GetSeconds()
+                        << "," << u << "," << GetUeServingCellId(u) << "," << GetUeRnti(u)
+                        << "," << c.dlTb << "," << c.dlTbErr << "," << GetUeRecentSinrDb(u)
+                        << "," << GetUeMeanSinrDb(u) << "," << std::setprecision(6)
+                        << GetUeRecentTbler(u) << "\n";
+    }
+    m_ueStatsTrace->flush();
+    m_ueStatsEvent = Simulator::Schedule(m_ueStatsPeriod, &NtnRealStackHelper::SampleUeStats, this);
+}
+
+void
+NtnRealStackHelper::EnableMeasurementTrace(const std::string& csvPath)
+{
+    m_measTracePath = csvPath;
+    std::error_code ec;
+    const std::filesystem::path p(csvPath);
+    if (p.has_parent_path())
+    {
+        std::filesystem::create_directories(p.parent_path(), ec);
+    }
+    m_measTrace = std::make_shared<std::ofstream>(csvPath);
+    *m_measTrace << "time_s,ue,imsi,cell,serving,source,rsrp_dbm,rsrq_db,slant_km\n";
+    if (m_built && m_backend == RadioBackend::Nr)
+    {
+        for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+        {
+            Ptr<NrUeNetDevice> d = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(u));
+            if (!d)
+            {
+                continue;
+            }
+            d->GetPhy(0)->TraceConnectWithoutContext(
+                "ReportUeMeasurements",
+                MakeCallback(&NtnRealStackHelper::NrUePhyMeas, this).Bind(u));
+        }
+    }
+}
+
+void
+NtnRealStackHelper::NrUePhyMeas(uint32_t ueIndex,
+                                uint16_t /*rnti*/,
+                                uint16_t cellId,
+                                double rsrp,
+                                double rsrq,
+                                bool isServing,
+                                uint8_t /*ccId*/)
+{
+    if (!m_measTrace)
+    {
+        return;
+    }
+    Ptr<NrUeNetDevice> d = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(ueIndex));
+    *m_measTrace << Simulator::Now().GetSeconds() << "," << ueIndex << ","
+                 << (d ? d->GetImsi() : 0) << "," << cellId << "," << (isServing ? 1 : 0)
+                 << ",l1," << rsrp << "," << rsrq << "," << SlantKmToCell(ueIndex, cellId) << "\n";
+}
+
+double
+NtnRealStackHelper::SlantKmToCell(uint32_t ueIndex, uint16_t cellId) const
+{
+    if (ueIndex >= m_ue.GetN())
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    Ptr<MobilityModel> um = m_ue.Get(ueIndex)->GetObject<MobilityModel>();
+    for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
+    {
+        if (GetGnbCellId(g) == cellId)
+        {
+            Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
+            return (um && gm) ? gm->GetDistanceFrom(um) / 1e3
+                              : std::numeric_limits<double>::quiet_NaN();
+        }
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+uint32_t
+NtnRealStackHelper::GetPingPongCount(Time window) const
+{
+    // TS 38.300 15.5.2.2 (MRO): a handover back to the cell the UE just left,
+    // within the window after the previous handover of the same UE.
+    uint32_t n = 0;
+    std::map<uint32_t, const HoRecord*> last;
+    for (const auto& r : m_hoRecords)
+    {
+        auto it = last.find(r.ue);
+        if (it != last.end() && r.target == it->second->source && r.t - it->second->t <= window)
+        {
+            ++n;
+        }
+        last[r.ue] = &r;
+    }
+    return n;
+}
+
+NtnRealStackHelper::UeRanCounters
+NtnRealStackHelper::GetUeRanCounters(uint32_t ueIndex) const
+{
+    auto it = m_ueRan.find(ueIndex);
+    return (it == m_ueRan.end()) ? UeRanCounters{} : it->second;
+}
+
+double
+NtnRealStackHelper::GetCellDlPrbSlotsUsed(uint16_t cellId) const
+{
+    auto it = m_cellPrbSlots.find(cellId);
+    return (it == m_cellPrbSlots.end()) ? 0.0 : it->second;
+}
+
+void
+NtnRealStackHelper::NrUeRrcConnTrace(std::string /*ctx*/,
+                                     uint64_t /*imsi*/,
+                                     uint16_t /*cellId*/,
+                                     uint16_t /*rnti*/)
+{
+    // DRBs exist only after the RRC (re)configuration; hook any new PDCP.
+    Simulator::ScheduleNow(&NtnRealStackHelper::ConnectUePdcpTraces, this);
+}
+
+void
+NtnRealStackHelper::ConnectUePdcpTraces()
+{
+    for (uint32_t u = 0; u < m_ue.GetN(); ++u)
+    {
+        std::ostringstream path;
+        path << "/NodeList/" << m_ue.Get(u)->GetId()
+             << "/DeviceList/*/NrUeRrc/DataRadioBearerMap/*/NrPdcp";
+        Config::MatchContainer mc = Config::LookupMatches(path.str());
+        for (uint32_t i = 0; i < mc.GetN(); ++i)
+        {
+            Ptr<Object> pdcp = mc.Get(i);
+            if (m_pdcpConnected.insert(PeekPointer(pdcp)).second)
+            {
+                pdcp->TraceConnectWithoutContext(
+                    "RxPDU",
+                    MakeCallback(&NtnRealStackHelper::UePdcpRx, this).Bind(u));
+            }
+        }
+    }
+}
+
+void
+NtnRealStackHelper::UePdcpRx(uint32_t ueIndex,
+                             uint16_t /*rnti*/,
+                             uint8_t /*lcid*/,
+                             uint32_t /*size*/,
+                             uint64_t delayNs)
+{
+    // The NrPdcpTag is stamped when the gNB PDCP hands the PDU (the RLC SDU)
+    // to its RLC, so this is the gNB RLC ingress to UE delivery time.
+    UeRanCounters& c = m_ueRan[ueIndex];
+    c.rlcSduDelaySumMs += static_cast<double>(delayNs) / 1e6;
+    c.rlcSdus += 1;
+}
+
+void
+NtnRealStackHelper::SetSsbCellBeam(bool enable, Ptr<MobilityModel> cellCenter, Time refresh)
+{
+    NS_ABORT_MSG_IF(m_built, "SetSsbCellBeam must be called before Build()");
+    m_ssbCellBeam = enable;
+    m_cellBeamCenter = cellCenter;
+    m_cellBeamRefresh = refresh;
+}
+
+void
+NtnRealStackHelper::RefreshCellBeams()
+{
+    if (m_backend != RadioBackend::Nr || !m_nr)
+    {
+        return;
+    }
+    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    if (m_nadirCenters.size() != m_enbDevs.GetN())
+    {
+        m_nadirCenters.clear();
+        for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+        {
+            m_nadirCenters.push_back(CreateObject<ConstantPositionMobilityModel>());
+        }
+    }
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        Ptr<MobilityModel> gm = m_gnb.Get(i)->GetObject<MobilityModel>();
+        if (!gm)
+        {
+            continue;
+        }
+        Ptr<MobilityModel> target = m_cellBeamCenter;
+        if (!target)
+        {
+            // Earth-moving beam: the sub-satellite point on the WGS-84 surface
+            // (the radial projection is within 0.2 deg of the geodetic nadir).
+            const Vector p = gm->GetPosition();
+            const double r = p.GetLength();
+            if (r < 1.0)
+            {
+                continue;
+            }
+            const double lat = std::asin(p.z / r) * 180.0 / M_PI;
+            const double lon = std::atan2(p.y, p.x) * 180.0 / M_PI;
+            m_nadirCenters[i]->SetPosition(GeodeticToEcef(lat, lon, 0.0));
+            target = m_nadirCenters[i];
+        }
+        for (uint8_t b = 0; b < nBwp; ++b)
+        {
+            Ptr<NrSpectrumPhy> sp = m_nr->GetGnbPhy(m_enbDevs.Get(i), b)->GetSpectrumPhy();
+            Ptr<const UniformPlanarArray> upa = sp->GetAntenna()->GetObject<UniformPlanarArray>();
+            if (!upa)
+            {
+                continue;
+            }
+            sp->GetBeamManager()->SetPredefinedBeam(CreateDirectPathBfv(gm, target, upa));
+        }
+    }
+    if (m_cellBeamRefresh.IsStrictlyPositive())
+    {
+        Simulator::Schedule(m_cellBeamRefresh, &NtnRealStackHelper::RefreshCellBeams, this);
     }
 }
 

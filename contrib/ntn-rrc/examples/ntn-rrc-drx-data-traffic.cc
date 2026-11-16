@@ -220,7 +220,7 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(wElements[0]);
+    satSgp4->SetElementsSgp4(wElements[0]);
     satNodes.Get(0)->AggregateObject(satSgp4);
     Ptr<MobilityModel> satMob = satSgp4;
     double subLat, subLon, subAlt;

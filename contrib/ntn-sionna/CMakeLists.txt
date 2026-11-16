@@ -20,6 +20,8 @@ set(source_files
     bridge/ntn-atmospheric-propagation-loss-model.cc
     # Roadmap §4.3.3 — Sionna vs propagation-model calibrator
     bridge/sionna-calibrator.cc
+    # Wave 2 M3: per-RB CIR transfer function on the spectrum seam
+    bridge/sionna-cir-spectrum-loss-model.cc
 )
 
 set(header_files
@@ -44,6 +46,8 @@ set(header_files
     bridge/ntn-atmospheric-propagation-loss-model.h
     # Roadmap §4.3.3 — Sionna vs propagation-model calibrator
     bridge/sionna-calibrator.h
+    # Wave 2 M3: per-RB CIR transfer function on the spectrum seam
+    bridge/sionna-cir-spectrum-loss-model.h
 )
 
 set(test_sources
@@ -59,6 +63,7 @@ build_lib(
     ${libnetwork}
     ${libmobility}
     ${libpropagation}
+    ${libspectrum}
     ${libthz-ntn}
   TEST_SOURCES ${test_sources}
 )

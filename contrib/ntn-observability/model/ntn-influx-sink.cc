@@ -16,6 +16,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -222,13 +223,30 @@ NtnInfluxSink::GetTypeId()
 
 NtnInfluxSink::NtnInfluxSink()
 {
-    // Default the base epoch to the wall-clock time at construction (nanoseconds
-    // since the Unix epoch), matching ntn-digital-twin's convention. This makes
-    // emitted points land inside a retention-bounded InfluxDB bucket and inside
-    // Grafana's `now()-1h` window, instead of at epoch 1970 (pure sim time).
+    // Wave 2 M2 (RC9): ONE clock for every line-protocol file of a run.
+    //
+    // The default used to be the wall-clock time at construction, while the
+    // ntn-traffic KPM series writer (NtnOranAiFlowMonitor, *_kpm_series.lp)
+    // stamps pure simulation time, so the two .lp files of one run directory
+    // landed 56 years apart in one bucket, and the stamps changed from run to
+    // run. The default is now pure simulation time (base epoch 0), which every
+    // writer shares and which is reproducible. A live dashboard that queries
+    // "now() - 1h" opts in to the wall clock with SetBaseEpoch(WallClockNow())
+    // or with the environment variable NTN_INFLUX_WALLCLOCK=1.
+    m_baseEpoch = Time(0);
+    const char* env = std::getenv("NTN_INFLUX_WALLCLOCK");
+    if (env && std::string(env) == "1")
+    {
+        m_baseEpoch = WallClockNow();
+    }
+}
+
+Time
+NtnInfluxSink::WallClockNow()
+{
     const auto wall = std::chrono::system_clock::now().time_since_epoch();
     const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(wall).count();
-    m_baseEpoch = NanoSeconds(static_cast<int64_t>(ns));
+    return NanoSeconds(static_cast<int64_t>(ns));
 }
 
 NtnInfluxSink::~NtnInfluxSink() = default;
@@ -297,8 +315,9 @@ NtnInfluxSink::TimeAnchorNote() const
     os << "[influx/time-anchor] base_epoch_s=" << m_baseEpoch.GetSeconds();
     if (m_baseEpoch == Time(0))
     {
-        os << "  -> PURE SIM TIME (points land at epoch 1970; a wall-clock "
-              "dashboard query will not find them)";
+        os << "  -> PURE SIM TIME, the clock every .lp writer of the toolkit uses "
+              "(points land at epoch 1970; a wall-clock dashboard query needs "
+              "NTN_INFLUX_WALLCLOCK=1 or SetBaseEpoch(WallClockNow()))";
     }
     else
     {

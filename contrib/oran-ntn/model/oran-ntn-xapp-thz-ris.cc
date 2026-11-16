@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace ns3
 {
@@ -142,7 +143,7 @@ OranNtnXappThzRis::DecisionCycle()
         if (state.risGain_dB < m_risGainThreshold_dB)
         {
             double achievableGain = EstimateAchievableGain(
-                state.risGain_dB, state.thzSnr_dB, state.elevation_deg);
+                gnbId, state.risGain_dB, state.thzSnr_dB, state.elevation_deg);
 
             NS_LOG_INFO("ThzRis: gnb" << gnbId
                         << " RIS gain=" << state.risGain_dB
@@ -275,37 +276,41 @@ OranNtnXappThzRis::ComputeOptimalPhaseProfile(uint32_t gnbId) const
 // --------------------------------------------------------------------------
 
 double
-OranNtnXappThzRis::EstimateAchievableGain(double currentGain_dB,
+OranNtnXappThzRis::EstimateAchievableGain(uint32_t gnbId,
+                                           double currentGain_dB,
                                            double thzSnr_dB,
                                            double elevation_deg) const
 {
-    NS_LOG_FUNCTION(this << currentGain_dB << thzSnr_dB << elevation_deg);
+    NS_LOG_FUNCTION(this << gnbId << currentGain_dB << thzSnr_dB << elevation_deg);
 
-    // RIS gain is bounded by: G_max = 10*log10(N^2) for N elements
-    // with ideal phase alignment. Practical gains are lower due to
-    // quantization, mutual coupling, and non-ideal phase control.
-
-    // Assume 1024 RIS elements per panel, 4 panels
-    double totalElements = 1024.0 * m_numRisPanels;
-    double theoreticalMaxGain_dB = 20.0 * std::log10(totalElements);
-
-    // Practical efficiency factor (0.3-0.6 depending on conditions)
-    double efficiency = 0.4;
-    if (elevation_deg > 60.0)
+    // Wave 2 M2: the gain a reconfiguration can reach is the RIS link SNR gain
+    // over the direct path from the live geometry (ThzNtnRis::
+    // ComputeLinkSnrGain_dB), not 20 log10(N) x an efficiency, which is the
+    // array factor relative to ONE element and overstated the link gain by
+    // tens of dB. Without geometry there is no estimate (NaN): the caller's
+    // "achievable > current + 1 dB" test is then false and nothing is issued.
+    auto it = m_geometry.find(gnbId);
+    if (it == m_geometry.end() || !it->second.ris || !it->second.tx || !it->second.risPos ||
+        !it->second.rx)
     {
-        efficiency = 0.55; // better alignment at high elevation
+        return std::numeric_limits<double>::quiet_NaN();
     }
-    else if (elevation_deg < 20.0)
-    {
-        efficiency = 0.3; // poor alignment at low elevation
-    }
+    const RisGeometry& g = it->second;
+    return g.ris->ComputeLinkSnrGain_dB(g.tx->GetPosition(),
+                                        g.risPos->GetPosition(),
+                                        g.rx->GetPosition(),
+                                        g.directExtraLossDb);
+}
 
-    double achievableGain_dB = theoreticalMaxGain_dB * efficiency;
-
-    // Cap at reasonable value
-    achievableGain_dB = std::min(achievableGain_dB, 40.0);
-
-    return achievableGain_dB;
+void
+OranNtnXappThzRis::SetLinkGeometry(uint32_t gnbId,
+                                   Ptr<ThzNtnRis> ris,
+                                   Ptr<MobilityModel> tx,
+                                   Ptr<MobilityModel> risPosition,
+                                   Ptr<MobilityModel> rx,
+                                   double directExtraLossDb)
+{
+    m_geometry[gnbId] = RisGeometry{ris, tx, risPosition, rx, directExtraLossDb};
 }
 
 // --------------------------------------------------------------------------

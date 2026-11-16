@@ -171,7 +171,7 @@ main(int argc, char* argv[])
     wcfg.epoch_unix_s = 1735689600.0;
     const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(elements[0]);
+    satSgp4->SetElementsSgp4(elements[0]);
 
     // Scenario origin (the local-ENU reference for everything): the satellite's
     // t=0 sub-point, as in every sibling SAGIN LEO example. A fixed (36 N, 15 E)

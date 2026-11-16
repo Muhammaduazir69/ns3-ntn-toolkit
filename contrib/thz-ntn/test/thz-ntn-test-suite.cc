@@ -1034,8 +1034,8 @@ ThzNtnRisTest::DoRun()
     ris16->Configure(16, 16, 300e9, RisDeployment::GROUND); // 256 elements
 
     // Max gain should scale as ~20*log10(N) + element gain
-    double gain64 = ris8->ComputeMaxGain_dB();
-    double gain256 = ris16->ComputeMaxGain_dB();
+    double gain64 = ris8->ComputeMaxArrayFactorGain_dB();
+    double gain256 = ris16->ComputeMaxArrayFactorGain_dB();
 
     // Gain difference for 4x elements should be ~12 dB (20*log10(4))
     double diff = gain256 - gain64;
@@ -1051,8 +1051,8 @@ ThzNtnRisTest::DoRun()
         "256-element RIS should have higher gain than 64-element");
 
     // Perfect CSI gain should be higher than imperfect
-    double snrGainPerfect = ris8->ComputeSnrGain_dB(true);
-    double snrGainImperfect = ris8->ComputeSnrGain_dB(false);
+    double snrGainPerfect = ris8->ComputeArrayFactorGain_dB(true);
+    double snrGainImperfect = ris8->ComputeArrayFactorGain_dB(false);
     NS_TEST_ASSERT_MSG_GT(snrGainPerfect, snrGainImperfect,
         "Perfect CSI should yield higher SNR gain than imperfect CSI");
 

@@ -42,6 +42,9 @@ using namespace ns3;
 // read where the CSV row is written, so the provenance column cannot drift from
 // the value it describes.
 static bool g_rsrpMeasured = false;
+/// SINR the E2 report carries before the first PHY measurement (E2KpmReport
+/// has no noValue flag); the CSV writes empty fields for such rows.
+constexpr double kNoMeasSinrDb = -100.0;
 
 NS_LOG_COMPONENT_DEFINE("SaginFlightLeoE2");
 
@@ -131,7 +134,7 @@ EmitKpm(Context* ctx, Time reportPeriod)
     r.gnbId = ctx->e2node->GetNodeId();
     r.isNtn = true;
     r.ueId = 1;
-    r.sinr_dB = haveMeas ? measSinr : -100.0;
+    r.sinr_dB = haveMeas ? measSinr : kNoMeasSinrDb;
 
     // SAGIN-4. RSRP, RSRQ and CQI were derived algebraically from the SINR -
     // `sinr - 95`, an erfc-free RSRQ identity, and `sinr/2 + 7` - and written
@@ -258,7 +261,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -308,10 +311,26 @@ main(int argc, char* argv[])
     uint64_t indicationsDelivered = 0;
     e2->SetIndicationCallback([&kpmOut, &indicationsDelivered](E2Indication ind) {
         const E2KpmReport& r = ind.kpmReport;
-        kpmOut << r.timestamp << "," << r.gnbId << "," << r.ueId << "," << r.rsrp_dBm << ","
-               << (g_rsrpMeasured ? "rrc-meas-report" : "derived-per-re")
-               << ",derived-from-sinr,derived-from-sinr,"
-               << r.sinr_dB << "," << static_cast<unsigned>(r.cqi) << "," << r.elevation_deg << ","
+        // Before the first PHY measurement the report carries the E2 sentinel;
+        // the CSV writes empty radio fields instead of a placeholder number.
+        const bool meas = r.sinr_dB != kNoMeasSinrDb;
+        kpmOut << r.timestamp << "," << r.gnbId << "," << r.ueId << ",";
+        if (meas && !std::isnan(r.rsrp_dBm))
+        {
+            kpmOut << r.rsrp_dBm;
+        }
+        kpmOut << ","
+               << (!meas ? "no-measurement" : (g_rsrpMeasured ? "rrc-meas-report" : "derived-per-re"))
+               << (meas ? ",derived-from-sinr,derived-from-sinr," : ",no-measurement,no-measurement,");
+        if (meas)
+        {
+            kpmOut << r.sinr_dB << "," << static_cast<unsigned>(r.cqi);
+        }
+        else
+        {
+            kpmOut << ",";
+        }
+        kpmOut << "," << r.elevation_deg << ","
                << r.doppler_Hz << "," << r.propagationDelay_ms << "," << r.throughput_Mbps << ","
                << static_cast<unsigned>(r.sliceId) << "\n";
         ++indicationsDelivered;

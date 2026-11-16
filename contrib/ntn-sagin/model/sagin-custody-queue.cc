@@ -38,6 +38,12 @@ SaginCustodyQueue::Offer(Ptr<Packet> p)
     if (m_contactUp && m_queue.empty() && m_forward && m_forward(p))
     {
         ++m_fwdNow;
+        if (m_custody)
+        {
+            Item it{p, Simulator::Now()};
+            m_bytes += p->GetSize();
+            Retain(it);
+        }
         return true;
     }
 
@@ -104,6 +110,26 @@ SaginCustodyQueue::ExpireStale()
         return;
     }
     const Time now = Simulator::Now();
+    if (m_custody)
+    {
+        // RFC 9171 5.4.1: a retained bundle past its lifetime is deleted too.
+        for (auto it = m_pending.begin(); it != m_pending.end();)
+        {
+            const Time origin = m_origin ? m_origin(it->second.item.pkt) : it->second.item.enqueued;
+            if (now - origin > m_lifetime)
+            {
+                m_bytes -= it->second.item.pkt->GetSize();
+                it = m_pending.erase(it);
+                ++m_expired;
+                ++m_deletionReports;
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+    const uint64_t expiredBefore = m_expired;
     if (m_origin)
     {
         // Origin ages need not follow queue order (keep-newest and LCFS), so
@@ -121,6 +147,10 @@ SaginCustodyQueue::ExpireStale()
                 ++it;
             }
         }
+        if (m_custody)
+        {
+            m_deletionReports += m_expired - expiredBefore;
+        }
         return;
     }
     while (!m_queue.empty() && (now - m_queue.front().enqueued) > m_lifetime)
@@ -128,6 +158,10 @@ SaginCustodyQueue::ExpireStale()
         m_bytes -= m_queue.front().pkt->GetSize();
         m_queue.pop_front();
         ++m_expired;
+    }
+    if (m_custody)
+    {
+        m_deletionReports += m_expired - expiredBefore;
     }
 }
 
@@ -154,7 +188,14 @@ SaginCustodyQueue::Drain()
         {
             m_maxCustody = held;
         }
-        m_bytes -= front.pkt->GetSize();
+        if (m_custody)
+        {
+            Retain(front); // keeps the bytes: retained bundles occupy storage
+        }
+        else
+        {
+            m_bytes -= front.pkt->GetSize();
+        }
         if (m_lcfs)
         {
             m_queue.pop_back();
@@ -164,6 +205,100 @@ SaginCustodyQueue::Drain()
             m_queue.pop_front();
         }
         ++m_fwdCustody;
+    }
+}
+
+void
+SaginCustodyQueue::SetCustodyTransfer(bool on, Time retransmitTimeout, KeyFunction id)
+{
+    NS_ABORT_MSG_IF(on && !id, "custody transfer needs a bundle-id function");
+    m_custody = on;
+    m_custodyTimeout = retransmitTimeout;
+    m_id = std::move(id);
+}
+
+void
+SaginCustodyQueue::Retain(Item& it)
+{
+    const uint64_t id = m_id(it.pkt);
+    auto old = m_pending.find(id);
+    if (old != m_pending.end())
+    {
+        // Same bundle sent again before its signal: one retained copy.
+        m_bytes -= old->second.item.pkt->GetSize();
+        m_pending.erase(old);
+    }
+    m_pending[id] = Pending{it, Simulator::Now()};
+}
+
+bool
+SaginCustodyQueue::AcceptCustody(uint64_t id)
+{
+    auto it = m_pending.find(id);
+    if (it == m_pending.end())
+    {
+        return false;
+    }
+    m_bytes -= it->second.item.pkt->GetSize();
+    m_pending.erase(it);
+    ++m_custAccepted;
+    return true;
+}
+
+bool
+SaginCustodyQueue::RefuseCustody(uint64_t id)
+{
+    auto it = m_pending.find(id);
+    if (it == m_pending.end())
+    {
+        return false;
+    }
+    ++m_custRefused;
+    // Back into the queue in its original order slot (oldest first); the bytes
+    // stay counted, the custody is still ours.
+    Item item = it->second.item;
+    m_pending.erase(it);
+    auto pos = m_queue.begin();
+    while (pos != m_queue.end() && pos->enqueued <= item.enqueued)
+    {
+        ++pos;
+    }
+    m_queue.insert(pos, item);
+    return true;
+}
+
+void
+SaginCustodyQueue::CheckCustodyTimeouts()
+{
+    if (!m_custody)
+    {
+        return;
+    }
+    const Time now = Simulator::Now();
+    bool any = false;
+    for (auto it = m_pending.begin(); it != m_pending.end();)
+    {
+        if (now - it->second.sent >= m_custodyTimeout)
+        {
+            Item item = it->second.item;
+            it = m_pending.erase(it);
+            auto pos = m_queue.begin();
+            while (pos != m_queue.end() && pos->enqueued <= item.enqueued)
+            {
+                ++pos;
+            }
+            m_queue.insert(pos, item);
+            ++m_custRetx;
+            any = true;
+        }
+        else
+        {
+            ++it;
+        }
+    }
+    if (any && m_contactUp)
+    {
+        Drain();
     }
 }
 

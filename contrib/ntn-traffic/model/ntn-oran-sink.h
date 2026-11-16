@@ -70,6 +70,19 @@ class NtnOranSink : public Application
         double maxDelayMs{0};
         double jitterMs{0};       ///< RFC 3550 running estimate
         double lastTransitMs{0};
+        /// RFC 3393 IPDV, selection function "consecutive sequence numbers":
+        /// for packets n and n+1 both received, IPDV = D(n+1) - D(n). Signed
+        /// sum and a 10 us histogram of |IPDV| up to 100 ms for percentiles.
+        uint32_t ipdvLastSeq{0};
+        double ipdvLastDelayMs{0};
+        bool ipdvHaveRef{false};
+        uint64_t ipdvN{0};
+        double ipdvSumMs{0};
+        double ipdvSumAbsMs{0};
+        static constexpr uint32_t kIpdvBins = 10000;
+        static constexpr double kIpdvBinMs = 0.01;
+        std::vector<uint32_t> ipdvHistAbs; ///< lazily sized to kIpdvBins
+        uint64_t ipdvOverflow{0};
         Time firstRx{Seconds(0)};
         Time lastRx{Seconds(0)};
 

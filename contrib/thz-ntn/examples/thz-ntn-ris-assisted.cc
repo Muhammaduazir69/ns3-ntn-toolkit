@@ -190,8 +190,8 @@ main(int argc, char* argv[])
         // Set optimal phase profile for satellite->RIS->GT
         ris->ComputeOptimalPhases(elevation, 0.0, 0.0, 0.0);
 
-        // RIS gain with perfect CSI (N^2 scaling)
-        double risGain = ris->ComputeSnrGain_dB(true);
+        // Array factor with perfect CSI (N^2 vs ONE element; not a link gain)
+        double risGain = ris->ComputeArrayFactorGain_dB(true);
 
         // Cascaded path loss Sat->RIS->GT from the actual 3D node positions
         // (the model derives both hop distances from the MobilityModels).
@@ -232,7 +232,7 @@ main(int argc, char* argv[])
     std::cout << std::setw(10) << "N"
               << std::setw(12) << "N^2"
               << std::setw(16) << "10*log10(N^2)"
-              << std::setw(16) << "Measured Gain"
+              << std::setw(16) << "Array factor"
               << "\n";
     std::cout << std::setw(10) << ""
               << std::setw(12) << ""
@@ -246,7 +246,9 @@ main(int argc, char* argv[])
         Ptr<ThzNtnRis> ris = CreateObject<ThzNtnRis>();
         ris->Configure(N, N, freq, RisDeployment::GROUND);
 
-        double measuredGain = ris->ComputeSnrGain_dB(true);
+        // Array factor of the panel vs one element (the N^2 law); the link
+        // improvement is the "SNR Improv" column of the table above.
+        double measuredGain = ris->ComputeArrayFactorGain_dB(true);
         uint32_t N2 = N * N;
         double theoreticalGain = 10.0 * std::log10(static_cast<double>(N2));
 

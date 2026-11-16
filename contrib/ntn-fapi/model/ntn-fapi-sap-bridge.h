@@ -121,6 +121,19 @@ class NtnFapiSapBridge : public Object
     uint64_t GetDlTtiWithDataCount() const { return m_dlTtiDataCount; }
     uint64_t GetCrcIndicationCount() const { return m_crcCount; }
     uint64_t GetRxDataIndicationCount() const { return m_rxDataCount; }
+    /// P0-9: bytes carried by RX_DATA.indication PDUs (decoded TBs), all RNTIs.
+    uint64_t GetRxDataBytes() const { return m_rxDataBytes; }
+    /// P0-9: per-RNTI CRC.indication / RX_DATA.indication counts and bytes, so a
+    /// multi-UE cell is accounted per UE and for the cell (SCF 222.10: one
+    /// CRC report per TB, whatever the RNTI).
+    struct RntiStats
+    {
+        uint64_t crc{0};
+        uint64_t crcFail{0};
+        uint64_t rxData{0};
+        uint64_t rxBytes{0};
+    };
+    const std::map<uint16_t, RntiStats>& GetPerRntiStats() const { return m_perRnti; }
     uint64_t GetMatchedLatencyCount() const { return m_latCount; }
 
     const SlotIndication& LastSlotIndication() const { return m_lastSlot; }
@@ -267,6 +280,8 @@ class NtnFapiSapBridge : public Object
     CellConfig m_cell{};
     uint32_t m_slotsPerSubframe{1};
     uint16_t m_ueRnti{0};
+    uint64_t m_rxDataBytes{0};
+    std::map<uint16_t, RntiStats> m_perRnti;
 
     Ptr<mmwave::MmWaveEnbNetDevice> m_enb;
     // Real SAP endpoints captured at InstallEnb() (owned by mmwave objects).

@@ -88,7 +88,12 @@ class NrUeNetDevice : public NrNetDevice
     uint64_t GetImsi() const;
 
     /**
-     * \brief Get the CellId
+     * \brief Get the CellId of the serving cell
+     *
+     * ntn-patch 10: the cell the UE RRC is currently synchronized to, which
+     * follows handovers; the attach-time gNB (GetTargetGnb()) only until the
+     * RRC has a cell, and UINT16_MAX when neither exists.
+     *
      * \return cell ID
      */
     uint16_t GetCellId() const;

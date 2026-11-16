@@ -1544,10 +1544,14 @@ NrSpectrumPhy::ProcessReceivedPacketBurst()
             {
                 Ptr<NrUePhy> phy = (DynamicCast<NrUePhy>(m_phy));
                 uint8_t cqi = phy->ComputeCqi(m_sinrPerceived);
+                // ntn-patch 10: label the TB with the UE's SERVING cell, not
+                // the attach-time gNB (GetTargetGnb() is never updated by a
+                // handover, so every TB after the first X2 handover carried
+                // the old cell id and (cellId, RNTI) consumers lost the UE).
                 RxPacketTraceParams traceParams(tbInfo,
                                                 m_dataErrorModelEnabled,
                                                 rnti,
-                                                ueRx->GetTargetGnb()->GetCellId(),
+                                                ueRx->GetCellId(),
                                                 GetBwpId(),
                                                 cqi);
                 m_rxPacketTraceUe(traceParams);

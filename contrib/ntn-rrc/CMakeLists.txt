@@ -6,6 +6,7 @@ set(source_files
     model/ntn-ue-location-report.cc
     model/ntn-drx.cc
     model/ntn-ul-timing-precompensator.cc
+    model/ntn-ue-sib19-consumer.cc
     helper/ntn-rrc-helper.cc
 )
 
@@ -18,6 +19,7 @@ set(header_files
     model/ntn-ue-location-report.h
     model/ntn-drx.h
     model/ntn-ul-timing-precompensator.h
+    model/ntn-ue-sib19-consumer.h
     helper/ntn-rrc-helper.h
 )
 

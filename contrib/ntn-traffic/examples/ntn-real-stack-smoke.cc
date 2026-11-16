@@ -53,6 +53,13 @@ main(int argc, char* argv[])
     double beamwidthDeg = 4.4127; // TR 38.821 Table 6.1.1.1-1 Set-1, LEO-600 S-band
     double beamCenterXKm = 0.0;   // fixed beam centre offset east of the UEs; 0 = track them
     std::string ntnScenario = "suburban";
+    // Wave 1: Set-1 terminal/payload by default on the nr S-band carrier (C7),
+    // channel model choice (C3), and a real gateway for the feeder (C5).
+    bool set1 = true;
+    std::string channel = "legacy"; // legacy | ns3ntn
+    bool fading = true;
+    double gwDistanceKm = 500.0;
+    bool excessLoss = true;
 
     CommandLine cmd;
     cmd.AddValue("strictGates",
@@ -98,9 +105,29 @@ main(int argc, char* argv[])
                  "denseurban | urban | suburban | rural. Clutter is 0 dB in LOS per 6.6.2, so "
                  "sigma is what the scenario actually changes.",
                  ntnScenario);
+    cmd.AddValue("set1",
+                 "With the default --satEirpDbm on the nr S-band carrier: TR 38.821 Set-1 "
+                 "handheld terminal (1T2R 0 dBi, NF 7 dB, 23 dBm) and payload (34 dBW/MHz). "
+                 "0 = the legacy 70 dBm conducted operating point.",
+                 set1);
+    cmd.AddValue("channel",
+                 "legacy (Friis + TR 38.811 excess + UMi LOS spatial) or ns3ntn (ns-3 mainline "
+                 "TR 38.811 NTN path loss, condition and fast fading)",
+                 channel);
+    cmd.AddValue("fading", "Small-scale fading on the spatial channel (0 = LOS plane wave)", fading);
+    cmd.AddValue("gwDistanceKm",
+                 "Gateway ground distance north of the UE site (km) for the feeder; <= 0 keeps "
+                 "the 5 ms constant backhaul",
+                 gwDistanceKm);
+    cmd.AddValue("excessLoss",
+                 "Legacy channel only: chain the TR 38.811 excess terms (gas, shadow fading, "
+                 "scintillation). 0 leaves free space, for a closed-form link-budget check.",
+                 excessLoss);
     cmd.Parse(argc, argv);
 
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55.
+    // Sentinel: TR 38.821 Set-1 on the nr S-band carrier (C7); otherwise the
+    // legacy conducted operating points (nr 70 dBm, mmwave 55 dBm).
+    const bool useSet1 = set1 && satEirpDbm < 0.0 && radio != "mmwave" && freqGhz <= 7.125;
     if (satEirpDbm < 0.0)
     {
         satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
@@ -156,7 +183,19 @@ main(int argc, char* argv[])
     // NT-02: declared as CONDUCTED power at the array input. This carrier has
     // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
     // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (useSet1)
+    {
+        rs.ApplyTr38821Set1Defaults();
+    }
+    else
+    {
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
+    NS_ABORT_MSG_IF(channel != "legacy" && channel != "ns3ntn", "unknown --channel " << channel);
+    rs.SetChannelModel(channel == "ns3ntn" ? NtnRealStackHelper::ChannelModel::Ns3Tr38811
+                                           : NtnRealStackHelper::ChannelModel::Legacy);
+    rs.SetSmallScaleFading(fading);
+    rs.SetTr38811ExcessLoss(excessLoss);
 
     // NT-07: apply the two TR 38.811 options before Build(), which is where the
     // helper assembles the propagation chain.
@@ -190,6 +229,10 @@ main(int argc, char* argv[])
     }
 
     rs.Build(satNodes, ueNodes);
+    if (gwDistanceKm > 0.0)
+    {
+        rs.SetFeederGatewayGeodetic(subLat + gwDistanceKm / 111.195, subLon, 0.0);
+    }
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0),
                       Seconds(simTime - 0.5));

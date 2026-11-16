@@ -377,8 +377,16 @@ def train(xapp_name, episodes=1000, ns3_path=None):
     agent = create_agent(xapp_name)
 
     if NS3AI_AVAILABLE and ns3_path:
-        env = Ns3Env(port=0, stepTime=0.1, startSim=True,
-                     simSeed=42, simArgs={}, debug=False)
+        # Wave 2 M2: current ns3-ai Gym API (ns3ai_gym_env.Ns3Env(targetName,
+        # ns3Path)); the old ns3-gym keyword arguments (port, startSim, ...)
+        # do not exist there, which is why --gym=1 could never run. Only the
+        # handover environment has a shipped C++ example.
+        if xapp_name != "handover":
+            print(f"No measured C++ environment ships for '{xapp_name}'; "
+                  "see oran_ntn_gym_handover_agent.py for the handover agent")
+            return
+        env = Ns3Env(targetName="oran-ntn-gym-handover-example", ns3Path=ns3_path,
+                     ns3Settings={"gym": 1, "kpm": "measured"})
     else:
         print("Running in standalone mode (no ns-3 simulation)")
         return

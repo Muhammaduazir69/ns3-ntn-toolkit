@@ -95,7 +95,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> leoSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    leoSgp4->SetElements(satElements[0]);
+    leoSgp4->SetElementsSgp4(satElements[0]);
     double leoSubLat, leoSubLon, leoSubAlt;
     leoSgp4->GetGeodetic(leoSubLat, leoSubLon, leoSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> leoMob =

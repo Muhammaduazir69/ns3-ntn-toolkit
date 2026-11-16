@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit, W7)
  *
- * ntn-v2x-leo-relay-traffic — a shadowed vehicle (veh0) relays its basic-safety
+ * ntn-v2x-leo-relay-traffic, a shadowed vehicle (veh0) relays its basic-safety
  * messages to a ground server through a peer vehicle (veh1) and a LEO satellite:
  * veh0 --V2V--> veh1 --uplink--> LEO --feeder--> server. Real UDP BSMs are
  * forwarded THROUGH the relay nodes (real Ipv4 routing); each hop's propagation
@@ -27,7 +27,22 @@
  * fcd-output XML). You may instead supply your own CSV converted from a SUMO
  * fcd-export.
  *
+ * Wave 2 M3 (P1-5): `--v2v=pc5 --uplink=nr` replaces both P2P hops with the
+ * measured planes. veh0 (remote UE, no Uu: it sits in the shadow) broadcasts
+ * its 10 Hz SAE J2735 BSMs on the NR PC5 Mode-2 sidelink (NtnSlChannel:
+ * sensing-based SPS, half duplex, collisions, TR 37.885 Highway path loss)
+ * among --pc5Background other vehicles that send their own BSMs. veh1 (relay
+ * UE) decodes veh0's BSM and forwards it over its own Uu uplink on the
+ * measured NR NTN cell (NtnRealStackHelper, nr backend, TR 38.821 Set-1
+ * terminal and payload, feeder from a gateway at the origin): the L3
+ * UE-to-network relay of TS 23.304 Rel-17. The ground server measures the
+ * end-to-end delay (BSM generation to arrival), the PC5 part (generation to
+ * relay decode, including the Mode-2 resource wait of up to T2) and the Uu UL
+ * one-way delay (relay forward to arrival). The default (p2p/p2p) is
+ * unchanged.
+ *
  * Quick test:  --simSeconds=60 --bsmHz=10 --fcdTrace=<path/to/fcd.csv>
+ *              --simSeconds=30 --v2v=pc5 --uplink=nr
  */
 #include "ns3/applications-module.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
@@ -47,8 +62,15 @@
 #include "ns3/ipv4.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/v2x-leo-relay.h"
+#include "ns3/ntn-nr-sidelink.h"
+#include "ns3/ntn-oran-payload-header.h"
+#include "ns3/ntn-real-stack-helper.h"
 
 #include <cmath>
+#include <set>
+#include <vector>
+#include <functional>
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -194,6 +216,321 @@ Tick()
     }
     Simulator::Schedule(Seconds(1.0), &Tick);
 }
+
+// ===========================================================================
+// Wave 2 M3 (P1-5): measured PC5 V2V hop + measured NR Uu uplink at the relay.
+// ===========================================================================
+struct Pc5NrState
+{
+    Ptr<Packet> pendingBsm;      //!< newest BSM at veh0 awaiting its PC5 resource
+    uint64_t generated{0};
+    uint64_t replacedStale{0};   //!< a newer BSM replaced one never sent (J2735 freshness)
+    uint64_t pc5Sent{0};
+    uint64_t relayDecoded{0};
+    uint64_t forwarded{0};
+    uint64_t serverRx{0};
+    double pc5SumMs{0.0};
+    double ulSumMs{0.0};
+    double e2eSumMs{0.0};
+    double e2eMaxMs{0.0};
+    std::vector<double> e2e;
+    Ptr<Socket> relaySock;
+    Ptr<MobilityModel> veh0;
+    uint32_t seq{0};
+    uint32_t bsmBytes{300};
+    std::set<uint64_t> bsmUids; //!< packets that carry a veh0 BSM (fillers excluded)
+};
+Pc5NrState g_pn;
+
+void
+Pc5GenerateBsm(Time period, Time stop)
+{
+    if (Simulator::Now() >= stop)
+    {
+        return;
+    }
+    // SAE J2735 BSM Part I from veh0's live kinematics, behind the in-band
+    // payload header that carries the generation time.
+    ntnv2x::NtnV2xBsmHeader bsm;
+    const Vector p = g_pn.veh0->GetPosition();
+    const Vector v = g_pn.veh0->GetVelocity();
+    bsm.SetFromState(static_cast<uint8_t>(g_pn.seq % 128), 0x00000001u,
+                     static_cast<uint16_t>(Simulator::Now().GetMilliSeconds() % 60000),
+                     p.y / 111320.0, p.x / 111320.0, p.z, std::sqrt(v.x * v.x + v.y * v.y),
+                     std::fmod(std::atan2(v.x, v.y) * 180.0 / M_PI + 360.0, 360.0));
+    const uint32_t body = std::max<uint32_t>(
+        bsm.GetSerializedSize(), g_pn.bsmBytes > NtnOranPayloadHeader::SERIALIZED_SIZE
+                                     ? g_pn.bsmBytes - NtnOranPayloadHeader::SERIALIZED_SIZE
+                                     : 0);
+    Ptr<Packet> pkt = Create<Packet>(body - bsm.GetSerializedSize());
+    pkt->AddHeader(bsm);
+    NtnOranPayloadHeader h;
+    h.SetPayloadType(NtnOranPayloadHeader::URLLC_CMD);
+    h.SetSeq(g_pn.seq++);
+    h.SetTxTimestampNs(Simulator::Now().GetNanoSeconds());
+    h.SetFiveQi(82);
+    h.SetSrcId(0);
+    h.SetDstId(3);
+    pkt->AddHeader(h);
+    if (g_pn.pendingBsm)
+    {
+        ++g_pn.replacedStale;
+    }
+    g_pn.pendingBsm = pkt;
+    ++g_pn.generated;
+    Simulator::Schedule(period, &Pc5GenerateBsm, period, stop);
+}
+
+Ptr<Packet>
+Pc5TxPacket(uint32_t id)
+{
+    if (id == 0 && g_pn.pendingBsm)
+    {
+        Ptr<Packet> p = g_pn.pendingBsm;
+        g_pn.pendingBsm = nullptr;
+        ++g_pn.pc5Sent;
+        g_pn.bsmUids.insert(p->GetUid());
+        return p;
+    }
+    // Other vehicles: their own BSM-sized broadcasts (channel load).
+    return Create<Packet>(g_pn.bsmBytes);
+}
+
+void
+Pc5RelayRx(uint32_t from, Ptr<Packet> pkt)
+{
+    if (from != 0 || g_pn.bsmUids.erase(pkt->GetUid()) == 0)
+    {
+        return; // only veh0's BSMs (first decode of each) are relayed
+    }
+    NtnOranPayloadHeader h;
+    if (pkt->GetSize() < h.GetSerializedSize())
+    {
+        return;
+    }
+    pkt->PeekHeader(h);
+    ++g_pn.relayDecoded;
+    g_pn.pc5SumMs += (Simulator::Now().GetNanoSeconds() - static_cast<int64_t>(h.GetTxTimestampNs())) / 1e6;
+    // L3 relay forwarding: the relay's own Uu PDU session carries it; the
+    // forward time rides a SeqTs header in front of the BSM.
+    Ptr<Packet> fwd = pkt->Copy();
+    SeqTsHeader st;
+    st.SetSeq(h.GetSeq());
+    fwd->AddHeader(st);
+    if (g_pn.relaySock->Send(fwd) >= 0)
+    {
+        ++g_pn.forwarded;
+    }
+}
+
+void
+Pc5ServerRx(Ptr<Socket> s)
+{
+    Ptr<Packet> p;
+    while ((p = s->Recv()))
+    {
+        SeqTsHeader st;
+        if (p->GetSize() < st.GetSerializedSize())
+        {
+            continue;
+        }
+        p->RemoveHeader(st);
+        NtnOranPayloadHeader h;
+        if (p->GetSize() < h.GetSerializedSize())
+        {
+            continue;
+        }
+        p->PeekHeader(h);
+        const int64_t now = Simulator::Now().GetNanoSeconds();
+        const double e2e = (now - static_cast<int64_t>(h.GetTxTimestampNs())) / 1e6;
+        const double ul = (Simulator::Now() - st.GetTs()).GetSeconds() * 1e3;
+        ++g_pn.serverRx;
+        g_pn.e2eSumMs += e2e;
+        g_pn.e2eMaxMs = std::max(g_pn.e2eMaxMs, e2e);
+        g_pn.ulSumMs += ul;
+        g_pn.e2e.push_back(e2e);
+    }
+}
+
+int
+RunPc5Nr(double simSeconds,
+         double bsmHz,
+         uint32_t bsmBytes,
+         double leoAltKm,
+         const std::string& fcdTrace,
+         const std::string& outputDir,
+         uint32_t nBackground,
+         double relayUeTxDbm,
+         double relayUeGainDbi)
+{
+    g_pn.bsmBytes = bsmBytes;
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    NodeContainer relayUe;
+    relayUe.Create(1);
+
+    g_bridge = CreateObject<ntnv2x::SumoTraciBridge>();
+    NS_ABORT_MSG_IF(!g_bridge->LoadFcdTrace(fcdTrace), "could not load FCD trace " << fcdTrace);
+    Ptr<ConstantVelocityMobilityModel> veh0 = CreateObject<ConstantVelocityMobilityModel>();
+    veh0->SetPosition(Vector(0, 0, 1.5));
+    g_bridge->RegisterVehicle("veh0", veh0);
+    Ptr<ConstantVelocityMobilityModel> veh1 = CreateObject<ConstantVelocityMobilityModel>();
+    veh1->SetPosition(Vector(50, 0, 1.5));
+    relayUe.Get(0)->AggregateObject(veh1);
+    g_bridge->RegisterVehicle("veh1", veh1);
+    g_pn.veh0 = veh0;
+
+    ns3::ntncon::WalkerConfig wcfgSat;
+    wcfgSat.num_planes = 1;
+    wcfgSat.total_sats = 80;
+    wcfgSat.altitude_km = leoAltKm;
+    wcfgSat.inclination_deg = 53.0;
+    wcfgSat.epoch_unix_s = 1735689600.0;
+    const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+    satSgp4->SetElementsSgp4(satElements[0]);
+    double la, lo, al;
+    satSgp4->GetGeodetic(la, lo, al);
+    Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
+    sat->SetSource(satSgp4);
+    sat->SetReference(la, lo, 0.0);
+    satNodes.Get(0)->AggregateObject(sat);
+
+    // Measured NR NTN cell; the relay UE is its only UE (veh0 is shadowed and
+    // has no Uu connection).
+    NtnRealStackHelper rs;
+    rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+    rs.SetNumerology(1);
+    rs.SetSimTime(Seconds(simSeconds));
+    rs.SetOutputDir(outputDir);
+    rs.SetRunTag("ntn-v2x-leo-relay-traffic-pc5-nr");
+    rs.ApplyTr38821Set1Defaults(); // TR 38.821 Table 6.1.1.1-1/-2 Set-1, S band
+    if (relayUeTxDbm > 0.0)
+    {
+        rs.SetUeTxPowerDbm(relayUeTxDbm); // declared vehicle terminal, not Set-1 handheld
+    }
+    if (relayUeGainDbi != 0.0)
+    {
+        rs.SetUeRxAntennaGain(relayUeGainDbi); // reciprocal element gain (roof antenna)
+    }
+    rs.Build(satNodes, relayUe);
+    Ptr<ConstantPositionMobilityModel> gw = CreateObject<ConstantPositionMobilityModel>();
+    gw->SetPosition(g_gwPos); // feeder from a gateway at the origin (TR 38.821 4.2)
+    rs.SetFeederGateway(gw);
+
+    Ptr<Node> host = rs.GetRemoteHost();
+    const Ipv4Address hostAddr = host->GetObject<Ipv4>()->GetAddress(1, 0).GetLocal();
+    const uint16_t port = 7601;
+    Ptr<Socket> srv = Socket::CreateSocket(host, UdpSocketFactory::GetTypeId());
+    srv->Bind(InetSocketAddress(Ipv4Address::GetAny(), port));
+    srv->SetRecvCallback(MakeCallback(&Pc5ServerRx));
+    g_pn.relaySock = Socket::CreateSocket(relayUe.Get(0), UdpSocketFactory::GetTypeId());
+    g_pn.relaySock->Bind();
+    g_pn.relaySock->Connect(InetSocketAddress(hostAddr, port));
+
+    // PC5: veh0 (id 0), veh1 (id 1) and background vehicles (TR 37.885
+    // highway platoon spacing 2.5 s x speed ~ 50 m) on both sides.
+    Ptr<NtnSlChannel> ch = CreateObject<NtnSlChannel>();
+    NtnSlResourcePool pool;
+    pool.numSubchannels = 5;
+    pool.subchannelSizeRb = 10;
+    pool.slotDuration = MilliSeconds(1);
+    ch->SetResourcePool(pool);
+    const uint32_t prsvp = static_cast<uint32_t>(std::lround(1000.0 / bsmHz));
+    std::vector<Ptr<MobilityModel>> mobs{veh0, veh1};
+    for (uint32_t i = 0; i < nBackground; ++i)
+    {
+        Ptr<ConstantVelocityMobilityModel> m = CreateObject<ConstantVelocityMobilityModel>();
+        const double off = 50.0 * ((i / 2) + 1) * ((i % 2) ? 1.0 : -1.0);
+        m->SetPosition(Vector(off, (i % 3) * 4.0, 1.5));
+        m->SetVelocity(Vector(20.0 + (i % 3), 0.0, 0.0));
+        mobs.push_back(m);
+    }
+    std::vector<Ptr<NtnSlUeMac>> macs;
+    for (uint32_t i = 0; i < mobs.size(); ++i)
+    {
+        Ptr<NtnSlUeMac> mac = CreateObject<NtnSlUeMac>();
+        mac->SetUeId(i);
+        mac->SetMobility(mobs[i]);
+        mac->SetSelectionWindow(1, prsvp - 1); // T2 <= PDB (TS 38.214 8.1.4)
+        mac->SetReservationPeriod(prsvp);
+        mac->SetAlignReselection(true);
+        mac->SetPacketBytes(bsmBytes);
+        mac->AssignStreams(2000 + i);
+        mac->SetTxPacketCallback(MakeCallback(&Pc5TxPacket));
+        if (i == 1)
+        {
+            mac->SetRxCallback(MakeCallback(&Pc5RelayRx));
+        }
+        ch->AddUe(mac);
+        macs.push_back(mac);
+    }
+    ch->Start(Seconds(1.0), Seconds(simSeconds));
+    Simulator::Schedule(Seconds(1.0), &Pc5GenerateBsm, Seconds(1.0 / bsmHz), Seconds(simSeconds - 0.5));
+
+    std::function<void()> step;
+    step = [&step, simSeconds]() {
+        if (Simulator::Now().GetSeconds() >= simSeconds)
+        {
+            return;
+        }
+        g_bridge->Step();
+        Simulator::Schedule(Seconds(1.0), step);
+    };
+    Simulator::Schedule(Seconds(0.0), step);
+
+    std::printf("# ntn-v2x-leo-relay-traffic --v2v=pc5 --uplink=nr\n"
+                "#   veh0 --PC5 Mode 2--> veh1 (relay UE) --NR Uu UL (measured)--> LEO --feeder--> "
+                "server; %u background PC5 vehicles, BSM %.0f Hz x %u B, SPS %u ms\n",
+                nBackground, bsmHz, bsmBytes, prsvp);
+    Simulator::Stop(Seconds(simSeconds + 1.0));
+    Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
+
+    std::sort(g_pn.e2e.begin(), g_pn.e2e.end());
+    const double p95 = g_pn.e2e.empty() ? 0.0 : g_pn.e2e[std::min<size_t>(g_pn.e2e.size() - 1,
+                                                                  static_cast<size_t>(0.95 * g_pn.e2e.size()))];
+    const double pc5 = g_pn.relayDecoded ? g_pn.pc5SumMs / g_pn.relayDecoded : 0.0;
+    const double ul = g_pn.serverRx ? g_pn.ulSumMs / g_pn.serverRx : 0.0;
+    const double e2e = g_pn.serverRx ? g_pn.e2eSumMs / g_pn.serverRx : 0.0;
+    std::printf("# === summary (pc5 + nr) ===\n"
+                "#   BSMs generated %llu, replaced before a PC5 resource %llu, sent on PC5 %llu\n"
+                "#   decoded by the relay %llu (PC5 PDR %.4f), forwarded on Uu %llu, "
+                "received at the server %llu\n"
+                "#   end-to-end PDR %.4f\n"
+                "#   delay: PC5 (generation->relay decode) %.2f ms + Uu UL OWD (relay->server, "
+                "measured) %.2f ms = %.2f ms; measured e2e mean %.2f ms, p95 %.2f ms, max %.2f ms\n"
+                "#   PC5 channel: tx %llu, PRR %.4f, PRR within 100 m %.4f\n"
+                "#   relay UE Uu: uplink only (no DL traffic; the DL-only sim_health throughput "
+                "gate does not apply), UE Tx %.1f dBm\n",
+                (unsigned long long)g_pn.generated, (unsigned long long)g_pn.replacedStale,
+                (unsigned long long)g_pn.pc5Sent, (unsigned long long)g_pn.relayDecoded,
+                g_pn.pc5Sent ? double(g_pn.relayDecoded) / g_pn.pc5Sent : 0.0,
+                (unsigned long long)g_pn.forwarded, (unsigned long long)g_pn.serverRx,
+                g_pn.generated ? double(g_pn.serverRx) / g_pn.generated : 0.0, pc5, ul, pc5 + ul,
+                e2e, p95, g_pn.e2eMaxMs, (unsigned long long)ch->GetTxTotal(), ch->GetPrr(),
+                ch->GetPrrWithinRange(100.0), relayUeTxDbm > 0.0 ? relayUeTxDbm : 23.0);
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        std::ofstream f(outputDir + "/leo_relay_pc5_nr_summary.csv");
+        f << "metric,value,unit\n"
+          << "bsm_generated," << g_pn.generated << ",count\n"
+          << "pc5_sent," << g_pn.pc5Sent << ",count\n"
+          << "relay_decoded," << g_pn.relayDecoded << ",count\n"
+          << "server_rx," << g_pn.serverRx << ",count\n"
+          << "e2e_pdr," << (g_pn.generated ? double(g_pn.serverRx) / g_pn.generated : 0.0) << ",ratio\n"
+          << "pc5_delay_mean," << pc5 << ",ms\n"
+          << "uu_ul_owd_mean," << ul << ",ms\n"
+          << "e2e_delay_mean," << e2e << ",ms\n"
+          << "e2e_delay_p95," << p95 << ",ms\n";
+    }
+    g_pn.relaySock = nullptr;
+    g_pn.pendingBsm = nullptr;
+    Simulator::Destroy();
+    return 0;
+}
 } // namespace
 
 int
@@ -214,6 +551,11 @@ main(int argc, char* argv[])
     // --fcdTrace=<path> to replay a real SUMO-exported trace.
     std::string fcdTrace = "contrib/ntn-v2x/traces/leo-relay-fcd.csv";
     std::string outputDir = "ntn-v2x-leo-relay-output";
+    std::string v2v = "p2p";
+    std::string uplink = "p2p";
+    uint32_t pc5Background = 20;
+    double relayUeTxDbm = -1.0;   // <= 0: TR 38.821 Set-1 handheld 23 dBm
+    double relayUeGainDbi = 0.0;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
@@ -240,7 +582,21 @@ main(int argc, char* argv[])
                  "also works (loader reads a CSV dialect, not native fcd-output XML).",
                  fcdTrace);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("v2v", "V2V hop: p2p (default, gated P2P) or pc5 (NR sidelink Mode 2)", v2v);
+    cmd.AddValue("uplink", "Relay uplink: p2p (default) or nr (measured NR Uu UL)", uplink);
+    cmd.AddValue("pc5Background", "Other PC5 vehicles sending BSMs (pc5 mode)", pc5Background);
+    cmd.AddValue("relayUeTxDbm", "Relay UE Tx power (dBm); <= 0 keeps Set-1 23 dBm", relayUeTxDbm);
+    cmd.AddValue("relayUeGainDbi", "Relay UE antenna element gain (dBi)", relayUeGainDbi);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF((v2v == "pc5") != (uplink == "nr"),
+                    "supported combinations: --v2v=p2p --uplink=p2p (default) or --v2v=pc5 "
+                    "--uplink=nr");
+    if (v2v == "pc5")
+    {
+        g_simTime = simSeconds;
+        return RunPc5Nr(simSeconds, bsmHz, bsmBytes, leoAltKm, fcdTrace, outputDir, pc5Background,
+                        relayUeTxDbm, relayUeGainDbi);
+    }
     g_maxV2vRangeM = maxV2vRangeM;
     g_minDirectSnrDb = minDirectSnrDb;
     g_simTime = simSeconds;
@@ -249,7 +605,7 @@ main(int argc, char* argv[])
     nodes.Create(4); // 0=veh0 1=veh1 2=sat 3=server
 
     // Vehicles ride an FCD-format CSV trace supplied via --fcdTrace
-    // (trace-replay mode), exactly like ntn-v2x-rural-highway — one mobility
+    // (trace-replay mode), exactly like ntn-v2x-rural-highway, one mobility
     // source for all four v2x examples. The shipped trace is a synthetic
     // constant-speed FCD-format CSV fixture (not a SUMO microsimulation; the
     // loader reads a CSV dialect, not SUMO's native fcd-output XML). A CSV
@@ -298,7 +654,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> sat = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -315,7 +671,7 @@ main(int argc, char* argv[])
     g_relay->RegisterVehicle("veh1", veh1);
     // veh0 is the shadowed vehicle: a 3GPP-style NLOS blockage drops its direct
     // LEO SNR below the threshold, so EvaluateAll() selects the relay path
-    // through veh1 (clear sky) — which is exactly the data-plane chain wired
+    // through veh1 (clear sky), which is exactly the data-plane chain wired
     // below. The route decision is therefore the engine's, not a hard-coded
     // assumption.
     g_relay->SetVehicleBlockageDb("veh0", veh0BlockageDb);

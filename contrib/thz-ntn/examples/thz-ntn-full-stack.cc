@@ -160,10 +160,10 @@ main(int argc, char* argv[])
 
     Ptr<ns3::ntncon::Sgp4MobilityModel> sat1Sgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    sat1Sgp4->SetElements(elements[0]); // plane 0, slot 0
+    sat1Sgp4->SetElementsSgp4(elements[0]); // plane 0, slot 0
     Ptr<ns3::ntncon::Sgp4MobilityModel> sat2Sgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    sat2Sgp4->SetElements(elements[22]); // plane 1, slot 0
+    sat2Sgp4->SetElementsSgp4(elements[22]); // plane 1, slot 0
 
     double refLat;
     double refLon;
@@ -254,7 +254,8 @@ main(int argc, char* argv[])
     std::cout << "    Beamwidth:   " << std::setprecision(3) << array->ComputeBeamwidth3dB_deg()
               << " deg\n";
     std::cout << "    RIS:         64x64 = " << ris->GetTotalElements() << " elements\n";
-    std::cout << "    RIS array gain: " << std::setprecision(1) << ris->ComputeSnrGain_dB(true)
+    std::cout << "    RIS array factor: " << std::setprecision(1)
+              << ris->ComputeArrayFactorGain_dB(true)
               << " dB over a single element (perfect CSI); not a gain over the direct link\n";
     std::cout << "    ISAC mode:   JOINT (20% sensing)\n";
     std::cout << "    Beam track:  EKF\n";
@@ -483,8 +484,15 @@ main(int argc, char* argv[])
     // RIS
     std::cout << "\n  RIS-Assisted Link:\n";
     std::cout << "    Panel size:   64x64 = " << ris->GetTotalElements() << " elements\n";
-    std::cout << "    N^2 gain vs one element: " << std::setprecision(1)
-              << ris->ComputeSnrGain_dB(true) << " dB\n";
+    std::cout << "    N^2 array factor vs one element: " << std::setprecision(1)
+              << ris->ComputeArrayFactorGain_dB(true) << " dB (not a link gain)\n";
+    std::cout << "    Link SNR gain over the unblocked direct path (end geometry, "
+                 "Tang 2021 cascaded law): "
+              << std::setprecision(2)
+              << ris->ComputeLinkSnrGain_dB(sat1Mob->GetPosition(),
+                                            risMob->GetPosition(),
+                                            gtMob->GetPosition())
+              << " dB\n";
     std::cout << "    Quant loss:   " << std::setprecision(2)
               << ris->ComputeQuantizationLoss_dB() << " dB\n";
 

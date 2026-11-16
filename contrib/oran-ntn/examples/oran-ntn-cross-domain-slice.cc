@@ -105,7 +105,7 @@ main(int argc, char* argv[])
             CreateObject<ns3::ntncon::Sgp4MobilityModel>();
         // satA = serving element at zenith; satB = the trailing element two
         // slots behind on the same plane (rises as satA recedes).
-        sgp4->SetElements(elements[i == 0 ? 0 : 78]);
+        sgp4->SetElementsSgp4(elements[i == 0 ? 0 : 78]);
         if (i == 0)
         {
             sgp4->GetGeodetic(subLat, subLon, subAlt);

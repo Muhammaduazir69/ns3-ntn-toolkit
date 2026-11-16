@@ -91,6 +91,34 @@ class Ntn38811ExcessLossModel : public PropagationLossModel
     double m_freqHz{2.0e9};        ///< carrier (selects the P.676 gas band)
     bool m_enableShadowFading{true};
     bool m_enableScintillation{true};
+    bool m_tr38811Scint{false}; //!< C3: TR 38.811 6.6.6 fade term instead of the P.618 draw
+    /// Wave 2 core: ITU-R P.618-13 2.4.1 scintillation as a time-correlated
+    /// Gaussian (AR(1), time constant ScintillationCoherenceS) with the
+    /// recommendation's standard deviation. Opt-in; the legacy draw stays the
+    /// default so existing outputs reproduce.
+    bool m_p618Scint{false};
+    double m_p618NwetPpm{42.5};       //!< P.618 step 1 wet refractivity N_wet (ppm)
+    double m_p618DiameterM{0.0};      //!< P.618 step 4 antenna diameter D (m); 0 = point
+    double m_p618Efficiency{0.5};     //!< P.618 step 4 aperture efficiency eta
+    bool m_enableGas{true};           //!< P.676 band gas term (off when a plugin carries gas)
+    bool m_skipSpaceToSpace{false};   //!< no excess terms when both ends are above 100 km
+
+  public:
+    /// ITU-R P.618-13 2.4.1 standard deviation sigma (dB) of the tropospheric
+    /// scintillation at \p freqHz and elevation \p elevDeg (clamped to >= 5 deg,
+    /// the recommendation's lower validity limit), for wet refractivity
+    /// \p nWetPpm and an aperture of diameter \p diameterM (m) and efficiency
+    /// \p efficiency (diameter 0 = point receiver, g(x) = 1). Steps 2-7.
+    static double P618ScintillationSigmaDb(double freqHz,
+                                           double elevDeg,
+                                           double nWetPpm,
+                                           double diameterM,
+                                           double efficiency);
+    /// True when both ends of the link are above 100 km (ISL, sat-sat), i.e.
+    /// the path crosses no troposphere. ECEF and local-ENU frames.
+    static bool IsSpaceToSpace(const Vector& pa, const Vector& pb);
+
+  private:
     /// Rician small-scale fading (TR 38.811 §6.7/6.9).
     ///
     /// GAP S6: defaults to FALSE. Both radio backends keep the 3GPP phased-array
@@ -138,6 +166,8 @@ class Ntn38811ExcessLossModel : public PropagationLossModel
         Vector lastPos{0, 0, 0}; ///< ground-node position at the last SF draw
         double lastElevDeg{0.0};
         Time lastScintTime{Seconds(-1e9)};
+        double scintUnit{0.0};    ///< P.618 AR(1) unit-variance state
+        bool scintValid{false};   ///< P.618 state initialized
         bool valid{false};
     };
     /// Shadow-fading decorrelation distance (m), TR 38.811 §6.6.2.

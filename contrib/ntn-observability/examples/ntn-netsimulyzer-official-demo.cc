@@ -107,7 +107,7 @@ main(int argc, char* argv[])
         const uint32_t k = (s + 1) / 2;
         const uint32_t slot = (s % 2 == 1) ? k : (kSatsPerPlane - k) % kSatsPerPlane;
         Ptr<ns3::ntncon::Sgp4MobilityModel> m = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-        m->SetElements(elements[slot]);
+        m->SetElementsSgp4(elements[slot]);
         satNodes.Get(s)->AggregateObject(m);
     }
 

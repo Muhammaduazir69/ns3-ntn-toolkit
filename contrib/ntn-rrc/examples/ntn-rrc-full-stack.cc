@@ -28,13 +28,18 @@
 #include "ns3/ntn-rrc-helper.h"
 #include "ns3/ntn-sib19.h"
 #include "ns3/ntn-timing-advance.h"
+#include "ns3/ntn-ue-sib19-consumer.h"
 #include "ns3/ntn-ue-location-report.h"
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <sstream>
+#include <string>
 
 using namespace ns3;
 using namespace ns3::ntnrrc;
@@ -52,6 +57,7 @@ struct Sinks
 };
 
 NtnRealStackHelper* g_rs = nullptr;
+Ptr<NtnUeSib19Consumer> g_ueSib; // P0-7: UE-side SIB19 consumer
 uint64_t g_drxLastRxPkts = 0;
 double g_drxStopS = 0.0;
 
@@ -82,6 +88,20 @@ DrxActivityPoll(Ptr<NtnDrxStateMachine> drx)
     Simulator::Schedule(MilliSeconds(1), &DrxActivityPoll, drx);
 }
 
+/// A measured value, or an empty CSV field when there is none yet (never a
+/// placeholder number).
+std::string
+CsvValue(double v, int precision = 3)
+{
+    if (std::isnan(v))
+    {
+        return "";
+    }
+    std::ostringstream o;
+    o << std::fixed << std::setprecision(precision) << v;
+    return o.str();
+}
+
 void
 SampleTa(Ptr<NtnTimingAdvance> ta, Sinks* s)
 {
@@ -93,7 +113,15 @@ SampleTa(Ptr<NtnTimingAdvance> ta, Sinks* s)
              << ta->ComputeTotalTa().GetMicroSeconds() << ","
              << ta->ComputeCommonTa().GetMicroSeconds() << ","
              << ta->ComputeUeSpecificTa().GetMicroSeconds() << ","
-             << (g_rs ? g_rs->GetUeRecentSinrDb(0) : 0.0) << "\n";
+             << CsvValue(g_rs ? g_rs->GetUeRecentSinrDb(0)
+                              : std::numeric_limits<double>::quiet_NaN());
+    // P0-7: UE 0's own TA from the SIB19 it decoded (TS 38.213 4.2).
+    const NtnUeSib19Consumer::SampleResult r =
+        g_ueSib ? g_ueSib->Sample() : NtnUeSib19Consumer::SampleResult{};
+    // Before the first decoded SIB19 the UE has no estimate: empty fields.
+    s->taOut << "," << (r.valid ? CsvValue(r.estUs) : "") << ","
+             << (r.valid ? CsvValue(r.errNs) : "") << "," << (r.valid ? CsvValue(r.ageMs) : "")
+             << "," << (r.valid ? int(r.synced) : -1) << "\n";
     Simulator::Schedule(Seconds(1.0), &SampleTa, ta, s);
 }
 
@@ -200,7 +228,8 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(wElements[0]);
+    satSgp4->SetElementsSgp4(wElements[0]);
+    satSgp4->SetCacheGranularity(MilliSeconds(1)); // UE TA study: no 100 ms stale positions
     satNodes.Get(0)->AggregateObject(satSgp4);
     Ptr<MobilityModel> satMob = satSgp4;
     double subLat, subLon, subAlt;
@@ -287,7 +316,8 @@ main(int argc, char* argv[])
     std::filesystem::create_directories(outputDir);
     Sinks sinks;
     sinks.taOut.open(outputDir + "/" + prefix + "-ta.csv");
-    sinks.taOut << "time_s,ta_total_us,ta_common_us,ta_ue_us,measured_sinr_db\n";
+    sinks.taOut << "time_s,ta_total_us,ta_common_us,ta_ue_us,measured_sinr_db,ta_ue_est_us,"
+                   "ta_err_ns,sib19_age_ms,ul_synced\n";
     sinks.sibOut.open(outputDir + "/" + prefix + "-sib19.csv");
     sinks.sibOut << "time_s,broadcast_seq,cell_id,sat_x,sat_y,sat_z,ta_common_us,drift_rate_us_per_s\n";
     sinks.ueOut.open(outputDir + "/" + prefix + "-ue.csv");
@@ -296,6 +326,14 @@ main(int argc, char* argv[])
     sinks.drxOut << "time_s,state,active_ms,onDuration_ms,shortSleep_ms,longSleep_ms,awaitingPass_ms\n";
 
     sib19->TraceConnectWithoutContext("Broadcast", MakeCallback(&OnSib19).Bind(&sinks));
+    // P0-7: UE 0 decodes every broadcast's wire image (in-process until P1-B).
+    g_ueSib = CreateObject<NtnUeSib19Consumer>();
+    g_ueSib->Setup(ueMob, ta);
+    sib19->TraceConnectWithoutContext(
+        "Broadcast",
+        Callback<void, const Sib19Content&>([sib19](const Sib19Content&) {
+            g_ueSib->ReceiveWire(sib19->GetLatestSerialised());
+        }));
     rep->TraceConnectWithoutContext("Report", MakeCallback(&OnUeReport).Bind(&sinks));
 
     sib19->Start();
@@ -325,7 +363,11 @@ main(int argc, char* argv[])
               << "  ue reports         : " << sinks.reportCount << " (period 5 s)\n"
               << "  drx total active   : " << drx->GetTimeInState(DrxState::Active).GetMilliSeconds()
               << " ms\n"
-              << "  csvs: " << outputDir << "/" << prefix << "-{ta,sib19,ue,drx}.csv\n";
+              << "  csvs: " << outputDir << "/" << prefix << "-{ta,sib19,ue,drx}.csv\n"
+              << "  UE TA from decoded SIB19: " << g_ueSib->GetSampleCount() << " samples, max |err| "
+              << g_ueSib->GetMaxAbsErrorNs() << " ns (violations " << g_ueSib->GetViolationCount()
+              << "), ta-Common " << g_ueSib->GetHeld().taCommon.GetMicroSeconds() << " us, kMac "
+              << g_ueSib->GetHeld().kMac << "\n";
 
     Simulator::Destroy();
     return 0;

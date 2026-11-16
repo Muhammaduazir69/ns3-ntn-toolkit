@@ -185,10 +185,13 @@ class SionnaPathLossEngine:
               ris: dict | None = None) -> dict[str, Any]:
         t0 = time.perf_counter()
         self._set_freq(freq_hz)
-        if tx_array is not None:
-            self._ensure_array("tx", tx_array)
-        if rx_array is not None:
-            self._ensure_array("rx", rx_array)
+        # Wave 2 M3: a request WITHOUT an array descriptor means the SISO
+        # default, not "whatever the previous request installed". Before this,
+        # a SISO query that followed an 8x8 query was traced with the 8x8 array
+        # (mmimo-vs-codebook-leo: delta 5.09 dB on the first sample, 0 dB on
+        # every later one because both channels then shared the 8x8 array).
+        self._ensure_array("tx", tx_array if tx_array is not None else self.DEFAULT_ARRAY)
+        self._ensure_array("rx", rx_array if rx_array is not None else self.DEFAULT_ARRAY)
         self._replace_endpoints(tx_xyz, rx_xyz)
         # Install / refresh RIS on every call so geometry stays consistent
         # with mobile satellites; cheap when ris dict is None.
@@ -210,8 +213,13 @@ class SionnaPathLossEngine:
         # |a|^2 summed across all paths = total received power for unit Tx power.
         a = np.asarray(a)
         gain = float(np.sum(np.abs(a) ** 2))
+        fallback = False
         if gain <= 0.0:
-            # No paths (Sionna might prune below epsilon). Fall back to FSPL.
+            # No paths (Sionna might prune below epsilon). Fall back to FSPL,
+            # and SAY so in the reply (P0-4: no silent free-space substitution).
+            fallback = True
+            LOG.warning("no traced path between %s and %s: answering closed-form FSPL "
+                        "(reply field fspl_fallback=true)", tx_xyz, rx_xyz)
             d = math.dist(tx_xyz, rx_xyz)
             f_ghz = freq_hz / 1e9
             pl_db = 20.0 * math.log10(max(d, 1e-3)) + 20.0 * math.log10(f_ghz) + 32.45
@@ -234,6 +242,7 @@ class SionnaPathLossEngine:
             "compute_ms": (time.perf_counter() - t0) * 1e3,
             "tx_ports": tx_ports,
             "rx_ports": rx_ports,
+            "fspl_fallback": fallback,
         }
 
 

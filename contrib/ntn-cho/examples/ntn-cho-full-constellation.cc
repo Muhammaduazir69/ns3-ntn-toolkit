@@ -52,6 +52,8 @@
 #include "ns3/ntn-cho-algorithm.h"
 #include "ns3/ntn-cho-helper.h"
 #include "ns3/ntn-measurement-model.h"
+#include "ns3/ntn-ho-kpi-recorder.h"
+#include "ntn-cho-measured-inputs.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-scene-recorder.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
@@ -69,6 +71,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -83,6 +86,9 @@ namespace
 {
 // ---- Globals for the per-second CHO/measurement tick on the real queue ----
 NtnRealStackHelper* g_rs = nullptr;
+// Wave 2 M1 options. Every default reproduces the paper campaign output.
+bool g_measRrc = false;               // --measSource=rrc: per-UE reports, CHO sole owner
+Ptr<NtnHoKpiRecorder> g_hoRec;        // --measuredHoKpi=1
 // CHO-3: handover outcomes as reported by the RRC, not asserted by the model.
 // GetHandoverCount() counts NrGnbRrc HandoverEndOk completions.
 uint32_t g_hoCompletionsSeen = 0;
@@ -203,8 +209,14 @@ ChoTick()
     g_minServElevDeg = std::min(g_minServElevDeg, servElev);
     const double servSlant = ntngeo::SlantRangeM(u, sPos);
 
-    // Serving SINR is MEASURED from the real mmwave PHY (UE 0).
-    const double servSinr = g_rs->GetUeRecentSinrDb(0);
+    // Serving SINR is MEASURED from the real PHY (UE 0). Under --measSource=rrc
+    // on the nr backend it is the linear mean of UE 0's TBs since the previous
+    // tick (NtnRealStackHelper::TakeUeSinrWindowMeanDb, continuous across
+    // handovers).
+    const double servSinr =
+        g_measRrc && g_rs->GetRadioBackend() == NtnRealStackHelper::RadioBackend::Nr
+            ? g_rs->TakeUeSinrWindowMeanDb(0)
+            : g_rs->GetUeRecentSinrDb(0);
     if (std::isnan(servSinr))
     {
         Simulator::Schedule(Seconds(g_dt), &ChoTick);
@@ -214,7 +226,9 @@ ChoTick()
     ++g_sinrSamples;
 
     g_cho->UpdateServingMeasurement(servSinr);
-    const double servGain = std::max(-20.0, (servElev - 45.0) / 5.0);
+    // --measSource=rrc gives no beam-gain input (the elevation map is invented).
+    const double servGain = g_measRrc ? std::numeric_limits<double>::quiet_NaN()
+                                     : std::max(-20.0, (servElev - 45.0) / 5.0);
     g_cho->UpdateMeasurement(g_servingCellId, servSinr, servGain);
     g_cho->UpdateCandidateSlantRange(g_servingCellId, servSlant);
 
@@ -257,6 +271,24 @@ ChoTick()
         const double measuredCandSinr = g_rs->GetCellMeanSinrDb(g_candCellIds[k]);
         const double reportedRsrp = g_rs->GetNeighbourRsrpDbm(g_candCellIds[k]);
         double candSinr;
+        if (g_measRrc)
+        {
+            // P0-2 (--measSource=rrc): UE 0's own TS 38.331 5.5.5 report for
+            // this cell, serving SINR plus the reported (Mn - Mp). No report,
+            // no update: never a geometric stand-in.
+            const ntnchoex::ReportedCandidate rep =
+                ntnchoex::ReadReportedCandidate(*g_rs, 0, g_candCellIds[k], servSinr);
+            if (rep.fresh)
+            {
+                g_cho->UpdateMeasurement(g_candCellIds[k], rep.candSinrDb,
+                                         std::numeric_limits<double>::quiet_NaN());
+            }
+            g_cho->UpdateCandidateSlantRange(g_candCellIds[k], candSlant);
+            cands.push_back({g_candCellIds[k], g_candSatIds[k],
+                             rep.fresh ? rep.candSinrDb : -100.0, // -100 = not measured (CandidateInfo default)
+                             std::numeric_limits<double>::quiet_NaN(), candElev, candSlant});
+            continue;
+        }
         if (!std::isnan(measuredCandSinr))
         {
             candSinr = measuredCandSinr;
@@ -491,6 +523,10 @@ ChoTick()
         // self-completes every handover as a success.
         g_lastActuationAccepted = false;
         g_cho->ExecuteHandover(chosen);
+        if (g_hoRec)
+        {
+            g_hoRec->AnnotateNext(0, g_cho->GetMechanismStats().lastInterruptionMs, "cho");
+        }
         const bool requested = g_lastActuationAccepted;
         // Do NOT grade it here; the verdict resolves one decision tick later.
         const double tos = (g_lastHoTime >= 0.0) ? (t - g_lastHoTime) : t;
@@ -722,6 +758,11 @@ main(int argc, char* argv[])
     uint32_t rngRun = 1;
     std::string netSimOut;
     std::string czmlOut;
+    // Wave 2 M1 options; every default reproduces the paper output byte for byte.
+    std::string measSource = "friis";
+    bool measuredHoKpi = false;
+    bool rachLessCompletion = false;
+    std::string zeroAttemptRate = "legacy";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
@@ -748,7 +789,27 @@ main(int argc, char* argv[])
     cmd.AddValue("rngRun", "RNG run", rngRun);
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON trace output path (empty = off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D trace output path (empty = off)", czmlOut);
+    cmd.AddValue("measSource",
+                 "candidate input: friis (paper default: cell-mean SINR, cell-keyed RSRP, then "
+                 "Friis) | rrc (UE 0's own TS 38.331 reports; vendored A3 off so the CHO is the "
+                 "only decision maker)",
+                 measSource);
+    cmd.AddValue("measuredHoKpi",
+                 "write handover KPIs measured from the UE RRC traces and packet arrivals "
+                 "(handover_events_measured.csv, ho_kpm_measured.csv)",
+                 measuredHoKpi);
+    cmd.AddValue("rachLessCompletion",
+                 "count the RRCReconfigurationComplete leg (slant/c) in the modeled RACH-less "
+                 "interruption (TS 38.300 9.2.3.2); paper default off",
+                 rachLessCompletion);
+    cmd.AddValue("zeroAttemptRate",
+                 "success rate printed at 0 attempts: legacy (paper default, prints 100) | na",
+                 zeroAttemptRate);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(measSource != "friis" && measSource != "rrc", "--measSource=friis|rrc");
+    NS_ABORT_MSG_IF(zeroAttemptRate != "legacy" && zeroAttemptRate != "na",
+                    "--zeroAttemptRate=legacy|na");
+    g_measRrc = (measSource == "rrc");
 
     const bool useNr = (radio != "mmwave");
     // Legacy conducted-power default: nr 70 dBm, mmwave 55 dBm. The nr value is
@@ -885,6 +946,12 @@ main(int argc, char* argv[])
     // the grant past the round trip, which is exactly what TS 38.213 4.2
     // defines it for.
     rs.SetKOffsetConsumption(true);
+    if (g_measRrc)
+    {
+        // The CHO is the only decision maker; with A3 off the helper installs
+        // the periodical 480 ms report (TS 38.331 5.5.4.1) instead.
+        rs.SetAutonomousHandover(false);
+    }
     rs.Build(gnbSats, ueNodes);
     // A20b: take the verdict from the radio's own completion event, for the cell
     // the handover was aimed at. ntn-cho-real-stack already binds this trace;
@@ -917,6 +984,14 @@ main(int argc, char* argv[])
                       Seconds(simTime - 0.5));
     rs.EnableAiFlowMonitor(outputDir + "/ntn-cho-full-constellation");
     g_rs = &rs;
+    if (measuredHoKpi)
+    {
+        g_hoRec = CreateObject<NtnHoKpiRecorder>();
+        for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+        {
+            g_hoRec->AttachUe(i, ueNodes.Get(i));
+        }
+    }
 
     // ---- Real CHO algorithm with the selected trigger ----
     g_choHelper = CreateObject<NtnChoHelper>();
@@ -948,6 +1023,8 @@ main(int argc, char* argv[])
     cfg.qualityThreshold_dB = qualityTh;
     cfg.tteMinimum = Seconds(tteMinSec);
     cfg.rachLess = true;
+    // P0-8: the paper campaign priced RACH-less without the Complete leg.
+    cfg.countRachLessCompletion = rachLessCompletion;
     // ChoTick drives EvaluateConditions on the real event queue; keep the
     // algorithm's internal monitor period large so it does not also auto-fire.
     cfg.conditionMonitorPeriod = Seconds(g_simTime + 10.0);
@@ -1187,6 +1264,17 @@ main(int argc, char* argv[])
     }
     rs.Collect();
     rs.WriteHealthReport();
+    if (g_hoRec)
+    {
+        g_hoRec->WriteCsv(outputDir + "/handover_events_measured.csv");
+        g_hoRec->WriteKpm(outputDir + "/ho_kpm_measured.csv");
+        std::cout << "  [measured HO KPIs] RRC handovers " << g_hoRec->GetHandoverCount(true)
+                  << " ok / " << g_hoRec->GetHandoverFailureCount() << " failed, C-plane mean "
+                  << g_hoRec->GetMeanCplaneMs() << " ms, U-plane gap mean "
+                  << g_hoRec->GetMeanUplaneGapMs() << " ms, ping-pong(1 s) "
+                  << g_hoRec->GetPingPongCount(Seconds(1)) << ", RLF " << g_hoRec->GetTotalRlfCount()
+                  << "\n";
+    }
 
     // Close GeoJSON + CSV.
     g_satGeo << "\n]}";
@@ -1250,8 +1338,16 @@ main(int argc, char* argv[])
                << "Failed HOs:          " << g_failedHos << "\n"
                << "Ping-Pong Events:    " << g_ppCount << "\n"
                << std::fixed << std::setprecision(2)
-               << "HO Success Rate:     "
-               << (g_totalHos > 0 ? 100.0 * g_successHos / g_totalHos : 100.0) << " %\n"
+               << "HO Success Rate:     ";
+    if (g_totalHos == 0 && zeroAttemptRate == "na")
+    {
+        kpiSummary << "n/a (0 attempts)\n";
+    }
+    else
+    {
+        kpiSummary << (g_totalHos > 0 ? 100.0 * g_successHos / g_totalHos : 100.0) << " %\n";
+    }
+    kpiSummary
                << "Measured serving SINR (mean): " << measSinrMean << " dB\n"
                << "Measured DL throughput:       " << rs.GetRxThroughputMbps()
                << " Mbps\n"
@@ -1263,8 +1359,16 @@ main(int argc, char* argv[])
               << "  SIMULATION COMPLETE (REAL plane)\n"
               << "  Algorithm:      " << algorithm << "\n"
               << "  Total HOs:      " << g_totalHos << "\n"
-              << "  Success Rate:   " << std::fixed << std::setprecision(1)
-              << (g_totalHos > 0 ? 100.0 * g_successHos / g_totalHos : 100.0) << " %\n"
+              << "  Success Rate:   " << std::fixed << std::setprecision(1);
+    if (g_totalHos == 0 && zeroAttemptRate == "na")
+    {
+        std::cout << "n/a (0 attempts)\n";
+    }
+    else
+    {
+        std::cout << (g_totalHos > 0 ? 100.0 * g_successHos / g_totalHos : 100.0) << " %\n";
+    }
+    std::cout
               << "  measured SINR:  " << std::setprecision(2) << measSinrMean << " dB\n"
               << "  measured thr:   " << rs.GetRxThroughputMbps() << " Mbps\n"
               << "  RACH-less exec: " << st.rachLessExecutions << "\n"

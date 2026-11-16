@@ -4,6 +4,9 @@
 
 #include "ns3/boolean.h"
 #include "ns3/geocentric-constant-position-mobility-model.h"
+#include "ns3/global-value.h"
+#include "ns3/ntn-geocentric-mobility-adapter.h"
+#include "ns3/string.h"
 #include "ns3/double.h"
 #include "ns3/uinteger.h"
 #include <limits>
@@ -2858,6 +2861,163 @@ class ContactSchedulerIslCandidateTest : public TestCase
     }
 };
 
+/// C3 (Wave 1): the geocentric adapter gives any ECEF model the interface the
+/// mainline TR 38.811 channel needs, and the opt-in elevation convention (src
+/// patch 0001) measures at the terminal, while the stock ns-3.43 convention
+/// swaps the ends whenever the satellite is equatorward of the terminal.
+class GeocentricAdapterElevationTest : public TestCase
+{
+  public:
+    GeocentricAdapterElevationTest()
+        : TestCase("C3: geocentric adapter + WGS-84 lower-end elevation")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto ueSrc = CreateObject<ConstantPositionMobilityModel>();
+        ueSrc->SetPosition(NtnGeocentricMobilityAdapter::GeodeticToEcef(Vector(45.0, 7.0, 0.0)));
+        auto ue = CreateObject<NtnGeocentricMobilityAdapter>();
+        ue->SetSource(ueSrc);
+        const Vector g = ue->GetGeographicPosition();
+        NS_TEST_ASSERT_MSG_EQ_TOL(g.x, 45.0, 1e-7, "geodetic latitude round trip");
+        NS_TEST_ASSERT_MSG_EQ_TOL(g.y, 7.0, 1e-7, "longitude round trip");
+        NS_TEST_ASSERT_MSG_EQ_TOL(g.z, 0.0, 1e-3, "altitude round trip");
+
+        auto satSrc = CreateObject<ConstantPositionMobilityModel>();
+        satSrc->SetPosition(NtnGeocentricMobilityAdapter::GeodeticToEcef(Vector(38.0, 7.0, 600e3)));
+        auto sat = CreateObject<NtnGeocentricMobilityAdapter>();
+        sat->SetSource(satSrc);
+        NS_TEST_ASSERT_MSG_EQ_TOL(sat->GetGeographicPosition().z, 600e3, 1e-3, "satellite altitude");
+
+        // Reference: elevation about the geodetic normal at the terminal.
+        const double lat = 45.0 * M_PI / 180.0;
+        const double lon = 7.0 * M_PI / 180.0;
+        const Vector n(std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat));
+        const Vector d = sat->GetPosition() - ue->GetPosition();
+        const double ref =
+            std::asin((n.x * d.x + n.y * d.y + n.z * d.z) / d.GetLength()) * 180.0 / M_PI;
+
+        const double legacy = ue->GetElevationAngle(sat);
+        GlobalValue::Bind("GeocentricElevationModel", StringValue("Wgs84LowerEnd"));
+        const double fixedUe = ue->GetElevationAngle(sat);
+        const double fixedSat = sat->GetElevationAngle(ue);
+        GlobalValue::Bind("GeocentricElevationModel", StringValue("Legacy"));
+        NS_TEST_ASSERT_MSG_EQ_TOL(fixedUe, ref, 0.01, "elevation at the terminal");
+        NS_TEST_ASSERT_MSG_EQ_TOL(fixedSat, ref, 0.01, "same value whichever end is asked");
+        NS_TEST_ASSERT_MSG_GT(std::abs(legacy - ref), 2.0,
+                              "the stock convention measures at the satellite here (documented "
+                              "reason for the opt-in patch)");
+    }
+};
+
+/// Wave 2 core: NtnSatLinkErrorModel altitude, frame and cost.
+///  1. GroundAltKm accepts a HAPS at 20 km (the checker capped it at 12 km),
+///     and GroundAltFromGeometry reads the lower endpoint's own height.
+///  2. In a local ENU (flat) frame the zenith is +z, not the position vector.
+///  3. The excess-loss cache is exact by default (same value as a fresh model,
+///     one ITU evaluation for repeated inputs) and bins with a positive step.
+class SatLinkAltitudeFrameCacheTest : public TestCase
+{
+  public:
+    SatLinkAltitudeFrameCacheTest()
+        : TestCase("Wave 2 core: sat-link error model HAPS altitude, ENU zenith, P.676 cache")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        constexpr double Re = 6371e3;
+        auto ecefAbove = [&](double hM) {
+            auto m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(Vector(0, 0, Re + hM));
+            return m;
+        };
+        // 1. HAPS altitude.
+        {
+            auto m = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            m->SetAttribute("GroundAltKm", DoubleValue(20.0)); // used to abort (cap 12 km)
+            m->SetAttribute("CarrierHz", DoubleValue(20e9));
+            auto sat = CreateObject<ConstantPositionMobilityModel>();
+            sat->SetPosition(Vector(300e3, 0, Re + 600e3));
+            m->SetEndpoints(sat, ecefAbove(20e3));
+            const double gas20 = (m->CurrentExcessLossDb(), m->LastGaseousDb());
+            auto ground = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            ground->SetAttribute("CarrierHz", DoubleValue(20e9));
+            ground->SetEndpoints(sat, ecefAbove(20e3));
+            const double gas005 = (ground->CurrentExcessLossDb(), ground->LastGaseousDb());
+            NS_TEST_ASSERT_MSG_LT(gas20, 0.2 * gas005,
+                                  "above 20 km almost no water vapour or oxygen is left");
+            auto geo = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            geo->SetAttribute("CarrierHz", DoubleValue(20e9));
+            geo->SetAttribute("GroundAltFromGeometry", BooleanValue(true));
+            // Lower endpoint on the WGS-84 pole-ish spheroid would differ from
+            // the 6371 km sphere; use the ENU frame for an exact height.
+            auto haps = CreateObject<ConstantPositionMobilityModel>();
+            haps->SetPosition(Vector(0, 0, 20e3));
+            auto satEnu = CreateObject<ConstantPositionMobilityModel>();
+            satEnu->SetPosition(Vector(300e3, 0, 600e3));
+            geo->SetEndpoints(satEnu, haps);
+            auto fixed20 = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            fixed20->SetAttribute("CarrierHz", DoubleValue(20e9));
+            fixed20->SetAttribute("GroundAltKm", DoubleValue(20.0));
+            fixed20->SetEndpoints(satEnu, haps);
+            NS_TEST_ASSERT_MSG_EQ_TOL(geo->CurrentExcessLossDb(),
+                                      fixed20->CurrentExcessLossDb(),
+                                      1e-12,
+                                      "geometry-derived altitude (20 km) = GroundAltKm 20");
+        }
+        // 2. ENU frame: elevation from +z.
+        {
+            auto ue = CreateObject<ConstantPositionMobilityModel>();
+            ue->SetPosition(Vector(1000.0, 2000.0, 0.0));
+            auto sat = CreateObject<ConstantPositionMobilityModel>();
+            const double el = 35.0 * M_PI / 180.0;
+            sat->SetPosition(Vector(1000.0 + 800e3 * std::cos(el), 2000.0, 800e3 * std::sin(el)));
+            auto m = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            m->SetEndpoints(sat, ue);
+            NS_TEST_ASSERT_MSG_EQ_TOL(m->CurrentElevationDeg(), 35.0, 1e-9,
+                                      "ENU: elevation is measured from +z at the lower end");
+        }
+        // 3. Cache.
+        {
+            auto gs = ecefAbove(0.0);
+            auto sat = CreateObject<ConstantPositionMobilityModel>();
+            sat->SetPosition(Vector(400e3, 0, Re + 550e3));
+            auto cached = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            cached->SetEndpoints(sat, gs);
+            const double first = cached->CurrentEsNoDb();
+            for (int i = 0; i < 50; ++i)
+            {
+                NS_TEST_ASSERT_MSG_EQ(cached->CurrentEsNoDb(), first, "exact cache: same value");
+            }
+            NS_TEST_ASSERT_MSG_EQ(cached->GetExcessLossEvaluations(), 1u,
+                                  "51 packets at one geometry: P.676 evaluated once");
+            auto fresh = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            fresh->SetEndpoints(sat, gs);
+            NS_TEST_ASSERT_MSG_EQ(fresh->CurrentEsNoDb(), first,
+                                  "bit-identical to an uncached evaluation");
+
+            auto binned = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            binned->SetAttribute("ExcessLossElevationStepDeg", DoubleValue(0.1));
+            binned->SetEndpoints(sat, gs);
+            const double e0 = binned->CurrentElevationDeg();
+            for (int i = 0; i < 20; ++i)
+            {
+                // Move the satellite by tiny steps that stay inside one 0.1 deg bin.
+                sat->SetPosition(Vector(400e3 + 1.0 * i, 0, Re + 550e3));
+                binned->CurrentExcessLossDb();
+            }
+            NS_TEST_ASSERT_MSG_LT(std::fabs(binned->CurrentElevationDeg() - e0), 0.01,
+                                  "the probe stayed within a bin");
+            NS_TEST_ASSERT_MSG_LT(binned->GetExcessLossEvaluations(), 3u,
+                                  "binned cache: one evaluation per bin, not per packet");
+        }
+    }
+};
+
 class NtnConstellationTestSuite : public TestSuite
 {
   public:
@@ -2895,6 +3055,7 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new ContactSchedulerRangeUpdateTest, Duration::QUICK);
         AddTestCase(new SatLinkErrorAtmosphericChainTest, Duration::QUICK);
         AddTestCase(new Sgp4GeocentricContractTest, Duration::QUICK);
+        AddTestCase(new GeocentricAdapterElevationTest, Duration::QUICK);
         AddTestCase(new Tr38821CorpusLoadTest, Duration::QUICK);
         AddTestCase(new CalibrationHarnessGateTest, Duration::QUICK);
         AddTestCase(new CalibrationHarnessEndToEndTest, Duration::QUICK);
@@ -2907,6 +3068,7 @@ class NtnConstellationTestSuite : public TestSuite
         AddTestCase(new ContactGraphRouterLifetimeAwarePathTest, Duration::QUICK);
         AddTestCase(new ContactSchedulerPredictContactEndTest, Duration::QUICK);
         AddTestCase(new ContactSchedulerIslCandidateTest, Duration::QUICK);
+        AddTestCase(new SatLinkAltitudeFrameCacheTest, Duration::QUICK);
     }
 };
 

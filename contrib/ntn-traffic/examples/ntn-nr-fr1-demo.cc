@@ -40,6 +40,10 @@ main(int argc, char* argv[])
     double bwMhz = 20.0;        // NTN-FR1 max
     std::string outputDir = "./";
 
+    // Wave 1 (C5): feeder from a real gateway north of the UE site (WGS-84).
+
+    double gwDistanceKm = 500.0;
+
     CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
@@ -51,6 +55,14 @@ main(int argc, char* argv[])
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
     cmd.AddValue("bwMhz", "Channel bandwidth (MHz)", bwMhz);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("gwDistanceKm",
+
+                 "Gateway ground distance north of the UE site (km); <= 0 keeps the 5 ms "
+
+                 "constant backhaul",
+
+                 gwDistanceKm);
+
     cmd.Parse(argc, argv);
 
     // ---- Nodes + mobility -----------------------------------------------
@@ -111,7 +123,9 @@ main(int argc, char* argv[])
     const bool eirpFromTr38821 = satEirpDbm < 0.0 && freqGhz * 1e9 > 1.0e9 && freqGhz * 1e9 <= 7.125e9;
     if (eirpFromTr38821)
     {
-        nr.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        // C4/C7: TR 38.821 Set-1 terminal and payload (34 dBW/MHz, handheld 1T2R, NF 7 dB).
+
+        nr.ApplyTr38821Set1Defaults();
     }
     else
     {
@@ -122,9 +136,17 @@ main(int argc, char* argv[])
         nr.SetSatConductedPowerDbm(satEirpDbm);
     }
     nr.SetUeTxPowerDbm(23.0);
-    nr.SetBackhaulDelay(MilliSeconds(5));
+    nr.SetBackhaulDelay(MilliSeconds(5)); // used only when no gateway is wired (--gwDistanceKm <= 0)
 
     nr.Build(gnbNodes, ueNodes);
+
+    if (gwDistanceKm > 0.0)
+
+    {
+
+        nr.SetFeederGatewayGeodetic(subLat + gwDistanceKm / 111.195, subLon, 0.0);
+
+    }
     // Report the conducted power the radio actually uses.
     satEirpDbm = nr.GetSatEirpDbm();
     // The main spine takes an explicit traffic profile; the alternative spine

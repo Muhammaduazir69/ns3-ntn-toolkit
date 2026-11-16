@@ -3,7 +3,7 @@
  * Copyright (c) 2026  Muhammad Uzair
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * thz-ntn-real-stack — Phase 1 of 2026-06 protocol-fidelity audit
+ * thz-ntn-real-stack: Phase 1 of 2026-06 protocol-fidelity audit
  * (channel-plugin pattern).
  *
  * The audit found every thz-ntn example was a CSV calculator (or an empty Run()):
@@ -12,7 +12,7 @@
  * (ThzNtnPropagationLossModel) and chained onto the REAL mmwave NTN spectrum
  * channel via NtnRealStackHelper::AddExtraPropagationLoss(). The THz atmospheric
  * loss now actually attenuates the transmitted packets, so it shows up in the
- * MEASURED SINR — and toggling rain mid-run visibly degrades the measured link.
+ * MEASURED SINR: and toggling rain mid-run visibly degrades the measured link.
  *
  * Usage:
  *   ./ns3 run "thz-ntn-real-stack --duration=16 --freqGhz=100 --rainMmH=25"
@@ -28,6 +28,9 @@
 #include "ns3/thz-ntn-propagation-loss-model.h"
 #include "ns3/walker-constellation.h"
 
+#include "ns3/thz-ntn-aperture.h"
+#include "ns3/thz-ntn-spectrum-atmosphere-model.h"
+
 #include <iostream>
 
 using namespace ns3;
@@ -41,7 +44,15 @@ main(int argc, char* argv[])
     uint32_t numUes = 4;
     double altitudeKm = 550.0;
     double freqGhz = 100.0;      // sub-THz / W-band (within the stack's range)
-    double satEirpDbm = 92.0;    // high-gain THz beam EIRP (closes the long slant)
+    double satEirpDbm = 92.0;    // legacy only (--legacyConductedDbm=1 uses it as conducted)
+    // Wave 2 M3: declared payload and terminals (aperture law, eta 0.6).
+    double satTxW = 10.0;
+    double satDishM = 0.5;
+    double ueDishM = 0.3;
+    double nfDb = 7.0;
+    double bandwidthMHz = 100.0;
+    uint32_t numerology = 3;
+    bool legacyConducted = false;
     double rainMmH = 4.0;        // light rain: degrades but keeps the link alive
     std::string outputDir = "thz-ntn-real-stack-output";
     std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
@@ -55,6 +66,16 @@ main(int argc, char* argv[])
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("rainMmH", "Rain rate applied in the 2nd half (mm/h)", rainMmH);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("satTxW", "Satellite transmitter output (W)", satTxW);
+    cmd.AddValue("satDishM", "Satellite reflector diameter (m)", satDishM);
+    cmd.AddValue("ueDishM", "Terminal reflector diameter (m)", ueDishM);
+    cmd.AddValue("nfDb", "Terminal noise figure (dB)", nfDb);
+    cmd.AddValue("bandwidthMHz", "Channel bandwidth (MHz)", bandwidthMHz);
+    cmd.AddValue("numerology", "NR numerology (3 = 120 kHz, extrapolated above 71 GHz)",
+                 numerology);
+    cmd.AddValue("legacyConductedDbm",
+                 "1 = pre-Wave-2 point: --satEirpDbm as conducted power, mu 1, scalar loss",
+                 legacyConducted);
     std::string netSimOut; // NetSimulyzer JSON (empty = off)
     std::string czmlOut;   // Cesium CZML (empty = off)
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON trace output path (empty = off)", netSimOut);
@@ -84,7 +105,7 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(satElements[0]);
+    satSgp4->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
@@ -105,9 +126,26 @@ main(int argc, char* argv[])
     NtnRealStackHelper rs;
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
                                          : NtnRealStackHelper::RadioBackend::Nr);
+    if (radio == "mmwave")
+    {
+        legacyConducted = true; // the spectrum seam is nr-only
+    }
     if (radio != "mmwave")
     {
-        rs.SetNumerology(1); // FR1 30 kHz SCS
+        rs.SetNumerology(legacyConducted ? 1 : numerology);
+    }
+    const double fHz = freqGhz * 1e9;
+    const double eirpDbm =
+        10.0 * std::log10(satTxW * 1e3) + ThzNtnAperture::GainDbi(satDishM, fHz, 0.6);
+    const double gUe = ThzNtnAperture::GainDbi(ueDishM, fHz, 0.6);
+    if (!legacyConducted)
+    {
+        std::cout << "  Wave 2 M3 declared payload: Pt " << satTxW << " W, dish " << satDishM
+                  << " m, EIRP " << eirpDbm << " dBm; terminal dish " << ueDishM << " m ("
+                  << gUe << " dBi), NF " << nfDb << " dB; mu " << numerology << " over "
+                  << bandwidthMHz
+                  << " MHz (NR numerology EXTRAPOLATED above 71 GHz, TS 38.211 4.2); "
+                     "per-RB P.676 + P.618/P.838 rain, LOS, no legacy excess model\n";
     }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
@@ -116,22 +154,54 @@ main(int argc, char* argv[])
     // NT-02: declared as CONDUCTED power at the array input. This carrier has
     // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
     // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (legacyConducted)
+    {
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
+    else
+    {
+        rs.SetBandwidthHz(bandwidthMHz * 1e6);
+        rs.SetSatEirpTotalDbm(eirpDbm);
+        rs.SetEirpBudgetDbm(eirpDbm, 0.5);
+        rs.SetUeRxAntennaGain(gUe - 10.0 * std::log10(2.0));
+        rs.SetUeNoiseFigureDb(nfDb);
+        rs.SetSmallScaleFading(false);
+        rs.SetTr38811ExcessLoss(false);
+    }
     rs.Build(satNodes, ueNodes);
 
     // Re-home the THz physics as a real channel plug-in on the mmwave channel.
-    Ptr<ThzNtnPropagationLossModel> thz = CreateObject<ThzNtnPropagationLossModel>();
-    thz->SetFrequency(freqGhz * 1e9);
-    thz->SetRainRate(0.0); // clear sky for the first half
-    rs.AddExtraPropagationLoss(thz);
-
+    Ptr<ThzNtnPropagationLossModel> thz;
+    Ptr<ThzNtnSpectrumAtmosphereModel> atm;
+    if (legacyConducted)
+    {
+        thz = CreateObject<ThzNtnPropagationLossModel>();
+        thz->SetFrequency(fHz);
+        thz->SetRainRate(0.0); // clear sky for the first half
+        rs.AddExtraPropagationLoss(thz);
+    }
+    else
+    {
+        // Per-RB P.676 gas and P.618 rain (R_0.01 = rainMmH) at each RB frequency.
+        atm = CreateObject<ThzNtnSpectrumAtmosphereModel>();
+        rs.AddSpectrumChannelLoss(atm);
+    }
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));
     rs.EnableAiFlowMonitor("thz-ntn-real-stack");
 
     // Rain event over the traffic window -> measured SINR drops (THz physics in
     // the packet path). Run with --rainMmH=0 vs a high value to see the delta.
-    Simulator::Schedule(Seconds(1.0), [thz, rainMmH] { thz->SetRainRate(rainMmH); });
+    Simulator::Schedule(Seconds(1.0), [thz, atm, rainMmH] {
+        if (thz)
+        {
+            thz->SetRainRate(rainMmH);
+        }
+        if (atm)
+        {
+            atm->SetUniformRainRate(rainMmH);
+        }
+    });
 
     // ---- Optional 3D scene trace (LOCAL-ENU frame) ----
     // The satellite and UEs live in the scenario's local ENU frame (metres about
@@ -174,8 +244,18 @@ main(int argc, char* argv[])
 
     // Query the plug-in on the actual sat->UE pair (the cached "last loss" can
     // be a ground-to-ground UE pair query on a shared multi-UE channel).
-    const double satUeLossDb =
-        -thz->CalcRxPower(0.0, satEnu, ueNodes.Get(0)->GetObject<MobilityModel>());
+    double satUeLossDb;
+    if (thz)
+    {
+        satUeLossDb = -thz->CalcRxPower(0.0, satEnu, ueNodes.Get(0)->GetObject<MobilityModel>());
+    }
+    else
+    {
+        // Centre-RB loss of the per-RB model on the same sat->UE geometry.
+        const ThzNtnLinkGeometry g = ThzNtnLinkGeometry::Compute(
+            PeekPointer(satEnu), PeekPointer(ueNodes.Get(0)->GetObject<MobilityModel>()));
+        satUeLossDb = atm->ComputeLossDb(g, {fHz}, Simulator::Now()).front();
+    }
     std::cout << "\n--- THz Summary (physics applied to real packets) ---\n"
               << "  measured DL SINR (mean):  " << rs.GetMeanDlSinrDb() << " dB\n"
               << "  measured TBLER:           " << rs.GetMeanDlTbler() << "\n"

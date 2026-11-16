@@ -368,7 +368,180 @@ OranNtnHelper::CreateAllXapps(Ptr<OranNtnNearRtRic> ric)
 
     NS_LOG_INFO("OranNtnHelper: Created and registered " << xapps.size()
                 << " xApps");
+    // ORAN-13 follow-up (Wave 2 M2): the dispatcher reports each actuation back
+    // to the issuing xApp through m_allXapps, which nothing ever filled, so
+    // xapp_metrics.csv actuated_actions was 0 even for actuated actions.
+    for (const auto& [name, x] : xapps)
+    {
+        m_allXapps[name] = x;
+    }
     return xapps;
+}
+
+std::vector<E2RcActionType>
+OranNtnHelper::GetXappActionTypes(const std::string& name)
+{
+    using T = E2RcActionType;
+    // What each catalogue xApp emits (grep of BuildAction/actionType in
+    // model/oran-ntn-xapp-*.cc, 16 Nov 2026).
+    static const std::map<std::string, std::vector<E2RcActionType>> kTypes = {
+        {"ho-predict", {T::HANDOVER_TRIGGER}},
+        {"beam-hop", {T::BEAM_HOP_SCHEDULE}},
+        {"slice-manager", {T::SLICE_PRB_ALLOCATION}},
+        {"doppler-comp", {T::DOPPLER_COMP_UPDATE}},
+        {"tn-ntn-steering", {T::HANDOVER_TRIGGER}},
+        {"energy-harvest", {T::BEAM_SHUTDOWN, T::COMPUTE_THROTTLE}},
+        {"interference-mgmt", {T::BEAM_SWITCH, T::INTERFERENCE_NULLING, T::TX_POWER_CONTROL}},
+        {"isac", {T::ACTION_THZ_ISAC_MODE}},
+        {"multi-conn", {T::DC_SETUP, T::DC_TEARDOWN, T::BEARER_SPLIT}},
+        {"predictive-alloc", {T::PRB_RESERVATION}},
+        {"thz-beam-mgmt", {T::ACTION_THZ_BEAM_CODEBOOK}},
+        {"thz-ris", {T::ACTION_THZ_RIS_CONFIG}},
+        {"thz-spectrum", {T::ACTION_THZ_FREQ_SELECT, T::ACTION_THZ_WINDOW_HOP}},
+    };
+    auto it = kTypes.find(name);
+    return it == kTypes.end() ? std::vector<E2RcActionType>{} : it->second;
+}
+
+std::map<std::string, Ptr<OranNtnXappBase>>
+OranNtnHelper::CreateAdmittedXapps(Ptr<OranNtnNearRtRic> ric)
+{
+    NS_LOG_FUNCTION(this);
+    std::map<std::string, Ptr<OranNtnXappBase>> admitted;
+    m_admission.clear();
+    struct Entry
+    {
+        std::string name;
+        uint8_t prio;
+        Time interval;
+        std::function<Ptr<OranNtnXappBase>()> make;
+    };
+    // Same names, priorities and decision intervals as CreateAllXapps().
+    const std::vector<Entry> catalogue = {
+        {"ho-predict", 10, MilliSeconds(100), [] { return CreateObject<OranNtnXappHoPredict>(); }},
+        {"beam-hop", 20, MilliSeconds(200), [] { return CreateObject<OranNtnXappBeamHop>(); }},
+        {"slice-manager", 30, MilliSeconds(500),
+         [] { return CreateObject<OranNtnXappSliceManager>(); }},
+        {"doppler-comp", 15, MilliSeconds(200),
+         [] { return CreateObject<OranNtnXappDopplerComp>(); }},
+        {"tn-ntn-steering", 25, MilliSeconds(500),
+         [] { return CreateObject<OranNtnXappTnNtnSteering>(); }},
+        {"energy-harvest", 40, MilliSeconds(1000),
+         [] { return CreateObject<OranNtnXappEnergyHarvest>(); }},
+        {"interference-mgmt", 22, MilliSeconds(200),
+         [] { return CreateObject<OranNtnXappInterferenceMgmt>(); }},
+        {"isac", 35, MilliSeconds(500), [] { return CreateObject<OranNtnXappIsac>(); }},
+        {"multi-conn", 28, MilliSeconds(300), [] { return CreateObject<OranNtnXappMultiConn>(); }},
+        {"predictive-alloc", 18, MilliSeconds(200),
+         [] { return CreateObject<OranNtnXappPredictiveAlloc>(); }},
+        {"thz-beam-mgmt", 26, MilliSeconds(200),
+         [] { return CreateObject<OranNtnXappThzBeamMgmt>(); }},
+        {"thz-ris", 27, MilliSeconds(300), [] { return CreateObject<OranNtnXappThzRis>(); }},
+        {"thz-spectrum", 24, MilliSeconds(300),
+         [] { return CreateObject<OranNtnXappThzSpectrum>(); }},
+    };
+    for (const auto& e : catalogue)
+    {
+        AdmissionRecord rec;
+        rec.xappName = e.name;
+        std::ostringstream types;
+        std::ostringstream missing;
+        bool ok = true;
+        for (E2RcActionType t : GetXappActionTypes(e.name))
+        {
+            types << (types.tellp() > 0 ? ";" : "") << static_cast<uint32_t>(t);
+            if (!HasActuator(t))
+            {
+                ok = false;
+                missing << (missing.tellp() > 0 ? ";" : "") << static_cast<uint32_t>(t);
+            }
+        }
+        rec.actionTypes = types.str();
+        rec.admitted = ok;
+        rec.reason = ok ? std::string("all action types actuated")
+                        : "no actuator for action type(s) " + missing.str();
+        m_admission.push_back(rec);
+        if (!ok)
+        {
+            NS_LOG_WARN("OranNtnHelper: xApp " << e.name << " REFUSED: " << rec.reason);
+            continue;
+        }
+        Ptr<OranNtnXappBase> x = e.make();
+        x->SetXappName(e.name);
+        x->SetPriority(e.prio);
+        x->SetDecisionInterval(e.interval);
+        ric->RegisterXapp(x);
+        admitted[e.name] = x;
+        m_allXapps[e.name] = x;
+    }
+    return admitted;
+}
+
+void
+OranNtnHelper::RegisterActuator(E2RcActionType type,
+                                RcActuatorCallback cb,
+                                const std::string& name)
+{
+    m_actuators[static_cast<uint8_t>(type)] = RegisteredActuator{cb, name};
+}
+
+bool
+OranNtnHelper::HasActuator(E2RcActionType type) const
+{
+    if (m_actuators.count(static_cast<uint8_t>(type)))
+    {
+        return true;
+    }
+    switch (type)
+    {
+    case E2RcActionType::BEAM_SWITCH:
+    case E2RcActionType::BEAM_SHUTDOWN:
+        return !m_beamActuators.empty();
+    case E2RcActionType::HANDOVER_TRIGGER:
+    case E2RcActionType::HANDOVER_CANCEL:
+        return !m_handoverActuator.IsNull();
+    case E2RcActionType::SLICE_PRB_ALLOCATION:
+    case E2RcActionType::PRB_RESERVATION:
+        return !m_sliceActuator.IsNull();
+    default:
+        return false;
+    }
+}
+
+bool
+OranNtnHelper::SubmitKpmReport(const E2KpmReport& report)
+{
+    auto it = m_e2Nodes.find(report.gnbId);
+    if (it == m_e2Nodes.end())
+    {
+        NS_LOG_WARN("OranNtnHelper: E2 node " << report.gnbId << " not found for KPM submit");
+        return false;
+    }
+    it->second->SubmitKpmMeasurement(report);
+    m_kpmDataset.push_back(report);
+    return true;
+}
+
+uint64_t
+OranNtnHelper::GetTotalRouted() const
+{
+    uint64_t n = 0;
+    for (const auto& [t, c] : m_actuationCounters)
+    {
+        n += c.routed;
+    }
+    return n;
+}
+
+uint64_t
+OranNtnHelper::GetTotalActuated() const
+{
+    uint64_t n = 0;
+    for (const auto& [t, c] : m_actuationCounters)
+    {
+        n += c.actuated;
+    }
+    return n;
 }
 
 void
@@ -668,6 +841,14 @@ OranNtnHelper::DefaultRcActionHandler(E2RcAction action)
     // reported as a failure (never a silent accept), and the logged success is
     // exactly the value returned to the RIC (action_log <-> xapp_metrics agree).
     bool actuated = false;
+    auto reg = m_actuators.find(static_cast<uint8_t>(action.actionType));
+    if (reg != m_actuators.end())
+    {
+        // Wave 2 M2: a registered actuator (a binding to the measured radio)
+        // owns this action type.
+        actuated = reg->second.cb(action);
+    }
+    else
     switch (action.actionType)
     {
     case E2RcActionType::BEAM_SWITCH:
@@ -737,6 +918,15 @@ OranNtnHelper::DefaultRcActionHandler(E2RcAction action)
     entry.confidence = action.confidence;
     entry.success = actuated;
     m_actionLog.push_back(entry);
+    {
+        ActuationCounter& c = m_actuationCounters[static_cast<uint8_t>(action.actionType)];
+        ++c.routed;
+        c.actuated += actuated ? 1 : 0;
+    }
+    if (m_actionObserver)
+    {
+        m_actionObserver(action, actuated);
+    }
 
     // ORAN-13: tell the issuing xApp what actually happened. Its own
     // successfulActions counter records only that the RIC ROUTED the action;
@@ -833,6 +1023,30 @@ OranNtnHelper::WriteAllMetrics(Ptr<OranNtnNearRtRic> ric) const
                 << m.avgConfidence << "," << m.avgDecisionLatency_ms << ","
                 << p50 << "," << p95 << "," << p99 << ","
                 << lmin << "," << lmax << "\n";
+    }
+
+    // Wave 2 M2: routed vs actuated per RC action type, and the admission
+    // verdict of every catalogue xApp (empty when CreateAdmittedXapps was not used).
+    {
+        std::ofstream act(m_outputDir + "/actuator_summary.csv");
+        act << "action_type,actuator,routed,actuated\n";
+        for (const auto& [t, c] : m_actuationCounters)
+        {
+            auto r = m_actuators.find(t);
+            act << static_cast<uint32_t>(t) << ","
+                << (r != m_actuators.end() ? r->second.name : std::string("legacy-hook-or-none"))
+                << "," << c.routed << "," << c.actuated << "\n";
+        }
+        if (!m_admission.empty())
+        {
+            std::ofstream adm(m_outputDir + "/xapp_admission.csv");
+            adm << "xapp_name,admitted,action_types,reason\n";
+            for (const auto& a : m_admission)
+            {
+                adm << a.xappName << "," << (a.admitted ? 1 : 0) << "," << a.actionTypes << ","
+                    << a.reason << "\n";
+            }
+        }
     }
 
     // Write Space RIC metrics

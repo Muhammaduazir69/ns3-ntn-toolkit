@@ -1474,6 +1474,13 @@ NtnChoAlgorithm::ExecuteHandover(uint16_t targetCellId)
         // TA from ephemeris and GNSS (TS 38.821 section 6.3.3).
         m_mechStats.lastRachTraversals = 0;
         m_mechStats.lastRachPropagationMs = 0.0;
+        // P0-8: the RRCReconfigurationComplete leg on the configured grant
+        // (TS 38.300 9.2.3.2) is one UE-to-target traversal; skipping the RACH
+        // does not skip it.
+        if (m_config.countRachLessCompletion)
+        {
+            interruptionMs += targetIt->second.slantRangeM / 299792458.0 * 1e3;
+        }
         ++m_mechStats.rachLessExecutions;
         // CHO-12: hand the pre-compensation to whoever owns timing advance.
         // Without this the value stopped in a stats struct and RACH-less

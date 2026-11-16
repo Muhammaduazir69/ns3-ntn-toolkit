@@ -12,6 +12,7 @@ build_lib_example(
     ${libapplications}
     ${libmmwave}
     ${liblte}
+    ${libnr}
 )
 
 build_lib_example(
@@ -29,6 +30,7 @@ build_lib_example(
     ${libapplications}
     ${libmmwave}
     ${liblte}
+    ${libnr}
 )
 
 build_lib_example(
@@ -63,6 +65,7 @@ build_lib_example(
     ${libapplications}
     ${libmmwave}
     ${liblte}
+    ${libnr}
 )
 
 # Real-stack flagship: TTE-aware CHO decides on MEASURED mmwave SINR.
@@ -81,6 +84,7 @@ build_lib_example(
     ${libapplications}
     ${libmmwave}
     ${liblte}
+    ${libnr}
 )
 
 build_lib_example(

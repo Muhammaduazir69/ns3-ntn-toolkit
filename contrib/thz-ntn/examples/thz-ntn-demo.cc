@@ -326,9 +326,9 @@ Example4_Ris()
         Ptr<ThzNtnRis> ris = CreateObject<ThzNtnRis>();
         ris->Configure(n, n, 300e9, RisDeployment::GROUND);
 
-        double maxG = ris->ComputeMaxGain_dB();
-        double snrGPerf = ris->ComputeSnrGain_dB(true);
-        double snrGImp = ris->ComputeSnrGain_dB(false);
+        double maxG = ris->ComputeMaxArrayFactorGain_dB();
+        double snrGPerf = ris->ComputeArrayFactorGain_dB(true);
+        double snrGImp = ris->ComputeArrayFactorGain_dB(false);
         double qLoss = ris->ComputeQuantizationLoss_dB();
         // Panel side n * lambda/2 at 300 GHz (lambda ~ 1 mm), in cm. The old
         // n*0.5/300*10 was a factor 3 too small (128 -> 2.13 cm, not 6.4 cm).
@@ -349,7 +349,7 @@ Example4_Ris()
     r8->Configure(8, 8, 300e9, RisDeployment::GROUND);
     Ptr<ThzNtnRis> r16 = CreateObject<ThzNtnRis>();
     r16->Configure(16, 16, 300e9, RisDeployment::GROUND);
-    double diff = r16->ComputeMaxGain_dB() - r8->ComputeMaxGain_dB();
+    double diff = r16->ComputeMaxArrayFactorGain_dB() - r8->ComputeMaxArrayFactorGain_dB();
     std::cout << "\nN^2 scaling verification: 4x more elements -> "
               << diff << " dB more gain (expected 20*log10(4) = 12.04 dB)\n";
     std::cout << "[CSV] " << OUT_DIR << "/04_ris_sweep.csv\n";

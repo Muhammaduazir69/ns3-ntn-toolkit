@@ -5,6 +5,7 @@ set(_fapi_real_libs
   ${libntn-traffic}
   ${libntn-constellation}
   ${libntn-cho}
+  ${libntn-rrc}
   ${libcore}
   ${libnetwork}
   ${libmobility}

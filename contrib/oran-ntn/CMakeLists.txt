@@ -83,8 +83,12 @@ set(source_files
     # WS4 — payload options / FH split / platform spec / role switch
     model/oran-ntn-fh-split.cc
     model/ntn-platform-spec.cc
+    # Wave 2 M2: E2 as packets over the feeder (opt-in)
+    model/oran-ntn-e2-transport.cc
     # Helper
     helper/oran-ntn-helper.cc
+    # Wave 2 M2: actuator registry + measured KPM producer on NtnRealStackHelper
+    helper/oran-ntn-real-stack-binding.cc
 )
 
 set(header_files
@@ -175,8 +179,10 @@ set(header_files
     # WS4 — payload options / FH split / platform spec / role switch
     model/oran-ntn-fh-split.h
     model/ntn-platform-spec.h
+    model/oran-ntn-e2-transport.h
     # Helper
     helper/oran-ntn-helper.h
+    helper/oran-ntn-real-stack-binding.h
 )
 
 set(test_sources
@@ -222,12 +228,15 @@ build_lib(
         ${libspectrum}
         ${libpropagation}
         ${libinternet}
+        ${libpoint-to-point}
         ${libapplications}
         ${libsatellite}
         ${libmmwave}
         ${libns3-ai-ntn}
         ${libntn-traffic}
         ${libntn-slice}
+        ${libnr}
+        ${libthz-ntn}
         ${oran_ntn_extra_libs}
     TEST_SOURCES ${test_sources}
 )

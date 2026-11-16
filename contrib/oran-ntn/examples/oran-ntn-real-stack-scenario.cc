@@ -123,7 +123,7 @@ main(int argc, char* argv[])
         // Serving = element 0; candidates = in-plane neighbours both ways.
         const uint32_t idx =
             (s == 0) ? 0 : ((s % 2 == 1) ? s / 2 + 1 : wcfg.total_sats - s / 2);
-        satMobs[s]->SetElements(elements[idx % wcfg.total_sats]);
+        satMobs[s]->SetElementsSgp4(elements[idx % wcfg.total_sats]);
         satNodes.Get(s)->AggregateObject(satMobs[s]);
     }
 
