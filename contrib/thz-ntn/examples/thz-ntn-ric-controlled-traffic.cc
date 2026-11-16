@@ -13,8 +13,9 @@
 //              tracks the channel, not its own actuation (no bang-bang).
 //   control:   an xApp callback (SetIndicationCallback) receives every
 //              indication; when intrinsic SINR falls below --sinrThreshDb it
-//              ENGAGES the ground RIS, whose ThzNtnRis::ComputeSnrGain_dB()
-//              array gain is applied as a LIVE channel reconfiguration
+//              ENGAGES the ground RIS, whose far-field cascaded ray
+//              (ThzNtnRis::ComputeCascadedPathLoss_dB, power-summed with the
+//              blocked direct ray) is applied as a LIVE channel reconfiguration
 //              (NtnStaticExtraLossModel); when the channel recovers it
 //              releases the RIS.
 //   data:      the saturating downlink flow rides the same real radio, so
@@ -62,8 +63,25 @@ Ptr<OranNtnE2Node> g_e2;
 double g_sinrThreshDb = 15.0;
 bool g_xappEnabled = true;
 double g_blockageDb = 0.0;   // current canyon blockage (0 = LOS)
-double g_risCompDb = 0.0;    // RIS compensation available when engaged
+// RIS ray level relative to the unblocked direct ray (dB, negative). It used to
+// hold ComputeSnrGain_dB(true) = 20 log10(N), the gain over ONE element, and
+// that was applied as a gain over the direct link: a 64x64 panel "recovered"
+// 72 dB, ignoring the RIS-to-terminal spreading loss entirely.
+double g_risCompDb = 0.0;
 bool g_risEngaged = false;
+
+// Recovery once engaged: the blocked direct ray and the RIS ray add in power.
+double
+RisRecoveryDb(double blockageDb)
+{
+    if (blockageDb <= 0.0)
+    {
+        return 0.0;
+    }
+    const double engaged = -10.0 * std::log10(std::pow(10.0, -blockageDb / 10.0) +
+                                              std::pow(10.0, g_risCompDb / 10.0));
+    return std::max(0.0, blockageDb - engaged);
+}
 uint32_t g_risEngagements = 0;
 uint32_t g_kpmsSent = 0;
 uint32_t g_xappActions = 0;
@@ -71,7 +89,7 @@ uint32_t g_xappActions = 0;
 void
 ApplyChannelState()
 {
-    const double comp = g_risEngaged ? std::min(g_blockageDb, g_risCompDb) : 0.0;
+    const double comp = g_risEngaged ? RisRecoveryDb(g_blockageDb) : 0.0;
     g_nlos->SetLossDb(g_blockageDb - comp);
 }
 
@@ -112,6 +130,7 @@ main(int argc, char* argv[])
     double sinrThreshDb = 15.0;
     bool xappEnabled = true;
     uint32_t risN = 64; // 64x64 RIS panel
+    double risDistM = 10.0; // RIS-to-terminal distance, beyond the ~2 D^2/lambda far field
     std::string humidityProfile = "mid_latitude_summer";
     std::string outputDir = "thz-ntn-ric-controlled-output";
     std::string radio = "nr"; // radio backend: nr (FR1) or mmwave
@@ -127,6 +146,7 @@ main(int argc, char* argv[])
                  sinrThreshDb);
     cmd.AddValue("xapp", "Enable the RIS control xApp (0/1)", xappEnabled);
     cmd.AddValue("risN", "RIS panel side N (NxN elements)", risN);
+    cmd.AddValue("risDistM", "RIS-to-terminal distance in m (far field)", risDistM);
     cmd.AddValue("humidityProfile", "Humidity profile label (reporting only)",
                  humidityProfile);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -146,7 +166,19 @@ main(int argc, char* argv[])
     Ptr<ThzNtnRis> ris = CreateObject<ThzNtnRis>();
     ris->Configure(risN, risN, freqGHz * 1e9, RisDeployment::GROUND);
     ris->ComputeOptimalPhases(45.0, 0.0, 0.0, 0.0);
-    g_risCompDb = ris->ComputeSnrGain_dB(true);
+    {
+        // RIS ray vs direct ray: FSPL(d1) - PL_cascaded(d1, d2); d1 cancels.
+        Ptr<ConstantPositionMobilityModel> tx = CreateObject<ConstantPositionMobilityModel>();
+        Ptr<ConstantPositionMobilityModel> rp = CreateObject<ConstantPositionMobilityModel>();
+        Ptr<ConstantPositionMobilityModel> rx = CreateObject<ConstantPositionMobilityModel>();
+        const double d1 = 550.0e3;
+        tx->SetPosition(Vector(0.0, 0.0, d1));
+        rp->SetPosition(Vector(0.0, 0.0, 0.0));
+        rx->SetPosition(Vector(risDistM, 0.0, 0.0));
+        const double lambda = 299792458.0 / (freqGHz * 1e9);
+        g_risCompDb = 20.0 * std::log10(4.0 * M_PI * d1 / lambda) -
+                      ris->ComputeCascadedPathLoss_dB(tx, rp, rx);
+    }
 
     // --- nodes + REAL mobility (SGP4 satellite, fixed ground UE) ---
     NodeContainer satNodes;
@@ -236,9 +268,10 @@ main(int argc, char* argv[])
     });
 
     std::printf("# thz-ntn-ric-controlled-traffic (Roadmap §4.3.7, measured radio)\n");
-    std::printf("#   sim=%.0fs freq=%.0fGHz EIRP=%.1fdBm RIS=%ux%u (gain %.1f dB) "
+    std::printf("#   sim=%.0fs freq=%.0fGHz EIRP=%.1fdBm RIS=%ux%u (ray %.1f dB vs direct, recovers %.1f of %.0f dB) "
                 "xApp=%s thresh=%.1fdB\n",
                 simSeconds, freqGHz, satEirpDbm, risN, risN, g_risCompDb,
+                RisRecoveryDb(blockageDb), blockageDb,
                 xappEnabled ? "on" : "off", sinrThreshDb);
     std::printf("#   blockage: %.0f dB @%.0fs, clears @%.0fs (live channel events)\n",
                 blockageDb, tBlock, tClear);
@@ -253,7 +286,7 @@ main(int argc, char* argv[])
         [ueMob, satEnu, &lastRx](Time now) {
             const double measured = g_rs->GetUeRecentSinrDb(0);
             const double comp =
-                g_risEngaged ? std::min(g_blockageDb, g_risCompDb) : 0.0;
+                g_risEngaged ? RisRecoveryDb(g_blockageDb) : 0.0;
             const double intrinsic = measured - comp;
             const double tbler = g_rs->GetUeRecentTbler(0);
             const uint64_t rx = g_rs->GetUeRxBytes(0);

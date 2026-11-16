@@ -34,7 +34,7 @@ struct NtnDrxConfig
     Time shortCycle{MilliSeconds(20)};     //!< drx-ShortCycle (0 disables)
     Time onDuration{MilliSeconds(5)};      //!< drx-onDurationTimer
     Time inactivityTimer{MilliSeconds(10)};//!< drx-InactivityTimer
-    uint32_t shortCycleCount{2};           //!< drx-ShortCycleTimer (in long cycles)
+    uint32_t shortCycleCount{2};           //!< drx-ShortCycleTimer (in multiples of drx-ShortCycle, TS 38.321 5.7)
 
     /// NTN: when true, allow the state machine to enter `AwaitingPass` between
     /// the current pass-end and the next pass-start.

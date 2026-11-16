@@ -79,16 +79,40 @@ ChoTick()
     const double servSlant = ntngeo::SlantRangeM(u, sPos);
     const double candSlant = ntngeo::SlantRangeM(u, cPos);
 
-    const double servSinr = g_rs->GetUeRecentSinrDb(0);
-    if (std::isnan(servSinr))
+    const double measSinr = g_rs->GetUeRecentSinrDb(0);
+    if (std::isnan(measSinr))
     {
         Simulator::Schedule(Seconds(1.0), &ChoTick);
         return;
     }
-    // Ephemeris-predicted candidate SINR: measured baseline + real Friis ratio.
-    const double candSinr = servSinr + 20.0 * std::log10(servSlant / std::max(1.0, candSlant));
-    const double servGain = std::max(-20.0, (servElev - 45.0) / 5.0);
-    const double candGain = std::max(-20.0, (candElev - 45.0) / 5.0);
+    // CHO-25: attribute the measurement to the cell the radio ACTUALLY serves.
+    //
+    // GetUeRecentSinrDb(0) is the SINR of whichever gNB UE 0 is attached to.
+    // It was always filed under the original serving cell, so once the vendored
+    // A3 (or the CHO itself) moved the UE to the neighbour, the neighbour's
+    // measured SINR was reported as the old cell's and the old cell's predicted
+    // value as the neighbour's: every decision after the first cell change ran
+    // on swapped inputs. TS 38.331 section 5.5.3 measures the serving cell
+    // (Mp) and neighbours (Mn) relative to the CURRENT PCell.
+    const uint16_t radioCell = g_rs->GetUeServingCellId(0);
+    const bool onCand = (radioCell == g_candCellId);
+    const uint16_t attCell = onCand ? g_candCellId : g_servingCellId;
+    const uint16_t othCell = onCand ? g_servingCellId : g_candCellId;
+    const double attSlant = onCand ? candSlant : servSlant;
+    const double othSlant = onCand ? servSlant : candSlant;
+    const double attElev = onCand ? candElev : servElev;
+    const double othElev = onCand ? servElev : candElev;
+    if (radioCell != 0 && radioCell != g_cho->GetServingCellId() &&
+        g_cho->GetState() != NtnChoAlgorithm::CHO_EXECUTING)
+    {
+        // The radio changed cell without a CHO decision (vendored A3): follow it.
+        g_cho->SetServingCell(radioCell);
+    }
+    // Ephemeris-predicted SINR of the other cell: measured baseline + real Friis ratio.
+    const double servSinr = measSinr;
+    const double candSinr = measSinr + 20.0 * std::log10(attSlant / std::max(1.0, othSlant));
+    const double servGain = std::max(-20.0, (attElev - 45.0) / 5.0);
+    const double candGain = std::max(-20.0, (othElev - 45.0) / 5.0);
 
     // CHO-21: hand the algorithm the UE's real position every tick.
     //
@@ -101,10 +125,10 @@ ChoTick()
     // from the fallback rule below instead.
     g_cho->UpdateUeKinematics(GeoCoordinate(u), g_ueMob->GetVelocity());
 
-    g_cho->UpdateMeasurement(g_servingCellId, servSinr, servGain);
-    g_cho->UpdateMeasurement(g_candCellId, candSinr, candGain);
-    g_cho->UpdateCandidateSlantRange(g_servingCellId, servSlant);
-    g_cho->UpdateCandidateSlantRange(g_candCellId, candSlant);
+    g_cho->UpdateMeasurement(attCell, servSinr, servGain);
+    g_cho->UpdateMeasurement(othCell, candSinr, candGain);
+    g_cho->UpdateCandidateSlantRange(attCell, attSlant);
+    g_cho->UpdateCandidateSlantRange(othCell, othSlant);
     g_cho->EvaluateConditions();
 
     uint16_t chosen = g_cho->SelectBestCandidate();
@@ -118,8 +142,8 @@ ChoTick()
     {
         std::fprintf(g_choTrace,
                      "%.1f,%u,%u,%.3f,%.3f,%.2f,%.2f,%.1f,%.1f,%u\n",
-                     Simulator::Now().GetSeconds(), g_servingCellId, g_candCellId, servSinr,
-                     candSinr, servElev, candElev, servSlant / 1e3, candSlant / 1e3, chosen);
+                     Simulator::Now().GetSeconds(), attCell, othCell, servSinr,
+                     candSinr, attElev, othElev, attSlant / 1e3, othSlant / 1e3, chosen);
     }
     // CHO-22: remember WHO decided, so the fallback is never reported as the
     // named trigger. Every committed "CHO decisions=N (a3 ...)" line was
@@ -135,10 +159,16 @@ ChoTick()
         // TTE-aware fallback before the estimator admits: better-predicted
         // visible cell with a 1 dB execution offset (3GPP NTN CHO
         // execution-condition analogue, matched to the LTM hysteresis).
-        chosen = (candSinr > servSinr + 1.0 && candElev >= 10.0) ? g_candCellId
-                                                                 : g_servingCellId;
+        chosen = (candSinr > servSinr + 1.0 && othElev >= 10.0) ? othCell : attCell;
     }
-    if (chosen != g_serving && chosen != 0 && chosen != g_servingCellId)
+    // CHO-25: a decision is a cell change relative to the radio's serving cell,
+    // and none is issued while a reconfiguration is still in flight (T304
+    // running, TS 38.331 section 5.3.5.8.3). The old guard compared against the
+    // ORIGINAL serving id, so a return handover could never be executed and a
+    // UE already moved by A3 could be "handed over" to the cell it was on.
+    const uint16_t curCell = (radioCell != 0) ? radioCell : g_cho->GetServingCellId();
+    if (chosen != 0 && chosen != curCell &&
+        g_cho->GetState() != NtnChoAlgorithm::CHO_EXECUTING)
     {
         ++g_handovers;
         if (fromTrigger)
@@ -154,7 +184,7 @@ ChoTick()
         const auto st = g_cho->GetMechanismStats();
         std::printf("  %6.1fs  HANDOVER cell %u -> %u  (servSINR meas=%.1f dB, candSINR "
                     "pred=%.1f dB, interruption=%.1f ms)\n",
-                    Simulator::Now().GetSeconds(), g_serving, chosen, servSinr, candSinr,
+                    Simulator::Now().GetSeconds(), curCell, chosen, servSinr, candSinr,
                     st.lastInterruptionMs);
         g_serving = chosen;
     }
@@ -183,7 +213,7 @@ main(int argc, char* argv[])
     cmd.AddValue("numUes", "Number of TR 38.811 UEs on the serving cell", numUes);
     cmd.AddValue("leoAltKm", "Constellation altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("tteMinSec", "Minimum TTE for CHO admission (s)", tteMinSec);
     cmd.AddValue("hoHystDb", "A3 hysteresis (dB) for the actuated NR X2 handover", hoHystDb);
@@ -199,9 +229,30 @@ main(int argc, char* argv[])
     g_simTime = simSeconds;
 
     const bool useNr = (radio != "mmwave");
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
-    // healthy SINR; mmwave keeps its historical 55 dBm (zero regression).
-    if (satEirpDbm < 0.0)
+    // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the
+    // default is now that Set-1 density, as ntn-v2x-real-stack does; an
+    // explicit --satEirpDbm keeps meaning conducted power. The radio here
+    // already took the Set-1 density on BOTH backends, so the default is
+    // backend-agnostic; what changes is that the printed budget and the
+    // decision model now receive the same conducted power as the radio.
+    // The probe mirrors the cell's carrier and bandwidth and returns the
+    // equivalent CONDUCTED power from the helper's own formula
+    // (density + 10log10(BW_MHz) + 30 - ArrayGainDb()), so every other
+    // consumer of satEirpDbm stays consistent with the radio.
+    NtnRealStackHelper eirpProbe;
+    eirpProbe.SetCarrierFrequencyHz(freqGHz * 1e9);
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 &&
+                                 eirpProbe.GetCarrierFrequencyHz() > 1.0e9 &&
+                                 eirpProbe.GetCarrierFrequencyHz() <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        eirpProbe.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        satEirpDbm = eirpProbe.GetSatEirpDbm();
+    }
+    else if (satEirpDbm < 0.0)
     {
         satEirpDbm = useNr ? 70.0 : 55.0;
     }
@@ -269,12 +320,22 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-handover-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
-    // S-band LEO reference payload. Declared as a DENSITY so the helper
-    // back-computes conducted power against the array gain instead of the
-    // antenna being counted twice.
-    rs.SetSatEirpDensityDbwMhz(
-        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    if (eirpFromTr38821)
+    {
+        // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for
+        // the S-band LEO reference payload. Declared as a DENSITY so the
+        // helper back-computes conducted power against the array gain
+        // instead of the antenna being counted twice.
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit --satEirpDbm (or a default on a carrier outside
+        // the Set-1 S-band reference) is CONDUCTED power at the array input.
+        // It used to be ignored here: the radio always took the density
+        // while the printed budget and the decision model took this value.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     // ACTUATED handover: hand BOTH satellites to the radio helper as gNBs and
     // arm the real NR A3-RSRP + X2 handover, so a UE physically moves to the
     // neighbour cell on measured RSRP (not just a decision-model counter). The
@@ -283,7 +344,17 @@ main(int argc, char* argv[])
     gnbSats.Add(servSat.Get(0));
     gnbSats.Add(candSat.Get(0));
     rs.SetHandover(true, hoHystDb, MilliSeconds(256));
+    // The CHO below is the ONLY decision maker: keep the X2 for its
+    // TriggerHandover but do not install the vendored A3 as well. With both
+    // armed, A3 moved the UE back within about a second of every CHO
+    // execution under NTN fading (8 handovers for one CHO decision).
+    rs.SetAutonomousHandover(false);
     rs.Build(gnbSats, ueNodes);
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("ntn-cho-handover-traffic"); // WS2 KPM series (TS 28.552 names)
@@ -415,10 +486,16 @@ main(int argc, char* argv[])
             g_cho->NotifyHandoverComplete(to, false);
         }
     }));
+    // CHO-26: only UE 0's completions close UE 0's CHO. The trace fires for
+    // every UE; with --numUes > 1 another terminal's A3 handover stopped this
+    // UE's T304 and moved the algorithm's serving cell. The gNB fires
+    // HandoverEndOk on RRCReconfigurationComplete, by which time UE 0 holds its
+    // target-cell RNTI, so (cellId, rnti) identifies it radio-agnostically.
     Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/HandoverEndOk",
                     MakeCallback(+[](std::string /*ctx*/, uint64_t /*imsi*/, uint16_t cellId,
-                                     uint16_t /*rnti*/) {
-                        if (g_cho)
+                                     uint16_t rnti) {
+                        if (g_cho && g_rs && cellId == g_rs->GetUeServingCellId(0) &&
+                            rnti == g_rs->GetUeRnti(0))
                         {
                             g_cho->NotifyHandoverComplete(cellId, true);
                         }
@@ -459,7 +536,7 @@ main(int argc, char* argv[])
                 "rachless=%u  final cell=%u\n",
                 g_handovers, trigger.c_str(), actuatedHo, rs.GetRxThroughputMbps(),
                 rs.GetMeanDlSinrDb(), g_sinrAtHo, st.lastInterruptionMs, st.rachLessExecutions,
-                g_serving);
+                rs.GetUeServingCellId(0)); // CHO-25: the radio's serving cell, not the model's
     // NOTE: "CHO decisions" is the ntn-cho algorithm's trigger count; "ACTUATED
     // X2 handovers" is how many times a UE was physically moved to the neighbour
     // gNB by the real NR A3-RSRP + X2 machinery. On a real LEO pass the RSRP

@@ -31,6 +31,7 @@
 #include "ns3/oran-ntn-a1-interface.h"
 #include "ns3/oran-ntn-helper.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
+#include "ns3/oran-ntn-ric-placement.h"
 #include "ns3/oran-ntn-types.h"
 #include "ns3/slice-isolation-monitor.h"
 
@@ -126,12 +127,33 @@ main(int argc, char* argv[])
     auto nearRtRic = helper->CreateNearRtRic();
     helper->ConnectA1Interface(nearRtRic, nonRtRic);
     auto satE2Nodes = helper->CreateSatelliteE2Nodes(satNodes, nearRtRic);
+    helper->SetShellAltitudeKm(altitudeKm);
+    // MixedBouquet marks UE u%3 = 0 mMTC (5QI 9), 1 eMBB (5QI 2), 2 URLLC
+    // (5QI 82); declare the same slices to the RIC instead of the helper's
+    // unrelated ueId%3 tag (0 eMBB, 1 URLLC, 2 mMTC).
+    for (uint32_t u = 0; u < numUes; ++u)
+    {
+        helper->SetUeSliceId(u, (u % 3 == 0) ? 2 : (u % 3 == 1) ? 0 : 1);
+    }
+    // The E2 node sat at the helper's constant 4 ms feeder delay. A ground RIC
+    // controlling a LEO cell sees the live satellite-gateway slant on both
+    // legs (O-RAN WG3 E2 over the feeder), so bind it to the geometry: a
+    // gateway about 110 km north of the UE cluster, refreshed every second.
+    Ptr<ConstantPositionMobilityModel> gwMob = CreateObject<ConstantPositionMobilityModel>();
+    gwMob->SetPosition(ntngeo::GeodeticToEcef(subLat + 1.0, subLon, 0.0));
+    Ptr<OranNtnRicPlacement> ricSite = CreateObject<OranNtnRicPlacement>();
+    ricSite->SetSite(OranNtnRicPlacement::Site::GroundGateway);
+    ricSite->BindToGeometry(servSat, gwMob, satE2Nodes.front(), Seconds(1.0));
     auto xapps = helper->CreateAllXapps(nearRtRic);
     helper->StartAllXapps(nearRtRic);
 
     // ---- Consumer 2: ntn-slice SLA monitor ----
     SliceProfile profiles[3] = {DefaultEmbb(1), DefaultUrllc(2), DefaultMmtc(3)};
     SliceIsolationMonitor sliceMon;
+    // The monitor keeps a 200-sample window by default and the histogram below
+    // is replayed in ascending delay order, so only the slowest 200 packets
+    // would survive and "p99" would be the tail maximum. Keep every sample.
+    sliceMon.SetWindow(10000000);
     for (auto& p : profiles)
     {
         sliceMon.RegisterSlice(p);
@@ -145,6 +167,8 @@ main(int argc, char* argv[])
     // One periodic loop drives ALL consumers from the SAME measured SINR; the
     // O-RAN enrichment (elevation/Doppler) is computed from the REAL ephemeris.
     std::map<uint32_t, uint64_t> lastRxBytes; // ue -> last measured DL bytes
+    std::map<uint32_t, double> lastElev;      // ue -> last serving elevation (deg)
+    const double minElevDeg = 10.0;           // service elevation mask for TTE
     const double kpmIntervalS = 0.1; // matches RegisterPeriodicCallback below
     auto tick = [&](Time now) {
         double t = now.GetSeconds();
@@ -177,8 +201,22 @@ main(int argc, char* argv[])
                 measThp = (rxBytes - bit->second) * 8.0 / (kpmIntervalS * 1e6);
             }
             lastRxBytes[u] = rxBytes;
-            helper->InjectKpmReport(1, u, sinr, sinr - 95.0, 60.0, elev, doppler,
-                                    measThp, rxBytes, measTbler);
+            // Time-to-exit from the live elevation rate of THIS UE's serving
+            // link (it was a constant 60 s for every UE and every tick, which
+            // the ho-predict xApp then read as geometry).
+            double elevRate = 0.0;
+            if (auto eit = lastElev.find(u); eit != lastElev.end())
+            {
+                elevRate = (elev - eit->second) / kpmIntervalS;
+            }
+            lastElev[u] = elev;
+            const double tte =
+                (elevRate < -1e-3) ? std::max(1.0, (elev - minElevDeg) / -elevRate) : 600.0;
+            // The serving SINR is read off the PHY trace: claim the measured
+            // provenance (ORAN-03), as the gym example already does.
+            helper->InjectKpmReport(1, u, sinr, sinr - 95.0, tte, elev, doppler,
+                                    measThp, rxBytes, measTbler, /*measPrbUtil=*/-1.0,
+                                    /*sinrMeasured=*/true);
             // (c) observability: log the measured value.
             kpiLog << std::fixed << std::setprecision(2) << t << "," << u << "," << sinr
                    << ",phy-trace\n";
@@ -211,7 +249,11 @@ main(int argc, char* argv[])
     // size. Replaying the histogram gives the monitor a distribution with actual
     // spread, so a percentile bound can be breached by a tail rather than only
     // by the mean.
-    const uint8_t sliceQi[3] = {9, 82, 9}; // eMBB / URLLC / mMTC 5QIs in this run
+    // eMBB / URLLC / mMTC 5QIs in this run. MixedBouquet marks eMBB 5QI 2; this
+    // table said 9 for eMBB, so the eMBB slice was fed the mMTC histogram (and
+    // the mMTC samples were replayed twice) while the real eMBB flows were
+    // never looked at.
+    const uint8_t sliceQi[3] = {2, 82, 9};
     uint64_t replayed = 0;
     for (uint32_t slice = 0; slice < 3; ++slice)
     {
@@ -227,14 +269,15 @@ main(int argc, char* argv[])
         }
     }
     // Losses are measured too, so the reliability verdict is not asserted.
-    uint64_t measuredLost = 0;
-    for (uint32_t u = 0; u < numUes; ++u)
+    // Each loss is charged to the slice whose flow lost it; every loss used to
+    // be booked against eMBB, which hid a URLLC reliability breach.
+    for (uint32_t slice = 0; slice < 3; ++slice)
     {
-        measuredLost += rs.GetUeLostPackets(u);
-    }
-    for (uint64_t p = 0; p < measuredLost; ++p)
-    {
-        sliceMon.RecordPacket(profiles[0].snssai, 0.0, false);
+        const uint64_t lost = rs.GetSliceMeasuredStats(sliceQi[slice]).lostPackets;
+        for (uint64_t p = 0; p < lost; ++p)
+        {
+            sliceMon.RecordPacket(profiles[slice].snssai, 0.0, false);
+        }
     }
     // Report the SPREAD, because its absence was the defect. A distribution
     // stamped with one value has zero range, and a p99 over it equals the mean

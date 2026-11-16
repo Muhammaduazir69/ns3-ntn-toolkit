@@ -70,7 +70,7 @@ All types live in `namespace ns3::fapi`.
 
 | Class / header | Role |
 |---|---|
-| `NtnFapiSapBridge` (`model/ntn-fapi-sap-bridge.h`) | Decorates a live `MmWaveEnbMac` / `MmWaveEnbPhy` pair (`InstallEnb()`); records SLOT.indication, DL_TTI.request, UL_TTI.request, TX_DATA.request, RX_DATA.indication, CRC.indication and RACH.indication; measures SAP latency and labels its provenance; `SetNtnTimingAdvance()` puts the TA residual (in T_c units) into RACH.indication. |
+| `NtnFapiSapBridge` (`model/ntn-fapi-sap-bridge.h`) | Decorates a live `MmWaveEnbMac` / `MmWaveEnbPhy` pair (`InstallEnb()`); records SLOT.indication, DL_TTI.request, UL_TTI.request, TX_DATA.request, RX_DATA.indication, CRC.indication and RACH.indication; measures SAP latency and labels its provenance; `SetNtnTimingAdvance()` puts the TA residual into RACH.indication as a TS 38.213 section 4.2 TA command index (units of 16 x 64 T_c / 2^mu, saturating at 3846); SLOT.indication is emitted once per slot, although the mmwave PHY calls the SAP once per variable TTI. |
 | `fapi-common.h` | `MessageId` codes and names, `Numerology` with `SubCarrierSpacingKhz()`, `CarrierConfig`, `CellConfig`, `BwpInfo`, `DmrsConfig`; tracked spec versions `kScfFapiBase` and `kScfFapiAddendum`. |
 | `fapi-messages.h` | Message structs, each with a `static constexpr MessageId kId`: `DlTtiRequest`, `UlTtiRequest`, `SlotIndication`, `UlDciRequest`, `TxDataRequest` (carries the TB bytes), `RxDataIndication`, `CrcIndication`, `SrsIndication`, `RachIndication`. |
 | `fapi-pdu-types.h` | PDU descriptors with SCF field names: `PdcchPdu`, `PdschPdu`, `CsiRsPdu`, `PuschPdu`, `PucchPdu`, `SrsPdu`, `PrachPdu`. |

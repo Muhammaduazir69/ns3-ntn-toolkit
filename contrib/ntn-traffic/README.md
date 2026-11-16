@@ -43,7 +43,7 @@ Most satellite network studies compute their KPIs from a closed form: slant rang
 | Area | API | Notes |
 |---|---|---|
 | Build | `Build(gnbNodes, ueNodes)`, `SetRadioBackend`, `SetCarrierFrequencyHz`, `SetBandwidthHz`, `SetSatEirpDbm`, `SetUeTxPowerDbm` | Both node sets must already carry a `MobilityModel` (SGP4, TR 38.811, HAPS). Default carrier 2 GHz. |
-| Payload | `SetPayloadOption`, `SetFeederGeometry`, `ComputePayloadExtraDelay` | `Transparent` (2 x slant/c), `RegenerativeRu` (slant/c + 0.25 ms), `RegenerativeRuDu` (slant/c + 0.15 ms), `FullGnb` (slant/c + 0.05 ms, default); feeder delay re-evaluated every second from live geometry. |
+| Payload | `SetPayloadOption`, `SetFeederGeometry`, `ComputePayloadExtraDelay` | `Transparent` (slant/c: the feeder is crossed once, TR 38.821 Table 4.2-2), `RegenerativeRu` (slant/c + 0.25 ms), `RegenerativeRuDu` (slant/c + 0.15 ms), `FullGnb` (slant/c + 0.05 ms, default); feeder delay re-evaluated every second from live geometry. |
 | HARQ and RLC | `SetHarqEnabled`, `SetNtnHarqProfile`, `SetRlcAmEnabled` | HARQ is off by default because terrestrial timers break over the slant; the NTN profile rescales the HARQ timeout and process count from the geometry. Shipped runs carry RLC UM. |
 | Uplink timing | `SetKOffsetConsumption`, `ComputeKOffsetSlots`, `GetGnbN2Delay` | Opt-in, nr backend: K_offset = ceil(RTT / slot) + 1, programmed into the UL DCI to PUSCH gap (TS 38.213 Section 4.2). Uses a vendored nr patch that raises the `N2Delay` cap. |
 | Channel | `AddExtraPropagationLoss`, `AddSpectrumChannelLoss`, `SetChannelUpdatePeriod`, `SetTddPattern` | Chains module physics (THz, Sionna RT, A2G) onto the live channel; the 3GPP channel regenerates every 100 ms so clusters follow the satellite. |

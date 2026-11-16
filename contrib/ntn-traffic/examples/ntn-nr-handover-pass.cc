@@ -48,7 +48,7 @@ main(int argc, char* argv[])
     // here; leave numUes=1 for a run that completes cleanly.
     uint32_t numUes = 1;
     double altitudeKm = 600.0; // LEO altitude
-    double satEirpDbm = 70.0;
+    double satEirpDbm = -1.0; // sentinel: TR 38.821 Set-1 S-band density on an S-band carrier
     double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
                               // which is n256 UPLINK and never conformant as a DL carrier.
     double bwMhz = 10.0;  // single BWP — isolate the handover machinery
@@ -56,12 +56,18 @@ main(int argc, char* argv[])
     // ping-pong: right after a handover the new serving cell's RSRP filter is
     // briefly unpopulated, and an over-eager reverse trigger under a receding
     // (near-zero-RSRP) old serving cell can storm the source scheduler. 2 dB /
-    // 512 ms yields one clean handover on the pass below.
-    double hystDb = 3.0;  // damp ping-pong between co-planar sats
+    // 512 ms yields one clean handover on the pass below. The default was 3 dB,
+    // which contradicted this note and, on the real geometry (neighbour 4.5 deg
+    // behind), is only reached at ~89 s and peaks at ~3.6 dB by 120 s: no margin
+    // for shadowing. At 2 dB the A3 entry is at ~68 s and the RSRP gap keeps
+    // growing afterwards, so there is no reverse trigger (no ping-pong).
+    double hystDb = 3.0;  // damp ping-pong between co-planar sats (matches the dashboard default)
     double tttMs = 512.0;
     // Footprint offset: the neighbour starts this far behind so it rises to
     // overhead as the serving sat flies off, giving a single clean RSRP
-    // crossover mid-pass while BOTH cells are still strong (~-85 dBm) — not the
+    // crossover mid-pass while BOTH cells are still strong (~-85 dBm at the old
+    // 70 dBm conducted default; ~14 dB lower at the Set-1 density over 10 MHz,
+    // which shifts both cells equally and leaves the A3 crossover in place), not the
     // pathological case where the serving cell is swept into signal loss.
     double vSatKmps = 7.5; // nominal LEO ground-track speed (display only)
 
@@ -71,6 +77,9 @@ main(int argc, char* argv[])
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altitudeKm", "Satellite altitude (km)", altitudeKm);
+    cmd.AddValue("satEirpDbm",
+                 "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)",
+                 satEirpDbm);
     cmd.AddValue("hystDb", "A3 hysteresis (dB)", hystDb);
     cmd.AddValue("tttMs", "A3 time-to-trigger (ms)", tttMs);
     // The output directory was hardcoded to ./nr-ho-pass/, so the example wrote
@@ -91,19 +100,24 @@ main(int argc, char* argv[])
     // whichever adjacent plane-member is currently RISING toward the UE (the
     // genuine geometry of an inter-satellite handover — a setting sat handing
     // off to a rising one). Standard-aligned with TR 38.821 LEO handover.
+    // 80 per plane puts the in-plane neighbours 4.5 deg (~500 km of ground
+    // track) apart at 600 km, so both cells are in view and the A3 crossover
+    // falls inside the 120 s default. With 6 per plane (60 deg apart) the
+    // "neighbour" was ~7000 km away, below the UE's horizon for the whole run,
+    // and no handover could ever fire.
     WalkerConfig wcfg;
     wcfg.num_planes = 1;
-    wcfg.total_sats = 6;
+    wcfg.total_sats = 80;
     wcfg.altitude_km = altitudeKm;
     wcfg.inclination_deg = 53.0;
     wcfg.epoch_unix_s = 1735689600.0;
     const auto elements = WalkerConstellation::BuildDelta(wcfg);
     Ptr<Sgp4MobilityModel> serv = CreateObject<Sgp4MobilityModel>();
-    serv->SetElements(elements[0]);
+    serv->SetElementsSgp4(elements[0]);
     Ptr<Sgp4MobilityModel> nbrA = CreateObject<Sgp4MobilityModel>();
-    nbrA->SetElements(elements[1]);
+    nbrA->SetElementsSgp4(elements[1]);
     Ptr<Sgp4MobilityModel> nbrB = CreateObject<Sgp4MobilityModel>();
-    nbrB->SetElements(elements[wcfg.total_sats - 1]);
+    nbrB->SetElementsSgp4(elements[wcfg.total_sats - 1]);
 
     // Ground UEs under the serving satellite's sub-point, TR 38.811 mobility.
     double subLat, subLon, subAlt;
@@ -133,10 +147,26 @@ main(int argc, char* argv[])
     rs.SetNumerology(1);
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
     rs.SetBandwidthHz(bwMhz * 1e6);
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    // EIRP default (NT-02 calibration). This used to be a fixed 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the default
+    // is now that Set-1 density and the helper back-computes the conducted
+    // power from the bandwidth and the array gain (again in Build()). An
+    // explicit --satEirpDbm keeps meaning conducted power at the array input.
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && freqGhz * 1e9 > 1.0e9 && freqGhz * 1e9 <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        if (satEirpDbm < 0.0)
+        {
+            satEirpDbm = 70.0; // legacy default, kept for carriers outside Set-1
+        }
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.SetUeTxPowerDbm(23.0);
     rs.SetBackhaulDelay(MilliSeconds(5));
     rs.SetHandover(true, hystDb, MilliSeconds(static_cast<uint64_t>(tttMs)));

@@ -165,7 +165,7 @@ main(int argc, char* argv[])
     std::cout << "  " << std::string(82, '-') << "\n";
     std::cout << std::setw(10) << "RIS Size"
               << std::setw(12) << "Elements"
-              << std::setw(12) << "RIS Gain"
+              << std::setw(12) << "N^2 Gain"
               << std::setw(14) << "Cascaded PL"
               << std::setw(12) << "Total SNR"
               << std::setw(12) << "SNR Improv"
@@ -197,9 +197,16 @@ main(int argc, char* argv[])
         // (the model derives both hop distances from the MobilityModels).
         double cascadedPL = ris->ComputeCascadedPathLoss_dB(satMob, risMob, gtMob);
 
-        // Total SNR with RIS = direct SNR + RIS gain
-        double totalSnr = directResult.snr_dB + risGain;
-        double snrImprovement = risGain;
+        // The RIS ray arrives (FSPL_direct - PL_cascaded) dB relative to the
+        // direct ray and adds to it coherently-in-power (co-phased by the
+        // optimal profile; power sum is the conservative form). The old
+        // "direct SNR + 20 log10(N)" added the gain over ONE element as if it
+        // were a gain over the direct link, ignoring the RIS->GT spreading
+        // loss; at 200 m that overstated the improvement by tens of dB.
+        const double risRelDb = directResult.fspl_dB - cascadedPL;
+        double totalSnr = directResult.snr_dB +
+                          10.0 * std::log10(1.0 + std::pow(10.0, risRelDb / 10.0));
+        double snrImprovement = totalSnr - directResult.snr_dB;
 
         // Capacity with RIS
         double snrLinear = std::pow(10.0, totalSnr / 10.0);

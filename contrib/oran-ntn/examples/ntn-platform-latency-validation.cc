@@ -11,8 +11,14 @@
 // 10-deg cell-edge elevation the Table-3 classes assume (Table 3 classifies
 // the platform ACCESS latency). An NtnOranApplication URLLC flow crosses it and
 // the sink MEASURES the one-way delay from in-band timestamps; the reported
-// round trip (2x measured OWD) must land in the Table-3 band:
-//   UAV ~1 ms | HAP ~1-2 ms | LEO 30-50 ms | MEO ~150 ms | GEO ~600 ms
+// round trip (2x measured OWD) must land in the acceptance band coded in
+// `cases` below. Deng 2026 Table 3 quotes UAV ~1 ms | HAP ~1-2 ms |
+// LEO 30-50 ms | MEO ~150 ms | GEO ~600 ms; the coded bands are WIDER
+// (UAV/HAP [0,5], LEO [20,60], MEO [100,250], GEO [450,700]) because the
+// propagation-only bent-pipe RTD at the 10 deg edge is below Table 3's LEO
+// figure. The standards cross-check is TR 38.821 Table 4.2-2 (transparent
+// payload, worst-case RTD): LEO-600 25.77 ms and GEO 541.46 ms, which this
+// example reproduces (25.8 + serialization ~ 26.7 ms; ~542 ms).
 //
 // ORAN-12, scope stated so the result is not read for more than it is. What
 // this validates is the PROPAGATION-dominated component of platform access

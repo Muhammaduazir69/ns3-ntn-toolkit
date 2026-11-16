@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,15 @@ std::vector<ThzNtnUeContext> g_ues;
 uint32_t g_commSlotsPerFrame = 10; // out of 10 x 100 ms slots per 1 s frame
 uint32_t g_slotIndex = 0;
 const char* g_modeName = "?";
+// The 200 dB sensing-slot gate drives every TB decoded in a sensing slot to a
+// SINR near -170 dB, and the helper's run mean is a mean in dB, so the cell
+// SINR it reports (-89 dB on the default run) describes the gate, not the comm
+// link. Sample the comm link only at the END of each comm slot, when the last
+// decoded TB is guaranteed to have crossed the un-gated channel.
+NtnRealStackHelper* g_rs = nullptr;
+bool g_prevSlotComm = false;
+double g_commSinrDbSum = 0.0;
+uint64_t g_commSinrN = 0;
 
 const char*
 ModeName(IsacMode m)
@@ -95,6 +105,16 @@ void
 SlotTick()
 {
     const bool commSlot = (g_slotIndex % 10) < g_commSlotsPerFrame;
+    if (g_prevSlotComm && g_rs != nullptr)
+    {
+        const double s = g_rs->GetUeRecentSinrDb(0);
+        if (std::isfinite(s))
+        {
+            g_commSinrDbSum += s;
+            ++g_commSinrN;
+        }
+    }
+    g_prevSlotComm = commSlot;
     g_gate->SetLossDb(commSlot ? 0.0 : 200.0);
     ++g_slotIndex;
     Simulator::Schedule(MilliSeconds(100), &SlotTick);
@@ -206,6 +226,7 @@ main(int argc, char* argv[])
     // reports "not asserted" rather than certifying an uncalibrated budget.
     rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.Build(satNodes, ueNodes);
+    g_rs = &rs;
 
     g_gate = CreateObject<NtnStaticExtraLossModel>();
     g_gate->SetLossDb(0.0);
@@ -254,10 +275,16 @@ main(int argc, char* argv[])
     rs.Collect();
     rs.WriteHealthReport();
 
-    std::printf("# === summary ===  measured throughput=%.3f Mbps, cell SINR=%.2f dB "
-                "(goodput tracks the REAL scheduler's comm share via TDM aperture "
-                "gating in the live channel)\n",
-                rs.GetRxThroughputMbps(), rs.GetMeanDlSinrDb());
+    const double commSinrDb =
+        g_commSinrN ? g_commSinrDbSum / static_cast<double>(g_commSinrN)
+                    : std::numeric_limits<double>::quiet_NaN();
+    std::printf("# === summary ===  measured throughput=%.3f Mbps, comm-slot SINR=%.2f dB "
+                "(n=%llu end-of-comm-slot samples; the all-slot dB mean %.2f dB includes "
+                "the 200 dB sensing gate) (goodput tracks the REAL scheduler's comm "
+                "share via TDM aperture gating in the live channel)\n",
+                rs.GetRxThroughputMbps(), commSinrDb,
+                static_cast<unsigned long long>(g_commSinrN), rs.GetMeanDlSinrDb());
+    g_rs = nullptr;
 
     Simulator::Destroy();
     return 0;

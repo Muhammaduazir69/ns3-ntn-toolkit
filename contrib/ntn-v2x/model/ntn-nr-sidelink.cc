@@ -612,8 +612,18 @@ NtnSlChannel::SlotTick()
                 // than a constant.
                 const double propS = dist / 299792458.0;
                 const Time owd = m_pool.slotDuration + Seconds(propS);
-                m_delaySumS += owd.GetSeconds();
-                m_delayMaxS = std::max(m_delayMaxS, owd.GetSeconds());
+                // With aligned reselection the message has a real arrival slot,
+                // so the latency KPI also carries the wait from arrival to the
+                // selected resource (TR 37.885 counts latency from packet arrival
+                // at the MAC; that wait is up to T2 slots and dominates the slot).
+                // Delivery itself stays at the end of the transmitting slot.
+                Time latency = owd;
+                if (t.ue->m_align && m_slot > t.ue->m_arrival)
+                {
+                    latency += m_pool.slotDuration * static_cast<int64_t>(m_slot - t.ue->m_arrival - 1);
+                }
+                m_delaySumS += latency.GetSeconds();
+                m_delayMaxS = std::max(m_delayMaxS, latency.GetSeconds());
                 ++m_delayCount;
                 Ptr<NtnSlUeMac> dst = rxUe;
                 const uint32_t src = t.ue->GetUeId();

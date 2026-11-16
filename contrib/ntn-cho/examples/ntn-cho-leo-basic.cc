@@ -48,15 +48,35 @@ main(int argc, char* argv[])
     cmd.AddValue("trigger", "CHO trigger: a3|location|tte-aware", triggerType);
     cmd.AddValue("tteMinimum", "Minimum TTE in seconds", tteMinimum);
     cmd.AddValue("numUes", "Number of UEs", numUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
     const bool useNr = (radio != "mmwave");
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
-    // healthy SINR; mmwave keeps its historical 55 dBm (zero regression).
-    if (satEirpDbm < 0.0)
+    constexpr double kCarrierHz = 2.185e9; // n256 downlink, shared by radio and CHO model
+    // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the nr
+    // default is now that Set-1 density, as ntn-v2x-real-stack does; an
+    // explicit --satEirpDbm keeps meaning conducted power, and mmwave keeps
+    // its historical 55.0 dBm.
+    // The probe mirrors the cell's carrier and bandwidth and returns the
+    // equivalent CONDUCTED power from the helper's own formula
+    // (density + 10log10(BW_MHz) + 30 - ArrayGainDb()), so every other
+    // consumer of satEirpDbm stays consistent with the radio.
+    NtnRealStackHelper eirpProbe;
+    eirpProbe.SetCarrierFrequencyHz(kCarrierHz);
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && useNr &&
+                                 eirpProbe.GetCarrierFrequencyHz() > 1.0e9 &&
+                                 eirpProbe.GetCarrierFrequencyHz() <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        eirpProbe.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        satEirpDbm = eirpProbe.GetSatEirpDbm();
+    }
+    else if (satEirpDbm < 0.0)
     {
         satEirpDbm = useNr ? 70.0 : 55.0;
     }
@@ -79,8 +99,12 @@ main(int argc, char* argv[])
     // ---- CHO algorithm (TTE-aware) via the helper ----
     Ptr<NtnChoHelper> ntnHelper = CreateObject<NtnChoHelper>();
     ntnHelper->SetChoTriggerType(trigger);
-    ntnHelper->SetCarrierFrequency(2.0e9);
-    ntnHelper->SetBandwidth(30.0e6);
+    // CHO-27: the radio below runs at the NtnRealStackHelper default carrier
+    // (2.185 GHz, n256 downlink) while the CHO measurement model was told 2.0
+    // GHz, which is n256 UPLINK (TS 38.101-5). Both now use the same carrier.
+    // (kCarrierHz is declared with the EIRP default above.)
+    ntnHelper->SetCarrierFrequency(kCarrierHz);
+    ntnHelper->SetBandwidth(20.0e6); // same 20 MHz carrier as the measured NR cell (helper default)
     ntnHelper->SetSatelliteTxPower(satEirpDbm);
     ntnHelper->SetTteMinimum(Seconds(tteMinimum));
     // CHO-5: the algorithm used to be created here, before the satellite nodes
@@ -114,6 +138,25 @@ main(int argc, char* argv[])
     Ptr<ns3::ntncon::Sgp4MobilityModel> candSatMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
     candSatMob->SetElements(elements[1]);
+    {
+        // CHO-27: the candidate must be the in-plane neighbour that APPROACHES
+        // the UE field (as in ntn-cho-real-stack); elements[1] can equally be
+        // the one ahead, which recedes and can never become a better cell.
+        Ptr<ns3::ntncon::Sgp4MobilityModel> behind =
+            CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+        behind->SetElements(elements[wcfg.total_sats - 1]);
+        double sLat, sLon, sAlt;
+        servSatMob->GetGeodetic(sLat, sLon, sAlt);
+        const Vector ue0 = ntngeo::GeodeticToEcef(sLat, sLon, 0.0);
+        const Vector p = candSatMob->GetPosition();
+        const Vector v = candSatMob->GetVelocity();
+        const double closing =
+            v.x * (ue0.x - p.x) + v.y * (ue0.y - p.y) + v.z * (ue0.z - p.z);
+        if (closing <= 0.0)
+        {
+            candSatMob = behind;
+        }
+    }
 
     NodeContainer satNodes;
     satNodes.Create(2);
@@ -138,7 +181,7 @@ main(int argc, char* argv[])
     Ptr<SatConstantPositionMobilityModel> auxCand =
         CreateObject<SatConstantPositionMobilityModel>();
     auxServ->SetGeoPosition(GeoCoordinate(servSatMob->GetPosition()));
-    auxCand->SetGeoPosition(GeoCoordinate(servSatMob->GetPosition()));
+    auxCand->SetGeoPosition(GeoCoordinate(candSatMob->GetPosition()));
     auxSats.Get(0)->AggregateObject(auxServ);
     auxSats.Get(1)->AggregateObject(auxCand);
     agp->ConfigureBeamsMobility(0, auxServ);
@@ -182,11 +225,26 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTime));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-leo-basic_" + triggerType);
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (eirpFromTr38821)
+    {
+        // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 S-band EIRP density. The
+        // helper back-computes the conducted power from the bandwidth and
+        // the array gain, and again in Build().
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit value (or a default on a carrier outside the
+        // Set-1 S-band reference) is CONDUCTED power at the array input.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
+    rs.SetCarrierFrequencyHz(kCarrierHz);
     rs.Build(satNodes, ueNodes);
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTime - 0.5));
     rs.EnableAiFlowMonitor("ntn-cho-leo-basic"); // WS2 KPM series (TS 28.552 names)
@@ -197,8 +255,13 @@ main(int argc, char* argv[])
     NS_ABORT_MSG_IF(candCell == 0 || candCell == servingCell,
                     "CHO needs two distinct real cells; got serving=" << servingCell
                                                                      << " candidate=" << candCell);
+    // CHO-27: declare the serving cell. Without SetServingCell() the
+    // algorithm's ServingState() is empty, so A3 (Mn vs Mp, TS 38.331 section
+    // 5.5.4.4) and every serving-relative condition returned early and the
+    // smoke test could only ever report zero fires.
     choAlgo->AddCandidateCell(servingCell, 0, 0);
     choAlgo->AddCandidateCell(candCell, 1, 0);
+    choAlgo->SetServingCell(servingCell);
     uint32_t choDecisions = 0;
 
     // CHO exercised every 200 ms on the MEASURED serving SINR (UE 0); the

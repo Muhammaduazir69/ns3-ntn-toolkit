@@ -388,7 +388,7 @@ main(int argc, char* argv[])
     sched->SetMaxIslRangeM(5'000'000.0);
     sched->RegisterSatellite(kSatA, satA);
     sched->RegisterSatellite(kSatB, satB);
-    sched->RegisterGroundStation(kGs1, gs1Lat, gs1Lon);
+    sched->RegisterGroundStation(kGs1, gs1Lat, gs1Lon, 20000.0); // HAPS at 20 km (ITU-R F.1500)
     sched->RegisterGroundStation(kGs2, gs2Lat, gs2Lon);
 
     g_router = CreateObject<ContactGraphRouter>();
@@ -421,13 +421,23 @@ main(int argc, char* argv[])
         PointToPointHelper p2p;
         p2p.SetDeviceAttribute(
             "DataRate", DataRateValue(DataRate(static_cast<uint64_t>(capMbps * 1e6))));
-        p2p.SetChannelAttribute("Delay", TimeValue(MilliSeconds(delayMs)));
+        // Seconds(double), not MilliSeconds(): the access delays below are
+        // sub-millisecond and must not be truncated to an integer.
+        p2p.SetChannelAttribute("Delay", TimeValue(Seconds(delayMs * 1e-3)));
         NetDeviceContainer d = p2p.Install(x, y);
         ipv4.SetBase(Ipv4Address(subnet.c_str()), "255.255.255.0");
         return ipv4.Assign(d);
     };
-    mkFixed(ue.Get(0), uav.Get(0), accessCapMbps, 1.0, "10.0.1.0");   // ground->UAV
-    mkFixed(uav.Get(0), haps.Get(0), accessCapMbps, 2.0, "10.0.2.0"); // UAV->HAPS (A2G)
+    // Access delays are propagation over the real hop length. They were 1 ms
+    // and 2 ms, i.e. 300 km and 600 km of path, for a UAV a kilometer from the
+    // UE and a HAPS 20 km overhead (ITU-R F.1500 nominal altitude), which added
+    // about 2.9 ms of fictitious delay to every measured one-way delay.
+    constexpr double kUeUavRangeM = 1000.0;    // UE to a UAV at ~120 m AGL, ~1 km away
+    constexpr double kUavHapsRangeM = 20000.0; // UAV to a HAPS at 20 km altitude
+    mkFixed(ue.Get(0), uav.Get(0), accessCapMbps, kUeUavRangeM / kC * 1e3,
+            "10.0.1.0"); // ground->UAV
+    mkFixed(uav.Get(0), haps.Get(0), accessCapMbps, kUavHapsRangeM / kC * 1e3,
+            "10.0.2.0"); // UAV->HAPS (A2G)
     Ipv4InterfaceContainer srvIf =
         mkFixed(gw.Get(0), srv.Get(0), accessCapMbps, 1.0, "10.0.9.0"); // GW->server
 

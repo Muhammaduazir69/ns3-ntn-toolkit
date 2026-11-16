@@ -36,6 +36,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <string>
+#include <sstream>
 #include <sys/stat.h>
 #include <vector>
 
@@ -133,7 +135,11 @@ OranNtnHelper::CreateSatelliteE2Nodes(NodeContainer satNodes,
         e2node->SetNodeId(i + 1); // 1-indexed
         e2node->SetIsNtn(true);
 
-        // Estimate feeder link delay from LEO altitude (~550 km -> ~3.7 ms round trip)
+        // Placeholder one-way feeder delay (a 550 km satellite at zenith is
+        // 1.83 ms one way; at the 10 deg gateway mask about 6.6 ms). It is a
+        // constant: a scenario with real geometry must drive it from the live
+        // satellite-gateway slant (OranNtnRicPlacement::BindToGeometry or a
+        // periodic SetFeederLinkDelay), as the examples now do.
         e2node->SetFeederLinkDelay(MilliSeconds(4));
         e2node->SetOnBoardBufferSize(500);
 
@@ -391,6 +397,7 @@ OranNtnHelper::GenerateConstellationPolicies(Ptr<OranNtnA1PolicyManager> nonRtRi
                                                double altitudeKm)
 {
     NS_LOG_FUNCTION(this);
+    m_shellAltitudeKm = altitudeKm; // InjectKpmReport's NTN delay uses the real shell
 
     // Generate orbit-aware HO threshold policies
     nonRtRic->GenerateOrbitAwarePolicies(numPlanes, satsPerPlane,
@@ -470,13 +477,16 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
     report.tte_s = tte;
     report.elevation_deg = elevation;
     report.doppler_Hz = doppler;
-    // RSRQ = N·RSRP/RSSI. For a loaded cell this reduces to S/(S+I+N) per RE,
-    // i.e. SINR_lin/(1+SINR_lin), bounded to the 3GPP RSRQ range [-19.5,-3] dB.
-    // (The old `sinr - 3` produced physically-impossible positive RSRQ.)
+    // RSRQ = N·RSRP/RSSI (TS 38.215 §5.1.3). RSRP is the power of ONE resource
+    // element while the RSSI integrates all 12 subcarriers of each of the N
+    // RBs, so for a fully loaded cell RSRQ = SINR_lin / (12 (1 + SINR_lin)),
+    // whose ceiling is -10.8 dB. The previous form dropped the 1/12, so every
+    // report above ~3 dB SINR hit the -3 dB clamp and the column was a constant.
+    // Bounded to the TS 38.133 reporting range [-43, 20] dB.
     {
         double sinrLin = std::pow(10.0, sinr / 10.0);
-        report.rsrq_dB = std::max(-19.5, std::min(-3.0,
-                            10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
+        report.rsrq_dB = std::max(-43.0, std::min(20.0,
+                            10.0 * std::log10(sinrLin / (12.0 * (1.0 + sinrLin)))));
     }
     // CQI derived from SINR via the 3GPP TS 38.214 Table 5.2.2.1-2 (CQI table 1)
     // efficiency breakpoints, NOT the old "sinr + 6" clamp. Monotonic SINR->CQI
@@ -522,13 +532,15 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
         // Not measured: do NOT fabricate an error rate. NaN = "no measurement".
         report.harqBler = std::nan("");
     }
-    // Propagation delay from the actual slant range, derived from elevation for
-    // a LEO shell (h~600 km), instead of a single is_ntn constant. One-way
-    // user-plane latency = propagation + ~1 ms processing/scheduling.
+    // Propagation delay from the actual slant range, derived from elevation and
+    // the shell altitude (SetShellAltitudeKm / GenerateConstellationPolicies;
+    // it was a fixed 600 km for every scenario), instead of a single is_ntn
+    // constant. One-way user-plane latency = propagation + ~1 ms
+    // processing/scheduling.
     if (it->second->IsNtn())
     {
         const double Re = 6371.0;
-        const double h = 600.0;
+        const double h = m_shellAltitudeKm;
         const double e = elevation * M_PI / 180.0;
         const double slantKm =
             Re * (std::sqrt(std::pow((Re + h) / Re, 2.0) - std::cos(e) * std::cos(e)) -
@@ -558,30 +570,26 @@ OranNtnHelper::InjectKpmReport(uint32_t gnbId, uint32_t ueId,
     // activeUes: uint sentinel 0 = "not measured" (no active-UE count is plumbed
     // into this injector; the old 12+6*sin fabrication is removed).
     report.activeUes = 0;
-    // Cell throughput follows PRB utilisation; when PRB is unknown (NaN) this
-    // propagates NaN rather than fabricating a load-derived number.
-    report.cellThroughput_Mbps = report.prbUtilization * 273.0 * 0.75; // util x PRB x Mbps/PRB
-    // Assign slice based on UE modular grouping: eMBB=0, URLLC=1, mMTC=2
-    report.sliceId = static_cast<uint8_t>(ueId % 3);
-    // Slice-aware throughput/latency are DERIVED from the (measured-or-derived)
-    // per-UE throughput/latency, so they are kept. sliceReliability, however,
-    // was a hardcoded SLA TARGET (0.999/0.9999/0.99) masquerading as a measured
-    // packet-delivery ratio -- no delivery ratio is measured here, so emit NaN.
-    if (report.sliceId == 0) // eMBB
+    // Cell throughput: no cell-level measurement reaches this injector. It was
+    // util x 273 PRB x 0.75 Mbps/PRB, a fixed spectral-efficiency guess that
+    // ignored the cell's real bandwidth and MCS. Not measured -> NaN.
+    report.cellThroughput_Mbps = std::nan("");
+    // Slice of this UE: what the scenario declared (SetUeSliceId), else the
+    // legacy ueId % 3 grouping. eMBB=0, URLLC=1, mMTC=2.
     {
-        report.sliceThroughput_Mbps = report.throughput_Mbps;
-        report.sliceLatency_ms = report.latency_ms;
+        auto sit = m_ueSlice.find(ueId);
+        report.sliceId = (sit != m_ueSlice.end()) ? sit->second
+                                                  : static_cast<uint8_t>(ueId % 3);
     }
-    else if (report.sliceId == 1) // URLLC
-    {
-        report.sliceThroughput_Mbps = std::max(0.1, report.throughput_Mbps * 0.1);
-        report.sliceLatency_ms = report.latency_ms; // NTN latency violates URLLC SLA
-    }
-    else // mMTC
-    {
-        report.sliceThroughput_Mbps = std::max(0.01, report.throughput_Mbps * 0.02);
-        report.sliceLatency_ms = report.latency_ms * 2.0;
-    }
+    // A per-UE report contributes ITS OWN throughput and latency to its slice.
+    // URLLC used to be reported at 0.1 x and mMTC at 0.02 x the UE's
+    // throughput, and mMTC latency at 2 x: fixed scale factors with no
+    // measurement behind them, which the slice-manager xApp then acted on.
+    // sliceReliability was a hardcoded SLA TARGET (0.999/0.9999/0.99)
+    // masquerading as a measured packet-delivery ratio -- no delivery ratio is
+    // measured here, so emit NaN.
+    report.sliceThroughput_Mbps = report.throughput_Mbps;
+    report.sliceLatency_ms = report.latency_ms;
     report.sliceReliability = std::nan("");
 
     it->second->SubmitKpmMeasurement(report);
@@ -885,17 +893,28 @@ OranNtnHelper::WriteKpmDataset(const std::string& filename) const
            "prb_utilization,active_ues,cell_throughput_Mbps,"
            "slice_id,slice_throughput_Mbps,slice_latency_ms,slice_reliability\n";
 
+    // A metric the scenario does not measure is NaN in the record; write it as
+    // an empty field (the CSV convention for missing data), not the text "nan".
+    auto v = [](double x) -> std::string {
+        if (!std::isfinite(x))
+        {
+            return std::string();
+        }
+        std::ostringstream o;
+        o << x;
+        return o.str();
+    };
     for (const auto& r : m_kpmDataset)
     {
         ofs << r.timestamp << "," << r.gnbId << "," << (r.isNtn ? 1 : 0) << ","
-            << r.ueId << "," << r.rsrp_dBm << "," << r.rsrq_dB << ","
-            << r.sinr_dB << "," << (int)r.cqi << "," << r.throughput_Mbps << ","
-            << r.latency_ms << "," << r.elevation_deg << "," << r.doppler_Hz << ","
-            << r.propagationDelay_ms << "," << r.tte_s << "," << r.beamId << ","
-            << r.beamGain_dB << "," << r.prbUtilization << "," << r.activeUes << ","
-            << r.cellThroughput_Mbps << "," << (int)r.sliceId << ","
-            << r.sliceThroughput_Mbps << "," << r.sliceLatency_ms << ","
-            << r.sliceReliability << "\n";
+            << r.ueId << "," << v(r.rsrp_dBm) << "," << v(r.rsrq_dB) << ","
+            << v(r.sinr_dB) << "," << (int)r.cqi << "," << v(r.throughput_Mbps) << ","
+            << v(r.latency_ms) << "," << v(r.elevation_deg) << "," << v(r.doppler_Hz) << ","
+            << v(r.propagationDelay_ms) << "," << v(r.tte_s) << "," << r.beamId << ","
+            << v(r.beamGain_dB) << "," << v(r.prbUtilization) << "," << r.activeUes << ","
+            << v(r.cellThroughput_Mbps) << "," << (int)r.sliceId << ","
+            << v(r.sliceThroughput_Mbps) << "," << v(r.sliceLatency_ms) << ","
+            << v(r.sliceReliability) << "\n";
     }
 
     NS_LOG_INFO("OranNtnHelper: Wrote " << m_kpmDataset.size()

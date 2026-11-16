@@ -65,8 +65,9 @@ class NtnTimingAdvance : public Object
     /// advance must cover both. Without this the class had no gateway geometry
     /// and returned the service-link round trip for every payload mode, which
     /// made m_payloadMode dead and under-compensated a transparent LEO cell by
-    /// the feeder round trip (TR 38.821 Table 4.2-2 gives ~41.77 ms total for
-    /// LEO-600 transparent against ~4 ms service-only).
+    /// the feeder round trip (TR 38.821 Table 4.2-2 gives a 25.77 ms worst-case
+    /// RTT for LEO-600 transparent, 41.77 ms for LEO-1200, against about 4 ms
+    /// for the LEO-600 service link alone at zenith).
     void SetGatewayMobility(Ptr<MobilityModel> gw);
 
     /// True when the configured payload mode needs a feeder leg that has not

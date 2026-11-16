@@ -243,13 +243,30 @@ void
 NtnFapiSapBridge::OnSlotIndication(const mmwave::SfnSf& snf)
 {
     // Real PHY told the MAC a slot started == FAPI SLOT.indication (0x82).
+    //
+    // FAPI-5: SCF FAPI 222.10.02 section 3.4.1 sends SLOT.indication ONCE per
+    // slot. The mmwave PHY calls MmWaveEnbPhySapUser::SlotIndication once per
+    // variable TTI (MmWaveEnbPhy::StartTti, SfnSf::m_varTtiNum = first symbol),
+    // so a slot carrying a control TTI and two data TTIs produced three
+    // SLOT.indications: the stored runs reported about 13000 per second on a
+    // 4000 slot/s cell. Only the first TTI of a slot is a slot boundary; the
+    // later ones still reach the real MAC (the decorator forwards every call)
+    // but are not FAPI messages.
+    const uint64_t key = SlotKey(snf.m_frameNum, snf.m_sfNum, snf.m_slotNum);
+    m_currentSfn = snf;
+    m_haveCurrentSfn = true;
+    if (key == m_lastSlotIndKey)
+    {
+        return;
+    }
+    m_lastSlotIndKey = key;
+
     SlotIndication si{};
     si.sfn = static_cast<uint16_t>(snf.m_frameNum & 0x3FF);
     si.slot = FapiSlot(snf.m_sfNum, snf.m_slotNum);
     m_lastSlot = si;
     ++m_slotIndCount;
 
-    const uint64_t key = SlotKey(snf.m_frameNum, snf.m_sfNum, snf.m_slotNum);
     m_slotIndTimeSec[key] = Simulator::Now().GetSeconds();
 
     // Scheduling pipeline: this slot's alloc was produced ahead of the slot.
@@ -263,8 +280,6 @@ NtnFapiSapBridge::OnSlotIndication(const mmwave::SfnSf& snf)
             ++m_pipeCount;
         }
     }
-    m_currentSfn = snf;
-    m_haveCurrentSfn = true;
     m_slotIndTrace(si);
 }
 
@@ -589,8 +604,19 @@ NtnFapiSapBridge::OnRachPreamble(uint32_t raId)
     pre.slotIndex = static_cast<uint8_t>(ind.slot & 0xFF);
     pre.freqIndex = 0;
     // The residual, not the round trip: see SetNtnTimingAdvance.
+    //
+    // FAPI-6: the RACH.indication TimingAdvance field (SCF FAPI 222.10.02
+    // RACH.indication, value 0..3846) is the TA COMMAND index T_A of TS 38.213
+    // section 4.2, i.e. units of 16 * 64 * T_c / 2^mu (TS 38.211 section 4.3.1),
+    // not raw T_c. Writing T_c into it and clamping at 0xFFFF reported at most
+    // 33 us and mislabelled the unit by a factor 1024 / 2^mu. The residual is
+    // converted and saturates at 3846, which is exactly the point the module
+    // makes: an un-compensated NTN round trip cannot be expressed by the
+    // terrestrial 12-bit RAR TA command.
     const uint32_t taTc = GetResidualTaInTc();
-    pre.timingAdvance = static_cast<uint16_t>(std::min<uint32_t>(taTc, 0xFFFF));
+    const uint64_t taUnitTc = 16ull * 64ull / std::max<uint32_t>(1u, m_slotsPerSubframe);
+    const uint64_t taIdx = (static_cast<uint64_t>(taTc) + taUnitTc / 2) / taUnitTc;
+    pre.timingAdvance = static_cast<uint16_t>(std::min<uint64_t>(taIdx, 3846u));
     pre.preamblePower = 0;
     ind.preambles.push_back(pre);
 

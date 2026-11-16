@@ -7,9 +7,11 @@
  * HARQ + RLC/PDCP + RRC + EPC) on a real SGP4 LEO pass, with TR 38.811 UE
  * mobility. Isolation is genuinely CONTESTED: the eMBB slice saturates the
  * shared cell while URLLC and mMTC must hold their SLAs. Every KPI is MEASURED
- * — per-slice SINR off the mmwave PHY trace, per-slice delivered bytes off the
- * PacketSinks, latency from the real slant geometry — and fed to the real
- * SliceIsolationMonitor, which flags breaches.
+ * (per-slice SINR off the per-BWP PHY trace, per-slice delivered packets,
+ * sequence-gap losses and one-way delays off the in-band sinks) and fed to
+ * the real SliceIsolationMonitor, which flags breaches. A latency breach whose
+ * budget is below the one-way floor (altitude/c + backhaul) is reported as
+ * structural, not as an isolation violation.
  *
  * Quick test:  --simSeconds=15 --numUes=9
  */
@@ -130,6 +132,10 @@ main(int argc, char* argv[])
     // KPIs below are reported under the wrong slice labels.
     SliceProfile profiles[3] = {DefaultMmtc(3), DefaultEmbb(1), DefaultUrllc(2)};
     SliceIsolationMonitor monitor;
+    // Keep every replayed sample: the replay is in ascending-delay order, so the
+    // default 200-sample window kept only the slowest 200 and turned the p99
+    // into a tail maximum (the 630/4047/18078-packet slices all overflowed it).
+    monitor.SetWindow(10000000);
     for (auto& p : profiles)
     {
         monitor.RegisterSlice(p);
@@ -188,25 +194,41 @@ main(int argc, char* argv[])
         std::printf("#   %s  meas thr=%6.3f Mbps  BWP SINR=%6.2f dB  (rxPkts=%lu)\n", names[s],
                     sliceMbps[s], sliceSinr[s], static_cast<unsigned long>(sliceRxPkts[s]));
     }
+    // One-way floor: the shell altitude / c (true lower bound for any
+    // elevation) plus the backhaul constant. A budget below it breaches on an
+    // empty cell, so it says nothing about isolation (each slice has its own
+    // BWP here) and must not be counted as an isolation violation.
+    const double floorMs = wcfg.altitude_km * 1e3 / 299792458.0 * 1e3 + backhaulMs;
     uint32_t nBreach = 0;
+    uint32_t nIsolation = 0;
     for (const auto& b : breaches)
     {
         if (b.latencyBreach || b.reliabilityBreach)
         {
             ++nBreach;
-            std::printf("#   SLA BREACH sst=%u latencyBreach=%d reliabilityBreach=%d\n",
+            const bool structural =
+                b.latencyBreach && !b.reliabilityBreach && b.latencyBudgetMs < floorMs;
+            if (!structural)
+            {
+                ++nIsolation;
+            }
+            std::printf("#   SLA BREACH sst=%u latencyBreach=%d reliabilityBreach=%d%s\n",
                         static_cast<unsigned>(b.snssai.sst), b.latencyBreach,
-                        b.reliabilityBreach);
+                        b.reliabilityBreach,
+                        structural ? " (budget below the one-way floor: structural)" : "");
         }
     }
-    std::printf("#   SLA breaches: %u/3 (isolation %s under eMBB saturation)\n", nBreach,
-                nBreach == 0 ? "HELD" : "violated");
+    std::printf("#   one-way floor (altitude/c + backhaul) = %.2f ms\n", floorMs);
+    std::printf("#   SLA breaches: %u/3, of which not explained by the floor: %u "
+                "(isolation %s under eMBB saturation)\n",
+                nBreach, nIsolation, nIsolation == 0 ? "HELD" : "violated");
 
     // Persist the PER-SLICE breakdown (the signature of this example): per-BWP
     // SINR, measured throughput, measured one-way delay and delivered/lost counts
     // per slice, plus each slice's SLA breach verdict. URLLC latency conformance
-    // is judged against its configured budget (TS 23.501 5QI PDB) — over a LEO
-    // slant a 5 ms URLLC budget is expected to BREACH, which the file now shows.
+    // is judged against the slice profile's 5 ms SLA budget (TS 22.261), not the
+    // 5QI 82 PDB (10 ms, TS 23.501 Table 5.7.4-1); the 5 ms budget is below the
+    // ~6.8 ms one-way floor, so that breach is structural.
     {
         using SstT = decltype(profiles[0].snssai.sst);
         auto breachFor = [&](SstT sst, bool& lat, bool& rel) {

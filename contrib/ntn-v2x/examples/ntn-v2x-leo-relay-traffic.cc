@@ -50,6 +50,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 
 using namespace ns3;
 
@@ -61,7 +63,12 @@ constexpr double kC = 299792458.0;
 Ptr<ntnv2x::V2xLeoRelay> g_relay;
 Ptr<MobilityModel> g_veh0, g_veh1, g_sat;
 Ptr<RateErrorModel> g_emV2v, g_emUplink, g_emDirect;
-Ptr<PointToPointChannel> g_chV2v, g_chUplink, g_chDirect;
+Ptr<PointToPointChannel> g_chV2v, g_chUplink, g_chDirect, g_chFeeder;
+// Gateway (feeder-link ground end) at the scenario origin: the transparent
+// payload case of TR 38.821 Sec. 4.2 with the gateway inside the same
+// footprint, so the feeder hop is a real slant range, not a 10 us stub.
+const Vector g_gwPos(0.0, 0.0, 0.0);
+std::ofstream g_csv;
 Ptr<Ipv4> g_veh0Ipv4;
 uint32_t g_ifV2v = 1, g_ifDirect = 2;
 Ptr<NtnOranSink> g_sink;
@@ -107,6 +114,9 @@ Tick()
     // fabricated SINR). These are real range/c and stay regardless of gating.
     g_chV2v->SetAttribute("Delay", TimeValue(Seconds(dV2v / kC)));
     g_chUplink->SetAttribute("Delay", TimeValue(Seconds(dUp / kC)));
+    // Feeder hop: satellite to gateway slant range. It was a fixed 10 us, so the
+    // reported e2e delay carried only one of the two space legs of a bent pipe.
+    g_chFeeder->SetAttribute("Delay", TimeValue(Seconds(Dist(g_sat->GetPosition(), g_gwPos) / kC)));
 
     // The packet-routing decision is owned by the V2xLeoRelay engine, NOT by an
     // inline geometry test: EvaluateAll() returns, per vehicle, whether veh0
@@ -174,6 +184,14 @@ Tick()
                 Simulator::Now().GetSeconds(), dV2v, elevUp,
                 d0 ? (d0->directToLeo ? "DIR" : "RELAY") : "?",
                 (d0 && !d0->relayPeerId.empty()) ? d0->relayPeerId.c_str() : "-", bsmRx);
+    if (g_csv.is_open())
+    {
+        g_csv << Simulator::Now().GetSeconds() << "," << dV2v << "," << elevUp << ","
+              << (d0 ? (d0->directToLeo ? "direct" : "relay") : "none") << ","
+              << ((d0 && !d0->relayPeerId.empty()) ? d0->relayPeerId : "-") << ","
+              << (d0 ? d0->directSnrDb : 0.0) << "," << servingSnr << "," << uplinkUp << ","
+              << bsmRx << "\n";
+    }
     Simulator::Schedule(Seconds(1.0), &Tick);
 }
 } // namespace
@@ -202,8 +220,12 @@ main(int argc, char* argv[])
     cmd.AddValue("bsmHz", "Basic-safety-message rate (Hz)", bsmHz);
     cmd.AddValue("bsmBytes", "BSM payload size (bytes)", bsmBytes);
     cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
-    cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
-    cmd.AddValue("relayDriftMps", "Relay vehicle relative speed (m/s)", relayDriftMps);
+    cmd.AddValue("satSpeed",
+                 "IGNORED: the SGP4 orbit at --leoAltKm sets the satellite speed",
+                 satSpeed);
+    cmd.AddValue("relayDriftMps",
+                 "IGNORED: vehicle motion comes from the FCD trace (--fcdTrace)",
+                 relayDriftMps);
     cmd.AddValue("maxV2vRange", "Max V2V range for relay (m)", maxV2vRangeM);
     cmd.AddValue("minDirectSnr", "Min direct SNR before relaying (dB)", minDirectSnrDb);
     cmd.AddValue("veh0BlockageDb",
@@ -326,6 +348,7 @@ main(int argc, char* argv[])
     ipv4.Assign(dUp);
 
     NetDeviceContainer dFeeder = p2p.Install(NodeContainer(nodes.Get(2), nodes.Get(3)));
+    g_chFeeder = DynamicCast<PointToPointChannel>(dFeeder.Get(0)->GetChannel());
     ipv4.SetBase("10.60.3.0", "255.255.255.0");
     Ipv4InterfaceContainer iFeeder = ipv4.Assign(dFeeder);
 
@@ -399,10 +422,29 @@ main(int argc, char* argv[])
     src->SetStopTime(Seconds(simSeconds));
 
     std::printf("# ntn-v2x-leo-relay-traffic (veh0 --V2V--> veh1 --uplink--> LEO --> server)\n"
-                "#   sim=%.0fs bsm=%.0fHz x %uB leoAlt=%.0fkm relayDrift=%.0fm/s maxV2vRange=%.0fm\n",
-                simSeconds, bsmHz, bsmBytes, leoAltKm, relayDriftMps, maxV2vRangeM);
+                "#   sim=%.0fs bsm=%.0fHz x %uB leoAlt=%.0fkm (SGP4) maxV2vRange=%.0fm "
+                "minDirectSnr=%.1fdB veh0Blockage=%.1fdB\n",
+                simSeconds, bsmHz, bsmBytes, leoAltKm, maxV2vRangeM, minDirectSnrDb,
+                veh0BlockageDb);
+    (void)satSpeed;
+    (void)relayDriftMps;
 
-    Simulator::Schedule(Seconds(2.0), &Tick);
+    // outputDir was parsed and never used; persist the per-tick decisions.
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        g_csv.open(outputDir + "/ntn-v2x-leo-relay-traffic.csv");
+        if (g_csv.is_open())
+        {
+            g_csv << "time_s,v2v_range_m,uplink_elev_deg,route,peer,veh0_direct_snr_db,"
+                     "serving_snr_db,uplink_up,rx_bytes_last_s\n";
+        }
+    }
+
+    // First tick at t=0, before the first BSM at t=1 s: it used to run at t=2 s,
+    // so the first second of BSMs crossed every hop with the 10 us placeholder
+    // delay and ungated links.
+    Simulator::Schedule(Seconds(0.0), &Tick);
     Simulator::Stop(Seconds(simSeconds + 1));
     Simulator::Run();
 
@@ -422,10 +464,18 @@ main(int argc, char* argv[])
         const Vector vFinal = g_veh0Mob ? g_veh0Mob->GetVelocity() : Vector(0, 0, 0);
         const double speedFinal = std::sqrt(vFinal.x * vFinal.x + vFinal.y * vFinal.y);
         std::cout << "#   BSM mobility: veh0 final speed=" << speedFinal << " m/s heading="
-                  << (speedFinal > 0.0 ? std::atan2(vFinal.y, vFinal.x) * 180.0 / M_PI : 0.0)
+                  // compass heading (clockwise from north), the J2735 convention
+                  // the BSM itself uses, not the math angle from +x
+                  << (speedFinal > 0.0
+                          ? std::fmod(std::atan2(vFinal.x, vFinal.y) * 180.0 / M_PI + 360.0, 360.0)
+                          : 0.0)
                   << " deg | FCD velocity samples applied="
                   << g_bridge->VelocitySamplesApplied()
                   << " dropped=" << g_bridge->VelocitySamplesDropped() << "\n";
+    }
+    if (g_csv.is_open())
+    {
+        g_csv.close();
     }
     Simulator::Destroy();
     return 0;

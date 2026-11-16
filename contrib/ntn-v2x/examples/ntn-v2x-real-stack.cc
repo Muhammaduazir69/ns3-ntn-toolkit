@@ -216,11 +216,17 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     g_simTime = duration;
 
-    // Backend-appropriate EIRP default (honoured only if the user did not set it):
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    if (satEirpDbm < 0.0)
+    // EIRP default. This used to put 70 dBm (10 kW) of CONDUCTED power on the
+    // nr array, about 20 dB above the TR 38.821 Set-1 S-band payload once the
+    // array gain is added, which held every vehicle near 30 dB SINR so a 14 dB
+    // blockage never pushed one below the 6 dB threshold for most of the run.
+    // The nr default is now the TR 38.821 Table 6.1.1.1-1 Set-1 EIRP density
+    // (34 dBW/MHz), as ntn-v2x-edge-urllc and ntn-v2x-maritime-ais already use;
+    // an explicit --satEirpDbm is still honored as conducted power.
+    const bool eirpFromTr38821 = (satEirpDbm < 0.0 && radio != "mmwave");
+    if (satEirpDbm < 0.0 && radio == "mmwave")
     {
-        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+        satEirpDbm = 55.0;
     }
 
     std::cout << "\n=== ntn-v2x REAL-STACK (relay decision on MEASURED LEO SINR) ===\n"
@@ -253,7 +259,11 @@ main(int argc, char* argv[])
     satEnu->SetReference(satSubLat, satSubLon, 0.0);
     satNodes.Get(0)->AggregateObject(satEnu);
     MobilityHelper mob;
-    mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    // Vehicles drive: ConstantVelocity at 27.8 m/s (100 km/h, inside the
+    // TR 38.821 Table 6.1.1.1-3 vehicle-mounted UE speed of up to 120 km/h).
+    // They were ConstantPosition, i.e. parked cars on a "highway", which the
+    // mobility mandate does not allow and which hid Doppler from the radio.
+    mob.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
 
     // Vehicles along a highway, 300 m apart; odd-indexed ones are NLOS (canyon/
     // foliage) and carry the blockage term. Even ones keep line of sight.
@@ -266,6 +276,11 @@ main(int argc, char* argv[])
     }
     mob.SetPositionAllocator(vehPos);
     mob.Install(g_vehicles);
+    for (uint32_t i = 0; i < numVehicles; ++i)
+    {
+        g_vehicles.Get(i)->GetObject<ConstantVelocityMobilityModel>()->SetVelocity(
+            Vector(27.8, 0.0, 0.0));
+    }
     Ptr<MobilityModel> satMob = satNodes.Get(0)->GetObject<MobilityModel>();
 
     NtnRealStackHelper rs;
@@ -278,10 +293,15 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-real-stack");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (eirpFromTr38821)
+    {
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit value is CONDUCTED power at the array input.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, g_vehicles);
     // V2X-2 FIX (2026-08-25): install ONE flow per vehicle and keep the
     // handles, so the relay decision below has something to act on. With the
@@ -315,8 +335,20 @@ main(int argc, char* argv[])
     // real antenna gain) is visible — that gap is exactly why relay decisions
     // must ride the measured link.
     Vector v0 = g_vehicles.Get(0)->GetObject<MobilityModel>()->GetPosition();
+    // Same budget convention as the radio: total EIRP over the cell bandwidth
+    // and kTB + 7 dB NF (TR 38.821 Table 6.1.1.1-3). It used to pass the
+    // conducted power as if it were EIRP and a -110 dBm floor that sits below
+    // thermal noise for any NR bandwidth.
+    const double bwHz = rs.GetBandwidthHz();
+    const double eirpTotalDbm =
+        eirpFromTr38821
+            ? NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz + 10.0 * std::log10(bwHz / 1e6) +
+                  30.0
+            : satEirpDbm;
+    const double noiseDbm = -174.0 + 10.0 * std::log10(bwHz) + 7.0;
     V2xLinkBudget formula =
-        V2xLeoDirect::ComputeStatic(v0, satMob->GetPosition(), 2.0, satEirpDbm, -110.0);
+        V2xLeoDirect::ComputeStatic(v0, satMob->GetPosition(), rs.GetCarrierFrequencyHz() / 1e9,
+                                    eirpTotalDbm, noiseDbm);
 
     const uint64_t total = g_directDecisions + g_relayDecisions + g_outageDecisions;
     std::cout << "\n--- V2X Summary (relay logic on MEASURED radio) ---\n"

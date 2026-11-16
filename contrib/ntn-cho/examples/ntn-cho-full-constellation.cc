@@ -736,7 +736,8 @@ main(int argc, char* argv[])
     cmd.AddValue("tteMinimum", "Minimum TTE for admission (s)", tteMinimum);
     cmd.AddValue("tteMin", "Minimum TTE for CHO config (s)", tteMinSec);
     cmd.AddValue("carrierFreqGhz", "Carrier frequency (GHz)", carrierFreqGhz);
-    cmd.AddValue("satTxPower", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satTxPower);
+    cmd.AddValue("satTxPower", "Satellite conducted Tx power at the array input (dBm); -1 = backend default "
+                 "(nr 70, mmwave 55; legacy, not TR 38.821 Set-1 calibrated)", satTxPower);
     cmd.AddValue("altitude", "Constellation altitude (km)", altitudeKm);
     cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("numCandidates", "Candidate satellite cells", numCandidates);
@@ -750,8 +751,9 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
 
     const bool useNr = (radio != "mmwave");
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
-    // healthy SINR; mmwave keeps its historical 55 dBm (zero regression).
+    // Legacy conducted-power default: nr 70 dBm, mmwave 55 dBm. The nr value is
+    // roughly 11 dB above the TR 38.821 Set-1 S-band density once the array
+    // gain is added; it is kept because the paper campaign used it.
     if (satTxPower < 0.0)
     {
         satTxPower = useNr ? 70.0 : 55.0;
@@ -860,9 +862,12 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-cho-full-constellation_" + algorithm);
     rs.SetCarrierFrequencyHz(carrierFreqGhz * 1e9);
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
+    // NT-02: declared as CONDUCTED power at the array input, so the EIRP
+    // health gate reports "not asserted". The nr default is the legacy
+    // 70 dBm, about 88 dBm EIRP with the ~18 dB array gain and roughly 11 dB
+    // above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band density (34 dBW/MHz).
+    // It is NOT TR 38.821 calibrated; it is kept unchanged because the
+    // paper's CHO KPI campaign was produced with it.
     rs.SetSatConductedPowerDbm(satTxPower);
     // CHO-3: hand every satellite to the radio helper so the candidates are
     // genuine neighbour cells and a CHO decision can drive a real X2

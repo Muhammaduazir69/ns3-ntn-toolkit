@@ -13,9 +13,9 @@
  *
  * The radio KPIs (SINR/TBLER/throughput) are MEASURED off the mmwave PHY trace
  * — no closed-form SINR and no sigmoid error model. The summary reports the
- * measured link together with the DRX duty cycle and the resulting power-saving
- * vs effective-throughput trade-off (effective active time = measured goodput x
- * DRX on-duty). Compare --drxOn vs --drxOff.
+ * measured link together with the DRX duty cycle; the goodput under DRX is the
+ * one measured at the sink with the downlink gated by the state machine (RRC-3),
+ * not a product of goodput and duty cycle. Compare --drxOn vs --drxOff.
  *
  * Quick test:  --simSeconds=20 --numUes=4
  */
@@ -166,7 +166,7 @@ main(int argc, char* argv[])
     cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
     cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("drxOn", "Enable connected-mode DRX gating", drxEnabled);
     cmd.AddValue("drxLongCycleMs", "DRX long cycle (ms)", drxLongCycleMs);
@@ -176,10 +176,31 @@ main(int argc, char* argv[])
     g_drxEnabled = drxEnabled;
     g_simTime = simSeconds;
 
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
-    // mmwave, so honour the historical 55 dBm for mmwave but give nr 70 dBm.
     const bool useNr = (radio == "nr");
-    if (satEirpDbm < 0.0)
+    // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the
+    // default is now that Set-1 density, as ntn-v2x-real-stack does; an
+    // explicit --satEirpDbm keeps meaning conducted power. The radio here
+    // already took the Set-1 density on BOTH backends, so the default is
+    // backend-agnostic; what changes is that the printed budget and the
+    // decision model now receive the same conducted power as the radio.
+    // The probe mirrors the cell's carrier and bandwidth and returns the
+    // equivalent CONDUCTED power from the helper's own formula
+    // (density + 10log10(BW_MHz) + 30 - ArrayGainDb()), so every other
+    // consumer of satEirpDbm stays consistent with the radio.
+    NtnRealStackHelper eirpProbe;
+    eirpProbe.SetCarrierFrequencyHz(freqGHz * 1e9);
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 &&
+                                 eirpProbe.GetCarrierFrequencyHz() > 1.0e9 &&
+                                 eirpProbe.GetCarrierFrequencyHz() <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        eirpProbe.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        satEirpDbm = eirpProbe.GetSatEirpDbm();
+    }
+    else if (satEirpDbm < 0.0)
     {
         satEirpDbm = useNr ? 70.0 : 55.0;
     }
@@ -224,13 +245,28 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-rrc-drx-data-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
-    // S-band LEO reference payload. Declared as a DENSITY so the helper
-    // back-computes conducted power against the array gain instead of the
-    // antenna being counted twice.
-    rs.SetSatEirpDensityDbwMhz(
-        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    if (eirpFromTr38821)
+    {
+        // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for
+        // the S-band LEO reference payload. Declared as a DENSITY so the
+        // helper back-computes conducted power against the array gain
+        // instead of the antenna being counted twice.
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit --satEirpDbm (or a default on a carrier outside
+        // the Set-1 S-band reference) is CONDUCTED power at the array input.
+        // It used to be ignored here: the radio always took the density
+        // while the printed budget and the decision model took this value.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, ueNodes);
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
     // RRC-3 FIX (2026-08-25): install the downlink flow explicitly so the DRX
     // state machine can gate it. With the bouquet installed in bulk there were
     // no handles, which is part of why DRX could only be reported rather than
@@ -251,6 +287,14 @@ main(int argc, char* argv[])
     g_ta = CreateObject<NtnTimingAdvance>();
     g_ta->SetUeMobility(ueMob);
     g_ta->SetSatelliteMobility(satMob);
+    // RRC-2d: the radio puts the gNB ON the satellite (NtnRealStackHelper::Build
+    // gets the satellite node), i.e. a regenerative payload, and this example
+    // has no gateway. Left at the class default (Transparent) the TA omitted a
+    // feeder leg the payload type says exists and printed the RRC-2b warning on
+    // every run. Declaring the payload the radio actually models keeps the
+    // service-link round trip (TS 38.213 section 4.2, N_TA,adj^UE) and makes it
+    // the correct one.
+    g_ta->SetPayloadMode(PayloadMode::RegenerativeFull);
     g_ta->SetReferencePosition(ntngeo::GeodeticToEcef(subLat, subLon, 0.0));
 
     const uint16_t cellId = rs.GetServingCellId(); // radio-agnostic (mmwave or nr gNB)
@@ -259,6 +303,7 @@ main(int argc, char* argv[])
     g_sib19->SetTimingAdvance(g_ta);
     g_sib19->SetReferencePosition(ntngeo::GeodeticToEcef(subLat, subLon, 0.0));
     g_sib19->SetCellId(cellId);
+    g_sib19->SetPayloadMode(PayloadMode::RegenerativeFull);
     g_sib19->SetPeriod(MilliSeconds(160));
 
     g_drx = CreateObject<NtnDrxStateMachine>();
@@ -324,12 +369,14 @@ main(int argc, char* argv[])
         awakeFrac = (simSeconds > 0.0) ? awakeS / simSeconds : 0.0;
     }
     const double measGoodput = rs.GetRxThroughputMbps();
-    std::printf("# === summary ===  DRX=%s  measured awake fraction=%.1f%% (from DRX SM, "
-                "real-traffic driven)  measured SINR=%.2f dB  measured TBLER=%.4f  "
-                "measured goodput=%.3f Mbps  DRX effective goodput=%.3f Mbps "
-                "(power-saving trade-off)\n",
+    // RRC-3d: the console used to add "DRX effective goodput = goodput x awake
+    // fraction", the very arithmetic RRC-3 removed from drx_metrics.csv. With
+    // the gate applied, the measured goodput already IS the DRX goodput.
+    std::printf("# === summary ===  DRX=%s  awake fraction=%.1f%% (DRX SM, activity polled "
+                "once per long cycle, SCOPE A18)  measured SINR=%.2f dB  measured TBLER=%.4f  "
+                "measured goodput (DL gated by DRX)=%.3f Mbps\n",
                 drxEnabled ? "on" : "off", 100.0 * awakeFrac, rs.GetMeanDlSinrDb(),
-                rs.GetMeanDlTbler(), measGoodput, measGoodput * awakeFrac);
+                rs.GetMeanDlTbler(), measGoodput);
 
     // Persist the DRX-specific KPIs (the signature of this example) to a file:
     // per-state residency, the connected-mode DRX duty cycle (awake fraction),

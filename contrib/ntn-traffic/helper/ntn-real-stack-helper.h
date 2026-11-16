@@ -64,6 +64,7 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <set>
 #include <vector>
 
 namespace ns3
@@ -130,8 +131,9 @@ class NtnRealStackHelper
     /// where the gNB functions live and therefore which legs the user plane
     /// crosses; the extra one-way delay is computed from the LIVE feeder
     /// slant range when SetFeederGeometry() is wired:
-    ///   Transparent      bent-pipe: the user plane crosses the RF feeder leg
-    ///                    too -> 2 x slant/c
+    ///   Transparent      bent-pipe, gNB at the gateway: the user plane
+    ///                    crosses the feeder once -> slant/c, no on-board
+    ///                    processing (TR 38.821 Table 4.2-2)
     ///   RegenerativeRu   O-RU on sat, O-DU/O-CU ground: Open-FH (7.2x) over
     ///                    the feeder -> slant/c + 0.25 ms lower-PHY budget
     ///   RegenerativeRuDu O-DU on sat: F1 midhaul over the feeder ->
@@ -358,6 +360,12 @@ class NtnRealStackHelper
     /// A value outside the supported set is accepted (scenarios may explore
     /// deliberately) but warned about at Build(), and the sim_health
     /// air_interface tag reports the run as non-conformant.
+    /// Declare that the carrier is the TR 38.821 calibration carrier (e.g. the
+    /// 2 GHz S-band of Table 6.1.1.1-1), which lies in band n256's UPLINK range.
+    /// The NTN band check is then reported for information (tag suffix
+    /// "-calibration") instead of failing the run: reproducing the calibration
+    /// tables requires that carrier.
+    void DeclareCalibrationCarrier(bool c = true) { m_calibrationCarrier = c; }
     void SetBandwidthHz(double b) { m_bwHz = b; }
     double GetBandwidthHz() const { return m_bwHz; }
     double GetCarrierFrequencyHz() const { return m_freqHz; }
@@ -760,7 +768,7 @@ class NtnRealStackHelper
         double meanOwdMs{0.0};
         double maxOwdMs{0.0};
         /// SLICE-1: real percentiles of the measured one-way-delay distribution,
-        /// 1 ms resolution. NaN when the slice received nothing. A latency SLA
+        /// 0.1 ms resolution up to 1 s, 1 ms beyond. NaN when the slice received nothing. A latency SLA
         /// stated as a percentile is meaningless without these: the examples
         /// used to stamp every packet with meanOwdMs, so p99 == mean by
         /// construction and no percentile bound could ever breach.
@@ -786,6 +794,13 @@ class NtnRealStackHelper
     /// interfaces so a UE re-selects a real neighbour cell on measured RSRP,
     /// replacing free-space-scaled candidate SINR. Call before Build().
     void SetHandover(bool enable, double hysteresisDb = 3.0, Time ttt = MilliSeconds(256));
+    /// With SetHandover(true, ...) the X2 between satellites is stood up AND the
+    /// vendored A3-RSRP algorithm is installed. A scenario whose own logic
+    /// decides every handover (conditional handover via TriggerHandover) must
+    /// call SetAutonomousHandover(false): the X2 stays, the A3 algorithm is not
+    /// installed, and the RRC keeps 5G-LENA's no-op algorithm, so the two
+    /// decision makers cannot fight over the same UE.
+    void SetAutonomousHandover(bool a) { m_hoAutonomous = a; }
 
     /// WF-11: how many TriggerHandover calls were REFUSED, and why the last one
     /// was. These are members rather than log lines because the shipped build
@@ -1126,6 +1141,14 @@ class NtnRealStackHelper
     void RunPeriodic(uint32_t idx);
     // Enabler A: NrGnbRrc "HandoverEndOk" trace sink (counts completed HOs).
     void NrHandoverEndOk(std::string ctx, uint64_t imsi, uint16_t cellId, uint16_t rnti);
+    /// Point each UE's active receive beam at its CURRENT serving cell. The
+    /// ideal beamforming helper replays every registered (gNB, UE) task in
+    /// insertion order and leaves the UE beam on the LAST registered gNB, so
+    /// after a handover back to an earlier cell the UE would listen to the
+    /// wrong satellite. Rescheduled just after each beamforming pass.
+    void NrReassertUeBeams();
+    /// (cellId, IMSI) pairs that have an ideal-beamforming task registered.
+    std::set<std::pair<uint16_t, uint64_t>> m_nrBfPairs;
     // Enabler D: stretch the NR HARQ process pool to the slant RTT so a
     // process is not recycled before its ACK returns (NR analogue of the
     // mmwave ConfigureNtnHarqProfile). No-op unless SetNtnHarqProfile(true).
@@ -1209,6 +1232,7 @@ class NtnRealStackHelper
     /// at 20 MHz, the narrower channel winning on noise floor, with application
     /// throughput unchanged because it is offered-load limited.
     double m_bwHz{20.0e6};
+    bool m_calibrationCarrier{false};
     double m_satEirpDbm{55.0};    // gNB conducted Tx power (UPA array gain added separately), Friis budget -> ~15-20 dB SINR
     double m_eirpTotalDbm{std::numeric_limits<double>::quiet_NaN()}; // S7: intended total EIRP if set via SetSatEirpTotalDbm/Density
     double m_eirpDensityDbwMhz{std::numeric_limits<double>::quiet_NaN()}; // NT-02: deferred density
@@ -1364,6 +1388,7 @@ class NtnRealStackHelper
     uint32_t m_hoCount{0};                      // A: completed NR handovers
     uint32_t m_hoRequested{0};                  // P1: handovers REQUESTED via TriggerHandover
     std::vector<Ptr<NrHandoverAlgorithm>> m_hoAlgos; // A: per-gNB A3 algos (kept alive)
+    bool m_hoAutonomous{true};
 
     // Collected results
     double m_dlSinrDbMean{0.0};
@@ -1373,6 +1398,12 @@ class NtnRealStackHelper
     double m_rxThroughputMbps{0.0};
     double m_meanDelayMs{0.0};
     double m_meanJitterMs{0.0};
+    /// Aggregate one-way-delay distribution over every DL flow, from the
+    /// sinks' 1 ms delay histograms (NaN when nothing was received).
+    double m_owdP50Ms{std::numeric_limits<double>::quiet_NaN()};
+    double m_owdP95Ms{std::numeric_limits<double>::quiet_NaN()};
+    double m_owdP99Ms{std::numeric_limits<double>::quiet_NaN()};
+    double m_owdMaxMs{std::numeric_limits<double>::quiet_NaN()};
     double m_appLossRatio{0.0};
     uint16_t m_nextDlPort{1234};
     uint16_t m_flowSeq{0}; ///< monotonic ORAN srcId allocator (never a recycled port)

@@ -268,7 +268,9 @@ class NtnSlChannel : public Object
     /// this quantity was identically zero and no accessor for it existed. A
     /// transmission occupies its slot, so the floor is one slot duration
     /// (1 ms at mu=0) plus propagation, which at V2X ranges is under a
-    /// microsecond.
+    /// microsecond. With SetAlignReselection(true) the statistic is the latency
+    /// from message arrival, so it also includes the wait for the selected
+    /// resource (up to T2 slots).
     double GetMeanDelayMs() const
     {
         return m_delayCount ? (m_delaySumS / m_delayCount) * 1e3 : 0.0;

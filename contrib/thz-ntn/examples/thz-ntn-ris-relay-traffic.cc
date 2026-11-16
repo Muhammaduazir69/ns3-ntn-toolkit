@@ -14,9 +14,13 @@
 // channel reconfigurations (NtnStaticExtraLossModel chained onto the real
 // spectrum channel): the MEASURED SINR collapses when the canyon blocks the
 // path and recovers when the RIS engages. The recovery magnitude is the
-// module's own physics — ThzNtnRis::ComputeSnrGain_dB(true) from the
-// configured NumElementsX/Y — clamped at the LOS level (a passive reflector
-// cannot beat the unobstructed direct path in this abstraction).
+// module's own physics: the far-field cascaded RIS path loss
+// (ThzNtnRis::ComputeCascadedPathLoss_dB, Tang et al. 2021) relative to the
+// direct path, power-summed with the residual blocked direct ray. It used to
+// be ThzNtnRis::ComputeSnrGain_dB(true) = 20 log10(N), the gain over a single
+// element, which is not a gain over the direct link: it ignored the second
+// hop's spreading loss and let a 40x40 panel at 200 m "recover" 40 dB when the
+// physical RIS ray sits ~45 dB below the direct path.
 //
 // Molecular absorption (ThzNtnPropagationLossModel) also stays in the packet
 // path the whole time. Mobility is real: SGP4 satellite, fixed ground site.
@@ -53,6 +57,9 @@ main(int argc, char* argv[])
     uint32_t risX = 40;
     uint32_t risY = 40;
     double reflEff = 0.9;
+    // RIS-to-terminal distance. Far field of a 40x40 half-wavelength panel at
+    // 100 GHz starts at 2 D^2 / lambda ~ 5 m (D = panel diagonal).
+    double risDistM = 10.0;
     double blockFraction = 0.25; // canyon blocks the direct path here
     double risOnFraction = 0.55; // RIS engages here
     std::string outputDir = "thz-ntn-ris-relay-output";
@@ -67,6 +74,7 @@ main(int argc, char* argv[])
     cmd.AddValue("risX", "RIS elements along X", risX);
     cmd.AddValue("risY", "RIS elements along Y", risY);
     cmd.AddValue("reflEff", "RIS reflection efficiency (0-1)", reflEff);
+    cmd.AddValue("risDistM", "RIS-to-terminal distance in m (far field)", risDistM);
     cmd.AddValue("blockFraction", "Fraction of sim at which the blockage starts",
                  blockFraction);
     cmd.AddValue("risOnFraction", "Fraction of sim at which the RIS engages",
@@ -88,15 +96,34 @@ main(int argc, char* argv[])
     ris->SetAttribute("NumElementsY", UintegerValue(risY));
     ris->SetAttribute("Frequency", DoubleValue(freqGHz * 1e9));
     ris->SetAttribute("ReflectionEfficiency", DoubleValue(reflEff));
-    const double risGainDb = ris->ComputeSnrGain_dB(true);
-    // A passive reflector restores at most the LOS budget here.
-    const double risCompDb = std::min(blockageDb, risGainDb);
+    const double risGainDb = ris->ComputeSnrGain_dB(true); // vs one element, printed only
+    // RIS ray relative to the direct ray: FSPL(d1) - PL_cascaded(d1, d2). The
+    // satellite range cancels (d1 ~ direct range), so a nominal 550 km is used.
+    double risRelDb;
+    {
+        Ptr<ConstantPositionMobilityModel> tx = CreateObject<ConstantPositionMobilityModel>();
+        Ptr<ConstantPositionMobilityModel> rp = CreateObject<ConstantPositionMobilityModel>();
+        Ptr<ConstantPositionMobilityModel> rx = CreateObject<ConstantPositionMobilityModel>();
+        const double d1 = 550.0e3;
+        tx->SetPosition(Vector(0.0, 0.0, d1));
+        rp->SetPosition(Vector(0.0, 0.0, 0.0));
+        rx->SetPosition(Vector(risDistM, 0.0, 0.0));
+        const double lambda = 299792458.0 / (freqGHz * 1e9);
+        const double fsplDirect = 20.0 * std::log10(4.0 * M_PI * d1 / lambda);
+        risRelDb = fsplDirect - ris->ComputeCascadedPathLoss_dB(tx, rp, rx);
+    }
+    // Extra loss once the RIS engages: blocked direct ray plus RIS ray, summed
+    // in power. Recovery = blockageDb - that.
+    const double engagedLossDb =
+        -10.0 * std::log10(std::pow(10.0, -blockageDb / 10.0) + std::pow(10.0, risRelDb / 10.0));
+    const double risCompDb = std::max(0.0, blockageDb - engagedLossDb);
 
     std::printf("# thz-ntn-ris-relay-traffic (REAL radio, blockage + RIS in the packet path)\n");
     std::printf("#   sim=%.0fs freq=%.0fGHz EIRP=%.1fdBm blockage=%.0fdB "
-                "RIS=%ux%u(eff %.2f)->%.1fdB gain (%.1f dB applied)\n",
-                simSeconds, freqGHz, satEirpDbm, blockageDb, risX, risY, reflEff,
-                risGainDb, risCompDb);
+                "RIS=%ux%u(eff %.2f) at %.1f m: N^2 gain %.1f dB, RIS ray %.1f dB vs direct, "
+                "%.1f dB recovered\n",
+                simSeconds, freqGHz, satEirpDbm, blockageDb, risX, risY, reflEff, risDistM,
+                risGainDb, risRelDb, risCompDb);
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -199,9 +226,10 @@ main(int argc, char* argv[])
 
     std::printf("# === summary ===  measured cell SINR=%.2f dB TBLER=%.4f "
                 "throughput=%.3f Mbps (blockage + RIS applied to real packets, "
-                "RIS gain %.1f dB from ThzNtnRis physics)\n",
+                "RIS recovers %.1f dB of the %.0f dB blockage, far-field cascaded "
+                "ThzNtnRis physics)\n",
                 rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps(),
-                risGainDb);
+                risCompDb, blockageDb);
 
     Simulator::Destroy();
     return 0;

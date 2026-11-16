@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <utility>
 
 namespace ns3
 {
@@ -35,15 +36,20 @@ void
 SionnaCirPropagationLossModel::SetSnapshot(const CirSnapshot& snap)
 {
     m_snap = snap;
-    // Reference narrowband combine at the snapshot time (dt = 0): the coherent
-    // sum of the raw tap amplitudes. The fading deviation is measured relative
-    // to this so the time-0 charge is exactly 0 dB.
-    std::complex<double> h{0.0, 0.0};
+    // SIONNA-07: normalize to the MEAN power of the CIR, sum_p |a_p|^2, so the
+    // charged term is unit-mean-power small-scale fading on top of the Friis
+    // head (the same normalization the TR 38.811 Section 6.7.2 Rician term
+    // uses). The reference used to be the coherent sum |sum_p a_p|^2 at t=0,
+    // which for an in-phase profile is a constructive PEAK: every later sample
+    // was then charged against that peak, a positive mean bias of
+    // 10 log10(|sum a|^2 / sum |a|^2), 3.5 dB for the shipped 4-tap profile,
+    // added to every packet as if it were path loss.
+    double p = 0.0;
     for (const auto& t : m_snap.taps)
     {
-        h += t.amplitude;
+        p += std::norm(t.amplitude);
     }
-    m_refGain = std::max(std::norm(h), 1e-12);
+    m_refGain = std::max(p, 1e-12);
 }
 
 double
@@ -78,6 +84,27 @@ SionnaCirPropagationLossModel::DoCalcRxPower(double txPowerDbm,
     {
         rxVel = b->GetVelocity();
     }
+    // SIONNA-07: the snapshot describes the satellite -> ground direction
+    // (tx_dir leaves the satellite, rx_dir is the angle of arrival at the
+    // ground end). The same model sits on the uplink chain too, where the
+    // spectrum channel calls it with a = UE and b = satellite; projecting the
+    // UE velocity on the satellite departure directions there gave the uplink a
+    // different, unphysical fading process. The channel is reciprocal, so put
+    // each endpoint's velocity back on its own side of the snapshot. Ground is
+    // the lower-z end in a local ENU frame and the smaller-norm end in ECEF.
+    if (a && b)
+    {
+        const Vector pa = a->GetPosition();
+        const Vector pb = b->GetPosition();
+        const double na = std::sqrt(pa.x * pa.x + pa.y * pa.y + pa.z * pa.z);
+        const double nb = std::sqrt(pb.x * pb.x + pb.y * pb.y + pb.z * pb.z);
+        const bool ecef = std::max(na, nb) > 0.9 * 6371000.0;
+        const bool aIsGround = ecef ? (na < nb) : (pa.z < pb.z);
+        if (aIsGround)
+        {
+            std::swap(txVel, rxVel);
+        }
+    }
 
     const double dt = Simulator::Now().GetSeconds() - m_snap.t_ref_s;
     // Evolve every tap by its Doppler phase (Sionna paths.apply_doppler()).
@@ -91,7 +118,7 @@ SionnaCirPropagationLossModel::DoCalcRxPower(double txPowerDbm,
     }
     const double gain = std::max(std::norm(h), 1e-12);
 
-    // Charge the fading deviation about the snapshot reference (chained on the
+    // Charge the fading deviation about the CIR mean power (chained on the
     // base Friis path loss; +ve dB = a fade, -ve = constructive peak).
     m_lastFadingDb = -10.0 * std::log10(gain / m_refGain);
     return txPowerDbm - m_lastFadingDb;

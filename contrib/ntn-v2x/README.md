@@ -44,8 +44,8 @@ Relay decisions actuate. A runtime transmit gate lets a decision start and stop 
 | `model/ntn-nr-sidelink.h` | NR PC5 sidelink Mode 2 (TS 38.321 Section 5.22). `NtnSlResourcePool` (subchannels x slots, TS 38.331 SL-ResourcePool); `NtnSlUeMac` (sensing-based autonomous selection: candidates in the T1..T2 window, exclusion above an SL-RSRP threshold, the 20 percent rule with 3 dB steps, periodic reservation with a reselection counter); `NtnSlChannel` (TR 37.885 highway LOS path loss with log-normal shadowing and NLOSv blockage, half duplex, SINR decode against thermal noise plus noise figure with co-channel interference summed in linear power, TS 38.885 PRR through `GetPrr` and `GetPrrWithinRange`). |
 | `model/ntn-v2x-bsm-header.h` | `NtnV2xBsmHeader`: SAE J2735 (2016) BSMcoreData as an ns-3 `Header`, 21 octets on the wire (1 + 4 + 2 + 4 + 4 + 2 + 2 + 2), fields in J2735 resolutions; `SetFromState()` fills it from SI quantities. |
 | `model/v2x-leo-relay.h` | `V2xLeoRelay`: per-vehicle direct or relay assignment with `m_minDirectSnrDb` and `m_maxV2vRangeM`; `EvaluateAll()` returns the decisions. |
-| `model/v2x-leo-direct.h` | `V2xLeoDirect`: closed-form vehicle to LEO budget (free-space loss, SNR, elevation), kept as a comparison baseline; the examples decide on measured SINR. |
-| `model/maritime-scenario.h` | `MaritimeMobilityModel`: deprecated, offline tests only. The maritime path is `ntn-v2x-maritime-ais`, which replays recorded AIS tracks through `ntn-sagin`. |
+| `model/v2x-leo-direct.h` | `V2xLeoDirect`: closed-form vehicle to LEO budget (free-space loss, SNR, elevation), defaults TR 38.821 Set-1 S-band (74 dBm EIRP over 10 MHz, -97 dBm noise with a 7 dB NF). `ntn-v2x-leo-relay-traffic` gates its hops on it; the NR examples decide on measured SINR. |
+| `model/maritime-scenario.h` | `MaritimeMobilityModel`: deprecated, offline tests only. The maritime path is `ntn-v2x-maritime-ais`, which replays AIS tracks (DMA CSV format) through `ntn-sagin`. |
 | `helper/ntn-v2x-helper.h` | `WriteDeterministicTestFcdCsv`: a disclosed, RNG-free FCD trace for the test suite. |
 
 ## Results
@@ -108,7 +108,7 @@ Binaries land at `build/contrib/ntn-v2x/examples/ns3.43-<name>-default`.
 | `ntn-v2x-real-stack` | Every vehicle a UE on a real NR NTN cell; the direct-or-relay decision rides the measured per-UE SINR minus blockage, with the closed-form value printed beside it. | `./ns3 run "ntn-v2x-real-stack --duration=20 --numVehicles=8"` |
 | `ntn-v2x-rural-highway` | A LEO pass over a rural highway with vehicles replayed from an FCD trace; direct, relay and orphan counts each second from a measured baseline SINR. | `./ns3 run "ntn-v2x-rural-highway --vehicles=40 --simTime=30"` |
 | `ntn-v2x-leo-relay-traffic` | A two-hop data plane, shadowed vehicle to peer vehicle to LEO to server, with real IPv4 forwarding and contact-gated hops; BSM delay, jitter and loss measured at `NtnOranSink`. | `./ns3 run "ntn-v2x-leo-relay-traffic --simSeconds=60 --bsmHz=10"` |
-| `ntn-v2x-maritime-ais` | A vessel replayed from a recorded Danish Maritime Authority AIS track (via `ntn-sagin`) as a UE of a real NR NTN cell. | `./ns3 run "ntn-v2x-maritime-ais --simSeconds=30"` |
+| `ntn-v2x-maritime-ais` | A vessel replayed from an AIS track in the Danish Maritime Authority CSV format (via `ntn-sagin`) as a UE of a real NR NTN cell. The shipped default is a small hand-made fixture; pass `--aisTrace` with a real aisdk export for recorded motion. | `./ns3 run "ntn-v2x-maritime-ais --simSeconds=30"` |
 
 ## Tests
 

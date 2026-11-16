@@ -53,8 +53,9 @@ std::string EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulation
  * Two transports are supported:
  *   - **UDP** (default; matches `influxdb_v1` UDP listener): low-overhead,
  *     fire-and-forget, lossy under MTU pressure.
- *   - **File**: appends line protocol to a local file. Used for offline
- *     scenarios and for the deterministic unit tests.
+ *   - **File**: writes line protocol to a local file (the sink's first flush
+ *     truncates it, later flushes append). Used for offline scenarios and
+ *     for the deterministic unit tests.
  *
  * HTTP/v2 transport is intentionally NOT in this module — it pulls in libcurl
  * and async event-loop concerns that fight with ns-3's discrete event
@@ -151,6 +152,7 @@ class NtnInfluxSink : public Object
     std::string m_udpHost{"127.0.0.1"};
     uint16_t m_udpPort{8089};
     std::string m_filePath;
+    bool m_fileOpened{false}; ///< first write of this sink truncates m_filePath
     Time m_flushPeriod{Seconds(1.0)};
     bool m_useSimulationTime{true};
     Time m_baseEpoch{Seconds(0)}; ///< wall-clock/TLE epoch added to sim-time (set in ctor)

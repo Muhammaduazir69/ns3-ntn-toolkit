@@ -142,8 +142,9 @@ class V2xLeoRelayDirectVsRelayTest : public TestCase
         // geometry, so a model that disagrees with the budget fails.
         //
         // Vehicle A is at the sub-satellite point, slant 100 m. Vehicle B is
-        // 300 m away, slant sqrt(100^2 + 300^2) = 316.23 m. With EIRP 50 dBm,
-        // noise -110 dBm and 2 GHz:
+        // 300 m away, slant sqrt(100^2 + 300^2) = 316.23 m. With the model's
+        // defaults (EIRP 74 dBm, TR 38.821 Set-1 34 dBW/MHz over 10 MHz; noise
+        // -97 dBm, kTB(10 MHz) + NF 7 dB) and 2 GHz:
         //   FSPL = 20log10(d) + 20log10(f) - 147.55
         //   SNR  = EIRP - FSPL - noise
         // so the two differ by 20log10(316.23/100) = 10.0 dB, and the midpoint
@@ -151,7 +152,7 @@ class V2xLeoRelayDirectVsRelayTest : public TestCase
         constexpr double kC = 299792458.0;
         auto budgetSnrDb = [](double slantM) {
             const double fspl = 20.0 * std::log10(slantM) + 20.0 * std::log10(2.0e9) - 147.55;
-            return 50.0 - fspl - (-110.0);
+            return 74.0 - fspl - (-97.0);
         };
         (void)kC;
         const double snrA = budgetSnrDb(100.0);
@@ -164,9 +165,9 @@ class V2xLeoRelayDirectVsRelayTest : public TestCase
         // And the model must AGREE with that independent budget, which is the
         // assertion the old form could never make.
         auto lbA = V2xLeoDirect::ComputeStatic(a->GetPosition(), sat->GetPosition(),
-                                               2.0, 50.0, -110.0);
+                                               2.0, 74.0, -97.0);
         auto lbB = V2xLeoDirect::ComputeStatic(b->GetPosition(), sat->GetPosition(),
-                                               2.0, 50.0, -110.0);
+                                               2.0, 74.0, -97.0);
         NS_TEST_ASSERT_MSG_EQ_TOL(lbA.snrDb, snrA, 1.0,
                                   "the model's SNR at 100 m must match the free-space budget ("
                                       << snrA << " dB), not merely be larger than B's");

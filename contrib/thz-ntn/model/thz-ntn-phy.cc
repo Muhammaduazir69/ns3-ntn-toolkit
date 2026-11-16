@@ -557,7 +557,9 @@ ThzNtnPhy::SelectSubcarrierSpacing_Hz(Ptr<MobilityModel> satMobility,
         // Fallback: worst-case LEO at 550 km, v=7.6 km/s, 10 deg elevation
         double satVel_m_s = 7600.0;
         double elevRad = 10.0 * M_PI / 180.0;
-        double radialVel = satVel_m_s * std::cos(elevRad);
+        // Range rate of an overhead pass is v * Re cos(el) / (Re + h) (sine of
+        // the off-nadir angle); v*cos(el) overstated it by (Re+h)/Re.
+        double radialVel = satVel_m_s * 6371.0 * std::cos(elevRad) / (6371.0 + 550.0);
         dopplerHz = m_centerFreqHz * radialVel / SPEED_OF_LIGHT;
         NS_LOG_WARN("No mobility models provided, using worst-case Doppler estimate");
     }

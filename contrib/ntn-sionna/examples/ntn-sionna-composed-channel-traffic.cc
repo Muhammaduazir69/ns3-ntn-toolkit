@@ -56,7 +56,7 @@ main(int argc, char* argv[])
 {
     double simSeconds = 40.0;
     double freqGHz = 2.185; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz). // S-band (so the oran-ntn TR 38.811 band matches)
-    double satEirpDbm = 70.0; // healthy nr (FR1 Friis) LEO downlink
+    double satEirpDbm = -1.0; // sentinel: TR 38.821 Set-1 S-band EIRP density
     double rainRateMmH = 0.0;
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-sionna-composed-channel-output";
@@ -64,15 +64,17 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm",
+                 "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)",
+                 satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("rainRateMmH", "Rain rate on the ITU-R chain (mm/h)", rainRateMmH);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
     std::printf("# ntn-sionna-composed-channel-traffic (Roadmap §4.2.8, REAL radio)\n");
-    std::printf("#   sim=%.0fs freq=%.1fGHz EIRP=%.1fdBm rain=%.1fmm/h\n",
-                simSeconds, freqGHz, satEirpDbm, rainRateMmH);
+    std::printf("#   sim=%.0fs freq=%.1fGHz rain=%.1fmm/h\n",
+                simSeconds, freqGHz, rainRateMmH);
     std::printf("#   chain: Friis -> ITU-R excess -> Nakagami fading -> spectrum PHY\n");
 
     NodeContainer satNodes;
@@ -115,13 +117,34 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-sionna-composed-channel-traffic");
     rs.SetCarrierFrequencyHz(freqGHz * 1e9);
-    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
-    // S-band LEO reference payload. Declared as a DENSITY so the helper
-    // back-computes conducted power against the array gain instead of the
-    // antenna being counted twice.
-    rs.SetSatEirpDensityDbwMhz(
-        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    // NT-02: by default (and on an S-band FR1 carrier) the cell takes the
+    // TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the S-band LEO
+    // reference payload, declared as a DENSITY so the helper back-computes
+    // conducted power against the array gain instead of the antenna being
+    // counted twice. An explicit --satEirpDbm used to reach only the printed
+    // drop-in column; it is now the cell's CONDUCTED power at the array input.
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && freqGHz > 1.0 && freqGHz <= 7.125;
+    if (eirpFromTr38821)
+    {
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        if (satEirpDbm < 0.0)
+        {
+            satEirpDbm = 70.0; // legacy default for a carrier outside Set-1
+        }
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, gndNodes);
+    satEirpDbm = rs.GetSatEirpDbm(); // conducted power the radio actually uses
+    // The oran-ntn drop-in adds no antenna gain (its input is radiated EIRP),
+    // so it is fed the cell's effective EIRP, conducted power plus array gain,
+    // rather than the conducted figure. It used to get a flat 70 dBm.
+    const double oranEirpDbm = rs.GetEffectiveEirpDbm();
+    std::printf("#   gNB conducted=%.1fdBm effective EIRP=%.1fdBm (%s)\n", satEirpDbm,
+                oranEirpDbm,
+                eirpFromTr38821 ? "TR 38.821 Set-1 S-band density" : "explicit conducted");
 
     // (1) the composed chain in the REAL packet path.
     Ptr<NtnAtmosphericLossChain> chain = CreateObject<NtnAtmosphericLossChain>();
@@ -132,9 +155,12 @@ main(int argc, char* argv[])
     atmo->SetChain(chain);
     rs.AddExtraPropagationLoss(atmo);
 
-    // LEO LOS is Rician-like: Nakagami m>1 in the near field, heavier tails
-    // further out. The fading delta varies per transmission — real packets
-    // see a different draw each TB.
+    // LEO LOS is Rician-like: Nakagami m=3 (about K = 7 dB) at every range.
+    // The fading delta varies per transmission (i.i.d. per TB, no Doppler
+    // correlation). SIONNA-07 note: the nr backend's 3GPP spectrum model already
+    // applies small-scale fading, so this is a second, independent fading
+    // realization on the same link (see SCOPE_AND_LIMITATIONS NT-07); it is a
+    // composition demo, not a calibrated NTN fading model.
     Ptr<NakagamiPropagationLossModel> nakagami =
         CreateObject<NakagamiPropagationLossModel>();
     nakagami->SetAttribute("m0", DoubleValue(3.0));
@@ -160,9 +186,9 @@ main(int argc, char* argv[])
     uint64_t lastRx = 0;
     rs.RegisterPeriodicCallback(
         Seconds(1.0),
-        [&rs, atmo, oran, gndMob, satEnu, satEirpDbm, &lastRx](Time now) {
+        [&rs, atmo, oran, gndMob, satEnu, oranEirpDbm, &lastRx](Time now) {
             // Drop-in alternative evaluated on the live geometry.
-            const double oranRxDbm = oran->CalcRxPower(satEirpDbm, satEnu, gndMob);
+            const double oranRxDbm = oran->CalcRxPower(oranEirpDbm, satEnu, gndMob);
             const double sinr = rs.GetUeRecentSinrDb(0);
             const double tbler = rs.GetUeRecentTbler(0);
             const uint64_t rx = rs.GetUeRxBytes(0);

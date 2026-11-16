@@ -241,7 +241,13 @@ A2gChannelTr36777::PathLossDb(A2gScenario scenario, A2gLink link,
 
     const double fcTermDb = 20.0 * std::log10(fcGHz);
     const LosCoeffs los = GetLosCoeffs(scenario, hUtM);
-    const double losDb = los.alpha + los.beta * std::log10(d3dM) + fcTermDb;
+    double losDb = los.alpha + los.beta * std::log10(d3dM) + fcTermDb;
+    if (scenario == A2gScenario::UMi_AV)
+    {
+        // Table B-1.2 UMi-AV LOS: PL = max(PL_FS, 30.9 + ...), with
+        // PL_FS = 20*log10(40*pi*d3D*fc/3); the free-space floor was missing.
+        losDb = std::max(losDb, k40Pi3Db + 20.0 * std::log10(d3dM) + fcTermDb);
+    }
     if (link == A2gLink::LOS)
     {
         return losDb;
@@ -264,9 +270,12 @@ A2gChannelTr36777::ShadowFadingSigmaDb(A2gScenario scenario, A2gLink link, doubl
     case A2gScenario::UMa_AV:
         return (link == A2gLink::LOS) ? 4.64 * std::exp(-0.0066 * h) : 6.0;
     case A2gScenario::RMa_AV:
-        return (link == A2gLink::LOS) ? 4.2 * std::exp(-0.0046 * h) : 8.0;
+        // Table B-1.2 RMa-AV: NLOS sigma_SF = 6 dB (was 8 dB, the UMi-AV value).
+        return (link == A2gLink::LOS) ? 4.2 * std::exp(-0.0046 * h) : 6.0;
     case A2gScenario::UMi_AV:
-        return (link == A2gLink::LOS) ? 4.64 * std::exp(-0.0066 * h) : 8.0;
+        // Table B-1.2 UMi-AV: LOS sigma_SF = max(5*exp(-0.01*h), 2) dB (was the
+        // UMa-AV expression 4.64*exp(-0.0066*h)); NLOS sigma_SF = 8 dB.
+        return (link == A2gLink::LOS) ? std::max(5.0 * std::exp(-0.01 * h), 2.0) : 8.0;
     }
     return 6.0;
 }

@@ -133,12 +133,13 @@ class OranMonitorGroundTruthTest : public TestCase
                                   "probe-pipeline delay == in-band delay");
 
         // KPM series integrates back to the sink volume.
-        double kbitSum = 0;
+        // DRB.PdcpSduVolumeDl is in Mbit (TS 28.552 5.1.2.1.1.1).
+        double mbitSum = 0;
         for (const auto& s : series.begin()->second)
         {
-            kbitSum += s.metrics.at("DRB.PdcpSduVolumeDl");
+            mbitSum += s.metrics.at("DRB.PdcpSduVolumeDl");
         }
-        NS_TEST_ASSERT_MSG_EQ_TOL(kbitSum, sink->GetTotalRx() * 8.0 / 1e3, 1.0,
+        NS_TEST_ASSERT_MSG_EQ_TOL(mbitSum, sink->GetTotalRx() * 8.0 / 1e6, 1e-3,
                                   "sum(DRB.PdcpSduVolumeDl) == sink volume");
         Simulator::Destroy();
     }

@@ -397,7 +397,11 @@ main(int argc, char* argv[])
     nodes.Get(1)->AggregateObject(uav);
 
     Ptr<HapsMobilityModel> haps = CreateObject<HapsMobilityModel>();
-    haps->SetCenter(Vector(0, 0, hapsAltKm * 1000.0));
+    // SetCenter() takes the GROUND anchor and adds the Altitude attribute on
+    // top; passing z = hapsAltKm put the HAPS at 2x hapsAltKm (40 km instead
+    // of the ITU-R F.1500 nominal 20 km). Set the height via Altitude.
+    haps->SetAttribute("Altitude", DoubleValue(hapsAltKm * 1000.0));
+    haps->SetCenter(Vector(0, 0, 0));
     nodes.Get(2)->AggregateObject(haps);
 
     nodes.Get(3)->AggregateObject(leoA);

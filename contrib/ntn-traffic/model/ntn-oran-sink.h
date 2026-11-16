@@ -84,6 +84,16 @@ class NtnOranSink : public Application
         std::vector<uint32_t> delayHistMs;  ///< lazily sized to kDelayBins
         uint64_t delayOverflow{0};          ///< samples at or beyond kDelayBins ms
 
+        /// Fine one-way-delay histogram for reported percentiles: 0.1 ms bins
+        /// up to kFineBins * 0.1 ms (1 s). The 1 ms histogram above stays as is
+        /// for its existing users (slice SLA checks read its bin index as ms);
+        /// with 1 ms bins a LEO link whose delay sits inside one millisecond
+        /// reported p50 = p95 = p99, which hid the real spread.
+        static constexpr uint32_t kFineBins = 10000;
+        static constexpr double kFineBinMs = 0.1;
+        std::vector<uint32_t> delayHistFine; ///< lazily sized to kFineBins
+        uint64_t delayFineOverflow{0};       ///< samples at or beyond 1 s
+
         void RecordDelaySample(double delayMs)
         {
             if (delayHistMs.empty())
@@ -93,6 +103,19 @@ class NtnOranSink : public Application
             if (delayMs < 0.0)
             {
                 delayMs = 0.0;
+            }
+            if (delayHistFine.empty())
+            {
+                delayHistFine.assign(kFineBins, 0u);
+            }
+            const uint32_t fbin = static_cast<uint32_t>(delayMs / kFineBinMs);
+            if (fbin < kFineBins)
+            {
+                delayHistFine[fbin]++;
+            }
+            else
+            {
+                delayFineOverflow++;
             }
             const uint32_t bin = static_cast<uint32_t>(delayMs);
             if (bin < kDelayBins)

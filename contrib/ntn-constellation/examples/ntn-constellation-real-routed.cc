@@ -6,8 +6,8 @@
  * ntn-constellation-real-routed — real-stack flagship for ntn-constellation
  * (routing pattern).
  *
- * A live ContactGraphScheduler samples the Kepler+J2-secular geometry (Vallado
- * SGP4 available via SetUseVallado) and feeds GSL
+ * A live ContactGraphScheduler samples the Vallado SGP4 geometry (Walker
+ * elements loaded as a synthesized TLE) and feeds GSL
  * contact-up / contact-down events into a ContactGraphRouter; the router's
  * ShortestPath(GS1, GS2) decision actually INSTALLS the Ipv4 routes, so real
  * UDP packets are forwarded THROUGH the satellite nodes and adaptively REROUTE
@@ -102,11 +102,11 @@ uint64_t g_routerQueriesAtEnd = 0;
 double
 ElevDeg(Ptr<MobilityModel> ue, Ptr<MobilityModel> sat)
 {
-    Vector u = ue->GetPosition();
-    Vector s = sat->GetPosition();
-    double dx = s.x - u.x, dy = s.y - u.y, dz = s.z - u.z;
-    double d = std::sqrt(dx * dx + dy * dy + dz * dz);
-    return std::asin(std::max(0.0, dz) / std::max(1.0, d)) * 180.0 / M_PI;
+    // All nodes live in ECEF, so elevation is taken about the WGS-84 normal at
+    // the ground station. The former flat-frame asin(dz/d) used one global
+    // "up" for both stations, which is wrong at GS2 (500 km away, ~4.5 deg of
+    // Earth curvature).
+    return ntngeo::GeodeticElevationDeg(ue->GetPosition(), sat->GetPosition());
 }
 
 double
@@ -160,7 +160,7 @@ Tick()
 
     // Route decision is now driven by the live ContactGraphRouter: query the
     // hop-count shortest path GS1 -> GS2 over the contact graph the scheduler
-    // is maintaining from the Kepler+J2 geometry, and pick the transit satellite it
+    // is maintaining from the SGP4 geometry, and pick the transit satellite it
     // returns. The path includes both endpoints, so a 3-hop {GS1, SAT, GS2}
     // result names the satellite as the middle element.
     uint32_t chosen = 0;
@@ -173,7 +173,7 @@ Tick()
             ++g_routerPathHits;
         }
     }
-    // Fall back to the Kepler+J2 elevation comparison when the live contact graph
+    // Fall back to the SGP4 elevation comparison when the live contact graph
     // yields no GS1-SAT-GS2 transit (preserves the original behaviour).
     if (chosen == 0)
     {
@@ -231,7 +231,10 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
-    cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
+    cmd.AddValue("satSpeed",
+                 "Ignored, kept for CLI compatibility: the orbital speed follows from altKm "
+                 "(the measured value is printed and written to sim_health.csv)",
+                 satSpeed);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     bool blerLinks = true;
     double linkEirpDbw = 52.0;
@@ -255,17 +258,9 @@ main(int argc, char* argv[])
     InternetStackHelper internet;
     internet.Install(nodes);
 
-    Ptr<ConstantPositionMobilityModel> g1 = CreateObject<ConstantPositionMobilityModel>();
-    g1->SetPosition(Vector(0, 0, 0));
-    nodes.Get(GS1)->AggregateObject(g1);
-    Ptr<ConstantPositionMobilityModel> g2 = CreateObject<ConstantPositionMobilityModel>();
-    g2->SetPosition(Vector(500000.0, 0, 0));
-    nodes.Get(GS2)->AggregateObject(g2);
-
-    // Real Kepler+J2-secular Walker neighbours (Vallado SGP4 via SetUseVallado)
-    // projected into the local ENU frame: satA is
-    // at zenith over GS1 at t=0 and recedes; satB genuinely approaches, so the
-    // reroute emerges from real orbital dynamics.
+    // Walker neighbours propagated by Vallado SGP4 (SetElementsSgp4: synthesized TLE)
+    // in ECEF: satA is at zenith over GS1 at t=0 and recedes; satB genuinely
+    // approaches, so the reroute emerges from real orbital dynamics.
     ns3::ntncon::WalkerConfig wcfgSat;
     wcfgSat.num_planes = 1;
     wcfgSat.total_sats = 80;
@@ -275,13 +270,13 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4A =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4A->SetElements(satElements[0]);
+    satSgp4A->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4A->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<ns3::ntncon::Sgp4MobilityModel> nbr1 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    nbr1->SetElements(satElements[1]);
+    nbr1->SetElementsSgp4(satElements[1]);
     Ptr<ns3::ntncon::Sgp4MobilityModel> nbr2 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    nbr2->SetElements(satElements[79]);
+    nbr2->SetElementsSgp4(satElements[79]);
     const Vector originEcef = ntngeo::GeodeticToEcef(satSubLat, satSubLon, 0.0);
     auto approaching = [&originEcef](Ptr<ns3::ntncon::Sgp4MobilityModel> sm) {
         const Vector p = sm->GetPosition();
@@ -290,14 +285,35 @@ main(int argc, char* argv[])
         return (v.x * to.x + v.y * to.y + v.z * to.z) > 0.0;
     };
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4B = approaching(nbr1) ? nbr1 : nbr2;
-    Ptr<NtnEnuProjectionMobilityModel> sa = CreateObject<NtnEnuProjectionMobilityModel>();
-    sa->SetSource(satSgp4A);
-    sa->SetReference(satSubLat, satSubLon, 0.0);
-    Ptr<NtnEnuProjectionMobilityModel> sb = CreateObject<NtnEnuProjectionMobilityModel>();
-    sb->SetSource(satSgp4B);
-    sb->SetReference(satSubLat, satSubLon, 0.0);
-    nodes.Get(SATA)->AggregateObject(sa);
-    nodes.Get(SATB)->AggregateObject(sb);
+    // Every node is in ECEF. The ground stations used to sit at (0,0,0) and
+    // (500 km,0,0) of a flat tangent plane while the satellites were ENU
+    // projections: GS2 floated ~20 km above the ground, and NtnSatLinkErrorModel
+    // (which takes the lower endpoint's position vector as local zenith) saw
+    // GS1 at the frame origin and GS2's zenith pointing east, so its P.676 /
+    // P.618 terms were evaluated at the wrong elevation. GS1 is satA's t=0
+    // sub-point; GS2 is 500 km east of it on the WGS-84 ellipsoid, the same
+    // point the contact-graph scheduler registers below.
+    const double kmPerDegLon = 111.320 * std::cos(satSubLat * M_PI / 180.0);
+    const double gs2Lon = satSubLon + 500.0 / std::max(1.0, kmPerDegLon);
+    Ptr<ConstantPositionMobilityModel> g1 = CreateObject<ConstantPositionMobilityModel>();
+    g1->SetPosition(ntngeo::GeodeticToEcef(satSubLat, satSubLon, 0.0));
+    nodes.Get(GS1)->AggregateObject(g1);
+    Ptr<ConstantPositionMobilityModel> g2 = CreateObject<ConstantPositionMobilityModel>();
+    g2->SetPosition(ntngeo::GeodeticToEcef(satSubLat, gs2Lon, 0.0));
+    nodes.Get(GS2)->AggregateObject(g2);
+    Ptr<MobilityModel> sa = satSgp4A;
+    Ptr<MobilityModel> sb = satSgp4B;
+    nodes.Get(SATA)->AggregateObject(satSgp4A);
+    nodes.Get(SATB)->AggregateObject(satSgp4B);
+    // The orbit fixes the speed; satSpeed is not an input.
+    const double satSpeedMps = satSgp4A->GetVelocity().GetLength();
+    std::cout << "  satellite speed (ECEF, SGP4 model at altKm=" << altKm
+              << "): " << satSpeedMps << " m/s";
+    if (std::abs(satSpeed - 7500.0) > 1e-9)
+    {
+        std::cout << "  [--satSpeed=" << satSpeed << " ignored]";
+    }
+    std::cout << "\n\n";
 
     g_g1 = g1;
     g_g2 = g2;
@@ -358,13 +374,9 @@ main(int argc, char* argv[])
 
     // Live contact-graph scheduler + router that DRIVE the route decision in
     // Tick(). Registered exactly as the test suite does: satellites take the
-    // raw Sgp4MobilityModel (NOT the ENU wrappers), ground stations take
-    // geodetic lat/lon. GS1 sits at satA's sub-point; GS2 is ~500 km east in
-    // the ENU frame, i.e. a longitude offset of 500 km / (111.32 km/deg *
-    // cos(lat)) at the sub-latitude. Use the example's elevation gate so the
+    // raw Sgp4MobilityModel, ground stations take the same geodetic lat/lon
+    // the packet-plane nodes sit at. Use the example's elevation gate so the
     // router sees the same contacts the geometry implies.
-    const double kmPerDegLon = 111.320 * std::cos(satSubLat * M_PI / 180.0);
-    const double gs2Lon = satSubLon + 500.0 / std::max(1.0, kmPerDegLon);
     g_sched = CreateObject<ContactGraphScheduler>();
     g_sched->SetMinElevationDeg(g_minElev);
     g_sched->RegisterSatellite(SATA, satSgp4A);
@@ -503,6 +515,7 @@ main(int argc, char* argv[])
     out << "metric,value,floor,pass,provenance\n";
     out << "sim_time_s," << duration << "," << duration << ",1,config\n";
     out << "air_interface,sat-ip-routing,-,1,config\n";
+    out << "sat_speed_ecef_mps," << satSpeedMps << ",-,-,sgp4-propagated\n";
     out << "packets_through_sats," << rxP << ",1," << (rxP > 0 ? 1 : 0) << ",packetsink\n";
     out << "rx_throughput_mbps," << thrMbps << ",0.05," << (thrMbps >= 0.05 ? 1 : 0)
         << ",packetsink\n";

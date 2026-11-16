@@ -192,7 +192,7 @@ Binaries land in `build/contrib/oran-ntn/examples/`; run them with
 | `oran-ntn-cross-domain-slice` | NWDAF, SMO and TPN path switch at the latency crossover between two satellites | example code sets rates and routes |
 | `oran-ntn-payload-options-ab` | measured one-way delay for transparent, O-RU, O-RU+O-DU and full gNB payloads | n/a |
 | `ntn-platform-latency-validation` | round trip per platform class (UAV, HAP, LEO, MEO, GEO) against its latency band | n/a |
-| `oran-ntn-emergency-communication` | gateway failure, role switch to an on-board gNB, emergency slice SST=5 | yes (role switch) |
+| `oran-ntn-emergency-communication` | gateway failure with a real 0.5 s backhaul outage, role switch to an on-board gNB, measured data-plane restoration, operator-defined emergency slice (SST 128, 5QI 69) | yes (role switch) |
 | `oran-ntn-e2-termination` | two-process E2 setup and indications over a real SCTP association (TCP fallback); exits non-zero on failure | n/a |
 
 Common outputs (in `--outputDir`): `kpm_feed.csv` with a `provenance` column,

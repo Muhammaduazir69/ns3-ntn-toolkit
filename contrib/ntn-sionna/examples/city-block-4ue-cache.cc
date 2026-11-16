@@ -9,10 +9,15 @@
  * Geometry: 4 UEs arranged on a 200 m × 200 m grid (NE, NW, SE, SW
  * corners), one LEO satellite at 550 km altitude moving in +x. Each UE
  * has its own NtnSionnaCascadeChannel sharing a single
- * SionnaCachingTransport on top of a SionnaUdpTransport. With four UEs at
- * 100 ms sampling cadence and a 500 ms cache time bucket, the cache
- * collapses ~80% of queries into hits — typical of a real digital-twin
- * replay loop.
+ * SionnaCachingTransport on top of a SionnaUdpTransport.
+ *
+ * SIONNA-07: the satellite is a real SGP4 element and moves about 760 m per
+ * 100 ms sample, so with the default 50 m spatial grid its quantized cell
+ * changes on every sample and the cache key (which includes the satellite
+ * cell) never repeats: expect a hit rate near 0 at the defaults, not the
+ * ~80% this header used to promise for a slow placeholder satellite. Hits
+ * appear when the sample cadence is short against the grid (for example
+ * --spatialResM=1000), at the cost of binning UEs 200 m apart together.
  *
  * Run:
  *   python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 &
@@ -145,10 +150,17 @@ main(int argc, char* argv[])
         ch->SetAtmosphericChain(chain);
         return ch;
     };
+    // SIONNA-07: keep every UE's base channel; `base` alone is the last one
+    // built, so the provenance line used to count UE SW's queries only.
+    std::vector<Ptr<NtnSionnaChannel>> bases;
     auto chA = buildChannel();
+    bases.push_back(base);
     auto chB = buildChannel();
+    bases.push_back(base);
     auto chC = buildChannel();
+    bases.push_back(base);
     auto chD = buildChannel();
+    bases.push_back(base);
 
     // --- Mobility: 4 UEs on a 200 m × 200 m grid ---
     Ptr<ConstantPositionMobilityModel> ueA =
@@ -169,7 +181,7 @@ main(int argc, char* argv[])
     ns3::ntncon::WalkerConfig wcfgSat;
     wcfgSat.num_planes = 1;
     wcfgSat.total_sats = 80;
-    wcfgSat.altitude_km = 550.0;
+    wcfgSat.altitude_km = altKm; // SIONNA-07: was hard-coded 550, --altKm ignored
     wcfgSat.inclination_deg = 53.0;
     wcfgSat.epoch_unix_s = 1735689600.0;
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
@@ -232,6 +244,9 @@ main(int argc, char* argv[])
     // WF-12: say what produced these numbers. GetFallbacks() existed and no
     // example read it, so on a host without Sionna every run here printed
     // Sionna framing over pure free-space results with nothing to show it.
-    std::cout << base->ProvenanceLine() << std::endl;
+    for (const auto& b : bases)
+    {
+        std::cout << b->ProvenanceLine() << std::endl;
+    }
     return 0;
 }

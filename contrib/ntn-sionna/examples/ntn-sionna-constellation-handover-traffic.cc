@@ -21,6 +21,17 @@
  * The hand-over decision rides measured radio + real orbital geometry; the
  * ITU-R atmospheric cascade stays in the packet path.
  *
+ * SIONNA-07 scope note: the hand-over is a SERVING-SELECTION decision only.
+ * The packet plane is one cell on the anchor satellite for the whole run, so
+ * after a "hand-over" the delivered goodput and the measured SINR are still
+ * the anchor's, which is why this run's cell KPIs match
+ * ntn-sionna-leo-downlink-traffic (same anchor element, same seed). The
+ * candidates' values are predictions: the Friis ratio carries over the anchor's
+ * measured SINR including any antenna off-boresight loss the anchor suffers,
+ * which a candidate with its own beam would not. A hand-over that moves the
+ * radio needs multi-cell support in NtnRealStackHelper (see ntn-cho for the
+ * Rel-17 CHO procedure on a measured plane).
+ *
  * Quick test:  --simSeconds=60 --hysteresisDb=1
  */
 #include "ns3/core-module.h"
@@ -176,8 +187,10 @@ main(int argc, char* argv[])
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("ntn-sionna-constellation-handover-traffic"); // WS2 KPM series (TS 28.552 names)
 
+    // servSinr/bestSinr are PREDICTED values for the selected satellites;
+    // tbler/goodput are the anchor cell's measurements (SIONNA-07).
     std::printf("# %5s  %7s  %8s  %8s  %8s  %9s\n",
-                "t_s", "serving", "servSinr", "bestSinr", "tbler", "goodput");
+                "t_s", "serving", "predServ", "predBest", "tbler", "goodput");
 
     Ptr<MobilityModel> gndMob = gndNodes.Get(0)->GetObject<MobilityModel>();
     uint32_t serving = 0;
@@ -219,7 +232,7 @@ main(int argc, char* argv[])
             {
                 ++handovers;
                 std::printf("  %5.1f  HANDOVER sat%u(WALKER-0-%u) -> sat%u(WALKER-0-%u) "
-                            " (%.2f -> %.2f dB, real orbital crossover)\n",
+                            " (predicted %.2f -> %.2f dB, selection only)\n",
                             now.GetSeconds(), serving, satIdx[serving], best,
                             satIdx[best], pred[serving], pred[best]);
                 serving = best;
@@ -229,9 +242,8 @@ main(int argc, char* argv[])
             const double mbps = (rx - lastRx) * 8.0 / 1e6;
             lastRx = rx;
             std::printf("  %5.1f  sat%-4u  %8.2f  %8.2f  %8.3f  %9.3f\n",
-                        now.GetSeconds(), serving, pred[serving],
-                        pred[best > serving ? best : serving], rs.GetUeRecentTbler(0),
-                        mbps);
+                        now.GetSeconds(), serving, pred[serving], pred[best],
+                        rs.GetUeRecentTbler(0), mbps);
         });
 
     Simulator::Stop(Seconds(simSeconds));
@@ -241,7 +253,7 @@ main(int argc, char* argv[])
 
     std::printf("# === summary ===  hand-overs=%u  measured cell SINR=%.2f dB "
                 "TBLER=%.4f throughput=%.3f Mbps (serving selection on measured "
-                "radio + real SGP4 geometry)\n",
+                "radio + real SGP4 geometry; the packet plane stays on the anchor)\n",
                 handovers, rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(),
                 rs.GetRxThroughputMbps());
 

@@ -216,9 +216,14 @@ NtnDrxStateMachine::TickActive()
         return;
     }
 
-    if (m_cfg.shortCycle > Time(0))
+    if (m_cfg.shortCycle > Time(0) && m_cfg.shortCycleCount > 0)
     {
-        m_shortCycleRemaining = m_cfg.shortCycleCount;
+        // RRC-9: TS 38.321 section 5.7 runs drx-ShortCycleTimer for
+        // shortCycleCount x drx-ShortCycle from the inactivity expiry, and the
+        // cycle entered here is the first of those. Loading the full count and
+        // decrementing only at the end of each on-duration gave one short cycle
+        // too many (three for a timer of two) before the long cycle.
+        m_shortCycleRemaining = m_cfg.shortCycleCount - 1;
         Transition(DrxState::ShortSleep);
         m_event = Simulator::Schedule(m_cfg.shortCycle - m_cfg.onDuration,
                                       &NtnDrxStateMachine::TickShortSleep, this);

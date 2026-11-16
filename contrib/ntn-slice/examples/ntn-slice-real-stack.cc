@@ -10,9 +10,11 @@
  * PointToPoint link, so PRB-level isolation was never actually contested. Here all
  * slices share ONE real mmwave NR cell (NtnRealStackHelper). Per-slice SINR and
  * throughput are MEASURED from that shared cell's PHY/PacketSink, and the real
- * SliceIsolationMonitor evaluates SLA breaches against the MEASURED delivery plus
- * the real geometric NTN latency (so URLLC's 5 ms budget realistically breaches
- * over the LEO slant while eMBB's 50 ms budget holds).
+ * SliceIsolationMonitor evaluates SLA breaches against the MEASURED delivery and
+ * the MEASURED one-way delay. Note the URLLC 5 ms budget sits below the path's
+ * physical floor (altitude/c plus the 5 ms backhaul constant, ~6.8 ms at
+ * 550 km), so its latency breach is structural, not an isolation failure; the
+ * summary prints that floor so the attribution is explicit.
  *
  * Usage:
  *   ./ns3 run "ntn-slice-real-stack --duration=15 --numUes=9"
@@ -154,6 +156,11 @@ main(int argc, char* argv[])
     SliceProfile profiles[3] = {mmtc, embb, urllc};
 
     SliceIsolationMonitor monitor;
+    // The histogram replay below is in ascending-delay order. With the default
+    // 200-sample rolling window only the LAST 200 replayed samples survive, i.e.
+    // the slowest ones, so the "p99" was the p99 of the tail (close to the max)
+    // and the latency verdict was biased toward breach. Keep every sample.
+    monitor.SetWindow(10000000);
     monitor.RegisterSlice(embb);
     monitor.RegisterSlice(urllc);
     monitor.RegisterSlice(mmtc);
@@ -233,8 +240,24 @@ main(int argc, char* argv[])
                   << "ms  latencyBreach=" << (b.latencyBreach ? "YES" : "no")
                   << "  reliabilityBreach=" << (b.reliabilityBreach ? "YES" : "no") << "\n";
     }
-    std::cout << "\n  (URLLC's 5 ms budget breaches over the LEO slant — a real, "
-                 "measured-geometry result, not a synthetic formula.)\n";
+    // Attribution: a budget below the one-way floor (altitude/c + backhaul)
+    // breaches whatever the scheduler does, so it is not evidence about
+    // isolation. Floor uses the altitude, a true lower bound for any elevation.
+    const double floorMs = altitudeKm * 1e3 / 299792458.0 * 1e3 + backhaulMs;
+    std::cout << "\n  one-way floor (altitude/c + backhaul) = " << floorMs << " ms\n";
+    for (const auto& b : breaches)
+    {
+        if (b.latencyBreach)
+        {
+            const bool structural = b.latencyBudgetMs < floorMs;
+            std::cout << "  slice " << b.snssai << ": budget " << b.latencyBudgetMs << " ms "
+                      << (structural ? "is below the propagation+backhaul floor (structural "
+                                       "breach, not an isolation failure)"
+                                     : "is above the floor (breach caused by queueing/"
+                                       "scheduling on the shared cell)")
+                      << "\n";
+        }
+    }
 
     Simulator::Destroy();
     return 0;

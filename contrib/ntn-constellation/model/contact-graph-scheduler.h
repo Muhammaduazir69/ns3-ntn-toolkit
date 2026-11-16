@@ -121,8 +121,10 @@ class ContactGraphScheduler : public Object
     double PredictContactEndS(uint32_t a, uint32_t b, bool isl, double horizonS,
                               double stepS = 5.0) const;
 
-    /// Register a ground station at (lat, lon, alt=0 m MSL).
-    void RegisterGroundStation(uint32_t id, double lat_deg, double lon_deg);
+    /// Register a ground station at (lat, lon) and height alt_m above the
+    /// WGS-84 ellipsoid (default 0). A HAPS or airborne terminal registered at
+    /// 0 m had its elevation and range evaluated ~20 km too low.
+    void RegisterGroundStation(uint32_t id, double lat_deg, double lon_deg, double alt_m = 0.0);
 
     /// P7: the ground links that can occur in the run. With a list set, only these are sampled, and a
     /// satellite well below the mask is skipped until it could first reach it at the rate bound below;
@@ -171,6 +173,7 @@ class ContactGraphScheduler : public Object
     {
         double lat_deg;
         double lon_deg;
+        double alt_m{0.0};
     };
 
     Time m_dt{Seconds(1.0)};
@@ -198,7 +201,10 @@ class ContactGraphScheduler : public Object
     bool CrossPlaneBlocked(uint32_t a, const Vector& pa, uint32_t b, const Vector& pb) const;
 
     bool ContactUpAt(uint32_t a, uint32_t b, bool isl, double offsetS) const;
-    static double ElevationDeg(const Vector& satEcef, double latDeg, double lonDeg);
+    static double ElevationDeg(const Vector& satEcef,
+                               double latDeg,
+                               double lonDeg,
+                               double altM = 0.0);
     void CheckIslPair(double t, uint32_t a, Ptr<Sgp4MobilityModel> ma, uint32_t b,
                       Ptr<Sgp4MobilityModel> mb);
 
@@ -214,6 +220,7 @@ class ContactGraphScheduler : public Object
         Ptr<Sgp4MobilityModel> mob;
         double latDeg;
         double lonDeg;
+        double altM{0.0};
         Vector gsEcef;
         bool up{false};
         double nextCheck{0.0};

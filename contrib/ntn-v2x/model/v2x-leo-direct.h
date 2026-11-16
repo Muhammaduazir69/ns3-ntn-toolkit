@@ -37,13 +37,17 @@ class V2xLeoDirect : public Object
     static TypeId GetTypeId();
     V2xLeoDirect();
 
-    /// Carrier frequency (GHz). 2 GHz default — NTN UE-link Ka/Ku-band-equivalent.
+    /// Carrier frequency (GHz). 2 GHz default: the S-band (n255/n256) NTN service link.
     void SetFrequencyGHz(double fcGHz);
 
-    /// EIRP at the LEO downlink (dBm). 50 dBm = 10 W EIRP, typical for Starlink.
+    /// EIRP at the LEO downlink (dBm). Default 74 dBm: TR 38.821 Table 6.1.1.1-1
+    /// Set-1 S-band LEO-600 EIRP density 34 dBW/MHz over the 10 MHz the noise
+    /// floor below assumes (34 + 10 + 30). The old 50 dBm default had no source.
     void SetSatEirpDbm(double dbm);
 
-    /// Receiver noise floor at the vehicle (dBm). −110 dBm ≈ 10 MHz.
+    /// Receiver noise floor at the vehicle (dBm). Default -97 dBm: kTB over
+    /// 10 MHz (-174 + 70 = -104 dBm) plus the 7 dB UE noise figure of TR 38.821
+    /// Table 6.1.1.1-3. The old -110 dBm was 13 dB below thermal noise alone.
     void SetNoiseFloorDbm(double dbm);
 
     /// Compute one link-budget snapshot.
@@ -57,8 +61,8 @@ class V2xLeoDirect : public Object
 
   private:
     double m_fcGHz{2.0};
-    double m_satEirpDbm{50.0};
-    double m_noiseFloorDbm{-110.0};
+    double m_satEirpDbm{74.0};    // TR 38.821 Set-1, 34 dBW/MHz x 10 MHz
+    double m_noiseFloorDbm{-97.0}; // kTB(10 MHz) + NF 7 dB
 };
 
 } // namespace ntnv2x

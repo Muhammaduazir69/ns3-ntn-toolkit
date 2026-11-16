@@ -19,11 +19,11 @@
  *     wrapping NtnAtmosphericLossChain — the exact adapter used in
  *     ntn-sionna-ris-relay-traffic.cc).
  *
- * The RIS reflection gain remains an analytic probe column. AddExtraPropagation-
- * Loss chains AFTER the built-in Friis FSPL via SetNext and can only SUBTRACT
- * loss; a RIS reflection is a POSITIVE power delta, and there is no existing
- * "negative-loss" / gain adapter that injects power onto the real plane without
- * net-new functionality. Rather than fabricate one, the RIS gain is computed
+ * The RIS reflection gain remains an analytic probe column. (SIONNA-07: a
+ * chained PropagationLossModel CAN return a positive delta, as the per-UE gain
+ * model in ntn-sionna-mimo-traffic does; the probe stays off the packet path
+ * because without a live server both probe channels fall back to free space
+ * and the delta is exactly 0 dB.) The RIS gain is computed
  * from the SAME two-channel Sionna cascade probe (rx_RIS - rx_noRIS) and printed
  * as a per-tick gain column beside the MEASURED SINR/goodput. The measured-radio
  * RIS counterpart (blockage recovery as a LIVE channel reconfiguration) is
@@ -112,7 +112,7 @@ main(int argc, char* argv[])
     double satEirpDbm = 75.0;
     uint32_t risRows = 32;
     uint32_t risCols = 32;
-    double risPosX = 706.5; // halfway between UE and sub-sat ground point
+    double risPosX = 706.5; // RIS 706.5 m east of the UE (the UE is at the t=0 sub-satellite point)
     double risPosZ = 50.0;
     std::string phaseProfile = "focus";
     uint32_t timeoutMs = 200;
@@ -182,7 +182,7 @@ main(int argc, char* argv[])
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
     {
-        rs.SetNumerology(1); // FR1 30 kHz SCS
+        rs.SetNumerology(3); // 120 kHz SCS: 28 GHz is FR2-1 (TS 38.101-2, 60/120 kHz)
     }
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);

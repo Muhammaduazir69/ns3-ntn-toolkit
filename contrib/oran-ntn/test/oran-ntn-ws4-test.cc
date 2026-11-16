@@ -27,7 +27,7 @@ class PayloadDelayLadderTest : public TestCase
 {
   public:
     PayloadDelayLadderTest()
-        : TestCase("payload options order exactly as the paper's delay ladder")
+        : TestCase("payload options follow the corrected TR 38.821 delay ladder")
     {
     }
 
@@ -45,13 +45,33 @@ class PayloadDelayLadderTest : public TestCase
         const Time tRu = delayOf(PO::RegenerativeRu);
         const Time tRuDu = delayOf(PO::RegenerativeRuDu);
         const Time tFull = delayOf(PO::FullGnb);
-        NS_TEST_ASSERT_MSG_GT(tTrans.GetSeconds(), tRu.GetSeconds(),
-                              "transparent > regenerative RU");
+        // Corrected model (TR 38.821 Table 4.2-2): the bent pipe carries the user
+        // plane over the feeder ONCE and the service link ONCE, with no on-board
+        // processing. The regenerative options add their fronthaul, midhaul or
+        // backhaul processing budget (250 / 150 / 50 us) on top of the same two
+        // legs, so the transparent payload is now the FASTEST one-way path; its
+        // penalty lives in the HARQ / K_offset round trip, not here. The old test
+        // asserted the double-counted feeder (2 x slant/c) and transparent > RU.
         NS_TEST_ASSERT_MSG_GT(tRu.GetSeconds(), tRuDu.GetSeconds(), "RU > RU+DU");
         NS_TEST_ASSERT_MSG_GT(tRuDu.GetSeconds(), tFull.GetSeconds(), "RU+DU > full gNB");
-        // Transparent = exactly two propagation legs.
-        NS_TEST_ASSERT_MSG_EQ_TOL(tTrans.GetSeconds(), 2.0 * 600e3 / 299792458.0, 1e-9,
-                                  "bent-pipe is 2 x slant/c");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(tFull.GetSeconds(), tTrans.GetSeconds(),
+                                    "full gNB >= transparent");
+
+        // Transparent = feeder leg + service leg, each counted once. Nothing is
+        // built here, so the service leg the helper folds in is zero and the
+        // bent pipe reduces to exactly slant/c.
+        constexpr double kC = 299792458.0;
+        const double serviceS = rs.ComputeServiceLinkDelay().GetSeconds();
+        NS_TEST_ASSERT_MSG_EQ_TOL(serviceS, 0.0, 1e-12, "no service leg without a built cell");
+        NS_TEST_ASSERT_MSG_EQ_TOL(tTrans.GetSeconds(), slantM / kC + serviceS, 1e-8,
+                                  "bent pipe is feeder + service once each (slant/c here)");
+        // Each regenerative option is the same two legs plus its processing budget.
+        NS_TEST_ASSERT_MSG_EQ_TOL(tRu.GetSeconds() - tTrans.GetSeconds(), 250e-6, 1e-9,
+                                  "RU adds the 0.25 ms open-FH budget");
+        NS_TEST_ASSERT_MSG_EQ_TOL(tRuDu.GetSeconds() - tTrans.GetSeconds(), 150e-6, 1e-9,
+                                  "RU+DU adds the 0.15 ms F1 midhaul budget");
+        NS_TEST_ASSERT_MSG_EQ_TOL(tFull.GetSeconds() - tTrans.GetSeconds(), 50e-6, 1e-9,
+                                  "full gNB adds the 0.05 ms GTP backhaul budget");
     }
 };
 

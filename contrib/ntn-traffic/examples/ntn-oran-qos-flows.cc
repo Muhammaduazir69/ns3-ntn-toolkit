@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
 // ntn-oran-qos-flows — the WS1 flagship of the AI-Native ORAN-NTN adoption
-// plan. One REAL LEO cell (NtnRealStackHelper: mmwave SpectrumPhy + MAC +
-// RLC/PDCP + RRC + EPC, SGP4 satellite) carries four 3GPP QoS flows side by
+// plan. One REAL LEO cell (NtnRealStackHelper: nr FR1 by default or mmwave,
+// SpectrumPhy + MAC + RLC/PDCP + RRC + EPC, SGP4 satellite) carries four 3GPP QoS flows side by
 // side, each an NtnOranApplication with its own 5QI / S-NSSAI in REAL packet
 // bytes:
 //   UE0  5QI 1   conversational voice    (S-NSSAI 1/0x000001)
@@ -53,20 +53,32 @@ main(int argc, char* argv[])
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm",
+                 "Satellite conducted Tx power at the array input (dBm); -1 = TR 38.821 "
+                 "Set-1 EIRP density (34 dBW/MHz)",
+                 satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 60.
-    if (satEirpDbm < 0.0)
-    {
-        satEirpDbm = (radio == "mmwave") ? 60.0 : 70.0;
-    }
-
+    // --satEirpDbm < 0 (default): the TR 38.821 Set-1 S-band EIRP density
+    // below. Any other value is the conducted power at the array input, as the
+    // option's help says. The value used to be resolved here, printed, and then
+    // never passed to the helper, so the option changed nothing but the banner.
+    const bool useSet1Density = (satEirpDbm < 0.0);
     std::printf("# ntn-oran-qos-flows (REAL radio, per-5QI ORAN-NTN flows)\n");
-    std::printf("#   sim=%.0fs alt=%.0fkm fc=%.1fGHz EIRP=%.1fdBm\n",
-                simSeconds, leoAltKm, freqGHz, satEirpDbm);
+    if (useSet1Density)
+    {
+        std::printf("#   sim=%.0fs alt=%.0fkm fc=%.3fGHz EIRP density=%.1f dBW/MHz "
+                    "(TR 38.821 Set-1)\n",
+                    simSeconds, leoAltKm, freqGHz,
+                    NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        std::printf("#   sim=%.0fs alt=%.0fkm fc=%.3fGHz conducted Tx=%.1f dBm\n",
+                    simSeconds, leoAltKm, freqGHz, satEirpDbm);
+    }
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -86,7 +98,7 @@ main(int argc, char* argv[])
     const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4->SetElements(elements[0]);
+    satSgp4->SetElementsSgp4(elements[0]);
     satNodes.Get(0)->AggregateObject(satSgp4);
     double subLat, subLon, subAlt;
     satSgp4->GetGeodetic(subLat, subLon, subAlt);
@@ -110,8 +122,15 @@ main(int argc, char* argv[])
     // S-band LEO reference payload. Declared as a DENSITY so the helper
     // back-computes conducted power against the array gain instead of the
     // antenna being counted twice.
-    rs.SetSatEirpDensityDbwMhz(
-        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    if (useSet1Density)
+    {
+        rs.SetSatEirpDensityDbwMhz(
+            NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, ueNodes);
 
     // Four QoS flows with distinct 5QI / S-NSSAI identity in real bytes.

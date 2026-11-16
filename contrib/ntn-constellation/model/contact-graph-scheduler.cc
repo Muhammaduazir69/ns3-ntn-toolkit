@@ -90,9 +90,10 @@ ContactGraphScheduler::RegisterSatellite(uint32_t id,
 void
 ContactGraphScheduler::RegisterGroundStation(uint32_t id,
                                                double lat_deg,
-                                               double lon_deg)
+                                               double lon_deg,
+                                               double alt_m)
 {
-    m_gss[id] = {lat_deg, lon_deg};
+    m_gss[id] = {lat_deg, lon_deg, alt_m};
 }
 
 void
@@ -111,9 +112,10 @@ ContactGraphScheduler::SetGslCandidates(const std::vector<std::pair<uint32_t, ui
         gc.mob = m_sats.at(s);
         gc.latDeg = g.lat_deg;
         gc.lonDeg = g.lon_deg;
-        gc.gsEcef = Vector(Ngs * std::cos(lat) * std::cos(lon),
-                           Ngs * std::cos(lat) * std::sin(lon),
-                           Ngs * (1.0 - kWgs84E2) * std::sin(lat));
+        gc.altM = g.alt_m;
+        gc.gsEcef = Vector((Ngs + g.alt_m) * std::cos(lat) * std::cos(lon),
+                           (Ngs + g.alt_m) * std::cos(lat) * std::sin(lon),
+                           (Ngs * (1.0 - kWgs84E2) + g.alt_m) * std::sin(lat));
         m_gslCand.push_back(gc);
     }
 }
@@ -162,15 +164,15 @@ ContactGraphScheduler::NumActiveIsl() const
 }
 
 double
-ContactGraphScheduler::ElevationDeg(const Vector& p, double latDeg, double lonDeg)
+ContactGraphScheduler::ElevationDeg(const Vector& p, double latDeg, double lonDeg, double altM)
 {
     const double lat = latDeg * M_PI / 180.0;
     const double lon = lonDeg * M_PI / 180.0;
     const double sinLat = std::sin(lat);
     const double Ngs = kEarthRadiusM / std::sqrt(1.0 - kWgs84E2 * sinLat * sinLat);
-    const Vector gs(Ngs * std::cos(lat) * std::cos(lon),
-                    Ngs * std::cos(lat) * std::sin(lon),
-                    Ngs * (1.0 - kWgs84E2) * sinLat);
+    const Vector gs((Ngs + altM) * std::cos(lat) * std::cos(lon),
+                    (Ngs + altM) * std::cos(lat) * std::sin(lon),
+                    (Ngs * (1.0 - kWgs84E2) + altM) * sinLat);
     // Local up is the ellipsoid normal (geodetic), not the geocentric radius.
     const Vector up(std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), sinLat);
     const double dx = p.x - gs.x;
@@ -189,7 +191,8 @@ ContactGraphScheduler::ContactUpAt(uint32_t a, uint32_t b, bool isl, double offs
     if (!isl)
     {
         const auto& g = m_gss.at(b);
-        return ElevationDeg(pa, g.lat_deg, g.lon_deg) >= m_minElevDeg - m_gateHysteresisDeg;
+        return ElevationDeg(pa, g.lat_deg, g.lon_deg, g.alt_m) >=
+               m_minElevDeg - m_gateHysteresisDeg;
     }
     Vector pb;
     Vector vb;
@@ -323,7 +326,10 @@ ContactGraphScheduler::Tick()
         {
             continue;
         }
-        const double elev = c.mob->GetElevationDeg(c.latDeg, c.lonDeg);
+        // Sea-level stations keep the original call (bit-identical results).
+        const double elev = (c.altM == 0.0)
+                                ? c.mob->GetElevationDeg(c.latDeg, c.lonDeg)
+                                : ElevationDeg(c.mob->GetEcefPosition(), c.latDeg, c.lonDeg, c.altM);
         const bool visible = c.up ? (elev >= m_minElevDeg - m_gateHysteresisDeg) : (elev >= m_minElevDeg);
         if (!visible)
         {
@@ -366,9 +372,14 @@ ContactGraphScheduler::Tick()
     {
         for (auto& satIt : m_sats)
         {
+            const double gsAlt = gsIt.second.alt_m;
             const double elev =
-                satIt.second->GetElevationDeg(gsIt.second.lat_deg,
-                                              gsIt.second.lon_deg);
+                (gsAlt == 0.0)
+                    ? satIt.second->GetElevationDeg(gsIt.second.lat_deg, gsIt.second.lon_deg)
+                    : ElevationDeg(satIt.second->GetEcefPosition(),
+                                   gsIt.second.lat_deg,
+                                   gsIt.second.lon_deg,
+                                   gsAlt);
             const std::pair<uint32_t, uint32_t> key{satIt.first, gsIt.first};
             auto stateIt = m_gslState.find(key);
             const bool prev =
@@ -390,9 +401,9 @@ ContactGraphScheduler::Tick()
             // equatorial radius). N = a / sqrt(1 - e^2 sin^2 lat).
             const double Ngs =
                 kEarthRadiusM / std::sqrt(1.0 - kWgs84E2 * sinLat * sinLat);
-            const Vector gs(Ngs * cosLat * std::cos(lon),
-                             Ngs * cosLat * std::sin(lon),
-                             Ngs * (1.0 - kWgs84E2) * sinLat);
+            const Vector gs((Ngs + gsAlt) * cosLat * std::cos(lon),
+                             (Ngs + gsAlt) * cosLat * std::sin(lon),
+                             (Ngs * (1.0 - kWgs84E2) + gsAlt) * sinLat);
             const double dx = p.x - gs.x;
             const double dy = p.y - gs.y;
             const double dz = p.z - gs.z;

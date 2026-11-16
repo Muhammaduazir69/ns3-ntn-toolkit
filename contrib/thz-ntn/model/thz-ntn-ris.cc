@@ -221,7 +221,7 @@ ThzNtnRis::ComputeCascadedPathLoss_dB(Ptr<MobilityModel> tx,
         // Fallback: compute FSPL from positions directly
         double d1_m = tx->GetDistanceFrom(ris);
         double d2_m = ris->GetDistanceFrom(rx);
-        double lambda = GetWavelength();
+        const double lambda = GetWavelength();
 
         if (d1_m <= 0.0 || d2_m <= 0.0)
         {
@@ -233,8 +233,28 @@ ThzNtnRis::ComputeCascadedPathLoss_dB(Ptr<MobilityModel> tx,
         fspl2_dB = 20.0 * std::log10(4.0 * PI_VAL * d2_m / lambda);
     }
 
-    // Total cascaded path loss (without RIS gain compensation)
-    double cascadedPL = fspl1_dB + fspl2_dB;
+    // Far-field RIS beamforming path loss (Tang et al., IEEE TWC 20(1), 2021,
+    // Eq. (7) with unit element pattern and normal incidence):
+    //   PL = (4 pi d1 d2 / (N dx dy))^2
+    //      = FSPL1 + FSPL2 - 20 log10(4 pi N dx dy / lambda^2).
+    // The aperture term is what the header has always promised ("then
+    // subtracts the RIS gain") and the code never did: it returned the bare
+    // FSPL1 + FSPL2 product, 74 dB too pessimistic for a 40x40 panel at
+    // 100 GHz. Reflection efficiency and phase quantization enter exactly as in
+    // ComputeSnrGain_dB(). Note this is NOT 20 log10(N) on top of the direct
+    // link: relative to the direct path the RIS hop is FSPL_direct - PL, which
+    // is strongly negative unless the panel is large or close to the receiver.
+    const double lambda = GetWavelength();
+    const double dx = GetElementSpacing_m();
+    const double nTot = static_cast<double>(GetTotalElements());
+    double apertureGain_dB = 0.0;
+    if (nTot > 0.0 && lambda > 0.0)
+    {
+        apertureGain_dB = 20.0 * std::log10(4.0 * PI_VAL * nTot * dx * dx / (lambda * lambda)) +
+                          10.0 * std::log10(std::max(m_reflectionEfficiency, 1e-12)) -
+                          ComputeQuantizationLoss_dB();
+    }
+    double cascadedPL = fspl1_dB + fspl2_dB - apertureGain_dB;
 
     NS_LOG_DEBUG("Cascaded PL: fspl1=" << fspl1_dB << " dB, fspl2="
                                        << fspl2_dB << " dB, total="

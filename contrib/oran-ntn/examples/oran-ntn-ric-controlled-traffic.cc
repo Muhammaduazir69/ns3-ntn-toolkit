@@ -396,10 +396,16 @@ main(int argc, char* argv[])
     std::string outputDir = "oran-ntn-ric-controlled-output";
 
     CommandLine cmd(__FILE__);
+    uint16_t numerology = 1; // published runs used mu=1 (30 kHz)
+    cmd.AddValue("numerology",
+                 "NR numerology mu (SCS = 15*2^mu kHz). Ka-band NTN (TS 38.101-5) uses 2 or 3; "
+                 "the default 1 reproduces the published results",
+                 numerology);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Baseline EIRP without beamforming (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Baseline conducted Tx power at the array input without beamforming (dBm); "
+                 "Ka-band, not TR 38.821 Set-1 calibrated", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("numTx", "mMIMO Tx antennas (beam gain = 10log10(numTx))", numTx);
     cmd.AddValue("sinrThreshDb", "Intrinsic SINR threshold for the xApp", sinrThreshDb);
@@ -475,7 +481,7 @@ main(int argc, char* argv[])
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
     {
-        rs.SetNumerology(1); // FR1 30 kHz SCS
+        rs.SetNumerology(numerology); // default 1 reproduces the published runs; Ka-band NTN uses 2 or 3
     }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);

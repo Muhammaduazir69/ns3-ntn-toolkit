@@ -16,11 +16,17 @@
  * MEASURED SINR collapses when the path is blocked and recovers when the RIS
  * engages. The ITU-R atmospheric cascade also stays in the packet path.
  *
- * The RIS gain is the standard perfect-CSI coherent-combining law
- *   G_ris(N) = 20*log10(N_elements)   [dB]
- * from --risRows x --risCols (the same rows/cols descriptor a live Sionna RT
- * server consumes), clamped at the LOS level — a passive reflector cannot
- * beat the unobstructed direct path in this abstraction.
+ * SIONNA-07: the RIS path is the far-field plate-scattering law, not
+ * 20*log10(N). With half-wavelength elements, unit reflection and perfect
+ * phase control, the RIS-reflected power relative to the UNOBSTRUCTED direct
+ * path (satellite range d1 ~ direct range) is
+ *   P_ris / P_los = (N * lambda / (4 * d2))^2
+ * (Tang et al., IEEE TWC 20(1), 2021, eq. (7) with G = pi, d_x = d_y = lambda/2;
+ * Ellingson, IEEE OJ-COMS 2021), d2 = RIS-to-UE distance (--risDistM), capped
+ * at 0 dB, the specular-mirror limit inside the RIS near field. The RIS path
+ * adds coherently (optimized phase) to the blocked direct path. The old
+ * 20*log10(N) = 60 dB "gain" omitted the element aperture and the second
+ * path-loss leg, so any 32x32 surface erased any blockage up to 60 dB.
  *
  * Mobility is real: SGP4 satellite (ENU-projected), fixed ground terminal.
  *
@@ -57,6 +63,7 @@ main(int argc, char* argv[])
     uint32_t risCols = 32;
     double blockFraction = 0.25;
     double risOnFraction = 0.55;
+    double risDistM = 30.0; // RIS-to-UE range; beyond 2D^2/lambda = 26 m (32x32, 12 GHz)
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-sionna-ris-relay-output";
 
@@ -72,18 +79,27 @@ main(int argc, char* argv[])
                  blockFraction);
     cmd.AddValue("risOnFraction", "Fraction of sim at which the RIS engages",
                  risOnFraction);
+    cmd.AddValue("risDistM", "RIS-to-UE distance (m) for the far-field RIS path", risDistM);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    const double risGainDb = 20.0 * std::log10(std::max(1u, risRows * risCols));
-    const double risCompDb = std::min(blockageDb, risGainDb);
+    // SIONNA-07: RIS path relative to the unobstructed LOS, then coherent sum
+    // with the blocked direct path. risCompDb is the loss the RIS removes.
+    const double lambdaM = 299792458.0 / (freqGHz * 1e9);
+    const double nEl = static_cast<double>(std::max(1u, risRows * risCols));
+    const double risGainDb =
+        std::min(0.0, 20.0 * std::log10(nEl * lambdaM / (4.0 * std::max(risDistM, 1e-3))));
+    const double withRisLossDb = std::max(
+        0.0,
+        -20.0 * std::log10(std::pow(10.0, -blockageDb / 20.0) + std::pow(10.0, risGainDb / 20.0)));
+    const double risCompDb = blockageDb - withRisLossDb;
 
     std::printf("# ntn-sionna-ris-relay-traffic (REAL radio, blockage + RIS in the "
                 "packet path)\n");
     std::printf("#   sim=%.0fs freq=%.1fGHz EIRP=%.1fdBm blockage=%.0fdB "
-                "RIS=%ux%u->%.1fdB gain (%.1f dB applied)\n",
+                "RIS=%ux%u at %.0fm -> RIS path %.1f dB vs LOS (%.1f dB recovered)\n",
                 simSeconds, freqGHz, satEirpDbm, blockageDb, risRows, risCols,
-                risGainDb, risCompDb);
+                risDistM, risGainDb, risCompDb);
 
     NodeContainer satNodes;
     satNodes.Create(1);

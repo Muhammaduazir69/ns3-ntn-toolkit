@@ -31,7 +31,8 @@
  *
  * The offline replay backend (SionnaReplayTransport, Roadmap §4.2.6) is also
  * exercised here: the per-tick free-space reference is recorded into a
- * toolkit-native replay file and then re-served through a NtnSionnaChannel so
+ * toolkit-native replay file and then re-served (queried and matched) through
+ * SionnaReplayTransport so
  * the precompute/replay path is demonstrated end-to-end without a live server.
  *
  * Run:
@@ -54,6 +55,7 @@
 #include "ns3/sionna-replay-transport.h"
 
 #include <cmath>
+#include <complex>
 #include <cstdio>
 #include <iostream>
 #include <limits>
@@ -164,23 +166,86 @@ Tick(Time now)
 // parametric profile below.
 bool g_cirFromServer = false;
 
+// SIONNA-07: directions and delays derived from geometry (satellite at t=0, the
+// UE, three scatterers near the UE), the same construction as
+// ntn-sionna-cir-real-stack. The old free directions left the satellite up to
+// 90 degrees apart, so the orbital velocity alone produced tap Doppler offsets
+// tens of kHz apart: a fading process no fixed ground terminal can see.
 CirSnapshot
-MakeSnapshot(double freqHz)
+MakeSnapshot(double freqHz, const Vector& sat, const Vector& ue)
 {
     CirSnapshot snap;
     snap.wavelength_m = 299792458.0 / freqHz;
     snap.t_ref_s = 0.0;
-    auto unit = [](double x, double y, double z) {
-        double n = std::sqrt(x * x + y * y + z * z);
+    auto unit = [](const Vector& v) {
+        double n = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
         n = (n > 0) ? n : 1.0;
-        return Vector(x / n, y / n, z / n);
+        return Vector(v.x / n, v.y / n, v.z / n);
     };
-    snap.taps.push_back({{1.00, 0.00}, 0.0e-9, unit(0.95, 0.31, 0.0), unit(0, 0, 1)});
-    snap.taps.push_back({{0.26, 0.12}, 35.0e-9, unit(-0.70, 0.70, 0.0), unit(0, 0, 1)});
-    snap.taps.push_back({{0.18, -0.18}, 80.0e-9, unit(0.10, -0.99, 0.0), unit(0, 0, 1)});
-    snap.taps.push_back({{0.20, 0.10}, 120.0e-9, unit(-0.30, 0.20, 0.93), unit(0, 0, 1)});
+    auto sub = [](const Vector& a, const Vector& b) {
+        return Vector(a.x - b.x, a.y - b.y, a.z - b.z);
+    };
+    auto len = [](const Vector& v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); };
+    const double c = 299792458.0;
+    const double dLos = len(sub(ue, sat));
+    snap.taps.push_back({{1.00, 0.00}, 0.0, unit(sub(ue, sat)), unit(sub(sat, ue))});
+    struct Scat
+    {
+        Vector offset;
+        std::complex<double> amp;
+    };
+    const Scat scat[] = {{Vector(8.0, 3.0, -ue.z), {0.26, 0.12}},
+                         {Vector(-15.0, 10.0, 6.0), {0.18, -0.18}},
+                         {Vector(5.0, -25.0, 10.0), {0.20, 0.10}}};
+    for (const auto& sc : scat)
+    {
+        const Vector p(ue.x + sc.offset.x, ue.y + sc.offset.y, ue.z + sc.offset.z);
+        const double excess = len(sub(p, sat)) + len(sub(ue, p)) - dLos;
+        snap.taps.push_back({sc.amp, std::max(0.0, excess) / c, unit(sub(p, sat)),
+                             unit(sub(p, ue))});
+    }
     return snap;
 }
+
+/**
+ * SIONNA-07: charge only the traced EXCESS over free space. NtnSionnaChannel
+ * returns the server's FULL path loss; chained after the stack's Friis head it
+ * charged free space twice (about 155 dB extra at 600 km and 2.185 GHz), which
+ * this example's own header warns against.
+ */
+class TracedExcessLossModel : public PropagationLossModel
+{
+  public:
+    static TypeId GetTypeId()
+    {
+        static TypeId tid = TypeId("LeoPassTracedExcessLossModel")
+                                .SetParent<PropagationLossModel>()
+                                .AddConstructor<TracedExcessLossModel>();
+        return tid;
+    }
+
+    void SetChannel(Ptr<NtnSionnaChannel> ch, double freqHz)
+    {
+        m_ch = ch;
+        m_freqHz = freqHz;
+    }
+
+  private:
+    double DoCalcRxPower(double txPowerDbm,
+                         Ptr<MobilityModel> a,
+                         Ptr<MobilityModel> b) const override
+    {
+        const double fullPl = txPowerDbm - m_ch->CalcRxPower(txPowerDbm, a, b);
+        const double fspl =
+            NtnSionnaChannel::FreeSpacePathLossDb(a->GetDistanceFrom(b), m_freqHz);
+        return txPowerDbm - (fullPl - fspl);
+    }
+
+    int64_t DoAssignStreams(int64_t /*stream*/) override { return 0; }
+
+    Ptr<NtnSionnaChannel> m_ch;
+    double m_freqHz{2.185e9};
+};
 } // namespace
 
 int
@@ -189,7 +254,7 @@ main(int argc, char* argv[])
     double duration = 12.0;
     double freqHz = 2.185e9; // TS 38.101-5 n256 DOWNLINK block (2170-2200 MHz).
     double altKm = 600.0;
-    double satEirpDbm = 70.0; // healthy nr (FR1 Friis) LEO downlink
+    double satEirpDbm = -1.0; // sentinel: TR 38.821 Set-1 S-band EIRP density
     std::string radio = "nr"; // radio spine: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "leo-pass-sionna-vs-tr38811-output";
     std::string replayFile = "leo-pass-sionna-vs-tr38811-replay.bin";
@@ -204,7 +269,9 @@ main(int argc, char* argv[])
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("freqHz", "Carrier frequency (Hz)", freqHz);
     cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm",
+                 "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)",
+                 satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("replayFile", "Offline replay file path (§4.2.6 demo)", replayFile);
@@ -264,12 +331,25 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("leo-pass-sionna-vs-tr38811");
     rs.SetCarrierFrequencyHz(freqHz);
-    // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the
-    // S-band LEO reference payload. Declared as a DENSITY so the helper
-    // back-computes conducted power against the array gain instead of the
-    // antenna being counted twice.
-    rs.SetSatEirpDensityDbwMhz(
-        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    // NT-02: by default (and on an S-band FR1 carrier) the cell takes the
+    // TR 38.821 Table 6.1.1.1-1 Set-1 downlink EIRP density for the S-band LEO
+    // reference payload, declared as a DENSITY so the helper back-computes
+    // conducted power against the array gain instead of the antenna being
+    // counted twice. An explicit --satEirpDbm used to be silently ignored; it
+    // is now honored as CONDUCTED power at the array input.
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && freqHz > 1.0e9 && freqHz <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        if (satEirpDbm < 0.0)
+        {
+            satEirpDbm = 70.0; // legacy default for a carrier outside Set-1
+        }
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, ueNodes);
 
     // ---- Channel plug-in: the Sionna multipath+Doppler EXCESS fades real
@@ -292,12 +372,18 @@ main(int argc, char* argv[])
         ch->SetLosOnly(false);
         ch->SetRequireLiveTransport(true);
         ch->SetTransport(udp);
-        rs.AddExtraPropagationLoss(ch);
+        // SIONNA-07: trace at the run's carrier (the attribute default is
+        // 2.0 GHz, the n256 UPLINK block) and charge only the excess over free
+        // space, since the stack's Friis head already carries the FSPL.
+        ch->SetFrequencyHz(freqHz);
+        auto excess = CreateObject<TracedExcessLossModel>();
+        excess->SetChannel(ch, freqHz);
+        rs.AddExtraPropagationLoss(excess);
         g_cirFromServer = true;
     }
     else
     {
-        g_cir->SetSnapshot(MakeSnapshot(freqHz));
+        g_cir->SetSnapshot(MakeSnapshot(freqHz, satEnu->GetPosition(), g_ueMob->GetPosition()));
     }
     g_cir->SetTxVelocity(satEnu->GetVelocity());
     g_cir->SetRxVelocity(Vector(0.0, 0.0, 0.0));
@@ -366,10 +452,27 @@ main(int argc, char* argv[])
         Ptr<SionnaReplayTransport> replay = CreateObject<SionnaReplayTransport>();
         if (replay->LoadFile(replayFile))
         {
-            replaySize = replay->Reader().Size();
-            Ptr<NtnSionnaChannel> replayCh = CreateObject<NtnSionnaChannel>();
-            replayCh->SetTransport(replay);
-            replayCh->SetFrequencyHz(freqHz);
+            // SIONNA-07: actually re-serve every record through the transport
+            // and count exact matches. This used to load the file and report
+            // its size as "re-served" without a single query.
+            for (size_t i = 0; i < replay->Reader().Size(); ++i)
+            {
+                const ReplayRecord& rec = replay->Reader().At(i);
+                SionnaTransport::Request req;
+                req.tx_x = rec.sat_pos[0];
+                req.tx_y = rec.sat_pos[1];
+                req.tx_z = rec.sat_pos[2];
+                req.rx_x = rec.ue_pos[0];
+                req.rx_y = rec.ue_pos[1];
+                req.rx_z = rec.ue_pos[2];
+                req.freq_hz = freqHz;
+                replay->SetClockOverride(rec.t_s);
+                const SionnaTransport::Response rsp = replay->Query(req);
+                if (rsp.ok && std::abs(rsp.path_loss_db - rec.path_loss_db) < 1e-9)
+                {
+                    ++replaySize;
+                }
+            }
         }
     }
 
@@ -385,7 +488,7 @@ main(int argc, char* argv[])
               << "  excess-fading sanity gate:    " << (g_maxFadeDb <= 30.0 ? "PASS" : "CHECK")
               << " (|excess| within a few dB of free space)\n"
               << "  offline replay records:       " << g_recordsWritten << " written, "
-              << replaySize << " re-served via SionnaReplayTransport (§4.2.6)\n"
+              << replaySize << " re-served and matched via SionnaReplayTransport (§4.2.6)\n"
               << "  -> headline SINR/TBLER/goodput are MEASURED; TR 38.811 free space is the\n"
               << "     reference column, not the deliverable.\n";
 

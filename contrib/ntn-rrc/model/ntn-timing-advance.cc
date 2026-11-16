@@ -173,7 +173,7 @@ NtnTimingAdvance::GetReferenceRangeMetres() const
 // Previously this class had no gateway geometry, returned the service-link round
 // trip for every payload mode, and m_payloadMode was stored but never read: a
 // transparent LEO-600 cell was compensated for ~4 ms when TR 38.821 Table 4.2-2
-// gives ~41.77 ms. SetGatewayMobility() supplies the missing geometry; when the
+// gives up to 25.77 ms. SetGatewayMobility() supplies the missing geometry; when the
 // mode needs it and it is absent, FeederGeometryMissing() reports so rather than
 // the shortfall passing silently.
 Time

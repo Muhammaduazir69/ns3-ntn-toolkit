@@ -254,8 +254,8 @@ main(int argc, char* argv[])
     std::cout << "    Beamwidth:   " << std::setprecision(3) << array->ComputeBeamwidth3dB_deg()
               << " deg\n";
     std::cout << "    RIS:         64x64 = " << ris->GetTotalElements() << " elements\n";
-    std::cout << "    RIS gain:    " << std::setprecision(1) << ris->ComputeSnrGain_dB(true)
-              << " dB (perfect CSI)\n";
+    std::cout << "    RIS array gain: " << std::setprecision(1) << ris->ComputeSnrGain_dB(true)
+              << " dB over a single element (perfect CSI); not a gain over the direct link\n";
     std::cout << "    ISAC mode:   JOINT (20% sensing)\n";
     std::cout << "    Beam track:  EKF\n";
     helper->PrintConfiguration();
@@ -353,8 +353,14 @@ main(int argc, char* argv[])
 
         // ---- 2. RIS-assisted SNR improvement ----
         ris->ComputeOptimalPhases(elev, azim, 0.0, 0.0);
-        double risGain = ris->ComputeSnrGain_dB(true);
-        double risSnr = dlResult.snr_dB + risGain;
+        // RIS ray relative to the direct ray from the live geometry
+        // (sat -> RIS at 150 m -> GT), far-field cascaded loss; the two rays add
+        // in power. "dlSnr + 20 log10(N)" treated the gain over one element as a
+        // gain over the direct link and overstated the RIS benefit by ~50 dB.
+        const double risRelDb =
+            dlResult.fspl_dB - ris->ComputeCascadedPathLoss_dB(sat1Mob, risMob, gtMob);
+        double risSnr =
+            dlResult.snr_dB + 10.0 * std::log10(1.0 + std::pow(10.0, risRelDb / 10.0));
 
         // Effective communication rate (80% of resources for comms)
         double commBw = downlinkBw * 0.8;
@@ -374,8 +380,12 @@ main(int argc, char* argv[])
         double noisyAzim = azim + measNoise * std::cos(t * 5.1);
         tracker->UpdateMeasurement(noisyElev, noisyAzim, risSnr, t);
         std::pair<double, double> pred = tracker->PredictBeamDirection(t + dt);
-        double trackError = std::sqrt(
-            std::pow(pred.first - elev, 2.0) + std::pow(pred.second - azim, 2.0));
+        // Angular pointing error (deg): wrap the azimuth difference into
+        // [-180, 180] and scale it by cos(elevation), the great-circle factor;
+        // an unwrapped difference across the 0/360 seam read as 117 to 236 deg.
+        double dAz = std::fmod(pred.second - azim + 540.0, 360.0) - 180.0;
+        double trackError = std::sqrt(std::pow(pred.first - elev, 2.0) +
+                                      std::pow(dAz * std::cos(elev * M_PI / 180.0), 2.0));
         totalTrackingError += trackError;
 
         // ---- 5. ISAC sensing (periodic, every 5 seconds) ----
@@ -417,7 +427,7 @@ main(int argc, char* argv[])
                       << std::setw(10) << dlRate
                       << std::setw(12) << islCap
                       << std::setprecision(1)
-                      << std::setw(10) << risGain
+                      << std::setw(10) << (risSnr - dlResult.snr_dB)
                       << std::setprecision(4)
                       << std::setw(10) << trackError
                       << std::setw(10) << isacStatus
@@ -473,7 +483,7 @@ main(int argc, char* argv[])
     // RIS
     std::cout << "\n  RIS-Assisted Link:\n";
     std::cout << "    Panel size:   64x64 = " << ris->GetTotalElements() << " elements\n";
-    std::cout << "    Max SNR gain: " << std::setprecision(1)
+    std::cout << "    N^2 gain vs one element: " << std::setprecision(1)
               << ris->ComputeSnrGain_dB(true) << " dB\n";
     std::cout << "    Quant loss:   " << std::setprecision(2)
               << ris->ComputeQuantizationLoss_dB() << " dB\n";

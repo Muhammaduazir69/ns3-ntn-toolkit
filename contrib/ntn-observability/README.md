@@ -147,9 +147,12 @@ simulation-time stamps to ingest time.
 
 - `NtnSceneRecorder` writes NetSimulyzer and CZML; its InfluxDB fan-out is
   planned. Today line protocol comes from `NtnInfluxSink` and the AI flow monitor.
-- The `band` tag that `ntn-observability-traffic` writes is the fixed label `Ku`
-  even when `--freqGHz` selects another carrier (the run above used 20 GHz).
-  Read the carrier from the manifest or `sim_health.csv`, not from that tag.
+- The `band` tag that `ntn-observability-traffic` writes now follows
+  `--freqGHz` (IEEE Std 521 letter bands). Runs made before November 2026,
+  including the one above at 20 GHz, carry the fixed label `Ku`; read their
+  carrier from the manifest or `sim_health.csv`.
+- `ntn_drx` points from `ntn-observability-demo` carry `provenance=timer-fsm-unbound`:
+  the DRX state machine runs on its own timers and is not bound to the MAC.
 - The results above are from a June 2026 sweep. The module has since gained the
   base-epoch, escaping and handover-edge fixes covered by the tests; rerun the
   example to regenerate the series on the current code.

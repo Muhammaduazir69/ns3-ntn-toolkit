@@ -13,7 +13,7 @@
  *
  * MultiLayerRouter::Route() is called once a second and its result is written
  * to the CSV. That is ALL it does in this example: the route is not actuated
- * onto any data plane. The real stack built below is a single UAV-to-ground
+ * onto any data plane. The real stack built below is a single LEO-to-aircraft
  * access cell, and its behaviour does not depend on which relay layer the
  * router picked - so the CSV's route columns cannot be cross-checked against
  * delivered traffic, and no measured KPI here validates the routing decision.
@@ -33,7 +33,7 @@
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
-#include "ns3/constant-velocity-mobility-model.h"
+#include "ns3/aeronautical-scenario.h"
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/multi-layer-router.h"
@@ -84,17 +84,20 @@ main(int argc, char* argv[])
     // Aircraft terminal = UE (great-circle cruise); LEO satellite = mmwave gNB.
     NodeContainer ueNodes;
     ueNodes.Create(numUes);
-    Ptr<ConstantVelocityMobilityModel> acMob = CreateObject<ConstantVelocityMobilityModel>();
-    acMob->SetPosition(Vector(0.0, 0.0, cruiseAltM));
-    acMob->SetVelocity(Vector(speedMps, 0.0, 0.0));
+    // The module's own AeronauticalMobilityModel (cruise leg at --cruise and
+    // --speed) instead of a generic ConstantVelocity placeholder; the leg is
+    // long enough that no aircraft reaches its arrival point within the run.
+    SaginHelper flightHelper;
+    const double legM = 2.0 * speedMps * simTimeSec + 10000.0;
+    Ptr<AeronauticalMobilityModel> acMob = flightHelper.CreateFlight(
+        Vector(0.0, 0.0, cruiseAltM), Vector(legM, 0.0, cruiseAltM), cruiseAltM, speedMps);
     ueNodes.Get(0)->AggregateObject(acMob);
-    MobilityHelper mh;
-    mh.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     for (uint32_t i = 1; i < numUes; ++i)
     {
-        Ptr<ConstantVelocityMobilityModel> m = CreateObject<ConstantVelocityMobilityModel>();
-        m->SetPosition(Vector(1500.0 * i, 0.0, cruiseAltM));
-        m->SetVelocity(Vector(speedMps, 0.0, 0.0));
+        // Trailing aircraft on the same airway, 1.5 km apart.
+        Ptr<AeronauticalMobilityModel> m = flightHelper.CreateFlight(
+            Vector(1500.0 * i, 0.0, cruiseAltM), Vector(1500.0 * i + legM, 0.0, cruiseAltM),
+            cruiseAltM, speedMps);
         ueNodes.Get(i)->AggregateObject(m);
     }
 

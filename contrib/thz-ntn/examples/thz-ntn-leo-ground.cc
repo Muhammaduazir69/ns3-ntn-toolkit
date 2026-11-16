@@ -126,9 +126,10 @@ int
 main(int argc, char* argv[])
 {
     std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
-                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
-                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
-                "module's *-traffic / *-real-stack examples.\n\n");
+                "directly (link budgets, scaling laws, comparisons). Its packets cross a\n"
+                "point-to-point abstraction whose delay and PER follow the budget (DVB-S2\n"
+                "QPSK 1/2 stand-in), not an NR radio, so rx/tx is a budget check, not a\n"
+                "measured KPI. For measured KPIs see the *-traffic / *-real-stack examples.\n\n");
     // ---- Default parameters ----
     double freq = 225e9;       // 225 GHz
     double altitude = 550.0;   // km
@@ -161,7 +162,15 @@ main(int argc, char* argv[])
               << std::pow(10.0, (txPower - 30.0) / 10.0) << " W)\n";
     std::cout << "  Bandwidth:    " << bandwidth / 1e9 << " GHz\n";
     std::cout << "  Tx Gain:      " << txGain << " dBi (UM-MIMO 32x32)\n";
-    std::cout << "  Rx Gain:      " << rxGain << " dBi (Cassegrain 0.45m)\n";
+    // Aperture implied by the gain (eta = 0.6): G = eta (pi D / lambda)^2. The
+    // label used to say "Cassegrain 0.45m", but 0.45 m at 225 GHz is ~58 dBi;
+    // 45 dBi is a ~0.10 m dish.
+    {
+        const double lambda = 299792458.0 / freq;
+        const double dRx = lambda / M_PI * std::sqrt(std::pow(10.0, rxGain / 10.0) / 0.6);
+        std::cout << "  Rx Gain:      " << rxGain << " dBi (reflector, D ~ " << dRx
+                  << " m at eta 0.6)\n";
+    }
     std::cout << "  Noise Figure: " << noiseFigure << " dB\n";
     std::cout << "-------------------------------------------------------------\n\n";
 
@@ -318,11 +327,19 @@ main(int argc, char* argv[])
     std::cout << "    Link Margin:             " << detailResult.linkMargin_dB << " dB\n";
 
     // ---- Doppler analysis (geometric, freq-scaled radial velocity) ----
-    double satVelocity = 7600.0; // m/s for 550 km LEO
-    std::cout << "\n  Doppler Pre-Compensation Analysis:\n";
+    // Circular-orbit speed from the CLI altitude (it was a fixed 7600 m/s), and
+    // the range rate of an overhead pass: v_r = v * Re cos(el) / (Re + h)
+    // (sine of the off-nadir angle; TR 38.811 Sec. 6.10 / TR 38.821 Sec. 7.3
+    // Doppler geometry). v*cos(el) overstated it by (Re+h)/Re, ~8.6 percent at
+    // 550 km. Earth rotation is neglected.
+    const double reM = 6371.0e3;
+    const double rOrbM = reM + altitude * 1000.0;
+    const double satVelocity = std::sqrt(3.986004418e14 / rOrbM);
+    std::cout << "\n  Doppler Pre-Compensation Analysis (v = " << std::setprecision(0)
+              << satVelocity << " m/s):\n";
     for (double elev : elevations)
     {
-        double vRadial = satVelocity * std::cos(elev * M_PI / 180.0);
+        double vRadial = satVelocity * reM * std::cos(elev * M_PI / 180.0) / rOrbM;
         double dopplerHz = vRadial / 299792458.0 * freq;
         std::cout << "    Elev " << std::setw(4) << elev << " deg: Doppler offset = "
                   << std::setprecision(0) << dopplerHz / 1e3 << " kHz\n";
@@ -400,12 +417,15 @@ main(int argc, char* argv[])
               << " (was pinned at 0); PER over the pass min=" << g_perMin << " max=" << g_perMax << " mean=" << (g_couplingUpdates ? g_perSum/g_couplingUpdates : 0.0) << "\n";
     if (g_lastAppliedPer > 0.5)
     {
-        std::cout << "  [WF-06] LINK DOES NOT CLOSE at these defaults: the computed SNR is below\n"
+        std::cout << "  [WF-06] LINK DOES NOT CLOSE with these settings: the computed SNR is below\n"
                      "          any usable MODCOD threshold, so the data plane correctly delivers\n"
                      "          (almost) nothing. This was invisible while the error rate was\n"
                      "          pinned at 0 and every packet arrived regardless of the physics.\n"
-                     "          The dominant term is the noise bandwidth: --bandwidth=10e9 puts the\n"
-                     "          thermal floor at -174 + 100 dB. Narrowing it closes the link.\n";
+                  << "          The dominant term is the noise bandwidth: --bandwidth="
+                  << bandwidth << " puts the\n          thermal floor at -174 + "
+                  << 10.0 * std::log10(bandwidth) << " dB. Note --bandwidth=2e8 alone gives\n"
+                  << "          only about +2 dB at zenith (QPSK 1/2 threshold ~1 dB); a 0.45 m\n"
+                  << "          ground reflector (--rxGain=58) is also needed for a full pass.\n";
     }
     passCsv.close();
     Simulator::Destroy();

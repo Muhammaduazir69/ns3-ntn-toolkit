@@ -22,7 +22,7 @@
 // constant for a physical reason (a tracking beam), not because a constant was
 // substituted for a function.
 //
-// The experiment. The same real LEO-600 pass (SGP4 element, S-band DL, EIRP
+// The experiment. The same real LEO-600 pass (Walker element, Kepler + J2, S-band DL, EIRP
 // 48.77 dBW, G/T -31.62 dB/K, 30 MHz) is run TWICE against the same measured
 // mmwave PHY, changing ONE thing — where the beam points:
 //
@@ -176,7 +176,7 @@ RunRegime(const RunConfig& cfg, bool tracking)
     NodeContainer ueNodes;
     ueNodes.Create(1);
 
-    // Real SGP4 LEO-600 element; the local ENU frame is referenced at the
+    // Real LEO-600 Walker element (Kepler + J2, see SCOPE A8); the local ENU frame is referenced at the
     // sub-satellite point at t = 0, so the UE starts exactly at zenith.
     ns3::ntncon::WalkerConfig wcfg;
     wcfg.num_planes = 1;
@@ -302,6 +302,7 @@ RunRegime(const RunConfig& cfg, bool tracking)
     rs.SetOutputDir(cfg.outputDir);
     rs.SetRunTag("ntn-tr38821-array-gain-" + out.name);
     rs.SetCarrierFrequencyHz(kFreqHz);
+    rs.DeclareCalibrationCarrier(); // TR 38.821 Table 6.1.1.1-1 2 GHz calibration carrier
     rs.SetBandwidthHz(kBwHz);
     // NT-02 FIX (2026-08-24): kEirpDbw is the TR 38.821 Set-1 TOTAL EIRP, and
     // the closed-form reference above uses it as such. Passing it to the

@@ -75,6 +75,18 @@ struct TleRecord
     bool ChecksumOk() const;
 };
 
+/// Synthesize a conforming two-line element set from classical elements so a
+/// generated shell (Walker) can be propagated by Vallado SGP4 instead of the
+/// Kepler + J2 path. The elements are taken as SGP4 mean elements (the usual
+/// reading of a nominal constellation design); B*, ndot and nddot are zero
+/// (drag-free); the epoch is the elements' epoch; catalog number is
+/// norad_id mod 100000; both checksums are set. Columns follow the NORAD TLE
+/// format (CelesTrak / Vallado, "Revisiting Spacetrack Report #3", 2006).
+/// Resolution: 1e-4 deg on angles (~12 m along track at LEO), 1e-7 on
+/// eccentricity, 1e-8 day on the epoch. Returns false for a non-elliptic or
+/// sub-orbital input.
+bool MakeTleFromElements(const KeplerianElements& el, TleRecord& out);
+
 /// Convenience parser that consumes a multi-line string containing zero
 /// or more 0/1/2-line groups and returns the parsed records.
 /// Lines starting with '#' are treated as comments.

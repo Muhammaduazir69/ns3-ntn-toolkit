@@ -55,7 +55,7 @@ main(int argc, char* argv[])
     double delayMs = 12.885;   // one-way prop delay -> ~25.77 ms RTD (LEO-600, TR 38.821)
     double dataRateMbps = 50.0;
 
-    CommandLine cmd;
+    CommandLine cmd(__FILE__);
     cmd.AddValue("simTime", "Simulation time in seconds", simTime);
     cmd.AddValue("intervalMs", "CBR inter-packet interval in milliseconds", intervalMs);
     cmd.AddValue("pktSize", "CBR payload size in bytes", pktSize);
@@ -138,6 +138,7 @@ main(int argc, char* argv[])
     double fmMeanDelayMs = 0.0;
     double fmJitterMs = 0.0;
     uint64_t fmRxPackets = 0;
+    uint64_t fmJitterPairs = 0;
     for (auto& kv : monitor->GetFlowStats())
     {
         const FlowMonitor::FlowStats& st = kv.second;
@@ -149,15 +150,23 @@ main(int argc, char* argv[])
             {
                 fmThroughputMbps += st.rxBytes * 8.0 / durSec / 1e6;
             }
-            fmMeanDelayMs += st.delaySum.GetMilliSeconds();
-            fmJitterMs += st.jitterSum.GetMilliSeconds();
+            // Time::GetMilliSeconds() truncates to an integer, which zeroed
+            // any sub-millisecond jitter sum; take the double value instead.
+            fmMeanDelayMs += st.delaySum.GetSeconds() * 1e3;
+            fmJitterMs += st.jitterSum.GetSeconds() * 1e3;
             fmRxPackets += st.rxPackets;
+            // FlowMonitor accumulates |D(i) - D(i-1)| (RFC 3393 IPDV) over
+            // consecutive pairs, so the mean is over rxPackets - 1 samples.
+            fmJitterPairs += st.rxPackets - 1;
         }
     }
     if (fmRxPackets > 0)
     {
         fmMeanDelayMs /= fmRxPackets;
-        fmJitterMs /= fmRxPackets;
+    }
+    if (fmJitterPairs > 0)
+    {
+        fmJitterMs /= fmJitterPairs;
     }
 
     std::cout << "==== ntn-cbr-leo-link MEASURED KPIs ====" << std::endl;

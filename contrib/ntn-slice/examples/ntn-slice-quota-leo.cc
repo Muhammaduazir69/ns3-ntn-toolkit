@@ -11,7 +11,8 @@
  *             bytes per RBG (closed loop): each slice gets the RBG share its backlog needs within the control
  *             period, URLLC first, then mMTC, eMBB takes the rest, with a floor per slice
  * Output: one JSON line with per-slice delivered packets, loss, one-way delay p50/p95/p99, throughput and the
- * per-slice RBG share actually granted.
+ * per-slice RBG share actually granted. The delay percentiles come from the sinks' 1 ms histogram and are
+ * reported at the bin midpoint (x.5 ms), so they resolve to 1 ms, not finer.
  */
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
@@ -124,6 +125,14 @@ Count()
         g.bprW[s] += (s < bpr.size() ? bpr[s] : 0.0) * rbg[s];
     }
     g.slots += slots;
+    // The static policy's quota is fixed but real: average it like the reactive
+    // one so mean_quota is reported instead of -1.
+    const std::vector<double> q = g.sched->GetQuotas();
+    for (size_t s = 0; s < 3 && s < q.size(); ++s)
+    {
+        g.quotaSum[s] += q[s];
+    }
+    ++g.steps;
     Simulator::Schedule(Seconds(g.ctrlS), &Count);
 }
 

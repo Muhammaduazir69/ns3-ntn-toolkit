@@ -182,7 +182,7 @@ main(int argc, char* argv[])
     cmd.AddValue("scsKhz", "Sub-carrier spacing (kHz): 15/30/60/120", scsKhz);
     cmd.AddValue("tbBytes", "Transport-block size (bytes)", tbBytes);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: mmwave (FR2, per-TB FAPI loop) or nr (FR1)", radio);
     cmd.AddValue("tle", "Path to 3-line TLE (default: contrib/ntn-rrc/data/iss-zarya.tle)", tlePath);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -191,10 +191,28 @@ main(int argc, char* argv[])
     g_tbBytes = tbBytes;
     g_slotsPerSubframe = std::max<uint32_t>(1, scsKhz / 15);
 
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
-    // mmwave, so honour the historical 58 dBm for mmwave but give nr 70 dBm.
     const bool useNr = (radio == "nr");
-    if (satEirpDbm < 0.0)
+    // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the nr
+    // default is now that Set-1 density, as ntn-v2x-real-stack does; an
+    // explicit --satEirpDbm keeps meaning conducted power, and mmwave keeps
+    // its historical 58.0 dBm.
+    // The probe mirrors the cell's carrier and bandwidth and returns the
+    // equivalent CONDUCTED power from the helper's own formula
+    // (density + 10log10(BW_MHz) + 30 - ArrayGainDb()), so every other
+    // consumer of satEirpDbm stays consistent with the radio.
+    NtnRealStackHelper eirpProbe;
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && useNr &&
+                                 eirpProbe.GetCarrierFrequencyHz() > 1.0e9 &&
+                                 eirpProbe.GetCarrierFrequencyHz() <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        eirpProbe.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        satEirpDbm = eirpProbe.GetSatEirpDbm();
+    }
+    else if (satEirpDbm < 0.0)
     {
         satEirpDbm = useNr ? 70.0 : 58.0;
     }
@@ -253,11 +271,25 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-fapi-leo-pass-slotloop");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (eirpFromTr38821)
+    {
+        // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 S-band EIRP density. The
+        // helper back-computes the conducted power from the bandwidth and
+        // the array gain, and again in Build().
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit value (or a default on a carrier outside the
+        // Set-1 S-band reference) is CONDUCTED power at the array input.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, ueNodes);
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("ntn-fapi-leo-pass-slotloop"); // WS2 KPM series (TS 28.552 names)
@@ -273,7 +305,8 @@ main(int argc, char* argv[])
         MakeCallback(&FapiPhyRxTrace));
 
     std::printf("# ntn-fapi-leo-pass-slotloop (FAPI ABI on a real mmwave cell over a real SGP4 pass)\n"
-                "#   TLE=%s  GS sub-point=(%.3f,%.3f)  sim=%.0fs scs=%ukHz TB=%uB\n",
+                "#   TLE=%s  GS sub-point=(%.3f,%.3f)  sim=%.0fs requested scs=%ukHz TB=%uB "
+                "(not applied to the radio, see numerology line)\n",
                 tlePath.c_str(), subLat, subLon, simSeconds, scsKhz, tbBytes);
 
     // Install the FAPI SAP bridge on the live mmwave cell. From here every FAPI
@@ -291,6 +324,27 @@ main(int argc, char* argv[])
     else
     {
         std::printf("#   NOTE: no mmwave gNB device, FAPI SAP bridge not installed\n");
+    }
+
+    // FAPI-7: report the numerology the cell actually runs. --scsKhz and
+    // --tbBytes never reached the radio: the mmwave PHY keeps its own slot
+    // configuration (the FAPI slot label is derived from it, see
+    // NtnFapiSapBridge::InstallEnb) and the TB size of every DL_TTI.request is
+    // the MAC scheduler's own decision. Printing the requested values as if they
+    // ran made a sweep over them look like a result (TS 38.211 Table 4.2-1).
+    if (fapiEnb && fapiEnb->GetPhy() && fapiEnb->GetPhy()->GetConfigurationParameters())
+    {
+        const uint32_t realSpsf =
+            fapiEnb->GetPhy()->GetConfigurationParameters()->GetSlotsPerSubframe();
+        std::cout << "#   radio numerology (cell PHY config): " << realSpsf << " slots/ms, SCS "
+                  << 15 * realSpsf << " kHz\n";
+        if (realSpsf != g_slotsPerSubframe)
+        {
+            std::cout << "#   NOTE: --scsKhz=" << scsKhz
+                      << " is not applied to the radio; the FAPI slot numbers follow the cell.\n";
+        }
+        std::cout << "#   NOTE: --tbBytes=" << tbBytes
+                  << " is not applied; each TB size is the scheduler's (PDSCH tbSize).\n";
     }
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();

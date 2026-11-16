@@ -330,7 +330,9 @@ Example4_Ris()
         double snrGPerf = ris->ComputeSnrGain_dB(true);
         double snrGImp = ris->ComputeSnrGain_dB(false);
         double qLoss = ris->ComputeQuantizationLoss_dB();
-        double sizeC = (n * 0.5 / (300.0)) * 10.0; // cm
+        // Panel side n * lambda/2 at 300 GHz (lambda ~ 1 mm), in cm. The old
+        // n*0.5/300*10 was a factor 3 too small (128 -> 2.13 cm, not 6.4 cm).
+        double sizeC = n * (299792458.0 / 300e9) / 2.0 * 100.0; // cm
 
         std::cout << " " << std::setw(3) << n << "x" << std::setw(3) << n
                   << "  " << std::setw(6) << n * n << "   "

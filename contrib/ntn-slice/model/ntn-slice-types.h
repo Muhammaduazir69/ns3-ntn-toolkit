@@ -2,7 +2,8 @@
  * SPDX-License-Identifier: GPL-2.0-only
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit, Workstream W6)
  *
- * Network-slice identifiers per 3GPP TS 23.501 §5.15.2 and Annex A:
+ * Network-slice identifiers per 3GPP TS 23.501 §5.15.2 (SST values: Table
+ * 5.15.2.2-1; 5 = HMTC and 6 = HDLLC from Rel-17/18 are not modelled):
  *
  *   S-NSSAI = (SST, [SD])
  *
@@ -140,7 +141,11 @@ DefaultEmbb(uint32_t sd = kSdUnset)
     };
 }
 
-/// Default URLLC profile per TS 22.261 (1 ms latency, 1e-5 BLER).
+/// Default URLLC profile: 5 ms end-to-end budget and 99.999 % reliability, a
+/// TS 22.261 Table 7.2.2-1 URLLC service SLA. It is stricter than the 5QI the
+/// examples mark URLLC traffic with (5QI 82: PDB 10 ms, PER 1e-4, TS 23.501
+/// Table 5.7.4-1), and below the ~6.8 ms one-way floor of a 550 km LEO path
+/// with a 5 ms backhaul, so a latency breach against it is structural.
 /// `allowGeo = false` enforces "GEO mode-skip" — URLLC bypasses GEO satellites.
 inline SliceProfile
 DefaultUrllc(uint32_t sd = kSdUnset)

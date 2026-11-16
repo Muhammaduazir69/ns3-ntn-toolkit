@@ -43,9 +43,13 @@ struct CirPathTap
     std::complex<double> amplitude;
     /// Propagation delay (seconds).
     double delay_s;
-    /// Unit direction vector at the tx side (path leaves the tx).
+    /// Unit direction of departure at the tx: points FROM the tx along the
+    /// path (Sionna k_t). Tx motion along it gives a positive Doppler.
     Vector tx_dir;
-    /// Unit direction vector at the rx side (path arrives at rx).
+    /// Unit direction of arrival at the rx: points FROM the rx BACK toward
+    /// where the path arrives from (Sionna r_hat(theta_r, phi_r)), so rx motion
+    /// toward the source gives a positive Doppler, as f_d = (v_t.k_t + v_r.k_r)/lambda
+    /// requires. Storing the propagation direction here instead flips the sign.
     Vector rx_dir;
 };
 

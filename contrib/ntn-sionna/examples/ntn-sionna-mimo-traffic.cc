@@ -209,8 +209,11 @@ main(int argc, char* argv[])
 
     const double sisoSinr = rs.GetUeMeanSinrDb(0);
     const double mimoSinr = rs.GetUeMeanSinrDb(1);
-    const double sisoMbps = rs.GetUeRxBytes(0) * 8.0 / simSeconds / 1e6;
-    const double mimoMbps = rs.GetUeRxBytes(1) * 8.0 / simSeconds / 1e6;
+    // SIONNA-07: average over the traffic window [1, simSeconds - 0.5] s, not
+    // the whole run, which understated both rates by 1.5/simSeconds.
+    const double activeS = std::max(1e-9, simSeconds - 1.5);
+    const double sisoMbps = rs.GetUeRxBytes(0) * 8.0 / activeS / 1e6;
+    const double mimoMbps = rs.GetUeRxBytes(1) * 8.0 / activeS / 1e6;
     std::printf("# === summary ===  MEASURED SISO SINR=%.2f dB / %.3f Mbps  vs  "
                 "MIMO SINR=%.2f dB / %.3f Mbps  (measured gap %.2f dB, array gain "
                 "%.1f dB)\n",

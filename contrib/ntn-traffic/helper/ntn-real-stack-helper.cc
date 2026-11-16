@@ -56,6 +56,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <sstream>
 #include <tuple>
 #include <ctime>
 #include <filesystem>
@@ -595,7 +596,12 @@ NtnRealStackHelper::BuildNrRadio()
         break;
     case Scheduler::TdmaRR:
     default:
-        break; // NR default
+        // NR default. Its TDMA allocator used to starve the whole cell once the
+        // active UEs were at least as many as the data symbols (12 UEs on a
+        // 12-symbol slot: one 8-byte TB each at MCS 0, below the 10-byte DCI
+        // floor, so nothing was ever sent). Fixed in the vendored
+        // contrib/nr/model/nr-mac-scheduler-tdma.cc (AssignRBGTDMA).
+        break;
     }
 
     // ---- Enabler A: NR inter-cell handover algorithm --------------------
@@ -1017,7 +1023,7 @@ NtnRealStackHelper::BuildNrRadio()
     // Without this, SetHandoverAlgorithmType alone leaves the RRC on the no-op
     // SAP and the UE never emits neighbour measurement reports (handover count
     // stays 0 regardless of geometry).
-    if (m_handover && m_gnb.GetN() >= 2)
+    if (m_handover && m_hoAutonomous && m_gnb.GetN() >= 2)
     {
         for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
         {
@@ -1099,6 +1105,28 @@ NtnRealStackHelper::BuildNrRadio()
     }
 
     m_nr->AttachToClosestGnb(m_ueDevs, m_enbDevs);
+    if (m_nrBeamforming)
+    {
+        // Record the (cell, IMSI) pairs AttachToGnb registered, then keep each
+        // UE's beam on its serving cell after every beamforming pass (offset by
+        // 1 us so it runs right after IdealBeamformingHelper::Run).
+        for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+        {
+            Ptr<NrUeNetDevice> ue = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(u));
+            if (ue && ue->GetTargetGnb())
+            {
+                m_nrBfPairs.insert({ue->GetTargetGnb()->GetCellId(), ue->GetImsi()});
+            }
+        }
+        TimeValue period;
+        m_nrBeamforming->GetAttribute("BeamformingPeriodicity", period);
+        if (period.Get().IsStrictlyPositive())
+        {
+            Simulator::Schedule(period.Get() + MicroSeconds(1),
+                                &NtnRealStackHelper::NrReassertUeBeams,
+                                this);
+        }
+    }
 
     // ---- Enabler A: X2 interfaces + handover-completion trace ------------
     // With >=2 gNBs (e.g. several satellites in view) the A3-RSRP algorithm set
@@ -1252,11 +1280,92 @@ NtnRealStackHelper::SetHandover(bool enable, double hysteresisDb, Time ttt)
 
 void
 NtnRealStackHelper::NrHandoverEndOk(std::string /*ctx*/,
-                                    uint64_t /*imsi*/,
-                                    uint16_t /*cellId*/,
+                                    uint64_t imsi,
+                                    uint16_t cellId,
                                     uint16_t /*rnti*/)
 {
     ++m_hoCount;
+    // 5G-LENA registers an ideal-beamforming task only at attach
+    // (NrHelper::AttachToGnb), so after an X2 handover the TARGET gNB had no
+    // beam toward the UE and served it with an unsteered vector: its RSRP
+    // collapsed and A3 sent the UE straight back (ping-pong, measured 8 to 31
+    // handovers on one pass). Register the (target, UE) pair once and point the
+    // UE's receive beam at the new serving cell.
+    if (m_backend != RadioBackend::Nr || !m_nrBeamforming)
+    {
+        return;
+    }
+    Ptr<NrGnbNetDevice> gnb;
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        Ptr<NrGnbNetDevice> g = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
+        if (g && g->GetCellId() == cellId)
+        {
+            gnb = g;
+            break;
+        }
+    }
+    Ptr<NrUeNetDevice> ue;
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        Ptr<NrUeNetDevice> d = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(u));
+        if (d && d->GetImsi() == imsi)
+        {
+            ue = d;
+            break;
+        }
+    }
+    if (!gnb || !ue)
+    {
+        return;
+    }
+    if (m_nrBfPairs.insert({cellId, imsi}).second)
+    {
+        m_nrBeamforming->AddBeamformingTask(gnb, ue); // also points the UE beam at gnb
+    }
+    else
+    {
+        for (std::size_t cc = 0; cc < ue->GetCcMapSize(); ++cc)
+        {
+            ue->GetPhy(cc)->GetSpectrumPhy()->GetBeamManager()->ChangeBeamformingVector(gnb);
+        }
+    }
+}
+
+void
+NtnRealStackHelper::NrReassertUeBeams()
+{
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        Ptr<NrUeNetDevice> ue = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(u));
+        if (!ue)
+        {
+            continue;
+        }
+        const uint16_t cellId = GetUeServingCellId(u);
+        if (m_nrBfPairs.find({cellId, ue->GetImsi()}) == m_nrBfPairs.end())
+        {
+            continue; // no stored beam for this pair yet
+        }
+        for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+        {
+            Ptr<NrGnbNetDevice> g = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
+            if (g && g->GetCellId() == cellId)
+            {
+                for (std::size_t cc = 0; cc < ue->GetCcMapSize(); ++cc)
+                {
+                    ue->GetPhy(cc)->GetSpectrumPhy()->GetBeamManager()->ChangeBeamformingVector(g);
+                }
+                break;
+            }
+        }
+    }
+    TimeValue period;
+    m_nrBeamforming->GetAttribute("BeamformingPeriodicity", period);
+    if (period.Get().IsStrictlyPositive())
+    {
+        Simulator::Schedule(period.Get(), &NtnRealStackHelper::NrReassertUeBeams, this);
+    }
 }
 
 // ---- Enabler B: MIMO + spectrum-level channel plugin --------------------
@@ -1406,7 +1515,7 @@ NtnRealStackHelper::GetUeRxPackets(uint32_t ueIndex) const
 {
     // P3 (M5): measured delivered-packet COUNT for a UE, summed over its flows.
     // Use this instead of GetUeRxBytes()/1400 — that estimate is wrong for any
-    // non-1400 B packet (128 B mMTC, 256 B URLLC).
+    // non-1400 B packet (128 B mMTC, 227 B URLLC).
     uint64_t pkts = 0;
     for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
     {
@@ -1501,6 +1610,10 @@ NtnRealStackHelper::GetSliceMeasuredStats(uint8_t fiveQi) const
     // the slice, not one flow within it.
     std::vector<uint64_t> pooledHist(NtnOranSink::FlowStats::kDelayBins, 0u);
     uint64_t pooledOverflow = 0;
+    // Percentiles come from the 0.1 ms histogram (TS 28.552 DRB.RlcSduDelayDl
+    // is reported in 0.1 ms units); with 1 ms bins a LEO slice whose delays
+    // sit inside one millisecond reported p50 = p95 = p99.
+    std::vector<uint64_t> pooledFine(NtnOranSink::FlowStats::kFineBins, 0u);
     for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
     {
         Ptr<NtnOranSink> sink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
@@ -1527,6 +1640,10 @@ NtnRealStackHelper::GetSliceMeasuredStats(uint8_t fiveQi) const
                     pooledHist[b] += fs.delayHistMs[b];
                 }
             }
+            for (size_t b = 0; b < fs.delayHistFine.size() && b < pooledFine.size(); ++b)
+            {
+                pooledFine[b] += fs.delayHistFine[b];
+            }
             pooledOverflow += fs.delayOverflow;
         }
     }
@@ -1540,7 +1657,18 @@ NtnRealStackHelper::GetSliceMeasuredStats(uint8_t fiveQi) const
         }
         const uint64_t target = static_cast<uint64_t>(q * static_cast<double>(out.rxPackets));
         uint64_t cum = 0;
-        for (uint32_t b = 0; b < NtnOranSink::FlowStats::kDelayBins; ++b)
+        for (uint32_t b = 0; b < NtnOranSink::FlowStats::kFineBins; ++b)
+        {
+            cum += pooledFine[b];
+            if (cum >= target)
+            {
+                return (b + 0.5) * NtnOranSink::FlowStats::kFineBinMs;
+            }
+        }
+        // Past the fine range (1 s): continue on the 1 ms bins above it.
+        const uint32_t firstCoarse = static_cast<uint32_t>(NtnOranSink::FlowStats::kFineBins *
+                                                           NtnOranSink::FlowStats::kFineBinMs);
+        for (uint32_t b = firstCoarse; b < NtnOranSink::FlowStats::kDelayBins; ++b)
         {
             cum += pooledHist[b];
             if (cum >= target)
@@ -1686,8 +1814,11 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
         client->SetAttribute("Period", TimeValue(MilliSeconds(64))); // ~16 kbps
         break;
     case NtnOranApplication::URLLC_PERIODIC:
-        client->SetAttribute("PacketSize", UintegerValue(256));
-        client->SetAttribute("Period", TimeValue(MilliSeconds(10))); // ~205 kbps
+        // 5QI 82: MDBV 255 bytes per 10 ms PDB (TS 23.501 Table 5.7.4-1). One
+        // packet per period, so the IP PDU must fit: 227 B payload + 28 B
+        // IPv4/UDP = 255 B. It was 256 B of payload (284 B PDU), over budget.
+        client->SetAttribute("PacketSize", UintegerValue(227));
+        client->SetAttribute("Period", TimeValue(MilliSeconds(10))); // ~204 kbps on the wire
         break;
     case NtnOranApplication::CONVERSATIONAL_VOICE:
         client->SetAttribute("PacketSize", UintegerValue(92)); // AMR-WB + RTP-ish
@@ -1903,23 +2034,41 @@ NtnRealStackHelper::ComputeServiceLinkDelay() const
     // A single pair made the folded delay a property of one terminal, so a
     // scenario with terminals spread across a beam gave them all the slant of
     // whichever happened to be first.
+    //
+    // Each UE contributes the slant to its OWN serving gNB only. Averaging over
+    // every gNB x UE pair let non-serving (even below-horizon) satellites of a
+    // multi-satellite scene inflate the folded delay by milliseconds. Before
+    // attachment (no serving cell yet) the nearest gNB stands in for it.
     double sumM = 0.0;
     uint32_t pairs = 0;
-    for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
+    for (uint32_t u = 0; u < m_ue.GetN(); ++u)
     {
-        Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
-        if (!gm)
+        Ptr<MobilityModel> um = m_ue.Get(u)->GetObject<MobilityModel>();
+        if (!um)
         {
             continue;
         }
-        for (uint32_t u = 0; u < m_ue.GetN(); ++u)
+        const uint16_t servingCell = GetUeServingCellId(u);
+        double servingM = -1.0;
+        double nearestM = std::numeric_limits<double>::infinity();
+        for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
         {
-            Ptr<MobilityModel> um = m_ue.Get(u)->GetObject<MobilityModel>();
-            if (!um)
+            Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
+            if (!gm)
             {
                 continue;
             }
-            sumM += gm->GetDistanceFrom(um);
+            const double d = gm->GetDistanceFrom(um);
+            nearestM = std::min(nearestM, d);
+            if (servingCell != 0 && GetGnbCellId(g) == servingCell)
+            {
+                servingM = d;
+            }
+        }
+        const double useM = (servingM >= 0.0) ? servingM : nearestM;
+        if (std::isfinite(useM))
+        {
+            sumM += useM;
             ++pairs;
         }
     }
@@ -1947,6 +2096,13 @@ NtnRealStackHelper::RefreshBackhaulFold()
     // When the real air interface carries the delay (SetAirInterfaceDelay) there
     // is nothing to fold and this does not run.
     if (m_airIfaceDelayActive || !m_backhaulCh)
+    {
+        return;
+    }
+    // SetFeederGeometry() owns the channel once wired: its callback writes
+    // feeder + payload processing + service. Writing backhaul + service here
+    // as well made the delay flip between two models every refresh.
+    if (m_feederSat && m_feederGw)
     {
         return;
     }
@@ -2077,8 +2233,12 @@ NtnRealStackHelper::ComputePayloadExtraDelay(double slantRangeM) const
     switch (m_payload)
     {
     case PayloadOption::Transparent:
-        // Bent-pipe: the user plane rides the RF feeder leg too.
-        return prop + prop + service;
+        // Bent pipe: the user plane crosses the feeder ONCE (gateway gNB ->
+        // satellite -> UE), TR 38.821 Table 4.2-2 (one-way = feeder + service).
+        // This returned prop + prop + service, counting the feeder twice. The
+        // transparent penalty is in the HARQ / K_offset round trip, not in the
+        // one-way delivery of a packet. No on-board processing is added.
+        return prop + service;
     case PayloadOption::RegenerativeRu:
         // Open-FH (split 7.2x) over the feeder; 0.25 ms lower-PHY budget.
         return prop + MicroSeconds(250) + service;
@@ -2668,7 +2828,11 @@ NtnRealStackHelper::ComputeOwdFloorMs() const
     {
         return 0.0;
     }
-    const double kEarthR = 6371000.0;
+    // WGS-84 equatorial radius, the largest Earth radius: r - a never exceeds
+    // the true altitude, so the floor stays a lower bound at every latitude.
+    // The mean radius (6371 km) overstated the altitude by up to ~7 km at the
+    // equator, putting the "floor" ~23 us above the true zenith delay there.
+    const double kEarthR = 6378137.0;
     double altM = std::numeric_limits<double>::infinity();
     for (uint32_t g = 0; g < m_gnb.GetN(); ++g)
     {
@@ -2691,7 +2855,12 @@ NtnRealStackHelper::ComputeOwdFloorMs() const
         return 0.0;
     }
     const double c = 299792458.0;
-    return (altM / c) * 1000.0 + m_backhaulDelay.GetSeconds() * 1000.0;
+    // Once SetFeederGeometry() is wired the configured backhaul is no longer in
+    // the path (the feeder model replaced it), so it must not be in the floor
+    // either; the service leg alone is then the bound.
+    const double backhaulMs =
+        (m_feederSat && m_feederGw) ? 0.0 : m_backhaulDelay.GetSeconds() * 1000.0;
+    return (altM / c) * 1000.0 + backhaulMs;
 }
 
 double
@@ -2797,6 +2966,11 @@ NtnRealStackHelper::Collect()
     uint64_t jitterFlows = 0;
     uint64_t lostPkts = 0;
     uint64_t expectedPkts = 0;
+    // Merged 0.1 ms one-way-delay histogram over all DL flows, for percentiles.
+    std::vector<uint64_t> owdHist(NtnOranSink::FlowStats::kFineBins, 0);
+    uint64_t owdOverflow = 0;
+    uint64_t owdN = 0;
+    double owdMax = 0.0;
     for (uint32_t i = 0; i < m_dlSinks.GetN(); ++i)
     {
         Ptr<NtnOranSink> oranSink = DynamicCast<NtnOranSink>(m_dlSinks.Get(i));
@@ -2814,6 +2988,14 @@ NtnRealStackHelper::Collect()
                 }
                 lostPkts += fs.LostPackets();
                 expectedPkts += static_cast<uint64_t>(fs.highestSeq) + 1;
+                for (size_t b = 0; b < fs.delayHistFine.size() && b < owdHist.size(); ++b)
+                {
+                    owdHist[b] += fs.delayHistFine[b];
+                    owdN += fs.delayHistFine[b];
+                }
+                owdOverflow += fs.delayFineOverflow;
+                owdN += fs.delayFineOverflow;
+                owdMax = std::max(owdMax, fs.maxDelayMs);
             }
             continue;
         }
@@ -2842,6 +3024,28 @@ NtnRealStackHelper::Collect()
     m_meanJitterMs = jitterFlows ? sumJitterMs / jitterFlows : 0.0;
     m_appLossRatio =
         expectedPkts ? static_cast<double>(lostPkts) / expectedPkts : 0.0;
+
+    // Delay percentiles (bin midpoint, 0.1 ms resolution) and the exact maximum.
+    auto quantile = [&](double q) {
+        const uint64_t target = static_cast<uint64_t>(std::ceil(q * static_cast<double>(owdN)));
+        uint64_t cum = 0;
+        for (size_t b = 0; b < owdHist.size(); ++b)
+        {
+            cum += owdHist[b];
+            if (cum >= std::max<uint64_t>(target, 1))
+            {
+                return (static_cast<double>(b) + 0.5) * NtnOranSink::FlowStats::kFineBinMs;
+            }
+        }
+        return owdMax; // the quantile lies in the overflow (beyond 1 s): report the max
+    };
+    if (owdN > 0)
+    {
+        m_owdP50Ms = quantile(0.50);
+        m_owdP95Ms = quantile(0.95);
+        m_owdP99Ms = quantile(0.99);
+        m_owdMaxMs = owdMax;
+    }
 }
 
 void
@@ -3013,12 +3217,12 @@ NtnRealStackHelper::WriteHealthReport()
                                                  : "thz";
     // NT-09. The "-ntn" suffix asserted a 3GPP NTN band on any carrier under
     // 7.125 GHz, which is a claim about the CHANNEL, not just the frequency
-    // range. TS 38.101-5 defines the NTN FR1 bands narrowly: n255 pairs
-    // 1980-2010 MHz uplink with 2170-2200 MHz downlink, and n256 pairs
-    // 1626.5-1660.5 with 1525-1559. The helper's own default carrier, 2.0 GHz,
-    // sits in n255's UPLINK block and is used as the downlink carrier, and its
+    // range. TS 38.101-5 Table 5.2-1 defines the NTN FR1 bands narrowly: n256
+    // pairs 1980-2010 MHz uplink with 2170-2200 MHz downlink, and n255 pairs
+    // 1626.5-1660.5 MHz uplink with 1525-1559 MHz downlink. The helper's former
+    // default carrier, 2.0 GHz, sits in n256's UPLINK block, and its former
     // default 30 MHz was documented as "the TS 38.101-5 NTN-FR1 maximum channel
-    // bandwidth" when 30 MHz is the total WIDTH of the n255 downlink block, not
+    // bandwidth" when 30 MHz is the total WIDTH of the n256 downlink block, not
     // a channel bandwidth that fits inside it alongside guard bands.
     //
     // Rather than silently relabel physics, the tag now states what is true.
@@ -3066,6 +3270,12 @@ NtnRealStackHelper::WriteHealthReport()
         bandTag = "";
     }
 
+    if (!ntnBandOk && m_calibrationCarrier)
+    {
+        // TR 38.821 calibration carrier declared by the scenario: report, do not fail.
+        bandTag += "-calibration";
+        ntnBandOk = true;
+    }
     const std::string airTag = std::string(backendTag) + "-" + frTag + bandTag;
 
     std::error_code ec;
@@ -3076,6 +3286,37 @@ NtnRealStackHelper::WriteHealthReport()
         << ",1,config\n";
     out << "wall_clock_s," << wallSec << ",-,-,measured\n";
     out << "air_interface," << airTag << ",-," << (ntnBandOk ? 1 : 0) << ",config\n";
+    if (m_backend == RadioBackend::Nr)
+    {
+        // Subcarrier spacing vs frequency range (TS 38.101-1/-2 SCS tables,
+        // TS 38.211 4.2): FR1 mu 0..2, FR2-1 (24.25-52.6 GHz) mu 2..3, FR2-2
+        // (52.6-71 GHz) mu 3, 5, 6; nothing is defined above 71 GHz. The helper
+        // runs whatever the scenario set; this row says whether it is legal.
+        // Rel-18 also defines Ka-band NTN bands (TS 38.101-5, n510-n512, roughly
+        // 17.3 to 30 GHz) with 60 or 120 kHz SCS. Carriers in no defined range
+        // (for example Ku-band, 10.7 to 12.75 GHz, or above 71 GHz) have no
+        // 3GPP numerology at all: the row is then informational ("-"), not a
+        // failure, because "illegal" would claim a rule that does not exist.
+        const uint16_t mu = m_numerology;
+        std::string muPass = "-";
+        if (m_freqHz <= 7.125e9)
+        {
+            muPass = (mu <= 2) ? "1" : "0";
+        }
+        else if (m_freqHz >= 17.3e9 && m_freqHz < 24.25e9)
+        {
+            muPass = (mu == 2 || mu == 3) ? "1" : "0"; // FR2-NTN Ka (TS 38.101-5)
+        }
+        else if (m_freqHz >= 24.25e9 && m_freqHz <= 52.6e9)
+        {
+            muPass = (mu == 2 || mu == 3) ? "1" : "0";
+        }
+        else if (m_freqHz > 52.6e9 && m_freqHz <= 71.0e9)
+        {
+            muPass = (mu == 3 || mu == 5 || mu == 6) ? "1" : "0";
+        }
+        out << "numerology," << mu << ",-," << muPass << ",ts38211-4.2+ts38101-scs\n";
+    }
 
     // Half-duplex drops, so they can never be silent.
     //
@@ -3224,6 +3465,19 @@ NtnRealStackHelper::WriteHealthReport()
             << "\n";
     }
     out << "app_jitter_ms," << m_meanJitterMs << ",-,-,inband-timestamp\n";
+    // One-way-delay distribution (empty value when nothing was received).
+    auto owdField = [](double v) {
+        std::ostringstream f;
+        if (std::isfinite(v))
+        {
+            f << v;
+        }
+        return f.str();
+    };
+    out << "app_owd_p50_ms," << owdField(m_owdP50Ms) << ",-,-,inband-timestamp-hist0.1ms\n";
+    out << "app_owd_p95_ms," << owdField(m_owdP95Ms) << ",-,-,inband-timestamp-hist0.1ms\n";
+    out << "app_owd_p99_ms," << owdField(m_owdP99Ms) << ",-,-,inband-timestamp-hist0.1ms\n";
+    out << "app_owd_max_ms," << owdField(m_owdMaxMs) << ",-,-,inband-timestamp\n";
     out << "app_loss_ratio," << m_appLossRatio << ",-,-,inband-seq\n";
     // NT-02: real budget + real pass flag (was: floor "-", pass hard-coded 1,
     // which made a 20 dB link-budget error invisible to every gate).

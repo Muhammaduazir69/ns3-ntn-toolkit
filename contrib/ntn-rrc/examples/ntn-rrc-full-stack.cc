@@ -6,7 +6,8 @@
 // component at once over a REAL mmwave NR NTN cell (NtnRealStackHelper:
 // SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC): Timing Advance pre-comp,
 // SIB19 broadcast, UE GNSS location reporting, and NTN-DRX — all bound to the
-// live LEO-pass geometry while real UDP traffic flows over the radio. The radio
+// live LEO-pass geometry while real UDP traffic flows over the radio (DRX
+// activity is fed from UE 0's delivered packets, TS 38.321 section 5.7). The radio
 // KPIs (SINR/TBLER/throughput) are MEASURED off the mmwave PHY trace, not
 // closed-form. Writes the four RRC CSVs plus an honest sim_health.csv.
 //
@@ -51,6 +52,35 @@ struct Sinks
 };
 
 NtnRealStackHelper* g_rs = nullptr;
+uint64_t g_drxLastRxPkts = 0;
+double g_drxStopS = 0.0;
+
+// RRC-3c: feed the DRX state machine from the real downlink.
+//
+// The state machine was started and never told about a single packet, so it
+// left Active after its 50 ms inactivity timer and slept for the rest of a run
+// in which UDP traffic flowed to UE 0 the whole time: "drx total active 50 ms"
+// described no terminal. TS 38.321 section 5.7 restarts drx-InactivityTimer on
+// every PDCCH that schedules new data, so the activity is taken from the UE's
+// own delivered-packet counter. The poll runs every 1 ms (one 15 kHz slot);
+// against the 50 ms inactivity timer the sampling error is at most 2 percent,
+// unlike the one-poll-per-long-cycle scheme SCOPE A18 records for
+// ntn-rrc-drx-data-traffic.
+void
+DrxActivityPoll(Ptr<NtnDrxStateMachine> drx)
+{
+    if (Simulator::Now().GetSeconds() >= g_drxStopS || !g_rs)
+    {
+        return;
+    }
+    const uint64_t pkts = g_rs->GetUeRxPackets(0);
+    if (pkts > g_drxLastRxPkts)
+    {
+        drx->NotifyDataActivity();
+    }
+    g_drxLastRxPkts = pkts;
+    Simulator::Schedule(MilliSeconds(1), &DrxActivityPoll, drx);
+}
 
 void
 SampleTa(Ptr<NtnTimingAdvance> ta, Sinks* s)
@@ -120,7 +150,7 @@ main(int argc, char* argv[])
     cmd.AddValue("simTime", "Pass duration (s)", simTimeSec);
     cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("transparent", "Transparent payload (true) vs regenerative (false)", transparent);
     cmd.AddValue("passAwareDrx", "Enable NTN pass-aware DRX deep sleep", passAwareDrx);
@@ -128,10 +158,28 @@ main(int argc, char* argv[])
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
-    // mmwave, so honour the historical 55 dBm for mmwave but give nr 70 dBm.
     const bool useNr = (radio == "nr");
-    if (satEirpDbm < 0.0)
+    // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the nr
+    // default is now that Set-1 density, as ntn-v2x-real-stack does; an
+    // explicit --satEirpDbm keeps meaning conducted power, and mmwave keeps
+    // its historical 55.0 dBm.
+    // The probe mirrors the cell's carrier and bandwidth and returns the
+    // equivalent CONDUCTED power from the helper's own formula
+    // (density + 10log10(BW_MHz) + 30 - ArrayGainDb()), so every other
+    // consumer of satEirpDbm stays consistent with the radio.
+    NtnRealStackHelper eirpProbe;
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && useNr &&
+                                 eirpProbe.GetCarrierFrequencyHz() > 1.0e9 &&
+                                 eirpProbe.GetCarrierFrequencyHz() <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        eirpProbe.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        satEirpDbm = eirpProbe.GetSatEirpDbm();
+    }
+    else if (satEirpDbm < 0.0)
     {
         satEirpDbm = useNr ? 70.0 : 55.0;
     }
@@ -176,11 +224,25 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-rrc-full-stack");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (eirpFromTr38821)
+    {
+        // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 S-band EIRP density. The
+        // helper back-computes the conducted power from the bandwidth and
+        // the array gain, and again in Build().
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit value (or a default on a carrier outside the
+        // Set-1 S-band reference) is CONDUCTED power at the array input.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, ueNodes);
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
     rs.EnableAiFlowMonitor("ntn-rrc-full-stack"); // WS2 KPM series (TS 28.552 names)
@@ -192,6 +254,19 @@ main(int argc, char* argv[])
     helper.SetPayloadMode(transparent ? PayloadMode::Transparent : PayloadMode::RegenerativeFull);
     // Beam centre ~50 km north of the sub-point (ECEF) -> non-zero residual TA.
     helper.SetReferencePosition(ntngeo::GeodeticToEcef(subLat + 0.45, subLon, 0.0));
+    // RRC-2c: give the transparent payload its feeder leg, as ntn-rrc-real-stack
+    // does. Without a gateway NtnTimingAdvance returns a zero feeder range, so
+    // --transparent=1 and --transparent=0 printed the same TA and the payload
+    // flag was inert. TS 38.213 section 4.2: the common TA the network signals
+    // covers the feeder (gateway to satellite) round trip; TR 38.821 Table
+    // 4.2-2 lists the transparent RTT as service plus feeder. The gateway is a
+    // fixed ground station 300 km from the t=0 sub-point, in view for the pass.
+    if (transparent)
+    {
+        Ptr<ConstantPositionMobilityModel> gwMob = CreateObject<ConstantPositionMobilityModel>();
+        gwMob->SetPosition(ntngeo::GeodeticToEcef(subLat + 2.7, subLon, 0.0));
+        helper.SetGatewayMobility(gwMob);
+    }
     Ptr<NtnTimingAdvance> ta = helper.InstallTimingAdvance(ueMob, satMob);
     Ptr<NtnSib19Broadcaster> sib19 =
         helper.InstallSib19Broadcaster(satMob, cellId, ta, MilliSeconds(160));
@@ -228,6 +303,8 @@ main(int argc, char* argv[])
     drx->Start();
     Simulator::ScheduleNow(&SampleTa, ta, &sinks);
     Simulator::ScheduleNow(&SampleDrx, drx, &sinks);
+    g_drxStopS = simTimeSec;
+    Simulator::ScheduleNow(&DrxActivityPoll, drx);
 
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();

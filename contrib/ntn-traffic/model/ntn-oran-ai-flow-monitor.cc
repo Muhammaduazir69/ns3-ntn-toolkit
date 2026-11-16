@@ -11,6 +11,8 @@
 
 #include <cmath>
 #include <fstream>
+#include <sstream>
+#include <string>
 
 namespace ns3
 {
@@ -214,8 +216,9 @@ NtnOranAiFlowMonitor::GranularityTick()
             // the official measurement NAME and its unit contract agree:
             //   DRB.UEThpDl  §5.1.1.3 — kbit/s (NOT Mbps)
             s.metrics["DRB.UEThpDl"] = dBytes * 8.0 / periodS / 1e3; // kbit/s
-            //   DRB.PdcpSduVolumeDl §5.1.1.6 — kbit
-            s.metrics["DRB.PdcpSduVolumeDl"] = dBytes * 8.0 / 1e3; // kbit
+            //   DRB.PdcpSduVolumeDl: TS 28.552 5.1.2.1.1.1 defines the DL PDCP
+            //   SDU data volume in Mbit (was written in kbit, a factor 1e3 off).
+            s.metrics["DRB.PdcpSduVolumeDl"] = dBytes * 8.0 / 1e6; // Mbit
             //   DRB.RlcSduDelayDl §5.1.1.2 — units of 0.1 ms (a value of 10 == 1 ms)
             s.metrics["DRB.RlcSduDelayDl"] = (dPkts ? dDelaySum / dPkts : 0.0) * 10.0;
             //   DRB.PacketLossRateDl §5.1.3.1 — integer in units of 1e-6 (a 0..1
@@ -383,9 +386,18 @@ NtnOranAiFlowMonitor::WriteCsv(const std::string& path) const
     os << "time_s,flow_id,src_id,dst_id,five_qi,sst,sd,DRB.UEThpDl,"
           "DRB.PdcpSduVolumeDl,DRB.RlcSduDelayDl,DRB.PacketLossRateDl,"
           "L1M.RS-SINR,TB.ErrTotNbrDl\n";
-    auto get = [](const KpmSample& s, const char* name) {
+    // A metric the period did not measure (no UE-side PHY sample for this
+    // flow, e.g. an uplink or gateway-side flow) is written as an empty field,
+    // the CSV convention for a missing value, never as the text "nan".
+    auto get = [](const KpmSample& s, const char* name) -> std::string {
         auto it = s.metrics.find(name);
-        return (it != s.metrics.end()) ? it->second : std::nan("");
+        if (it == s.metrics.end() || !std::isfinite(it->second))
+        {
+            return std::string();
+        }
+        std::ostringstream v;
+        v << it->second;
+        return v.str();
     };
     for (const auto& [id, series] : m_series)
     {

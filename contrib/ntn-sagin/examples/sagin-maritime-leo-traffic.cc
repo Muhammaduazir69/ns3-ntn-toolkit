@@ -67,48 +67,21 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
-    cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
+    cmd.AddValue("satSpeed", "IGNORED: SGP4 sets the orbital speed from the altitude (m/s)", satSpeed);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default",
+    cmd.AddValue("satEirpDbm", "Satellite conducted Tx power (dBm); -1 = TR 38.821 Set-1 EIRP density",
                  satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("vesselSpeedKn", "Vessel speed over ground (knots)", vesselSpeedKn);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    // Backend-appropriate EIRP default (honoured only if the user did not set it):
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    if (satEirpDbm < 0.0)
-    {
-        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
-    }
+    // satEirpDbm < 0 keeps the TR 38.821 Set-1 EIRP density below. It used to be
+    // overwritten here with 70/55 dBm that no call consumed (the density call
+    // always won) while the banner printed it as the satellite power, and an
+    // explicit --satEirpDbm was silently ignored. A value >= 0 now takes effect
+    // as conducted power, exactly as in the sibling SAGIN LEO examples.
     g_simTime = simSeconds;
-
-    // Build an AIS trace inline: a vessel sailing due east (course 090).
-    sagin::AisMaritimeTrace trace;
-    trace.mmsi = 244000000;
-    const double refLat = 56.0, refLon = 11.0; // Danish waters
-    for (double t = 0.0; t <= simSeconds + 60.0; t += 30.0)
-    {
-        sagin::AisSample smp;
-        smp.time_s = t;
-        const double mEast = vesselSpeedKn * 0.5144 * t;
-        smp.lat_deg = refLat;
-        smp.lon_deg = refLon + mEast / (111320.0 * std::cos(refLat * M_PI / 180.0));
-        smp.sog_knots = vesselSpeedKn;
-        smp.cog_deg = 90.0;
-        smp.heading_deg = 90.0;
-        trace.samples.push_back(smp);
-    }
-
-    // Vessel terminal = UE (real AIS mobility); LEO satellite = mmwave gNB.
-    NodeContainer ueNodes;
-    ueNodes.Create(1);
-    Ptr<sagin::AisMobilityModel> vessel = CreateObject<sagin::AisMobilityModel>();
-    vessel->SetReference(refLat, refLon);
-    vessel->SetTrace(trace);
-    ueNodes.Get(0)->AggregateObject(vessel);
-    g_vessel = vessel;
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -132,6 +105,38 @@ main(int argc, char* argv[])
     sat->SetReference(satSubLat, satSubLon, 0.0);
     satNodes.Get(0)->AggregateObject(sat);
 
+    // Build an AIS trace inline: a vessel sailing due east (course 090).
+    sagin::AisMaritimeTrace trace;
+    trace.mmsi = 244000000;
+    // ONE local ENU frame for both endpoints. The trace was anchored in Danish
+    // waters (56 N, 11 E) in its own frame while the satellite was projected
+    // about its own sub-satellite point, so two unrelated origins were mixed.
+    // The vessel now sails under the satellite's t=0 sub-point, in the same
+    // frame as the satellite.
+    const double refLat = satSubLat, refLon = satSubLon;
+    for (double t = 0.0; t <= simSeconds + 60.0; t += 30.0)
+    {
+        sagin::AisSample smp;
+        smp.time_s = t;
+        const double mEast = vesselSpeedKn * 0.5144 * t;
+        smp.lat_deg = refLat;
+        smp.lon_deg = refLon + mEast / (111320.0 * std::cos(refLat * M_PI / 180.0));
+        smp.sog_knots = vesselSpeedKn;
+        smp.cog_deg = 90.0;
+        smp.heading_deg = 90.0;
+        trace.samples.push_back(smp);
+    }
+
+    // Vessel terminal = UE (real AIS mobility); LEO satellite = mmwave gNB.
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
+    Ptr<sagin::AisMobilityModel> vessel = CreateObject<sagin::AisMobilityModel>();
+    vessel->SetReference(refLat, refLon);
+    vessel->SetTrace(trace);
+    ueNodes.Get(0)->AggregateObject(vessel);
+    g_vessel = vessel;
+
+
     NtnRealStackHelper rs;
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
@@ -141,8 +146,15 @@ main(int argc, char* argv[])
     // S-band LEO reference payload. Declared as a DENSITY so the helper
     // back-computes conducted power against the array gain instead of the
     // antenna being counted twice.
-    rs.SetSatEirpDensityDbwMhz(
-        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    if (satEirpDbm >= 0.0)
+    {
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
+    else
+    {
+        rs.SetSatEirpDensityDbwMhz(
+            NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
@@ -156,8 +168,12 @@ main(int argc, char* argv[])
     g_rs = &rs;
 
     std::printf("# sagin-maritime-leo-traffic (vessel terminal on a real mmwave NR cell)\n"
-                "#   sim=%.0fs leoAlt=%.0fkm freq=%.1fGHz EIRP=%.1fdBm vesselSpeed=%.0fkn\n",
-                simSeconds, leoAltKm, freqGHz, satEirpDbm, vesselSpeedKn);
+                "#   sim=%.0fs leoAlt=%.0fkm freq=%.1fGHz satPower=%s vesselSpeed=%.0fkn\n",
+                simSeconds, leoAltKm, freqGHz,
+                satEirpDbm >= 0.0
+                    ? (std::to_string(satEirpDbm) + " dBm conducted").c_str()
+                    : "TR 38.821 Set-1 34 dBW/MHz EIRP density",
+                vesselSpeedKn);
 
     Simulator::Schedule(Seconds(2.0), &LinkProbe);
     Simulator::Stop(Seconds(simSeconds));

@@ -18,8 +18,6 @@
 #include "ns3/packet.h"
 #include "ns3/simulator.h"
 
-#include <filesystem>
-#include <fstream>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -91,8 +89,17 @@ main(int argc, char* argv[])
         ue->SetMobility(mob);
         mobs[i] = mob;
         // Selection window within the packet delay budget (one BSM period).
-        ue->SetSelectionWindow(1, prsvpSlots);
+        // TS 38.214 Sec. 8.1.4: T2 <= remaining PDB. The transport block is
+        // received at the END of its slot, so T2 = Prsvp - 1 keeps the delivery
+        // inside the 100 ms budget of TS 22.185 (T2 = Prsvp landed at 101 ms).
+        ue->SetSelectionWindow(1, prsvpSlots - 1);
         ue->SetReservationPeriod(prsvpSlots);
+        // SAE J2735 BSMs are generated on a fixed 10 Hz clock. Without aligned
+        // reselection each reselection drew a new slot relative to the CURRENT
+        // transmission, so a vehicle could send two BSMs less than 100 ms apart
+        // (1043 TX in a 20 x 5 s run where 1000 BSMs exist). Aligned mode keeps
+        // one arrival per Prsvp and selects inside [arrival+T1, arrival+T2].
+        ue->SetAlignReselection(true);
         ue->SetPacketBytes(190);
         ue->AssignStreams(1 + i);
         uint32_t self = i;
@@ -177,7 +184,7 @@ main(int argc, char* argv[])
     std::printf("#   msgCnt discontinuities: %llu (gaps = genuine losses)\n",
                 static_cast<unsigned long long>(bsmSeqBreaks));
     std::printf("#   max position error    : %.3f m (decode vs sender truth)\n", maxPosErrM);
-    std::printf("#   PC5 one-way delay    : mean %.3f ms, max %.3f ms over %llu receptions\n",
+    std::printf("#   PC5 latency (arrival->rx): mean %.3f ms, max %.3f ms over %llu receptions\n",
                 ch->GetMeanDelayMs(), ch->GetMaxDelayMs(),
                 static_cast<unsigned long long>(ch->GetDelaySampleCount()));
     std::printf("#   PRR (TS 38.885) by distance:\n");

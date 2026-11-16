@@ -262,6 +262,7 @@ void
 NtnInfluxSink::SetFilePath(const std::string& path)
 {
     m_filePath = path;
+    m_fileOpened = false;
 }
 
 void
@@ -507,12 +508,18 @@ NtnInfluxSink::AppendToFile(const std::string& payload)
     {
         return;
     }
-    std::ofstream f(m_filePath, std::ios::app);
+    // OBS-15: truncate on this sink's first write, append afterwards. Always
+    // appending meant a rerun (or a crashed attempt followed by a retry) into
+    // the same path left both runs' points in one file under distinct
+    // wall-clock-based timestamps, so the export no longer matched the run
+    // that produced its sim_health.csv.
+    std::ofstream f(m_filePath, m_fileOpened ? std::ios::app : std::ios::trunc);
     if (!f)
     {
-        NS_LOG_WARN("could not open " << m_filePath << " for append");
+        NS_LOG_WARN("could not open " << m_filePath << " for writing");
         return;
     }
+    m_fileOpened = true;
     f.write(payload.data(), static_cast<std::streamsize>(payload.size()));
 }
 

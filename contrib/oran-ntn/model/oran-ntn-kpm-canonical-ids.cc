@@ -4,7 +4,9 @@
 
 #include "oran-ntn-kpm-canonical-ids.h"
 
+#include <sstream>
 #include <cmath>
+#include <string>
 
 namespace ns3
 {
@@ -39,8 +41,11 @@ CanonicalMetricIds()
 namespace
 {
 
-// Number of PRBs in a single 100 MHz NR carrier at 30 kHz SCS. Used as the
-// PRB-availability divisor in the absence of a dedicated cell-config field.
+// Number of PRBs in a single 100 MHz NR carrier at 30 kHz SCS (TS 38.101-1
+// Table 5.3.2-1, an FR1 configuration; the old name said FR2, where 100 MHz at
+// 120 kHz SCS is 66 PRBs). Used as the PRB-availability divisor in the absence
+// of a dedicated cell-config field, so RRU.PrbAvailDl/RRU.PrbUsedDl are only
+// right for a 100 MHz / 30 kHz cell and carry provenance "derived".
 constexpr uint32_t kPrbsPerCarrierFr2_100mhz_30khz = 273;
 
 KpmMeasurement
@@ -104,13 +109,16 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
     out.push_back(
         MakeMeasurement(kpm::kDrbUeThpUl, 0.0, /*present=*/false, base));
 
-    // DRB.PdcpSduVolumeDL — bytes since last report. Stand-in derived from
-    // instantaneous throughput at the report cadence; will be replaced by a
-    // proper integrating counter when the OranNtnDataRepository (§4.1.4)
-    // lands. Provenance tracks the throughput it is derived from.
-    const double volDlBytes = (r.throughput_Mbps * 1e6 / 8.0);
+    // DRB.PdcpSduVolumeDL: TS 28.552 §5.1.2.1.1.1 reports the DL PDCP SDU
+    // data volume in Mbit over the granularity period. This used to emit
+    // BYTES (throughput*1e6/8), a factor of 8e6 off the standard's unit.
+    // Stand-in derived from the throughput over a 1 s granularity period
+    // (E2KpmReport carries no period); will be replaced by a proper
+    // integrating counter when the OranNtnDataRepository (§4.1.4) lands.
+    // Provenance tracks the throughput it is derived from.
+    const double volDlMbit = r.throughput_Mbps * 1.0;
     out.push_back(
-        MakeMeasurement(kpm::kDrbPdcpVolumeDl, volDlBytes, /*present=*/true, base, thpProv));
+        MakeMeasurement(kpm::kDrbPdcpVolumeDl, volDlMbit, /*present=*/true, base, thpProv));
 
     out.push_back(
         MakeMeasurement(kpm::kDrbPdcpVolumeUl, 0.0, /*present=*/false, base));
@@ -188,10 +196,23 @@ WriteCanonicalKpmCsv(const std::vector<E2KpmReport>& reports,
     {
         // Per-slice 5QI so the canonical stream differentiates the slices:
         // eMBB(0)->9 (default non-GBR), URLLC(1)->82 (delay-critical GBR),
-        // mMTC(2)->79. Overrides the base FIVE_QI label per record.
+        // mMTC(2)->9. Overrides the base FIVE_QI label per record. mMTC was
+        // labelled 79, which TS 23.501 Table 5.7.4-1 assigns to V2X messages,
+        // not to MIoT; the toolkit's own mMTC traffic (ntn-traffic
+        // NbIotPeriodic) is marked 5QI 9.
         std::map<std::string, std::string> labels = baseLabels;
         labels[label::kFiveQi] =
-            (r.sliceId == 1) ? "82" : (r.sliceId == 2) ? "79" : "9";
+            (r.sliceId == 1) ? "82" : (r.sliceId == 2) ? "9" : "9";
+        // S-NSSAI must follow the slice too: TS 23.501 Table 5.15.2.2-1 SST
+        // 1 = eMBB, 2 = URLLC, 3 = MIoT. A URLLC record used to carry the
+        // caller's eMBB S-NSSAI ("1-..."). The caller's SD is kept.
+        {
+            const std::string& sn = labels[label::kSnssai];
+            const auto dash = sn.find('-');
+            const std::string sd = (dash == std::string::npos) ? std::string() : sn.substr(dash);
+            labels[label::kSnssai] =
+                std::string((r.sliceId == 1) ? "2" : (r.sliceId == 2) ? "3" : "1") + sd;
+        }
         const auto measurements = BuildCanonicalKpmMeasurements(r, labels);
         for (const auto& m : measurements)
         {
@@ -200,7 +221,17 @@ WriteCanonicalKpmCsv(const std::vector<E2KpmReport>& reports,
                 (presentIt == m.labels.end()) || presentIt->second != "false";
             os << r.timestamp << "," << r.gnbId << ","
                << (r.isNtn ? 1 : 0) << "," << r.ueId << "," << m.metricId
-               << "," << m.value << "," << (present ? 1 : 0) << ","
+               << ","
+               << [&] {
+                      // Not measured (NaN) is an empty field, never the text "nan".
+                      std::ostringstream v;
+                      if (std::isfinite(m.value))
+                      {
+                          v << m.value;
+                      }
+                      return v.str();
+                  }()
+               << "," << (present ? 1 : 0) << ","
                << m.provenance << ","
                << m.labels.at(label::kFiveQi) << ","
                << m.labels.at(label::kSnssai) << ","

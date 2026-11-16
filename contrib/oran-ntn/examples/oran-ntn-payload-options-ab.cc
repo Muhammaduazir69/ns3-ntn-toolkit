@@ -13,6 +13,22 @@
 //   ru:          O-RU on sat, Open-FH over the feeder (slant/c + 0.25 ms)
 //   rudu:        O-DU on sat, F1 midhaul over the feeder (slant/c + 0.15 ms)
 //   fullgnb:     full gNB on sat, GTP backhaul (slant/c + 0.05 ms)
+// (each plus the service-link slant, on the air or folded into the backhaul).
+//
+// CAUTION on the transparent row (reported to the ntn-traffic owner, not
+// changed here): in a bent pipe the user plane crosses the feeder ONCE, so the
+// one-way UE-gateway propagation is service + feeder, the same as every
+// regenerative option (TR 38.821 §4.2 and Table 4.2-2: LEO-600 transparent
+// worst-case RTD 25.77 ms = 2 x (service + feeder)). What transparent changes
+// is where the gNB sits, i.e. the HARQ/scheduling round trip, not the
+// propagation of a delivered packet. NtnRealStackHelper::ComputePayloadExtraDelay
+// adds the feeder twice, so the transparent OWD reads one feeder delay high.
+//
+// The core network is taken as co-located with the feeder gateway
+// (SetBackhaulDelay(0)): SetFeederGeometry REPLACES the helper's default 5 ms
+// "feeder+core" backhaul with the live feeder model, but the OWD-floor health
+// gate still added that 5 ms, so a physically consistent 5.4 ms OWD failed a
+// 6.8 ms "floor" that included a leg the path no longer had.
 // The one-way delay is MEASURED by NtnOranSink from in-band timestamps that
 // crossed radio + GTP + backhaul; the FH-split feasibility of the measured
 // feeder delay is checked against NtnFhSplitModel (the paper's argument that
@@ -126,6 +142,9 @@ main(int argc, char* argv[])
     rs.SetSatEirpDensityDbwMhz(
         NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
     rs.SetPayloadOption(opt);
+    // Gateway and core co-located: no terrestrial leg beyond the feeder model.
+    // Must precede Build(); it also sets the OWD-floor gate's backhaul term.
+    rs.SetBackhaulDelay(Seconds(0));
     rs.Build(satNodes, ueNodes);
     rs.SetFeederGeometry(satEnu, gwNodes.Get(0)->GetObject<MobilityModel>());
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,

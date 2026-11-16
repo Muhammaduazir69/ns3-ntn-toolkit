@@ -3,7 +3,7 @@
  * Copyright (c) 2026 Muhammad Uzair (ns3-ntn-toolkit)
  *
  * sagin-hst-leo-traffic — a high-speed-train terminal (HstMobilityModel, a
- * TR 38.901-style HST track) is served by a passing LEO satellite over a REAL
+ * 3GPP-style HST track (TS 38.101-4 Annex B geometry)) is served by a passing LEO satellite over a REAL
  * mmwave NR NTN cell (NtnRealStackHelper: SpectrumPhy + MAC + HARQ + RLC/PDCP +
  * RRC + EPC). The DL SINR/TBLER/throughput are MEASURED off the mmwave PHY trace
  * as the train races along the track and the satellite crosses overhead — no
@@ -67,24 +67,23 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
-    cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
+    cmd.AddValue("satSpeed", "IGNORED: SGP4 sets the orbital speed from the altitude (m/s)", satSpeed);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default",
+    cmd.AddValue("satEirpDbm", "Satellite conducted Tx power (dBm); -1 = TR 38.821 Set-1 EIRP density",
                  satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("trainSpeedKmh", "Train speed (km/h)", trainSpeedKmh);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    // Backend-appropriate EIRP default (honoured only if the user did not set it):
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    if (satEirpDbm < 0.0)
-    {
-        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
-    }
+    // satEirpDbm < 0 keeps the TR 38.821 Set-1 EIRP density below. It used to be
+    // overwritten here with 70/55 dBm that no call consumed (the density call
+    // always won) while the banner printed it as the satellite power, and an
+    // explicit --satEirpDbm was silently ignored. A value >= 0 now takes effect
+    // as conducted power, exactly as in the sibling SAGIN LEO examples.
     g_simTime = simSeconds;
 
-    // Generate a TR 38.901-style HST track at the requested speed.
+    // Generate a 3GPP-style HST track (TS 38.101-4 Annex B geometry) at the requested speed.
     sagin::HstTrace trace =
         sagin::HstTraceGenerator::Generate(trainSpeedKmh, 150.0, simSeconds + 60.0, 200);
 
@@ -128,8 +127,15 @@ main(int argc, char* argv[])
     // S-band LEO reference payload. Declared as a DENSITY so the helper
     // back-computes conducted power against the array gain instead of the
     // antenna being counted twice.
-    rs.SetSatEirpDensityDbwMhz(
-        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    if (satEirpDbm >= 0.0)
+    {
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
+    else
+    {
+        rs.SetSatEirpDensityDbwMhz(
+            NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
@@ -143,8 +149,12 @@ main(int argc, char* argv[])
     g_rs = &rs;
 
     std::printf("# sagin-hst-leo-traffic (HST terminal on a real mmwave NR cell)\n"
-                "#   sim=%.0fs leoAlt=%.0fkm freq=%.1fGHz EIRP=%.1fdBm trainSpeed=%.0fkm/h\n",
-                simSeconds, leoAltKm, freqGHz, satEirpDbm, trainSpeedKmh);
+                "#   sim=%.0fs leoAlt=%.0fkm freq=%.1fGHz satPower=%s trainSpeed=%.0fkm/h\n",
+                simSeconds, leoAltKm, freqGHz,
+                satEirpDbm >= 0.0
+                    ? (std::to_string(satEirpDbm) + " dBm conducted").c_str()
+                    : "TR 38.821 Set-1 34 dBW/MHz EIRP density",
+                trainSpeedKmh);
 
     Simulator::Schedule(Seconds(2.0), &LinkProbe);
     Simulator::Stop(Seconds(simSeconds));

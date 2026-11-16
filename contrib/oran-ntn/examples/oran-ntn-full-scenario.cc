@@ -360,8 +360,12 @@ class RealGeometryKpmFeed
                 }
                 m_lastRxBytes[ue] = measBytes;
             }
+            // ORAN-03: a phy-trace row's SINR IS a measurement; say so, or the
+            // canonical KPM labels it "derived" like the budget rows.
+            const bool sinrFromPhy = (std::string(provenance) == "phy-trace");
             m_helper->InjectKpmReport(servingSat + 1, ue, sinr, rsrp, tte, elev, doppler,
-                                      measThp, measBytes, measTbler);
+                                      measThp, measBytes, measTbler, /*measPrbUtil=*/-1.0,
+                                      sinrFromPhy);
             LogRow(t, ue, servingSat + 1, "serving", sinr, rsrp, elev, doppler, tte,
                    provenance, rsrpProvenance);
 
@@ -970,6 +974,12 @@ main(int argc, char* argv[])
         const double measWin = std::min(params.duration, params.measuredWindowS);
         rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                           Seconds(1.0), Seconds(measWin - 0.5));
+        // MixedBouquet marks UE u%3 = 0 mMTC, 1 eMBB, 2 URLLC; tell the RIC the
+        // same instead of the helper's unrelated ueId%3 tag.
+        for (uint32_t u = 0; u < anchoredUes; ++u)
+        {
+            helper->SetUeSliceId(u, (u % 3 == 0) ? 2 : (u % 3 == 1) ? 0 : 1);
+        }
         rs.EnableAiFlowMonitor(params.outputDir + "/full_scenario");
     }
     else

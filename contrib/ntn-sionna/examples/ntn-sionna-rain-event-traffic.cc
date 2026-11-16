@@ -21,6 +21,13 @@
  * Mobility is real: the satellite is an SGP4 Walker element projected into
  * the scenario's local ENU frame; the gateway is a fixed Ka-band ground site.
  *
+ * SIONNA-07 note: the chain applies the ITU-R P.618-13 Section 2.2.1.1
+ * effective-path method to the instantaneous rain rate of each schedule step.
+ * P.618 defines that method for the 0.01% exceedance rate R0.01, so the fade
+ * here is the long-term-statistics attenuation a station with R0.01 equal to
+ * the step's rate would see, not a time-series rain-cell model (P.1853). The
+ * station latitude used by the vertical factor is the Itu618 default (45 deg).
+ *
  * Quick test:  --simSeconds=40 --peakRainMmH=50
  */
 #include "ns3/core-module.h"
@@ -116,7 +123,7 @@ main(int argc, char* argv[])
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
     {
-        rs.SetNumerology(1); // FR1 30 kHz SCS
+        rs.SetNumerology(3); // 120 kHz SCS: 20 GHz is Ka-band NTN (TS 38.101-5 FR2-NTN, 60/120 kHz)
     }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);

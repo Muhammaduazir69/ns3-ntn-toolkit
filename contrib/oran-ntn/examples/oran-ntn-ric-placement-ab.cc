@@ -182,6 +182,11 @@ main(int argc, char* argv[])
     std::string outputDir = "oran-ntn-ric-placement-ab-output";
 
     CommandLine cmd(__FILE__);
+    uint16_t numerology = 1; // published runs used mu=1 (30 kHz)
+    cmd.AddValue("numerology",
+                 "NR numerology mu (SCS = 15*2^mu kHz). Ka-band NTN (TS 38.101-5) uses 2 or 3; "
+                 "the default 1 reproduces the published results",
+                 numerology);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("placement", "RIC placement: onboard|haps|gateway|cloud", placement);
     cmd.AddValue("hapsAltKm", "Aerial RIC platform altitude (km)", hapsAltKm);
@@ -270,7 +275,7 @@ main(int argc, char* argv[])
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
     {
-        rs.SetNumerology(1); // FR1 30 kHz SCS
+        rs.SetNumerology(numerology); // default 1 reproduces the published runs; Ka-band NTN uses 2 or 3
     }
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);

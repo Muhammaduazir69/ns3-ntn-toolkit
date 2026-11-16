@@ -8,10 +8,11 @@
  * its real control outputs. The radio truth is MEASURED: a real mmwave NR cell
  * (NtnRealStackHelper) on a real SGP4 LEO pass with TR 38.811 UEs provides the
  * measured per-UE TBLER and per-UE delivered bytes (PacketSink), and per-slice
- * latency is the REAL geometry — LEO slant/c for LEO-served slices, the real
- * ~36 000 km GEO slant/c (~120 ms one-way / ~541 ms RTD) for GEO-served ones —
- * so the URLLC GEO-skip decision is validated against real physics, not a
- * hardcoded 250 ms constant (TR 38.821 Table 4.2-2: GEO 541.46 ms vs LEO
+ * latency is the MEASURED LEO one-way delay for LEO-served slices, plus the
+ * modeled ~36 000 km GEO service+feeder legs of a transparent payload
+ * (>= ~238 ms one-way / ~541 ms RTD at the TR 38.821 reference) for
+ * GEO-served ones, so the URLLC GEO-skip decision is checked against real
+ * geometry, not a hardcoded 250 ms constant (TR 38.821 Table 4.2-2: GEO 541.46 ms vs LEO
  * 25.77 ms RTD).
  *
  * Provenance note: every per-slice KPI fed to the isolation monitor is
@@ -75,7 +76,7 @@ main(int argc, char* argv[])
     double backhaulMs = 5.0;
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string csvPath = "ntn-three-slice.csv";
-    uint32_t totalPrb = 273;
+    uint32_t totalPrb = 0; // 0: derive from the measured cell's carrier (see below)
     std::string outputDir = "ntn-three-slice-output";
 
     CommandLine cmd(__FILE__);
@@ -85,7 +86,7 @@ main(int argc, char* argv[])
     cmd.AddValue("useRlShares",
                  "Drive the orchestrator with StepWithShares(priority shares) instead of Step()",
                  useRlShares);
-    cmd.AddValue("totalPrb", "Total PRB budget", totalPrb);
+    cmd.AddValue("totalPrb", "Total PRB budget (0 = the cell's own N_RB)", totalPrb);
     cmd.AddValue("satEirpDbm", "LEO EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("csv", "Per-slice KPI CSV path", csvPath);
@@ -154,6 +155,18 @@ main(int argc, char* argv[])
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
     rs.EnableAiFlowMonitor("ntn-three-slice-leo-geo"); // WS2 KPM series (TS 28.552 names)
 
+    // The orchestrator's PRB budget must be the cell the radio actually runs.
+    // The old default of 273 PRB is a 100 MHz carrier at 30 kHz SCS, five times
+    // the 20 MHz NTN cell built above, so every logged "prb" exceeded the grid.
+    // TS 38.101-1 Table 5.3.2-1 (reused by TS 38.101-5 for NTN FR1), 30 kHz SCS.
+    if (totalPrb == 0)
+    {
+        const double bwMhz = rs.GetBandwidthHz() / 1e6;
+        const std::map<int, uint32_t> nrbMu1 = {{5, 11},  {10, 24}, {15, 38},  {20, 51},
+                                                {25, 65}, {30, 78}, {40, 106}, {50, 133}};
+        const auto it = nrbMu1.find(static_cast<int>(std::lround(bwMhz)));
+        totalPrb = (radio != "mmwave" && it != nrbMu1.end()) ? it->second : 273;
+    }
     auto stack = NtnSliceHelper::ThreeSliceDefault();
     stack.orchestrator->SetTotalPrb(totalPrb);
     // The whole run feeds one window; size it so all measured per-UE packets
@@ -279,8 +292,15 @@ main(int argc, char* argv[])
         const Vector uePos = ueModels[ue]->GetPosition();
         const double leoLatMs =
             ntngeo::SlantRangeM(uePos, leoPos) / 299792458.0 * 1e3 + backhaulMs;
-        const double geoLatMs =
-            ntngeo::SlantRangeM(uePos, geoEcef) / 299792458.0 * 1e3 + backhaulMs;
+        // TR 38.821 Sec. 4.2 / Table 4.2-2: the GEO reference is a TRANSPARENT
+        // payload (the 541.46 ms RTD cited above), so a GEO user-plane packet
+        // crosses the service link AND the feeder link. The old expression
+        // counted the service link only, i.e. the regenerative case (~120 ms),
+        // half the transparent one-way delay. The gateway is taken co-located
+        // with the UE cluster, so feeder slant = service slant and the result is
+        // a lower bound (TR 38.821 nadir minimum ~238 ms one-way).
+        const double geoServiceMs = ntngeo::SlantRangeM(uePos, geoEcef) / 299792458.0 * 1e3;
+        const double geoLatMs = 2.0 * geoServiceMs + backhaulMs;
         const double latencyMs = servedByGeo ? geoLatMs : leoLatMs;
 
         // WF-04: replay the MEASURED one-way-delay distribution.
@@ -314,6 +334,18 @@ main(int argc, char* argv[])
         }
         if (histTotal > 0)
         {
+            // Bin b holds delays in [b, b+1) ms; replay at the bin midpoint, the
+            // same convention GetSliceMeasuredStats uses for its percentiles.
+            uint32_t modalBin = hist.front().first;
+            uint64_t modalCount = 0;
+            for (const auto& [bin, count] : hist)
+            {
+                if (count > modalCount)
+                {
+                    modalBin = bin;
+                    modalCount = count;
+                }
+            }
             uint64_t emitted = 0;
             for (const auto& [bin, count] : hist)
             {
@@ -323,15 +355,17 @@ main(int argc, char* argv[])
                     static_cast<double>(deliveredPkts));
                 for (uint64_t p = 0; p < share; ++p)
                 {
-                    stack.monitor->RecordPacket(s, static_cast<double>(bin) + geoExtraMs, true);
+                    stack.monitor->RecordPacket(s, static_cast<double>(bin) + 0.5 + geoExtraMs,
+                                                true);
                     ++emitted;
                 }
             }
             // Rounding remainder goes to the modal bin so the delivered count
-            // is preserved exactly.
+            // is preserved exactly. (It used to go to hist.front(), the LOWEST
+            // bin, which biased the replayed distribution toward zero delay.)
             for (uint64_t p = emitted; p < deliveredPkts; ++p)
             {
-                stack.monitor->RecordPacket(s, static_cast<double>(hist.front().first) + geoExtraMs,
+                stack.monitor->RecordPacket(s, static_cast<double>(modalBin) + 0.5 + geoExtraMs,
                                             true);
             }
         }
@@ -352,6 +386,8 @@ main(int argc, char* argv[])
         const uint64_t lostPkts = rs.GetUeLostPackets(ue);
         for (uint64_t p = 0; p < lostPkts; ++p)
         {
+            // Lost packets carry no delay sample; latencyMs keeps them out of
+            // the tail (the monitor's loss rate is what they feed).
             stack.monitor->RecordPacket(s, latencyMs, false);
         }
     }
@@ -379,10 +415,13 @@ main(int argc, char* argv[])
               << "  measured LEO TBLER : " << rs.GetMeanDlTbler() << "\n"
               << "  urllcViaGeo=" << (routeUrllcViaGeo ? "true" : "false")
               << "  max URLLC p99 latency: " << maxUrllcP99 << (routeUrllcViaGeo
-                      ? " ms (MEASURED OWD distribution + modelled GEO propagation delta; the "
+                      ? " ms (MEASURED OWD distribution + modelled transparent-GEO service+feeder "
+                        "delta, TR 38.821 Sec. 4.2; the "
                         "GEO 'satellite' is a static ECEF point, not a second gNB, so no packet "
                         "flew that path)\n"
                       : " ms (MEASURED one-way-delay distribution)\n")
+              << "  orchestrator PRB budget: " << totalPrb << " PRB (shadow allocator, "
+                 "logged only; TS 38.101-1 Table 5.3.2-1)\n"
               << "  latency breaches=" << totalLatencyBreach
               << "  reliability breaches=" << totalReliabilityBreach << "\n"
               << "  csv: " << csvPath << "\n";

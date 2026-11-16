@@ -714,7 +714,7 @@ RunRadioPhase(const Cfg& cfg)
     double eirp = cfg.satEirpDbm;
     if (eirp < 0.0)
     {
-        eirp = useNr ? 70.0 : 55.0; // backend-appropriate Friis budget
+        eirp = useNr ? 70.0 : 55.0; // legacy conducted default (paper R2.6), not Set-1
     }
 
     NtnRealStackHelper rs;
@@ -729,9 +729,12 @@ RunRadioPhase(const Cfg& cfg)
     rs.SetRunTag("scal-" + cfg.regime + "-s" + std::to_string(cfg.sats) + "-u" +
                  std::to_string(cfg.ues));
     rs.SetCarrierFrequencyHz(cfg.freqGhz * 1e9);
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
+    // NT-02: declared as CONDUCTED power at the array input, so the EIRP
+    // health gate reports "not asserted". The nr default is the legacy
+    // 70 dBm, about 88 dBm EIRP with the ~18 dB array gain and roughly 11 dB
+    // above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band density (34 dBW/MHz).
+    // It is NOT TR 38.821 calibrated; it is kept unchanged because this
+    // example's numbers feed a paper (R2.6) and must stay reproducible.
     rs.SetSatConductedPowerDbm(eirp);
     rs.Build(gnbNodes, sc.ueNodes);
 
@@ -873,7 +876,8 @@ main(int argc, char* argv[])
                  cfg.epochUnix);
     cmd.AddValue("controlHz", "Geometry/control re-decision rate [Hz]", cfg.controlHz);
     cmd.AddValue("freqGhz", "Carrier frequency [GHz]", cfg.freqGhz);
-    cmd.AddValue("satEirpDbm", "gNB Tx power [dBm]; -1 = backend default", cfg.satEirpDbm);
+    cmd.AddValue("satEirpDbm", "gNB conducted Tx power at the array input [dBm]; -1 = backend default "
+                 "(mmwave 55, nr 70; legacy, not TR 38.821 Set-1 calibrated)", cfg.satEirpDbm);
     cmd.AddValue("rngRun", "RNG run", cfg.rngRun);
     cmd.AddValue("pktSize", "Override packet size [B] (0 = regime preset)", cfg.pktSizeOverride);
     cmd.AddValue("periodMs",

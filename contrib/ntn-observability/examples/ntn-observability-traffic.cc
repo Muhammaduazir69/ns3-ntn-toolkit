@@ -57,6 +57,30 @@ ElevDegEnu(const Vector& gnd, const Vector& sat)
     return std::atan2(dz, horiz) * 180.0 / M_PI;
 }
 
+/// OBS-16: IEEE Std 521-2019 letter band of the carrier, so the `band` tag
+/// follows --freqGHz instead of the fixed "Ku" it used to carry.
+std::string
+Ieee521Band(double fGHz)
+{
+    if (fGHz < 1.0)
+        return "UHF";
+    if (fGHz < 2.0)
+        return "L";
+    if (fGHz < 4.0)
+        return "S";
+    if (fGHz < 8.0)
+        return "C";
+    if (fGHz < 12.0)
+        return "X";
+    if (fGHz < 18.0)
+        return "Ku";
+    if (fGHz < 27.0)
+        return "K";
+    if (fGHz < 40.0)
+        return "Ka";
+    return "V";
+}
+
 } // namespace
 
 int
@@ -65,7 +89,9 @@ main(int argc, char* argv[])
     double simSeconds = 40.0;
     double leoAltKm = 550.0;
     double freqGHz = 12.0; // Ku-band
-    double satEirpDbm = 75.0; // already healthy for the nr Friis LEO link
+    // Conducted power at the array input (NT-02); the radiated EIRP that
+    // sim_health.csv reports adds the array gain (75 dBm -> ~93 dBm EIRP).
+    double satEirpDbm = 75.0;
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outPath = "ntn-observability-traffic.lp";
     std::string influxHost = ""; // empty = file transport
@@ -76,13 +102,23 @@ main(int argc, char* argv[])
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "Satellite altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm",
+                 "Satellite CONDUCTED Tx power at the array input (dBm); the "
+                 "radiated EIRP adds the array gain (see effective_eirp_dbm)",
+                 satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("out", "InfluxDB line-protocol output file", outPath);
     cmd.AddValue("influxHost", "InfluxDB/Telegraf UDP host (empty=file)", influxHost);
     cmd.AddValue("influxPort", "InfluxDB/Telegraf UDP port", influxPort);
     cmd.AddValue("outputDir", "Output directory for sim_health.csv", outputDir);
     cmd.Parse(argc, argv);
+    // A bare --out name goes with the rest of the run (sim_health.csv,
+    // _kpm_series.*) instead of the launch directory; a path still wins.
+    if (!outputDir.empty() && outPath.find('/') == std::string::npos)
+    {
+        outPath = outputDir + (outputDir.back() == '/' ? "" : "/") + outPath;
+        SystemPath::MakeDirectories(outputDir); // the sink flushes from t=5 s
+    }
 
     std::printf("# ntn-observability-traffic (REAL radio + InfluxDB KPI export)\n");
     std::printf("#   sim=%.0fs alt=%.0fkm freq=%.0fGHz EIRP=%.1fdBm export=%s\n",
@@ -113,6 +149,9 @@ main(int argc, char* argv[])
     satEnu->SetReference(subLat, subLon, 0.0);
     satNodes.Get(0)->AggregateObject(satEnu);
 
+    // Fixed terminal (TR 38.821 Sec. 6.1 VSAT class, the Ku-band reference
+    // terminal) at the ENU origin under the sub-satellite point at t=0. A
+    // fixed class is a constant position by definition, not a placeholder.
     MobilityHelper mob;
     mob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
@@ -166,7 +205,7 @@ main(int argc, char* argv[])
     uint64_t lastRx = 0;
     rs.RegisterPeriodicCallback(
         Seconds(1.0),
-        [&rs, influx, ueMob, satEnu, &lastRx](Time now) {
+        [&rs, influx, ueMob, satEnu, &lastRx, freqGHz](Time now) {
             const Vector u = ueMob->GetPosition();
             const Vector s = satEnu->GetPosition();
             const double elev = ElevDegEnu(u, s);
@@ -183,7 +222,7 @@ main(int argc, char* argv[])
             // ntn-metric-schema.h or in any shipped dashboard.
             p.measurement = ntnobs::measurement::kDownlink;
             p.tags[ntnobs::tag::kLink] = "leo-gnd";
-            p.tags[ntnobs::tag::kBand] = "Ku";
+            p.tags[ntnobs::tag::kBand] = Ieee521Band(freqGHz);
             p.tags[ntnobs::tag::kProvenance] = "phy-trace";
             p.fieldsFloat[ntnobs::field::kGoodputMbps] = mbps;
             if (!std::isnan(sinr))
@@ -200,8 +239,21 @@ main(int argc, char* argv[])
             p.timestamp = now;
             influx->Push(p);
 
-            std::printf("  %5.1f  %7.2f  %9.1f  %8.2f  %8.3f  %9.3f\n",
-                        now.GetSeconds(), elev, rangeM / 1000.0, sinr, tbler, mbps);
+            // Before the first PHY sample (t=1 s, traffic starts at 1 s) there
+            // is no SINR/TBLER; print "-" rather than "nan" (the export above
+            // already omits the field).
+            char sinrTxt[16] = "       -";
+            char tblerTxt[16] = "       -";
+            if (!std::isnan(sinr))
+            {
+                std::snprintf(sinrTxt, sizeof(sinrTxt), "%8.2f", sinr);
+            }
+            if (!std::isnan(tbler))
+            {
+                std::snprintf(tblerTxt, sizeof(tblerTxt), "%8.3f", tbler);
+            }
+            std::printf("  %5.1f  %7.2f  %9.1f  %s  %s  %9.3f\n",
+                        now.GetSeconds(), elev, rangeM / 1000.0, sinrTxt, tblerTxt, mbps);
         });
 
     influx->Start();

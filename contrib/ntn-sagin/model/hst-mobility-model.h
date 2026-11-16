@@ -5,7 +5,7 @@
 #ifndef NTN_SAGIN_HST_MOBILITY_MODEL_H
 #define NTN_SAGIN_HST_MOBILITY_MODEL_H
 
-// 3GPP TR 38.901 §7.5 HST mobility model (Roadmap §4.4.3).
+// 3GPP HST (TS 38.101-4 Annex B geometry) mobility model (Roadmap §4.4.3).
 //
 // Linear motion along a fixed rail corridor at a configured speed. The
 // gNB perpendicular offset Dmin and the cell-spacing Ds are exposed for

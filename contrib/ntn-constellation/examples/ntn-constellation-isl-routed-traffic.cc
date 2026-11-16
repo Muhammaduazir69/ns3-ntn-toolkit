@@ -57,11 +57,10 @@ uint64_t g_contactDrops = 0;
 double
 ElevDeg(Ptr<MobilityModel> gs, Ptr<MobilityModel> sat)
 {
-    Vector u = gs->GetPosition();
-    Vector s = sat->GetPosition();
-    double dx = s.x - u.x, dy = s.y - u.y, dz = s.z - u.z;
-    double d = std::sqrt(dx * dx + dy * dy + dz * dz);
-    return std::asin(std::max(0.0, dz) / std::max(1.0, d)) * 180.0 / M_PI;
+    // All nodes are ECEF: elevation about the WGS-84 normal at the station.
+    // The former flat-frame asin(dz/d) ignored ~9 deg of Earth curvature at
+    // GS2, 1000 km away, and overstated its elevation by several degrees.
+    return ntngeo::GeodeticElevationDeg(gs->GetPosition(), sat->GetPosition());
 }
 
 double
@@ -108,7 +107,10 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("altKm", "Satellite altitude (km)", altKm);
-    cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
+    cmd.AddValue("satSpeed",
+                 "Ignored, kept for CLI compatibility: the orbital speed follows from altKm "
+                 "(the measured value is printed and written to sim_health.csv)",
+                 satSpeed);
     cmd.AddValue("minElev", "Min GSL elevation for contact (deg)", g_minElev);
     cmd.AddValue("islRangeCapKm", "Max ISL range for contact (km)", g_islRangeCapKm);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -125,19 +127,11 @@ main(int argc, char* argv[])
     InternetStackHelper internet;
     internet.Install(nodes);
 
-    Ptr<ConstantPositionMobilityModel> g1 = CreateObject<ConstantPositionMobilityModel>();
-    g1->SetPosition(Vector(0, 0, 0));
-    nodes.Get(GS1)->AggregateObject(g1);
-    Ptr<ConstantPositionMobilityModel> g2 = CreateObject<ConstantPositionMobilityModel>();
-    g2->SetPosition(Vector(1000000.0, 0, 0)); // 1000 km downrange
-    nodes.Get(GS2)->AggregateObject(g2);
-
-    // satA over GS1, satB over GS2, both drifting east on the same shell so the
-    // ISL range stays within cap while each GSL rises and sets across the pass.
-    // Real Kepler+J2-secular Walker neighbours (Vallado SGP4 via SetUseVallado)
-    // projected into the local ENU frame: satA is
-    // at zenith over GS1 at t=0 and recedes; satB genuinely approaches, so the
-    // reroute emerges from real orbital dynamics.
+    // satA and satB are in-plane neighbours of one shell, so the ISL range
+    // stays within cap while each GSL's elevation evolves with the real orbit.
+    // Walker neighbours propagated by Vallado SGP4 (SetElementsSgp4: synthesized TLE)
+    // in ECEF: satA is at zenith over GS1 at t=0 and recedes; satB is the
+    // neighbour approaching GS1's sub-point.
     ns3::ntncon::WalkerConfig wcfgSat;
     wcfgSat.num_planes = 1;
     wcfgSat.total_sats = 80;
@@ -147,13 +141,13 @@ main(int argc, char* argv[])
     const auto satElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfgSat);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4A =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    satSgp4A->SetElements(satElements[0]);
+    satSgp4A->SetElementsSgp4(satElements[0]);
     double satSubLat, satSubLon, satSubAlt;
     satSgp4A->GetGeodetic(satSubLat, satSubLon, satSubAlt);
     Ptr<ns3::ntncon::Sgp4MobilityModel> nbr1 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    nbr1->SetElements(satElements[1]);
+    nbr1->SetElementsSgp4(satElements[1]);
     Ptr<ns3::ntncon::Sgp4MobilityModel> nbr2 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    nbr2->SetElements(satElements[79]);
+    nbr2->SetElementsSgp4(satElements[79]);
     const Vector originEcef = ntngeo::GeodeticToEcef(satSubLat, satSubLon, 0.0);
     auto approaching = [&originEcef](Ptr<ns3::ntncon::Sgp4MobilityModel> sm) {
         const Vector p = sm->GetPosition();
@@ -162,14 +156,31 @@ main(int argc, char* argv[])
         return (v.x * to.x + v.y * to.y + v.z * to.z) > 0.0;
     };
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4B = approaching(nbr1) ? nbr1 : nbr2;
-    Ptr<NtnEnuProjectionMobilityModel> sa = CreateObject<NtnEnuProjectionMobilityModel>();
-    sa->SetSource(satSgp4A);
-    sa->SetReference(satSubLat, satSubLon, 0.0);
-    Ptr<NtnEnuProjectionMobilityModel> sb = CreateObject<NtnEnuProjectionMobilityModel>();
-    sb->SetSource(satSgp4B);
-    sb->SetReference(satSubLat, satSubLon, 0.0);
-    nodes.Get(SATA)->AggregateObject(sa);
-    nodes.Get(SATB)->AggregateObject(sb);
+    // Ground stations on the WGS-84 ellipsoid in the same ECEF frame as the
+    // satellites. They used to sit at (0,0,0) and (1000 km,0,0) of a flat
+    // tangent plane, which put GS2 ~78 km above the real ground and gave both
+    // stations the same "up". GS1 is satA's t=0 sub-point; GS2 is 1000 km east.
+    const double kmPerDegLon = 111.320 * std::cos(satSubLat * M_PI / 180.0);
+    const double gs2Lon = satSubLon + 1000.0 / std::max(1.0, kmPerDegLon);
+    Ptr<ConstantPositionMobilityModel> g1 = CreateObject<ConstantPositionMobilityModel>();
+    g1->SetPosition(ntngeo::GeodeticToEcef(satSubLat, satSubLon, 0.0));
+    nodes.Get(GS1)->AggregateObject(g1);
+    Ptr<ConstantPositionMobilityModel> g2 = CreateObject<ConstantPositionMobilityModel>();
+    g2->SetPosition(ntngeo::GeodeticToEcef(satSubLat, gs2Lon, 0.0));
+    nodes.Get(GS2)->AggregateObject(g2);
+    Ptr<MobilityModel> sa = satSgp4A;
+    Ptr<MobilityModel> sb = satSgp4B;
+    nodes.Get(SATA)->AggregateObject(satSgp4A);
+    nodes.Get(SATB)->AggregateObject(satSgp4B);
+    // The orbit fixes the speed; satSpeed is not an input.
+    const double satSpeedMps = satSgp4A->GetVelocity().GetLength();
+    std::cout << "  satellite speed (ECEF, SGP4 model at altKm=" << altKm
+              << "): " << satSpeedMps << " m/s";
+    if (std::abs(satSpeed - 7500.0) > 1e-9)
+    {
+        std::cout << "  [--satSpeed=" << satSpeed << " ignored]";
+    }
+    std::cout << "\n\n";
 
     g_g1 = g1;
     g_g2 = g2;
@@ -234,6 +245,7 @@ main(int argc, char* argv[])
     out << "metric,value,floor,pass,provenance\n";
     out << "sim_time_s," << duration << "," << duration << ",1,config\n";
     out << "air_interface,sat-ip-isl-routing,-,1,config\n";
+    out << "sat_speed_ecef_mps," << satSpeedMps << ",-,-,sgp4-propagated\n";
     out << "packets_through_sats," << rxP << ",1," << (rxP > 0 ? 1 : 0) << ",packetsink\n";
     out << "rx_throughput_mbps," << thrMbps << ",0.05," << (thrMbps >= 0.05 ? 1 : 0)
         << ",packetsink\n";

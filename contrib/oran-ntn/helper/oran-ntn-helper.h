@@ -165,6 +165,19 @@ class OranNtnHelper : public Object
     /// report came to claim the wrong one.
     const E2KpmReport& GetLastInjectedReport() const { return m_lastInjectedReport; }
 
+    /// Declare which slice a UE's traffic actually belongs to (0 = eMBB,
+    /// 1 = URLLC, 2 = mMTC). InjectKpmReport() used to tag every UE by
+    /// ueId % 3 regardless of the traffic the scenario installed, so a run
+    /// whose UEs all carried eMBB still reported a third of them as URLLC.
+    /// Without a declaration the legacy ueId % 3 tag is kept.
+    void SetUeSliceId(uint32_t ueId, uint8_t sliceId) { m_ueSlice[ueId] = sliceId; }
+
+    /// Altitude of the shell the E2 nodes ride (km). InjectKpmReport() derives
+    /// the propagation delay of NTN reports from the elevation and this
+    /// altitude; it used to assume 600 km for every scenario. Also set by
+    /// GenerateConstellationPolicies().
+    void SetShellAltitudeKm(double km) { m_shellAltitudeKm = km; }
+
     // ---- Phase 2: mmWave NTN stack setup ----
     //
     // \warning The Phase 2-5 methods below are DECLARED ONLY: no definition
@@ -344,6 +357,8 @@ class OranNtnHelper : public Object
     std::string m_outputDir;
     std::map<uint32_t, Ptr<OranNtnE2Node>> m_e2Nodes;
     E2KpmReport m_lastInjectedReport{}; //!< AI-07
+    std::map<uint32_t, uint8_t> m_ueSlice; //!< declared slice per UE (SetUeSliceId)
+    double m_shellAltitudeKm{600.0};       //!< shell altitude for NTN delay (km)
     std::vector<Ptr<OranNtnSpaceRic>> m_spaceRics;
 
     bool DefaultRcActionHandler(E2RcAction action);

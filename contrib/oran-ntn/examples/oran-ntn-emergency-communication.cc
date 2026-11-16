@@ -9,19 +9,34 @@
 //   t<20 s   normal operation: four ground UEs carry eMBB on S-NSSAI 1.
 //   t=20 s   DISASTER: the terrestrial gateway fails. OranNtnRoleSwitch
 //            elevates the satellite to a full on-board gNB (failure-injected
-//            switch with a real 500 ms service-interruption window) and the
-//            feeder re-points to a surviving gateway (payload option applied
-//            to the live backhaul).
-//   t=22 s   emergency responders arrive: two URLLC flows on the DEDICATED
-//            emergency slice (S-NSSAI SST=5) join via InstallOranFlow; the
-//            SMO protects them RIC-style by throttling the eMBB quota (live
+//            switch with a real 500 ms service-interruption window: the
+//            backhaul drops every packet in both directions until the switch
+//            completes) and the feeder re-points to a surviving gateway
+//            (payload option applied to the live backhaul).
+//   t=22 s   emergency responders arrive: two mission-critical flows on the
+//            DEDICATED emergency slice join via InstallOranFlow; the SMO
+//            protects them RIC-style by throttling the eMBB quota (live
 //            offered-rate actuation, as in the cross-domain example).
-// Measured recovery timeline: disaster -> first emergency byte delivered,
-// per-slice OWD/loss/throughput before and after, all from NtnOranSink and
-// the KPM monitor on the real radio.
+//
+// Emergency slice marking. TS 23.501 Table 5.15.2.2-1 assigns SST 5 to HMTC,
+// so it cannot label a public-safety slice; there is no standardized
+// emergency SST and §5.15.2.1 leaves 128-255 to the operator, so SST 128 is
+// used. The responders' small periodic packets are marked 5QI 69
+// (Table 5.7.4-1: mission-critical delay-sensitive signalling, non-GBR,
+// PDB 60 ms, PER 1e-6, priority level 5), not 5QI 82, which is the 10 ms
+// discrete-automation class and is below the LEO one-way floor.
+//
+// Measured timeline: disaster -> data-plane restoration (first DL byte after
+// the observed outage), responder arrival -> first emergency byte, and
+// per-slice OWD/loss/throughput, all from NtnOranSink and the KPM monitor on
+// the real radio. The "recovery" used to be disaster -> first emergency byte,
+// which is the scripted responder start time (disasterAt + 2 s) plus one
+// access delay whatever the switch did, because nothing interrupted the data
+// plane.
 //
 // Quick test:  --simSeconds=60
 #include "ns3/core-module.h"
+#include "ns3/error-model.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
 #include "ns3/ntn-oran-ai-flow-monitor.h"
@@ -126,12 +141,17 @@ main(int argc, char* argv[])
     ApplicationContainer embb1 = rs.InstallOranFlow(
         1, 2, 1, 0x000001, NtnOranApplication::CBR_SATURATING, Seconds(1.0), stop);
     // Emergency slice (SST 5): responders join AFTER the disaster.
+    // 5QI 69 / operator SST 128: see the header (TS 23.501 Tables 5.7.4-1 and
+    // 5.15.2.2-1).
+    constexpr uint8_t kEmergencyFiveQi = 69;
+    constexpr uint8_t kEmergencySst = 128;
+    const double responderArrival = disasterAt + 2.0;
     ApplicationContainer emrg0 = rs.InstallOranFlow(
-        2, 82, 5, 0x000001, NtnOranApplication::URLLC_PERIODIC,
-        Seconds(disasterAt + 2.0), stop);
+        2, kEmergencyFiveQi, kEmergencySst, 0x000001, NtnOranApplication::URLLC_PERIODIC,
+        Seconds(responderArrival), stop);
     ApplicationContainer emrg1 = rs.InstallOranFlow(
-        3, 82, 5, 0x000001, NtnOranApplication::URLLC_PERIODIC,
-        Seconds(disasterAt + 2.0), stop);
+        3, kEmergencyFiveQi, kEmergencySst, 0x000001, NtnOranApplication::URLLC_PERIODIC,
+        Seconds(responderArrival), stop);
 
     Ptr<NtnOranAiFlowMonitor> kpm = rs.EnableOranFlowMonitor();
 
@@ -152,11 +172,29 @@ main(int argc, char* argv[])
 
     Ptr<NtnOranApplication> embbApp0 = DynamicCast<NtnOranApplication>(embb0.Get(0));
     Ptr<NtnOranApplication> embbApp1 = DynamicCast<NtnOranApplication>(embb1.Get(0));
-    Simulator::Schedule(Seconds(disasterAt), [&rsw, embbApp0, embbApp1] {
+    // The outage itself, on the real path: while the ground O-DU is lost and
+    // the satellite has not yet taken over, the backhaul delivers nothing. A
+    // packet-unit error model at rate 1 on both backhaul devices, enabled for
+    // exactly the role-switch interruption window.
+    Ptr<RateErrorModel> outage = CreateObject<RateErrorModel>();
+    outage->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
+    outage->SetRate(1.0);
+    outage->Disable();
+    if (Ptr<Channel> bh = DynamicCast<Channel>(rs.GetBackhaulChannel()))
+    {
+        for (std::size_t d = 0; d < bh->GetNDevices(); ++d)
+        {
+            bh->GetDevice(d)->SetAttribute("ReceiveErrorModel", PointerValue(outage));
+        }
+    }
+    Simulator::Schedule(Seconds(disasterAt), [&rsw, embbApp0, embbApp1, outage] {
         std::printf("  [%.1fs] DISASTER: ground O-DU lost -> elevating satellite "
                     "to full gNB (500 ms interruption)\n",
                     Simulator::Now().GetSeconds());
-        rsw->TriggerSwitch("leo-sat", OranNtnRoleSwitch::Role::FullGnb, "o-du-lost");
+        rsw->TriggerSwitch(
+            "leo-sat", OranNtnRoleSwitch::Role::FullGnb, "o-du-lost",
+            [outage] { outage->Enable(); },
+            [outage] { outage->Disable(); });
         // SMO emergency policy: throttle the public eMBB slice to protect
         // the emergency slice (live offered-rate actuation).
         embbApp0->SetAttribute("DataRate", DataRateValue(DataRate("1Mbps")));
@@ -167,11 +205,49 @@ main(int argc, char* argv[])
     Ptr<NtnOranSink> emrgSink0 = DynamicCast<NtnOranSink>(emrg0.Get(1));
     Ptr<NtnOranSink> emrgSink1 = DynamicCast<NtnOranSink>(emrg1.Get(1));
     double firstEmergencyByteAt = -1.0;
-    rs.RegisterPeriodicCallback(Seconds(0.1), [&](Time now) {
+    // Data-plane restoration, measured: after the disaster the DL byte counter
+    // must stall (>= 100 ms without a delivered byte) and then move again.
+    // If an RLC backlog bridges the whole window no stall is observed and the
+    // run says so instead of inventing a recovery time.
+    uint64_t lastRxTotal = 0;
+    double lastRxIncreaseAt = 0.0;
+    bool stallSeen = false;
+    double stallStartAt = -1.0;
+    double restoredAt = -1.0;
+    rs.RegisterPeriodicCallback(MilliSeconds(10), [&](Time now) {
+        const double t = now.GetSeconds();
         if (firstEmergencyByteAt < 0.0 &&
             (emrgSink0->GetTotalRx() > 0 || emrgSink1->GetTotalRx() > 0))
         {
-            firstEmergencyByteAt = now.GetSeconds();
+            firstEmergencyByteAt = t;
+        }
+        uint64_t rxTotal = 0;
+        for (uint32_t u = 0; u < ueNodes.GetN(); ++u)
+        {
+            rxTotal += rs.GetUeRxBytes(u);
+        }
+        const bool moved = rxTotal > lastRxTotal;
+        lastRxTotal = rxTotal;
+        if (t < disasterAt)
+        {
+            if (moved)
+            {
+                lastRxIncreaseAt = t;
+            }
+            return;
+        }
+        if (!stallSeen && !moved && t - lastRxIncreaseAt >= 0.1)
+        {
+            stallSeen = true;
+            stallStartAt = lastRxIncreaseAt;
+        }
+        else if (stallSeen && restoredAt < 0.0 && moved)
+        {
+            restoredAt = t;
+        }
+        if (moved)
+        {
+            lastRxIncreaseAt = t;
         }
     });
     rs.RegisterPeriodicCallback(Seconds(5.0), [&](Time now) {
@@ -191,10 +267,23 @@ main(int argc, char* argv[])
     kpm->WriteCsv(outputDir + "/kpm_series.csv");
 
     std::printf("# === recovery timeline (measured) ===\n");
-    std::printf("#   disaster t=%.1f s -> first emergency byte t=%.2f s "
-                "(recovery %.2f s incl. 0.5 s switch window)\n",
-                disasterAt, firstEmergencyByteAt,
-                firstEmergencyByteAt - disasterAt);
+    if (restoredAt >= 0.0)
+    {
+        std::printf("#   disaster t=%.1f s -> last byte before the outage t=%.2f s -> "
+                    "data plane restored t=%.2f s (measured recovery %.3f s; "
+                    "role-switch window 0.5 s)\n",
+                    disasterAt, stallStartAt, restoredAt, restoredAt - disasterAt);
+    }
+    else
+    {
+        std::printf("#   disaster t=%.1f s -> no data-plane stall >= 100 ms observed "
+                    "(queued RLC data bridged the 0.5 s window, or no traffic)\n",
+                    disasterAt);
+    }
+    std::printf("#   responders arrive t=%.1f s -> first emergency byte t=%.2f s "
+                "(access delay %.3f s)\n",
+                responderArrival, firstEmergencyByteAt,
+                firstEmergencyByteAt >= 0.0 ? firstEmergencyByteAt - responderArrival : -1.0);
     for (int i = 0; i < 2; ++i)
     {
         Ptr<NtnOranSink> s = (i == 0) ? emrgSink0 : emrgSink1;

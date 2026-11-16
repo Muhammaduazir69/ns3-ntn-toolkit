@@ -243,8 +243,15 @@ main(int argc, char* argv[])
             st.lastMeasElev = measElev;
             st.lastMeasAzim = measAzim;
 
-            const double err = std::sqrt(std::pow(steerElev - trueElev, 2.0) +
-                                         std::pow(steerAzim - trueAzim, 2.0));
+            // Great-circle pointing error, not a Euclidean (el, az) distance:
+            // wrap the azimuth difference into [-180, 180) and scale it by
+            // cos(elevation). Unscaled, a pass through near-zenith (where the
+            // azimuth swings fast for a tiny angular offset) and any 0/360
+            // crossing inflated the error and the pointing loss applied to the
+            // live channel.
+            double dAz = std::fmod(steerAzim - trueAzim + 540.0, 360.0) - 180.0;
+            dAz *= std::cos(trueElev * M_PI / 180.0);
+            const double err = std::sqrt(std::pow(steerElev - trueElev, 2.0) + dAz * dAz);
             st.sumErr += err;
             st.n++;
             st.lastErr = err;
@@ -294,10 +301,15 @@ main(int argc, char* argv[])
     const ThzTrackingMetrics metrics = tracker->GetTrackingMetrics();
     std::printf("# === summary ===  mode=%s mean tracking error=%.4f deg "
                 "(converged, t>5s: %.4f deg), beam failures=%u, prediction "
-                "RMS=%.4f deg\n",
+                "RMS=%s\n",
                 trackingMode.c_str(), st.n ? st.sumErr / st.n : 0.0,
                 st.nConverged ? st.sumErrConverged / st.nConverged : 0.0, st.failures,
-                metrics.predictionAccuracy_deg);
+                // ThzNtnBeamTracking fills predictionAccuracy_deg only in
+                // ML_ASSISTED mode; in EKF/position mode it stayed 0 and was
+                // printed as a perfect 0.0000 deg.
+                (metrics.predictionAccuracy_deg > 0.0
+                     ? (std::to_string(metrics.predictionAccuracy_deg) + " deg").c_str()
+                     : "n/a (ML_ASSISTED only)"));
     std::printf("#                  measured cell SINR=%.2f dB TBLER=%.4f "
                 "throughput=%.3f Mbps (pointing loss applied to real packets)\n",
                 rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());

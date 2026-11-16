@@ -107,7 +107,7 @@ main(int argc, char* argv[])
     cmd.AddValue("numUes", "Number of UEs on the serving cell", numUes);
     cmd.AddValue("scsKhz", "Sub-carrier spacing (kHz): 15/30/60/120", scsKhz);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: mmwave (FR2, FAPI SAP bridge) or nr (FR1)", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     std::string netSimOut;
@@ -116,10 +116,28 @@ main(int argc, char* argv[])
     cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
 
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
-    // mmwave, so honour the historical 55 dBm for mmwave but give nr 70 dBm.
     const bool useNr = (radio == "nr");
-    if (satEirpDbm < 0.0)
+    // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the nr
+    // default is now that Set-1 density, as ntn-v2x-real-stack does; an
+    // explicit --satEirpDbm keeps meaning conducted power, and mmwave keeps
+    // its historical 55.0 dBm.
+    // The probe mirrors the cell's carrier and bandwidth and returns the
+    // equivalent CONDUCTED power from the helper's own formula
+    // (density + 10log10(BW_MHz) + 30 - ArrayGainDb()), so every other
+    // consumer of satEirpDbm stays consistent with the radio.
+    NtnRealStackHelper eirpProbe;
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && useNr &&
+                                 eirpProbe.GetCarrierFrequencyHz() > 1.0e9 &&
+                                 eirpProbe.GetCarrierFrequencyHz() <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        eirpProbe.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        satEirpDbm = eirpProbe.GetSatEirpDbm();
+    }
+    else if (satEirpDbm < 0.0)
     {
         satEirpDbm = useNr ? 70.0 : 55.0;
     }
@@ -128,7 +146,9 @@ main(int argc, char* argv[])
               << "  FAPI SLOT.indication  <- real MmWaveEnbPhySapUser::SlotIndication(SfnSf)\n"
               << "  FAPI DL_TTI.request   <- real MmWavePhySapProvider::SetSlotAllocInfo(SlotAllocInfo)\n"
               << "  FAPI CRC.indication   <- real per-TB decode (mmwave m_corrupt)\n"
-              << "  scs: " << scsKhz << " kHz, " << numUes << " UEs, " << duration << " s\n\n";
+              << "  requested scs: " << scsKhz << " kHz (FAPI-7: not applied; the mmwave cell "
+              << "keeps its own numerology, printed with CONFIG.request), " << numUes << " UEs, "
+              << duration << " s\n\n";
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -165,11 +185,25 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-fapi-real-stack");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (eirpFromTr38821)
+    {
+        // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 S-band EIRP density. The
+        // helper back-computes the conducted power from the bandwidth and
+        // the array gain, and again in Build().
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit value (or a default on a carrier outside the
+        // Set-1 S-band reference) is CONDUCTED power at the array input.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, ueNodes);
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(duration - 0.5));
     rs.EnableAiFlowMonitor("ntn-fapi-real-stack"); // WS2 KPM series (TS 28.552 names)
@@ -186,7 +220,8 @@ main(int argc, char* argv[])
         const auto& cc = g_bridge->GetCarrierConfig();
         std::cout << "  P5 CONFIG.request consumed: cellId=" << g_bridge->GetCellConfig().phyCellId
                   << " dlFreq=" << cc.dlFrequency / 1e3 << " MHz dlBW=" << cc.dlBandwidth
-                  << " MHz numRb=" << cc.dlGridSize[0] << "\n\n";
+                  << " MHz numRb=" << cc.dlGridSize[0] << " slots/ms="
+                  << enb->GetPhy()->GetConfigurationParameters()->GetSlotsPerSubframe() << "\n\n";
     }
 
     // Reverse FAPI path: same real per-TB decode trace the helper connects.

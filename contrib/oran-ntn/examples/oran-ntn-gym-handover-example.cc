@@ -40,6 +40,7 @@
 #include "ns3/oran-ntn-near-rt-ric.h"
 #include "ns3/oran-ntn-xapp-ho-predict.h"
 #include "ns3/oran-ntn-phy-kpm-extractor.h"
+#include "ns3/oran-ntn-ric-placement.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 
@@ -47,6 +48,9 @@
 
 #include <cstdio>
 #include <map>
+#include <set>
+#include <utility>
+#include <vector>
 
 using namespace ns3;
 using ns3::ntncon::Sgp4MobilityModel;
@@ -151,9 +155,34 @@ main(int argc, char* argv[])
     // actuated=false, so the whole RL loop terminated in a log line.
     // SetHandoverActuator had exactly one caller in the tree, inside a unit
     // test, and none in any shipped scenario.
-    helper->SetHandoverActuator(MakeCallback(
-        +[](E2RcAction action) -> bool { return g_rs->TriggerHandover(action.targetUeId,
-                                                                            action.targetGnbId); }));
+    // The RC action names an E2 node id (1-based satellite index); the radio
+    // wants an NR cell id. Map through GetGnbCellId rather than relying on the
+    // two numberings happening to coincide.
+    helper->SetHandoverActuator(MakeCallback(+[](E2RcAction action) -> bool {
+        if (action.targetGnbId == 0)
+        {
+            return false;
+        }
+        const uint16_t cell = g_rs->GetGnbCellId(action.targetGnbId - 1);
+        return cell != 0 && g_rs->TriggerHandover(action.targetUeId, cell);
+    }));
+    for (uint32_t u = 0; u < numUes; ++u)
+    {
+        helper->SetUeSliceId(u, 0); // every UE carries EmbbStreaming (5QI 2)
+    }
+    helper->SetShellAltitudeKm(altitudeKm);
+    // Each satellite's E2 node rides its live feeder slant to one gateway
+    // about 110 km from the UEs (it was the helper's constant 4 ms).
+    Ptr<ConstantPositionMobilityModel> gwMob = CreateObject<ConstantPositionMobilityModel>();
+    gwMob->SetPosition(ntngeo::GeodeticToEcef(subLat + 1.0, subLon, 0.0));
+    std::vector<Ptr<OranNtnRicPlacement>> ricSites;
+    for (uint32_t s = 0; s < numSats; ++s)
+    {
+        Ptr<OranNtnRicPlacement> site = CreateObject<OranNtnRicPlacement>();
+        site->SetSite(OranNtnRicPlacement::Site::GroundGateway);
+        site->BindToGeometry(satMobs[s], gwMob, satE2Nodes[s], Seconds(1.0));
+        ricSites.push_back(site);
+    }
 
     // ---- The gym env, wired to the measured xApp (A1 FIX) ----
     Ptr<OranNtnGymHandover> env = CreateObject<OranNtnGymHandover>();
@@ -174,7 +203,9 @@ main(int argc, char* argv[])
     std::set<uint32_t> registeredRnti;
 
     // ---- KPM feed: MEASURED PHY SINR + live-ephemeris enrichment ----
-    std::map<uint32_t, double> lastElev;
+    // (sat, ue) -> last elevation. Keyed by satellite only, UE k's rate was
+    // taken against UE k-1's elevation at the same instant.
+    std::map<std::pair<uint32_t, uint32_t>, double> lastElev;
     std::map<uint32_t, uint64_t> lastRx;
     const double kpmIntervalS = 0.1;
     uint32_t g_steps = 0;
@@ -189,16 +220,32 @@ main(int argc, char* argv[])
             }
             const Vector uePos = ueModels[ue]->GetPosition();
             const Vector ueVel = ueModels[ue]->GetVelocity();
-            const Vector sp = satMobs[0]->GetPosition();
-            const Vector sv = satMobs[0]->GetVelocity();
+            // The UE's ACTUAL serving satellite. Satellite 0 was assumed for
+            // the whole run, so after a handover (RL action or the radio's own
+            // A3) the measured SINR of the new cell was reported against the
+            // old satellite's E2 node and geometry.
+            uint32_t serv = 0;
+            {
+                const uint16_t cell = rs.GetUeServingCellId(ue);
+                for (uint32_t s = 0; s < numSats; ++s)
+                {
+                    if (cell != 0 && rs.GetGnbCellId(s) == cell)
+                    {
+                        serv = s;
+                        break;
+                    }
+                }
+            }
+            const Vector sp = satMobs[serv]->GetPosition();
+            const Vector sv = satMobs[serv]->GetVelocity();
             const double elev = ntngeo::ElevationDeg(uePos, sp);
             const double doppler = ntngeo::DopplerHz(uePos, ueVel, sp, sv, freqGhz * 1e9);
             double elevRate = 0.0;
-            if (auto it = lastElev.find(0); it != lastElev.end())
+            if (auto it = lastElev.find({serv, ue}); it != lastElev.end())
             {
                 elevRate = (elev - it->second) / kpmIntervalS;
             }
-            lastElev[0] = elev;
+            lastElev[{serv, ue}] = elev;
             const double tte =
                 (elevRate < -1e-3) ? std::max(1.0, (elev - minElevDeg) / -elevRate) : 600.0;
             const uint64_t rxBytes = rs.GetUeRxBytes(ue);
@@ -222,12 +269,13 @@ main(int argc, char* argv[])
             // left unflagged because theirs is a slant-range extrapolation; the
             // one report that had a right to the measured label was the one not
             // claiming it.
-            helper->InjectKpmReport(1, ue, sinr, sinr - 95.0, tte, elev, doppler, thp, rxBytes,
-                                    tbler, /*measPrbUtil=*/-1.0, /*sinrMeasured=*/true);
+            helper->InjectKpmReport(serv + 1, ue, sinr, sinr - 95.0, tte, elev, doppler, thp,
+                                    rxBytes, tbler, /*measPrbUtil=*/-1.0,
+                                    /*sinrMeasured=*/true);
             // Publish the UE's TRUE serving cell (E2 node 1 in this scenario) so
             // the gym reads the serving baseline by identity, not by gnbId map
             // order. In a full RAN this is rs.GetUeServingCellId(ue).
-            hoPredict->SetUeServingCell(ue, 1);
+            hoPredict->SetUeServingCell(ue, serv + 1);
 
             // D3: feed the PHY-KPM extractor from the MEASURED radio. Register the
             // UE's real RNTI once, then ingest each measured sample.
@@ -252,11 +300,21 @@ main(int argc, char* argv[])
             // action rule keys on. It stays unflagged (sinrMeasured defaults
             // false) so downstream consumers see it as derived, which is the
             // honest label for what it is.
-            for (uint32_t c = 1; c < numSats; ++c)
+            for (uint32_t c = 0; c < numSats; ++c)
             {
+                if (c == serv)
+                {
+                    continue;
+                }
                 const Vector cp = satMobs[c]->GetPosition();
                 const Vector cv = satMobs[c]->GetVelocity();
                 const double cElev = ntngeo::ElevationDeg(uePos, cp);
+                // Below the service mask a satellite is not a candidate the UE
+                // can measure; do not extrapolate a SINR for it.
+                if (cElev < minElevDeg)
+                {
+                    continue;
+                }
                 const double cDop = ntngeo::DopplerHz(uePos, ueVel, cp, cv, freqGhz * 1e9);
                 const double servSlant = ntngeo::SlantRangeM(uePos, sp);
                 const double candSlant = ntngeo::SlantRangeM(uePos, cp);

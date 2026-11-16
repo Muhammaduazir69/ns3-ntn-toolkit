@@ -149,7 +149,8 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("sagin-haps-leo-relay");
-    rs.SetCarrierFrequencyHz(2.185e9);
+    constexpr double kFcHz = 2.185e9; // n256 DL block; ONE value for both models
+    rs.SetCarrierFrequencyHz(kFcHz);
     // NT-02: declared as CONDUCTED power at the array input. This carrier has
     // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
     // reports "not asserted" rather than certifying an uncalibrated budget.
@@ -162,7 +163,11 @@ main(int argc, char* argv[])
     }
     rs.Build(satNodes, ueNodes);
     Ptr<SaginA2gPropagationLossModel> a2g = CreateObject<SaginA2gPropagationLossModel>();
-    a2g->SetFrequencyGHz(2.0);
+    // Same carrier as the cell (was 2.0 GHz against a 2.185 GHz cell). The
+    // aerial-band excess is fc-independent (both terms scale as 20log10 fc), so
+    // this is consistency, not a dB change; below the AV height threshold the
+    // TR 38.901 ground formulas (21.3log10 fc for UMi NLOS) do depend on it.
+    a2g->SetFrequencyGHz(kFcHz / 1e9);
     a2g->SetScenario(A2gScenario::UMa_AV);
     a2g->SetLink(A2gLink::NLOS);
     a2g->SetUavAltitudeM(uavAltM);

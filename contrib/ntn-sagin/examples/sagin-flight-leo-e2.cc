@@ -7,9 +7,11 @@
  * O-RAN E2-KPM indications emitted from the satellite gNB to a Near-RT RIC. Each
  * reporting period the E2KpmReport is filled with the MEASURED DL SINR / TBLER /
  * throughput off the mmwave PHY trace (not a closed-form FSPL->SINR or Shannon
- * bound); the elevation/Doppler/delay geometry remains real. A mid-pass elevation
- * descent drops the measured SINR below the in-service threshold so the handover
- * CSV shows a real RELEASE event.
+ * bound); the elevation/Doppler/delay geometry remains real. In-service follows
+ * the measured SINR (> 0 dB) above --minElevDeg. With the default 30 s run the
+ * satellite starts at zenith and stays above ~65 deg, so any RELEASE logged is a
+ * measured-SINR dip, not an elevation descent; the in-service rule has no
+ * hysteresis, so a link near 0 dB can toggle (one CSV row per toggle).
  *
  * Run:
  *   ./ns3 run "sagin-flight-leo-e2 --simSeconds=30 --reportMs=500"
@@ -150,6 +152,13 @@ EmitKpm(Context* ctx, Time reportPeriod)
     {
         r.rsrp_dBm = reportedRsrp;
     }
+    else if (!haveMeas)
+    {
+        // Before the first PHY measurement r.sinr_dB is the -100 dB sentinel;
+        // reconstructing RSRP from it wrote -195 dBm rows, below any TS 38.133
+        // reportable value (-156 dBm). No measurement, no RSRP.
+        r.rsrp_dBm = std::nan("");
+    }
     else
     {
         // No measurement report on this backend. Reconstruct per TS 38.215
@@ -220,7 +229,7 @@ main(int argc, char* argv[])
     cmd.AddValue("cruiseAltM", "Aircraft cruise altitude (m)", cruiseAltM);
     cmd.AddValue("cruiseSpeed", "Aircraft cruise speed (m/s)", cruiseSpeed);
     cmd.AddValue("satAltM", "Satellite altitude (m)", satAltM);
-    cmd.AddValue("satSpeed", "Satellite ground-track speed (m/s)", satSpeed);
+    cmd.AddValue("satSpeed", "IGNORED: SGP4 sets the orbital speed from the altitude (m/s)", satSpeed);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
@@ -270,7 +279,7 @@ main(int argc, char* argv[])
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
     {
-        rs.SetNumerology(1); // FR1 30 kHz SCS
+        rs.SetNumerology(3); // 120 kHz SCS: 20 GHz is Ka-band NTN (TS 38.101-5 FR2-NTN, 60/120 kHz)
     }
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,

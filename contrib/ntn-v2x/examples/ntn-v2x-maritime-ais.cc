@@ -16,8 +16,10 @@
  * FSPL->SINR and no box-bounce mobility.
  *
  * Reuses ntn-sagin classes verbatim (AisDanishImporter, AisMaritimeTrace,
- * AisMobilityModel) and the real sample trace shipped at
- * contrib/ntn-sagin/data/ais-sample-trace.csv.
+ * AisMobilityModel). The default file contrib/ntn-sagin/data/ais-sample-trace.csv
+ * is a small hand-made fixture in the Danish Maritime Authority CSV format (11
+ * rows, round coordinates), NOT a recorded track; pass --aisTrace with a real
+ * aisdk export (https://web.ais.dk/aisdata/) for recorded vessel motion.
  *
  * Usage:
  *   ./ns3 run "ntn-v2x-maritime-ais --simSeconds=30"
@@ -77,22 +79,23 @@ main(int argc, char* argv[])
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm",
+                 "Satellite total EIRP (dBm, antenna gain included); -1 = TR 38.821 Set-1 density",
+                 satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("aisTrace",
-                 "Real Danish Maritime AIS CSV export (no synthetic fallback). "
-                 "Defaults to the shipped ntn-sagin sample trace.",
+                 "Danish Maritime Authority AIS CSV export. Defaults to the shipped "
+                 "ntn-sagin fixture (DMA format, hand-made rows, not a recorded track).",
                  aisTrace);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
     g_simTime = simSeconds;
 
-    // Backend-appropriate EIRP default (honoured only if the user did not set it):
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    if (satEirpDbm < 0.0)
-    {
-        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
-    }
+    // --satEirpDbm used to be parsed, defaulted to 70 dBm, printed as the EIRP
+    // and then ignored: the cell always ran the TR 38.821 Set-1 density. Now
+    // the TR 38.821 density is the default and an explicit value is applied as
+    // the TOTAL EIRP (antenna gain included), which is what the flag says.
+    const bool eirpExplicit = (satEirpDbm >= 0.0);
 
     // Parse a REAL Danish Maritime AIS export and take the first vessel's track.
     sagin::AisDanishImporter importer;
@@ -169,17 +172,29 @@ main(int argc, char* argv[])
     // S-band LEO reference payload. Declared as a DENSITY so the helper
     // back-computes conducted power against the array gain instead of the
     // antenna being counted twice.
-    rs.SetSatEirpDensityDbwMhz(
-        NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    if (eirpExplicit)
+    {
+        rs.SetSatEirpTotalDbm(satEirpDbm);
+    }
+    else
+    {
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
     rs.Build(satNodes, ueNodes);
+    // The EIRP actually radiated, for the banner below.
+    const double eirpPrintedDbm =
+        eirpExplicit ? satEirpDbm
+                     : NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz +
+                           10.0 * std::log10(rs.GetBandwidthHz() / 1e6) + 30.0;
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("ntn-v2x-maritime-ais"); // WS2 KPM series (TS 28.552 names)
     g_rs = &rs;
 
     std::printf("# ntn-v2x-maritime-ais (AIS-replayed vessel UE on a real %s NTN cell)\n"
-                "#   sim=%.0fs leoAlt=%.0fkm freq=%.1fGHz EIRP=%.1fdBm refLatLon=(%.4f,%.4f)\n",
-                radio.c_str(), simSeconds, leoAltKm, freqGHz, satEirpDbm, refLat, refLon);
+                "#   sim=%.0fs leoAlt=%.0fkm freq=%.3fGHz EIRP=%.1fdBm (%s) refLatLon=(%.4f,%.4f)\n",
+                radio.c_str(), simSeconds, leoAltKm, freqGHz, eirpPrintedDbm,
+                eirpExplicit ? "--satEirpDbm" : "TR 38.821 Set-1 34 dBW/MHz", refLat, refLon);
 
     Simulator::Schedule(Seconds(2.0), &LinkProbe);
     Simulator::Stop(Seconds(simSeconds));

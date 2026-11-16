@@ -6,10 +6,13 @@
 // the official 3GPP TR 38.821 Sec. 6.1.3 link-budget methodology (adoption
 // plan WS5). Study case: Set-1 LEO-600, S-band downlink, handheld UE
 // (verified parameters: EIRP density 34 dBW/MHz -> 48.77 dBW over 30 MHz;
-// handheld G/T = -31.62 dB/K with 0 dBi antenna and NF 7 dB; CNR = 15.78 dB
-// at 90 deg elevation where FSPL ~154.8 dB).
+// handheld G/T = -31.62 dB/K with 0 dBi antenna and NF 7 dB; free-space CNR =
+// 16.95 dB at 90 deg elevation (600 km slant) where FSPL = 154.03 dB at 2 GHz,
+// the values the run prints on its first line).
 //
-// The satellite is a REAL SGP4 element at 600 km; every second the example
+// The satellite is a real Walker element at 600 km propagated with Kepler + J2
+// (kept off SGP4 so the published calibration stays reproducible; SCOPE A8);
+// every second the example
 // computes the TR closed-form CNR at the LIVE slant range and compares it to
 // the SINR MEASURED off the PHY trace. Two calibration gates:
 //   * tracking: the offset (measured - TR CNR) must be CONSTANT across the
@@ -141,6 +144,7 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-tr38821-calibration");
     rs.SetCarrierFrequencyHz(kFreqHz);
+    rs.DeclareCalibrationCarrier(); // TR 38.821 Table 6.1.1.1-1 2 GHz calibration carrier
     rs.SetBandwidthHz(kBwHz);
     // NT-02 FIX (2026-08-24): kEirpDbw is the TR 38.821 Set-1 TOTAL EIRP, and
     // the closed-form reference above uses it as such. Passing it to the

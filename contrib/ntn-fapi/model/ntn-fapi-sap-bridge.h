@@ -157,8 +157,10 @@ class NtnFapiSapBridge : public Object
     /// \param preCompensated the amount the UE already applied (Time() for none).
     void SetNtnTimingAdvance(Time roundTrip, Time preCompensated = Time());
     Time GetResidualTimingAdvance() const { return m_taResidual; }
-    /// Residual expressed in T_C units of TS 38.211 section 4.1, which is the
-    /// unit the FAPI timingAdvance field carries.
+    /// Residual expressed in T_C units of TS 38.211 section 4.1. FAPI-6: the
+    /// RACH.indication timingAdvance field carries the TS 38.213 section 4.2 TA
+    /// command index instead (units of 16 * 64 * T_c / 2^mu, 0..3846); the
+    /// bridge converts when it fills that field.
     uint32_t GetResidualTaInTc() const;
 
     // ---- Provenance of the SAP latency (FAPI-2) --------------------------
@@ -282,6 +284,8 @@ class NtnFapiSapBridge : public Object
     std::map<uint64_t, uint8_t> m_dlHarqId;
 
     SlotIndication m_lastSlot{};
+    /// FAPI-5: SlotKey of the last SLOT.indication emitted (one per slot).
+    uint64_t m_lastSlotIndKey{~static_cast<uint64_t>(0)};
     DlTtiRequest m_lastDlTti{};
     UlTtiRequest m_lastUlTti{};
     TxDataRequest m_lastTxData{};

@@ -184,11 +184,17 @@ main(int argc, char* argv[])
         // down) before it applies at the vehicle.
         const double slantM = vehMob->GetDistanceFrom(satEnu);
         const Time leg = placement->ComputeE2Delay(slantM);
+        // The command is applied AT THE VEHICLE, so after the E2 legs it still
+        // crosses the satellite-to-vehicle service link. ComputeE2Delay() covers
+        // only DU <-> RIC (zero propagation for an on-board RIC), so the decision
+        // latency used to omit this slant/c term (about 1.8 ms at 550 km zenith)
+        // and an on-board edge reported a processing-only 1.00 ms.
+        const Time serviceLink = Seconds(slantM / 299792458.0);
         const Time sensedAt = now;
-        Simulator::Schedule(leg, [&, f, sensedAt, leg] {
+        Simulator::Schedule(leg, [&, f, sensedAt, leg, serviceLink] {
             const auto act = xapp->Infer({f.delayMeanMs, f.lossMean, f.sinrMeanDb});
             const bool brake = !act.empty() && act[0] > 0.5;
-            Simulator::Schedule(leg, [&, sensedAt, brake] {
+            Simulator::Schedule(leg + serviceLink, [&, sensedAt, brake] {
                 const double dt = (Simulator::Now() - sensedAt).GetSeconds();
                 decisionLatenciesMs.push_back(dt * 1e3);
                 // V2X-9: actuate. The command applies to the vehicle's own
@@ -229,13 +235,19 @@ main(int argc, char* argv[])
 
     // 5GAA-style KPIs on the URLLC control flow, measured in-band.
     Ptr<NtnOranSink> ctrlSink = DynamicCast<NtnOranSink>(ctrl.Get(1));
-    std::printf("# === 5GAA-style KPIs (measured) ===\n");
+    // Platoon control is a TS 22.186 Table 5.2-1 (TR 22.886 Sec. 5.x platooning)
+    // requirement: 25 ms max end-to-end latency for the lower degree of
+    // automation, 10 ms for the highest. The 100 ms checked before is the
+    // TS 22.185 basic-safety (BSM/CAM) budget, which says nothing about a
+    // platooning control loop.
+    std::printf("# === TS 22.186 platooning KPIs (measured) ===\n");
     for (const auto& [k, fs] : ctrlSink->GetFlowStats())
     {
-        std::printf("#   control 5QI=%u owd=%.2f ms (target <100 ms %s) "
-                    "PDR=%.4f jitter=%.3f ms\n",
+        std::printf("#   control 5QI=%u owd=%.2f ms (TS 22.186 platooning <=25 ms %s, "
+                    "<=10 ms %s) PDR=%.4f jitter=%.3f ms\n",
                     fs.fiveQi, fs.MeanDelayMs(),
-                    fs.MeanDelayMs() < 100.0 ? "MET" : "MISSED",
+                    fs.MeanDelayMs() <= 25.0 ? "MET" : "MISSED",
+                    fs.MeanDelayMs() <= 10.0 ? "MET" : "MISSED",
                     1.0 - fs.LossRatio(), fs.jitterMs);
     }
     // V2X-9: report the ACTUATION, not just the decision count. A brake command

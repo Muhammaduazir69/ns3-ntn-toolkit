@@ -4,7 +4,9 @@
 
 #include "orbital-elements.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <ctime>
 #include <sstream>
 #include <stdexcept>
@@ -217,6 +219,67 @@ TleRecord::ToKeplerian(KeplerianElements& out) const
     out.bstar = bstar;
     out.norad_id = static_cast<uint32_t>(norad);
     out.name = name;
+    return true;
+}
+
+bool
+MakeTleFromElements(const KeplerianElements& el, TleRecord& out)
+{
+    const double n = el.MeanMotionRadS();
+    if (n <= 0.0 || el.eccentricity < 0.0 || el.eccentricity >= 1.0)
+    {
+        return false;
+    }
+    auto wrapDeg = [](double rad) {
+        double d = std::fmod(rad / kDegToRad, 360.0);
+        if (d < 0.0)
+        {
+            d += 360.0;
+        }
+        // %8.4f would print 360.0000 for values that round up; keep it in range.
+        return (d >= 359.99995) ? 0.0 : d;
+    };
+    const double revPerDay = n * 86400.0 / kTwoPi;
+    const double inc = el.inclination_rad / kDegToRad;
+    if (revPerDay >= 100.0 || inc < 0.0 || inc > 180.0)
+    {
+        return false;
+    }
+
+    // Epoch as two-digit year + day of year with fraction (TLE cols 19-32).
+    const double epochFloor = std::floor(el.epoch_unix_s);
+    const time_t tt = static_cast<time_t>(epochFloor);
+    std::tm tm{};
+    if (gmtime_r(&tt, &tm) == nullptr)
+    {
+        return false;
+    }
+    const double secOfDay = tm.tm_hour * 3600.0 + tm.tm_min * 60.0 + tm.tm_sec +
+                            (el.epoch_unix_s - epochFloor);
+    const double doy = (tm.tm_yday + 1) + secOfDay / 86400.0;
+    const int yy = (tm.tm_year + 1900) % 100;
+    const unsigned satnum = el.norad_id % 100000u;
+    const long eccDigits = std::lround(el.eccentricity * 1e7);
+
+    char l1[80];
+    char l2[80];
+    // Line 1: no designator, zero ndot/nddot/B*, ephemeris type 0, element set 999.
+    std::snprintf(l1, sizeof(l1), "1 %05uU %-8s %02d%012.8f  .00000000  00000-0  00000-0 0  999",
+                  satnum, "", yy, doy);
+    std::snprintf(l2, sizeof(l2), "2 %05u %8.4f %8.4f %07ld %8.4f %8.4f %11.8f%5d", satnum, inc,
+                  wrapDeg(el.raan_rad), std::min(eccDigits, 9999999L),
+                  wrapDeg(el.arg_perigee_rad), wrapDeg(el.mean_anomaly_rad), revPerDay, 0);
+    std::string s1(l1);
+    std::string s2(l2);
+    if (s1.size() != 68 || s2.size() != 68)
+    {
+        return false;
+    }
+    s1.push_back(static_cast<char>('0' + TleChecksum(s1)));
+    s2.push_back(static_cast<char>('0' + TleChecksum(s2)));
+    out.name = el.name;
+    out.line1 = s1;
+    out.line2 = s2;
     return true;
 }
 

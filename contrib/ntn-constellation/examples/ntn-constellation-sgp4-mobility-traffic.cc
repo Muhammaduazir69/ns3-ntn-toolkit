@@ -8,8 +8,10 @@
 // SpectrumPhy + MAC + HARQ + RLC/PDCP + RRC + EPC) toward a ground terminal,
 // while the ContactGraphScheduler tracks GSL up/down events from the live
 // Vallado SGP4 geometry.
-// The ground station is auto-placed at the satellite's t=0 sub-point so a real
-// rise->zenith->set pass occurs, and the radio KPIs (SINR/TBLER/throughput) are
+// The ground station is auto-placed at the satellite's sub-point at mid-run, so
+// the run is centred on the zenith of a real pass (elevation climbs to ~90 deg
+// and falls back; a full horizon-to-horizon rise and set takes ~10 min, so it
+// needs --simSeconds of that order), and the radio KPIs (SINR/TBLER/throughput) are
 // MEASURED off the mmwave PHY trace — no closed-form SINR, no P2P star.
 //
 // Quick test:  --simSeconds=20 --tle=contrib/ntn-rrc/data/iss-zarya.tle
@@ -51,20 +53,6 @@ ReadThreeLineTle(const std::string& path, TleRecord& tle)
     return tle.line1.size() >= 60 && tle.line2.size() >= 60;
 }
 
-Vector
-GeodeticToEcef(double latDeg, double lonDeg, double altM)
-{
-    constexpr double kA = 6378137.0;
-    constexpr double kF = 1.0 / 298.257223563;
-    constexpr double kE2 = kF * (2.0 - kF);
-    const double latR = latDeg * M_PI / 180.0;
-    const double lonR = lonDeg * M_PI / 180.0;
-    const double s = std::sin(latR), c = std::cos(latR);
-    const double N = kA / std::sqrt(1.0 - kE2 * s * s);
-    return Vector((N + altM) * c * std::cos(lonR),
-                  (N + altM) * c * std::sin(lonR),
-                  (N * (1.0 - kE2) + altM) * s);
-}
 } // namespace
 
 int
@@ -83,7 +71,7 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("tle", "Path to 3-line TLE (default: contrib/ntn-rrc/data/iss-zarya.tle)", tlePath);
     cmd.AddValue("gsLat", "Ground-station latitude (deg; default = sat sub-point)", gsLatDeg);
@@ -93,9 +81,27 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
 
     const bool useNr = (radio != "mmwave");
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
-    // healthy SINR; mmwave keeps a comparable 58 dBm (zero regression).
-    if (satEirpDbm < 0.0)
+    // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the nr
+    // default is now that Set-1 density, as ntn-v2x-real-stack does; an
+    // explicit --satEirpDbm keeps meaning conducted power, and mmwave keeps
+    // its historical 58.0 dBm.
+    // The probe mirrors the cell's carrier and bandwidth and returns the
+    // equivalent CONDUCTED power from the helper's own formula
+    // (density + 10log10(BW_MHz) + 30 - ArrayGainDb()), so every other
+    // consumer of satEirpDbm stays consistent with the radio.
+    NtnRealStackHelper eirpProbe;
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && useNr &&
+                                 eirpProbe.GetCarrierFrequencyHz() > 1.0e9 &&
+                                 eirpProbe.GetCarrierFrequencyHz() <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        eirpProbe.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        satEirpDbm = eirpProbe.GetSatEirpDbm();
+    }
+    else if (satEirpDbm < 0.0)
     {
         satEirpDbm = useNr ? 70.0 : 58.0;
     }
@@ -134,14 +140,19 @@ main(int argc, char* argv[])
     // propagator for a low-drag ISS-class TLE. If the Vallado init fails the
     // model falls back to the Kepler+J2-secular path automatically.
     sat->SetUseVallado(true);
+    // Sub-point at mid-run, not at t=0: placing the station under the t=0
+    // sub-point made every run start at zenith and only ever set, so the
+    // "rise, zenith, set" the example describes never had its rising half.
+    Vector midPos;
+    Vector midVel;
+    sat->GetEcefStateAt(Seconds(0.5 * simSeconds), midPos, midVel);
     double subLat, subLon, subAlt;
-    sat->GetGeodetic(subLat, subLon, subAlt);
+    ntngeo::EcefToGeodetic(midPos, subLat, subLon, subAlt);
     if (std::isnan(gsLatDeg) || std::isnan(gsLonDeg))
     {
         gsLatDeg = subLat;
         gsLonDeg = subLon;
     }
-    const Vector gsEcef = GeodeticToEcef(gsLatDeg, gsLonDeg, 540.0);
 
     // ---- nodes: the Vallado SGP4 satellite (real mmwave gNB) + ground UEs ----
     NodeContainer satNodes;
@@ -173,11 +184,25 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-constellation-sgp4-mobility-traffic");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (eirpFromTr38821)
+    {
+        // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 S-band EIRP density. The
+        // helper back-computes the conducted power from the bandwidth and
+        // the array gain, and again in Build().
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit value (or a default on a carrier outside the
+        // Set-1 S-band reference) is CONDUCTED power at the array input.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, ueNodes);
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("ntn-constellation-sgp4-mobility-traffic"); // WS2 KPM series (TS 28.552 names)

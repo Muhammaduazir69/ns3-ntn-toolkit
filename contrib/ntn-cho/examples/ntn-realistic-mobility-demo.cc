@@ -74,7 +74,7 @@ main(int argc, char** argv)
     std::string outputDir = "./mob_demo";
     double simTime = 20.0;
     double dt = 1.0;
-    uint32_t numUes = 4; // mixed TR 38.811 classes on the real radio PHY
+    uint32_t numUes = 7; // one per TR 38.811 class (CHO-28), cycled if larger
     uint32_t rngRun = 1;
     double altitudeKm = 550.0;
     double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
@@ -88,17 +88,37 @@ main(int argc, char** argv)
     cmd.AddValue("rngRun", "RNG seed", rngRun);
     cmd.AddValue("altitude", "Serving constellation altitude (km)", altitudeKm);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
-    cmd.AddValue("numUes", "Number of real ns-3 UEs (one per TR 38.811 class)", numUes);
+    cmd.AddValue("numUes", "Number of real ns-3 UEs; classes assigned round robin over the 7 "
+                 "TR 38.811 classes (7 = one per class)", numUes);
     cmd.Parse(argc, argv);
     g_simTime = simTime;
     g_dt = dt;
 
     const bool useNr = (radio != "mmwave");
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~70 dBm for a
-    // healthy SINR; mmwave keeps its historical 55 dBm (zero regression).
-    if (satEirpDbm < 0.0)
+    // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the nr
+    // default is now that Set-1 density, as ntn-v2x-real-stack does; an
+    // explicit --satEirpDbm keeps meaning conducted power, and mmwave keeps
+    // its historical 55.0 dBm.
+    // The probe mirrors the cell's carrier and bandwidth and returns the
+    // equivalent CONDUCTED power from the helper's own formula
+    // (density + 10log10(BW_MHz) + 30 - ArrayGainDb()), so every other
+    // consumer of satEirpDbm stays consistent with the radio.
+    NtnRealStackHelper eirpProbe;
+    eirpProbe.SetCarrierFrequencyHz(freqGhz * 1e9);
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && useNr &&
+                                 eirpProbe.GetCarrierFrequencyHz() > 1.0e9 &&
+                                 eirpProbe.GetCarrierFrequencyHz() <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        eirpProbe.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        satEirpDbm = eirpProbe.GetSatEirpDbm();
+    }
+    else if (satEirpDbm < 0.0)
     {
         satEirpDbm = useNr ? 70.0 : 55.0;
     }
@@ -141,8 +161,31 @@ main(int argc, char** argv)
 
     g_ueNodes.Create(numUes);
     NtnTr38811MobilityHelper ueMobility(static_cast<uint64_t>(rngRun));
-    g_ueModels = ueMobility.Install(g_ueNodes, fairProfile, subLat - 0.05, subLat + 0.05,
+    // CHO-28: the README and registry promise one UE per TR 38.811 section
+    // 6.1.1.1 class, but the classes were DRAWN from an equal-probability
+    // profile: the 4-UE default could not cover 7 classes, and the stored 6-UE
+    // run had two vehicular terminals and no static or IoT one. Assign the
+    // classes round robin with a one-hot profile per node instead; positions
+    // and class-specific motion still come from the same generator and seed.
+    (void)fairProfile;
+    for (uint32_t i = 0; i < numUes; ++i)
+    {
+        MobilityProfile oneHot{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        switch (i % 7)
+        {
+        case 0: oneHot.pStatic = 1.0; break;
+        case 1: oneHot.pPedestrian = 1.0; break;
+        case 2: oneHot.pVehicular = 1.0; break;
+        case 3: oneHot.pHst = 1.0; break;
+        case 4: oneHot.pMaritime = 1.0; break;
+        case 5: oneHot.pAviation = 1.0; break;
+        default: oneHot.pIot = 1.0; break;
+        }
+        NodeContainer one(g_ueNodes.Get(i));
+        auto m = ueMobility.Install(one, oneHot, subLat - 0.05, subLat + 0.05,
                                     subLon - 0.05, subLon + 0.05);
+        g_ueModels.push_back(m[0]);
+    }
 
     std::cout << "Spawned " << g_ueModels.size()
               << " REAL ns-3 UEs (TR 38.811 classes) under the serving pass:\n";
@@ -167,11 +210,25 @@ main(int argc, char** argv)
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-realistic-mobility-demo");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (eirpFromTr38821)
+    {
+        // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 S-band EIRP density. The
+        // helper back-computes the conducted power from the bandwidth and
+        // the array gain, and again in Build().
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit value (or a default on a carrier outside the
+        // Set-1 S-band reference) is CONDUCTED power at the array input.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(servSat, g_ueNodes);
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming, Seconds(1.0),
                       Seconds(simTime - 0.5));
 

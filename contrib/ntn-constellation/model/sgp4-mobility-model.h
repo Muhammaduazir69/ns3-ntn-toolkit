@@ -82,6 +82,12 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     /// Install classical elements directly.
     void SetElements(const KeplerianElements& elements);
 
+    /// Install classical elements and propagate them with Vallado SGP4: the
+    /// elements are written as a synthesized TLE (MakeTleFromElements) and
+    /// loaded through SetTle(). Use this where a generated shell must run SGP4;
+    /// SetElements() keeps the Kepler + J2 path. Returns false (and leaves the
+    /// Kepler + J2 elements installed) if the TLE cannot be formed.
+    bool SetElementsSgp4(const KeplerianElements& elements);
     /// Convenience: parse a TLE record and install it.
     /// Returns false on parse failure.
     bool SetTle(const TleRecord& tle);

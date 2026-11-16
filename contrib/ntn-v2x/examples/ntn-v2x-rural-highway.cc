@@ -6,10 +6,13 @@
  * connectivity from a single LEO satellite. The vehicle mobility is replayed
  * from a SUMO FCD trace (SumoTraciBridge, trace-replay mode, so CI needs no live
  * SUMO). The LEO link quality is MEASURED off a real mmwave NR cell
- * (NtnRealStackHelper) over representative highway terminals; each vehicle's
- * direct uplink SINR is that measured baseline minus its 3GPP-style NLOS
- * blockage, and a vehicle that cannot clear the threshold relays through the
- * nearest in-range peer that can. The direct/relay/orphan split is therefore
+ * (NtnRealStackHelper) with every vehicle a UE of the cell; each vehicle's
+ * direct link quality is its OWN measured PHY SINR (TR 38.811 Rural excess
+ * loss and shadowing on the measured channel, no per-vehicle blockage
+ * constant), and a vehicle that cannot clear the threshold relays through the
+ * nearest in-range peer that can. On an open rural highway with a LEO near
+ * zenith every vehicle normally clears the threshold, so n_relay = n_orphan = 0
+ * is the expected physical outcome, not a defect. The direct/relay/orphan split is therefore
  * driven by the MEASURED radio, not V2xLeoDirect's closed-form budget.
  *
  * Quick test:  --vehicles=40 --simTime=30
@@ -192,11 +195,14 @@ main(int argc, char* argv[])
     g_simTime = simTimeSec;
     g_dt = dtSec;
 
-    // Backend-appropriate EIRP default (honoured only if the user did not set it):
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    if (satEirpDbm < 0.0)
+    // EIRP default: TR 38.821 Table 6.1.1.1-1 Set-1 S-band density (34 dBW/MHz)
+    // for nr, as ntn-v2x-edge-urllc does. It used to put 70 dBm (10 kW) of
+    // CONDUCTED power on the array, about 20 dB above that payload once the
+    // array gain is added. An explicit --satEirpDbm is honored as conducted power.
+    const bool eirpFromTr38821 = (satEirpDbm < 0.0 && radio != "mmwave");
+    if (satEirpDbm < 0.0 && radio == "mmwave")
     {
-        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
+        satEirpDbm = 55.0;
     }
 
     // FCD-format CSV vehicle mobility (trace replay from a supplied file; the
@@ -241,7 +247,10 @@ main(int argc, char* argv[])
     ueNodes.Create(static_cast<uint32_t>(nVehicles));
     for (std::size_t i = 0; i < nVehicles; ++i)
     {
-        Ptr<ConstantPositionMobilityModel> mob = CreateObject<ConstantPositionMobilityModel>();
+        // ConstantVelocity, not ConstantPosition: the FCD bridge pushes each
+        // vehicle's velocity (V2X-6), and a constant-position model drops it,
+        // so the radio saw parked cars and no Doppler.
+        Ptr<ConstantVelocityMobilityModel> mob = CreateObject<ConstantVelocityMobilityModel>();
         mob->SetPosition(Vector(300.0 * i, 0, 1.5));
         g_bridge->RegisterVehicle("veh" + std::to_string(i), mob);
         g_vMobs.push_back(mob);
@@ -285,10 +294,18 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-v2x-rural-highway");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (eirpFromTr38821)
+    {
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit value is CONDUCTED power at the array input.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
+    // A rural highway is the TR 38.811 Rural scenario (0=DU,1=U,2=SU,3=Rural);
+    // the helper default is Suburban.
+    rs.SetNtnScenario(3);
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
@@ -308,9 +325,18 @@ main(int argc, char* argv[])
     g_out.close();
 
     // Contrast: the OLD closed-form direct budget for a reference terminal.
-    V2xLinkBudget formula = V2xLeoDirect::ComputeStatic(Vector(0, 0, 1.5),
-                                                        Vector(0, 0, 550000.0), 2.0, satEirpDbm,
-                                                        -110.0);
+    // Same convention as the radio: total EIRP over the cell bandwidth, noise
+    // kTB + 7 dB NF (TR 38.821 Table 6.1.1.1-3), instead of conducted power
+    // treated as EIRP and a -110 dBm floor below thermal noise.
+    const double bwHz = rs.GetBandwidthHz();
+    const double eirpTotalDbm =
+        eirpFromTr38821
+            ? NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz + 10.0 * std::log10(bwHz / 1e6) +
+                  30.0
+            : satEirpDbm;
+    V2xLinkBudget formula = V2xLeoDirect::ComputeStatic(
+        Vector(0, 0, 1.5), Vector(0, 0, 550000.0), rs.GetCarrierFrequencyHz() / 1e9, eirpTotalDbm,
+        -174.0 + 10.0 * std::log10(bwHz) + 7.0);
     std::cout << "ntn-v2x-rural-highway done.\n"
               << "  vehicles            : " << nVehicles << "\n"
               << "  measured cell SINR  : " << rs.GetMeanDlSinrDb() << " dB (baseline)\n"

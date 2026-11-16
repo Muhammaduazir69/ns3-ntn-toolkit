@@ -47,7 +47,7 @@ main(int argc, char* argv[])
     double simTime = 10.0;     // seconds
     uint32_t numUes = 6;       // ground UEs (2 per slice for MixedBouquet)
     double altitudeKm = 600.0; // LEO altitude
-    double satEirpDbm = 70.0;
+    double satEirpDbm = -1.0; // sentinel: TR 38.821 Set-1 S-band density on an S-band carrier
     double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
                               // which is n256 UPLINK and never conformant as a DL carrier.
     double bwMhz = 20.0; // TS 38.101-5 Table 5.3.5-1: n256 allows 5/10/15/20 MHz.
@@ -60,7 +60,9 @@ main(int argc, char* argv[])
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altitudeKm", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB TxPower (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm",
+                 "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)",
+                 satEirpDbm);
     cmd.AddValue("bwMhz", "Channel bandwidth (MHz)", bwMhz);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
@@ -71,15 +73,15 @@ main(int argc, char* argv[])
     NodeContainer ueNodes;
     ueNodes.Create(numUes);
 
-    // Two satellites in view: sat 0 overhead moving at a realistic LEO
-    // ground-track speed, sat 1 a neighbour cell 20 km to the side. The A3-RSRP
+    // Two satellites in view: sat 0 overhead and sat 1 its in-plane neighbour,
+    // 4.5 deg (~500 km of ground track) ahead. The A3-RSRP
     // handover algorithm + X2 (Enabler A) are installed, armed and fully wired
     // (the helper cross-wires the A3 algorithm to each gNB RRC, which the
     // vendored NrHelper itself omits), so the UE emits real neighbour RSRP
     // reports and the A3 event will trigger an X2 handover once the neighbour
     // RSRP crosses the serving cell by the hysteresis. On THIS demo's geometry
-    // -- sat 1 only 20 km to the side over a short sim -- both slant ranges hug
-    // 600 km and that crossover is not reached, so no handover fires here; that
+    // sat 1 is ahead and receding, so its RSRP stays several dB below the
+    // serving cell over the short sim and no handover fires here; that
     // is expected and is exactly why Rel-17 NTN prefers elevation/time
     // CondEvents (carried by ntn-cho). The A3/X2 machinery firing end to end on
     // a realistic 600 km LEO pass is verified by the dedicated
@@ -87,17 +89,20 @@ main(int argc, char* argv[])
     // Two REAL LEO satellites from a Walker-Delta shell: adjacent members of the
     // same plane, each SGP4-propagated on a genuine ~600 km / 53-deg orbit at
     // ~7.5 km/s (TR 38.821 LEO regime) — not ConstantVelocity straight lines.
+    // 80 per plane: adjacent members are 4.5 deg apart and both in view. With 6
+    // per plane (60 deg apart) sat 1 was below the UE's horizon all run, so the
+    // "two satellites in view" this demo describes was not the geometry it ran.
     WalkerConfig wcfg;
     wcfg.num_planes = 1;
-    wcfg.total_sats = 6;
+    wcfg.total_sats = 80;
     wcfg.altitude_km = altitudeKm;
     wcfg.inclination_deg = 53.0;
     wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01T00:00:00Z
     const auto elements = WalkerConstellation::BuildDelta(wcfg);
     Ptr<Sgp4MobilityModel> sat0 = CreateObject<Sgp4MobilityModel>();
-    sat0->SetElements(elements[0]);
+    sat0->SetElementsSgp4(elements[0]);
     Ptr<Sgp4MobilityModel> sat1 = CreateObject<Sgp4MobilityModel>();
-    sat1->SetElements(elements[1]);
+    sat1->SetElementsSgp4(elements[1]);
     gnbNodes.Get(0)->AggregateObject(sat0);
     gnbNodes.Get(1)->AggregateObject(sat1);
 
@@ -117,10 +122,26 @@ main(int argc, char* argv[])
     rs.SetNumerology(1);
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
     rs.SetBandwidthHz(bwMhz * 1e6);
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    // EIRP default (NT-02 calibration). This used to be a fixed 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the default
+    // is now that Set-1 density and the helper back-computes the conducted
+    // power from the bandwidth and the array gain (again in Build()). An
+    // explicit --satEirpDbm keeps meaning conducted power at the array input.
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && freqGhz * 1e9 > 1.0e9 && freqGhz * 1e9 <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        if (satEirpDbm < 0.0)
+        {
+            satEirpDbm = 70.0; // legacy default, kept for carriers outside Set-1
+        }
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.SetUeTxPowerDbm(23.0);
     rs.SetBackhaulDelay(MilliSeconds(5));
 
@@ -170,7 +191,10 @@ main(int argc, char* argv[])
     std::cout << "  [A] Handovers done  : " << rs.GetHandoverCount() << "\n";
     std::cout << "  [C] Per-slice (BWP) measured SINR / TB:\n";
     const char* label[3] = {"eMBB ", "URLLC", "mMTC "};
-    for (uint8_t b = 0; b < 3; ++b)
+    // Only the BWPs that exist: --slices=false builds one, and asking for
+    // BWPs 1 and 2 printed "SINR=nan dB, TB=0" for parts that were never built.
+    const uint8_t nBwp = slices ? 3 : 1;
+    for (uint8_t b = 0; b < nBwp; ++b)
     {
         std::cout << "        BWP " << static_cast<int>(b) << " (" << label[b]
                   << "): SINR=" << rs.GetBwpMeanSinrDb(b) << " dB, TB=" << rs.GetBwpRxTb(b) << "\n";

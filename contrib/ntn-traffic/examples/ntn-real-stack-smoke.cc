@@ -18,6 +18,9 @@
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 
+#include <algorithm>
+#include <cmath>
+
 
 using namespace ns3;
 
@@ -48,7 +51,7 @@ main(int argc, char* argv[])
     // the Suburban shadow-fading bins.
     bool satBeam = false;
     double beamwidthDeg = 4.4127; // TR 38.821 Table 6.1.1.1-1 Set-1, LEO-600 S-band
-    double beamCenterXKm = 0.0;   // fixed beam centre offset along +x; 0 = track the UEs
+    double beamCenterXKm = 0.0;   // fixed beam centre offset east of the UEs; 0 = track them
     std::string ntnScenario = "suburban";
 
     CommandLine cmd;
@@ -86,7 +89,7 @@ main(int argc, char* argv[])
                  satBeam);
     cmd.AddValue("beamwidthDeg", "3 dB beamwidth for --satBeam [deg]", beamwidthDeg);
     cmd.AddValue("beamCenterXKm",
-                 "Fixed beam-centre offset along +x [km] for --satBeam. 0 keeps the beam "
+                 "Fixed beam-centre offset east of the UE cluster [km] for --satBeam. 0 keeps the beam "
                  "tracking the terminal, which puts theta at 0 and the roll-off at 0 dB - "
                  "that is exactly why a steered-beam calibration reports a constant offset.",
                  beamCenterXKm);
@@ -120,7 +123,7 @@ main(int argc, char* argv[])
     const auto wElements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> servSatMob =
         CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-    servSatMob->SetElements(wElements[0]);
+    servSatMob->SetElementsSgp4(wElements[0]);
     satNodes.Get(0)->AggregateObject(servSatMob);
     double subLat, subLon, subAlt;
     servSatMob->GetGeodetic(subLat, subLon, subAlt);
@@ -171,8 +174,16 @@ main(int argc, char* argv[])
         Ptr<MobilityModel> beamCenter;
         if (beamCenterXKm != 0.0)
         {
+            // The scene is ECEF (SGP4 satellite, TR 38.811 UEs), so the beam
+            // centre must be a ground point in ECEF too: the UE cluster's
+            // sub-point moved beamCenterXKm east on the WGS-84 ellipsoid. It was
+            // Vector(beamCenterXKm * 1e3, 0, 0), a flat-frame offset that in
+            // ECEF lies near the Earth's centre, so the "fixed beam" pointed
+            // almost at nadir whatever offset was asked for.
+            const double kmPerDegLon = 111.320 * std::cos(subLat * M_PI / 180.0);
             Ptr<ConstantPositionMobilityModel> c = CreateObject<ConstantPositionMobilityModel>();
-            c->SetPosition(Vector(beamCenterXKm * 1e3, 0.0, 0.0));
+            c->SetPosition(ntngeo::GeodeticToEcef(
+                subLat, subLon + beamCenterXKm / std::max(1.0, kmPerDegLon), 0.0));
             beamCenter = c;
         }
         rs.SetSatelliteBeam(beamwidthDeg, beamCenter);

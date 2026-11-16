@@ -79,9 +79,19 @@ main(int argc, char* argv[])
     }
 
     // ---- REAL SGP4 satellites (ECEF) ----
+    // OBS-18: render a contiguous in-plane WINDOW of an 80-satellite plane (the
+    // same shell the other two examples here use), not `sats` satellites spread
+    // evenly round the whole orbit. With total_sats == sats == 6 they sat 60
+    // degrees apart, so only satellite 0 was above the UE's horizon, the
+    // "real handover path" could never fire, and every satellite became a gNB
+    // whose 7,000+ km slant entered the helper's averaged service-link delay
+    // (sweep 7336a43c9b11: service_link_delay_ms 27.95, app OWD 34.9 ms at a
+    // 550 km zenith pass, against a ~1.8 ms TR 38.821 Table 4.2-2 service leg).
+    constexpr uint32_t kSatsPerPlane = 80;
+    NS_ABORT_MSG_IF(sats > kSatsPerPlane, "--sats must be <= " << kSatsPerPlane);
     ns3::ntncon::WalkerConfig wcfg;
     wcfg.num_planes = 1;
-    wcfg.total_sats = std::max<uint32_t>(sats, 1);
+    wcfg.total_sats = kSatsPerPlane;
     wcfg.altitude_km = altitudeKm;
     wcfg.inclination_deg = 53.0;
     wcfg.epoch_unix_s = 1735689600.0;
@@ -91,8 +101,13 @@ main(int argc, char* argv[])
     satNodes.Create(sats);
     for (uint32_t s = 0; s < sats; ++s)
     {
+        // Slot order 0, +1, -1, +2, -2, ...: satellite 0 serves the UE, its
+        // in-plane neighbours lead and trail it (4.5 deg apart), so the
+        // approaching one is a genuine handover target on a longer run.
+        const uint32_t k = (s + 1) / 2;
+        const uint32_t slot = (s % 2 == 1) ? k : (kSatsPerPlane - k) % kSatsPerPlane;
         Ptr<ns3::ntncon::Sgp4MobilityModel> m = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
-        m->SetElements(elements[s]);
+        m->SetElements(elements[slot]);
         satNodes.Get(s)->AggregateObject(m);
     }
 
@@ -323,7 +338,11 @@ main(int argc, char* argv[])
     // phy_rx_tb and rx_throughput_mbps came out zero while the application
     // counters showed traffic flowing. A health record claiming the radio
     // carried nothing, in a run where it did, is worse than no record at all.
-    rs.SetOutputDir("./ntn-netsimulyzer-official-demo-output/");
+    // OBS-18: honor --outputDir. The fixed "./...-output/" ignored it, so a
+    // run's sim_health.csv landed under the launch directory.
+    rs.SetOutputDir((outputDir.empty() || outputDir == ".")
+                        ? std::string("./ntn-netsimulyzer-official-demo-output/")
+                        : outputDir);
     rs.WriteHealthReport();
 
 
@@ -349,6 +368,7 @@ main(int argc, char* argv[])
         .SetTleEpoch(epochBuf)
         .SetConstellation("walker-delta", wcfg.num_planes, satsPerPlane, altitudeKm, 53.0)
         .SetCliArgv(argc, argv)
+        .AddExtra("rendered_sats", std::to_string(sats))
         .AddExtra("mean_dl_sinr_db", std::to_string(rs.GetMeanDlSinrDb()));
     const bool wrote = manifest.WriteJson(manifestPath);
 

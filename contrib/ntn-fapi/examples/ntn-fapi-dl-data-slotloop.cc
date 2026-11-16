@@ -10,8 +10,15 @@
  * CRC.indication is decided by the MEASURED PHY outcome: the recent DL SINR and
  * TBLER are read off the mmwave RxPacketTraceUe trace (the real SINR->BLER error
  * model), so CRC pass/fail and HARQ feedback follow the measured TBLER — not a
- * closed-form SinrToBler() sigmoid or a coin-flip. A mid-run elevation descent
- * drops the measured SINR so CRC failures and HARQ retransmissions appear.
+ * closed-form SinrToBler() sigmoid or a coin-flip. CRC failures and HARQ
+ * retransmissions appear wherever the measured SINR of the pass produces them.
+ *
+ * Scope (FAPI-8): SCF FAPI CRC.indication and RX_DATA.indication report the
+ * gNB's PUSCH decode. The decode used here is the UE's PDSCH decode, whose
+ * outcome a real gNB L1 would report as HARQ-ACK in UCI.indication, K1 slots
+ * plus one NTN round trip later (TS 38.213 section 9.2.3). The struct and
+ * counters keep the CRC.indication shape for comparability with the stored
+ * runs; read them as the DL HARQ outcome.
  *
  * Quick test:  --simSeconds=20 --numUes=4 --scsKhz=30
  */
@@ -155,26 +162,46 @@ main(int argc, char* argv[])
     cmd.AddValue("scsKhz", "Sub-carrier spacing (kHz): 15/30/60/120", scsKhz);
     cmd.AddValue("tbBytes", "FAPI transport-block size (bytes)", tbBytes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: mmwave (FR2, per-TB FAPI loop) or nr (FR1)", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
     g_simTime = simSeconds;
     g_tbBytes = tbBytes;
     g_slotsPerSubframe = std::max<uint32_t>(1, scsKhz / 15);
+    (void)g_tbBytes;
 
-    // Backend-appropriate EIRP default: nr's Friis LEO link needs ~+15 dB vs
-    // mmwave, so honour the historical 55 dBm for mmwave but give nr 70 dBm.
     const bool useNr = (radio == "nr");
-    if (satEirpDbm < 0.0)
+    // EIRP default (NT-02 calibration). The nr default used to be 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). On an S-band FR1 carrier the nr
+    // default is now that Set-1 density, as ntn-v2x-real-stack does; an
+    // explicit --satEirpDbm keeps meaning conducted power, and mmwave keeps
+    // its historical 55.0 dBm.
+    // The probe mirrors the cell's carrier and bandwidth and returns the
+    // equivalent CONDUCTED power from the helper's own formula
+    // (density + 10log10(BW_MHz) + 30 - ArrayGainDb()), so every other
+    // consumer of satEirpDbm stays consistent with the radio.
+    NtnRealStackHelper eirpProbe;
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && useNr &&
+                                 eirpProbe.GetCarrierFrequencyHz() > 1.0e9 &&
+                                 eirpProbe.GetCarrierFrequencyHz() <= 7.125e9;
+    if (eirpFromTr38821)
+    {
+        eirpProbe.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        satEirpDbm = eirpProbe.GetSatEirpDbm();
+    }
+    else if (satEirpDbm < 0.0)
     {
         satEirpDbm = useNr ? 70.0 : 55.0;
     }
 
     std::cout << "\n=== ntn-fapi-dl-data-slotloop (SCF-222 ABI on a real mmwave NR cell) ===\n"
               << "  FAPI L1 CRC.indication: decided by MEASURED PHY SINR/TBLER (not a sigmoid)\n"
-              << "  scs: " << scsKhz << " kHz (" << g_slotsPerSubframe << " slots/ms), TB "
-              << tbBytes << " B, " << numUes << " UEs, " << simSeconds << " s\n\n";
+              << "  requested scs: " << scsKhz << " kHz, TB " << tbBytes << " B (see the "
+              << "numerology line below for what the cell runs), " << numUes << " UEs, "
+              << simSeconds << " s\n\n";
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -211,11 +238,25 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-fapi-dl-data-slotloop");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    if (eirpFromTr38821)
+    {
+        // NT-02: TR 38.821 Table 6.1.1.1-1 Set-1 S-band EIRP density. The
+        // helper back-computes the conducted power from the bandwidth and
+        // the array gain, and again in Build().
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        // NT-02: an explicit value (or a default on a carrier outside the
+        // Set-1 S-band reference) is CONDUCTED power at the array input.
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, ueNodes);
+    // satEirpDbm was resolved before Build() and handed to the rest of the
+    // example; make sure the radio landed on the same conducted power.
+    NS_ABORT_MSG_IF(eirpFromTr38821 && std::abs(rs.GetSatEirpDbm() - satEirpDbm) > 1e-6,
+                    "Set-1 conducted power mismatch: radio "
+                        << rs.GetSatEirpDbm() << " dBm vs " << satEirpDbm << " dBm");
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("ntn-fapi-dl-data-slotloop"); // WS2 KPM series (TS 28.552 names)
@@ -244,6 +285,27 @@ main(int argc, char* argv[])
     else
     {
         std::cout << "  NOTE: no mmwave gNB device, FAPI SAP bridge not installed\n";
+    }
+
+    // FAPI-7: report the numerology the cell actually runs. --scsKhz and
+    // --tbBytes never reached the radio: the mmwave PHY keeps its own slot
+    // configuration (the FAPI slot label is derived from it, see
+    // NtnFapiSapBridge::InstallEnb) and the TB size of every DL_TTI.request is
+    // the MAC scheduler's own decision. Printing the requested values as if they
+    // ran made a sweep over them look like a result (TS 38.211 Table 4.2-1).
+    if (fapiEnb && fapiEnb->GetPhy() && fapiEnb->GetPhy()->GetConfigurationParameters())
+    {
+        const uint32_t realSpsf =
+            fapiEnb->GetPhy()->GetConfigurationParameters()->GetSlotsPerSubframe();
+        std::cout << "  radio numerology (cell PHY config): " << realSpsf << " slots/ms, SCS "
+                  << 15 * realSpsf << " kHz\n";
+        if (realSpsf != g_slotsPerSubframe)
+        {
+            std::cout << "  NOTE: --scsKhz=" << scsKhz
+                      << " is not applied to the radio; the FAPI slot numbers follow the cell.\n";
+        }
+        std::cout << "  NOTE: --tbBytes=" << tbBytes
+                  << " is not applied; each TB size is the scheduler's (PDSCH tbSize).\n";
     }
 
     Simulator::Stop(Seconds(simSeconds));

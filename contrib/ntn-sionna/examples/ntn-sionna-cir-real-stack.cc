@@ -25,7 +25,7 @@
  * make that exact difference visible.
  *
  * Usage:
- *   ./ns3 run "ntn-sionna-cir-real-stack --duration=12 --platformSpeed=200"
+ *   ./ns3 run "ntn-sionna-cir-real-stack --duration=12 --numUes=4"
  */
 
 #include "ns3/core-module.h"
@@ -85,25 +85,55 @@ SampleSinr()
 
 // Build a hand-authored synthetic Rician multipath CIR snapshot (NOT ray-traced;
 // the Sionna RT server returns only a scalar path loss): a dominant LOS tap plus
-// three reflected taps with distinct arrival directions (so they Doppler-rotate at
-// different rates -> real constructive/destructive fading) and short delays.
+// three single-bounce taps off local scatterers.
+//
+// SIONNA-07: the tap directions and delays are now DERIVED from a geometry
+// (satellite position at t=0, UE position, three scatterer points near the UE)
+// instead of being free numbers. The old taps left the satellite in four
+// directions up to 90 degrees apart, so the 7.6 km/s orbital velocity gave the
+// taps Doppler offsets tens of kHz apart and the "fading" was the satellite's
+// own motion beating against itself. Physically every path leaves a 550 km
+// satellite in almost the same direction (local scatterers subtend about
+// 1e-4 rad), so the satellite Doppler is a common shift (pre-compensated per
+// TS 38.300 Section 16.14) and only the small differential term, about 1 Hz
+// at S band, plus the UE's own motion against the distinct arrival angles, fade
+// the link. Directions follow the CirPathTap convention: tx_dir leaves the
+// satellite along the path, rx_dir points from the UE back toward the arrival.
 CirSnapshot
-MakeSnapshot(double freqHz)
+MakeSnapshot(double freqHz, const Vector& sat, const Vector& ue)
 {
     CirSnapshot snap;
     snap.wavelength_m = 299792458.0 / freqHz;
     snap.t_ref_s = 0.0;
-    auto unit = [](double x, double y, double z) {
-        double n = std::sqrt(x * x + y * y + z * z);
+    auto unit = [](const Vector& v) {
+        double n = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
         n = (n > 0) ? n : 1.0;
-        return Vector(x / n, y / n, z / n);
+        return Vector(v.x / n, v.y / n, v.z / n);
     };
+    auto sub = [](const Vector& a, const Vector& b) {
+        return Vector(a.x - b.x, a.y - b.y, a.z - b.z);
+    };
+    auto len = [](const Vector& v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); };
+    const double c = 299792458.0;
+    const double dLos = len(sub(ue, sat));
     // Dominant LOS tap + weaker reflections -> a Rician profile (K ~ 7 dB),
     // typical for an NTN ground link with a clear-ish sky and local scatter.
-    snap.taps.push_back({{1.00, 0.00}, 0.0e-9, unit(0.95, 0.31, 0.0), unit(0, 0, 1)});
-    snap.taps.push_back({{0.26, 0.12}, 35.0e-9, unit(-0.70, 0.70, 0.0), unit(0, 0, 1)});
-    snap.taps.push_back({{0.18, -0.18}, 80.0e-9, unit(0.10, -0.99, 0.0), unit(0, 0, 1)});
-    snap.taps.push_back({{0.20, 0.10}, 120.0e-9, unit(-0.30, 0.20, 0.93), unit(0, 0, 1)});
+    snap.taps.push_back({{1.00, 0.00}, 0.0, unit(sub(ue, sat)), unit(sub(sat, ue))});
+    struct Scat
+    {
+        Vector offset; // scatterer position relative to the UE (m)
+        std::complex<double> amp;
+    };
+    const Scat scat[] = {{Vector(8.0, 3.0, -ue.z), {0.26, 0.12}},  // ground patch
+                         {Vector(-15.0, 10.0, 6.0), {0.18, -0.18}}, // facade
+                         {Vector(5.0, -25.0, 10.0), {0.20, 0.10}}};  // facade
+    for (const auto& sc : scat)
+    {
+        const Vector p(ue.x + sc.offset.x, ue.y + sc.offset.y, ue.z + sc.offset.z);
+        const double excess = len(sub(p, sat)) + len(sub(ue, p)) - dLos;
+        snap.taps.push_back({sc.amp, std::max(0.0, excess) / c, unit(sub(p, sat)),
+                             unit(sub(p, ue))});
+    }
     return snap;
 }
 } // namespace
@@ -114,7 +144,7 @@ main(int argc, char* argv[])
     double duration = 12.0;
     uint32_t numUes = 4;
     double altitudeKm = 550.0;
-    double satEirpDbm = 70.0; // healthy nr (FR1 Friis) LEO downlink
+    double satEirpDbm = -1.0; // sentinel: TR 38.821 Set-1 S-band density (nr), 70 dBm (mmwave)
     double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
                               // which is n256 UPLINK and never conformant as a DL carrier.
     double platformSpeed = 0.0; // 0 = use the REAL SGP4 ephemeris velocity
@@ -125,11 +155,14 @@ main(int argc, char* argv[])
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm",
+                 "-1 = TR 38.821 Set-1 S-band EIRP density (34 dBW/MHz); otherwise conducted power at the array input (dBm)",
+                 satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
     cmd.AddValue("platformSpeed",
-                 "Tx platform speed override (m/s); 0 = real ephemeris velocity",
+                 "Fallback Tx speed (m/s) used only when the CIR model is driven without "
+                 "mobility; the real stack always uses the live SGP4 velocity (SIONNA-06)",
                  platformSpeed);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
@@ -188,16 +221,41 @@ main(int argc, char* argv[])
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-sionna-cir-real-stack");
     rs.SetCarrierFrequencyHz(freqGhz * 1e9);
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    // EIRP default (NT-02 calibration). This used to be a fixed 70 dBm of
+    // CONDUCTED power, about 88 dBm EIRP once the ~18 dB array gain is added,
+    // ~11 dB above the TR 38.821 Table 6.1.1.1-1 Set-1 S-band payload
+    // (34 dBW/MHz, 77 dBm over 20 MHz). For nr on an S-band FR1 carrier the
+    // default is now that Set-1 density and the helper back-computes the
+    // conducted power from the bandwidth and the array gain (again in
+    // Build()). mmwave keeps its historical 70 dBm, and an explicit
+    // --satEirpDbm keeps meaning conducted power at the array input.
+    const bool eirpFromTr38821 = satEirpDbm < 0.0 && radio != "mmwave" &&
+                                 freqGhz > 1.0 && freqGhz <= 7.125;
+    if (eirpFromTr38821)
+    {
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+    }
+    else
+    {
+        if (satEirpDbm < 0.0)
+        {
+            satEirpDbm = 70.0; // legacy default (mmwave, or a carrier outside Set-1)
+        }
+        rs.SetSatConductedPowerDbm(satEirpDbm);
+    }
     rs.Build(satNodes, ueNodes);
 
     // ---- Channel plug-in: the FULL CIR fades real packets ----
     g_cir = CreateObject<SionnaCirPropagationLossModel>();
-    g_cir->SetSnapshot(MakeSnapshot(freqGhz * 1e9));
-    // Doppler from the REAL ephemeris velocity (CLI override if nonzero).
+    // SIONNA-07: one snapshot from UE 0's geometry at t=0 serves every UE (they
+    // sit within a few km of each other under a 550 km satellite). The UEs
+    // therefore share one fading process; per-UE independent fading would need
+    // one snapshot per link.
+    g_cir->SetSnapshot(MakeSnapshot(freqGhz * 1e9, satEnu->GetPosition(),
+                                    ueNodes.Get(0)->GetObject<MobilityModel>()->GetPosition()));
+    // Fallback velocities only. On this real stack the model reads the live
+    // SGP4 and UE velocities from the mobility it is handed (SIONNA-06), so
+    // --platformSpeed does not reach the packet path.
     g_cir->SetTxVelocity(platformSpeed > 0.0 ? Vector(platformSpeed, 0.0, 0.0)
                                              : satEnu->GetVelocity());
     g_cir->SetRxVelocity(Vector(0.0, 0.0, 0.0));

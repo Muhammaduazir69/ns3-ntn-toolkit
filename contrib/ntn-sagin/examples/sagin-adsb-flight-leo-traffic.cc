@@ -69,7 +69,7 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("leoAltKm", "LEO altitude (km)", leoAltKm);
-    cmd.AddValue("satSpeed", "LEO ground-track speed (m/s)", satSpeed);
+    cmd.AddValue("satSpeed", "IGNORED: SGP4 sets the orbital speed from the altitude (m/s)", satSpeed);
     cmd.AddValue("freqGHz", "Carrier frequency (GHz)", freqGHz);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm)", satEirpDbm);
     cmd.AddValue("cruiseAltM", "Aircraft cruise altitude (m)", cruiseAltM);
@@ -78,32 +78,6 @@ main(int argc, char* argv[])
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.Parse(argc, argv);
     g_simTime = simSeconds;
-
-    // Build an ADS-B trace inline: a great-circle cruise leg heading east.
-    sagin::OpenSkyAdsbTrace trace;
-    trace.icao24 = "abcdef";
-    const double refLat = 50.0, refLon = 8.0;
-    for (double t = 0.0; t <= simSeconds + 20.0; t += 10.0)
-    {
-        sagin::OpenSkySample smp;
-        smp.time_s = t;
-        const double mEast = cruiseSpeedMps * t;
-        smp.lat_deg = refLat;
-        smp.lon_deg = refLon + mEast / (111320.0 * std::cos(refLat * M_PI / 180.0));
-        smp.alt_m = cruiseAltM;
-        smp.velocity_mps = cruiseSpeedMps;
-        smp.heading_deg = 90.0;
-        trace.samples.push_back(smp);
-    }
-
-    // Aircraft terminal = UE (real ADS-B mobility); LEO satellite = mmwave gNB.
-    NodeContainer ueNodes;
-    ueNodes.Create(1);
-    Ptr<sagin::OpenSkyMobilityModel> ac = CreateObject<sagin::OpenSkyMobilityModel>();
-    ac->SetReference(refLat, refLon, 0.0);
-    ac->SetTrace(trace);
-    ueNodes.Get(0)->AggregateObject(ac);
-    g_ac = ac;
 
     NodeContainer satNodes;
     satNodes.Create(1);
@@ -126,6 +100,38 @@ main(int argc, char* argv[])
     sat->SetSource(satSgp4);
     sat->SetReference(satSubLat, satSubLon, 0.0);
     satNodes.Get(0)->AggregateObject(sat);
+
+    // Build an ADS-B trace inline: a great-circle cruise leg heading east.
+    sagin::OpenSkyAdsbTrace trace;
+    trace.icao24 = "abcdef";
+    // ONE local ENU frame for both endpoints. The trace was anchored at
+    // (50 N, 8 E) in its own frame while the satellite was projected about its
+    // own sub-satellite point, so two unrelated origins were mixed and the
+    // aircraft only appeared under the pass. The leg is now flown under the
+    // satellite's t=0 sub-point, in one frame.
+    const double refLat = satSubLat, refLon = satSubLon;
+    for (double t = 0.0; t <= simSeconds + 20.0; t += 10.0)
+    {
+        sagin::OpenSkySample smp;
+        smp.time_s = t;
+        const double mEast = cruiseSpeedMps * t;
+        smp.lat_deg = refLat;
+        smp.lon_deg = refLon + mEast / (111320.0 * std::cos(refLat * M_PI / 180.0));
+        smp.alt_m = cruiseAltM;
+        smp.velocity_mps = cruiseSpeedMps;
+        smp.heading_deg = 90.0;
+        trace.samples.push_back(smp);
+    }
+
+    // Aircraft terminal = UE (real ADS-B mobility); LEO satellite = mmwave gNB.
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
+    Ptr<sagin::OpenSkyMobilityModel> ac = CreateObject<sagin::OpenSkyMobilityModel>();
+    ac->SetReference(refLat, refLon, 0.0);
+    ac->SetTrace(trace);
+    ueNodes.Get(0)->AggregateObject(ac);
+    g_ac = ac;
+
 
     NtnRealStackHelper rs;
     rs.SetSimTime(Seconds(simSeconds));

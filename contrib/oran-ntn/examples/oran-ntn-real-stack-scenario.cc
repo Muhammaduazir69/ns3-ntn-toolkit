@@ -37,6 +37,7 @@
 #include "ns3/oran-ntn-e2-interface.h"
 #include "ns3/oran-ntn-helper.h"
 #include "ns3/oran-ntn-near-rt-ric.h"
+#include "ns3/oran-ntn-ric-placement.h"
 #include "ns3/oran-ntn-types.h"
 
 #include "ns3/sgp4-mobility-model.h"
@@ -175,6 +176,19 @@ main(int argc, char* argv[])
 
     auto satE2Nodes = helper->CreateSatelliteE2Nodes(satNodes, nearRtRic);
     helper->GenerateConstellationPolicies(nonRtRic, 1, numSats, 53.0, altitudeKm);
+    // Every UE carries EmbbStreaming (5QI 2): declare that, instead of the
+    // helper tagging a third of them URLLC and a third mMTC by ueId % 3.
+    for (uint32_t u = 0; u < numUes; ++u)
+    {
+        helper->SetUeSliceId(u, 0);
+    }
+    // The serving E2 node's feeder delay follows the live slant to a gateway
+    // about 110 km from the UE cluster (it was the helper's constant 4 ms).
+    Ptr<ConstantPositionMobilityModel> gwMob = CreateObject<ConstantPositionMobilityModel>();
+    gwMob->SetPosition(ntngeo::GeodeticToEcef(subLat + 1.0, subLon, 0.0));
+    Ptr<OranNtnRicPlacement> ricSite = CreateObject<OranNtnRicPlacement>();
+    ricSite->SetSite(OranNtnRicPlacement::Site::GroundGateway);
+    ricSite->BindToGeometry(satMobs[0], gwMob, satE2Nodes.front(), Seconds(1.0));
     auto xapps = helper->CreateAllXapps(nearRtRic);
     helper->StartAllXapps(nearRtRic);
 
@@ -184,7 +198,11 @@ main(int argc, char* argv[])
     // geometry. TTE = time until the sat sets below minElev, estimated from the
     // real elevation rate. Candidates report real elevation + a Friis-ratio
     // SINR prediction off the measured baseline (flagged prediction by design).
-    std::map<uint32_t, double> lastElev; // satIdx -> last elevation (for d/dt)
+    // (satIdx, ue) -> last elevation (for d/dt). It was keyed by satellite
+    // only, so within one tick UE k's rate was taken against UE k-1's
+    // elevation at the SAME instant, divided by 0.1 s: the TTE of every UE
+    // after the first was noise.
+    std::map<std::pair<uint32_t, uint32_t>, double> lastElev;
     std::map<uint32_t, uint64_t> lastRxBytes; // ue -> last measured DL bytes
     const double kpmIntervalS = 0.1; // matches RegisterPeriodicCallback below
     auto kpmTick = [&, minElevDeg](Time) {
@@ -205,11 +223,11 @@ main(int argc, char* argv[])
             const double servSlant = ntngeo::SlantRangeM(uePos, sp);
             const double doppler = ntngeo::DopplerHz(uePos, ueVel, sp, sv, freqGhz * 1e9);
             double elevRate = 0.0;
-            if (auto it = lastElev.find(0); it != lastElev.end())
+            if (auto it = lastElev.find({0u, ue}); it != lastElev.end())
             {
                 elevRate = (elev - it->second) / 0.1; // deg/s over the KPM period
             }
-            lastElev[0] = elev;
+            lastElev[{0u, ue}] = elev;
             const double tte = (elevRate < -1e-3)
                                    ? std::max(1.0, (elev - minElevDeg) / -elevRate)
                                    : 600.0; // rising/flat: bounded "long" TTE
@@ -229,7 +247,8 @@ main(int argc, char* argv[])
             }
             lastRxBytes[ue] = rxBytes;
             helper->InjectKpmReport(1, ue, sinr, sinr - 95.0, tte, elev, doppler,
-                                    measThp, rxBytes, measTbler);
+                                    measThp, rxBytes, measTbler, /*measPrbUtil=*/-1.0,
+                                    /*sinrMeasured=*/true); // PHY-trace SINR (ORAN-03)
 
             // One ephemeris-predicted candidate per UE (round-robin).
             const uint32_t candIdx = 1 + (ue % std::max(1u, numSats - 1));
@@ -241,11 +260,18 @@ main(int argc, char* argv[])
             const double cSinr =
                 sinr + 20.0 * std::log10(servSlant / std::max(1.0, cSlant)); // Friis ratio
             double cElevRate = 0.0;
-            if (auto it = lastElev.find(candIdx); it != lastElev.end())
+            if (auto it = lastElev.find({candIdx, ue}); it != lastElev.end())
             {
                 cElevRate = (cElev - it->second) / 0.1;
             }
-            lastElev[candIdx] = cElev;
+            lastElev[{candIdx, ue}] = cElev;
+            // A satellite below the service elevation mask is not a handover
+            // candidate (TS 38.331 CHO candidates are cells the UE can measure);
+            // it used to be reported with a Friis extrapolation from any range.
+            if (cElev < minElevDeg)
+            {
+                continue;
+            }
             const double cTte = (cElevRate < -1e-3)
                                     ? std::max(1.0, (cElev - minElevDeg) / -cElevRate)
                                     : 600.0;

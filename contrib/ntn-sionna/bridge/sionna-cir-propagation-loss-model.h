@@ -44,8 +44,9 @@ class SionnaCirPropagationLossModel : public PropagationLossModel
     SionnaCirPropagationLossModel();
     ~SionnaCirPropagationLossModel() override;
 
-    /// Install the CIR snapshot (the taps from a Sionna RT query). Recomputes
-    /// the reference combine so the time-0 fading deviation is 0 dB.
+    /// Install the CIR snapshot (the taps from a Sionna RT query). The charged
+    /// fading is normalized to the CIR mean power sum_p |a_p|^2 (SIONNA-07), so
+    /// it is unit-mean-power fading; the t=0 value is generally NOT 0 dB.
     void SetSnapshot(const CirSnapshot& snap);
     /// Tx/Rx velocities (m/s, ECEF) that drive the per-tap Doppler.
     /// SIONNA-06: fallback velocities, used only when DoCalcRxPower is called
@@ -68,7 +69,7 @@ class SionnaCirPropagationLossModel : public PropagationLossModel
     CirSnapshot m_snap;
     Vector m_txVel{0.0, 0.0, 0.0};
     Vector m_rxVel{0.0, 0.0, 0.0};
-    double m_refGain{1.0}; ///< |Σ a_p|² at the snapshot reference time
+    double m_refGain{1.0}; ///< sum_p |a_p|^2, the CIR mean power (SIONNA-07)
     mutable double m_lastFadingDb{0.0};
 };
 

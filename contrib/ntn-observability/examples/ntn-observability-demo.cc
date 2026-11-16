@@ -130,6 +130,11 @@ SampleEverySecond(Wiring* w)
         Point p;
         p.measurement = measurement::kDrx;
         p.tags[tag::kRunId] = w->runId;
+        // OBS-17: this DRX FSM runs on its own timers; it is not bound to the
+        // MAC/PDCCH monitoring gate and sees none of the eMBB traffic below
+        // (SCOPE_AND_LIMITATIONS A3). Say so, so the series is never read as
+        // a measured TS 38.321 Sec. 5.7 DRX occupancy.
+        p.tags[tag::kProvenance] = "timer-fsm-unbound";
         p.fieldsInt[field::kDrxState] = static_cast<long long>(w->drx->GetState());
         p.fieldsFloat[field::kDrxAwakeMs] =
             (w->drx->GetTimeInState(DrxState::Active) +

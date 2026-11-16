@@ -9,8 +9,8 @@
  *   - sagin::HapsTrajectoryMobilityModel — a HAPS flying a supplied trajectory
  *     (a programmatic loiter racetrack), interpolated to Simulator::Now().
  *   - ntnv2x::MaritimeMobilityModel — a vessel under way in a sea area.
- *   - sagin::HstMobilityModel — a high-speed train; GetDopplerHz() is sampled
- *     against the satellite under the simulator.
+ *   - sagin::HstMobilityModel: a high-speed train; its trackside Doppler
+ *     (GetDopplerHz) and the live satellite-to-train Doppler are printed.
  *   - The CSV importers (OpenSkyAdsbImporter / AisDanishImporter /
  *     HapsTrajectoryImporter::LoadCsv) ingest the bundled sample traces.
  *   - MultiLayerRouter (SetScorer / SetLayerScorer) + SaginSliceRouter
@@ -47,11 +47,13 @@
 #include "ns3/ntn-tr38811-mobility-model.h" // NtnEnuProjectionMobilityModel
 #include "ns3/opensky-adsb-trace.h"
 #include "ns3/ais-maritime-trace.h"
+#include "ns3/point-to-point-channel.h"
 #include "ns3/point-to-point-helper.h"
 #include "ns3/sagin-slice-router.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -68,7 +70,25 @@ namespace
 // the train's Doppler readout).
 Ptr<MobilityModel> g_train;         // a sagin::HstMobilityModel under the hood
 Ptr<MobilityModel> g_sat;           // the ENU-projected SGP4 satellite
+Ptr<MobilityModel> g_haps;          // the HAPS relay (for the live HAPS-LEO delay)
+Ptr<PointToPointChannel> g_hapsLeoChan;
 double g_simTime = 120.0;
+double g_carrierHz = 2.0e9;
+
+// Keep the HAPS-LEO hop delay on the live slant range. It was set once from the
+// t=0 geometry and then frozen for the whole run, so the measured one-way delay
+// could not follow the pass (the reason the mean delay never moved).
+void
+TrackHapsLeoDelay()
+{
+    if (Simulator::Now().GetSeconds() >= g_simTime)
+    {
+        return;
+    }
+    const double r = CalculateDistance(g_haps->GetPosition(), g_sat->GetPosition());
+    g_hapsLeoChan->SetAttribute("Delay", TimeValue(Seconds(r / 299792458.0)));
+    Simulator::Schedule(MilliSeconds(100), &TrackHapsLeoDelay);
+}
 
 void
 LinkProbe()
@@ -81,9 +101,24 @@ LinkProbe()
     // MobilityModel base) — DynamicCast before calling.
     Ptr<sagin::HstMobilityModel> hst = DynamicCast<sagin::HstMobilityModel>(g_train);
     const Vector s = g_sat->GetPosition();
-    const double dopplerHz = hst ? hst->GetDopplerHz(s.x) : 0.0;
-    std::printf("  %6.1f  sat=(%9.0f,%9.0f,%9.0f)  trainDoppler=%10.1f Hz\n",
-                Simulator::Now().GetSeconds(), s.x, s.y, s.z, dopplerHz);
+    // HstMobilityModel::GetDopplerHz models a TRACKSIDE gNB at along-track x and
+    // lateral Dmin. It used to be fed the satellite's ENU x coordinate (about
+    // -6.4e6 m), which pinned the "train Doppler" at -v/c*f = -926.6 Hz for the
+    // whole run. Report the trackside value for a gNB at x = 0, and the real
+    // satellite-to-train Doppler from the live relative velocity.
+    const double trackHz = hst ? hst->GetDopplerHz(0.0) : 0.0;
+    const Vector p = g_train->GetPosition();
+    const Vector vs = g_sat->GetVelocity();
+    const Vector vp = g_train->GetVelocity();
+    const Vector los(s.x - p.x, s.y - p.y, s.z - p.z);
+    const double range = std::max(1.0, los.GetLength());
+    const double rangeRate =
+        (los.x * (vs.x - vp.x) + los.y * (vs.y - vp.y) + los.z * (vs.z - vp.z)) / range;
+    const double satHz = -rangeRate / 299792458.0 * g_carrierHz; // + when closing
+    const double elevDeg = std::asin(std::clamp(los.z / range, -1.0, 1.0)) * 180.0 / M_PI;
+    std::printf("  %6.1f  sat=(%9.0f,%9.0f,%9.0f) elev=%5.1f deg  satToTrainDoppler=%10.1f Hz"
+                "  trackDoppler=%7.1f Hz\n",
+                Simulator::Now().GetSeconds(), s.x, s.y, s.z, elevDeg, satHz, trackHz);
     Simulator::Schedule(Seconds(5.0), &LinkProbe);
 }
 
@@ -127,10 +162,6 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     g_simTime = duration;
 
-    // Scenario origin: a coastal site (the local-ENU reference for everything).
-    const double refLat = 36.0;
-    const double refLon = 15.0;
-
     // ---- Satellite: real SGP4 projected into the local ENU frame ----
     ns3::ntncon::WalkerConfig wcfg;
     wcfg.num_planes = 1;
@@ -141,6 +172,14 @@ main(int argc, char* argv[])
     const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
     Ptr<ns3::ntncon::Sgp4MobilityModel> satSgp4 = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
     satSgp4->SetElements(elements[0]);
+
+    // Scenario origin (the local-ENU reference for everything): the satellite's
+    // t=0 sub-point, as in every sibling SAGIN LEO example. A fixed (36 N, 15 E)
+    // origin put this satellite about 8,000 km BELOW the local horizon (ENU
+    // z = -8.08e6 m), so the "Ground -> HAPS -> LEO" plane ran through the Earth
+    // with a 36.8 ms HAPS-LEO hop instead of the ~1.8 ms of a 550 km pass.
+    double refLat = 0.0, refLon = 0.0, refAltIgnored = 0.0;
+    satSgp4->GetGeodetic(refLat, refLon, refAltIgnored);
     Ptr<NtnEnuProjectionMobilityModel> satEnu = CreateObject<NtnEnuProjectionMobilityModel>();
     satEnu->SetSource(satSgp4);
     satEnu->SetReference(refLat, refLon, 0.0);
@@ -204,12 +243,12 @@ main(int argc, char* argv[])
     shipNodes.Create(1);
     shipNodes.Get(0)->AggregateObject(shipMob);
 
-    // ---- High-speed-train terminal: a TR 38.901 HST track. Its GetDopplerHz
-    //      is sampled against the live satellite in LinkProbe(). ----
+    // ---- High-speed-train terminal: a 3GPP-style HST track. LinkProbe()
+    //      prints its trackside Doppler and the live satellite Doppler. ----
     sagin::HstTrace hstTrace =
         sagin::HstTraceGenerator::Generate(500.0, 150.0, duration + 60.0, 200);
     Ptr<sagin::HstMobilityModel> train = CreateObject<sagin::HstMobilityModel>();
-    train->SetCarrierFrequencyHz(2.0e9);
+    train->SetCarrierFrequencyHz(g_carrierHz);
     train->SetTrace(hstTrace);
     NodeContainer trainNodes;
     trainNodes.Create(1);
@@ -283,6 +322,8 @@ main(int argc, char* argv[])
     NetDeviceContainer dGH = p2p.Install(NodeContainer(planeNodes.Get(0), planeNodes.Get(1)));
     p2p.SetChannelAttribute("Delay", TimeValue(Seconds(rHapsLeo / kC)));
     NetDeviceContainer dHL = p2p.Install(NodeContainer(planeNodes.Get(1), planeNodes.Get(2)));
+    g_haps = hapsMob;
+    g_hapsLeoChan = DynamicCast<PointToPointChannel>(dHL.Get(0)->GetChannel());
 
     Ipv4AddressHelper ipv4;
     ipv4.SetBase("10.40.1.0", "255.255.255.0");
@@ -328,6 +369,7 @@ main(int argc, char* argv[])
 
     std::printf("# train Doppler probe (HstMobilityModel::GetDopplerHz vs live SGP4 sat):\n");
     Simulator::Schedule(Seconds(5.0), &LinkProbe);
+    Simulator::Schedule(MilliSeconds(100), &TrackHapsLeoDelay);
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
 

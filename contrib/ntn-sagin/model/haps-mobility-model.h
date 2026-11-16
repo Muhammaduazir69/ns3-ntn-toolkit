@@ -39,7 +39,9 @@ class HapsMobilityModel : public MobilityModel
     HapsMobilityModel();
     ~HapsMobilityModel() override;
 
-    /// Set the (lat, lon) anchor point converted to an ECEF-like local frame.
+    /// Set the GROUND anchor of the station-keeping pattern (local frame).
+    /// The HAPS flies at centerXyz.z + Altitude, so pass z = 0 (ground) and set
+    /// the height through the Altitude attribute; passing z = altitude doubles it.
     void SetCenter(const Vector& centerXyz);
     Vector GetCenter() const;
 

@@ -77,7 +77,11 @@ main(int argc, char* argv[])
 
     // HAPS: real station-keeping (figure-8 drift inside its keep-radius).
     Ptr<HapsMobilityModel> hapsMob = CreateObject<HapsMobilityModel>();
-    hapsMob->SetCenter(Vector(0, 0, hapsAltKm * 1000.0));
+    // SetCenter() takes the GROUND anchor and adds the Altitude attribute on
+    // top; passing z = hapsAltKm put the HAPS at 2x hapsAltKm (40 km instead
+    // of the ITU-R F.1500 nominal 20 km). Set the height via Altitude.
+    hapsMob->SetAttribute("Altitude", DoubleValue(hapsAltKm * 1000.0));
+    hapsMob->SetCenter(Vector(0, 0, 0));
 
     // LEO: real SGP4 Walker element projected into the scenario's local ENU
     // frame — overhead near t=0 and receding with genuine orbital dynamics,

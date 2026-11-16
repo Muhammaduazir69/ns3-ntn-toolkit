@@ -98,9 +98,10 @@ int
 main(int argc, char* argv[])
 {
     std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
-                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
-                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
-                "module's *-traffic / *-real-stack examples.\n\n");
+                "directly (link budgets, scaling laws, comparisons). Its packets cross a\n"
+                "point-to-point abstraction whose delay and PER follow the budget (DVB-S2\n"
+                "QPSK 1/2 stand-in), not an NR radio, so rx/tx is a budget check, not a\n"
+                "measured KPI. For measured KPIs see the *-traffic / *-real-stack examples.\n\n");
     // ---- Default parameters ----
     double freq = 300e9;
     double txPower = 30.0;
@@ -109,6 +110,10 @@ main(int argc, char* argv[])
     double rxGain = 40.0;
     double altitude = 550.0;
     double simTime = 60.0;
+    // One receiver noise figure for the whole example. The distance table used
+    // the ComputeIslBudget() preset (NF 8 dB) while the SGP4 time series used
+    // 10 dB, so the two halves of the same run disagreed by 2 dB.
+    double noiseFigure = 10.0;
     std::string outputDir = "thz-isl-out";
 
     CommandLine cmd(__FILE__);
@@ -118,6 +123,7 @@ main(int argc, char* argv[])
     cmd.AddValue("txGain", "Tx antenna gain in dBi [default: 40]", txGain);
     cmd.AddValue("rxGain", "Rx antenna gain in dBi [default: 40]", rxGain);
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
+    cmd.AddValue("noiseFigure", "Receiver noise figure in dB [default: 10]", noiseFigure);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
@@ -207,12 +213,22 @@ main(int argc, char* argv[])
         double fspl = 20.0 * std::log10(dist_m)
                     + 20.0 * std::log10(freq)
                     + 20.0 * std::log10(4.0 * M_PI / 299792458.0);
-        ThzNtnLinkBudget::LinkBudgetResult result = linkBudget->ComputeIslBudget(freq, dist_km);
+        // Evaluate the CLI link (power, gains, bandwidth, NF). ComputeIslBudget()
+        // hardcodes 30 dBm / 40 dBi / 40 dBi / 20 GHz / NF 8, so --txGain,
+        // --rxGain, --txPower and --bandwidth never reached this table.
+        ThzNtnLinkBudget::LinkBudgetResult result = linkBudget->ComputeLinkBudget(
+            ThzNtnLinkBudget::INTER_SATELLITE, freq, dist_m, 90.0, txPower, txGain, rxGain,
+            bandwidth, noiseFigure);
         double snr = result.snr_dB;
-        double shannonCap = islChannel->ComputeIslCapacity_Gbps(snr);
+        // Same bandwidth and same (ideal) Shannon form as the HW-limited column;
+        // ComputeIslCapacity_Gbps() uses the preset bandwidth times a 0.8
+        // implementation factor, which is a different quantity.
+        double shannonCap = result.shannonCapacity_Gbps;
         double hwCap = result.hardwareLimitedCapacity_Gbps;
 
-        // Inline Doppler from relative radial velocity.
+        // ASSUMED relative radial speed (no geometry at a bare distance): 100 m/s
+        // for intra/adjacent-plane, 1 km/s beyond 2000 km. The SGP4 time series
+        // below reports the live range rate.
         double relVel = (dist_km > 2000.0) ? 1000.0 : 100.0;
         double doppler = relVel / 299792458.0 * freq;
 
@@ -248,7 +264,11 @@ main(int argc, char* argv[])
 
     for (double snr_dB = 0.0; snr_dB <= 40.0; snr_dB += 5.0)
     {
-        double shannonCap = islChannel->ComputeIslCapacity_Gbps(snr_dB);
+        // Both columns use the CLI bandwidth and the ideal Shannon form, so the
+        // ratio is the EVM ceiling alone. The Shannon column used the preset
+        // bandwidth with a 0.8 implementation factor, which made the
+        // "efficiency" exceed 100 percent (125 percent at 0 dB SNR).
+        double shannonCap = bandwidth * std::log2(1.0 + std::pow(10.0, snr_dB / 10.0)) / 1e9;
 
         // Hardware-limited: capacity saturates due to EVM floor
         [[maybe_unused]] double snrLinear = std::pow(10.0, snr_dB / 10.0);
@@ -283,7 +303,8 @@ main(int argc, char* argv[])
 
     // Maximum feasible distance
     double maxDist = islChannel->ComputeMaxLinkDistance_km(3.0);
-    std::cout << "\n  Maximum ISL distance (SNR > 3 dB): " << std::fixed << std::setprecision(1)
+    std::cout << "\n  Maximum ISL distance (SNR > 3 dB, ISL-300GHz preset budget and space "
+                 "noise temperature, not the CLI link): " << std::fixed << std::setprecision(1)
               << maxDist << " km\n";
 
     // ---- Real packet plane + dynamic ISL-distance sampler (v2) ----
@@ -311,7 +332,7 @@ main(int argc, char* argv[])
             std::sqrt(dp.x * dp.x + dp.y * dp.y + dp.z * dp.z), 1.0);
         const double d_km = d_m / 1000.0;
         auto r = linkBudget->ComputeLinkBudget(ThzNtnLinkBudget::INTER_SATELLITE,
-            freq, d_m, 90.0, txPower, txGain, rxGain, bandwidth, 10.0);
+            freq, d_m, 90.0, txPower, txGain, rxGain, bandwidth, noiseFigure);
         // Radial (range-rate) component of the relative velocity -> Doppler.
         const double relV = ((v2.x - v1.x) * dp.x + (v2.y - v1.y) * dp.y +
                              (v2.z - v1.z) * dp.z) / d_m;
@@ -345,12 +366,14 @@ main(int argc, char* argv[])
               << " (was pinned at 0)\n";
     if (g_lastAppliedPer > 0.5)
     {
-        std::cout << "  [WF-06] LINK DOES NOT CLOSE at these defaults: the computed SNR is below\n"
+        std::cout << "  [WF-06] LINK DOES NOT CLOSE with these settings: the computed SNR is below\n"
                      "          any usable MODCOD threshold, so the data plane correctly delivers\n"
                      "          (almost) nothing. This was invisible while the error rate was\n"
                      "          pinned at 0 and every packet arrived regardless of the physics.\n"
-                     "          The dominant term is the noise bandwidth: --bandwidth=10e9 puts the\n"
-                     "          thermal floor at -174 + 100 dB. Narrowing it closes the link.\n";
+                  << "          The dominant term is the noise bandwidth: --bandwidth="
+                  << bandwidth << " puts the\n          thermal floor at -174 + "
+                  << 10.0 * std::log10(bandwidth) << " dB. A 1 GHz channel with 55 dBi\n"
+                  << "          apertures (about 0.23 m at 300 GHz) closes it at ~620 km.\n";
     }
     isltimes.close();
     Simulator::Destroy();

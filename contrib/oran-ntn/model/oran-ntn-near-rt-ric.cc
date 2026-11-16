@@ -245,6 +245,16 @@ OranNtnNearRtRic::Initialize()
 
     // A1 feedback wiring is done externally via ConnectA1Interface in the helper
 
+    // O-RAN.WG3.RICARCH: the Near-RT RIC control loop runs between 10 ms and
+    // 1 s. Below 10 ms is the RT tier (OranNtnRtRic), above 1 s is Non-RT RIC
+    // territory. The attribute accepted any value, so a mis-set interval
+    // silently turned this object into a different tier.
+    NS_ABORT_MSG_IF(m_controlLoopInterval < MilliSeconds(10) ||
+                        m_controlLoopInterval > Seconds(1),
+                    "Near-RT RIC ControlLoopInterval " << m_controlLoopInterval.As(Time::MS)
+                                                       << " is outside the O-RAN WG3 "
+                                                          "near-real-time range [10 ms, 1 s]");
+
     // Start the RIC control loop
     m_controlLoopEvent = Simulator::Schedule(m_controlLoopInterval,
                                               &OranNtnNearRtRic::ControlLoop,

@@ -121,6 +121,24 @@ Sgp4MobilityModel::SetElements(const KeplerianElements& elements)
 }
 
 bool
+Sgp4MobilityModel::SetElementsSgp4(const KeplerianElements& elements)
+{
+    TleRecord tle;
+    if (!MakeTleFromElements(elements, tle))
+    {
+        SetElements(elements);
+        return false;
+    }
+    if (!SetTle(tle))
+    {
+        SetElements(elements);
+        return false;
+    }
+    SetUseVallado(true);
+    return IsUsingSgp4();
+}
+
+bool
 Sgp4MobilityModel::SetTle(const TleRecord& tle)
 {
     KeplerianElements el{};
