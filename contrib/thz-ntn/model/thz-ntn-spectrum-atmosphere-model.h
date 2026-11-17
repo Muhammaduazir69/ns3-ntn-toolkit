@@ -5,6 +5,7 @@
 #ifndef THZ_NTN_SPECTRUM_ATMOSPHERE_MODEL_H
 #define THZ_NTN_SPECTRUM_ATMOSPHERE_MODEL_H
 
+#include "thz-ntn-cloud-attenuation.h"
 #include "thz-ntn-itu-recommendations.h"
 #include "thz-ntn-link-geometry.h"
 #include "thz-ntn-molecular-absorption.h"
@@ -96,6 +97,13 @@ class ThzNtnSpectrumAtmosphereModel : public SpectrumPropagationLossModel
     /// Link evaluations that applied rain above 55 GHz.
     uint64_t GetExtrapolatedRainCount() const { return m_rainExtrapCount; }
     double GetLastElevationDeg() const { return m_lastElev; }
+    /// Wave 7C: apparent elevation (ITU-R P.834-9 eq. 14) used by the gas,
+    /// rain and cloud terms of the last link (equals the free-space value
+    /// with ApparentElevation false).
+    double GetLastApparentElevationDeg() const { return m_lastAppElev; }
+    /// Wave 7C: ITU-R P.840-9 cloud term (on by default; Mode Off disables).
+    Ptr<ThzNtnCloudAttenuation> GetCloudModel() const { return m_cloud; }
+    double GetLastCloudCentreDb() const { return m_lastCloudCentre; }
     /// Rain rate on the path below h_R (max over samples) of the last link.
     double GetLastPathRainRate() const { return m_lastPathRate; }
     uint64_t GetEvaluations() const { return m_evals; }
@@ -121,6 +129,10 @@ class ThzNtnSpectrumAtmosphereModel : public SpectrumPropagationLossModel
     Ptr<itu::Itu618LossModel> m_p618;
     Ptr<ThzNtnRainCellField> m_field;
     Ptr<ThzNtnScintillation> m_scint;
+    Ptr<ThzNtnCloudAttenuation> m_cloud;
+    bool m_apparentElevation{true};
+    mutable double m_lastAppElev{0.0};
+    mutable double m_lastCloudCentre{0.0};
     mutable double m_lastScint{0.0};
     mutable Time m_lastScintTime{Seconds(-1)};
     bool m_gas{true};

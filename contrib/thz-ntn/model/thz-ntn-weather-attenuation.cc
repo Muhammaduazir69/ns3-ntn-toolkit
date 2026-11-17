@@ -11,6 +11,8 @@
 
 #include "thz-ntn-weather-attenuation.h"
 
+#include "thz-ntn-cloud-attenuation.h"
+
 #include <sstream>
 
 #include <ns3/boolean.h>
@@ -368,73 +370,18 @@ ThzNtnWeatherAttenuation::ComputeKl(double freqGHz, double temperature_K) const
 {
     NS_LOG_FUNCTION(this << freqGHz << temperature_K);
 
-    // Compute K_l using the Debye relaxation model for liquid water.
-    // Based on ITU-R P.840-8, extended to THz frequencies.
-    //
-    // The complex permittivity of liquid water (Debye single-relaxation model):
-    //   epsilon(f) = epsilon_inf + (epsilon_s - epsilon_inf) / (1 + j*f/f_p)
-    //
-    // where:
-    //   epsilon_s = static permittivity
-    //   epsilon_inf = high-frequency permittivity
-    //   f_p = principal relaxation frequency
-
-    double theta = 300.0 / temperature_K - 1.0;
-
-    // THZ-04 FIX (2026-08-25): ITU-R P.840 double-Debye, with no frequency
-    // branch.
-    //
-    // This used to switch the intermediate permittivity at exactly 100 GHz:
-    //
-    //     if (freqGHz > 100.0) epsilon_1 = (epsilon_s - epsilon_inf) * 0.1 + epsilon_inf;
-    //     else                 epsilon_1 = epsilon_inf;
-    //
-    // The 0.1 had no source, and the branch made the specific attenuation
-    // coefficient jump 50.8 percent across 2 kHz of frequency at the boundary -
-    // a step change in a physical quantity that is continuous in reality, sitting
-    // right in the middle of the band this module exists to study. The
-    // high-frequency permittivity was also computed as 0.0671 * epsilon_s rather
-    // than taken from the recommendation.
-    //
-    // P.840 specifies the two-relaxation form with FIXED intermediate and
-    // high-frequency permittivities, which is continuous by construction: there
-    // is nothing to blend and no boundary to cross.
-    constexpr double kEpsilon1 = 5.48; //!< P.840 intermediate permittivity
-    constexpr double kEpsilon2 = 3.51; //!< P.840 high-frequency permittivity
-
-    // Static permittivity of water (ITU-R P.840)
-    double epsilon_s = 77.66 + 103.3 * theta;
-    double epsilon_inf = kEpsilon2;
-    double epsilon_1 = kEpsilon1;
-
-    // Principal relaxation frequency in GHz (ITU-R P.840)
-    double fp = 20.20 - 146.4 * theta + 316.0 * theta * theta;
-
-    // Secondary relaxation frequency in GHz (ITU-R P.840)
-    double fs = 39.8 * fp;
-
-    // Complex permittivity components (double-Debye)
-    double f = freqGHz;
-    double term1_denom = 1.0 + (f / fp) * (f / fp);
-    double term2_denom = 1.0 + (f / fs) * (f / fs);
-
-    double epsilon_real = kEpsilon2 +
-                          (epsilon_s - epsilon_1) / term1_denom +
-                          (epsilon_1 - kEpsilon2) / term2_denom;
-
-    double epsilon_imag = (f / fp) * (epsilon_s - epsilon_1) / term1_denom +
-                          (f / fs) * (epsilon_1 - epsilon_inf) / term2_denom;
-
-    // Specific attenuation coefficient K_l in (dB/km)/(g/m^3)
-    // K_l = (0.819 * f) / (epsilon_imag * (1 + eta^2))
-    // where eta = (2 + epsilon_real) / epsilon_imag
-    double eta = (2.0 + epsilon_real) / epsilon_imag;
-    double Kl = (0.819 * f) / (epsilon_imag * (1.0 + eta * eta));
-
+    // THZ-04 (2026-08-25) removed an unsourced branch at 100 GHz that made
+    // K_l jump 50.8 percent; the double-Debye form is continuous.
+    // Wave 7C: the double-Debye constants are those of ITU-R P.840-9 eqs.
+    // (2)-(11): epsilon_1 = 0.0671 epsilon_0, epsilon_2 = 3.52 and
+    // f_p = 20.20 - 146 theta' + 316 theta'^2. The previous constants
+    // (epsilon_1 = 5.48, epsilon_2 = 3.51) are those of P.840-4/5, and the
+    // 146.4 coefficient had no source. One implementation is shared with the
+    // P.840-9 cloud model (itu::P840LiquidWaterKl).
+    const double f = freqGHz;
+    const double Kl = itu::P840LiquidWaterKl(f, temperature_K);
     NS_LOG_DEBUG("Kl: f=" << freqGHz << " GHz, T=" << temperature_K
-                          << " K, eps_r=" << epsilon_real
-                          << ", eps_i=" << epsilon_imag
-                          << ", Kl=" << Kl << " (dB/km)/(g/m^3)");
+                          << " K, Kl=" << Kl << " (dB/km)/(g/m^3)");
 
     return Kl;
 }

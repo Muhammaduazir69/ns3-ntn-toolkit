@@ -20,9 +20,18 @@
  * each target column is found by bisection on GetWaterVapourColumn(), so the
  * reported PWV is the column the engine actually integrates.
  *
+ * Wave 7C: the sweep is a validation tool for the absorption kernel and is
+ * labeled as one in its output. It is followed by a measured packet
+ * companion (thz-ntn-pass-kit.h) whose ThzNtnPacketLink uses the same engine
+ * path (--mode, --lutFile, --profile): an SGP4 satellite of an
+ * ntn-constellation shell over a TR 38.811 static terminal, DVB-S2 ACM, and an
+ * ntn-traffic 5QI 2 flow with KPM output. --companion=0 skips it.
+ *
  * Usage:
  *   ./ns3 run "thz-ntn-absorption-sweep --mode=inproc --out=sweep.csv"
  */
+
+#include "thz-ntn-pass-kit.h"
 
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
@@ -107,6 +116,11 @@ main(int argc, char* argv[])
     double fStep = 0.5;
     double hSat = 550.0;
     uint32_t steps = 10;
+    bool companion = true;
+    double companionFreqGhz = 300.0;
+    double simSeconds = 20.0;
+    double appRateMbps = 1000.0;
+    std::string outputDir = "thz-ntn-absorption-sweep-out";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("mode", "inproc | lut | lutfile", mode);
@@ -120,7 +134,15 @@ main(int argc, char* argv[])
     cmd.AddValue("fStep", "carrier step, GHz", fStep);
     cmd.AddValue("hSat", "satellite altitude, km", hSat);
     cmd.AddValue("steps", "IntegrationSteps attribute (sub-steps per slab)", steps);
+    cmd.AddValue("companion", "Run the measured packet companion after the sweep", companion);
+    cmd.AddValue("companionFreqGhz", "Companion carrier (GHz)", companionFreqGhz);
+    cmd.AddValue("simSeconds", "Companion run length (s)", simSeconds);
+    cmd.AddValue("appRateMbps", "Companion offered 5QI 2 load (Mb/s)", appRateMbps);
+    cmd.AddValue("outputDir", "Companion output directory", outputDir);
     cmd.Parse(argc, argv);
+    std::cout << "[validation-tool] thz-ntn-absorption-sweep evaluates the absorption kernel\n"
+                 "over a (frequency, elevation, PWV) grid; its CSV holds no packet KPIs. The\n"
+                 "measured packet companion runs after it on the same engine path.\n";
 
     Ptr<ThzNtnMolecularAbsorption> m = CreateObject<ThzNtnMolecularAbsorption>();
     m->SetHumidityProfile(profile);
@@ -175,5 +197,37 @@ main(int argc, char* argv[])
               << " mean_cost_us=" << 1e6 * seconds / std::max<std::size_t>(nEval, 1)
               << " lut_used=" << (m->IsAtmosphericLutLoaded() ? "loaded" : "no")
               << " out=" << out << "\n";
+
+    if (companion)
+    {
+        thzkit::PassConfig pc;
+        pc.runTag = "absorption-sweep-companion";
+        pc.outputDir = outputDir;
+        pc.simSeconds = simSeconds;
+        pc.altitudeKm = hSat;
+        pc.appRateMbps = appRateMbps;
+        pc.argc = argc;
+        pc.argv = argv;
+        pc.link.freqHz = companionFreqGhz * 1e9;
+        pc.link.bandwidthHz = 1e9;
+        bool lutOk = true;
+        thzkit::RunPass(pc,
+                        [&](Ptr<thzntn::ThzNtnPacketLink> link, Ptr<MobilityModel>,
+                            Ptr<MobilityModel>) {
+                            // Same engine path as the sweep.
+                            Ptr<ThzNtnMolecularAbsorption> a =
+                                link->GetAtmosphere()->GetAbsorptionModel();
+                            a->SetHumidityProfile(profile);
+                            a->SetAttribute("IntegrationSteps", UintegerValue(steps));
+                            if (mode == "lut" || mode == "lutfile")
+                            {
+                                lutOk = a->LoadAtmosphericLut(lutFile);
+                            }
+                        });
+        if (!lutOk)
+        {
+            std::cerr << "companion: cannot load LUT " << lutFile << "\n";
+        }
+    }
     return 0;
 }

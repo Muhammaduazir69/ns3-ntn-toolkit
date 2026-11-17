@@ -19,6 +19,13 @@
  *
  *   python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 &
  *   ./ns3 run "sionna-calibration-harness --host=127.0.0.1 --port=8765 --losOnly=true"
+ *
+ * Wave 7C: this is a validation tool and says so in its output
+ * (example_kind=validation-tool). Its distance grid now comes from a real
+ * pass by default (--grid=pass): the slant ranges an SGP4 satellite of an
+ * ntn-constellation Walker shell presents to a TR 38.811 static terminal
+ * (ntn-cho geodesy) at elevations of 10 deg and up. --grid=fixed restores the
+ * previous 1 to 1000 km list.
  */
 #include "ns3/command-line.h"
 #include "ns3/core-module.h"
@@ -27,6 +34,10 @@
 
 #include "ns3/sionna-calibrator.h"
 #include "ns3/sionna-udp-transport.h"
+
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -81,6 +92,7 @@ NS_OBJECT_ENSURE_REGISTERED(FsplFreqModel);
 int
 main(int argc, char* argv[])
 {
+    std::printf("[validation-tool] example_kind=validation-tool\n");
     std::printf("[analytic-tool] CALIBRATION GATE — a packet data plane is genuinely\n"
                 "inappropriate here. The deliverable is a propagation-model PL RESIDUAL\n"
                 "(model_PL_dB - sionna_PL_dB) measured against the Sionna RT server BEFORE\n"
@@ -94,6 +106,8 @@ main(int argc, char* argv[])
     bool losOnly = true;
     uint32_t timeoutMs = 500;
     bool allowFallback = false;
+    std::string gridKind = "pass";
+    double altitudeKm = 550.0;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("host", "Sionna server host", host);
@@ -101,7 +115,54 @@ main(int argc, char* argv[])
     cmd.AddValue("losOnly", "Request LOS-only multipath suppression", losOnly);
     cmd.AddValue("timeoutMs", "Per-query timeout", timeoutMs);
     cmd.AddValue("allowFallback", "1 = exit 0 with an empty calibration when no Sionna server answers; default 0 exits non-zero (RequireLiveTransport)", allowFallback);
+    cmd.AddValue("grid",
+                 "Distance grid: pass (slant ranges of an SGP4 pass, elevation >= 10 deg) "
+                 "or fixed (1 km to 1000 km list)",
+                 gridKind);
+    cmd.AddValue("altitudeKm", "Walker shell altitude for --grid=pass (km)", altitudeKm);
     cmd.Parse(argc, argv);
+
+    // Distance grid. The pass grid samples the real geometry: satellite 0 of
+    // a 72x22 Walker delta shell (SGP4), a terminal 150 km north of its
+    // sub-satellite point 300 s after epoch, slant ranges every 20 s while
+    // the satellite is 10 deg or more above the terminal's horizon.
+    std::vector<double> dists = {1000.0, 5000.0, 50000.0, 200000.0, 500000.0, 1000000.0};
+    if (gridKind == "pass")
+    {
+        ntncon::WalkerConfig w;
+        w.num_planes = 72;
+        w.total_sats = 72 * 22;
+        w.altitude_km = altitudeKm;
+        w.inclination_deg = 53.0;
+        w.epoch_unix_s = 1735689600.0;
+        const auto el = ntncon::WalkerConstellation::BuildDelta(w);
+        Ptr<ntncon::Sgp4MobilityModel> sat = CreateObject<ntncon::Sgp4MobilityModel>();
+        sat->SetElementsSgp4(el[0]);
+        Vector pc;
+        Vector vc;
+        sat->GetEcefStateAt(Seconds(300.0), pc, vc);
+        double lat;
+        double lon;
+        double alt;
+        ntngeo::EcefToGeodetic(pc, lat, lon, alt);
+        const Vector ue = ntngeo::GeodeticToEcef(lat + 150.0 / 111.195, lon, 0.0);
+        dists.clear();
+        for (double t = 0.0; t <= 600.0; t += 20.0)
+        {
+            Vector p;
+            Vector v;
+            sat->GetEcefStateAt(Seconds(t), p, v);
+            if (ntngeo::GeodeticElevationDeg(ue, p) >= 10.0)
+            {
+                dists.push_back(ntngeo::SlantRangeM(ue, p));
+            }
+        }
+        std::printf("# grid=pass: %zu slant ranges %.0f..%.0f km from an SGP4 pass "
+                    "(Walker 1584/72, %.0f km)\n",
+                    dists.size(), dists.empty() ? 0.0 : *std::min_element(dists.begin(), dists.end()) / 1e3,
+                    dists.empty() ? 0.0 : *std::max_element(dists.begin(), dists.end()) / 1e3,
+                    altitudeKm);
+    }
 
     Ptr<SionnaUdpTransport> udp = CreateObject<SionnaUdpTransport>();
     udp->SetServer(host, port);
@@ -115,8 +176,6 @@ main(int argc, char* argv[])
                 "freq_GHz", "dist_m", "sionna_PL", "model_PL", "residual");
 
     const double freqs[] = {2.0e9, 12.0e9, 28.0e9};
-    const double dists[] = {1000.0, 5000.0, 50000.0,
-                             200000.0, 500000.0, 1000000.0};
 
     std::vector<SionnaCalibrator::PointResult> all;
 

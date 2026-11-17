@@ -597,7 +597,9 @@ class ThzNtnRainValidityFlagSimTest : public TestCase
         const Vector g = gnd->GetPosition();
         const Vector s = sat->GetPosition();
         const double d = CalculateDistance(g, s);
-        out->push_back({std::asin((s.z - g.z) / d) * 180.0 / M_PI, pl->GetLastGasDb(),
+        // Wave 7C: the gas term takes the P.834 apparent elevation.
+        (void)d;
+        out->push_back({pl->GetLastApparentElevationDeg(), pl->GetLastGasDb(),
                         pl->GetLastRainDb(), pl->WasLastRainExtrapolated()});
     }
 
@@ -3342,6 +3344,9 @@ class ThzNtnWaterVapourColumnTest : public TestCase
     }
 };
 
+/// Wave 7C cases (thz-ntn-wave7c-test.cc).
+std::vector<ns3::TestCase*> MakeThzNtnWave7cTests();
+
 class ThzNtnTestSuite : public TestSuite
 {
   public:
@@ -3407,6 +3412,10 @@ ThzNtnTestSuite::ThzNtnTestSuite()
     AddTestCase(new ThzNtnRainValidityFlagSimTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnLutProvenanceIsP676Test, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnWeatherProvenanceIsDeclaredTest, TestCase::Duration::QUICK);
+    for (auto* tc : MakeThzNtnWave7cTests())
+    {
+        AddTestCase(tc, TestCase::Duration::QUICK);
+    }
 }
 
 /// Static instance to register the test suite

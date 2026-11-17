@@ -4,7 +4,9 @@
 
 #include "thz-ntn-spectrum-atmosphere-model.h"
 
+#include "ns3/boolean.h"
 #include "ns3/double.h"
+#include "ns3/pointer.h"
 #include "ns3/log.h"
 #include "ns3/mobility-model.h"
 #include "ns3/nstime.h"
@@ -14,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 namespace ns3
@@ -40,6 +43,19 @@ ThzNtnSpectrumAtmosphereModel::GetTypeId()
                           DoubleValue(0.0),
                           MakeDoubleAccessor(&ThzNtnSpectrumAtmosphereModel::m_lwc),
                           MakeDoubleChecker<double>(0.0))
+            .AddAttribute("ApparentElevation",
+                          "Convert the free-space elevation to the apparent elevation "
+                          "(ITU-R P.834-9 eq. 14) before the gas, rain and cloud terms. "
+                          "False reproduces runs before Wave 7C.",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&ThzNtnSpectrumAtmosphereModel::m_apparentElevation),
+                          MakeBooleanChecker())
+            .AddAttribute("CloudModel",
+                          "ITU-R P.840-9 cloud attenuation (Mode Off reproduces runs before "
+                          "Wave 7C).",
+                          PointerValue(),
+                          MakePointerAccessor(&ThzNtnSpectrumAtmosphereModel::m_cloud),
+                          MakePointerChecker<ThzNtnCloudAttenuation>())
             .AddAttribute("ElevationQuantum",
                           "Elevation step (deg) of the gaseous-absorption cache.",
                           DoubleValue(0.02),
@@ -58,6 +74,7 @@ ThzNtnSpectrumAtmosphereModel::ThzNtnSpectrumAtmosphereModel()
     m_abs = CreateObject<ThzNtnMolecularAbsorption>();
     m_weather = CreateObject<ThzNtnWeatherAttenuation>();
     m_p618 = CreateObject<itu::Itu618LossModel>();
+    m_cloud = CreateObject<ThzNtnCloudAttenuation>();
 }
 
 ThzNtnSpectrumAtmosphereModel::~ThzNtnSpectrumAtmosphereModel() = default;
@@ -142,10 +159,20 @@ ThzNtnSpectrumAtmosphereModel::GasVector(const ThzNtnLinkGeometry& g,
 }
 
 std::vector<double>
-ThzNtnSpectrumAtmosphereModel::ComputeLossDb(const ThzNtnLinkGeometry& g,
+ThzNtnSpectrumAtmosphereModel::ComputeLossDb(const ThzNtnLinkGeometry& geo,
                                              const std::vector<double>& freqsHz,
                                              Time t) const
 {
+    // Wave 7C: the geometry gives the free-space elevation; the slant-path
+    // terms take the apparent one (ITU-R P.834-9 eq. 14). The rain field keeps
+    // the geometric ray (its cells are sampled along the straight path).
+    ThzNtnLinkGeometry g = geo;
+    if (m_apparentElevation && g.lowerAltKm < 100.0 && geo.elevationDeg > 0.0)
+    {
+        g.elevationDeg = itu::P834::ApparentElevationDeg(geo.elevationDeg, g.lowerAltKm);
+    }
+    m_lastAppElev = g.elevationDeg;
+    m_lastCloudCentre = 0.0;
     std::vector<double> loss(freqsHz.size(), 0.0);
     if (g.lowerAltKm >= 100.0 || g.elevationDeg <= 0.0)
     {
@@ -161,7 +188,7 @@ ThzNtnSpectrumAtmosphereModel::ComputeLossDb(const ThzNtnLinkGeometry& g,
     if (m_field)
     {
         double ds = 0.0;
-        const auto rates = m_field->SamplePath(g, t, ds);
+        const auto rates = m_field->SamplePath(geo, t, ds);
         m_lastPathRate = rates.empty() ? 0.0 : *std::max_element(rates.begin(), rates.end());
         for (size_t i = 0; i < freqsHz.size(); ++i)
         {
@@ -209,6 +236,36 @@ ThzNtnSpectrumAtmosphereModel::ComputeLossDb(const ThzNtnLinkGeometry& g,
         for (size_t i = 0; i < freqsHz.size(); ++i)
         {
             loss[i] += m_weather->ComputeFogAttenuation_dB(freqsHz[i], g.elevationDeg, m_lwc);
+        }
+    }
+    if (m_cloud && g.lowerAltKm < 10.0 && !freqsHz.empty())
+    {
+        const double lat = g.ecef ? g.lowerLatDeg : std::numeric_limits<double>::quiet_NaN();
+        const double lon = g.ecef ? g.lowerLonDeg : std::numeric_limits<double>::quiet_NaN();
+        // K_L varies by < 0.5 % across a 400 MHz channel at 100 GHz, so the
+        // coefficient is evaluated per RB only when the band is wide.
+        const double span = freqsHz.back() - freqsHz.front();
+        if (span < 0.01 * freqsHz[freqsHz.size() / 2])
+        {
+            const double a =
+                m_cloud->ComputeAttenuationDb(freqsHz[freqsHz.size() / 2], g.elevationDeg, lat, lon);
+            for (auto& l : loss)
+            {
+                l += a;
+            }
+            m_lastCloudCentre = a;
+        }
+        else
+        {
+            for (size_t i = 0; i < freqsHz.size(); ++i)
+            {
+                const double a = m_cloud->ComputeAttenuationDb(freqsHz[i], g.elevationDeg, lat, lon);
+                loss[i] += a;
+                if (i == freqsHz.size() / 2)
+                {
+                    m_lastCloudCentre = a;
+                }
+            }
         }
     }
     return loss;
@@ -287,9 +344,9 @@ ThzNtnSpectrumAtmosphereModel::DoCalcRxPowerSpectralDensity(
 }
 
 int64_t
-ThzNtnSpectrumAtmosphereModel::DoAssignStreams(int64_t /*stream*/)
+ThzNtnSpectrumAtmosphereModel::DoAssignStreams(int64_t stream)
 {
-    return 0;
+    return m_cloud ? m_cloud->AssignStreams(stream) : 0;
 }
 
 } // namespace ns3

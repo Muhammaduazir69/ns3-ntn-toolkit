@@ -16,6 +16,9 @@
  * measured radio see thz-ntn-beam-tracking.
  */
 
+#include "thz-ntn-pass-kit.h"
+#include "ns3/thz-ntn-link-geometry.h"
+
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
 #include <ns3/node-container.h>
@@ -46,10 +49,9 @@ NS_LOG_COMPONENT_DEFINE("ThzNtnUmMimo");
 int
 main(int argc, char* argv[])
 {
-    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
-                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
-                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
-                "module's *-traffic / *-real-stack examples.\n\n");
+    std::printf("[analytic-tool] Sections 1-5 drive the module's antenna and beamforming APIs\n"
+                "directly. The measured packet companion that follows puts the UPA on an SGP4\n"
+                "satellite and carries real packets through its live scan and squint loss.\n\n");
     // ---- Default parameters ----
     double freq = 300e9;        // 300 GHz
     uint32_t numElements = 32;  // default array side
@@ -61,6 +63,23 @@ main(int argc, char* argv[])
     cmd.AddValue("numElements", "Array elements per side [default: 32]", numElements);
     cmd.AddValue("cassegrainDiam", "Cassegrain aperture diameter in m [default: 0.45]",
                  cassegrainDiam);
+    bool companion = true;
+    uint32_t companionElements = 64;
+    double companionTxPowerDbm = 30.0;
+    double companionBandwidthGhz = 0.4;
+    double simSeconds = 30.0;
+    double appRateMbps = 200.0;
+    std::string outputDir = "thz-ntn-um-mimo-out";
+    cmd.AddValue("companion", "Run the measured packet companion", companion);
+    cmd.AddValue("companionElements", "Companion satellite UPA elements per side",
+                 companionElements);
+    cmd.AddValue("companionTxPowerDbm", "Companion satellite conducted power (dBm)",
+                 companionTxPowerDbm);
+    cmd.AddValue("companionBandwidthGhz", "Companion channel bandwidth (GHz)",
+                 companionBandwidthGhz);
+    cmd.AddValue("simSeconds", "Companion run length (s)", simSeconds);
+    cmd.AddValue("appRateMbps", "Companion offered 5QI 2 load (Mb/s)", appRateMbps);
+    cmd.AddValue("outputDir", "Companion output directory", outputDir);
     cmd.Parse(argc, argv);
 
     double lambda = 3e8 / freq;
@@ -285,5 +304,72 @@ main(int argc, char* argv[])
     std::cout << "\n  Simulation complete.\n";
     std::cout << "=============================================================\n";
 
+    if (companion)
+    {
+        // Satellite: a companionElements^2 UPA steered at the terminal; its
+        // gain toward the terminal (element pattern, array factor, coupling)
+        // and the wideband squint loss at the live steer angle are recomputed
+        // every 100 ms. Ground: the Cassegrain reflector of section 1.
+        Ptr<ThzNtnAntennaArray> upa = CreateObject<ThzNtnAntennaArray>();
+        upa->Configure(companionElements, companionElements, freq, ThzArrayType::UPA);
+        const double upaMax = upa->ComputeMaxGain_dBi();
+        Ptr<ThzNtnBeamforming> bf = helper->CreateBeamforming(64);
+        bf->SetAttribute("Frequency", DoubleValue(freq));
+        bf->SetAttribute("Bandwidth", DoubleValue(companionBandwidthGhz * 1e9));
+        bf->SetAttribute("NumElements", UintegerValue(companionElements * companionElements));
+        bf->SetAttribute("EnableBeamSquintComp", BooleanValue(false));
+        bf->GenerateCodebook(64, ThzCodebookLevel::NARROW);
+
+        thzkit::PassConfig pc;
+        pc.runTag = "um-mimo-companion";
+        pc.outputDir = outputDir;
+        pc.simSeconds = simSeconds;
+        pc.appRateMbps = appRateMbps;
+        pc.argc = argc;
+        pc.argv = argv;
+        pc.link.freqHz = freq;
+        pc.link.txPowerDbm = companionTxPowerDbm;
+        pc.link.spaceGainDbi = upaMax;
+        pc.link.groundGainDbi = cassGain;
+        pc.link.bandwidthHz = companionBandwidthGhz * 1e9;
+        double minScan = 1e9;
+        double maxScan = -1e9;
+        double lastSquint = 0.0;
+        const thzkit::PassResult r = thzkit::RunPass(
+            pc,
+            [&](Ptr<thzntn::ThzNtnPacketLink> link, Ptr<MobilityModel> sat,
+                Ptr<MobilityModel> gt) {
+                auto update = std::make_shared<std::function<void()>>();
+                std::weak_ptr<std::function<void()>> self = update;
+                *update = [&, link, sat, gt, self]() {
+                    const Vector s = ThzNtnLinkGeometry::PositionOf(PeekPointer(sat));
+                    const Vector g = ThzNtnLinkGeometry::PositionOf(PeekPointer(gt));
+                    // Off-nadir steer angle of the satellite beam.
+                    const Vector toG(g.x - s.x, g.y - s.y, g.z - s.z);
+                    const double ns = std::sqrt(s.x * s.x + s.y * s.y + s.z * s.z);
+                    const double ng = std::sqrt(toG.x * toG.x + toG.y * toG.y + toG.z * toG.z);
+                    const double cosNadir = -(s.x * toG.x + s.y * toG.y + s.z * toG.z) / (ns * ng);
+                    const double steer = std::acos(std::min(1.0, cosNadir)) * 180.0 / M_PI;
+                    const double scanLoss = upaMax - upa->ComputeArrayGain_dBi(steer, 0.0, steer, 0.0);
+                    bf->UpdateBeamTracking(steer, 0.0);
+                    const double squint = bf->ComputeBeamSquintLoss_dB();
+                    minScan = std::min(minScan, scanLoss);
+                    maxScan = std::max(maxScan, scanLoss);
+                    lastSquint = squint;
+                    link->SetExtraLossDb(scanLoss + squint);
+                    if (auto f = self.lock())
+                    {
+                        Simulator::Schedule(MilliSeconds(100), [f]() { (*f)(); });
+                    }
+                };
+                Simulator::ScheduleNow([update]() { (*update)(); });
+            });
+        std::printf("# measured companion: %ux%u UPA (%.1f dBi) -> %.0f cm Cassegrain (%.1f dBi), "
+                    "scan loss %.2f..%.2f dB, squint %.3f dB: PDR %.5f goodput %.2f Mb/s ACM "
+                    "%.1f Mb/s OWD %.3f ms\n",
+                    companionElements, companionElements, upaMax, cassegrainDiam * 100.0,
+                    cassGain, minScan, maxScan, lastSquint, r.pdr, r.goodputMbps,
+                    r.meanLineRateMbps, r.meanOwdMs);
+    }
     return 0;
 }

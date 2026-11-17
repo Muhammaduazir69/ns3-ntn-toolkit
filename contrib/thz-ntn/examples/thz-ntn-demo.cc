@@ -13,7 +13,15 @@
  * the latitude-convention spherical conversion below preserves the radius
  * exactly; e.g. a 550 km satellite has |position| ~= 6 921 000 m). The
  * thz-ntn loss/elevation models auto-detect geocentric vs local frames.
+ *
+ * Wave 7C: after the eight analysis sections, a measured packet companion
+ * (thz-ntn-pass-kit.h) carries an ntn-traffic 5QI 2 flow over an SGP4 pass
+ * (ntn-constellation) to a TR 38.811 static terminal (ntn-cho) on a
+ * ThzNtnPacketLink at --companionFreqGhz, with KPM and FlowMonitor output.
+ * --companion=0 skips it.
  */
+
+#include "thz-ntn-pass-kit.h"
 
 #include <ns3/command-line.h>
 #include <ns3/constant-position-mobility-model.h>
@@ -590,13 +598,20 @@ WriteSummary()
 int
 main(int argc, char* argv[])
 {
-    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
-                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
-                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
-                "module's *-traffic / *-real-stack examples.\n\n");
+    std::printf("[analytic-tool] Sections 1-8 drive the module's physics APIs directly (link\n"
+                "budgets, scaling laws, comparisons) into CSV datasets. The measured packet\n"
+                "companion that follows carries real packets over an SGP4 pass.\n\n");
     int example = 0;  // 0 = all
+    bool companion = true;
+    double companionFreqGhz = 140.0;
+    double simSeconds = 30.0;
+    double appRateMbps = 1000.0;
     CommandLine cmd;
     cmd.AddValue("example", "Example number to run (1-8), 0=all", example);
+    cmd.AddValue("companion", "Run the measured packet companion", companion);
+    cmd.AddValue("companionFreqGhz", "Companion carrier (GHz)", companionFreqGhz);
+    cmd.AddValue("simSeconds", "Companion run length (s)", simSeconds);
+    cmd.AddValue("appRateMbps", "Companion offered 5QI 2 load (Mb/s)", appRateMbps);
     cmd.Parse(argc, argv);
 
     EnsureOutDir();
@@ -621,5 +636,18 @@ main(int argc, char* argv[])
     std::cout << "#      All 8 examples completed; 8 CSV datasets + summary      #\n";
     std::cout << "###############################################################\n\n";
 
+    if (companion)
+    {
+        thzkit::PassConfig pc;
+        pc.runTag = "thz-ntn-demo-companion";
+        pc.outputDir = std::string(OUT_DIR);
+        pc.simSeconds = simSeconds;
+        pc.appRateMbps = appRateMbps;
+        pc.argc = argc;
+        pc.argv = argv;
+        pc.link.freqHz = companionFreqGhz * 1e9;
+        pc.link.bandwidthHz = 1e9;
+        thzkit::RunPass(pc);
+    }
     return 0;
 }

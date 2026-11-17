@@ -100,8 +100,11 @@ class ThzSpectrumAtmosphereGasTest : public TestCase
         auto band = p->psd->ConstBandsBegin();
         for (size_t i = 0; i < loss.size(); i += 13, band += 13)
         {
-            const double r =
-                ref->ComputeSlantPathAbsorption(band->fc, g.elevationDeg, 0.05, 100.0);
+            // Wave 7C: the slant path takes the P.834-9 apparent elevation.
+            const double appEl = itu::P834::ApparentElevationDeg(g.elevationDeg, 0.05);
+            NS_TEST_ASSERT_MSG_EQ_TOL(m->GetLastApparentElevationDeg(), appEl, 1e-9,
+                                      "apparent elevation used");
+            const double r = ref->ComputeSlantPathAbsorption(band->fc, appEl, 0.05, 100.0);
             NS_TEST_ASSERT_MSG_EQ_TOL(loss[i], r, 1e-6, "RB loss = P.676 at RB fc");
         }
         // Near the 118.75 GHz O2 line the per-RB loss is not flat over 400 MHz.
@@ -184,8 +187,10 @@ class ThzRainFieldTest : public TestCase
         Ptr<itu::Itu618LossModel> p618 = CreateObject<itu::Itu618LossModel>();
         auto out2 = um->CalcRxPowerSpectralDensity(p, sat, gnd);
         auto l2 = LossDb(p->psd, out2);
+        // Wave 7C: P.618 takes the P.834-9 apparent elevation.
         const double ref = p618->SlantPathRainAttenuationDb((p->psd->ConstBandsBegin() + 3)->fc,
-                                                            g.elevationDeg, 25.0, 0.0,
+                                                            um->GetLastApparentElevationDeg(),
+                                                            25.0, 0.0,
                                                             itu::Polarization::circular);
         NS_TEST_ASSERT_MSG_EQ_TOL(l2[3], ref, 1e-6, "uniform P.618 per RB");
     }

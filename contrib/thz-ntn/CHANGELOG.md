@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Wave 7C (Nov 2026)
+- ITU-R P.840-9 cloud attenuation (`ThzNtnCloudAttenuation`) on the default
+  packet path of `ThzNtnPropagationLossModel` and
+  `ThzNtnSpectrumAtmosphereModel`: K_L(f) of eq. (13), site log-normal liquid
+  water statistics from the Recommendation's maps (1 degree nodes), one
+  liquid water state per run, reported per run. `Mode=Off` reproduces older runs.
+- ITU-R P.834-9 free-space to apparent elevation (eqs. 8 to 14) at the
+  slant-path input of both models (`ApparentElevation=false` reproduces
+  older runs). `ThzNtnPropagationLossModel` now uses `ThzNtnLinkGeometry`, so
+  ECEF endpoints (SGP4) get WGS-84 altitudes instead of z.
+- Liquid-water K_l uses the P.840-9 constants (was P.840-4/5 with an
+  unsourced 146.4).
+- `ThzNtnLinkErrorModel`: DVB-S2 BLER decode rule, sky-noise antenna
+  temperature, 1 ms SNR reuse window.
+- `ThzNtnPacketLink` helper: live slant-range delay, DVB-S2 ACM with one-RTT
+  CSI age, pointing and scintillation, per-update CSV.
+- Examples `thz-ntn-isac` (ported to the current API and built again),
+  `-absorption-sweep`, `-ris-assisted`, `-altitude-relay`, `-demo`,
+  `-native-300ghz-traffic`, `-um-mimo` run a measured packet companion
+  (`examples/thz-ntn-pass-kit.h`): SGP4 satellite, TR 38.811 terminal,
+  ntn-traffic 5QI flow, KPM series, FlowMonitor, run manifest.
+
 ### Fixed
 - THZ-13: the bundled table `data/hitran2024-lut-subthz.csv` and its generator
   still carried the pre-THZ-01 six-layer atmosphere. Regenerated from the

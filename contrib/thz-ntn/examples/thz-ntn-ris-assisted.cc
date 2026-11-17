@@ -17,7 +17,20 @@
  * making the node positions consistent with the parametric slant range used
  * by the link budget. For a measured-radio RIS scenario see
  * thz-ntn-ris-relay-traffic.
+ *
+ * Wave 7C: after the analysis, a measured packet companion
+ * (thz-ntn-pass-kit.h) runs the same carrier and satellite power over an SGP4
+ * pass (ntn-constellation) to a TR 38.811 static terminal (ntn-cho) twice:
+ * direct only, and with a --risSize panel 200 m from the terminal whose
+ * co-phased contribution FSPL_direct - PL_cascaded is recomputed every 100 ms
+ * from the live ECEF positions and applied to the ThzNtnPacketLink. The
+ * ntn-traffic 5QI 2 flow measures what the RIS changes. The companion uses
+ * declared apertures (--companionGainDbi) and channel (--companionBandwidthGhz)
+ * so that the direct link closes; --companion=0 skips it.
  */
+
+#include "thz-ntn-pass-kit.h"
+#include "ns3/thz-ntn-link-geometry.h"
 
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
@@ -66,10 +79,9 @@ ComputeSlantRange(double elevDeg, double altKm)
 int
 main(int argc, char* argv[])
 {
-    std::printf("[analytic-tool] This example drives the module's physics/calibration APIs\n"
-                "directly (link budgets, scaling laws, comparisons); it does NOT simulate a\n"
-                "packet data plane. For measured end-to-end KPIs on a real radio, see this\n"
-                "module's *-traffic / *-real-stack examples.\n\n");
+    std::printf("[analytic-tool] Sections 1-4 drive the module's physics APIs directly (link\n"
+                "budgets, scaling laws). The measured packet companion that follows carries\n"
+                "real packets over an SGP4 pass with and without the RIS.\n\n");
     // ---- Default parameters ----
     double freq = 300e9;         // 300 GHz
     uint32_t risSize = 64;       // 64x64 default
@@ -87,6 +99,20 @@ main(int argc, char* argv[])
     cmd.AddValue("risSize", "RIS elements per side [default: 64]", risSize);
     cmd.AddValue("elevation", "Elevation angle in degrees [default: 30]", elevation);
     cmd.AddValue("txPower", "Satellite Tx power in dBm [default: 34.77]", txPower);
+    bool companion = true;
+    double companionGainDbi = 55.0;
+    double companionBandwidthGhz = 1.0;
+    double simSeconds = 20.0;
+    double appRateMbps = 500.0;
+    std::string outputDir = "thz-ntn-ris-assisted-out";
+    cmd.AddValue("companion", "Run the measured packet companion (direct vs RIS)", companion);
+    cmd.AddValue("companionGainDbi", "Companion aperture gain at both ends (dBi)",
+                 companionGainDbi);
+    cmd.AddValue("companionBandwidthGhz", "Companion channel bandwidth (GHz)",
+                 companionBandwidthGhz);
+    cmd.AddValue("simSeconds", "Companion run length (s)", simSeconds);
+    cmd.AddValue("appRateMbps", "Companion offered 5QI 2 load (Mb/s)", appRateMbps);
+    cmd.AddValue("outputDir", "Companion output directory", outputDir);
     cmd.Parse(argc, argv);
 
     std::cout << "=============================================================\n";
@@ -285,5 +311,70 @@ main(int argc, char* argv[])
     std::cout << "\n  Simulation complete.\n";
     std::cout << "=============================================================\n";
 
+    if (companion)
+    {
+        thzkit::PassResult res[2];
+        double lastRisDb = 0.0;
+        for (int withRis = 0; withRis < 2; ++withRis)
+        {
+            thzkit::PassConfig pc;
+            pc.runTag = withRis ? "ris-assisted-ris" : "ris-assisted-direct";
+            pc.outputDir = outputDir;
+            pc.simSeconds = simSeconds;
+            pc.altitudeKm = altitude;
+            pc.appRateMbps = appRateMbps;
+            pc.argc = argc;
+            pc.argv = argv;
+            pc.link.freqHz = freq;
+            pc.link.txPowerDbm = txPower;
+            pc.link.spaceGainDbi = companionGainDbi;
+            pc.link.groundGainDbi = companionGainDbi;
+            pc.link.bandwidthHz = companionBandwidthGhz * 1e9;
+            pc.link.noiseFigureDb = noiseFigure;
+            Ptr<ThzNtnRis> ris = CreateObject<ThzNtnRis>();
+            ris->Configure(risSize, risSize, freq, RisDeployment::GROUND);
+            res[withRis] = thzkit::RunPass(
+                pc,
+                [&, withRis, ris](Ptr<thzntn::ThzNtnPacketLink> link,
+                                  Ptr<MobilityModel> sat,
+                                  Ptr<MobilityModel> gt) {
+                    if (!withRis)
+                    {
+                        return;
+                    }
+                    // The panel: risDist m east of the terminal, 10 m up (ECEF).
+                    const Vector gtE = ThzNtnLinkGeometry::PositionOf(PeekPointer(gt));
+                    const Vector geo = ThzNtnLinkGeometry::EcefToGeodetic(gtE);
+                    const double dLon = risDist / (111195.0 * std::cos(geo.x * M_PI / 180.0));
+                    const Vector risE = ntngeo::GeodeticToEcef(geo.x, geo.y + dLon, geo.z + 10.0);
+                    const double lambda = ris->GetWavelength();
+                    double* sink = &lastRisDb;
+                    auto update = std::make_shared<std::function<void()>>();
+                    std::weak_ptr<std::function<void()>> self = update;
+                    *update = [link, sat, gt, ris, risE, lambda, sink, self]() {
+                        const Vector s = ThzNtnLinkGeometry::PositionOf(PeekPointer(sat));
+                        const Vector g = ThzNtnLinkGeometry::PositionOf(PeekPointer(gt));
+                        const double d = CalculateDistance(s, g);
+                        const double fsplDirect = 20.0 * std::log10(4.0 * M_PI * d / lambda);
+                        const double cascaded = ris->ComputeCascadedPathLoss_dB(s, risE, g);
+                        const double rel = fsplDirect - cascaded;
+                        const double gainDb = 10.0 * std::log10(1.0 + std::pow(10.0, rel / 10.0));
+                        *sink = gainDb;
+                        link->SetExtraLossDb(-gainDb);
+                        if (auto f = self.lock())
+                        {
+                            Simulator::Schedule(MilliSeconds(100), [f]() { (*f)(); });
+                        }
+                    };
+                    Simulator::ScheduleNow([update]() { (*update)(); });
+                });
+        }
+        std::printf("# measured companion (%.0f GHz, %ux%u RIS at %.0f m): direct PDR %.5f "
+                    "goodput %.2f Mb/s ACM %.1f Mb/s | RIS PDR %.5f goodput %.2f Mb/s ACM "
+                    "%.1f Mb/s, last RIS contribution %.4f dB\n",
+                    freq / 1e9, risSize, risSize, risDist, res[0].pdr, res[0].goodputMbps,
+                    res[0].meanLineRateMbps, res[1].pdr, res[1].goodputMbps,
+                    res[1].meanLineRateMbps, lastRisDb);
+    }
     return 0;
 }

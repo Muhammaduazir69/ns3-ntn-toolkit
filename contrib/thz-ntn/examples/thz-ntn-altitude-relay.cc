@@ -13,7 +13,17 @@
  * the lower endpoint altitude and the elevation angle change between rows.
  *
  * Output: one CSV row per (frequency, relay altitude, elevation).
+ *
+ * Wave 7C: the sweep is an analysis of the absorption kernel. It is followed
+ * by a measured packet companion (thz-ntn-pass-kit.h): the same SGP4
+ * satellite serves, in two runs, a ground terminal (TR 38.811 static class)
+ * and a HAPS relay at --relayAltKm above the same site, over a
+ * ThzNtnPacketLink at --companionFreqGhz with DVB-S2 ACM, and an ntn-traffic
+ * 5QI 2 flow measures what the avoided absorption buys in packets.
+ * --companion=0 skips it.
  */
+
+#include "thz-ntn-pass-kit.h"
 
 #include "ns3/core-module.h"
 #include "ns3/thz-ntn-molecular-absorption.h"
@@ -49,11 +59,25 @@ main(int argc, char* argv[])
 {
     double satAltKm = 550.0;
     std::string outputDir = "thz-altitude-relay-output";
+    bool companion = true;
+    double companionFreqGhz = 300.0;
+    double relayAltKm = 20.0;
+    double simSeconds = 10.0;
+    double appRateMbps = 2000.0;
+    std::string cloud = "sampled";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("satAltKm", "Satellite altitude in km", satAltKm);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("companion", "Run the measured packet companion (ground vs relay)", companion);
+    cmd.AddValue("companionFreqGhz", "Companion carrier (GHz)", companionFreqGhz);
+    cmd.AddValue("relayAltKm", "Companion relay altitude (km)", relayAltKm);
+    cmd.AddValue("simSeconds", "Companion run length per endpoint (s)", simSeconds);
+    cmd.AddValue("appRateMbps", "Companion offered 5QI 2 load (Mb/s)", appRateMbps);
+    cmd.AddValue("cloud", "P.840-9 cloud state: sampled | pXX | fixed:L | off", cloud);
     cmd.Parse(argc, argv);
+    std::printf("[validation-tool] The sweep below is an analysis of the P.676-13 Annex 1\n"
+                "absorption kernel (no packets). The measured packet companion follows it.\n");
 
     Ptr<ThzNtnMolecularAbsorption> abs = CreateObject<ThzNtnMolecularAbsorption>();
 
@@ -124,6 +148,35 @@ main(int argc, char* argv[])
             const double r = abs->ComputeSlantPathAbsorption(f * 1e9, e, 20.0, satAltKm);
             std::printf("  %-8.0f %-10.2f %-10.2f %-10.2f %.0f deg\n", f, g, r, g - r, e);
         }
+    }
+
+    if (companion)
+    {
+        thzkit::PassResult res[2];
+        const double alts[2] = {0.0, relayAltKm};
+        for (int i = 0; i < 2; ++i)
+        {
+            thzkit::PassConfig pc;
+            pc.runTag = i == 0 ? "altitude-relay-ground" : "altitude-relay-haps";
+            pc.outputDir = outputDir;
+            pc.simSeconds = simSeconds;
+            pc.altitudeKm = satAltKm;
+            pc.groundAltM = alts[i] * 1000.0;
+            pc.appRateMbps = appRateMbps;
+            pc.cloud = cloud;
+            pc.argc = argc;
+            pc.argv = argv;
+            pc.link.freqHz = companionFreqGhz * 1e9;
+            pc.link.bandwidthHz = 1e9;
+            res[i] = thzkit::RunPass(pc);
+        }
+        std::printf("# measured companion at %.0f GHz, same satellite and site:\n"
+                    "#   endpoint   PDR       goodput(Mb/s)  ACM rate(Mb/s)  OWD(ms)\n"
+                    "#   ground     %.5f   %.1f          %.1f          %.3f\n"
+                    "#   %4.1f km    %.5f   %.1f          %.1f          %.3f\n",
+                    companionFreqGhz, res[0].pdr, res[0].goodputMbps, res[0].meanLineRateMbps,
+                    res[0].meanOwdMs, relayAltKm, res[1].pdr, res[1].goodputMbps,
+                    res[1].meanLineRateMbps, res[1].meanOwdMs);
     }
     return 0;
 }

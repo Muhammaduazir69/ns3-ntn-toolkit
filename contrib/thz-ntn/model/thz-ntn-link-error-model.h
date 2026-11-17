@@ -35,8 +35,10 @@
 
 #include "ns3/error-model.h"
 #include "ns3/mobility-model.h"
+#include "ns3/nstime.h"
 #include "ns3/propagation-loss-model.h"
 #include "ns3/random-variable-stream.h"
+#include "ns3/satellite-enums.h"
 
 namespace ns3
 {
@@ -79,6 +81,43 @@ class ThzNtnLinkErrorModel : public ErrorModel
     uint64_t GetPacketsCorrupted() const { return m_corrupted; }
     double GetLastSnrDb() const { return m_lastSnrDb; }
 
+    /// Wave 7C: decode rule. THRESHOLD (default, the THZ-07 behavior) drops
+    /// every packet below DecodeSnr and none above. DVBS2_WATERFALL draws
+    /// each packet's error from the measured BLER(Es/N0) curve of the active
+    /// DVB-S2 MODCOD (SNS3 SatLinkResultsDvbS2, normal FECFRAME; a 1400 B
+    /// packet fits in one 64800-bit frame), with Es/N0 taken as the SNR over
+    /// the noise bandwidth, which the caller sets to the symbol rate.
+    enum DecodeRule : uint8_t
+    {
+        THRESHOLD = 0,
+        DVBS2_WATERFALL = 1,
+    };
+    void SetDecodeRule(DecodeRule r) { m_rule = r; }
+    DecodeRule GetDecodeRule() const { return m_rule; }
+    void SetModcod(SatEnums::SatModcod_t m) { m_modcod = m; }
+    SatEnums::SatModcod_t GetModcod() const { return m_modcod; }
+    /// BLER of a MODCOD at an Es/N0 (dB) from the DVB-S2 link-result tables.
+    static double DvbS2Bler(SatEnums::SatModcod_t m, double esNoDb);
+    /// Es/N0 (dB) a MODCOD needs for a target BLER.
+    static double DvbS2RequiredEsNoDb(SatEnums::SatModcod_t m, double blerTarget);
+    /// Wave 7C: receiver antenna noise temperature (K). NaN (default) keeps
+    /// the legacy floor -174 dBm/Hz + NF (antenna at T0 = 290 K); a value
+    /// gives T_sys = T_ant + T0 (F - 1) (ITU-R P.618-14 Section 3 sky noise).
+    void SetAntennaNoiseTemperatureK(double k)
+    {
+        m_antTempK = k;
+        m_cacheTime = Seconds(-1);
+    }
+    double GetAntennaNoiseTemperatureK() const { return m_antTempK; }
+    int64_t AssignStreams(int64_t stream);
+    /// Sum of the per-packet BLER draws' probabilities: the expected number
+    /// of corrupted packets (DVBS2_WATERFALL), to read next to the drawn count.
+    double GetExpectedCorrupted() const { return m_sumBler; }
+    /// Wave 7C: the per-packet decode reuses the SNR evaluated within this
+    /// window (default 1 ms: a LEO satellite moves 7.5 m, the slant path
+    /// changes by well under 0.01 dB). Zero evaluates every packet.
+    void SetSnrCacheWindow(Time t) { m_cacheWindow = t; }
+
   private:
     bool DoCorrupt(Ptr<Packet> p) override;
     void DoReset() override;
@@ -96,6 +135,14 @@ class ThzNtnLinkErrorModel : public ErrorModel
     mutable double m_lastSnrDb{0.0};
     uint64_t m_checked{0};
     uint64_t m_corrupted{0};
+    DecodeRule m_rule{THRESHOLD};
+    SatEnums::SatModcod_t m_modcod{SatEnums::SAT_MODCOD_QPSK_1_TO_2};
+    double m_antTempK;
+    Ptr<UniformRandomVariable> m_uv;
+    Time m_cacheWindow{MilliSeconds(1)};
+    double m_sumBler{0.0};
+    Time m_cacheTime{Seconds(-1)};
+    double PacketSnrDb();
 };
 
 } // namespace thzntn

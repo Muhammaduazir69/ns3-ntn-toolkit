@@ -1,3 +1,23 @@
+# Wave 7C: libraries of the measured packet companion (thz-ntn-pass-kit.h):
+# SGP4 satellite (ntn-constellation), TR 38.811 terminal (ntn-cho), THz packet
+# link (thz-ntn), 5QI flow + KPM (ntn-traffic), manifest (ntn-observability).
+set(thz_pass_kit_libs
+    ${libthz-ntn}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
+    ${libntn-observability}
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libpropagation}
+    ${libpoint-to-point}
+    ${libinternet}
+    ${libapplications}
+    ${libflow-monitor}
+    ${libsatellite}
+)
+
 build_lib_example(
   NAME thz-ntn-leo-ground
   SOURCE_FILES thz-ntn-leo-ground.cc
@@ -99,12 +119,7 @@ build_lib_example(
 build_lib_example(
   NAME thz-ntn-um-mimo
   SOURCE_FILES thz-ntn-um-mimo.cc
-  LIBRARIES_TO_LINK
-    ${libthz-ntn}
-    ${libntn-cho}
-    ${libntn-constellation}
-    ${libcore}
-    ${libmobility}
+  LIBRARIES_TO_LINK ${thz_pass_kit_libs}
 )
 
 # RIS recovers a blocked THz link mid-sim — blockage + RIS engagement are
@@ -176,30 +191,16 @@ build_lib_example(
 build_lib_example(
   NAME thz-ntn-ris-assisted
   SOURCE_FILES thz-ntn-ris-assisted.cc
-  LIBRARIES_TO_LINK
-    ${libthz-ntn}
-    ${libntn-cho}
-    ${libntn-constellation}
-    ${libcore}
-    ${libmobility}
+  LIBRARIES_TO_LINK ${thz_pass_kit_libs}
 )
 
-# TODO Roadmap §4.3.5: ISAC scheduler is being redesigned; thz-ntn-isac.cc
-# references the legacy ThzNtnIsac API (CreateIsac/PerformSensing/...). The
-# example will be rewritten alongside the Q4 2026 ISAC scheduler work. Until
-# then leave the example out of the build so test-runner can link.
-if(FALSE)
+# ISAC debris-detection analysis on the current ThzNtnIsac API (Wave 7C port)
+# plus a measured packet companion over an SGP4 pass.
 build_lib_example(
   NAME thz-ntn-isac
   SOURCE_FILES thz-ntn-isac.cc
-  LIBRARIES_TO_LINK
-    ${libthz-ntn}
-    ${libntn-cho}
-    ${libntn-constellation}
-    ${libcore}
-    ${libmobility}
+  LIBRARIES_TO_LINK ${thz_pass_kit_libs}
 )
-endif()
 
 build_lib_example(
   NAME thz-ntn-dband-constellation
@@ -220,13 +221,7 @@ build_lib_example(
 build_lib_example(
   NAME thz-ntn-demo
   SOURCE_FILES thz-ntn-demo.cc
-  LIBRARIES_TO_LINK
-    ${libthz-ntn}
-    ${libntn-cho}
-    ${libntn-constellation}
-    ${libcore}
-    ${libnetwork}
-    ${libmobility}
+  LIBRARIES_TO_LINK ${thz_pass_kit_libs}
 )
 
 # Full-stack integration demo: downlink link budget + RIS assist, ISL SNR/
@@ -291,9 +286,7 @@ build_lib_example(
 build_lib_example(
   NAME thz-ntn-altitude-relay
   SOURCE_FILES thz-ntn-altitude-relay.cc
-  LIBRARIES_TO_LINK
-    ${libthz-ntn}
-    ${libcore}
+  LIBRARIES_TO_LINK ${thz_pass_kit_libs}
 )
 
 # THZ-07: real IP packets at TRUE THz (default 300 GHz), on a propagation chain
@@ -302,16 +295,7 @@ build_lib_example(
 build_lib_example(
   NAME thz-ntn-native-300ghz-traffic
   SOURCE_FILES thz-ntn-native-300ghz-traffic.cc
-  LIBRARIES_TO_LINK
-    ${libthz-ntn}
-    ${libcore}
-    ${libnetwork}
-    ${libmobility}
-    ${libpropagation}
-    ${libpoint-to-point}
-    ${libinternet}
-    ${libapplications}
-    ${libflow-monitor}
+  LIBRARIES_TO_LINK ${thz_pass_kit_libs}
 )
 
 # Slant-path gaseous absorption sweep (frequency x elevation x PWV) of the
@@ -319,7 +303,5 @@ build_lib_example(
 build_lib_example(
   NAME thz-ntn-absorption-sweep
   SOURCE_FILES thz-ntn-absorption-sweep.cc
-  LIBRARIES_TO_LINK
-    ${libthz-ntn}
-    ${libcore}
+  LIBRARIES_TO_LINK ${thz_pass_kit_libs}
 )

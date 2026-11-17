@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed (Wave 7C, Nov 2026)
+- `sionna-calibration-harness` declares itself a validation tool in its
+  output and draws its distance grid from an SGP4 pass (ntn-constellation)
+  over a TR 38.811 terminal by default (`--grid=fixed` restores the list).
+
 ## [2.0.0] - 2026
 
 ### Added

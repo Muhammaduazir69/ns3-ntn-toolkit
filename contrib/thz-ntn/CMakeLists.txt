@@ -8,6 +8,9 @@ set(source_files
     # 4.3.2 — ITU-R P.618/676/838/681 wrappers (Roadmap §4.3.2)
     model/thz-ntn-itu-recommendations.cc
     model/thz-ntn-weather-attenuation.cc
+    # Wave 7C: ITU-R P.840-9 cloud attenuation + P.834-9 apparent elevation
+    model/thz-ntn-cloud-attenuation.cc
+    model/thz-ntn-p840-lwc-map.cc
     model/thz-ntn-scintillation.cc
     model/thz-ntn-pointing-error.cc
     # A2 — pointing impairment re-homed onto the measured packet plane
@@ -52,6 +55,7 @@ set(source_files
     model/thz-ntn-ris-spectrum-model.cc
     # Helper
     helper/thz-ntn-helper.cc
+    helper/thz-ntn-packet-link.cc
 )
 
 set(header_files
@@ -64,6 +68,7 @@ set(header_files
     # 4.3.2 — ITU-R P.618/676/838/681 wrappers (Roadmap §4.3.2)
     model/thz-ntn-itu-recommendations.h
     model/thz-ntn-weather-attenuation.h
+    model/thz-ntn-cloud-attenuation.h
     model/thz-ntn-scintillation.h
     model/thz-ntn-pointing-error.h
     # A2 — pointing impairment re-homed onto the measured packet plane
@@ -109,11 +114,13 @@ set(header_files
     model/thz-ntn-aperture.h
     # Helper
     helper/thz-ntn-helper.h
+    helper/thz-ntn-packet-link.h
 )
 
 set(test_sources
     test/thz-ntn-test-suite.cc
     test/thz-ntn-spectrum-plugins-test.cc
+    test/thz-ntn-wave7c-test.cc
 )
 
 build_lib(
@@ -130,5 +137,6 @@ build_lib(
         ${libapplications}
         ${libsatellite}
         ${libmmwave}
+        ${libpoint-to-point}
     TEST_SOURCES ${test_sources}
 )
