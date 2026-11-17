@@ -14,6 +14,7 @@
 #include "nr-mac-scheduler-harq-rr.h"
 #include "nr-mac-scheduler-lc-rr.h"
 #include "nr-mac-scheduler-srs-default.h"
+#include "nr-mac-phr-ce.h"
 #include "nr-mac-short-bsr-ce.h"
 
 #include <ns3/boolean.h>
@@ -24,6 +25,7 @@
 #include <ns3/uinteger.h>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <unordered_set>
 
@@ -235,6 +237,21 @@ NrMacSchedulerNs3::GetTypeId()
                 MakeTypeIdAccessor(&NrMacSchedulerNs3::SetLcSched),
                 //&NrMacSchedulerNs3::GetLcSched),
                 MakeTypeIdChecker())
+            .AddAttribute(
+                "PhrUlRbLimit",
+                "ntn-patch 16: bound each UE's PUSCH to the PRBs its last power headroom "
+                "report (TS 38.321 5.4.6 Single Entry PHR, type 1 PH of TS 38.213 7.7.1) "
+                "says it can power at its open-loop target PSD: M_max = M_RB x 10^(PH/10) for "
+                "the M_RB of the PUSCH that carried the PHR. A power-limited UE otherwise "
+                "spreads P_CMAX over the whole band and its PUSCH SINR falls below the lowest "
+                "MCS. false (default) ignores PHRs, the nr behavior before the patch.",
+                BooleanValue(false),
+                MakeBooleanAccessor(&NrMacSchedulerNs3::m_phrUlRbLimit),
+                MakeBooleanChecker())
+            .AddTraceSource("UlPhrPrbLimit",
+                            "A PHR set a UE's UL PRB limit: RNTI, PH (dB), M_RB, limit",
+                            MakeTraceSourceAccessor(&NrMacSchedulerNs3::m_ulPhrLimitTrace),
+                            "ns3::NrMacSchedulerNs3::UlPhrLimitTracedCallback")
             .AddAttribute("RachUlGrantMcs",
                           "The MCS of the RACH UL grant, must be [0..15] (default 0)",
                           UintegerValue(0),
@@ -869,6 +886,92 @@ NrMacSchedulerNs3::BSRReceivedFromUe(const MacCeElement& bsr)
     }
 }
 
+void
+NrMacSchedulerNs3::PhrReceivedFromUe(const MacCeElement& phr)
+{
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT(phr.m_macCeType == MacCeElement::PHR);
+    GetSecond UeInfoOf;
+    auto itUe = m_ueMap.find(phr.m_rnti);
+    if (itUe == m_ueMap.end())
+    {
+        return; // the UE left this BWP while the PHR was in flight
+    }
+    ++m_phrReceived;
+    const uint16_t usedRb = phr.m_macCeValue.m_phrNumRb;
+    if (!m_phrUlRbLimit || usedRb == 0)
+    {
+        NS_LOG_INFO("PHR from UE " << phr.m_rnti << " not used for the UL PRB limit");
+        return;
+    }
+    // Type 1 PH (TS 38.213 7.7.1) for M_RB = usedRb: P_CMAX minus the power the
+    // open-loop target needs on usedRb RBs. The target needs 10log10(M/usedRb)
+    // dB more on M RBs, so the UE can power M_max = usedRb x 10^(PH/10) RBs.
+    // The PH is decoded as the lower edge of its TS 38.133 range.
+    const double phDb = NrMacSingleEntryPhrCe::PhIndexToDb(phr.m_macCeValue.m_phr);
+    const double maxRbD = usedRb * std::pow(10.0, phDb / 10.0);
+    uint32_t maxRb = UINT32_MAX;
+    if (maxRbD < 1.0e6)
+    {
+        maxRb = std::max<uint32_t>(1, static_cast<uint32_t>(std::floor(maxRbD)));
+    }
+    UeInfoOf(*itUe)->m_ulMaxRb = maxRb;
+    UeInfoOf(*itUe)->m_ulPhrReceived = true;
+    NS_LOG_INFO("PHR from UE " << phr.m_rnti << ": PH " << phDb << " dB on " << usedRb
+                               << " RBs, UL PRB limit " << maxRb);
+    m_ulPhrLimitTrace(phr.m_rnti, phDb, usedRb, maxRb);
+}
+
+uint32_t
+NrMacSchedulerNs3::GetUlPhrPrbLimit(uint16_t rnti) const
+{
+    auto itUe = m_ueMap.find(rnti);
+    if (itUe == m_ueMap.end() || !itUe->second->m_ulPhrReceived)
+    {
+        return UINT32_MAX;
+    }
+    return itUe->second->m_ulMaxRb;
+}
+
+bool
+NrMacSchedulerNs3::IsUlPhrLimited(const UePtr& ue) const
+{
+    // Until the first PHR the gNB does not know whether the UE can power a
+    // wide PUSCH, so it starts narrow (the floor below) rather than spreading
+    // P_CMAX over the band: a full-band PUSCH from a power-limited UE does not
+    // decode, and so the PHR riding on it would never arrive either.
+    return m_phrUlRbLimit && (!ue->m_ulPhrReceived || ue->m_ulMaxRb != UINT32_MAX);
+}
+
+uint32_t
+NrMacSchedulerNs3::GetUlRbgCapPerSym(const UePtr& ue, uint32_t assignableRbg) const
+{
+    if (!IsUlPhrLimited(ue))
+    {
+        return assignableRbg;
+    }
+    const auto rbPerRbg = static_cast<uint32_t>(GetNumRbPerRbg());
+    const uint32_t maxRb = ue->m_ulPhrReceived ? ue->m_ulMaxRb : 1;
+    uint32_t cap = std::max<uint32_t>(1, maxRb / rbPerRbg);
+    cap = std::min(cap, assignableRbg);
+    // Never below an allocation whose TB can carry data (kMinUlTbWithData)
+    // over the UL data symbols of a slot: a smaller grant (CreateUlDci accepts
+    // 12 bytes) would carry the MAC CEs only, every slot, and the UE would
+    // never send its data. The floor is sized on the whole slot, not on the
+    // symbols left over in this one, so a few leftover symbols never turn
+    // into a wide, low-PSD grant: such a UE waits for a slot with room.
+    const uint32_t slotUlSym =
+        m_macSchedSapUser->GetSymbolsPerSlot() - m_ulCtrlSymbols - m_dlCtrlSymbols;
+    const uint32_t sym = std::max<uint32_t>(slotUlSym, 1);
+    while (cap < assignableRbg &&
+           m_ulAmc->CalculateTbSize(ue->m_ulMcs, ue->m_ulRank, cap * rbPerRbg * sym) <
+               kMinUlTbWithData)
+    {
+        ++cap;
+    }
+    return cap;
+}
+
 /**
  * \brief Evaluate different types of control messages (only BSR for the moment)
  * \param params parameters of the control message
@@ -887,6 +990,10 @@ NrMacSchedulerNs3::DoSchedUlMacCtrlInfoReq(
         if (element.m_macCeType == MacCeElement::BSR)
         {
             BSRReceivedFromUe(element);
+        }
+        else if (element.m_macCeType == MacCeElement::PHR)
+        {
+            PhrReceivedFromUe(element);
         }
         else
         {

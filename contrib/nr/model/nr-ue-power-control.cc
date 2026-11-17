@@ -85,10 +85,11 @@ NrUePowerControl::GetTypeId()
                           MakeDoubleAccessor(&NrUePowerControl::SetPcmin),
                           MakeDoubleChecker<double>())
             .AddAttribute("PoNominalPusch",
-                          "P_O_NOMINAL_PUSCH   INT (-126 ... 24), Default value -80",
+                          "P_O_NOMINAL_PUSCH   INT (-202 ... 24) (TS 38.331 p0-NominalWithGrant; "
+                          "the LTE range was -126 ... 24), Default value -80",
                           IntegerValue(-80),
                           MakeIntegerAccessor(&NrUePowerControl::SetPoNominalPusch),
-                          MakeIntegerChecker<int16_t>(-126, 24))
+                          MakeIntegerChecker<int16_t>(-202, 24))
             .AddAttribute("PoUePusch",
                           "P_O_UE_PUSCH   INT(-8...7), Default value 0",
                           IntegerValue(0),
@@ -785,6 +786,53 @@ NrUePowerControl::CalculateSrsTxPowerNr(std::size_t rbNum)
                                                          << m_cellId << "," << m_rnti);
 
     return txPower;
+}
+
+double
+NrUePowerControl::GetPuschPowerHeadroom(std::size_t rbNum) const
+{
+    NS_LOG_FUNCTION(this << rbNum);
+    NS_ABORT_MSG_IF(rbNum == 0, "a PUSCH has at least one RB");
+    // f(i): the closed-loop state the next PUSCH occasion will use (UpdateFc
+    // applies the stored TPC deltas at the occasion; do the same here
+    // without changing the state).
+    double fc = m_fc;
+    if (m_technicalSpec == TS_38_213 && m_closedLoop)
+    {
+        if (m_accumulationEnabled)
+        {
+            for (const auto& d : m_deltaPusch)
+            {
+                fc += d;
+            }
+        }
+        else if (!m_deltaPusch.empty())
+        {
+            fc = m_deltaPusch.back();
+        }
+    }
+    const double bw = 10 * log10(std::pow(2, m_nrUePhy->GetNumerology()) * rbNum);
+    const double required =
+        m_PoNominalPusch + m_PoUePusch + bw + m_alpha * m_pathLoss + m_deltaTF + fc;
+    return m_Pcmax - required;
+}
+
+double
+NrUePowerControl::GetPcmax() const
+{
+    return m_Pcmax;
+}
+
+double
+NrUePowerControl::GetPathLoss() const
+{
+    return m_pathLoss;
+}
+
+bool
+NrUePowerControl::HasPathLossEstimate() const
+{
+    return m_rsrpSet;
 }
 
 double

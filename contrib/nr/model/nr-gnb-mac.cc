@@ -18,6 +18,7 @@
 #include "nr-mac-pdu-info.h"
 #include "nr-mac-sched-sap.h"
 #include "nr-mac-scheduler.h"
+#include "nr-mac-phr-ce.h"
 #include "nr-mac-short-bsr-ce.h"
 #include "nr-phy-mac-common.h"
 #include "nr-radio-bearer-tag.h"
@@ -773,6 +774,10 @@ NrGnbMac::DoSlotUlIndication(const SfnSf& sfnSf, LteNrTddSlotType type)
 
         for (const auto& v : ulMacReq.m_macCeList)
         {
+            if (v.m_macCeType == MacCeElement::PHR)
+            {
+                continue; // ntn-patch 16: not a BSR, do not trace it as one
+            }
             Ptr<NrBsrMessage> msg = Create<NrBsrMessage>();
             msg->SetBsr(v);
             m_macRxedCtrlMsgsTrace(m_currentSlot, GetCellId(), v.m_rnti, GetBwpId(), msg);
@@ -916,6 +921,26 @@ NrGnbMac::DoReceivePhyPdu(Ptr<Packet> p)
         bsr.m_macCeValue.m_bufferStatus[3] = bsrHeader.m_bufferSizeLevel_3;
 
         ReceiveBsrMessage(bsr); // Here it will be converted again, but our job is done.
+        return;
+    }
+
+    // ntn-patch 16: Single Entry PHR MAC CE (TS 38.321 6.1.3.8). The PH is
+    // that of the PUSCH this CE arrived on, so it goes to this BWP's
+    // scheduler together with that PUSCH's M_RB (which the gNB scheduled).
+    if (header.GetLcId() == NrMacHeaderFsUl::SINGLE_ENTRY_PHR)
+    {
+        NrMacSingleEntryPhrCe phrCe;
+        p->RemoveHeader(phrCe);
+        NrPuschAllocationTag allocTag;
+        const bool haveAlloc = p->PeekPacketTag(allocTag);
+
+        MacCeElement phr;
+        phr.m_macCeType = MacCeElement::PHR;
+        phr.m_rnti = rnti;
+        phr.m_macCeValue.m_phr = phrCe.m_phIndex;
+        phr.m_macCeValue.m_phrPcmax = phrCe.m_pcmaxIndex;
+        phr.m_macCeValue.m_phrNumRb = haveAlloc ? allocTag.GetNumRb() : 0;
+        m_ulCeReceived.push_back(phr);
         return;
     }
 

@@ -402,6 +402,86 @@ class SatLinkGateAndModcodTest : public TestCase
     }
 };
 
+/**
+ * Wave 8: Sgp4MobilityModel's 100 ms position cache across two simulations in
+ * one process. Simulator::Destroy() resets the clock to 0 while the model
+ * object lives on; the cache stamped at the end of the first run used to have
+ * a negative age in the second and was taken as fresh, so the second run saw
+ * the first run's last position (about 450 km off after 60 s at 7.6 km/s).
+ * Normal path: the second run reads the true t = 0 position and the cache is
+ * still used within its granule. Failure path: an epoch re-anchored between
+ * runs (the canyon workaround) is honored too.
+ */
+class Sgp4CacheAcrossRunsTest : public TestCase
+{
+  public:
+    Sgp4CacheAcrossRunsTest()
+        : TestCase("Wave 8: SGP4 cache is not reused across Simulator::Destroy()")
+    {
+    }
+
+  private:
+    static double Dist(const Vector& a, const Vector& b)
+    {
+        return CalculateDistance(a, b);
+    }
+
+    void DoRun() override
+    {
+        Ptr<Sgp4MobilityModel> sat = MakeSat();
+        // Run 1: 60 s, the position is read (and cached) near the end.
+        Vector endRun1;
+        Simulator::Schedule(Seconds(60.0), [&]() { endRun1 = sat->GetPosition(); });
+        Simulator::Stop(Seconds(61.0));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        // Run 2 in the same process, same model object.
+        Vector start2;
+        Vector eci0;
+        Vector eciLater;
+        Simulator::Schedule(Seconds(0.0), [&]() {
+            start2 = sat->GetPosition();
+            eci0 = sat->GetEciPosition();
+        });
+        Simulator::Schedule(MilliSeconds(50), [&]() { eciLater = sat->GetEciPosition(); });
+        Simulator::Stop(Seconds(1.0));
+        Simulator::Run();
+        Simulator::Destroy();
+        // Reference: a model that never ran, read at t = 0.
+        Vector ref0;
+        Ptr<Sgp4MobilityModel> fresh = MakeSat();
+        Simulator::Schedule(Seconds(0.0), [&]() { ref0 = fresh->GetPosition(); });
+        Simulator::Stop(Seconds(0.5));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_ASSERT_MSG_GT(Dist(endRun1, ref0), 100e3,
+                              "the satellite moved far in run 1 (a reuse would show)");
+        NS_TEST_ASSERT_MSG_LT(Dist(start2, ref0), 1e-3,
+                              "run 2 starts at the true t = 0 position, not run 1's last");
+        // Within the 100 ms granule the cached (inertial) state is still served.
+        NS_TEST_ASSERT_MSG_LT(Dist(eciLater, eci0), 1e-9, "cache used within its granule");
+
+        // Failure path: an epoch re-anchored between runs (+600 s) is honored.
+        const double base = sat->SimBaseUnix();
+        sat->SetSimulationEpochUnix(base + 600.0);
+        Ptr<Sgp4MobilityModel> fresh600 = MakeSat();
+        fresh600->SetSimulationEpochUnix(base + 600.0);
+        Vector run3;
+        Vector ref600;
+        Simulator::Schedule(Seconds(0.0), [&]() {
+            run3 = sat->GetPosition();
+            ref600 = fresh600->GetPosition();
+        });
+        Simulator::Stop(Seconds(0.5));
+        Simulator::Run();
+        Simulator::Destroy();
+        NS_TEST_ASSERT_MSG_LT(Dist(run3, ref600), 1e-3, "re-anchored epoch propagated afresh");
+        NS_TEST_ASSERT_MSG_GT(Dist(run3, ref0), 100e3, "and it is a different position");
+    }
+};
+
 class NtnConstellationExactLinkTestSuite : public TestSuite
 {
   public:
@@ -412,6 +492,7 @@ class NtnConstellationExactLinkTestSuite : public TestSuite
         AddTestCase(new RangeDelayChannelFallbackTest, Duration::QUICK);
         AddTestCase(new SchedulerIslMarginSkipTest, Duration::QUICK);
         AddTestCase(new SatLinkGateAndModcodTest, Duration::QUICK);
+        AddTestCase(new Sgp4CacheAcrossRunsTest, Duration::QUICK);
     }
 };
 

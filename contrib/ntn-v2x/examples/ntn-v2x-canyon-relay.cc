@@ -1005,14 +1005,8 @@ RunNrCheck(double T, const std::string& dir, uint32_t periodMs)
     // geometry, the vehicle's kinematics and the orbit, evaluated ahead without
     // advancing the clock); ties go to the higher elevation. The highest
     // satellite alone is usually never blocked and would test nothing.
-    // The clock restarted at 0 after the study run, but each satellite still
-    // holds the position it cached at the end of it, and Sgp4MobilityModel
-    // treats a cache from the "future" (negative age) as fresh. Re-anchoring
-    // the epoch to the same instant invalidates the cache.
-    for (auto& sat : g_sats)
-    {
-        sat->SetSimulationEpochUnix(sat->SimBaseUnix());
-    }
+    // The clock restarted at 0 after the study run; Sgp4MobilityModel drops
+    // the position it cached at the end of that run (Wave 8 fix in the model).
     const auto vis = Visible();
     if (vis.empty() || g_v.empty())
     {

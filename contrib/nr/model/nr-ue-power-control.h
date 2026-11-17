@@ -214,6 +214,33 @@ class NrUePowerControl : public Object
      * \param rbNum number of RBs used for PUSCH
      */
     double GetPuschTxPower(std::size_t rbNum);
+
+    /**
+     * \brief Type 1 power headroom of an actual PUSCH on rbNum RBs, TS 38.213
+     * 7.7.1: P_CMAX - {P_O_PUSCH + 10log10(2^mu M_RB) + alpha PL + deltaTF + f},
+     * with the TPC commands received so far included in f. It changes no
+     * state (ntn-patch 16).
+     * \param rbNum M_RB, the number of RBs of the PUSCH
+     * \return the power headroom in dB
+     */
+    double GetPuschPowerHeadroom(std::size_t rbNum) const;
+
+    /**
+     * \return P_CMAX in dBm
+     */
+    double GetPcmax() const;
+
+    /**
+     * \return the downlink path-loss estimate PL in dB (referenceSignalPower
+     * minus the layer 3 filtered RSRP)
+     */
+    double GetPathLoss() const;
+
+    /**
+     * \return true once an RSRP measurement has been taken, so PL is an
+     * estimate rather than the initial value
+     */
+    bool HasPathLossEstimate() const;
     /**
      * \brief Implements calculation of PUCCH
      * power control according to TS 36.213 and TS 38.213.

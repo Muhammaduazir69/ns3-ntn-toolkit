@@ -133,6 +133,17 @@ class NrUePhy : public NrPhy
     Ptr<NrUePowerControl> GetUplinkPowerControl() const;
 
     /**
+     * \brief Type 1 power headroom (TS 38.213 7.7.1) of a PUSCH on the given
+     * RBG allocation, for the MAC's PHR (TS 38.321 5.4.6). Valid only with
+     * EnableUplinkPowerControl and once the UE has a path-loss estimate.
+     * ntn-patch 16.
+     * \param rbgBitmask the RBG allocation of the UL grant
+     * \return the power headroom
+     */
+    NrPhySapProvider::PuschPowerHeadroom GetPuschPowerHeadroom(
+        const std::vector<uint8_t>& rbgBitmask) const override;
+
+    /**
      * \brief Allow configuration of uplink power control algorithm.
      * E.g. necessary in FDD, when measurements are received in
      * downlink BWP, but they are used in uplink BWP

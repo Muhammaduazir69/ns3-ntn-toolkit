@@ -260,6 +260,12 @@ class NrMacSchedulerUeInfo
     /// converges to the target (NrMacSchedulerNs3 OllaEnabled / OllaBlerTarget / OllaStep).
     double m_dlOllaOffset{0.0};
     uint8_t m_ulMcs{0}; //!< UL MCS
+    /// ntn-patch 16: UL PRB limit from the last PHR (UINT32_MAX = none).
+    uint32_t m_ulMaxRb{UINT32_MAX};
+    /// ntn-patch 16: a PHR has been received from this UE.
+    bool m_ulPhrReceived{false};
+    /// ntn-patch 16: UL RBGs per symbol of the allocation being built (TDMA).
+    uint32_t m_ulRbgPerSym{0};
 
     uint32_t m_dlTbSize{0}; //!< DL Transport Block Size, depends on MCS and RBG,
                             //!< updated in UpdateDlMetric()

@@ -13,15 +13,19 @@
 
 #include "nr-control-messages.h"
 #include "nr-mac-header-vs.h"
+#include "nr-mac-phr-ce.h"
 #include "nr-mac-short-bsr-ce.h"
 #include "nr-phy-sap.h"
 #include "nr-radio-bearer-tag.h"
 
 #include <ns3/boolean.h>
+#include <ns3/double.h>
 #include <ns3/log.h>
 #include <ns3/nstime.h>
 #include <ns3/random-variable-stream.h>
 #include <ns3/uinteger.h>
+
+#include <cmath>
 
 namespace ns3
 {
@@ -236,6 +240,35 @@ NrUeMac::GetTypeId()
                 TimeValue(Time(0)),
                 MakeTimeAccessor(&NrUeMac::m_retxBsrTimer),
                 MakeTimeChecker(Time(0)))
+            .AddAttribute(
+                "PhrPeriodicTimer",
+                "TS 38.321 5.4.6 / TS 38.331 PHR-Config phr-PeriodicTimer. A positive value "
+                "configures power headroom reporting: a Single Entry PHR MAC CE (TS 38.321 "
+                "6.1.3.8) carrying the type 1 power headroom of the PUSCH it rides on (TS 38.213 "
+                "7.7.1, needs NrUePhy::EnableUplinkPowerControl) is sent on a new UL transmission "
+                "upon configuration, on expiry of this timer, and when the path loss changed by "
+                "more than PhrTxPowerFactorChange after PhrProhibitTimer. Zero (default) leaves "
+                "PHR unconfigured, as in nr before ntn-patch 16.",
+                TimeValue(Time(0)),
+                MakeTimeAccessor(&NrUeMac::m_phrPeriodicTimer),
+                MakeTimeChecker(Time(0)))
+            .AddAttribute("PhrProhibitTimer",
+                          "TS 38.331 PHR-Config phr-ProhibitTimer",
+                          TimeValue(MilliSeconds(10)),
+                          MakeTimeAccessor(&NrUeMac::m_phrProhibitTimer),
+                          MakeTimeChecker(Time(0)))
+            .AddAttribute("PhrTxPowerFactorChange",
+                          "TS 38.331 PHR-Config phr-Tx-PowerFactorChange (dB): a path-loss "
+                          "change above this since the last PHR triggers a new one once "
+                          "phr-ProhibitTimer has expired",
+                          DoubleValue(1.0),
+                          MakeDoubleAccessor(&NrUeMac::m_phrTxPowerFactorChange),
+                          MakeDoubleChecker<double>(0.0))
+            .AddTraceSource("PowerHeadroomReport",
+                            "A Single Entry PHR MAC CE was multiplexed into a PUSCH (TS 38.321 "
+                            "5.4.6): IMSI, RNTI, PH (dB), PH index, M_RB, path loss (dB)",
+                            MakeTraceSourceAccessor(&NrUeMac::m_phrTrace),
+                            "ns3::NrUeMac::PhrTracedCallback")
             .AddTraceSource("RarOutsideWindow",
                             "A RAR addressed to this UE arrived while ra-ResponseWindow was not "
                             "running (before the NTN start offset elapsed) and was ignored. "
@@ -529,6 +562,101 @@ NrUeMac::SendReportBufferStatus(const SfnSf& dataSfn, uint8_t symStart)
     m_phySapProvider->SendMacPdu(p, dataSfn, symStart, m_ulDci->m_rnti);
 }
 
+uint32_t
+NrUeMac::PreparePhr()
+{
+    NS_LOG_FUNCTION(this);
+    m_phrPending = NrPhySapProvider::PuschPowerHeadroom{};
+    if (!m_phrPeriodicTimer.IsStrictlyPositive() || m_rnti == 0)
+    {
+        return 0; // PHR not configured
+    }
+    const Time now = Simulator::Now();
+    const auto ph = m_phySapProvider->GetPuschPowerHeadroom(m_ulDci->m_rbgBitmask);
+    if (!ph.valid)
+    {
+        return 0; // no PUSCH power control, so no power headroom to report
+    }
+    // TS 38.321 5.4.6 triggers.
+    if (m_phrPeriodicExpiry.IsStrictlyPositive() && now >= m_phrPeriodicExpiry)
+    {
+        m_phrTriggered = true; // phr-PeriodicTimer expired
+    }
+    if (now >= m_phrProhibitExpiry && std::isfinite(m_phrLastPathloss) &&
+        std::abs(ph.pathlossDb - m_phrLastPathloss) > m_phrTxPowerFactorChange)
+    {
+        m_phrTriggered = true; // phr-ProhibitTimer expired and PL changed
+    }
+    if (!m_phrTriggered)
+    {
+        return 0;
+    }
+    // The CE (2 octets) and its subheader (1 octet) must fit after the
+    // status PDUs and the SHORT_BSR (5 bytes), which come first.
+    uint32_t statusBytes = 0;
+    for (const auto& b : m_ulBsrReceived)
+    {
+        statusBytes += b.second.statusPduSize;
+    }
+    NrMacSingleEntryPhrCe ce;
+    const uint32_t ceBytes = ce.GetSerializedSize();
+    if (m_ulDciTotalUsed + statusBytes + 5 + ceBytes > m_ulDci->m_tbSize)
+    {
+        return 0; // stays triggered for the next grant
+    }
+    m_phrPending = ph;
+    return ceBytes;
+}
+
+void
+NrUeMac::SendPhr(const SfnSf& dataSfn, uint8_t symStart)
+{
+    NS_LOG_FUNCTION(this);
+    NS_ASSERT(m_phrPending.valid);
+    NrMacSingleEntryPhrCe ce;
+    ce.m_phIndex = NrMacSingleEntryPhrCe::PhDbToIndex(m_phrPending.phDb);
+    ce.m_pcmaxIndex = NrMacSingleEntryPhrCe::PcmaxDbmToIndex(m_phrPending.pcmaxDbm);
+
+    Ptr<Packet> p = Create<Packet>();
+    p->AddHeader(ce);
+    NrRadioBearerTag bearerTag(m_rnti, NrMacHeaderFsUl::SINGLE_ENTRY_PHR, 0);
+    p->AddPacketTag(bearerTag);
+
+    m_ulDciTotalUsed += p->GetSize();
+    NS_ASSERT_MSG(m_ulDciTotalUsed <= m_ulDci->m_tbSize,
+                  "We used more data than the DCI allowed us.");
+    // The CE is part of the MAC PDU, so a HARQ retransmission of this TB
+    // carries it again (unlike nr's SHORT_BSR, which is regenerated): at the
+    // cell edge the first transmission is often lost and the PHR would only
+    // ever arrive on a TB that decodes the first time.
+    auto& harq = m_miUlHarqProcessesPacket.at(m_ulDci->m_harqProcess);
+    if (!harq.m_pktBurst)
+    {
+        harq.m_pktBurst = CreateObject<PacketBurst>();
+    }
+    harq.m_pktBurst->AddPacket(p->Copy());
+    m_miUlHarqProcessesPacketTimer.at(m_ulDci->m_harqProcess) = GetNumHarqProcess();
+    m_phySapProvider->SendMacPdu(p, dataSfn, symStart, m_ulDci->m_rnti);
+
+    // TS 38.321 5.4.6: start or restart both timers, cancel the trigger.
+    const Time now = Simulator::Now();
+    m_phrPeriodicExpiry = now + m_phrPeriodicTimer;
+    m_phrProhibitExpiry = now + m_phrProhibitTimer;
+    m_phrLastPathloss = m_phrPending.pathlossDb;
+    m_phrTriggered = false;
+    ++m_phrSent;
+    m_phrTrace(m_imsi,
+               m_rnti,
+               m_phrPending.phDb,
+               ce.m_phIndex,
+               m_phrPending.numRb,
+               m_phrPending.pathlossDb);
+    NS_LOG_INFO("PHR sent: PH " << m_phrPending.phDb << " dB (index " << +ce.m_phIndex
+                                << ") on " << m_phrPending.numRb << " RBs, PL "
+                                << m_phrPending.pathlossDb << " dB");
+    m_phrPending = NrPhySapProvider::PuschPowerHeadroom{};
+}
+
 void
 NrUeMac::SetUeCmacSapUser(NrUeCmacSapUser* s)
 {
@@ -728,7 +856,16 @@ NrUeMac::ProcessUlDci(const Ptr<NrUlDciMessage>& dciMsg)
     }
     else if (m_ulDci->m_ndi == 1)
     {
+        // ntn-patch 16: TS 38.321 5.4.6, a triggered PHR goes into a new
+        // transmission when the grant can hold it (LCP: after the BSR, before
+        // data, TS 38.321 5.4.3.1.3).
+        m_phrReservedBytes = PreparePhr();
         SendNewData();
+        if (m_phrReservedBytes > 0)
+        {
+            SendPhr(dataSfn, m_ulDci->m_symStart);
+            m_phrReservedBytes = 0;
+        }
 
         NS_LOG_INFO("After sending NewData, bufSize " << GetTotalBufSize());
 
@@ -940,11 +1077,11 @@ NrUeMac::SendNewData()
     // where we didn't check much as it is the most important data, that has to go
     // out. For the rest that we have left, we can use only a part of it because of
     // the overhead of the SHORT_BSR, which is 5 bytes.
-    NS_ASSERT_MSG(m_ulDciTotalUsed + 5 <= m_ulDci->m_tbSize,
+    NS_ASSERT_MSG(m_ulDciTotalUsed + 5 + m_phrReservedBytes <= m_ulDci->m_tbSize,
                   "The StatusPDU used " << m_ulDciTotalUsed
                                         << " B, we don't have any for the SHORT_BSR.");
-    // reserve some data for the SHORT_BSR
-    uint32_t usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5;
+    // reserve some data for the SHORT_BSR (and the PHR MAC CE, ntn-patch 16)
+    uint32_t usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5 - m_phrReservedBytes;
 
     // Now, we have 3 bytes of overhead for each subPDU. Let's try to serve all
     // the queues with some RETX data.
@@ -977,9 +1114,10 @@ NrUeMac::SendNewData()
     // Remember that m_ulDciTotalUsed keep count of data and overhead that we
     // used till now.
     NS_ASSERT_MSG(
-        m_ulDciTotalUsed + 5 <= m_ulDci->m_tbSize,
+        m_ulDciTotalUsed + 5 + m_phrReservedBytes <= m_ulDci->m_tbSize,
         "The StatusPDU and RETX sending required all space, we don't have any for the SHORT_BSR.");
-    usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5; // Update the usefulTbs.
+    usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5 -
+                m_phrReservedBytes; // Update the usefulTbs.
 
     // The last part is for the queues with some non-RETX data. If there is no space left,
     // then nothing.
@@ -1332,6 +1470,11 @@ NrUeMac::DoReset()
     m_noRaResponseReceivedEvent.Cancel();
     m_rachConfigured = false;
     m_ulBsrReceived.clear();
+    // ntn-patch 16: a PHR is triggered when the MAC entity is (re)configured
+    // for a new cell (TS 38.321 5.4.6); the timers restart from there.
+    m_phrTriggered = true;
+    m_phrPeriodicExpiry = Time(0);
+    m_phrProhibitExpiry = Time(0);
 }
 
 //////////////////////////////////////////////

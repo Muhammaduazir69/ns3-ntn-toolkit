@@ -60,6 +60,9 @@ class NrMemberPhySapProvider : public NrPhySapProvider
 
     uint32_t GetRbNum() const override;
 
+    PuschPowerHeadroom GetPuschPowerHeadroom(
+        const std::vector<uint8_t>& rbgBitmask) const override;
+
   private:
     NrPhy* m_phy;
 };
@@ -145,6 +148,12 @@ NrMemberPhySapProvider::GetRbNum() const
     return m_phy->GetRbNum();
 }
 
+NrPhySapProvider::PuschPowerHeadroom
+NrMemberPhySapProvider::GetPuschPowerHeadroom(const std::vector<uint8_t>& rbgBitmask) const
+{
+    return m_phy->GetPuschPowerHeadroom(rbgBitmask);
+}
+
 /* ======= */
 
 TypeId
@@ -159,6 +168,12 @@ NrPhy::GetTypeId()
                                           MakePointerChecker<NrSpectrumPhy>());
 
     return tid;
+}
+
+NrPhySapProvider::PuschPowerHeadroom
+NrPhy::GetPuschPowerHeadroom([[maybe_unused]] const std::vector<uint8_t>& rbgBitmask) const
+{
+    return NrPhySapProvider::PuschPowerHeadroom{};
 }
 
 std::vector<int>

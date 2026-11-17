@@ -424,6 +424,10 @@ struct MacCeValue
     uint8_t m_phr;
     uint8_t m_crnti;
     std::vector<uint8_t> m_bufferStatus;
+    // ntn-patch 16: PHR (TS 38.321 6.1.3.8) P_CMAX,f,c index, and the M_RB of
+    // the PUSCH the PHR arrived on (known to the gNB, which scheduled it).
+    uint8_t m_phrPcmax{0};
+    uint16_t m_phrNumRb{0};
 };
 
 /**

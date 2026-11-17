@@ -328,6 +328,35 @@ class NtnRealStackHelper
     Time GetRetxBsrTimer() const { return m_retxBsrTimerApplied; }
     /// SRs the UEs re-triggered on retxBSR-Timer expiry, summed over UEs and BWPs.
     uint64_t GetBsrRetriggerCount() const;
+
+    /// Wave 8 (nr patch 16): uplink power control and power-headroom-aware
+    /// PUSCH allocation. Each UE runs TS 38.213 7.1.1 PUSCH power control
+    /// (P_CMAX = the UE Tx power, P_O_NOMINAL_PUSCH from the target SNR below,
+    /// alpha = 1, PL from its SS-RSRP), reports its type 1 power headroom in a
+    /// TS 38.321 5.4.6 PHR (phr-PeriodicTimer 20 ms, phr-ProhibitTimer 10 ms,
+    /// phr-Tx-PowerFactorChange 1 dB), and the scheduler grants no more PRBs
+    /// than the headroom can power at the target PSD. Without it a 23 dBm
+    /// handheld spread its power over the whole 53-PRB band and the PUSCH ran
+    /// at about -11 dB SINR. Default: on for the nr backend, off under the
+    /// Legacy link-budget profile or with GlobalValue
+    /// NtnRealStackUlPhrPrbLimit=false. Call before Build().
+    void SetUlPowerHeadroomPrbLimit(bool enable)
+    {
+        m_ulPhrLimit = enable;
+        m_ulPhrLimitSet = true;
+    }
+    /// Target per-PRB PUSCH SNR (dB) the open-loop P0 is derived from. Call
+    /// before Build().
+    void SetUlTargetSnrDb(double snrDb) { m_ulTargetSnrDb = snrDb; }
+    double GetUlTargetSnrDb() const { return m_ulTargetSnrDb; }
+    /// Whether Build() enabled the uplink power control and the PHR PRB limit.
+    bool IsUlPowerHeadroomPrbLimitActive() const { return m_ulPhrLimitApplied; }
+    /// P_O_NOMINAL_PUSCH (dBm) programmed at Build() (NaN when inactive).
+    double GetUlP0NominalPuschDbm() const { return m_ulP0Applied; }
+    /// PHR MAC CEs the UEs sent, summed over UEs and BWPs.
+    uint64_t GetPhrSentCount() const;
+    /// PHR MAC CEs the gNB schedulers received, summed over gNBs and BWPs.
+    uint64_t GetPhrReceivedCount() const;
     /// Wave 7A (nr patch 15): stale DL soft buffers the UEs flushed when a new
     /// transmission (rv 0) arrived on a process the gNB never retransmitted
     /// (TS 38.321 5.3.2.2), summed over UEs and BWPs.
@@ -1727,6 +1756,12 @@ class NtnRealStackHelper
     Time m_retxBsrTimer{0};
     bool m_retxBsrTimerSet{false};
     Time m_retxBsrTimerApplied{0};
+    // Wave 8 (nr patch 16): UL power control + PHR-aware PUSCH PRB limit.
+    bool m_ulPhrLimit{true};
+    bool m_ulPhrLimitSet{false};
+    bool m_ulPhrLimitApplied{false};
+    double m_ulTargetSnrDb{3.0};
+    double m_ulP0Applied{std::numeric_limits<double>::quiet_NaN()};
     std::string m_prevElevationModel;
     int m_prevRsrpLinear{-1};
     bool m_ssbCellBeam{false};

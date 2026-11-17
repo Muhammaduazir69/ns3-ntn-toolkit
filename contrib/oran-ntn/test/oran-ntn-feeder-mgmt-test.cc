@@ -18,6 +18,7 @@
 #include "ns3/internet-stack-helper.h"
 #include "ns3/ipv4-address-helper.h"
 #include "ns3/ipv4-static-routing-helper.h"
+#include "ns3/ntn-oran-ai-flow-monitor.h"
 #include "ns3/ntn-oran-application.h"
 #include "ns3/ntn-oran-sink.h"
 #include "ns3/point-to-point-channel.h"
@@ -28,7 +29,9 @@
 #include <ns3/simulator.h>
 #include <ns3/test.h>
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 using namespace ns3;
 
@@ -462,6 +465,152 @@ class OranNtnGatedUserPlaneTest : public TestCase
     }
 };
 
+/**
+ * Wave 8: the UPF-side sinks of the feeder-mgmt user plane carry UPLINK flows
+ * and have no PHY source, so oran-ntn-feeder-mgmt registers them with
+ * Direction::Uplink and the KPMs carry the TS 28.552 UL names. Same user
+ * plane as above (UE -> satellite -> gateway/UPF, gated feeder), two
+ * monitors on the same flows: one registered the way the example now does
+ * (UL names, loss counted while the feeder is down: the failure path), one
+ * with the old two-argument call, which named these uplink flows DL.
+ */
+class OranNtnFeederUplinkKpmNamesTest : public TestCase
+{
+  public:
+    OranNtnFeederUplinkKpmNamesTest()
+        : TestCase("Wave 8: feeder-mgmt UPF sinks report TS 28.552 UL KPM names")
+    {
+    }
+
+  private:
+    struct Names
+    {
+        bool ul{false};
+        bool dl{false};
+        double maxLossUl{0.0};
+        double maxThpUl{0.0};
+    };
+
+    static Names Scan(const Ptr<NtnOranAiFlowMonitor>& mon)
+    {
+        Names r;
+        for (const auto& [id, series] : mon->GetKpmSeries())
+        {
+            for (const auto& smp : series)
+            {
+                r.ul = r.ul || smp.metrics.count("DRB.UEThpUl") ||
+                       smp.metrics.count("DRB.PacketLossRateUl") ||
+                       smp.metrics.count("DRB.RlcDelayUl");
+                r.dl = r.dl || smp.metrics.count("DRB.UEThpDl") ||
+                       smp.metrics.count("DRB.PacketLossRateDl") ||
+                       smp.metrics.count("DRB.RlcSduDelayDl");
+                if (smp.metrics.count("DRB.PacketLossRateUl"))
+                {
+                    r.maxLossUl = std::max(r.maxLossUl, smp.metrics.at("DRB.PacketLossRateUl"));
+                }
+                if (smp.metrics.count("DRB.UEThpUl"))
+                {
+                    r.maxThpUl = std::max(r.maxThpUl, smp.metrics.at("DRB.UEThpUl"));
+                }
+            }
+        }
+        return r;
+    }
+
+    void DoRun() override
+    {
+        NodeContainer n;
+        n.Create(3); // UE, satellite, gateway with the UPF
+        InternetStackHelper inet;
+        inet.Install(n);
+        PointToPointHelper svc;
+        svc.SetDeviceAttribute("DataRate", StringValue("1Mbps"));
+        svc.SetChannelAttribute("Delay", StringValue("2ms"));
+        NetDeviceContainer d1 = svc.Install(n.Get(0), n.Get(1));
+        PointToPointHelper fdr;
+        fdr.SetDeviceAttribute("DataRate", StringValue("50Mbps"));
+        fdr.SetChannelAttribute("Delay", StringValue("3ms"));
+        NetDeviceContainer d2 = fdr.Install(n.Get(1), n.Get(2));
+        Ipv4AddressHelper ah;
+        ah.SetBase("172.16.0.0", "255.255.255.252");
+        Ipv4InterfaceContainer i1 = ah.Assign(d1);
+        ah.SetBase("172.32.0.0", "255.255.255.252");
+        Ipv4InterfaceContainer i2 = ah.Assign(d2);
+        Ipv4StaticRoutingHelper srh;
+        srh.GetStaticRouting(n.Get(0)->GetObject<Ipv4>())->SetDefaultRoute(i1.GetAddress(1), 1);
+        srh.GetStaticRouting(n.Get(1)->GetObject<Ipv4>())->SetDefaultRoute(i2.GetAddress(1), 2);
+
+        // The serving feeder is down from 3 to 4 s (control-plane state).
+        auto ctrl = CreateObject<RateErrorModel>();
+        ctrl->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
+        ctrl->SetRate(0.0);
+        Simulator::Schedule(Seconds(3.0), [ctrl]() { ctrl->SetRate(1.0); });
+        Simulator::Schedule(Seconds(4.0), [ctrl]() { ctrl->SetRate(0.0); });
+        auto fdrGate = CreateObject<OranNtnGatedErrorModel>();
+        fdrGate->SetGate(OranNtnGatedErrorModel::MirrorOutage(ctrl));
+        d2.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(fdrGate));
+
+        Ptr<NtnOranAiFlowMonitor> mon = CreateObject<NtnOranAiFlowMonitor>();
+        Ptr<NtnOranAiFlowMonitor> legacy = CreateObject<NtnOranAiFlowMonitor>();
+        std::vector<Ptr<NtnOranApplication>> apps;
+        std::vector<Ptr<NtnOranSink>> sinks;
+        for (uint32_t u = 0; u < 2; ++u)
+        {
+            const uint16_t port = static_cast<uint16_t>(9100 + u);
+            Ptr<NtnOranSink> sink = CreateObject<NtnOranSink>();
+            sink->SetAttribute("Local", AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+            n.Get(2)->AddApplication(sink);
+            sink->SetStartTime(Seconds(0.0));
+            Ptr<NtnOranApplication> app = CreateObject<NtnOranApplication>();
+            app->SetRemote(InetSocketAddress(i2.GetAddress(1), port));
+            const bool voice = (u % 2) == 0;
+            app->SetProfile(voice ? NtnOranApplication::CONVERSATIONAL_VOICE
+                                  : NtnOranApplication::MMTC_PERIODIC);
+            app->SetAttribute("PacketSize", UintegerValue(voice ? 92 : 128));
+            app->SetFlowIdentity(voice ? 1 : 9, voice ? 1 : 3, 0x000001,
+                                 static_cast<uint16_t>(u + 1), 1000);
+            n.Get(0)->AddApplication(app);
+            app->SetStartTime(Seconds(1.0 + 0.001 * u));
+            app->SetStopTime(Seconds(6.0));
+            // As oran-ntn-feeder-mgmt registers its user plane now ...
+            mon->AddSource(app);
+            mon->AddSink(sink, static_cast<int32_t>(u), NtnOranAiFlowMonitor::Direction::Uplink);
+            // ... and as it did before (Auto, no PHY source -> DL names).
+            legacy->AddSource(app);
+            legacy->AddSink(sink, static_cast<int32_t>(u));
+            apps.push_back(app);
+            sinks.push_back(sink);
+        }
+        mon->Start();
+        legacy->Start();
+        Simulator::Stop(Seconds(7.0));
+        Simulator::Run();
+
+        uint64_t tx = 0;
+        uint64_t rx = 0;
+        for (uint32_t u = 0; u < apps.size(); ++u)
+        {
+            tx += apps[u]->GetTxPackets();
+            rx += sinks[u]->GetRxPackets();
+        }
+        NS_TEST_ASSERT_MSG_GT(rx, 0u, "uplink packets reached the UPF");
+        NS_TEST_ASSERT_MSG_LT(rx, tx, "the feeder outage dropped uplink packets");
+        NS_TEST_EXPECT_MSG_GT(fdrGate->GetGatedDrops(), 0u, "drops happened at the gated feeder");
+
+        const Names now = Scan(mon);
+        NS_TEST_EXPECT_MSG_EQ(now.ul, true, "UPF-side sinks carry the TS 28.552 UL names");
+        NS_TEST_EXPECT_MSG_EQ(now.dl, false, "and no DL names");
+        NS_TEST_EXPECT_MSG_GT(now.maxThpUl, 0.0, "DRB.UEThpUl measured");
+        // Failure path: the outage second shows up as uplink loss (unit 1E-6).
+        NS_TEST_EXPECT_MSG_GT(now.maxLossUl, 1.0e5, "DRB.PacketLossRateUl sees the outage");
+
+        const Names old = Scan(legacy);
+        NS_TEST_EXPECT_MSG_EQ(old.dl, true, "the two-argument call named these flows DL");
+        NS_TEST_EXPECT_MSG_EQ(old.ul, false, "and gave them no UL name");
+        Simulator::Destroy();
+    }
+};
+
 class OranNtnFeederMgmtTestSuite : public TestSuite
 {
   public:
@@ -474,6 +623,7 @@ class OranNtnFeederMgmtTestSuite : public TestSuite
         AddTestCase(new OranNtnContactPlanUnionTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnAuthorityLeaseRulesTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnGatedUserPlaneTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnFeederUplinkKpmNamesTest, TestCase::Duration::QUICK);
     }
 };
 

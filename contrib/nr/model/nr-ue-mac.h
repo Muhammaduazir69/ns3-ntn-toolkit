@@ -8,9 +8,11 @@
 #include "nr-ccm-mac-sap.h"
 #include "nr-phy-mac-common.h"
 #include "nr-ue-cmac-sap.h"
+#include "nr-phy-sap.h"
 
 #include <ns3/traced-callback.h>
 
+#include <limits>
 #include <unordered_map>
 
 namespace ns3
@@ -184,6 +186,22 @@ class NrUeMac : public Object
      * \param [in] imsi the IMSI
      */
     typedef void (*ImsiTracedCallback)(const uint64_t imsi);
+
+    /**
+     * TracedCallback signature for a transmitted PHR MAC CE (ntn-patch 16).
+     * \param [in] imsi the IMSI
+     * \param [in] rnti the C-RNTI
+     * \param [in] phDb the type 1 power headroom in dB (before quantization)
+     * \param [in] phIndex the reported TS 38.133 PH index
+     * \param [in] numRb M_RB of the PUSCH carrying the PHR
+     * \param [in] pathlossDb the path-loss estimate used
+     */
+    typedef void (*PhrTracedCallback)(const uint64_t imsi,
+                                      const uint16_t rnti,
+                                      const double phDb,
+                                      const uint8_t phIndex,
+                                      const uint32_t numRb,
+                                      const double pathlossDb);
 
     /**
      * \brief Sets the number of HARQ processes.
@@ -488,7 +506,39 @@ class NrUeMac : public Object
     /// SRs re-triggered by retxBSR-Timer expiry.
     uint64_t m_bsrRetriggers{0};
 
+    // ntn-patch 16: TS 38.321 5.4.6 power headroom reporting (PHR-Config).
+    /**
+     * \brief Evaluate the PHR triggers for a new UL transmission and, when a
+     * PHR is triggered, return the bytes to reserve for the Single Entry PHR
+     * MAC CE and its subheader (0 when none is sent in this grant).
+     * \return 3 or 0
+     */
+    uint32_t PreparePhr();
+    /**
+     * \brief Multiplex the Single Entry PHR MAC CE prepared by PreparePhr().
+     * \param dataSfn slot of the PUSCH
+     * \param symStart first symbol of the PUSCH
+     */
+    void SendPhr(const SfnSf& dataSfn, uint8_t symStart);
+    Time m_phrPeriodicTimer{0};          ///< phr-PeriodicTimer (0 = PHR not configured)
+    Time m_phrProhibitTimer{0};          ///< phr-ProhibitTimer
+    double m_phrTxPowerFactorChange{1.0}; ///< phr-Tx-PowerFactorChange (dB)
+    bool m_phrTriggered{true};           ///< a PHR is triggered (initially: configuration)
+    Time m_phrPeriodicExpiry{0};         ///< phr-PeriodicTimer expiry (running if > 0)
+    Time m_phrProhibitExpiry{0};         ///< phr-ProhibitTimer expiry
+    double m_phrLastPathloss{std::numeric_limits<double>::quiet_NaN()}; ///< PL at the last PHR
+    NrPhySapProvider::PuschPowerHeadroom m_phrPending; ///< PH obtained for this grant
+    uint64_t m_phrSent{0};                             ///< PHR MAC CEs multiplexed
+    uint32_t m_phrReservedBytes{0}; ///< bytes reserved in this grant for the PHR MAC CE
+    TracedCallback<uint64_t, uint16_t, double, uint8_t, uint32_t, double> m_phrTrace;
+
   public:
+    /// \return Single Entry PHR MAC CEs sent (TS 38.321 5.4.6, ntn-patch 16).
+    uint64_t GetPhrSentCount() const
+    {
+        return m_phrSent;
+    }
+
     /// \return SRs re-triggered by retxBSR-Timer expiry (TS 38.321 5.4.5).
     uint64_t GetBsrRetriggerCount() const
     {

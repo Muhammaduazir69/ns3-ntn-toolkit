@@ -48,6 +48,9 @@
 #include "ns3/nr-ue-mac.h"
 #include "ns3/nr-ue-net-device.h"
 #include "ns3/nr-ue-phy.h"
+#include "ns3/nr-mac-phr-ce.h"
+#include "ns3/nr-ue-power-control.h"
+#include "ns3/string.h"
 #include "ns3/ntn-rach-window.h"
 #include "ns3/ntn-tdl-spectrum-loss-model.h"
 #include "ns3/ntn-real-stack-helper.h"
@@ -4867,6 +4870,9 @@ class RetxBsrTimerTest : public TestCase
         rs.SetNumerology(1);
         rs.SetSimTime(Seconds(10.0));
         rs.SetOutputDir("test-ntn-retx-bsr");
+        // The timer is tested on the weak full-band PUSCH it was written for;
+        // the Wave 8 PHR PRB limit (tested below) makes that uplink robust.
+        rs.SetUlPowerHeadroomPrbLimit(false);
         if (!timerOn)
         {
             rs.SetRetxBsrTimer(Time(0));
@@ -4910,6 +4916,182 @@ class RetxBsrTimerTest : public TestCase
         NS_TEST_ASSERT_MSG_EQ(retrigOff, 0u, "no re-trigger with the timer off");
         NS_TEST_ASSERT_MSG_GT(rxOn, rxOff, "the timer delivers more uplink packets");
         NS_TEST_ASSERT_MSG_GT(rxOn, sentOn / 2, "with the timer most of the uplink arrives");
+    }
+};
+
+/// Wave 8 (nr patch 16): TS 38.213 7.1.1 PUSCH power control, TS 38.321
+/// 5.4.6 PHR and the scheduler's PHR-based PUSCH PRB limit. Zenith pass of a
+/// TR 38.821 Set-1 23 dBm handheld at 600 km: without the limit nr spreads the
+/// UE's power over the whole band (53 PRB, about -11 dB PUSCH SINR, most TBs
+/// corrupt); with it the UE reports its headroom and gets the few PRBs it can
+/// power. Failure paths: opting out (and the Legacy budget profile) restores
+/// the full-band behavior, with no PHR at all.
+class UlPowerHeadroomPrbLimitTest : public TestCase
+{
+  public:
+    UlPowerHeadroomPrbLimitTest()
+        : TestCase("Wave 8: UL power control + PHR-aware PUSCH PRB limit (nr patch 16)")
+    {
+    }
+
+  private:
+    struct Out
+    {
+        uint64_t sent{0};
+        uint64_t rx{0};
+        uint64_t tbs{0};
+        uint64_t corrupt{0};
+        double sumSinr{0.0};
+        uint64_t sumRb{0};
+        uint64_t phrSent{0};
+        uint64_t phrRx{0};
+        bool active{false};
+        double p0{0.0};
+        double maxPuschDbm{-1e9};
+
+        void Rx(RxPacketTraceParams p)
+        {
+            ++tbs;
+            corrupt += p.m_corrupt ? 1 : 0;
+            sumSinr += p.m_sinr;
+            sumRb += p.m_rbAssignedNum;
+        }
+
+        double SinrDb() const
+        {
+            return tbs ? 10.0 * std::log10(sumSinr / tbs) : -1e9;
+        }
+
+        double MeanRb() const
+        {
+            return tbs ? static_cast<double>(sumRb) / tbs : 0.0;
+        }
+
+        double Corrupt() const
+        {
+            return tbs ? static_cast<double>(corrupt) / tbs : 1.0;
+        }
+    };
+
+    Out Run(bool limit)
+    {
+        Out o;
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(5.0));
+        rs.SetOutputDir("test-ntn-ul-phr");
+        rs.SetUlPowerHeadroomPrbLimit(limit);
+        rs.Build(sats, ues);
+        o.active = rs.IsUlPowerHeadroomPrbLimitActive();
+        o.p0 = rs.GetUlP0NominalPuschDbm();
+        for (uint32_t d = 0; d < sats.Get(0)->GetNDevices(); ++d)
+        {
+            Ptr<NrGnbNetDevice> gnb = DynamicCast<NrGnbNetDevice>(sats.Get(0)->GetDevice(d));
+            if (gnb)
+            {
+                gnb->GetPhy(0)->GetSpectrumPhy()->TraceConnectWithoutContext(
+                    "RxPacketTraceGnb",
+                    MakeCallback(&Out::Rx, &o));
+            }
+        }
+        Ptr<NrUeNetDevice> ueDev;
+        for (uint32_t d = 0; d < ues.Get(0)->GetNDevices() && !ueDev; ++d)
+        {
+            ueDev = DynamicCast<NrUeNetDevice>(ues.Get(0)->GetDevice(d));
+        }
+        NS_ABORT_IF(!ueDev);
+        ueDev->GetPhy(0)->GetUplinkPowerControl()->TraceConnectWithoutContext(
+            "ReportPuschTxPower",
+            MakeBoundCallback(+[](Out* out, uint16_t, uint16_t, double dbm) {
+                                  out->maxPuschDbm = std::max(out->maxPuschDbm, dbm);
+                              },
+                              &o));
+        PacketSinkHelper sinkH("ns3::UdpSocketFactory",
+                               InetSocketAddress(Ipv4Address::GetAny(), 4002));
+        ApplicationContainer sink = sinkH.Install(rs.GetRemoteHost());
+        CbrHelper cbr("ns3::UdpSocketFactory",
+                      InetSocketAddress(rs.GetRemoteHostIpv4Address(), 4002));
+        cbr.SetConstantTraffic(MilliSeconds(20), 100);
+        ApplicationContainer app = cbr.Install(ues.Get(0));
+        app.Start(Seconds(1.0));
+        app.Stop(Seconds(4.0));
+        Simulator::Stop(Seconds(5.0));
+        Simulator::Run();
+        o.sent = DynamicCast<CbrApplication>(app.Get(0))->GetSent() / 100;
+        o.rx = DynamicCast<PacketSink>(sink.Get(0))->GetTotalRx() / 100;
+        o.phrSent = rs.GetPhrSentCount();
+        o.phrRx = rs.GetPhrReceivedCount();
+        Simulator::Destroy();
+        return o;
+    }
+
+    void DoRun() override
+    {
+        // TS 38.133 Tables 10.1.17.1-1 / 10.1.18.1-1 report mapping.
+        NS_TEST_ASSERT_MSG_EQ(+NrMacSingleEntryPhrCe::PhDbToIndex(-40.0), 0, "PH < -32 dB");
+        NS_TEST_ASSERT_MSG_EQ(+NrMacSingleEntryPhrCe::PhDbToIndex(-32.0), 1, "-32 <= PH < -31");
+        NS_TEST_ASSERT_MSG_EQ(+NrMacSingleEntryPhrCe::PhDbToIndex(21.5), 54, "21 <= PH < 22");
+        NS_TEST_ASSERT_MSG_EQ(+NrMacSingleEntryPhrCe::PhDbToIndex(23.0), 55, "22 <= PH < 24");
+        NS_TEST_ASSERT_MSG_EQ(+NrMacSingleEntryPhrCe::PhDbToIndex(40.0), 63, "PH >= 38 dB");
+        NS_TEST_ASSERT_MSG_EQ(NrMacSingleEntryPhrCe::PhIndexToDb(30), -3.0, "lower edge");
+        NS_TEST_ASSERT_MSG_EQ(+NrMacSingleEntryPhrCe::PcmaxDbmToIndex(23.0), 53, "P_CMAX 23 dBm");
+        NS_TEST_ASSERT_MSG_EQ(NrMacSingleEntryPhrCe::PcmaxIndexToDbm(53), 23.0, "P_CMAX back");
+
+        const Out on = Run(true);
+        const Out off = Run(false);
+        std::cout << "  [ul-phr] on: rx " << on.rx << "/" << on.sent << " PUSCH " << on.tbs
+                  << " TBs, " << on.SinrDb() << " dB, " << on.MeanRb() << " PRB, corrupt "
+                  << on.Corrupt() << ", PHR " << on.phrSent << "/" << on.phrRx << ", P0 " << on.p0
+                  << " dBm, max PUSCH power " << on.maxPuschDbm << " dBm; off: rx " << off.rx
+                  << "/" << off.sent << ", " << off.SinrDb() << " dB, " << off.MeanRb()
+                  << " PRB, corrupt " << off.Corrupt() << "\n";
+
+        NS_TEST_ASSERT_MSG_EQ(on.active, true, "PHR PRB limit on by default (Set-1 budget)");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(on.p0), true, "P0 programmed");
+        NS_TEST_ASSERT_MSG_GT(on.phrSent, 10u, "the UE reported its power headroom");
+        NS_TEST_ASSERT_MSG_GT(on.phrRx, on.phrSent / 2, "and the gNB decoded most PHRs");
+        NS_TEST_ASSERT_MSG_LT_OR_EQ(on.maxPuschDbm, 23.0 + 1e-9, "PUSCH power never above P_CMAX");
+        NS_TEST_ASSERT_MSG_LT(on.MeanRb(), 53.0 / 4.0, "the PUSCH is narrowed to what the UE powers");
+        NS_TEST_ASSERT_MSG_GT(on.SinrDb(), off.SinrDb() + 6.0, "per-PRB SINR rises");
+        // At this zenith budget one PRB is worth about +1 dB, so the smallest
+        // grant that carries data (18 bytes, MCS 0, about 7 PRB) sits near -5 dB:
+        // decodable at MCS 0 with HARQ, where the full band is not.
+        NS_TEST_ASSERT_MSG_GT(on.SinrDb(), -6.5, "PUSCH within reach of MCS 0");
+        NS_TEST_ASSERT_MSG_LT(on.Corrupt(), off.Corrupt() / 2.0, "PUSCH TB errors at least halved");
+        NS_TEST_ASSERT_MSG_GT(on.rx, off.rx, "more uplink packets delivered");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(on.rx * 100, on.sent * 97, "uplink delivered");
+        // Failure path: opted out, nr's full-band PUSCH and no PHR.
+        NS_TEST_ASSERT_MSG_EQ(off.active, false, "opt-out honored");
+        NS_TEST_ASSERT_MSG_EQ(off.phrSent, 0u, "no PHR when not configured");
+        NS_TEST_ASSERT_MSG_GT(off.MeanRb(), 50.0, "full band without the limit");
+        NS_TEST_ASSERT_MSG_LT(off.SinrDb(), -7.0, "full-band PUSCH far below MCS 0");
+        NS_TEST_ASSERT_MSG_GT(off.Corrupt(), 0.4, "most full-band PUSCH TBs corrupt");
+
+        // Failure path: the Legacy budget profile keeps the old behavior.
+        Config::SetGlobal("NtnRealStackLinkBudget", StringValue("Legacy"));
+        {
+            NodeContainer sats;
+            NodeContainer ues;
+            BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+            NtnRealStackHelper rs;
+            rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+            rs.SetNumerology(1);
+            rs.SetSimTime(Seconds(0.2));
+            rs.SetOutputDir("test-ntn-ul-phr-legacy");
+            rs.Build(sats, ues);
+            NS_TEST_EXPECT_MSG_EQ(rs.IsUlPowerHeadroomPrbLimitActive(),
+                                  false,
+                                  "Legacy profile: no UL power control / PHR limit");
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            NS_TEST_EXPECT_MSG_EQ(rs.GetPhrSentCount(), 0u, "Legacy: no PHR");
+            Simulator::Destroy();
+        }
+        Config::SetGlobal("NtnRealStackLinkBudget", StringValue("Tr38821Set1"));
     }
 };
 
@@ -5095,6 +5277,7 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new ExternalDlFlowTest, Duration::QUICK);
         AddTestCase(new RetxBsrTimerTest, Duration::QUICK);
         AddTestCase(new BwpPowerSplitTest, Duration::QUICK);
+        AddTestCase(new UlPowerHeadroomPrbLimitTest, Duration::QUICK);
         AddTestCase(new DefaultLinkBudgetIsSet1Test, Duration::QUICK);
         AddTestCase(new FeederGatewayDelayTest, Duration::QUICK);
         AddTestCase(new PeriodicMeasurementReportTest, Duration::QUICK);

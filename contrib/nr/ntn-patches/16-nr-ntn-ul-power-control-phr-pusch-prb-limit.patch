@@ -1,0 +1,1386 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -131,6 +131,7 @@
+     model/nr-mac-scheduler-ue-info.cc
+     model/nr-mac-scheduler.cc
+     model/nr-mac-short-bsr-ce.cc
++    model/nr-mac-phr-ce.cc
+     model/nr-mimo-chunk-processor.cc
+     model/nr-mimo-matrices.cc
+     model/nr-mimo-signal.cc
+@@ -320,6 +321,7 @@
+     model/nr-mac-scheduler-ue-info.h
+     model/nr-mac-scheduler.h
+     model/nr-mac-short-bsr-ce.h
++    model/nr-mac-phr-ce.h
+     model/nr-mimo-chunk-processor.h
+     model/nr-mimo-matrices.h
+     model/nr-mimo-signal.h
+--- a/model/nr-gnb-mac.cc
++++ b/model/nr-gnb-mac.cc
+@@ -18,6 +18,7 @@
+ #include "nr-mac-pdu-info.h"
+ #include "nr-mac-sched-sap.h"
+ #include "nr-mac-scheduler.h"
++#include "nr-mac-phr-ce.h"
+ #include "nr-mac-short-bsr-ce.h"
+ #include "nr-phy-mac-common.h"
+ #include "nr-radio-bearer-tag.h"
+@@ -773,6 +774,10 @@
+ 
+         for (const auto& v : ulMacReq.m_macCeList)
+         {
++            if (v.m_macCeType == MacCeElement::PHR)
++            {
++                continue; // ntn-patch 16: not a BSR, do not trace it as one
++            }
+             Ptr<NrBsrMessage> msg = Create<NrBsrMessage>();
+             msg->SetBsr(v);
+             m_macRxedCtrlMsgsTrace(m_currentSlot, GetCellId(), v.m_rnti, GetBwpId(), msg);
+@@ -919,6 +924,26 @@
+         return;
+     }
+ 
++    // ntn-patch 16: Single Entry PHR MAC CE (TS 38.321 6.1.3.8). The PH is
++    // that of the PUSCH this CE arrived on, so it goes to this BWP's
++    // scheduler together with that PUSCH's M_RB (which the gNB scheduled).
++    if (header.GetLcId() == NrMacHeaderFsUl::SINGLE_ENTRY_PHR)
++    {
++        NrMacSingleEntryPhrCe phrCe;
++        p->RemoveHeader(phrCe);
++        NrPuschAllocationTag allocTag;
++        const bool haveAlloc = p->PeekPacketTag(allocTag);
++
++        MacCeElement phr;
++        phr.m_macCeType = MacCeElement::PHR;
++        phr.m_rnti = rnti;
++        phr.m_macCeValue.m_phr = phrCe.m_phIndex;
++        phr.m_macCeValue.m_phrPcmax = phrCe.m_pcmaxIndex;
++        phr.m_macCeValue.m_phrNumRb = haveAlloc ? allocTag.GetNumRb() : 0;
++        m_ulCeReceived.push_back(phr);
++        return;
++    }
++
+     // Ok, we know it is data, so let's extract and pass to RLC.
+ 
+     NrMacHeaderVs macHeader;
+--- a/model/nr-mac-phr-ce.cc
++++ b/model/nr-mac-phr-ce.cc
+@@ -0,0 +1,185 @@
++// Copyright (c) 2026 Muhammad Uzair
++//
++// SPDX-License-Identifier: GPL-2.0-only
++
++#include "nr-mac-phr-ce.h"
++
++#include "ns3/log.h"
++
++#include <cmath>
++
++namespace ns3
++{
++
++NS_LOG_COMPONENT_DEFINE("NrMacPhrCe");
++
++NS_OBJECT_ENSURE_REGISTERED(NrMacSingleEntryPhrCe);
++NS_OBJECT_ENSURE_REGISTERED(NrPuschAllocationTag);
++
++TypeId
++NrMacSingleEntryPhrCe::GetTypeId()
++{
++    static TypeId tid = TypeId("ns3::NrMacSingleEntryPhrCe")
++                            .SetParent<Header>()
++                            .SetGroupName("Nr")
++                            .AddConstructor<NrMacSingleEntryPhrCe>();
++    return tid;
++}
++
++TypeId
++NrMacSingleEntryPhrCe::GetInstanceTypeId() const
++{
++    return GetTypeId();
++}
++
++NrMacSingleEntryPhrCe::NrMacSingleEntryPhrCe()
++{
++    m_header.SetLcId(NrMacHeaderFsUl::SINGLE_ENTRY_PHR);
++}
++
++void
++NrMacSingleEntryPhrCe::Serialize(Buffer::Iterator start) const
++{
++    NS_ASSERT(m_phIndex <= 63);
++    NS_ASSERT(m_pcmaxIndex <= 63);
++    m_header.Serialize(start);
++    start.Next(m_header.GetSerializedSize());
++    start.WriteU8(m_phIndex & 0x3F);    // R R PH
++    start.WriteU8(m_pcmaxIndex & 0x3F); // R R P_CMAX,f,c
++}
++
++uint32_t
++NrMacSingleEntryPhrCe::Deserialize(Buffer::Iterator start)
++{
++    auto readBytes = m_header.Deserialize(start);
++    start.Next(readBytes);
++    NS_ASSERT(m_header.GetLcId() == NrMacHeaderFsUl::SINGLE_ENTRY_PHR);
++    m_phIndex = start.ReadU8() & 0x3F;
++    m_pcmaxIndex = start.ReadU8() & 0x3F;
++    return GetSerializedSize();
++}
++
++uint32_t
++NrMacSingleEntryPhrCe::GetSerializedSize() const
++{
++    return m_header.GetSerializedSize() + 2;
++}
++
++void
++NrMacSingleEntryPhrCe::Print(std::ostream& os) const
++{
++    os << "PH index " << +m_phIndex << " (" << PhIndexToDb(m_phIndex) << " dB), PCMAX index "
++       << +m_pcmaxIndex << " (" << PcmaxIndexToDbm(m_pcmaxIndex) << " dBm)";
++}
++
++uint8_t
++NrMacSingleEntryPhrCe::PhDbToIndex(double phDb)
++{
++    // TS 38.133 Table 10.1.17.1-1: 1 dB steps from -32 dB to 22 dB, then
++    // 2 dB steps up to 38 dB.
++    if (!(phDb >= -32.0))
++    {
++        return 0;
++    }
++    if (phDb >= 38.0)
++    {
++        return 63;
++    }
++    if (phDb < 22.0)
++    {
++        return static_cast<uint8_t>(std::floor(phDb) + 33.0);
++    }
++    return static_cast<uint8_t>(55.0 + std::floor((phDb - 22.0) / 2.0));
++}
++
++double
++NrMacSingleEntryPhrCe::PhIndexToDb(uint8_t index)
++{
++    if (index == 0)
++    {
++        return -33.0;
++    }
++    if (index <= 54)
++    {
++        return static_cast<double>(index) - 33.0;
++    }
++    if (index <= 62)
++    {
++        return 22.0 + 2.0 * (index - 55);
++    }
++    return 38.0;
++}
++
++uint8_t
++NrMacSingleEntryPhrCe::PcmaxDbmToIndex(double pcmaxDbm)
++{
++    // TS 38.133 Table 10.1.18.1-1: 1 dB steps from -29 dBm to 33 dBm.
++    if (!(pcmaxDbm >= -29.0))
++    {
++        return 0;
++    }
++    if (pcmaxDbm >= 33.0)
++    {
++        return 63;
++    }
++    return static_cast<uint8_t>(std::floor(pcmaxDbm) + 30.0);
++}
++
++double
++NrMacSingleEntryPhrCe::PcmaxIndexToDbm(uint8_t index)
++{
++    return static_cast<double>(std::min<uint8_t>(index, 63)) - 30.0;
++}
++
++TypeId
++NrPuschAllocationTag::GetTypeId()
++{
++    static TypeId tid = TypeId("ns3::NrPuschAllocationTag")
++                            .SetParent<Tag>()
++                            .SetGroupName("Nr")
++                            .AddConstructor<NrPuschAllocationTag>();
++    return tid;
++}
++
++TypeId
++NrPuschAllocationTag::GetInstanceTypeId() const
++{
++    return GetTypeId();
++}
++
++NrPuschAllocationTag::NrPuschAllocationTag(uint16_t numRb)
++    : m_numRb(numRb)
++{
++}
++
++uint32_t
++NrPuschAllocationTag::GetSerializedSize() const
++{
++    return 2;
++}
++
++void
++NrPuschAllocationTag::Serialize(TagBuffer i) const
++{
++    i.WriteU16(m_numRb);
++}
++
++void
++NrPuschAllocationTag::Deserialize(TagBuffer i)
++{
++    m_numRb = i.ReadU16();
++}
++
++void
++NrPuschAllocationTag::Print(std::ostream& os) const
++{
++    os << "numRb=" << m_numRb;
++}
++
++uint16_t
++NrPuschAllocationTag::GetNumRb() const
++{
++    return m_numRb;
++}
++
++} // namespace ns3
+--- a/model/nr-mac-phr-ce.h
++++ b/model/nr-mac-phr-ce.h
+@@ -0,0 +1,127 @@
++// Copyright (c) 2026 Muhammad Uzair
++//
++// SPDX-License-Identifier: GPL-2.0-only
++
++#ifndef NR_MAC_PHR_CE_H
++#define NR_MAC_PHR_CE_H
++
++#include "nr-mac-header-fs-ul.h"
++
++#include "ns3/header.h"
++#include "ns3/tag.h"
++
++namespace ns3
++{
++
++/**
++ * \ingroup ue-mac
++ * \brief Single Entry PHR MAC CE (TS 38.321 6.1.3.8), with its fixed-size
++ * subheader (LCID 57).
++ *
++ * Two octets after the one-octet subheader:
++\verbatim
++ +-----+-----+-----------------------------------+
++ |  R  |  R  |  PH (type 1, PCell)               |   Oct 1
++ +-----+-----+-----------------------------------+
++ |  R  |  R  |  P_CMAX,f,c                       |   Oct 2
++ +-----+-----+-----------------------------------+
++\endverbatim
++ *
++ * PH is the TS 38.133 Table 10.1.17.1-1 report index (0..63) of the type 1
++ * power headroom of TS 38.213 7.7.1 for the PUSCH carrying the CE; P_CMAX,f,c
++ * is the TS 38.133 Table 10.1.18.1-1 index (0..63) of the configured maximum
++ * output power used for that PH.
++ */
++class NrMacSingleEntryPhrCe : public Header
++{
++  public:
++    /**
++     * \brief GetTypeId
++     * \return the type id of the object
++     */
++    static TypeId GetTypeId();
++    TypeId GetInstanceTypeId() const override;
++
++    NrMacSingleEntryPhrCe();
++
++    void Serialize(Buffer::Iterator start) const override;
++    uint32_t Deserialize(Buffer::Iterator start) override;
++    uint32_t GetSerializedSize() const override;
++    void Print(std::ostream& os) const override;
++
++    /**
++     * \brief TS 38.133 Table 10.1.17.1-1: power headroom (dB) to report index.
++     * \param phDb power headroom in dB
++     * \return POWER_HEADROOM_n index n, 0..63
++     */
++    static uint8_t PhDbToIndex(double phDb);
++    /**
++     * \brief Lower edge (dB) of the PH range a report index stands for
++     * (index 0, PH < -32 dB, is decoded as -33 dB).
++     * \param index report index 0..63
++     * \return the power headroom in dB the network may rely on
++     */
++    static double PhIndexToDb(uint8_t index);
++    /**
++     * \brief TS 38.133 Table 10.1.18.1-1: P_CMAX,f,c (dBm) to report index.
++     * \param pcmaxDbm configured maximum output power in dBm
++     * \return PCMAX_C_n index n, 0..63
++     */
++    static uint8_t PcmaxDbmToIndex(double pcmaxDbm);
++    /**
++     * \brief Lower edge (dBm) of the P_CMAX,f,c range a report index stands for.
++     * \param index report index 0..63
++     * \return P_CMAX,f,c in dBm
++     */
++    static double PcmaxIndexToDbm(uint8_t index);
++
++    uint8_t m_phIndex{0};    //!< PH field (6 bits)
++    uint8_t m_pcmaxIndex{0}; //!< P_CMAX,f,c field (6 bits)
++
++  private:
++    NrMacHeaderFsUl m_header; //!< Fixed-size subheader (LCID 57)
++};
++
++/**
++ * \ingroup gnb-phy
++ * \brief Number of PRBs of the PUSCH a packet was received on.
++ *
++ * Added by the gNB NrSpectrumPhy to a decoded uplink packet that carries a
++ * PHR MAC CE. It stands for knowledge the gNB has in any case: it scheduled
++ * that PUSCH, so it knows the M_RB the UE's type 1 power headroom refers to
++ * (TS 38.213 7.7.1). Not transmitted over the air.
++ */
++class NrPuschAllocationTag : public Tag
++{
++  public:
++    /**
++     * \brief GetTypeId
++     * \return the type id of the object
++     */
++    static TypeId GetTypeId();
++    TypeId GetInstanceTypeId() const override;
++
++    NrPuschAllocationTag() = default;
++    /**
++     * \brief Constructor
++     * \param numRb number of PRBs of the PUSCH
++     */
++    explicit NrPuschAllocationTag(uint16_t numRb);
++
++    uint32_t GetSerializedSize() const override;
++    void Serialize(TagBuffer i) const override;
++    void Deserialize(TagBuffer i) override;
++    void Print(std::ostream& os) const override;
++
++    /**
++     * \return the number of PRBs of the PUSCH
++     */
++    uint16_t GetNumRb() const;
++
++  private:
++    uint16_t m_numRb{0}; //!< PRBs of the PUSCH
++};
++
++} // namespace ns3
++
++#endif /* NR_MAC_PHR_CE_H */
+--- a/model/nr-mac-scheduler-ns3.cc
++++ b/model/nr-mac-scheduler-ns3.cc
+@@ -14,6 +14,7 @@
+ #include "nr-mac-scheduler-harq-rr.h"
+ #include "nr-mac-scheduler-lc-rr.h"
+ #include "nr-mac-scheduler-srs-default.h"
++#include "nr-mac-phr-ce.h"
+ #include "nr-mac-short-bsr-ce.h"
+ 
+ #include <ns3/boolean.h>
+@@ -24,6 +25,7 @@
+ #include <ns3/uinteger.h>
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <memory>
+ #include <unordered_set>
+ 
+@@ -235,6 +237,21 @@
+                 MakeTypeIdAccessor(&NrMacSchedulerNs3::SetLcSched),
+                 //&NrMacSchedulerNs3::GetLcSched),
+                 MakeTypeIdChecker())
++            .AddAttribute(
++                "PhrUlRbLimit",
++                "ntn-patch 16: bound each UE's PUSCH to the PRBs its last power headroom "
++                "report (TS 38.321 5.4.6 Single Entry PHR, type 1 PH of TS 38.213 7.7.1) "
++                "says it can power at its open-loop target PSD: M_max = M_RB x 10^(PH/10) for "
++                "the M_RB of the PUSCH that carried the PHR. A power-limited UE otherwise "
++                "spreads P_CMAX over the whole band and its PUSCH SINR falls below the lowest "
++                "MCS. false (default) ignores PHRs, the nr behavior before the patch.",
++                BooleanValue(false),
++                MakeBooleanAccessor(&NrMacSchedulerNs3::m_phrUlRbLimit),
++                MakeBooleanChecker())
++            .AddTraceSource("UlPhrPrbLimit",
++                            "A PHR set a UE's UL PRB limit: RNTI, PH (dB), M_RB, limit",
++                            MakeTraceSourceAccessor(&NrMacSchedulerNs3::m_ulPhrLimitTrace),
++                            "ns3::NrMacSchedulerNs3::UlPhrLimitTracedCallback")
+             .AddAttribute("RachUlGrantMcs",
+                           "The MCS of the RACH UL grant, must be [0..15] (default 0)",
+                           UintegerValue(0),
+@@ -869,6 +886,92 @@
+     }
+ }
+ 
++void
++NrMacSchedulerNs3::PhrReceivedFromUe(const MacCeElement& phr)
++{
++    NS_LOG_FUNCTION(this);
++    NS_ASSERT(phr.m_macCeType == MacCeElement::PHR);
++    GetSecond UeInfoOf;
++    auto itUe = m_ueMap.find(phr.m_rnti);
++    if (itUe == m_ueMap.end())
++    {
++        return; // the UE left this BWP while the PHR was in flight
++    }
++    ++m_phrReceived;
++    const uint16_t usedRb = phr.m_macCeValue.m_phrNumRb;
++    if (!m_phrUlRbLimit || usedRb == 0)
++    {
++        NS_LOG_INFO("PHR from UE " << phr.m_rnti << " not used for the UL PRB limit");
++        return;
++    }
++    // Type 1 PH (TS 38.213 7.7.1) for M_RB = usedRb: P_CMAX minus the power the
++    // open-loop target needs on usedRb RBs. The target needs 10log10(M/usedRb)
++    // dB more on M RBs, so the UE can power M_max = usedRb x 10^(PH/10) RBs.
++    // The PH is decoded as the lower edge of its TS 38.133 range.
++    const double phDb = NrMacSingleEntryPhrCe::PhIndexToDb(phr.m_macCeValue.m_phr);
++    const double maxRbD = usedRb * std::pow(10.0, phDb / 10.0);
++    uint32_t maxRb = UINT32_MAX;
++    if (maxRbD < 1.0e6)
++    {
++        maxRb = std::max<uint32_t>(1, static_cast<uint32_t>(std::floor(maxRbD)));
++    }
++    UeInfoOf(*itUe)->m_ulMaxRb = maxRb;
++    UeInfoOf(*itUe)->m_ulPhrReceived = true;
++    NS_LOG_INFO("PHR from UE " << phr.m_rnti << ": PH " << phDb << " dB on " << usedRb
++                               << " RBs, UL PRB limit " << maxRb);
++    m_ulPhrLimitTrace(phr.m_rnti, phDb, usedRb, maxRb);
++}
++
++uint32_t
++NrMacSchedulerNs3::GetUlPhrPrbLimit(uint16_t rnti) const
++{
++    auto itUe = m_ueMap.find(rnti);
++    if (itUe == m_ueMap.end() || !itUe->second->m_ulPhrReceived)
++    {
++        return UINT32_MAX;
++    }
++    return itUe->second->m_ulMaxRb;
++}
++
++bool
++NrMacSchedulerNs3::IsUlPhrLimited(const UePtr& ue) const
++{
++    // Until the first PHR the gNB does not know whether the UE can power a
++    // wide PUSCH, so it starts narrow (the floor below) rather than spreading
++    // P_CMAX over the band: a full-band PUSCH from a power-limited UE does not
++    // decode, and so the PHR riding on it would never arrive either.
++    return m_phrUlRbLimit && (!ue->m_ulPhrReceived || ue->m_ulMaxRb != UINT32_MAX);
++}
++
++uint32_t
++NrMacSchedulerNs3::GetUlRbgCapPerSym(const UePtr& ue, uint32_t assignableRbg) const
++{
++    if (!IsUlPhrLimited(ue))
++    {
++        return assignableRbg;
++    }
++    const auto rbPerRbg = static_cast<uint32_t>(GetNumRbPerRbg());
++    const uint32_t maxRb = ue->m_ulPhrReceived ? ue->m_ulMaxRb : 1;
++    uint32_t cap = std::max<uint32_t>(1, maxRb / rbPerRbg);
++    cap = std::min(cap, assignableRbg);
++    // Never below an allocation whose TB can carry data (kMinUlTbWithData)
++    // over the UL data symbols of a slot: a smaller grant (CreateUlDci accepts
++    // 12 bytes) would carry the MAC CEs only, every slot, and the UE would
++    // never send its data. The floor is sized on the whole slot, not on the
++    // symbols left over in this one, so a few leftover symbols never turn
++    // into a wide, low-PSD grant: such a UE waits for a slot with room.
++    const uint32_t slotUlSym =
++        m_macSchedSapUser->GetSymbolsPerSlot() - m_ulCtrlSymbols - m_dlCtrlSymbols;
++    const uint32_t sym = std::max<uint32_t>(slotUlSym, 1);
++    while (cap < assignableRbg &&
++           m_ulAmc->CalculateTbSize(ue->m_ulMcs, ue->m_ulRank, cap * rbPerRbg * sym) <
++               kMinUlTbWithData)
++    {
++        ++cap;
++    }
++    return cap;
++}
++
+ /**
+  * \brief Evaluate different types of control messages (only BSR for the moment)
+  * \param params parameters of the control message
+@@ -888,6 +991,10 @@
+         {
+             BSRReceivedFromUe(element);
+         }
++        else if (element.m_macCeType == MacCeElement::PHR)
++        {
++            PhrReceivedFromUe(element);
++        }
+         else
+         {
+             NS_LOG_INFO("Ignoring received CTRL message because it's not a BSR");
+--- a/model/nr-mac-scheduler-ns3.h
++++ b/model/nr-mac-scheduler-ns3.h
+@@ -13,6 +13,8 @@
+ #include "nr-mac-scheduler.h"
+ #include "nr-phy-mac-common.h"
+ 
++#include <ns3/traced-callback.h>
++
+ #include <functional>
+ #include <list>
+ #include <memory>
+@@ -719,6 +721,32 @@
+     Ptr<NrAmc> m_dlAmc; //!< AMC pointer
+     Ptr<NrAmc> m_ulAmc; //!< AMC pointer
+ 
++    /**
++     * \brief UL RBGs per symbol a UE may get in this slot (ntn-patch 16).
++     *
++     * With PhrUlRbLimit, the UE's last power headroom report bounds its
++     * PUSCH to the PRBs it can power at its open-loop target PSD (TS 38.213
++     * 7.1.1 / 7.7.1), never below the smallest allocation on which a TB that
++     * can carry data after the SHORT_BSR and PHR MAC CEs (kMinUlTbWithData)
++     * fits in the UL data symbols of a slot at the UE's current UL MCS.
++     * Otherwise, and before any PHR, it returns assignableRbg (the band).
++     * \param ue the UE
++     * \param assignableRbg RBGs per symbol available to the scheduler
++     * \return RBGs per symbol for this UE
++     */
++    uint32_t GetUlRbgCapPerSym(const UePtr& ue, uint32_t assignableRbg) const;
++
++    /**
++     * \param ue the UE
++     * \return true if a PHR limits this UE's UL PRBs (ntn-patch 16)
++     */
++    bool IsUlPhrLimited(const UePtr& ue) const;
++
++    /// Smallest UL TB worth granting to a PHR-limited UE: SHORT_BSR (5 bytes),
++    /// PHR MAC CE (3) and one data subPDU, which NrUeMac builds only with at
++    /// least 10 bytes (3 MAC subheader, 2 RLC header, 5 data). ntn-patch 16.
++    static constexpr uint32_t kMinUlTbWithData = 5 + 3 + 10;
++
+   private:
+     /**
+      * \brief Single UL allocation for calculating CQI and the number of reserved UL symbols in
+@@ -797,6 +825,12 @@
+     };
+ 
+     void BSRReceivedFromUe(const MacCeElement& bsr);
++    /**
++     * \brief Single Entry PHR MAC CE (TS 38.321 6.1.3.8) received from a UE
++     * (ntn-patch 16).
++     * \param phr the CE, with the M_RB of the PUSCH it arrived on
++     */
++    void PhrReceivedFromUe(const MacCeElement& phr);
+ 
+     template <typename T>
+     std::vector<T> MergeHARQ(std::vector<T>* existingFeedbacks,
+@@ -959,6 +993,12 @@
+     uint32_t m_dlHarqFeedbackDisabled{0};
+     /// DL transmissions released without waiting for HARQ feedback.
+     mutable uint64_t m_dlHarqFeedbackDisabledTx{0};
++    /// ntn-patch 16: limit UL PRBs by the reported power headroom (attribute PhrUlRbLimit).
++    bool m_phrUlRbLimit{false};
++    /// PHR MAC CEs received.
++    uint64_t m_phrReceived{0};
++    /// rnti, PH (dB, decoded), M_RB of the PUSCH carrying the PHR, resulting UL PRB limit.
++    TracedCallback<uint16_t, double, uint16_t, uint32_t> m_ulPhrLimitTrace;
+ 
+   public:
+     /// \return number of DL TBs sent on feedback-disabled HARQ processes (released
+@@ -967,6 +1007,28 @@
+     {
+         return m_dlHarqFeedbackDisabledTx;
+     }
++
++    /// \return PHR MAC CEs received from the UEs of this BWP (ntn-patch 16).
++    uint64_t GetPhrReceivedCount() const
++    {
++        return m_phrReceived;
++    }
++
++    /// \return the UL PRB limit currently derived from this UE's PHR, or
++    /// UINT32_MAX if none applies (ntn-patch 16).
++    uint32_t GetUlPhrPrbLimit(uint16_t rnti) const;
++
++    /**
++     * TracedCallback signature for the UL PRB limit set from a PHR.
++     * \param [in] rnti the RNTI
++     * \param [in] phDb the decoded power headroom (dB)
++     * \param [in] numRb M_RB of the PUSCH the PHR arrived on
++     * \param [in] maxRb the resulting UL PRB limit
++     */
++    typedef void (*UlPhrLimitTracedCallback)(const uint16_t rnti,
++                                             const double phDb,
++                                             const uint16_t numRb,
++                                             const uint32_t maxRb);
+ };
+ 
+ } // namespace ns3
+--- a/model/nr-mac-scheduler-ofdma.cc
++++ b/model/nr-mac-scheduler-ofdma.cc
+@@ -358,6 +358,7 @@
+                                  ? std::count(ulNotchedRBGsMask.begin(), ulNotchedRBGsMask.end(), 1)
+                                  : GetBandwidthInRbg();
+         NS_ASSERT(resources > 0);
++        const uint32_t bandRbg = resources;
+ 
+         for (const auto& ue : GetUeVector(el))
+         {
+@@ -379,7 +380,12 @@
+             while (schedInfoIt != ueVector.end())
+             {
+                 uint32_t bufQueueSize = schedInfoIt->second;
+-                if (GetUe(*schedInfoIt)->m_ulTbSize >= std::max(bufQueueSize, 12U))
++                // ntn-patch 16: a UE at its power-headroom PRB limit is full too.
++                const bool atPhrLimit =
++                    beamSym > 0 &&
++                    GetUe(*schedInfoIt)->m_ulRBG >=
++                        GetUlRbgCapPerSym(GetUe(*schedInfoIt), bandRbg) * beamSym;
++                if (GetUe(*schedInfoIt)->m_ulTbSize >= std::max(bufQueueSize, 12U) || atPhrLimit)
+                 {
+                     schedInfoIt++;
+                 }
+@@ -543,7 +549,8 @@
+ 
+     // If is less than 12, i.e., 7 (3 mac header, 2 rlc header, 2 data) + 5 bytes for
+     // the SHORT_BSR. then we can't transmit any new data, so don't create dci.
+-    if (tbs < 12)
++    // ntn-patch 16: for a PHR-limited UE the floor is kMinUlTbWithData.
++    if (tbs < 12 || (IsUlPhrLimited(ueInfo) && tbs < kMinUlTbWithData))
+     {
+         NS_LOG_DEBUG("While creating UL DCI for UE " << ueInfo->m_rnti << " assigned "
+                                                      << ueInfo->m_ulRBG << " UL RBG, but TBS < 12");
+--- a/model/nr-mac-scheduler-tdma.cc
++++ b/model/nr-mac-scheduler-tdma.cc
+@@ -182,9 +182,17 @@
+         do
+         {
+             // Assign 1 entire symbol (full RBG) to the selected UE and to the total
+-            // resources assigned count
+-            GetRBGFn(GetUe(*schedInfoIt)) += numOfAssignableRbgs;
+-            assigned.m_rbg += numOfAssignableRbgs;
++            // resources assigned count. ntn-patch 16: on UL, only the RBGs per
++            // symbol the UE's power headroom allows (GetUlRbgCapPerSym); the
++            // rest of the symbol stays idle, as TDMA gives a symbol to one UE.
++            uint32_t perSym = numOfAssignableRbgs;
++            if (type == "UL")
++            {
++                perSym = GetUlRbgCapPerSym(GetUe(*schedInfoIt), numOfAssignableRbgs);
++                GetUe(*schedInfoIt)->m_ulRbgPerSym = perSym;
++            }
++            GetRBGFn(GetUe(*schedInfoIt)) += perSym;
++            assigned.m_rbg += perSym;
+ 
+             GetSymFn(GetUe(*schedInfoIt)) += 1;
+             assigned.m_sym += 1;
+@@ -193,12 +201,12 @@
+             resources -= 1;
+ 
+             // Update metrics for the successful UE
+-            NS_LOG_DEBUG("Assigned " << numOfAssignableRbgs << " " << type
++            NS_LOG_DEBUG("Assigned " << perSym << " " << type
+                                      << " RBG (= 1 SYM) to UE " << GetUe(*schedInfoIt)->m_rnti
+                                      << " total assigned up to now: "
+                                      << GetRBGFn(GetUe(*schedInfoIt)) << " that corresponds to "
+                                      << assigned.m_rbg);
+-            SuccessfulAssignmentFn(*schedInfoIt, FTResources(numOfAssignableRbgs, 1), assigned);
++            SuccessfulAssignmentFn(*schedInfoIt, FTResources(perSym, 1), assigned);
+ 
+             // Update metrics for the unsuccessful UEs (who did not get any resource in this
+             // iteration)
+@@ -206,10 +214,13 @@
+             {
+                 if (GetUe(ue)->m_rnti != GetUe(*schedInfoIt)->m_rnti)
+                 {
+-                    UnSuccessfulAssignmentFn(ue, FTResources(numOfAssignableRbgs, 1), assigned);
++                    UnSuccessfulAssignmentFn(ue, FTResources(perSym, 1), assigned);
+                 }
+             }
+-        } while (resources > 0 && GetTBSFn(GetUe(*schedInfoIt)) < minUsefulTbs);
++        } while (resources > 0 &&
++                 GetTBSFn(GetUe(*schedInfoIt)) <
++                     ((type == "UL" && IsUlPhrLimited(GetUe(*schedInfoIt))) ? kMinUlTbWithData
++                                                                            : minUsefulTbs));
+     }
+ 
+     // Count the number of assigned symbol of each beam.
+@@ -219,7 +230,12 @@
+         uint32_t symOfBeam = 0;
+         for (const auto& ue : el.second)
+         {
+-            symOfBeam += GetRBGFn(ue.first) / numOfAssignableRbgs;
++            uint32_t perSym = numOfAssignableRbgs;
++            if (type == "UL" && ue.first->m_ulRbgPerSym > 0)
++            {
++                perSym = ue.first->m_ulRbgPerSym; // ntn-patch 16
++            }
++            symOfBeam += GetRBGFn(ue.first) / perSym;
+         }
+         ret.insert(std::make_pair(el.first, symOfBeam));
+     }
+@@ -389,8 +405,9 @@
+                                             ueInfo->m_ulRBG * GetNumRbPerRbg());
+ 
+     // If is less than 12, 7 (3 mac header, 2 rlc header, 2 data) + SHORT_BSR (5),
+-    // then we can't transmit any new data, so don't create dci.
+-    if (tbs < 12)
++    // then we can't transmit any new data, so don't create dci. ntn-patch 16:
++    // for a PHR-limited UE the floor is kMinUlTbWithData.
++    if (tbs < 12 || (IsUlPhrLimited(ueInfo) && tbs < kMinUlTbWithData))
+     {
+         NS_LOG_DEBUG("While creating UL DCI for UE " << ueInfo->m_rnti << " assigned "
+                                                      << ueInfo->m_ulRBG << " UL RBG, but TBS "
+@@ -402,7 +419,13 @@
+     int zeroes = std::count(notchedRBGsMask.begin(), notchedRBGsMask.end(), 0);
+     uint32_t numOfAssignableRbgs = GetBandwidthInRbg() - zeroes;
+ 
+-    uint8_t numSym = static_cast<uint8_t>(std::max(ueInfo->m_ulRBG / numOfAssignableRbgs, 1U));
++    // ntn-patch 16: a power-headroom-limited UE got fewer RBGs per symbol.
++    uint32_t perSym = numOfAssignableRbgs;
++    if (ueInfo->m_ulRbgPerSym > 0 && ueInfo->m_ulRbgPerSym < numOfAssignableRbgs)
++    {
++        perSym = ueInfo->m_ulRbgPerSym;
++    }
++    uint8_t numSym = static_cast<uint8_t>(std::max(ueInfo->m_ulRBG / perSym, 1U));
+     numSym = std::min(numSym, static_cast<uint8_t>(maxSym));
+ 
+     NS_ASSERT(spoint->m_sym >= numSym);
+@@ -419,6 +442,26 @@
+                          ueInfo->m_ulPrecMats,
+                          numSym);
+ 
++    // ntn-patch 16: keep only the first perSym assignable RBGs of the band.
++    if (perSym < numOfAssignableRbgs)
++    {
++        uint32_t kept = 0;
++        for (auto& bit : dci->m_rbgBitmask)
++        {
++            if (bit == 1)
++            {
++                if (kept < perSym)
++                {
++                    ++kept;
++                }
++                else
++                {
++                    bit = 0;
++                }
++            }
++        }
++    }
++
+     // Reset the RBG (we are TDMA)
+     spoint->m_rbg = 0;
+ 
+--- a/model/nr-mac-scheduler-ue-info.h
++++ b/model/nr-mac-scheduler-ue-info.h
+@@ -260,6 +260,12 @@
+     /// converges to the target (NrMacSchedulerNs3 OllaEnabled / OllaBlerTarget / OllaStep).
+     double m_dlOllaOffset{0.0};
+     uint8_t m_ulMcs{0}; //!< UL MCS
++    /// ntn-patch 16: UL PRB limit from the last PHR (UINT32_MAX = none).
++    uint32_t m_ulMaxRb{UINT32_MAX};
++    /// ntn-patch 16: a PHR has been received from this UE.
++    bool m_ulPhrReceived{false};
++    /// ntn-patch 16: UL RBGs per symbol of the allocation being built (TDMA).
++    uint32_t m_ulRbgPerSym{0};
+ 
+     uint32_t m_dlTbSize{0}; //!< DL Transport Block Size, depends on MCS and RBG,
+                             //!< updated in UpdateDlMetric()
+--- a/model/nr-phy.cc
++++ b/model/nr-phy.cc
+@@ -60,6 +60,9 @@
+ 
+     uint32_t GetRbNum() const override;
+ 
++    PuschPowerHeadroom GetPuschPowerHeadroom(
++        const std::vector<uint8_t>& rbgBitmask) const override;
++
+   private:
+     NrPhy* m_phy;
+ };
+@@ -145,6 +148,12 @@
+     return m_phy->GetRbNum();
+ }
+ 
++NrPhySapProvider::PuschPowerHeadroom
++NrMemberPhySapProvider::GetPuschPowerHeadroom(const std::vector<uint8_t>& rbgBitmask) const
++{
++    return m_phy->GetPuschPowerHeadroom(rbgBitmask);
++}
++
+ /* ======= */
+ 
+ TypeId
+@@ -161,6 +170,12 @@
+     return tid;
+ }
+ 
++NrPhySapProvider::PuschPowerHeadroom
++NrPhy::GetPuschPowerHeadroom([[maybe_unused]] const std::vector<uint8_t>& rbgBitmask) const
++{
++    return NrPhySapProvider::PuschPowerHeadroom{};
++}
++
+ std::vector<int>
+ NrPhy::FromRBGBitmaskToRBAssignment(const std::vector<uint8_t> rbgBitmask) const
+ {
+--- a/model/nr-phy.h
++++ b/model/nr-phy.h
+@@ -189,6 +189,16 @@
+      */
+     virtual double GetTxPower() const = 0;
+ 
++    /**
++     * \brief Type 1 power headroom (TS 38.213 7.7.1) of a PUSCH on the given
++     * RBG allocation (ntn-patch 16). The base class runs no uplink power
++     * control and returns an invalid value; NrUePhy overrides it.
++     * \param rbgBitmask the RBG allocation of the UL grant
++     * \return the power headroom
++     */
++    virtual NrPhySapProvider::PuschPowerHeadroom GetPuschPowerHeadroom(
++        const std::vector<uint8_t>& rbgBitmask) const;
++
+     // Installation / Helpers
+     /**
+      * \brief Retrieve a pointer to an instance of NrPhySapProvider
+@@ -441,6 +451,7 @@
+      */
+     std::vector<int> FromRBGBitmaskToRBAssignment(const std::vector<uint8_t> rbgBitmask) const;
+ 
++
+     /**
+      * \brief Protected function that is used to get the number of resource
+      * blocks per resource block group.
+--- a/model/nr-phy-mac-common.h
++++ b/model/nr-phy-mac-common.h
+@@ -424,6 +424,10 @@
+     uint8_t m_phr;
+     uint8_t m_crnti;
+     std::vector<uint8_t> m_bufferStatus;
++    // ntn-patch 16: PHR (TS 38.321 6.1.3.8) P_CMAX,f,c index, and the M_RB of
++    // the PUSCH the PHR arrived on (known to the gNB, which scheduled it).
++    uint8_t m_phrPcmax{0};
++    uint16_t m_phrNumRb{0};
+ };
+ 
+ /**
+--- a/model/nr-phy-sap.h
++++ b/model/nr-phy-sap.h
+@@ -135,6 +135,30 @@
+      * \return Get the number of resource blocks configured
+      */
+     virtual uint32_t GetRbNum() const = 0;
++
++    /**
++     * \brief Type 1 power headroom of a PUSCH (TS 38.213 7.7.1), for a PHR
++     * MAC CE (TS 38.321 5.4.6). ntn-patch 16.
++     */
++    struct PuschPowerHeadroom
++    {
++        bool valid{false};      //!< false when the PHY runs no uplink power control
++        double phDb{0.0};       //!< P_CMAX - (P0 + 10log10(2^mu M_RB) + alpha PL + deltaTF + f)
++        double pcmaxDbm{0.0};   //!< P_CMAX,f,c used for phDb
++        double pathlossDb{0.0}; //!< the UE's downlink path-loss estimate PL
++        uint32_t numRb{0};      //!< M_RB of the PUSCH
++    };
++
++    /**
++     * \brief Power headroom of a PUSCH on the given RBG allocation.
++     * \param rbgBitmask the RBG allocation of the UL grant
++     * \return the headroom; invalid by default (gNB PHY, or no power control)
++     */
++    virtual PuschPowerHeadroom GetPuschPowerHeadroom(
++        [[maybe_unused]] const std::vector<uint8_t>& rbgBitmask) const
++    {
++        return PuschPowerHeadroom{};
++    }
+ };
+ 
+ /**
+--- a/model/nr-spectrum-phy.cc
++++ b/model/nr-spectrum-phy.cc
+@@ -8,6 +8,7 @@
+ #include "nr-gnb-net-device.h"
+ #include "nr-gnb-phy.h"
+ #include "nr-lte-mi-error-model.h"
++#include "nr-mac-phr-ce.h"
+ #include "nr-radio-bearer-tag.h"
+ #include "nr-ue-net-device.h"
+ #include "nr-ue-phy.h"
+@@ -1548,6 +1549,14 @@
+ 
+             if (!tbInfo.m_isCorrupted)
+             {
++                // ntn-patch 16: the gNB scheduled this PUSCH, so it knows the
++                // M_RB a PHR MAC CE on it refers to (TS 38.213 7.7.1).
++                if (gnbRx && bearerTag.GetLcid() == NrMacHeaderFsUl::SINGLE_ENTRY_PHR)
++                {
++                    NrPuschAllocationTag allocTag(
++                        static_cast<uint16_t>(tbInfo.m_expected.m_rbBitmap.size()));
++                    packet->AddPacketTag(allocTag);
++                }
+                 m_phyRxDataEndOkCallback(packet);
+             }
+             else
+--- a/model/nr-ue-mac.cc
++++ b/model/nr-ue-mac.cc
+@@ -13,16 +13,20 @@
+ 
+ #include "nr-control-messages.h"
+ #include "nr-mac-header-vs.h"
++#include "nr-mac-phr-ce.h"
+ #include "nr-mac-short-bsr-ce.h"
+ #include "nr-phy-sap.h"
+ #include "nr-radio-bearer-tag.h"
+ 
+ #include <ns3/boolean.h>
++#include <ns3/double.h>
+ #include <ns3/log.h>
+ #include <ns3/nstime.h>
+ #include <ns3/random-variable-stream.h>
+ #include <ns3/uinteger.h>
+ 
++#include <cmath>
++
+ namespace ns3
+ {
+ 
+@@ -236,6 +240,35 @@
+                 TimeValue(Time(0)),
+                 MakeTimeAccessor(&NrUeMac::m_retxBsrTimer),
+                 MakeTimeChecker(Time(0)))
++            .AddAttribute(
++                "PhrPeriodicTimer",
++                "TS 38.321 5.4.6 / TS 38.331 PHR-Config phr-PeriodicTimer. A positive value "
++                "configures power headroom reporting: a Single Entry PHR MAC CE (TS 38.321 "
++                "6.1.3.8) carrying the type 1 power headroom of the PUSCH it rides on (TS 38.213 "
++                "7.7.1, needs NrUePhy::EnableUplinkPowerControl) is sent on a new UL transmission "
++                "upon configuration, on expiry of this timer, and when the path loss changed by "
++                "more than PhrTxPowerFactorChange after PhrProhibitTimer. Zero (default) leaves "
++                "PHR unconfigured, as in nr before ntn-patch 16.",
++                TimeValue(Time(0)),
++                MakeTimeAccessor(&NrUeMac::m_phrPeriodicTimer),
++                MakeTimeChecker(Time(0)))
++            .AddAttribute("PhrProhibitTimer",
++                          "TS 38.331 PHR-Config phr-ProhibitTimer",
++                          TimeValue(MilliSeconds(10)),
++                          MakeTimeAccessor(&NrUeMac::m_phrProhibitTimer),
++                          MakeTimeChecker(Time(0)))
++            .AddAttribute("PhrTxPowerFactorChange",
++                          "TS 38.331 PHR-Config phr-Tx-PowerFactorChange (dB): a path-loss "
++                          "change above this since the last PHR triggers a new one once "
++                          "phr-ProhibitTimer has expired",
++                          DoubleValue(1.0),
++                          MakeDoubleAccessor(&NrUeMac::m_phrTxPowerFactorChange),
++                          MakeDoubleChecker<double>(0.0))
++            .AddTraceSource("PowerHeadroomReport",
++                            "A Single Entry PHR MAC CE was multiplexed into a PUSCH (TS 38.321 "
++                            "5.4.6): IMSI, RNTI, PH (dB), PH index, M_RB, path loss (dB)",
++                            MakeTraceSourceAccessor(&NrUeMac::m_phrTrace),
++                            "ns3::NrUeMac::PhrTracedCallback")
+             .AddTraceSource("RarOutsideWindow",
+                             "A RAR addressed to this UE arrived while ra-ResponseWindow was not "
+                             "running (before the NTN start offset elapsed) and was ignored. "
+@@ -529,6 +562,101 @@
+     m_phySapProvider->SendMacPdu(p, dataSfn, symStart, m_ulDci->m_rnti);
+ }
+ 
++uint32_t
++NrUeMac::PreparePhr()
++{
++    NS_LOG_FUNCTION(this);
++    m_phrPending = NrPhySapProvider::PuschPowerHeadroom{};
++    if (!m_phrPeriodicTimer.IsStrictlyPositive() || m_rnti == 0)
++    {
++        return 0; // PHR not configured
++    }
++    const Time now = Simulator::Now();
++    const auto ph = m_phySapProvider->GetPuschPowerHeadroom(m_ulDci->m_rbgBitmask);
++    if (!ph.valid)
++    {
++        return 0; // no PUSCH power control, so no power headroom to report
++    }
++    // TS 38.321 5.4.6 triggers.
++    if (m_phrPeriodicExpiry.IsStrictlyPositive() && now >= m_phrPeriodicExpiry)
++    {
++        m_phrTriggered = true; // phr-PeriodicTimer expired
++    }
++    if (now >= m_phrProhibitExpiry && std::isfinite(m_phrLastPathloss) &&
++        std::abs(ph.pathlossDb - m_phrLastPathloss) > m_phrTxPowerFactorChange)
++    {
++        m_phrTriggered = true; // phr-ProhibitTimer expired and PL changed
++    }
++    if (!m_phrTriggered)
++    {
++        return 0;
++    }
++    // The CE (2 octets) and its subheader (1 octet) must fit after the
++    // status PDUs and the SHORT_BSR (5 bytes), which come first.
++    uint32_t statusBytes = 0;
++    for (const auto& b : m_ulBsrReceived)
++    {
++        statusBytes += b.second.statusPduSize;
++    }
++    NrMacSingleEntryPhrCe ce;
++    const uint32_t ceBytes = ce.GetSerializedSize();
++    if (m_ulDciTotalUsed + statusBytes + 5 + ceBytes > m_ulDci->m_tbSize)
++    {
++        return 0; // stays triggered for the next grant
++    }
++    m_phrPending = ph;
++    return ceBytes;
++}
++
++void
++NrUeMac::SendPhr(const SfnSf& dataSfn, uint8_t symStart)
++{
++    NS_LOG_FUNCTION(this);
++    NS_ASSERT(m_phrPending.valid);
++    NrMacSingleEntryPhrCe ce;
++    ce.m_phIndex = NrMacSingleEntryPhrCe::PhDbToIndex(m_phrPending.phDb);
++    ce.m_pcmaxIndex = NrMacSingleEntryPhrCe::PcmaxDbmToIndex(m_phrPending.pcmaxDbm);
++
++    Ptr<Packet> p = Create<Packet>();
++    p->AddHeader(ce);
++    NrRadioBearerTag bearerTag(m_rnti, NrMacHeaderFsUl::SINGLE_ENTRY_PHR, 0);
++    p->AddPacketTag(bearerTag);
++
++    m_ulDciTotalUsed += p->GetSize();
++    NS_ASSERT_MSG(m_ulDciTotalUsed <= m_ulDci->m_tbSize,
++                  "We used more data than the DCI allowed us.");
++    // The CE is part of the MAC PDU, so a HARQ retransmission of this TB
++    // carries it again (unlike nr's SHORT_BSR, which is regenerated): at the
++    // cell edge the first transmission is often lost and the PHR would only
++    // ever arrive on a TB that decodes the first time.
++    auto& harq = m_miUlHarqProcessesPacket.at(m_ulDci->m_harqProcess);
++    if (!harq.m_pktBurst)
++    {
++        harq.m_pktBurst = CreateObject<PacketBurst>();
++    }
++    harq.m_pktBurst->AddPacket(p->Copy());
++    m_miUlHarqProcessesPacketTimer.at(m_ulDci->m_harqProcess) = GetNumHarqProcess();
++    m_phySapProvider->SendMacPdu(p, dataSfn, symStart, m_ulDci->m_rnti);
++
++    // TS 38.321 5.4.6: start or restart both timers, cancel the trigger.
++    const Time now = Simulator::Now();
++    m_phrPeriodicExpiry = now + m_phrPeriodicTimer;
++    m_phrProhibitExpiry = now + m_phrProhibitTimer;
++    m_phrLastPathloss = m_phrPending.pathlossDb;
++    m_phrTriggered = false;
++    ++m_phrSent;
++    m_phrTrace(m_imsi,
++               m_rnti,
++               m_phrPending.phDb,
++               ce.m_phIndex,
++               m_phrPending.numRb,
++               m_phrPending.pathlossDb);
++    NS_LOG_INFO("PHR sent: PH " << m_phrPending.phDb << " dB (index " << +ce.m_phIndex
++                                << ") on " << m_phrPending.numRb << " RBs, PL "
++                                << m_phrPending.pathlossDb << " dB");
++    m_phrPending = NrPhySapProvider::PuschPowerHeadroom{};
++}
++
+ void
+ NrUeMac::SetUeCmacSapUser(NrUeCmacSapUser* s)
+ {
+@@ -728,7 +856,16 @@
+     }
+     else if (m_ulDci->m_ndi == 1)
+     {
++        // ntn-patch 16: TS 38.321 5.4.6, a triggered PHR goes into a new
++        // transmission when the grant can hold it (LCP: after the BSR, before
++        // data, TS 38.321 5.4.3.1.3).
++        m_phrReservedBytes = PreparePhr();
+         SendNewData();
++        if (m_phrReservedBytes > 0)
++        {
++            SendPhr(dataSfn, m_ulDci->m_symStart);
++            m_phrReservedBytes = 0;
++        }
+ 
+         NS_LOG_INFO("After sending NewData, bufSize " << GetTotalBufSize());
+ 
+@@ -940,11 +1077,11 @@
+     // where we didn't check much as it is the most important data, that has to go
+     // out. For the rest that we have left, we can use only a part of it because of
+     // the overhead of the SHORT_BSR, which is 5 bytes.
+-    NS_ASSERT_MSG(m_ulDciTotalUsed + 5 <= m_ulDci->m_tbSize,
++    NS_ASSERT_MSG(m_ulDciTotalUsed + 5 + m_phrReservedBytes <= m_ulDci->m_tbSize,
+                   "The StatusPDU used " << m_ulDciTotalUsed
+                                         << " B, we don't have any for the SHORT_BSR.");
+-    // reserve some data for the SHORT_BSR
+-    uint32_t usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5;
++    // reserve some data for the SHORT_BSR (and the PHR MAC CE, ntn-patch 16)
++    uint32_t usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5 - m_phrReservedBytes;
+ 
+     // Now, we have 3 bytes of overhead for each subPDU. Let's try to serve all
+     // the queues with some RETX data.
+@@ -977,9 +1114,10 @@
+     // Remember that m_ulDciTotalUsed keep count of data and overhead that we
+     // used till now.
+     NS_ASSERT_MSG(
+-        m_ulDciTotalUsed + 5 <= m_ulDci->m_tbSize,
++        m_ulDciTotalUsed + 5 + m_phrReservedBytes <= m_ulDci->m_tbSize,
+         "The StatusPDU and RETX sending required all space, we don't have any for the SHORT_BSR.");
+-    usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5; // Update the usefulTbs.
++    usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5 -
++                m_phrReservedBytes; // Update the usefulTbs.
+ 
+     // The last part is for the queues with some non-RETX data. If there is no space left,
+     // then nothing.
+@@ -1332,6 +1470,11 @@
+     m_noRaResponseReceivedEvent.Cancel();
+     m_rachConfigured = false;
+     m_ulBsrReceived.clear();
++    // ntn-patch 16: a PHR is triggered when the MAC entity is (re)configured
++    // for a new cell (TS 38.321 5.4.6); the timers restart from there.
++    m_phrTriggered = true;
++    m_phrPeriodicExpiry = Time(0);
++    m_phrProhibitExpiry = Time(0);
+ }
+ 
+ //////////////////////////////////////////////
+--- a/model/nr-ue-mac.h
++++ b/model/nr-ue-mac.h
+@@ -8,9 +8,11 @@
+ #include "nr-ccm-mac-sap.h"
+ #include "nr-phy-mac-common.h"
+ #include "nr-ue-cmac-sap.h"
++#include "nr-phy-sap.h"
+ 
+ #include <ns3/traced-callback.h>
+ 
++#include <limits>
+ #include <unordered_map>
+ 
+ namespace ns3
+@@ -186,6 +188,22 @@
+     typedef void (*ImsiTracedCallback)(const uint64_t imsi);
+ 
+     /**
++     * TracedCallback signature for a transmitted PHR MAC CE (ntn-patch 16).
++     * \param [in] imsi the IMSI
++     * \param [in] rnti the C-RNTI
++     * \param [in] phDb the type 1 power headroom in dB (before quantization)
++     * \param [in] phIndex the reported TS 38.133 PH index
++     * \param [in] numRb M_RB of the PUSCH carrying the PHR
++     * \param [in] pathlossDb the path-loss estimate used
++     */
++    typedef void (*PhrTracedCallback)(const uint64_t imsi,
++                                      const uint16_t rnti,
++                                      const double phDb,
++                                      const uint8_t phIndex,
++                                      const uint32_t numRb,
++                                      const double pathlossDb);
++
++    /**
+      * \brief Sets the number of HARQ processes.
+      * Called by the helper at the moment of UE attachment
+      * \param numHarqProcesses the maximum number of harq processes
+@@ -488,7 +506,39 @@
+     /// SRs re-triggered by retxBSR-Timer expiry.
+     uint64_t m_bsrRetriggers{0};
+ 
++    // ntn-patch 16: TS 38.321 5.4.6 power headroom reporting (PHR-Config).
++    /**
++     * \brief Evaluate the PHR triggers for a new UL transmission and, when a
++     * PHR is triggered, return the bytes to reserve for the Single Entry PHR
++     * MAC CE and its subheader (0 when none is sent in this grant).
++     * \return 3 or 0
++     */
++    uint32_t PreparePhr();
++    /**
++     * \brief Multiplex the Single Entry PHR MAC CE prepared by PreparePhr().
++     * \param dataSfn slot of the PUSCH
++     * \param symStart first symbol of the PUSCH
++     */
++    void SendPhr(const SfnSf& dataSfn, uint8_t symStart);
++    Time m_phrPeriodicTimer{0};          ///< phr-PeriodicTimer (0 = PHR not configured)
++    Time m_phrProhibitTimer{0};          ///< phr-ProhibitTimer
++    double m_phrTxPowerFactorChange{1.0}; ///< phr-Tx-PowerFactorChange (dB)
++    bool m_phrTriggered{true};           ///< a PHR is triggered (initially: configuration)
++    Time m_phrPeriodicExpiry{0};         ///< phr-PeriodicTimer expiry (running if > 0)
++    Time m_phrProhibitExpiry{0};         ///< phr-ProhibitTimer expiry
++    double m_phrLastPathloss{std::numeric_limits<double>::quiet_NaN()}; ///< PL at the last PHR
++    NrPhySapProvider::PuschPowerHeadroom m_phrPending; ///< PH obtained for this grant
++    uint64_t m_phrSent{0};                             ///< PHR MAC CEs multiplexed
++    uint32_t m_phrReservedBytes{0}; ///< bytes reserved in this grant for the PHR MAC CE
++    TracedCallback<uint64_t, uint16_t, double, uint8_t, uint32_t, double> m_phrTrace;
++
+   public:
++    /// \return Single Entry PHR MAC CEs sent (TS 38.321 5.4.6, ntn-patch 16).
++    uint64_t GetPhrSentCount() const
++    {
++        return m_phrSent;
++    }
++
+     /// \return SRs re-triggered by retxBSR-Timer expiry (TS 38.321 5.4.5).
+     uint64_t GetBsrRetriggerCount() const
+     {
+--- a/model/nr-ue-phy.cc
++++ b/model/nr-ue-phy.cc
+@@ -297,6 +297,28 @@
+     return m_powerControl;
+ }
+ 
++NrPhySapProvider::PuschPowerHeadroom
++NrUePhy::GetPuschPowerHeadroom(const std::vector<uint8_t>& rbgBitmask) const
++{
++    NrPhySapProvider::PuschPowerHeadroom ph;
++    if (!m_enableUplinkPowerControl || !m_powerControl ||
++        !m_powerControl->HasPathLossEstimate())
++    {
++        return ph;
++    }
++    const auto rbs = FromRBGBitmaskToRBAssignment(rbgBitmask);
++    if (rbs.empty())
++    {
++        return ph;
++    }
++    ph.valid = true;
++    ph.numRb = static_cast<uint32_t>(rbs.size());
++    ph.phDb = m_powerControl->GetPuschPowerHeadroom(rbs.size());
++    ph.pcmaxDbm = m_powerControl->GetPcmax();
++    ph.pathlossDb = m_powerControl->GetPathLoss();
++    return ph;
++}
++
+ void
+ NrUePhy::SetUplinkPowerControl(Ptr<NrUePowerControl> pc)
+ {
+--- a/model/nr-ue-phy.h
++++ b/model/nr-ue-phy.h
+@@ -133,6 +133,17 @@
+     Ptr<NrUePowerControl> GetUplinkPowerControl() const;
+ 
+     /**
++     * \brief Type 1 power headroom (TS 38.213 7.7.1) of a PUSCH on the given
++     * RBG allocation, for the MAC's PHR (TS 38.321 5.4.6). Valid only with
++     * EnableUplinkPowerControl and once the UE has a path-loss estimate.
++     * ntn-patch 16.
++     * \param rbgBitmask the RBG allocation of the UL grant
++     * \return the power headroom
++     */
++    NrPhySapProvider::PuschPowerHeadroom GetPuschPowerHeadroom(
++        const std::vector<uint8_t>& rbgBitmask) const override;
++
++    /**
+      * \brief Allow configuration of uplink power control algorithm.
+      * E.g. necessary in FDD, when measurements are received in
+      * downlink BWP, but they are used in uplink BWP
+--- a/model/nr-ue-power-control.cc
++++ b/model/nr-ue-power-control.cc
+@@ -85,10 +85,11 @@
+                           MakeDoubleAccessor(&NrUePowerControl::SetPcmin),
+                           MakeDoubleChecker<double>())
+             .AddAttribute("PoNominalPusch",
+-                          "P_O_NOMINAL_PUSCH   INT (-126 ... 24), Default value -80",
++                          "P_O_NOMINAL_PUSCH   INT (-202 ... 24) (TS 38.331 p0-NominalWithGrant; "
++                          "the LTE range was -126 ... 24), Default value -80",
+                           IntegerValue(-80),
+                           MakeIntegerAccessor(&NrUePowerControl::SetPoNominalPusch),
+-                          MakeIntegerChecker<int16_t>(-126, 24))
++                          MakeIntegerChecker<int16_t>(-202, 24))
+             .AddAttribute("PoUePusch",
+                           "P_O_UE_PUSCH   INT(-8...7), Default value 0",
+                           IntegerValue(0),
+@@ -788,6 +789,53 @@
+ }
+ 
+ double
++NrUePowerControl::GetPuschPowerHeadroom(std::size_t rbNum) const
++{
++    NS_LOG_FUNCTION(this << rbNum);
++    NS_ABORT_MSG_IF(rbNum == 0, "a PUSCH has at least one RB");
++    // f(i): the closed-loop state the next PUSCH occasion will use (UpdateFc
++    // applies the stored TPC deltas at the occasion; do the same here
++    // without changing the state).
++    double fc = m_fc;
++    if (m_technicalSpec == TS_38_213 && m_closedLoop)
++    {
++        if (m_accumulationEnabled)
++        {
++            for (const auto& d : m_deltaPusch)
++            {
++                fc += d;
++            }
++        }
++        else if (!m_deltaPusch.empty())
++        {
++            fc = m_deltaPusch.back();
++        }
++    }
++    const double bw = 10 * log10(std::pow(2, m_nrUePhy->GetNumerology()) * rbNum);
++    const double required =
++        m_PoNominalPusch + m_PoUePusch + bw + m_alpha * m_pathLoss + m_deltaTF + fc;
++    return m_Pcmax - required;
++}
++
++double
++NrUePowerControl::GetPcmax() const
++{
++    return m_Pcmax;
++}
++
++double
++NrUePowerControl::GetPathLoss() const
++{
++    return m_pathLoss;
++}
++
++bool
++NrUePowerControl::HasPathLossEstimate() const
++{
++    return m_rsrpSet;
++}
++
++double
+ NrUePowerControl::GetPuschTxPower(std::size_t rbNum)
+ {
+     NS_LOG_FUNCTION(this);
+--- a/model/nr-ue-power-control.h
++++ b/model/nr-ue-power-control.h
+@@ -214,6 +214,33 @@
+      * \param rbNum number of RBs used for PUSCH
+      */
+     double GetPuschTxPower(std::size_t rbNum);
++
++    /**
++     * \brief Type 1 power headroom of an actual PUSCH on rbNum RBs, TS 38.213
++     * 7.7.1: P_CMAX - {P_O_PUSCH + 10log10(2^mu M_RB) + alpha PL + deltaTF + f},
++     * with the TPC commands received so far included in f. It changes no
++     * state (ntn-patch 16).
++     * \param rbNum M_RB, the number of RBs of the PUSCH
++     * \return the power headroom in dB
++     */
++    double GetPuschPowerHeadroom(std::size_t rbNum) const;
++
++    /**
++     * \return P_CMAX in dBm
++     */
++    double GetPcmax() const;
++
++    /**
++     * \return the downlink path-loss estimate PL in dB (referenceSignalPower
++     * minus the layer 3 filtered RSRP)
++     */
++    double GetPathLoss() const;
++
++    /**
++     * \return true once an RSRP measurement has been taken, so PL is an
++     * estimate rather than the initial value
++     */
++    bool HasPathLossEstimate() const;
+     /**
+      * \brief Implements calculation of PUCCH
+      * power control according to TS 36.213 and TS 38.213.

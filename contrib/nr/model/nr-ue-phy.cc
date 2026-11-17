@@ -297,6 +297,28 @@ NrUePhy::GetUplinkPowerControl() const
     return m_powerControl;
 }
 
+NrPhySapProvider::PuschPowerHeadroom
+NrUePhy::GetPuschPowerHeadroom(const std::vector<uint8_t>& rbgBitmask) const
+{
+    NrPhySapProvider::PuschPowerHeadroom ph;
+    if (!m_enableUplinkPowerControl || !m_powerControl ||
+        !m_powerControl->HasPathLossEstimate())
+    {
+        return ph;
+    }
+    const auto rbs = FromRBGBitmaskToRBAssignment(rbgBitmask);
+    if (rbs.empty())
+    {
+        return ph;
+    }
+    ph.valid = true;
+    ph.numRb = static_cast<uint32_t>(rbs.size());
+    ph.phDb = m_powerControl->GetPuschPowerHeadroom(rbs.size());
+    ph.pcmaxDbm = m_powerControl->GetPcmax();
+    ph.pathlossDb = m_powerControl->GetPathLoss();
+    return ph;
+}
+
 void
 NrUePhy::SetUplinkPowerControl(Ptr<NrUePowerControl> pc)
 {

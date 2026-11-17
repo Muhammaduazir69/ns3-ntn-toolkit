@@ -182,9 +182,17 @@ NrMacSchedulerTdma::AssignRBGTDMA(
         do
         {
             // Assign 1 entire symbol (full RBG) to the selected UE and to the total
-            // resources assigned count
-            GetRBGFn(GetUe(*schedInfoIt)) += numOfAssignableRbgs;
-            assigned.m_rbg += numOfAssignableRbgs;
+            // resources assigned count. ntn-patch 16: on UL, only the RBGs per
+            // symbol the UE's power headroom allows (GetUlRbgCapPerSym); the
+            // rest of the symbol stays idle, as TDMA gives a symbol to one UE.
+            uint32_t perSym = numOfAssignableRbgs;
+            if (type == "UL")
+            {
+                perSym = GetUlRbgCapPerSym(GetUe(*schedInfoIt), numOfAssignableRbgs);
+                GetUe(*schedInfoIt)->m_ulRbgPerSym = perSym;
+            }
+            GetRBGFn(GetUe(*schedInfoIt)) += perSym;
+            assigned.m_rbg += perSym;
 
             GetSymFn(GetUe(*schedInfoIt)) += 1;
             assigned.m_sym += 1;
@@ -193,12 +201,12 @@ NrMacSchedulerTdma::AssignRBGTDMA(
             resources -= 1;
 
             // Update metrics for the successful UE
-            NS_LOG_DEBUG("Assigned " << numOfAssignableRbgs << " " << type
+            NS_LOG_DEBUG("Assigned " << perSym << " " << type
                                      << " RBG (= 1 SYM) to UE " << GetUe(*schedInfoIt)->m_rnti
                                      << " total assigned up to now: "
                                      << GetRBGFn(GetUe(*schedInfoIt)) << " that corresponds to "
                                      << assigned.m_rbg);
-            SuccessfulAssignmentFn(*schedInfoIt, FTResources(numOfAssignableRbgs, 1), assigned);
+            SuccessfulAssignmentFn(*schedInfoIt, FTResources(perSym, 1), assigned);
 
             // Update metrics for the unsuccessful UEs (who did not get any resource in this
             // iteration)
@@ -206,10 +214,13 @@ NrMacSchedulerTdma::AssignRBGTDMA(
             {
                 if (GetUe(ue)->m_rnti != GetUe(*schedInfoIt)->m_rnti)
                 {
-                    UnSuccessfulAssignmentFn(ue, FTResources(numOfAssignableRbgs, 1), assigned);
+                    UnSuccessfulAssignmentFn(ue, FTResources(perSym, 1), assigned);
                 }
             }
-        } while (resources > 0 && GetTBSFn(GetUe(*schedInfoIt)) < minUsefulTbs);
+        } while (resources > 0 &&
+                 GetTBSFn(GetUe(*schedInfoIt)) <
+                     ((type == "UL" && IsUlPhrLimited(GetUe(*schedInfoIt))) ? kMinUlTbWithData
+                                                                            : minUsefulTbs));
     }
 
     // Count the number of assigned symbol of each beam.
@@ -219,7 +230,12 @@ NrMacSchedulerTdma::AssignRBGTDMA(
         uint32_t symOfBeam = 0;
         for (const auto& ue : el.second)
         {
-            symOfBeam += GetRBGFn(ue.first) / numOfAssignableRbgs;
+            uint32_t perSym = numOfAssignableRbgs;
+            if (type == "UL" && ue.first->m_ulRbgPerSym > 0)
+            {
+                perSym = ue.first->m_ulRbgPerSym; // ntn-patch 16
+            }
+            symOfBeam += GetRBGFn(ue.first) / perSym;
         }
         ret.insert(std::make_pair(el.first, symOfBeam));
     }
@@ -389,8 +405,9 @@ NrMacSchedulerTdma::CreateUlDci(NrMacSchedulerNs3::PointInFTPlane* spoint,
                                             ueInfo->m_ulRBG * GetNumRbPerRbg());
 
     // If is less than 12, 7 (3 mac header, 2 rlc header, 2 data) + SHORT_BSR (5),
-    // then we can't transmit any new data, so don't create dci.
-    if (tbs < 12)
+    // then we can't transmit any new data, so don't create dci. ntn-patch 16:
+    // for a PHR-limited UE the floor is kMinUlTbWithData.
+    if (tbs < 12 || (IsUlPhrLimited(ueInfo) && tbs < kMinUlTbWithData))
     {
         NS_LOG_DEBUG("While creating UL DCI for UE " << ueInfo->m_rnti << " assigned "
                                                      << ueInfo->m_ulRBG << " UL RBG, but TBS "
@@ -402,7 +419,13 @@ NrMacSchedulerTdma::CreateUlDci(NrMacSchedulerNs3::PointInFTPlane* spoint,
     int zeroes = std::count(notchedRBGsMask.begin(), notchedRBGsMask.end(), 0);
     uint32_t numOfAssignableRbgs = GetBandwidthInRbg() - zeroes;
 
-    uint8_t numSym = static_cast<uint8_t>(std::max(ueInfo->m_ulRBG / numOfAssignableRbgs, 1U));
+    // ntn-patch 16: a power-headroom-limited UE got fewer RBGs per symbol.
+    uint32_t perSym = numOfAssignableRbgs;
+    if (ueInfo->m_ulRbgPerSym > 0 && ueInfo->m_ulRbgPerSym < numOfAssignableRbgs)
+    {
+        perSym = ueInfo->m_ulRbgPerSym;
+    }
+    uint8_t numSym = static_cast<uint8_t>(std::max(ueInfo->m_ulRBG / perSym, 1U));
     numSym = std::min(numSym, static_cast<uint8_t>(maxSym));
 
     NS_ASSERT(spoint->m_sym >= numSym);
@@ -418,6 +441,26 @@ NrMacSchedulerTdma::CreateUlDci(NrMacSchedulerNs3::PointInFTPlane* spoint,
                          ueInfo->m_ulRank,
                          ueInfo->m_ulPrecMats,
                          numSym);
+
+    // ntn-patch 16: keep only the first perSym assignable RBGs of the band.
+    if (perSym < numOfAssignableRbgs)
+    {
+        uint32_t kept = 0;
+        for (auto& bit : dci->m_rbgBitmask)
+        {
+            if (bit == 1)
+            {
+                if (kept < perSym)
+                {
+                    ++kept;
+                }
+                else
+                {
+                    bit = 0;
+                }
+            }
+        }
+    }
 
     // Reset the RBG (we are TDMA)
     spoint->m_rbg = 0;

@@ -135,6 +135,30 @@ class NrPhySapProvider
      * \return Get the number of resource blocks configured
      */
     virtual uint32_t GetRbNum() const = 0;
+
+    /**
+     * \brief Type 1 power headroom of a PUSCH (TS 38.213 7.7.1), for a PHR
+     * MAC CE (TS 38.321 5.4.6). ntn-patch 16.
+     */
+    struct PuschPowerHeadroom
+    {
+        bool valid{false};      //!< false when the PHY runs no uplink power control
+        double phDb{0.0};       //!< P_CMAX - (P0 + 10log10(2^mu M_RB) + alpha PL + deltaTF + f)
+        double pcmaxDbm{0.0};   //!< P_CMAX,f,c used for phDb
+        double pathlossDb{0.0}; //!< the UE's downlink path-loss estimate PL
+        uint32_t numRb{0};      //!< M_RB of the PUSCH
+    };
+
+    /**
+     * \brief Power headroom of a PUSCH on the given RBG allocation.
+     * \param rbgBitmask the RBG allocation of the UL grant
+     * \return the headroom; invalid by default (gNB PHY, or no power control)
+     */
+    virtual PuschPowerHeadroom GetPuschPowerHeadroom(
+        [[maybe_unused]] const std::vector<uint8_t>& rbgBitmask) const
+    {
+        return PuschPowerHeadroom{};
+    }
 };
 
 /**

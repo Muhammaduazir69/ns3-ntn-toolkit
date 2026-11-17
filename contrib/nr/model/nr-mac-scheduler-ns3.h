@@ -13,6 +13,8 @@
 #include "nr-mac-scheduler.h"
 #include "nr-phy-mac-common.h"
 
+#include <ns3/traced-callback.h>
+
 #include <functional>
 #include <list>
 #include <memory>
@@ -719,6 +721,32 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     Ptr<NrAmc> m_dlAmc; //!< AMC pointer
     Ptr<NrAmc> m_ulAmc; //!< AMC pointer
 
+    /**
+     * \brief UL RBGs per symbol a UE may get in this slot (ntn-patch 16).
+     *
+     * With PhrUlRbLimit, the UE's last power headroom report bounds its
+     * PUSCH to the PRBs it can power at its open-loop target PSD (TS 38.213
+     * 7.1.1 / 7.7.1), never below the smallest allocation on which a TB that
+     * can carry data after the SHORT_BSR and PHR MAC CEs (kMinUlTbWithData)
+     * fits in the UL data symbols of a slot at the UE's current UL MCS.
+     * Otherwise, and before any PHR, it returns assignableRbg (the band).
+     * \param ue the UE
+     * \param assignableRbg RBGs per symbol available to the scheduler
+     * \return RBGs per symbol for this UE
+     */
+    uint32_t GetUlRbgCapPerSym(const UePtr& ue, uint32_t assignableRbg) const;
+
+    /**
+     * \param ue the UE
+     * \return true if a PHR limits this UE's UL PRBs (ntn-patch 16)
+     */
+    bool IsUlPhrLimited(const UePtr& ue) const;
+
+    /// Smallest UL TB worth granting to a PHR-limited UE: SHORT_BSR (5 bytes),
+    /// PHR MAC CE (3) and one data subPDU, which NrUeMac builds only with at
+    /// least 10 bytes (3 MAC subheader, 2 RLC header, 5 data). ntn-patch 16.
+    static constexpr uint32_t kMinUlTbWithData = 5 + 3 + 10;
+
   private:
     /**
      * \brief Single UL allocation for calculating CQI and the number of reserved UL symbols in
@@ -797,6 +825,12 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     };
 
     void BSRReceivedFromUe(const MacCeElement& bsr);
+    /**
+     * \brief Single Entry PHR MAC CE (TS 38.321 6.1.3.8) received from a UE
+     * (ntn-patch 16).
+     * \param phr the CE, with the M_RB of the PUSCH it arrived on
+     */
+    void PhrReceivedFromUe(const MacCeElement& phr);
 
     template <typename T>
     std::vector<T> MergeHARQ(std::vector<T>* existingFeedbacks,
@@ -959,6 +993,12 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     uint32_t m_dlHarqFeedbackDisabled{0};
     /// DL transmissions released without waiting for HARQ feedback.
     mutable uint64_t m_dlHarqFeedbackDisabledTx{0};
+    /// ntn-patch 16: limit UL PRBs by the reported power headroom (attribute PhrUlRbLimit).
+    bool m_phrUlRbLimit{false};
+    /// PHR MAC CEs received.
+    uint64_t m_phrReceived{0};
+    /// rnti, PH (dB, decoded), M_RB of the PUSCH carrying the PHR, resulting UL PRB limit.
+    TracedCallback<uint16_t, double, uint16_t, uint32_t> m_ulPhrLimitTrace;
 
   public:
     /// \return number of DL TBs sent on feedback-disabled HARQ processes (released
@@ -967,6 +1007,28 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     {
         return m_dlHarqFeedbackDisabledTx;
     }
+
+    /// \return PHR MAC CEs received from the UEs of this BWP (ntn-patch 16).
+    uint64_t GetPhrReceivedCount() const
+    {
+        return m_phrReceived;
+    }
+
+    /// \return the UL PRB limit currently derived from this UE's PHR, or
+    /// UINT32_MAX if none applies (ntn-patch 16).
+    uint32_t GetUlPhrPrbLimit(uint16_t rnti) const;
+
+    /**
+     * TracedCallback signature for the UL PRB limit set from a PHR.
+     * \param [in] rnti the RNTI
+     * \param [in] phDb the decoded power headroom (dB)
+     * \param [in] numRb M_RB of the PUSCH the PHR arrived on
+     * \param [in] maxRb the resulting UL PRB limit
+     */
+    typedef void (*UlPhrLimitTracedCallback)(const uint16_t rnti,
+                                             const double phDb,
+                                             const uint16_t numRb,
+                                             const uint32_t maxRb);
 };
 
 } // namespace ns3

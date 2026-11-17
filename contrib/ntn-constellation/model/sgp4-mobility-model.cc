@@ -326,18 +326,27 @@ void
 Sgp4MobilityModel::EnsureCache() const
 {
     const Time now = Simulator::Now();
-    if (m_cacheValid && (now - m_cacheTime).GetMilliSeconds() <
-                            m_cacheGrain.GetMilliSeconds())
+    // The cache is used only from the instant it was propagated for up to one
+    // granule after it, and only for the epoch anchor it was computed with.
+    // Simulator::Destroy() resets the clock to 0 while this model may live on
+    // into the next run: a cache stamped at t = 60 s of the previous run then
+    // had a NEGATIVE age at t = 0 s of the next one and passed the old
+    // "age < grain" test, so the second run reported the first run's last
+    // position until its clock caught up.
+    const double base = SimBaseUnix();
+    if (m_cacheValid && now >= m_cacheTime && base == m_cacheBaseUnixS &&
+        (now - m_cacheTime).GetMilliSeconds() < m_cacheGrain.GetMilliSeconds())
     {
         return;
     }
-    const double unix_s = SimBaseUnix() + now.GetSeconds();
+    const double unix_s = base + now.GetSeconds();
     Vector pos_eci;
     Vector vel_eci;
     Propagate(unix_s, pos_eci, vel_eci);
     m_cachedEci = pos_eci;
     m_cachedEciVel = vel_eci;
     m_cacheTime = now;
+    m_cacheBaseUnixS = base;
     m_cacheValid = true;
 }
 

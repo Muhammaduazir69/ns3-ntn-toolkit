@@ -358,6 +358,7 @@ NrMacSchedulerOfdma::AssignULRBG(uint32_t symAvail, const ActiveUeMap& activeUl)
                                  ? std::count(ulNotchedRBGsMask.begin(), ulNotchedRBGsMask.end(), 1)
                                  : GetBandwidthInRbg();
         NS_ASSERT(resources > 0);
+        const uint32_t bandRbg = resources;
 
         for (const auto& ue : GetUeVector(el))
         {
@@ -379,7 +380,12 @@ NrMacSchedulerOfdma::AssignULRBG(uint32_t symAvail, const ActiveUeMap& activeUl)
             while (schedInfoIt != ueVector.end())
             {
                 uint32_t bufQueueSize = schedInfoIt->second;
-                if (GetUe(*schedInfoIt)->m_ulTbSize >= std::max(bufQueueSize, 12U))
+                // ntn-patch 16: a UE at its power-headroom PRB limit is full too.
+                const bool atPhrLimit =
+                    beamSym > 0 &&
+                    GetUe(*schedInfoIt)->m_ulRBG >=
+                        GetUlRbgCapPerSym(GetUe(*schedInfoIt), bandRbg) * beamSym;
+                if (GetUe(*schedInfoIt)->m_ulTbSize >= std::max(bufQueueSize, 12U) || atPhrLimit)
                 {
                     schedInfoIt++;
                 }
@@ -543,7 +549,8 @@ NrMacSchedulerOfdma::CreateUlDci(PointInFTPlane* spoint,
 
     // If is less than 12, i.e., 7 (3 mac header, 2 rlc header, 2 data) + 5 bytes for
     // the SHORT_BSR. then we can't transmit any new data, so don't create dci.
-    if (tbs < 12)
+    // ntn-patch 16: for a PHR-limited UE the floor is kMinUlTbWithData.
+    if (tbs < 12 || (IsUlPhrLimited(ueInfo) && tbs < kMinUlTbWithData))
     {
         NS_LOG_DEBUG("While creating UL DCI for UE " << ueInfo->m_rnti << " assigned "
                                                      << ueInfo->m_ulRBG << " UL RBG, but TBS < 12");

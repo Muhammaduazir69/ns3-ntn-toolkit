@@ -35,6 +35,8 @@
 #include "ns3/spectrum-propagation-loss-model.h"
 #include "ns3/three-gpp-spectrum-propagation-loss-model.h"
 #include "ns3/uinteger.h"
+#include "ns3/enum.h"
+#include "ns3/integer.h"
 #include "ns3/nr-gnb-net-device.h"
 #include "ns3/nr-ue-net-device.h"
 #include "ns3/nr-ue-mac.h"
@@ -65,6 +67,8 @@
 #include "ns3/string.h"
 #include "ns3/udp-client-server-helper.h"
 #include "ns3/uinteger.h"
+#include "ns3/enum.h"
+#include "ns3/integer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -114,6 +118,16 @@ static GlobalValue g_ntnRealStackLinkBudget(
     "nr NF 5 dB; not a TR 38.821 set)",
     StringValue("Tr38821Set1"),
     MakeStringChecker());
+
+// Wave 8 (nr patch 16): uplink power control with a PHR-aware PUSCH PRB limit.
+static GlobalValue g_ntnRealStackUlPhrPrbLimit(
+    "NtnRealStackUlPhrPrbLimit",
+    "nr backend: TS 38.213 7.1.1 PUSCH power control on every UE, TS 38.321 5.4.6 power headroom "
+    "reports, and a scheduler that grants no more PUSCH PRBs than the reported headroom can "
+    "power at the target SNR (nr patch 16). Off under NtnRealStackLinkBudget=Legacy; false turns "
+    "it off everywhere unless a scenario calls SetUlPowerHeadroomPrbLimit(true)",
+    BooleanValue(true),
+    MakeBooleanChecker());
 
 static GlobalValue g_ntnRealStackUeKpiPeriod(
     "NtnRealStackUeKpiPeriod",
@@ -1070,6 +1084,27 @@ NtnRealStackHelper::BuildNrRadio()
         }
     }
 
+    // Wave 8 (nr patch 16): power headroom reporting (TS 38.321 5.4.6,
+    // TS 38.331 PHR-Config) and the scheduler's PHR-based PUSCH PRB limit.
+    // The UE power control itself is programmed per UE after installation.
+    {
+        bool on = m_ulPhrLimit;
+        if (!m_ulPhrLimitSet)
+        {
+            BooleanValue gv;
+            GlobalValue::GetValueByName("NtnRealStackUlPhrPrbLimit", gv);
+            on = gv.Get() && GetLinkBudgetProfile() != LinkBudgetProfile::Legacy;
+        }
+        m_ulPhrLimitApplied = on;
+        if (on)
+        {
+            m_nr->SetUeMacAttribute("PhrPeriodicTimer", TimeValue(MilliSeconds(20)));
+            m_nr->SetUeMacAttribute("PhrProhibitTimer", TimeValue(MilliSeconds(10)));
+            m_nr->SetUeMacAttribute("PhrTxPowerFactorChange", DoubleValue(1.0));
+            m_nr->SetSchedulerAttribute("PhrUlRbLimit", BooleanValue(true));
+        }
+    }
+
     // Install devices on the caller's mobility-carrying nodes.
     m_enbDevs = m_nr->InstallGnbDevice(m_gnb, allBwps);
     m_ueDevs = m_nr->InstallUeDevice(m_ue, allBwps);
@@ -1250,6 +1285,47 @@ NtnRealStackHelper::BuildNrRadio()
         {
             m_nr->GetUePhy(m_ueDevs.Get(i), b)->SetAttribute("TxPower", DoubleValue(m_ueTxDbm));
         }
+    }
+    // Wave 8 (nr patch 16): TS 38.213 7.1.1 PUSCH power control,
+    //   P = min(P_CMAX, P_O_PUSCH + 10log10(2^mu M_RB) + alpha PL + deltaTF + f),
+    // with P_CMAX the UE power class, alpha = 1 (full path-loss compensation)
+    // and P_O_NOMINAL_PUSCH the per-180-kHz receive level that gives the target
+    // SNR over the gNB's thermal noise. PL is the UE's own estimate,
+    // ss-PBCH-BlockPower (the gNB conducted power nr broadcasts) minus the
+    // filtered RSRP. nr measures that RSRP on the control channel, which goes
+    // out on the quasi-omni beam unless the SSB cell beam is set, while the
+    // PUSCH is received on the UE-directed beam: the gNB knows this gain
+    // difference of its own antenna and subtracts it from P0, as an operator
+    // tunes P0 to the receive beam.
+    m_ulP0Applied = std::numeric_limits<double>::quiet_NaN();
+    if (m_ulPhrLimitApplied && m_ueDevs.GetN() > 0 && m_enbDevs.GetN() > 0)
+    {
+        DoubleValue gnbNf;
+        m_nr->GetGnbPhy(m_enbDevs.Get(0), 0)->GetAttribute("NoiseFigure", gnbNf);
+        const double noise180kDbm = -174.0 + 10.0 * std::log10(180.0e3) + gnbNf.Get();
+        const double rxBeamOverRsBeamDb = m_ssbCellBeam ? 0.0 : ArrayGainDb();
+        const double p0 = std::round(noise180kDbm + m_ulTargetSnrDb - rxBeamOverRsBeamDb);
+        m_ulP0Applied = std::clamp(p0, -202.0, 24.0); // TS 38.331 p0-NominalWithGrant
+        for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+        {
+            for (uint8_t b = 0; b < nBwp; ++b)
+            {
+                Ptr<NrUePhy> phy = m_nr->GetUePhy(m_ueDevs.Get(i), b);
+                Ptr<NrUePowerControl> pc = phy->GetUplinkPowerControl();
+                pc->SetAttribute("TSpec", EnumValue(NrUePowerControl::TS_38_213));
+                pc->SetAttribute("Pcmax", DoubleValue(m_ueTxDbm));
+                pc->SetAttribute("Alpha", DoubleValue(1.0));
+                pc->SetAttribute("PoNominalPusch",
+                                 IntegerValue(static_cast<int16_t>(m_ulP0Applied)));
+                pc->SetAttribute("PoUePusch", IntegerValue(0));
+                phy->SetAttribute("EnableUplinkPowerControl", BooleanValue(true));
+            }
+        }
+        NS_LOG_INFO("NtnRealStackHelper: UL power control (TS 38.213 7.1.1) P_CMAX "
+                    << m_ueTxDbm << " dBm, alpha 1, P_O_NOMINAL_PUSCH " << m_ulP0Applied
+                    << " dBm (target " << m_ulTargetSnrDb << " dB over " << noise180kDbm
+                    << " dBm/180 kHz, receive beam " << rxBeamOverRsBeamDb
+                    << " dB over the RS beam); PHR 20/10 ms, 1 dB; PHR PRB limit on");
     }
     m_nr->UpdateDeviceConfigs(m_enbDevs);
     m_nr->UpdateDeviceConfigs(m_ueDevs);
@@ -5276,6 +5352,57 @@ NtnRealStackHelper::ExtSinkRxSeq(uint32_t flow,
     ++f.seqRx;
     f.highestSeq = f.anySeq ? std::max<uint64_t>(f.highestSeq, h.GetSeq()) : h.GetSeq();
     f.anySeq = true;
+}
+
+uint64_t
+NtnRealStackHelper::GetPhrSentCount() const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr)
+    {
+        return 0;
+    }
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
+        if (!dev)
+        {
+            continue;
+        }
+        for (uint32_t b = 0; b < dev->GetCcMapSize(); ++b)
+        {
+            Ptr<NrUeMac> mac = DynamicCast<NrUeMac>(dev->GetMac(b));
+            if (mac)
+            {
+                n += mac->GetPhrSentCount();
+            }
+        }
+    }
+    return n;
+}
+
+uint64_t
+NtnRealStackHelper::GetPhrReceivedCount() const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr)
+    {
+        return 0;
+    }
+    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        for (uint8_t b = 0; b < nBwp; ++b)
+        {
+            Ptr<NrMacSchedulerNs3> sch =
+                DynamicCast<NrMacSchedulerNs3>(NrHelper::GetScheduler(m_enbDevs.Get(i), b));
+            if (sch)
+            {
+                n += sch->GetPhrReceivedCount();
+            }
+        }
+    }
+    return n;
 }
 
 uint64_t

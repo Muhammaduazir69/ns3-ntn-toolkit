@@ -8,6 +8,7 @@
 #include "nr-gnb-net-device.h"
 #include "nr-gnb-phy.h"
 #include "nr-lte-mi-error-model.h"
+#include "nr-mac-phr-ce.h"
 #include "nr-radio-bearer-tag.h"
 #include "nr-ue-net-device.h"
 #include "nr-ue-phy.h"
@@ -1548,6 +1549,14 @@ NrSpectrumPhy::ProcessReceivedPacketBurst()
 
             if (!tbInfo.m_isCorrupted)
             {
+                // ntn-patch 16: the gNB scheduled this PUSCH, so it knows the
+                // M_RB a PHR MAC CE on it refers to (TS 38.213 7.7.1).
+                if (gnbRx && bearerTag.GetLcid() == NrMacHeaderFsUl::SINGLE_ENTRY_PHR)
+                {
+                    NrPuschAllocationTag allocTag(
+                        static_cast<uint16_t>(tbInfo.m_expected.m_rbBitmap.size()));
+                    packet->AddPacketTag(allocTag);
+                }
                 m_phyRxDataEndOkCallback(packet);
             }
             else

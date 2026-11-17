@@ -189,6 +189,16 @@ class NrPhy : public Object
      */
     virtual double GetTxPower() const = 0;
 
+    /**
+     * \brief Type 1 power headroom (TS 38.213 7.7.1) of a PUSCH on the given
+     * RBG allocation (ntn-patch 16). The base class runs no uplink power
+     * control and returns an invalid value; NrUePhy overrides it.
+     * \param rbgBitmask the RBG allocation of the UL grant
+     * \return the power headroom
+     */
+    virtual NrPhySapProvider::PuschPowerHeadroom GetPuschPowerHeadroom(
+        const std::vector<uint8_t>& rbgBitmask) const;
+
     // Installation / Helpers
     /**
      * \brief Retrieve a pointer to an instance of NrPhySapProvider
@@ -440,6 +450,7 @@ class NrPhy : public Object
      * is a 1 are from the 4th to the 11th, and that is reflected in the output)
      */
     std::vector<int> FromRBGBitmaskToRBAssignment(const std::vector<uint8_t> rbgBitmask) const;
+
 
     /**
      * \brief Protected function that is used to get the number of resource

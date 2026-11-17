@@ -3177,7 +3177,10 @@ BuildUserPlane(const std::vector<double>& upfBackhaulS)
         up.apps.push_back(app);
         up.sinks.push_back(sink);
         up.kpm->AddSource(app);
-        up.kpm->AddSink(sink, static_cast<int32_t>(u));
+        // UPF-side sinks of uplink flows (no PHY source on this monitor): name
+        // them explicitly so the KPMs carry the TS 28.552 UL names
+        // (DRB.UEThpUl, DRB.PdcpSduVolumeUl, DRB.RlcDelayUl, DRB.PacketLossRateUl).
+        up.kpm->AddSink(sink, static_cast<int32_t>(u), NtnOranAiFlowMonitor::Direction::Uplink);
     }
     up.kpm->Start();
     NodeContainer all(up.ues);

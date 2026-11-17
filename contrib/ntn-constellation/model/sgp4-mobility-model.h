@@ -242,6 +242,8 @@ class Sgp4MobilityModel : public GeocentricConstantPositionMobilityModel
     // Cache.
     mutable bool m_cacheValid{false};
     mutable Time m_cacheTime;
+    /// Epoch anchor (SimBaseUnix) the cache was propagated with (EnsureCache).
+    mutable double m_cacheBaseUnixS{std::numeric_limits<double>::quiet_NaN()};
     mutable Vector m_cachedEci;
     mutable Vector m_cachedEciVel;
 };

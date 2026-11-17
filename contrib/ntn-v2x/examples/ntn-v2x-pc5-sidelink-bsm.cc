@@ -38,6 +38,7 @@
 #include "ns3/ntn-v2x-bsm-header.h"
 #include "ns3/packet.h"
 #include "ns3/simulator.h"
+#include "ns3/nr-module.h"
 
 #include <cmath>
 #include <filesystem>
@@ -51,6 +52,30 @@ using ns3::ntnv2x::NtnV2xBsmHeader;
 
 namespace
 {
+/// PUSCH transport blocks of the V2N uplink decoded at the gNB (nr RxPacketTraceGnb).
+struct PuschStats
+{
+    uint64_t tbs{0};
+    uint64_t corrupt{0};
+    double sumSinrLin{0.0};
+    uint64_t sumRb{0};
+    uint64_t sumMcs{0};
+
+    void Rx(RxPacketTraceParams p)
+    {
+        ++tbs;
+        corrupt += p.m_corrupt ? 1 : 0;
+        sumSinrLin += p.m_sinr;
+        sumRb += p.m_rbAssignedNum;
+        sumMcs += p.m_mcs;
+    }
+
+    double MeanSinrDb() const
+    {
+        return tbs > 0 ? 10.0 * std::log10(sumSinrLin / tbs) : std::nan("");
+    }
+};
+
 /// In-band delay, IPDV and loss of one direction of the V2N leg.
 struct UuStats
 {
@@ -281,6 +306,7 @@ main(int argc, char* argv[])
     std::error_code mkEc;
     std::filesystem::create_directories(outputDir, mkEc);
     NtnRealStackHelper rs;
+    PuschStats pusch;
     UuStats ulStats;
     UuStats dlStats;
     uint64_t ulSent = 0;
@@ -301,6 +327,16 @@ main(int argc, char* argv[])
         rs.SetOutputDir(outputDir);
         rs.SetRunTag("ntn-v2x-pc5-sidelink-bsm");
         rs.Build(gnbNodes, vehNodes);
+        for (uint32_t d = 0; d < gnbNodes.Get(0)->GetNDevices(); ++d)
+        {
+            Ptr<NrGnbNetDevice> gnb = DynamicCast<NrGnbNetDevice>(gnbNodes.Get(0)->GetDevice(d));
+            if (gnb)
+            {
+                gnb->GetPhy(0)->GetSpectrumPhy()->TraceConnectWithoutContext(
+                    "RxPacketTraceGnb",
+                    MakeCallback(&PuschStats::Rx, &pusch));
+            }
+        }
         if (gwDistanceKm > 0.0)
         {
             rs.SetFeederGatewayGeodetic(hwLat + gwDistanceKm / 111.195, hwLon0, 0.0);
@@ -441,6 +477,18 @@ main(int argc, char* argv[])
                     static_cast<unsigned long long>(ulStats.bsmDecoded), ulLoss,
                     ulStats.rx ? ulStats.sumDelayMs / ulStats.rx : 0.0, ulStats.maxDelayMs,
                     ulStats.ipdvN ? ulStats.ipdvSumMs / ulStats.ipdvN : 0.0);
+        std::printf("#   V2N uplink PUSCH      : %llu TBs, %.3f corrupt, SINR %.2f dB, mean %.2f "
+                    "PRB, mean MCS %.2f; UL power control + PHR PRB limit %s (P0 %.0f dBm), "
+                    "PHR sent %llu received %llu\n",
+                    static_cast<unsigned long long>(pusch.tbs),
+                    pusch.tbs ? static_cast<double>(pusch.corrupt) / pusch.tbs : 0.0,
+                    pusch.MeanSinrDb(),
+                    pusch.tbs ? static_cast<double>(pusch.sumRb) / pusch.tbs : 0.0,
+                    pusch.tbs ? static_cast<double>(pusch.sumMcs) / pusch.tbs : 0.0,
+                    rs.IsUlPowerHeadroomPrbLimitActive() ? "on" : "off",
+                    rs.GetUlP0NominalPuschDbm(),
+                    static_cast<unsigned long long>(rs.GetPhrSentCount()),
+                    static_cast<unsigned long long>(rs.GetPhrReceivedCount()));
         std::printf("#   V2N downlink digest   : sent %llu, received %llu (loss %.4f), OWD mean "
                     "%.3f ms, IPDV %.3f ms, DL SINR %.2f dB, TBLER %.4f\n",
                     static_cast<unsigned long long>(dlSent),
