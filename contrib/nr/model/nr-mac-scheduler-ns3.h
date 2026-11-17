@@ -955,6 +955,18 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     bool m_ollaEnabled{true};      //!< outer-loop link adaptation on DL (attribute OllaEnabled)
     double m_ollaBlerTarget{0.1};  //!< initial-transmission BLER target (attribute OllaBlerTarget)
     double m_ollaStep{1.0};        //!< MCS-index increase per NACK (attribute OllaStep)
+    /// downlinkHARQ-FeedbackDisabled-r17 bitmap over DL HARQ process IDs (attribute).
+    uint32_t m_dlHarqFeedbackDisabled{0};
+    /// DL transmissions released without waiting for HARQ feedback.
+    mutable uint64_t m_dlHarqFeedbackDisabledTx{0};
+
+  public:
+    /// \return number of DL TBs sent on feedback-disabled HARQ processes (released
+    /// at scheduling time, TS 38.321 5.3.2 Rel-17).
+    uint64_t GetDlHarqFeedbackDisabledTxCount() const
+    {
+        return m_dlHarqFeedbackDisabledTx;
+    }
 };
 
 } // namespace ns3

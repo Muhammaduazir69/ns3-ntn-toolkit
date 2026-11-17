@@ -210,6 +210,18 @@ NrMacSchedulerNs3::GetTypeId()
                           DoubleValue(1.0),
                           MakeDoubleAccessor(&NrMacSchedulerNs3::m_ollaStep),
                           MakeDoubleChecker<double>(0.01, 5.0))
+            .AddAttribute("DlHarqFeedbackDisabled",
+                          "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.321 5.3.2): "
+                          "bitmap over DL HARQ process IDs, bit i set = feedback disabled for "
+                          "process i. Such a process is released as soon as its transmission is "
+                          "scheduled instead of being held for an ACK/NACK one HARQ round trip "
+                          "later, so it never stalls on the satellite RTT; it is never "
+                          "retransmitted by HARQ (RLC recovers losses), and any feedback that "
+                          "still arrives for it is discarded. 0 (default) keeps every process "
+                          "feedback-enabled, the terrestrial behavior.",
+                          UintegerValue(0),
+                          MakeUintegerAccessor(&NrMacSchedulerNs3::m_dlHarqFeedbackDisabled),
+                          MakeUintegerChecker<uint32_t>())
             .AddAttribute("EnableHarqReTx",
                           "If true, it would set the max HARQ ReTx to 3; otherwise it set it to 0",
                           BooleanValue(true),
@@ -1575,6 +1587,17 @@ NrMacSchedulerNs3::DoScheduleDlData(PointInFTPlane* spoint,
             }
 
             NS_ABORT_IF(slotInfo.m_rlcPduInfo.empty());
+
+            // NTN downlinkHARQ-FeedbackDisabled-r17: a feedback-disabled
+            // process does not wait one HARQ round trip for an ACK/NACK that
+            // the UE is not expected to send. Release it now; the TB is
+            // already in slotInfo, and a late feedback for an INACTIVE process
+            // is discarded by DoSchedDlTriggerReq.
+            if (dci->m_harqProcess < 32 && ((m_dlHarqFeedbackDisabled >> dci->m_harqProcess) & 1U))
+            {
+                ue.first->m_dlHarq.Erase(dci->m_harqProcess);
+                ++m_dlHarqFeedbackDisabledTx;
+            }
 
             slotAlloc->m_varTtiAllocInfo.emplace_back(slotInfo);
         }

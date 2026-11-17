@@ -2,6 +2,7 @@ set(source_files
     model/ntn-orbit-predictor.cc
     model/ntn-tte-estimator.cc
     model/ntn-cho-algorithm.cc
+    model/ntn-cho-cond-event-ie.cc
     model/ntn-measurement-model.cc
     model/ntn-ai-interface.cc
     # P0-3: handover KPIs measured from the UE RRC traces and packet arrivals.
@@ -20,6 +21,7 @@ set(header_files
     model/ntn-orbit-predictor.h
     model/ntn-tte-estimator.h
     model/ntn-cho-algorithm.h
+    model/ntn-cho-cond-event-ie.h
     model/ntn-measurement-model.h
     model/ntn-ai-interface.h
     model/ntn-ho-kpi-recorder.h

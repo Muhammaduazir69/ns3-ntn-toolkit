@@ -44,6 +44,9 @@ struct NtnRachWindowVerdict
     Time roundTrip{};        //!< two-way service-link propagation
     Time processing{};       //!< gNB preamble detection + RAR assembly allowance
     Time slotPeriod{};       //!< numerology-dependent slot length
+    /// NTN ra-ResponseWindow start offset T_TA + k_mac (TS 38.321 5.1.4,
+    /// Rel-17) the UE applies before opening the window. Zero = terrestrial.
+    Time windowStartOffset{};
     Time requiredWindow{};   //!< the window length the geometry demands
     Time configuredWindow{}; //!< what the chosen responseWindowSize actually buys
     /// ra-ResponseWindow in the units nr's NrGnbMac attribute uses. nr computes
@@ -91,10 +94,18 @@ class NtnRachWindow
      * \param processing allowance for preamble detection and RAR assembly at
      *        the gNB. Defaults to one slot, which is the smallest value that
      *        is not a claim that detection is free.
+     * \param windowStartOffset the Rel-17 NTN window start offset T_TA + k_mac
+     *        (TS 38.321 5.1.4) the UE MAC applies (NrUeMac
+     *        RaResponseWindowStartOffset). The UE does not open the window until
+     *        it has elapsed, so only the part of the round trip the offset does
+     *        not cover has to fit inside the window. With the offset equal to the
+     *        round trip, the terrestrial window size suffices at any altitude,
+     *        which is what the Rel-17 offset exists for.
      */
     static NtnRachWindowVerdict Evaluate(Time roundTrip,
                                          Time slotPeriod,
-                                         Time processing = Time());
+                                         Time processing = Time(),
+                                         Time windowStartOffset = Time());
 
     /// Round-trip propagation for a straight-line slant range, in metres.
     static Time RoundTripForSlantRange(double slantRangeMeters);

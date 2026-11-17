@@ -2811,6 +2811,99 @@ class NtnHoKpiRecorderMeasuresTestCase : public TestCase
     }
 };
 
+/// Wave 6A: condEventT1-r17 / condEventD1-r17 encodings (TS 38.331). T1 is an
+/// absolute UTC instant in 10 ms units since 1900 with a 100 ms duration step
+/// (1..6000); D1 thresholds are 50 m steps (0..65525) and the hysteresis 10 m
+/// steps. The algorithm evaluates the encoded IE against the UE's UTC clock,
+/// so a threshold configured at 5.004 s after a 2025-01-01 epoch is signalled
+/// as 5.00 s and the window is already open at 5.002 s.
+class ChoCondEventIeEncodingTestCase : public TestCase
+{
+  public:
+    ChoCondEventIeEncodingTestCase()
+        : TestCase("Wave 6A: condEventT1 (10 ms UTC since 1900) and condEventD1 (50 m) encoding")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const double epoch = 1735689600.0; // 2025-01-01T00:00:00Z
+        bool clamped = true;
+        CondEventT1Ie t1 = CondEventT1Ie::Encode(epoch + 0.004, Seconds(3.0), &clamped);
+        NS_TEST_ASSERT_MSG_EQ(clamped, false, "in range");
+        NS_TEST_ASSERT_MSG_EQ(t1.t1Threshold, 394467840000ULL,
+                              "(unix + 2208988800 s) x 100, rounded to 10 ms");
+        NS_TEST_ASSERT_MSG_EQ(t1.duration, 30, "3 s = 30 x 100 ms");
+        NS_TEST_ASSERT_MSG_EQ_TOL(t1.ThresholdUnixSeconds(), epoch, 1e-6, "decodes to the epoch");
+        NS_TEST_ASSERT_MSG_EQ(t1.IsInside(epoch), false, "entering is Mt > Thresh1 (strict)");
+        NS_TEST_ASSERT_MSG_EQ(t1.IsInside(epoch + 0.001), true, "inside after 1 ms");
+        NS_TEST_ASSERT_MSG_EQ(t1.IsInside(epoch + 3.0), true, "leaving is Mt > Thresh1 + Duration");
+        NS_TEST_ASSERT_MSG_EQ(t1.IsInside(epoch + 3.001), false, "left");
+        CondEventT1Ie shortWin = CondEventT1Ie::Encode(epoch, MilliSeconds(20), &clamped);
+        NS_TEST_ASSERT_MSG_EQ(clamped, true, "20 ms is below the 100 ms minimum");
+        NS_TEST_ASSERT_MSG_EQ(shortWin.duration, 1, "clamped to 1");
+        CondEventT1Ie longWin = CondEventT1Ie::Encode(epoch, Seconds(700), &clamped);
+        NS_TEST_ASSERT_MSG_EQ(clamped, true, "700 s is above 600 s");
+        NS_TEST_ASSERT_MSG_EQ(longWin.duration, 6000, "clamped to 6000");
+        CondEventT1Ie tooEarly = CondEventT1Ie::Encode(-2208988801.0, Seconds(1), &clamped);
+        NS_TEST_ASSERT_MSG_EQ(clamped, true, "before 1900 is out of range");
+        NS_TEST_ASSERT_MSG_EQ(tooEarly.t1Threshold, 0ULL, "clamped to 0");
+
+        bool c = true;
+        NS_TEST_ASSERT_MSG_EQ(CondEventD1Ie::EncodeThreshold(50024.0, &c), 1000, "50 m steps");
+        NS_TEST_ASSERT_MSG_EQ(c, false, "in range");
+        NS_TEST_ASSERT_MSG_EQ(CondEventD1Ie::EncodeThreshold(50026.0), 1001, "nearest step");
+        NS_TEST_ASSERT_MSG_EQ(CondEventD1Ie::EncodeThreshold(4.0e6, &c), 65525, "clamped");
+        NS_TEST_ASSERT_MSG_EQ(c, true, "4000 km exceeds 65525 x 50 m");
+        NS_TEST_ASSERT_MSG_EQ(CondEventD1Ie::EncodeHysteresis(24.0), 2, "10 m steps");
+        CondEventD1Ie d1;
+        d1.distanceThreshFromReference1 = CondEventD1Ie::EncodeThreshold(40000.0);
+        d1.distanceThreshFromReference2 = CondEventD1Ie::EncodeThreshold(30000.0);
+        d1.hysteresisLocation = CondEventD1Ie::EncodeHysteresis(1000.0);
+        NS_TEST_ASSERT_MSG_EQ(d1.ServingLegMet(41500.0), true, "Ml1 - Hys > Thresh1");
+        NS_TEST_ASSERT_MSG_EQ(d1.ServingLegMet(40500.0), false, "hysteresis holds it back");
+        NS_TEST_ASSERT_MSG_EQ(d1.CandidateLegMet(28500.0), true, "Ml2 + Hys < Thresh2");
+        NS_TEST_ASSERT_MSG_EQ(d1.CandidateLegMet(29500.0), false, "hysteresis holds it back");
+
+        // Algorithm path, under Simulator::Run.
+        Ptr<NtnChoAlgorithm> algo = CreateObject<NtnChoAlgorithm>();
+        NtnChoAlgorithm::ChoConfig cfg;
+        cfg.triggerType = NtnChoAlgorithm::TRIGGER_TIME_T1;
+        cfg.qualityThreshold_dB = 0.0;
+        cfg.utcEpochUnixS = epoch;
+        cfg.t1ThresholdEpoch = MilliSeconds(5004); // signalled as 5.00 s
+        cfg.t1WindowDuration = MilliSeconds(2040); // signalled as 2.0 s
+        cfg.d1Threshold_m = 50024.0;
+        algo->Configure(cfg);
+        NS_TEST_ASSERT_MSG_EQ(algo->GetCondEventT1Ie().t1Threshold, 394467840500ULL,
+                              "algorithm encodes epoch + 5.004 s in 10 ms units");
+        NS_TEST_ASSERT_MSG_EQ(algo->GetCondEventT1Ie().duration, 20, "2.04 s -> 20 x 100 ms");
+        NS_TEST_ASSERT_MSG_EQ(algo->GetCondEventD1Ie().distanceThreshFromReference2, 1000,
+                              "d1Threshold_m in 50 m steps");
+        algo->SetServingCell(1);
+        algo->StartMonitoring(GeoCoordinate(0, 0, 0), Vector(0, 0, 0));
+        algo->AddCandidateCell(2, 2, 1);
+        auto probe = [algo, this](double t, bool expectOpen) {
+            Simulator::Schedule(Seconds(t), [algo, this, t, expectOpen]() {
+                algo->UpdateMeasurement(2, 20.0, 30.0);
+                algo->EvaluateConditions();
+                const bool admitted =
+                    (algo->SelectBestCandidate() != NtnChoAlgorithm::INVALID_CELL_ID);
+                NS_TEST_EXPECT_MSG_EQ(admitted, expectOpen,
+                                      "t=" << t << " s: encoded T1 window (5.00, 7.00]");
+            });
+        };
+        probe(4.99, false);
+        probe(5.002, true); // open only because the threshold is quantized to 10 ms
+        probe(6.99, true);
+        probe(7.03, false); // closed only because the duration is quantized to 100 ms
+        Simulator::Stop(Seconds(8.0));
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
 class NtnChoTestSuite : public TestSuite
 {
   public:
@@ -2854,6 +2947,7 @@ class NtnChoTestSuite : public TestSuite
         AddTestCase(new L3FilterRateAdaptationTestCase, TestCase::Duration::QUICK);
         AddTestCase(new VehicularHeadingKeepsRoadDirectionTestCase, TestCase::Duration::QUICK);
         AddTestCase(new ChoExitTriggeredSelectionTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new ChoCondEventIeEncodingTestCase, TestCase::Duration::QUICK);
     }
 };
 

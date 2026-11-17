@@ -146,6 +146,11 @@ NtnDrxStateMachine::Stop()
     {
         Simulator::Cancel(m_event);
     }
+    for (uint8_t i = 0; i < kMaxHarq; ++i)
+    {
+        m_dlHarqRttEvent[i].Cancel();
+        m_ulHarqRttEvent[i].Cancel();
+    }
 }
 
 DrxState
@@ -157,7 +162,141 @@ NtnDrxStateMachine::GetState() const
 bool
 NtnDrxStateMachine::IsAwake() const
 {
-    return m_state == DrxState::Active || m_state == DrxState::OnDuration;
+    if (m_state == DrxState::Active || m_state == DrxState::OnDuration)
+    {
+        return true;
+    }
+    if (!m_running)
+    {
+        return false;
+    }
+    const Time now = Simulator::Now();
+    for (uint8_t i = 0; i < kMaxHarq; ++i)
+    {
+        if (m_dlRetxEnd[i] > now || m_ulRetxEnd[i] > now)
+        {
+            return true;
+        }
+    }
+    return IsSrActive();
+}
+
+Time
+NtnDrxStateMachine::GetHarqRttTimerDlFor(uint8_t harqId) const
+{
+    const bool disabled = harqId < kMaxHarq && ((m_cfg.dlHarqFeedbackDisabled >> harqId) & 1U);
+    return disabled ? m_cfg.harqRttTimerDl : GetHarqRttTimerDlNtn();
+}
+
+Time
+NtnDrxStateMachine::GetHarqRttTimerUlFor(uint8_t harqId) const
+{
+    const bool modeB = harqId < kMaxHarq && ((m_cfg.ulHarqModeB >> harqId) & 1U);
+    return modeB ? m_cfg.harqRttTimerUl : GetHarqRttTimerUlNtn();
+}
+
+void
+NtnDrxStateMachine::NotifyDlTransmission(uint8_t harqId, bool decoded, Time feedbackDelay)
+{
+    NS_ASSERT_MSG(harqId < kMaxHarq, "DL HARQ process id " << +harqId << " beyond n32");
+    const Time now = Simulator::Now();
+    // TS 38.321 5.7: a DL assignment for the process stops its
+    // drx-RetransmissionTimerDL.
+    m_dlRetxEnd[harqId] = now;
+    m_dlHarqRttEvent[harqId].Cancel();
+    const bool disabled = (m_cfg.dlHarqFeedbackDisabled >> harqId) & 1U;
+    // Feedback enabled: the timer starts after the PUCCH carrying the ACK/NACK
+    // and lasts drx-HARQ-RTT-TimerDL + UE-gNB RTT (HARQ-RTT-TimerDL-NTN).
+    // Feedback disabled: nothing is fed back, so there is no RTT to wait for;
+    // the bare drx-HARQ-RTT-TimerDL starts at the end of the PDSCH.
+    const Time start = disabled ? Time(0) : feedbackDelay;
+    const Time dur = GetHarqRttTimerDlFor(harqId);
+    m_dlHarqRttEnd[harqId] = now + start + dur;
+    m_dlHarqRttEvent[harqId] = Simulator::Schedule(start + dur,
+                                                   &NtnDrxStateMachine::DlHarqRttExpired,
+                                                   this,
+                                                   harqId,
+                                                   decoded);
+}
+
+void
+NtnDrxStateMachine::DlHarqRttExpired(uint8_t harqId, bool decoded)
+{
+    // TS 38.321 5.7: on drx-HARQ-RTT-TimerDL expiry, if the data of the
+    // process was not successfully decoded, start drx-RetransmissionTimerDL.
+    if (!decoded && m_cfg.retransmissionTimerDl.IsStrictlyPositive())
+    {
+        m_dlRetxEnd[harqId] = Simulator::Now() + m_cfg.retransmissionTimerDl;
+    }
+}
+
+void
+NtnDrxStateMachine::NotifyUlTransmission(uint8_t harqId)
+{
+    NS_ASSERT_MSG(harqId < kMaxHarq, "UL HARQ process id " << +harqId << " beyond n32");
+    const Time now = Simulator::Now();
+    m_ulRetxEnd[harqId] = now;
+    m_ulHarqRttEvent[harqId].Cancel();
+    const Time dur = GetHarqRttTimerUlFor(harqId);
+    m_ulHarqRttEnd[harqId] = now + dur;
+    m_ulHarqRttEvent[harqId] =
+        Simulator::Schedule(dur, &NtnDrxStateMachine::UlHarqRttExpired, this, harqId);
+}
+
+void
+NtnDrxStateMachine::UlHarqRttExpired(uint8_t harqId)
+{
+    // TS 38.321 5.7: on drx-HARQ-RTT-TimerUL expiry start
+    // drx-RetransmissionTimerUL.
+    if (m_cfg.retransmissionTimerUl.IsStrictlyPositive())
+    {
+        m_ulRetxEnd[harqId] = Simulator::Now() + m_cfg.retransmissionTimerUl;
+    }
+}
+
+void
+NtnDrxStateMachine::NotifySrSent()
+{
+    m_srPending = true;
+    m_srSentAt = Simulator::Now();
+}
+
+void
+NtnDrxStateMachine::NotifyUlGrant()
+{
+    m_srPending = false;
+    NotifyDataActivity();
+}
+
+bool
+NtnDrxStateMachine::IsSrActive() const
+{
+    // Rel-17: Active Time for a pending SR begins one UE-gNB RTT after it.
+    return m_srPending && Simulator::Now() >= m_srSentAt + m_cfg.ntnRtt;
+}
+
+bool
+NtnDrxStateMachine::IsHarqRttTimerDlRunning(uint8_t harqId) const
+{
+    return harqId < kMaxHarq && m_dlHarqRttEvent[harqId].IsPending();
+}
+
+bool
+NtnDrxStateMachine::IsRetransmissionTimerDlRunning(uint8_t harqId) const
+{
+    return harqId < kMaxHarq && m_dlRetxEnd[harqId] > Simulator::Now();
+}
+
+bool
+NtnDrxStateMachine::IsHarqRttTimerUlRunning(uint8_t harqId) const
+{
+    return harqId < kMaxHarq && m_ulHarqRttEvent[harqId].IsPending();
+}
+
+bool
+NtnDrxStateMachine::IsRetransmissionTimerUlRunning(uint8_t harqId) const
+{
+    return harqId < kMaxHarq && m_ulRetxEnd[harqId] > Simulator::Now();
 }
 
 Time

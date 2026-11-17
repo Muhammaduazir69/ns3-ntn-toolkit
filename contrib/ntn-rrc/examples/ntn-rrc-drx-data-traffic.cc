@@ -137,6 +137,9 @@ GeoTick()
     g_sib19->RefreshNow();
 
     const Time ta = g_ta->ComputeTotalTa();
+    // Wave 6A: the UE-gNB RTT (T_TA + k_mac, k_mac = 0 for the on-board gNB)
+    // offsets the NTN HARQ RTT timers and the SR Active Time (TS 38.321 5.7).
+    g_drx->SetNtnRoundTripTime(ta);
     const double slantKm = g_ta->GetSlantRangeMetres() / 1000.0;
     const double sinr = g_rs->GetUeRecentSinrDb(0);
     std::printf("  %6.1f  slant=%7.0fkm  TA=%8.3fms  drx=%-10s  measSINR=%6.2f dB\n",

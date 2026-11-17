@@ -134,11 +134,15 @@ main(int argc, char* argv[])
     }
     rs.SetSimTime(Seconds(duration));
     rs.SetRunTag("ntn-netsimulyzer-official-demo");
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(radio == "mmwave" ? 55.0 : 70.0);
+    // Wave 6A: the nr link budget is the helper default, TR 38.821 Set-1 (S-band
+    // handheld 1T2R NF 7 dB 23 dBm, payload 34 dBW/MHz). The 70 dBm conducted
+    // used here before radiated about 88 dBm over 20 MHz, 11 dB above Set-1,
+    // and with nr's 5 dB noise figure produced the 29.5 dB DL SINR in the
+    // published dataset. mmwave keeps its 55 dBm conducted operating point.
+    if (radio == "mmwave")
+    {
+        rs.SetSatConductedPowerDbm(55.0);
+    }
     // Enable the REAL NR inter-cell handover path (A3-RSRP + X2) so the scene's
     // handover events, if any, come from a genuine RRC serving-cell change
     // (TS 38.300: reconfiguration-with-sync) — not a geometric guess. Requires
@@ -148,6 +152,13 @@ main(int argc, char* argv[])
     if (realHandoverPossible)
     {
         rs.SetHandover(true);
+        // Wave 6A: the A3 decision needs cell-level SS-RSRP (TS 38.215 5.1.1).
+        // On quasi-omni SSB (no satellite array gain) every cell read about
+        // -129 dBm at the Set-1 budget, below the per-RE noise, and A3 handed
+        // the UEs around all six satellites (94 cell changes in 30 s, out to
+        // 1743 km slant). Each satellite now sends SSB on its own nadir
+        // (Earth-moving) beam, as the payload's cell beam would.
+        rs.SetSsbCellBeam(true, nullptr);
     }
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,

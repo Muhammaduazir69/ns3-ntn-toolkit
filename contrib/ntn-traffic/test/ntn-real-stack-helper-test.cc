@@ -38,6 +38,11 @@
 #include <sstream>
 #include "ns3/nr-epc-helper.h"
 #include "ns3/nr-helper.h"
+#include "ns3/nr-phy-mac-common.h"
+#include "ns3/nr-spectrum-phy.h"
+#include "ns3/nr-ue-mac.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-ue-phy.h"
 #include "ns3/ntn-rach-window.h"
 #include "ns3/ntn-tdl-spectrum-loss-model.h"
 #include "ns3/ntn-real-stack-helper.h"
@@ -1079,15 +1084,16 @@ class RealStackAirInterfaceDelayTest : public TestCase
     /// interface either carrying the slant itself or folding it into backhaul.
     double RunOwdMs(bool airInterfaceDelay)
     {
-        // 350 km, not the 600 km LeoRig default: WF-03 measured that the
-        // vendored nr v3.3 stack aborts with "Cannot TX while RX" at 600 km
-        // even with one UE and K_offset consumption, while 350 km survives. The
-        // failure tracks the TDD slot pattern rather than the slant, so 300 km
-        // fails while 350 and 500 pass. This test exists to keep the code path
-        // alive at a geometry that works, not to claim LEO support.
+        // Wave 6A: LEO-600 (the LeoRig default). WF-03 had moved this to 350 km
+        // because 600 km aborted with "Cannot TX while RX"; that run's first
+        // RAR missed nr's terrestrial window and access only completed on a
+        // retry. With the Rel-17 RAR window start offset (nr patch 14) the
+        // first attempt succeeds, the slot timing shifts, and it is now 350 km
+        // that aborts ("Cannot RX SRS while TX") and 600 km that survives. The
+        // failure tracks the slot pattern, not the slant, because nr v3.3 has
+        // no UE timing advance; the test keeps the path alive at a geometry
+        // that works and claims nothing more.
         LeoRig rig(1);
-        rig.sat.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetPosition(
-            Vector(0.0, 0.0, 350e3));
         NtnRealStackHelper rs;
         rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
         rs.SetNumerology(1);
@@ -1125,7 +1131,7 @@ class RealStackAirInterfaceDelayTest : public TestCase
 
         // 600 km straight overhead is 2.0 ms one way. Whichever path carries it,
         // the measured OWD must respect that floor: this is the S2 gate.
-        constexpr double kSlantMs = 350e3 / 299792458.0 * 1e3;
+        constexpr double kSlantMs = 600e3 / 299792458.0 * 1e3;
         NS_TEST_ASSERT_MSG_GT(withAir, kSlantMs,
                               "with a real air-interface delay the measured OWD must exceed the "
                               "one-way slant");
@@ -4384,6 +4390,308 @@ class T300ClampedAtGeoTest : public TestCase
     }
 };
 
+// ===================== Wave 6A =====================================================
+
+namespace
+{
+/// Count DL TBs and HARQ retransmissions (RV > 0) at the UE PHY.
+struct DlTbCounter
+{
+    uint64_t tbs{0};
+    uint64_t retx{0};
+    uint64_t corrupt{0};
+
+    void Rx(RxPacketTraceParams p)
+    {
+        ++tbs;
+        retx += (p.m_rv > 0) ? 1 : 0;
+        corrupt += p.m_corrupt ? 1 : 0;
+    }
+
+    void Connect(NodeContainer& ues)
+    {
+        for (uint32_t u = 0; u < ues.GetN(); ++u)
+        {
+            for (uint32_t d = 0; d < ues.Get(u)->GetNDevices(); ++d)
+            {
+                Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(ues.Get(u)->GetDevice(d));
+                if (dev)
+                {
+                    dev->GetPhy(0)->GetSpectrumPhy()->TraceConnectWithoutContext(
+                        "RxPacketTraceUe",
+                        MakeCallback(&DlTbCounter::Rx, this));
+                }
+            }
+        }
+    }
+};
+} // namespace
+
+/// Wave 6A, TS 38.321 5.1.4 (Rel-17): the RAR window opens T_TA + k_mac after
+/// the preamble. With a real air-interface delay every UE MAC carries the
+/// UE-gNB RTT as RaResponseWindowStartOffset and random access completes with
+/// no early RAR and no timeout. Failure path: an offset larger than the round
+/// trip makes the RAR land before the window opens; the MAC ignores it, times
+/// out, and the UE never connects, which proves the MAC reads the offset.
+/// Without the air-interface delay the MAC sees no round trip, so the helper
+/// programs 0.
+class RaWindowStartOffsetTest : public TestCase
+{
+  public:
+    RaWindowStartOffsetTest()
+        : TestCase("Wave 6A: RAR window start offset = UE-gNB RTT (TS 38.321 5.1.4 Rel-17)")
+    {
+    }
+
+  private:
+    struct Out
+    {
+        Time offset;
+        Time rtt;
+        uint32_t early{0};
+        uint32_t timeouts{0};
+        uint64_t rxPackets{0};
+    };
+
+    Out Run(bool airDelay, Time forcedOffset, bool offsetOn = true)
+    {
+        // LEO-600 zenith (LeoRig default): RTT 4.0 ms. Measured without the
+        // offset, the first RAR (4.7 ms after the preamble at 350 km, 6.5 ms
+        // at 600 km) fell outside nr's 1 + (6 + N) slot window and the first
+        // random-access attempt timed out.
+        LeoRig rig(1);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(2.5));
+        rs.SetOutputDir("test-ntn-ra-window-offset");
+        if (airDelay)
+        {
+            rs.SetKOffsetConsumption(true);
+            rs.SetAirInterfaceDelay(true);
+        }
+        if (forcedOffset.IsStrictlyPositive() || !offsetOn)
+        {
+            rs.SetNtnRaWindowStartOffset(false); // the helper must not overwrite it
+        }
+        rs.Build(rig.sat, rig.ue);
+        if (forcedOffset.IsStrictlyPositive())
+        {
+            for (uint32_t d = 0; d < rig.ue.Get(0)->GetNDevices(); ++d)
+            {
+                Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(rig.ue.Get(0)->GetDevice(d));
+                if (dev)
+                {
+                    NrHelper::GetUeMac(dev, 0)->SetAttribute("RaResponseWindowStartOffset",
+                                                             TimeValue(forcedOffset));
+                }
+            }
+        }
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::NbIotPeriodic,
+                          Seconds(0.5),
+                          Seconds(2.2));
+        Out o;
+        o.offset = rs.GetRaWindowStartOffset(0);
+        o.rtt = rs.ComputeUeGnbRtt(0);
+        Simulator::Stop(Seconds(2.5));
+        Simulator::Run();
+        rs.Collect();
+        o.early = rs.GetRarOutsideWindowCount();
+        o.timeouts = rs.GetRaResponseTimeoutCount();
+        o.rxPackets = rs.GetUeRxPackets(0);
+        Simulator::Destroy();
+        return o;
+    }
+
+    void DoRun() override
+    {
+        const double rttMs = 2.0 * 600e3 / 299792458.0 * 1e3;
+
+        // Normal: air delay on, offset = RTT, access completes.
+        const Out ok = Run(true, Time());
+        NS_TEST_ASSERT_MSG_EQ_TOL(ok.offset.GetSeconds() * 1e3, rttMs, 1e-3,
+                                  "the UE MAC must carry T_TA + k_mac = 2 x slant / c");
+        NS_TEST_ASSERT_MSG_EQ_TOL(ok.rtt.GetSeconds() * 1e3, rttMs, 1e-3, "UE-gNB RTT");
+        NS_TEST_ASSERT_MSG_EQ(ok.early, 0u, "no RAR may arrive before the shifted window");
+        NS_TEST_ASSERT_MSG_EQ(ok.timeouts, 0u, "random access must not time out");
+        NS_TEST_ASSERT_MSG_GT(ok.rxPackets, 0u, "the UE must connect and receive traffic");
+
+        // No air-interface delay: the MAC sees no round trip, offset 0.
+        const Out folded = Run(false, Time());
+        NS_TEST_ASSERT_MSG_EQ(folded.offset, Time(0),
+                              "without air-interface delay the offset must stay 0");
+        NS_TEST_ASSERT_MSG_GT(folded.rxPackets, 0u, "folded run must connect");
+
+        // The defect being fixed: same geometry, nr's terrestrial window (no
+        // offset). The first RAR misses the window and access needs a retry.
+        const Out legacy = Run(true, Time(), false);
+        NS_TEST_ASSERT_MSG_EQ(legacy.offset, Time(0), "offset feature off");
+        NS_TEST_ASSERT_MSG_GT(legacy.timeouts, 0u,
+                              "without the Rel-17 offset the RAR overshoots the terrestrial "
+                              "window at LEO-600 and the attempt times out");
+
+        // Failure: window opens 30 ms after the preamble, long after the RAR.
+        const Out late = Run(true, MilliSeconds(30));
+        NS_TEST_ASSERT_MSG_EQ(late.offset, MilliSeconds(30), "forced offset kept");
+        NS_TEST_ASSERT_MSG_GT(late.early, 0u,
+                              "a RAR arriving before the window must be ignored");
+        NS_TEST_ASSERT_MSG_GT(late.timeouts, 0u, "the ignored RAR must end in a RAR timeout");
+        NS_TEST_ASSERT_MSG_EQ(late.rxPackets, 0u,
+                              "a UE whose window opens after its RAR cannot connect");
+    }
+};
+
+/// Wave 6A, downlinkHARQ-FeedbackDisabled-r17 (nr patch 14): a DL process with
+/// feedback disabled is released when the TB is scheduled, so it never waits a
+/// HARQ round trip and is never retransmitted by HARQ. Normal path: with
+/// feedback enabled, corrupted TBs are retransmitted (RV > 0). With every
+/// process disabled, every TB goes out on a released process and no TB is
+/// ever retransmitted although some are corrupted (RLC recovers instead).
+class DlHarqFeedbackDisabledTest : public TestCase
+{
+  public:
+    DlHarqFeedbackDisabledTest()
+        : TestCase("Wave 6A: DL HARQ feedback-disabled processes skip the HARQ RTT wait")
+    {
+    }
+
+  private:
+    void Run(uint32_t mask, DlTbCounter& cnt, uint64_t& disabledTx, uint64_t& rx)
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        // Zenith, default fading and excess loss: OLLA targets 10 % BLER, so some TBs fail.
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(2.0));
+        rs.SetOutputDir("test-ntn-harq-fb-disabled");
+        rs.SetDlHarqFeedbackDisabled(mask);
+        rs.Build(sats, ues);
+        cnt.Connect(ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(0.5),
+                          Seconds(1.9));
+        Simulator::Stop(Seconds(2.0));
+        Simulator::Run();
+        rs.Collect();
+        disabledTx = rs.GetDlHarqFeedbackDisabledTxCount();
+        rx = rs.GetUeRxPackets(0);
+        Simulator::Destroy();
+    }
+
+    void DoRun() override
+    {
+        DlTbCounter on;
+        uint64_t onDisabled = 0;
+        uint64_t onRx = 0;
+        Run(0, on, onDisabled, onRx);
+        DlTbCounter off;
+        uint64_t offDisabled = 0;
+        uint64_t offRx = 0;
+        Run(0xFFFFFFFFu, off, offDisabled, offRx);
+
+        NS_TEST_ASSERT_MSG_EQ(onDisabled, 0u, "feedback enabled: no process released early");
+        NS_TEST_ASSERT_MSG_GT(on.corrupt, 0u, "the link must corrupt some TBs");
+        NS_TEST_ASSERT_MSG_GT(on.retx, 0u, "feedback enabled: NACKed TBs are retransmitted");
+
+        NS_TEST_ASSERT_MSG_GT(off.tbs, 50u, "feedback disabled: the link still carries TBs");
+        NS_TEST_ASSERT_MSG_GT(off.corrupt, 0u, "feedback disabled: some TBs are corrupted");
+        NS_TEST_ASSERT_MSG_EQ(off.retx, 0u,
+                              "feedback disabled: no HARQ retransmission can be scheduled");
+        NS_TEST_ASSERT_MSG_GT(offDisabled, 0u, "every TB rides a released process");
+        NS_TEST_ASSERT_MSG_GT(offRx, 0u, "the application still receives data");
+    }
+};
+
+/// Wave 6A, SINR realism: an nr run that declares no link budget gets TR 38.821
+/// Set-1 (S-band handheld 1T2R 0 dBi NF 7 dB 23 dBm, payload 34 dBW/MHz), and
+/// the measured zenith SINR equals that closed form (about 19 dB at 600 km),
+/// not the 29-30 dB the 70 dBm conducted operating point produced. The Legacy
+/// profile reproduces the old helper defaults, and an explicit payload power is
+/// never overwritten (failure path of the default).
+class DefaultLinkBudgetIsSet1Test : public TestCase
+{
+  public:
+    DefaultLinkBudgetIsSet1Test()
+        : TestCase("Wave 6A: default nr link budget is TR 38.821 Set-1 S-band handheld")
+    {
+    }
+
+  private:
+    double Run(int mode, double& eirp, double& nf, bool& defaultPayload)
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(2.0));
+        rs.SetOutputDir("test-ntn-default-budget");
+        if (mode == 1)
+        {
+            rs.SetLinkBudgetProfile(NtnRealStackHelper::LinkBudgetProfile::Legacy);
+        }
+        else if (mode == 2)
+        {
+            rs.SetSatConductedPowerDbm(70.0);
+        }
+        rs.SetTr38811ExcessLoss(false);
+        rs.SetSmallScaleFading(false);
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(0.5),
+                          Seconds(1.9));
+        Simulator::Stop(Seconds(2.0));
+        Simulator::Run();
+        rs.Collect();
+        eirp = rs.GetEffectiveEirpDbm();
+        nf = rs.GetUeNoiseFigureDb();
+        defaultPayload = rs.GetDefaultSet1PayloadApplied();
+        const double sinr = rs.GetMeanDlSinrDb();
+        Simulator::Destroy();
+        return sinr;
+    }
+
+    void DoRun() override
+    {
+        const double c = 299792458.0;
+        const double fsplDb = 20.0 * std::log10(4.0 * M_PI * 600e3 * 2.185e9 / c);
+        const double occupiedDb = 10.0 * std::log10(51.0 * 12.0 * 30e3);
+        auto closedForm = [&](double eirpDbm, double nfDb) {
+            return eirpDbm - occupiedDb - fsplDb + 10.0 * std::log10(2.0) - (-174.0 + nfDb);
+        };
+
+        double eirp = 0;
+        double nf = 0;
+        bool def = false;
+        const double set1 = Run(0, eirp, nf, def);
+        NS_TEST_ASSERT_MSG_EQ(def, true, "no declared power: the Set-1 payload is applied");
+        NS_TEST_ASSERT_MSG_EQ_TOL(eirp, 77.0103, 0.01, "Set-1 EIRP over 20 MHz");
+        NS_TEST_ASSERT_MSG_EQ_TOL(nf, 7.0, 1e-9, "handheld NF");
+        NS_TEST_ASSERT_MSG_EQ_TOL(set1, closedForm(77.0103, 7.0), 0.5,
+                                  "default zenith SINR = Set-1 closed form");
+        NS_TEST_ASSERT_MSG_LT(set1, 21.0, "a Set-1 handheld at LEO-600 zenith is below 21 dB");
+
+        const double legacy = Run(1, eirp, nf, def);
+        NS_TEST_ASSERT_MSG_EQ(def, false, "Legacy profile: no Set-1 payload");
+        NS_TEST_ASSERT_MSG_EQ_TOL(eirp, 55.0 + 10.0 * std::log10(64.0), 0.01, "legacy EIRP");
+        NS_TEST_ASSERT_MSG_EQ_TOL(nf, 5.0, 1e-9, "legacy NF is the nr default");
+        NS_TEST_ASSERT_MSG_EQ_TOL(legacy, closedForm(55.0 + 10.0 * std::log10(64.0), 5.0), 0.5,
+                                  "legacy zenith SINR");
+
+        const double hot = Run(2, eirp, nf, def);
+        NS_TEST_ASSERT_MSG_EQ(def, false, "an explicit payload power must not be replaced");
+        NS_TEST_ASSERT_MSG_EQ_TOL(eirp, 70.0 + 10.0 * std::log10(64.0), 0.01,
+                                  "explicit 70 dBm conducted is kept");
+        NS_TEST_ASSERT_MSG_EQ_TOL(nf, 7.0, 1e-9, "the terminal still defaults to the handheld");
+        NS_TEST_ASSERT_MSG_GT(hot - set1, 10.0,
+                              "70 dBm conducted is about 11 dB hotter than Set-1: the dataset bug");
+    }
+};
+
 class NtnRealStackHelperTestSuite : public TestSuite
 {
   public:
@@ -4393,6 +4701,9 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new RealStackEirpBudgetGateTest, Duration::QUICK);
         AddTestCase(new EarthBlockageGeometryTest, Duration::QUICK);
         AddTestCase(new Set1ZenithClosedFormTest, Duration::QUICK);
+        AddTestCase(new RaWindowStartOffsetTest, Duration::QUICK);
+        AddTestCase(new DlHarqFeedbackDisabledTest, Duration::QUICK);
+        AddTestCase(new DefaultLinkBudgetIsSet1Test, Duration::QUICK);
         AddTestCase(new FeederGatewayDelayTest, Duration::QUICK);
         AddTestCase(new PeriodicMeasurementReportTest, Duration::QUICK);
         AddTestCase(new RanCounterKpmTest, Duration::QUICK);

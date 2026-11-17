@@ -266,6 +266,46 @@ class NtnRealStackHelper
     /// The verdict computed at Build() when SetNtnRachWindow(true). Zeroed
     /// otherwise.
     const NtnRachWindowVerdict& GetRachWindowVerdict() const { return m_rachVerdict; }
+
+    /// Wave 6A: TS 38.321 5.1.4 (Rel-17) ra-ResponseWindow start offset.
+    ///
+    /// An NTN UE opens its RAR window T_TA + k_mac after the preamble (the
+    /// UE-gNB RTT), so the terrestrial window size covers any altitude. nr
+    /// v3.3 opened the window one slot after the preamble whatever the
+    /// geometry, which is why SetNtnRachWindow had to stretch the window size
+    /// instead (and could not reach GEO). With this on (default) and a real
+    /// air-interface delay (SetAirInterfaceDelay), every UE MAC gets
+    /// NrUeMac::RaResponseWindowStartOffset = 2 x slant / c to its serving
+    /// satellite (T_TA; k_mac = 0, since the gNB is on board: the model's DL
+    /// and UL frames are aligned at the satellite) and the value is refreshed
+    /// every second as the satellite moves. Without the air-interface delay the
+    /// MAC sees no propagation delay at all, so the offset is 0 there: the
+    /// offset always equals the round trip the MAC actually experiences.
+    void SetNtnRaWindowStartOffset(bool on) { m_ntnRaWindowOffset = on; }
+    bool GetNtnRaWindowStartOffset() const { return m_ntnRaWindowOffset; }
+    /// The ra-ResponseWindow start offset programmed on UE \p ueIndex (BWP 0),
+    /// read back from its NrUeMac. Zero when not applied.
+    Time GetRaWindowStartOffset(uint32_t ueIndex) const;
+    /// UE-gNB RTT (T_TA + k_mac, TS 38.321 3) of UE \p ueIndex to its serving
+    /// satellite, from the live geometry.
+    Time ComputeUeGnbRtt(uint32_t ueIndex) const;
+    /// RARs ignored because they arrived before the UE's ra-ResponseWindow
+    /// opened (NrUeMac RarOutsideWindow trace), and RAR timeouts
+    /// (RaResponseTimeout trace), summed over UEs. Counted when the offset is
+    /// applied.
+    uint32_t GetRarOutsideWindowCount() const { return m_rarOutsideWindow; }
+    uint32_t GetRaResponseTimeoutCount() const { return m_raResponseTimeouts; }
+
+    /// Wave 6A: Rel-17 downlinkHARQ-FeedbackDisabled-r17 (TS 38.331), as a
+    /// bitmap over DL HARQ process IDs (bit i = process i). The nr scheduler
+    /// releases such a process when it schedules the TB instead of holding it
+    /// one HARQ round trip for an ACK/NACK, so the process never stalls on the
+    /// satellite RTT and is never retransmitted by HARQ (TS 38.321 5.3.2). 0
+    /// (default) keeps feedback on every process. Call before Build().
+    void SetDlHarqFeedbackDisabled(uint32_t processBitmap) { m_dlHarqFbDisabled = processBitmap; }
+    uint32_t GetDlHarqFeedbackDisabled() const { return m_dlHarqFbDisabled; }
+    /// DL TBs sent on feedback-disabled processes, summed over gNBs and BWPs.
+    uint64_t GetDlHarqFeedbackDisabledTxCount() const;
     bool GetKOffsetConsumption() const { return m_kOffsetConsumption; }
     /// The K_offset (in nr slots) actually applied to N2Delay after Build();
     /// 0 when consumption is off. Derived from the service-link round trip.
@@ -399,7 +439,11 @@ class NtnRealStackHelper
     /// (which already includes the 30 dBi satellite antenna) therefore
     /// double-counts the antenna by ~20 dB. Prefer SetSatEirpTotalDbm() or
     /// SetSatEirpDensityDbwMhz(), which back-compute the conducted power.
-    void SetSatEirpDbm(double p) { m_satEirpDbm = p; }
+    void SetSatEirpDbm(double p)
+    {
+        m_satEirpDbm = p;
+        m_satPowerExplicit = true;
+    }
 
     /// Set the intended TOTAL radiated EIRP in dBm (TR 38.821-style, antenna
     /// gain INCLUDED). The helper back-computes the conducted TxPower by
@@ -411,6 +455,7 @@ class NtnRealStackHelper
         m_satEirpDbm = eirpDbm - ArrayGainDb();
         m_eirpTotalDbm = eirpDbm;
         m_eirpDeclaredConducted = false;
+        m_satPowerExplicit = true;
     }
 
     /// TR 38.821 Set-1 style EIRP DENSITY (dBW/MHz). Converts to a total EIRP
@@ -425,6 +470,7 @@ class NtnRealStackHelper
     {
         m_eirpDensityDbwMhz = densityDbwPerMhz;
         m_eirpDeclaredConducted = false;
+        m_satPowerExplicit = true;
         ResolveEirpDensity();
     }
 
@@ -452,6 +498,7 @@ class NtnRealStackHelper
         m_satEirpDbm = dbm;
         m_eirpTotalDbm = std::numeric_limits<double>::quiet_NaN();
         m_eirpDeclaredConducted = true;
+        m_satPowerExplicit = true;
     }
 
     /// Declare the EIRP budget the run is supposed to respect, in dBm, with a
@@ -656,8 +703,16 @@ class NtnRealStackHelper
     /// Element gain (dBi) of every UE antenna element (IsotropicAntennaModel
     /// "Gain"). Antennas are reciprocal, so it applies to UL too. Call before
     /// Build().
-    void SetUeRxAntennaGain(double dBi) { m_ueAntennaGainDbi = dBi; }
-    void SetUeAntennaGainDbi(double dBi) { m_ueAntennaGainDbi = dBi; }
+    void SetUeRxAntennaGain(double dBi)
+    {
+        m_ueAntennaGainDbi = dBi;
+        m_ueGainExplicit = true;
+    }
+    void SetUeAntennaGainDbi(double dBi)
+    {
+        m_ueAntennaGainDbi = dBi;
+        m_ueGainExplicit = true;
+    }
     double GetUeAntennaGainDbi() const { return m_ueAntennaGainDbi; }
     /// UE receiver noise figure (dB) on both backends. NaN keeps the stack
     /// default (nr 5 dB). Call before Build().
@@ -673,6 +728,36 @@ class NtnRealStackHelper
     /// Call before Build() and after SetCarrierFrequencyHz()/SetBandwidthHz().
     void ApplyTr38821Set1Defaults();
     bool GetTr38821Set1Applied() const { return m_set1Applied; }
+
+    /// Wave 6A: which link budget an nr run gets when the scenario does not
+    /// declare one.
+    ///
+    /// Tr38821Set1 (default, also GlobalValue NtnRealStackLinkBudget): TR 38.821
+    /// Table 6.1.1.1-1/-3 Set-1. On an S-band carrier the terminal is the
+    /// handheld (1T2R 0 dBi, NF 7 dB, 23 dBm) and the payload, unless the
+    /// scenario set its power, radiates 34 dBW/MHz. Above 7.125 GHz the VSAT
+    /// terminal and the 4 dBW/MHz Ka payload apply together, and only when the
+    /// scenario did not set the satellite power (a VSAT antenna next to an
+    /// arbitrary payload would not be a documented parameter set). Fields the
+    /// scenario set explicitly are never overwritten.
+    ///
+    /// Legacy: the pre-Wave-6A defaults (55 dBm conducted at the array input,
+    /// UE 33 dBm, nr's 5 dB noise figure), which are not a TR 38.821 set.
+    /// The mmwave backend is not affected by either choice.
+    enum class LinkBudgetProfile : uint8_t
+    {
+        Tr38821Set1,
+        Legacy
+    };
+    void SetLinkBudgetProfile(LinkBudgetProfile p)
+    {
+        m_linkBudgetProfile = p;
+        m_linkBudgetProfileExplicit = true;
+    }
+    /// The profile in force (the GlobalValue unless SetLinkBudgetProfile was called).
+    LinkBudgetProfile GetLinkBudgetProfile() const;
+    /// True when Build() applied the default TR 38.821 Set-1 payload EIRP.
+    bool GetDefaultSet1PayloadApplied() const { return m_defaultSet1Payload; }
 
     // ---- C5 (Wave 1): feeder link from a real gateway --------------------
     /// Drive the backhaul delay from the live feeder geometry between the
@@ -692,7 +777,11 @@ class NtnRealStackHelper
     /// no gateway is wired.
     double GetFeederElevationDeg() const;
 
-    void SetUeTxPowerDbm(double p) { m_ueTxDbm = p; }
+    void SetUeTxPowerDbm(double p)
+    {
+        m_ueTxDbm = p;
+        m_ueTxExplicit = true;
+    }
     void SetBackhaulDelay(Time t) { m_backhaulDelay = t; } ///< feeder+core one-way delay
     Time GetBackhaulDelay() const { return m_backhaulDelay; }
     void SetPayloadOption(PayloadOption p) { m_payload = p; }
@@ -979,8 +1068,10 @@ class NtnRealStackHelper
     /// Per-UE and per-cell KPI dataset (Wave 5), written by default to <outputDir>/ue_kpi.csv and
     /// cell_kpi.csv every \p period (GlobalValue NtnRealStackUeKpiPeriod, seconds; 0 disables).
     /// Interval values: SS-RSRP/SS-RSRQ from the UE's measurement reports (TS 38.215 5.1.1/5.1.3),
-    /// SINR as the linear mean of the received DL TBs (L1M.RS-SINR), MCS, MIMO rank, PRB usage
-    /// (RRU.PrbUsedDl, TS 28.552 5.1.1.2), DL TBs, BLER, HARQ retransmissions (TBs with RV > 0),
+    /// SINR as the linear mean of the received DL TBs (L1M.RS-SINR), MCS, MIMO rank, DL PRB usage
+    /// as a percentage (column prb_used_dl_pct; TS 28.552 5.1.1.2.1 names the percentage
+    /// RRU.PrbDl, while RRU.PrbUsedDl and RRU.PrbAvailDl are PRB counts, its numerator and
+    /// denominator), DL TBs, BLER, HARQ retransmissions (TBs with RV > 0),
     /// MAC and application DL throughput, received and lost packets, and the geometry to the
     /// serving satellite: elevation, slant range, round-trip time and Doppler (from the range
     /// rate). Read-only: it consumes no decision window, so it cannot change a run.
@@ -1559,6 +1650,20 @@ class NtnRealStackHelper
     double m_ueAntennaGainDbi{0.0};
     double m_ueNoiseFigureDb{std::numeric_limits<double>::quiet_NaN()};
     bool m_set1Applied{false};
+    // ---- Wave 6A -------------------------------------------------------------
+    bool m_satPowerExplicit{false};
+    bool m_ueTxExplicit{false};
+    bool m_ueGainExplicit{false};
+    LinkBudgetProfile m_linkBudgetProfile{LinkBudgetProfile::Tr38821Set1};
+    bool m_linkBudgetProfileExplicit{false};
+    bool m_defaultSet1Payload{false};
+    void ApplyDefaultLinkBudget();
+    bool m_ntnRaWindowOffset{true};
+    uint32_t m_rarOutsideWindow{0};
+    uint32_t m_raResponseTimeouts{0};
+    void RefreshRaWindowOffsets();
+    void ApplyRaWindowOffsets();
+    uint32_t m_dlHarqFbDisabled{0};
     std::string m_prevElevationModel;
     int m_prevRsrpLinear{-1};
     bool m_ssbCellBeam{false};

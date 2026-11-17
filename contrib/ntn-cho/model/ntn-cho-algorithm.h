@@ -34,6 +34,7 @@
 #ifndef NTN_CHO_ALGORITHM_H
 #define NTN_CHO_ALGORITHM_H
 
+#include "ntn-cho-cond-event-ie.h"
 #include "ntn-orbit-predictor.h"
 #include "ntn-tte-estimator.h"
 
@@ -341,6 +342,26 @@ class NtnChoAlgorithm : public Object
          * that it is running a non-standard condition under a 3GPP name.
          */
         Time t1ThresholdEpoch = Seconds(0.0);
+        /**
+         * Wave 6A: UTC (Unix seconds) of simulation time 0, e.g. the SGP4
+         * scenario epoch. condEventT1 is signalled as an absolute UTC instant
+         * in 10 ms units since 1900 (TS 38.331 t1-Threshold-r17) and the UE
+         * compares its own UTC time against it; t1ThresholdEpoch (sim time)
+         * plus this offset is what gets encoded. 0 keeps sim time = Unix time.
+         */
+        double utcEpochUnixS = 0.0;
+        /**
+         * Wave 6A: condEventD1 hysteresisLocation-r17 in metres (sent in 10 m
+         * steps). 0 (default) keeps the previous candidate-leg test.
+         */
+        double d1HysteresisLocation_m = 0.0;
+        /**
+         * Wave 6A: distanceThreshFromReference1 (serving reference) in metres.
+         * TS 38.331 5.5.4.15 enters D1 when Ml1 - Hys > Thresh1 AND Ml2 + Hys <
+         * Thresh2. Negative (default) evaluates only the candidate leg (Ml2,
+         * d1Threshold_m), as before; set it to evaluate both legs.
+         */
+        double d1ServingThreshold_m = -1.0;
         double elevationMinDeg = 10.0;         //!< serving-elevation handover floor
         double elevationHystDeg = 2.0;         //!< candidate must clear floor + hyst
         double orbitAltitudeKm = 550.0;        //!< shell altitude for elevation from slant
@@ -618,6 +639,12 @@ class NtnChoAlgorithm : public Object
     /// CHO-4: true when the serving cell's own geometry is known, i.e. the
     /// standardized triggers that compare candidate against serving can run.
     bool HaveServingState() const { return m_haveServingState; }
+
+    /// Wave 6A: condEventT1-r17 exactly as the configured T1 window would be
+    /// signalled (10 ms UTC threshold since 1900, 100 ms duration steps).
+    CondEventT1Ie GetCondEventT1Ie() const;
+    /// Wave 6A: condEventD1-r17 distance fields as signalled (50 m / 10 m steps).
+    CondEventD1Ie GetCondEventD1Ie() const;
 
     /// CHO-5: true when \p t cannot evaluate without an orbit predictor and a
     /// TTE estimator. Selecting such a trigger without calling
@@ -934,6 +961,7 @@ class NtnChoAlgorithm : public Object
     Time m_servingSince{Seconds(0)};
     /// CHO-16: warn once when T1 runs the non-standard fallback.
     mutable bool m_t1FallbackWarned{false};
+    mutable bool m_t1ClampWarned{false};
     /// CHO-4: the serving cell's own geometry, kept OUTSIDE m_candidates.
     ///
     /// Rel-17 CHO keeps prepared candidates across an execution, and the cell

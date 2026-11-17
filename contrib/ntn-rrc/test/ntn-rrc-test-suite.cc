@@ -18,6 +18,7 @@
 #include "ns3/test.h"
 
 #include <cstring>
+#include <functional>
 #include <cmath>
 
 using namespace ns3;
@@ -1613,6 +1614,132 @@ class UeSib19ConsumerTest : public TestCase
     }
 };
 
+/// Wave 6A, TS 38.321 5.7: the NTN HARQ RTT timers now drive DRX Active Time.
+/// A feedback-enabled DL process waits drx-HARQ-RTT-TimerDL + UE-gNB RTT after
+/// its feedback before drx-RetransmissionTimerDL wakes the UE; a
+/// feedback-disabled process does not wait the RTT; a decoded TB never wakes the
+/// UE; UL mode B drops the RTT; a pending SR becomes Active Time one RTT after it
+/// is sent, and a UL grant cancels it.
+class DrxNtnHarqAndSrTimersTest : public TestCase
+{
+  public:
+    DrxNtnHarqAndSrTimersTest()
+        : TestCase("Wave 6A: DRX HARQ RTT / retransmission / SR timers extended by UE-gNB RTT")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<NtnDrxStateMachine> drx = CreateObject<NtnDrxStateMachine>();
+        NtnDrxConfig cfg;
+        cfg.longCycle = MilliSeconds(320);
+        cfg.shortCycle = MilliSeconds(0);
+        cfg.onDuration = MilliSeconds(5);
+        cfg.inactivityTimer = MilliSeconds(10);
+        cfg.harqRttTimerDl = MilliSeconds(1);
+        cfg.harqRttTimerUl = MilliSeconds(1);
+        cfg.retransmissionTimerDl = MilliSeconds(4);
+        cfg.retransmissionTimerUl = MilliSeconds(4);
+        cfg.ntnRtt = MilliSeconds(10);
+        cfg.dlHarqFeedbackDisabled = 1U << 3;
+        cfg.ulHarqModeB = 1U << 0;
+        drx->SetConfig(cfg);
+        drx->Start(); // Active until 10 ms, then long sleep until the 315 ms on-duration
+
+        NS_TEST_ASSERT_MSG_EQ(drx->GetHarqRttTimerDlFor(0), MilliSeconds(11),
+                              "feedback enabled: HARQ-RTT-TimerDL-NTN = 1 ms + RTT");
+        NS_TEST_ASSERT_MSG_EQ(drx->GetHarqRttTimerDlFor(3), MilliSeconds(1),
+                              "feedback disabled: no RTT extension");
+        NS_TEST_ASSERT_MSG_EQ(drx->GetHarqRttTimerUlFor(0), MilliSeconds(1), "UL mode B: no RTT");
+        NS_TEST_ASSERT_MSG_EQ(drx->GetHarqRttTimerUlFor(1), MilliSeconds(11), "UL mode A: + RTT");
+
+        auto at = [this](double ms, std::function<void()> f) {
+            Simulator::Schedule(MicroSeconds(static_cast<int64_t>(ms * 1000)), f);
+        };
+        // Feedback-enabled process 0 fails at 100 ms; feedback ends 2 ms later,
+        // so the RTT timer runs to 113 ms and the retransmission window to 117.
+        at(100.0, [drx]() { drx->NotifyDlTransmission(0, false, MilliSeconds(2)); });
+        at(105.0, [drx, this]() {
+            NS_TEST_EXPECT_MSG_EQ(drx->IsAwake(), false, "asleep during the HARQ RTT wait");
+            NS_TEST_EXPECT_MSG_EQ(drx->IsHarqRttTimerDlRunning(0), true, "RTT timer running");
+        });
+        at(112.5, [drx, this]() {
+            NS_TEST_EXPECT_MSG_EQ(drx->IsAwake(), false,
+                                  "still asleep: the RTT extension has not elapsed");
+        });
+        at(114.0, [drx, this]() {
+            NS_TEST_EXPECT_MSG_EQ(drx->IsRetransmissionTimerDlRunning(0), true,
+                                  "retransmission timer after the NTN RTT");
+            NS_TEST_EXPECT_MSG_EQ(drx->IsAwake(), true, "awake for the retransmission");
+        });
+        at(118.0, [drx, this]() {
+            NS_TEST_EXPECT_MSG_EQ(drx->IsAwake(), false, "retransmission window closed");
+        });
+        // Feedback-disabled process 3: no RTT wait, awake 1 ms after the PDSCH.
+        at(150.0, [drx]() { drx->NotifyDlTransmission(3, false, MilliSeconds(2)); });
+        at(151.5, [drx, this]() {
+            NS_TEST_EXPECT_MSG_EQ(drx->IsRetransmissionTimerDlRunning(3), true,
+                                  "feedback disabled: retransmission window without RTT wait");
+            NS_TEST_EXPECT_MSG_EQ(drx->IsAwake(), true, "awake at once");
+        });
+        // A decoded TB never opens a retransmission window.
+        at(170.0, [drx]() { drx->NotifyDlTransmission(1, true, MilliSeconds(2)); });
+        at(185.0, [drx, this]() {
+            NS_TEST_EXPECT_MSG_EQ(drx->IsAwake(), false, "decoded: no retransmission wake-up");
+        });
+        // SR: Active Time starts one RTT after the SR.
+        at(200.0, [drx]() { drx->NotifySrSent(); });
+        at(205.0, [drx, this]() {
+            NS_TEST_EXPECT_MSG_EQ(drx->IsAwake(), false, "no PDCCH monitoring within the RTT");
+        });
+        at(210.5, [drx, this]() {
+            NS_TEST_EXPECT_MSG_EQ(drx->IsSrActive(), true, "SR pending past the RTT");
+            NS_TEST_EXPECT_MSG_EQ(drx->IsAwake(), true, "awake for the grant");
+        });
+        at(212.0, [drx]() { drx->NotifyUlGrant(); });
+        at(212.5, [drx, this]() {
+            NS_TEST_EXPECT_MSG_EQ(drx->IsSrActive(), false, "the grant cancels the SR");
+            NS_TEST_EXPECT_MSG_EQ((drx->GetState() == DrxState::Active), true,
+                                  "the grant PDCCH restarts inactivity");
+        });
+        Simulator::Stop(MilliSeconds(260));
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
+/// Wave 6A: with the Rel-17 window start offset (T_TA + k_mac) the terrestrial
+/// window size fits any altitude; without it LEO low elevation and GEO do not.
+/// An offset beyond the round trip is reported as not fitting (the RAR is
+/// missed before the window opens).
+class RachWindowStartOffsetVerdictTest : public TestCase
+{
+  public:
+    RachWindowStartOffsetVerdictTest()
+        : TestCase("Wave 6A: RAR window verdict credits the Rel-17 start offset")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const Time slot = NtnRachWindow::SlotPeriodForNumerology(1);
+        const Time leo = NtnRachWindow::RoundTripForSlantRange(1932e3); // 10 deg
+        const Time geo = MilliSeconds(541);
+        NS_TEST_ASSERT_MSG_EQ(NtnRachWindow::Evaluate(leo, slot).fits, false,
+                              "LEO-600 at 10 deg does not fit without the offset");
+        const auto leoOff = NtnRachWindow::Evaluate(leo, slot, Time(), leo);
+        NS_TEST_ASSERT_MSG_EQ(leoOff.fits, true, "fits with the offset");
+        NS_TEST_ASSERT_MSG_EQ(+leoOff.appliedWindowSize, +NtnRachWindow::kNrWindowSizeMin,
+                              "only the processing allowance is left");
+        NS_TEST_ASSERT_MSG_EQ(NtnRachWindow::Evaluate(geo, slot, Time(), geo).fits, true,
+                              "even GEO fits once the window start is offset");
+        const auto tooLate = NtnRachWindow::Evaluate(leo, slot, Time(), leo + MilliSeconds(5));
+        NS_TEST_ASSERT_MSG_EQ(tooLate.fits, false, "an offset past the RAR misses it");
+    }
+};
+
 class NtnRrcTestSuite : public TestSuite
 {
   public:
@@ -1649,6 +1776,8 @@ class NtnRrcTestSuite : public TestSuite
         AddTestCase(new Sib19FitReducesResidualTest, TestCase::Duration::QUICK);
         AddTestCase(new Sib19ErrorBudgetValidityTest, TestCase::Duration::QUICK);
         AddTestCase(new UlPrecompensatorTrackingTest, TestCase::Duration::QUICK);
+        AddTestCase(new DrxNtnHarqAndSrTimersTest, TestCase::Duration::QUICK);
+        AddTestCase(new RachWindowStartOffsetVerdictTest, TestCase::Duration::QUICK);
     }
 };
 

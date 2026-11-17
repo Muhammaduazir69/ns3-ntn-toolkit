@@ -10,6 +10,7 @@
 #include <ns3/object.h>
 #include <ns3/traced-callback.h>
 
+#include <array>
 #include <cstdint>
 
 namespace ns3
@@ -53,6 +54,22 @@ struct NtnDrxConfig
     Time harqRttTimerDl{MilliSeconds(0)};  //!< drx-HARQ-RTT-TimerDL (baseline NR)
     Time harqRttTimerUl{MilliSeconds(0)};  //!< drx-HARQ-RTT-TimerUL (baseline NR)
     Time ntnRtt{MilliSeconds(0)};          //!< latest UE-gNB RTT (TS 38.321 §5.7)
+
+    // ---- Wave 6A: the timers above now drive Active Time ----
+    /// drx-RetransmissionTimerDL / UL: started when the HARQ RTT timer of a
+    /// process expires and its data was not decoded (DL) / always (UL); while
+    /// it runs the UE is in Active Time. Zero disables the retransmission
+    /// window (the UE then never wakes for a HARQ retransmission).
+    Time retransmissionTimerDl{MilliSeconds(0)};
+    Time retransmissionTimerUl{MilliSeconds(0)};
+    /// downlinkHARQ-FeedbackDisabled-r17 (TS 38.331), bit i = DL HARQ process
+    /// i has feedback disabled. For such a process the UE does not wait the
+    /// UE-gNB RTT: drx-HARQ-RTT-TimerDL (no RTT extension) starts at the end
+    /// of the PDSCH instead of after the HARQ feedback.
+    uint32_t dlHarqFeedbackDisabled{0};
+    /// uplinkHARQ-Mode-r17 (TS 38.331), bit i = UL HARQ process i in mode B.
+    /// HARQ-RTT-TimerUL-NTN (with the RTT) applies to mode A only.
+    uint32_t ulHarqModeB{0};
 
     /// True when `longCycle >= shortCycle >= onDuration > 0`.
     bool IsValid() const;
@@ -105,11 +122,47 @@ class NtnDrxStateMachine : public Object
     /// HARQ-RTT-TimerUL-NTN = drx-HARQ-RTT-TimerUL + UE-gNB RTT.
     Time GetHarqRttTimerUlNtn() const;
 
+    // ---- Wave 6A: HARQ RTT / retransmission timers and SR (TS 38.321 §5.7) ----
+
+    /// The DL HARQ RTT timer this process actually runs: HARQ-RTT-TimerDL-NTN
+    /// (drx-HARQ-RTT-TimerDL + UE-gNB RTT) with feedback enabled, the bare
+    /// drx-HARQ-RTT-TimerDL with feedback disabled (no RTT wait).
+    Time GetHarqRttTimerDlFor(uint8_t harqId) const;
+    /// UL counterpart: + UE-gNB RTT for HARQ mode A, bare timer for mode B.
+    Time GetHarqRttTimerUlFor(uint8_t harqId) const;
+
+    /// A PDSCH for DL HARQ process \p harqId ended now. \p decoded is the
+    /// UE's decoding outcome. With feedback enabled the HARQ RTT timer starts
+    /// after the feedback transmission, \p feedbackDelay from now (PDSCH end
+    /// to end of the PUCCH carrying the ACK/NACK, i.e. K1 plus K_offset);
+    /// with feedback disabled it starts now. A running
+    /// drx-RetransmissionTimerDL of the process stops (TS 38.321 §5.7).
+    void NotifyDlTransmission(uint8_t harqId, bool decoded, Time feedbackDelay = Time(0));
+    /// A PUSCH for UL HARQ process \p harqId ended now.
+    void NotifyUlTransmission(uint8_t harqId);
+    /// An SR was sent on PUCCH and is pending. In NTN the Active Time for the
+    /// pending SR starts one UE-gNB RTT after the SR (TS 38.321 §5.7, Rel-17):
+    /// no grant can arrive sooner, so the UE need not monitor PDCCH meanwhile.
+    void NotifySrSent();
+    /// A UL grant arrived: the pending SR is cancelled (TS 38.321 §5.4.4) and
+    /// the PDCCH counts as activity (inactivity timer restarts).
+    void NotifyUlGrant();
+
+    bool IsHarqRttTimerDlRunning(uint8_t harqId) const;
+    bool IsRetransmissionTimerDlRunning(uint8_t harqId) const;
+    bool IsHarqRttTimerUlRunning(uint8_t harqId) const;
+    bool IsRetransmissionTimerUlRunning(uint8_t harqId) const;
+    /// True while an SR is pending and its RTT offset has elapsed.
+    bool IsSrActive() const;
+
     /// Begin ticking the state machine. Initial state is `Active`.
     void Start();
     void Stop();
 
     DrxState GetState() const;
+    /// DRX Active Time (TS 38.321 §5.7): on-duration or inactivity (the cycle
+    /// state), a running drx-RetransmissionTimerDL/UL, or a pending SR past its
+    /// RTT offset.
     bool IsAwake() const;
 
     /// Total simulated time spent in each state since `Start()`.
@@ -138,6 +191,19 @@ class NtnDrxStateMachine : public Object
     EventId m_event;
 
     Time m_timeInState[5]{};
+
+    // Wave 6A per-process timers (32 processes, TS 38.331 n32).
+    static constexpr uint8_t kMaxHarq = 32;
+    std::array<Time, kMaxHarq> m_dlHarqRttEnd{};   //!< DL HARQ RTT timer expiry
+    std::array<Time, kMaxHarq> m_dlRetxEnd{};      //!< drx-RetransmissionTimerDL expiry
+    std::array<Time, kMaxHarq> m_ulHarqRttEnd{};
+    std::array<Time, kMaxHarq> m_ulRetxEnd{};
+    std::array<EventId, kMaxHarq> m_dlHarqRttEvent;
+    std::array<EventId, kMaxHarq> m_ulHarqRttEvent;
+    bool m_srPending{false};
+    Time m_srSentAt{Seconds(0)};
+    void DlHarqRttExpired(uint8_t harqId, bool decoded);
+    void UlHarqRttExpired(uint8_t harqId);
 
     TracedCallback<DrxState, DrxState, Time> m_stateChangeTrace;
 };

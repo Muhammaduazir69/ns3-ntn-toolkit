@@ -103,6 +103,16 @@ static GlobalValue g_ntnRealStackNrHarqProfile(
     BooleanValue(true),
     MakeBooleanChecker());
 
+// Wave 6A: the default nr link budget is a documented TR 38.821 parameter set.
+static GlobalValue g_ntnRealStackLinkBudget(
+    "NtnRealStackLinkBudget",
+    "Default nr link budget when a scenario does not declare one: Tr38821Set1 (TR 38.821 Table "
+    "6.1.1.1-1/-3 Set-1: S-band handheld 1T2R 0 dBi NF 7 dB 23 dBm with a 34 dBW/MHz payload, or "
+    "Ka VSAT with a 4 dBW/MHz payload) or Legacy (55 dBm conducted at the array input, UE 33 dBm, "
+    "nr NF 5 dB; not a TR 38.821 set)",
+    StringValue("Tr38821Set1"),
+    MakeStringChecker());
+
 static GlobalValue g_ntnRealStackUeKpiPeriod(
     "NtnRealStackUeKpiPeriod",
     "Sampling period (s) of the per-UE and per-cell KPI dataset NtnRealStackHelper writes to "
@@ -339,6 +349,11 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
                     "NtnRealStackHelper: need >=1 gNB and >=1 UE");
     m_gnb = gnbNodes;
     m_ue = ueNodes;
+
+    // Wave 6A: default link budget (TR 38.821 Set-1) for whatever the scenario
+    // did not declare. Before ResolveEirpDensity so a default density is
+    // converted against the configured bandwidth like a declared one.
+    ApplyDefaultLinkBudget();
 
     // NT-02: a declared EIRP density is converted against the bandwidth that is
     // actually configured at Build time, so SetBandwidthHz() may be called
@@ -1024,6 +1039,14 @@ NtnRealStackHelper::BuildNrRadio()
         m_nr->SetupMimoPmi(mp);
     }
 
+    // Wave 6A: Rel-17 downlinkHARQ-FeedbackDisabled-r17 bitmap (nr patch 14).
+    if (m_dlHarqFbDisabled != 0)
+    {
+        m_nr->SetSchedulerAttribute("DlHarqFeedbackDisabled", UintegerValue(m_dlHarqFbDisabled));
+        NS_LOG_INFO("NtnRealStackHelper: DL HARQ feedback disabled on process bitmap 0x"
+                    << std::hex << m_dlHarqFbDisabled << std::dec);
+    }
+
     // Install devices on the caller's mobility-carrying nodes.
     m_enbDevs = m_nr->InstallGnbDevice(m_gnb, allBwps);
     m_ueDevs = m_nr->InstallUeDevice(m_ue, allBwps);
@@ -1086,7 +1109,11 @@ NtnRealStackHelper::BuildNrRadio()
     {
         const Time rtt = Seconds(2.0 * ComputeServiceLinkDelay().GetSeconds());
         const Time slot = NtnRachWindow::SlotPeriodForNumerology(m_numerology);
-        m_rachVerdict = NtnRachWindow::Evaluate(rtt, slot);
+        // Wave 6A: with the Rel-17 window start offset in force (air-interface
+        // delay on), the UE opens the window one RTT late, so only the
+        // processing allowance has to fit in the window itself.
+        const Time offset = (m_ntnRaWindowOffset && m_airIfaceDelayActive) ? rtt : Time();
+        m_rachVerdict = NtnRachWindow::Evaluate(rtt, slot, Time(), offset);
         if (m_rachVerdict.fits)
         {
             NS_LOG_INFO("NtnRealStackHelper: RAR window sized for "
@@ -1297,6 +1324,7 @@ NtnRealStackHelper::BuildNrRadio()
     }
 
     m_nr->AttachToClosestGnb(m_ueDevs, m_enbDevs);
+    ApplyRaWindowOffsets();
     if (m_nrBeamforming)
     {
         // Record the (cell, IMSI) pairs AttachToGnb registered, then keep each
@@ -4423,6 +4451,9 @@ NtnRealStackHelper::SampleUeKpi()
         std::error_code ec;
         std::filesystem::create_directories(m_outputDir, ec);
         m_ueKpiCsv = std::make_shared<std::ofstream>(m_outputDir + "/ue_kpi.csv");
+        // prb_used_dl_pct is TS 28.552 5.1.1.2.1 RRU.PrbDl (DL PRB usage in
+        // percent), i.e. 100 x RRU.PrbUsedDl / RRU.PrbAvailDl (both PRB
+        // counts). The column name is kept because dataset consumers map it.
         *m_ueKpiCsv << "time_s,ue,rnti,serving_cell,ss_rsrp_dbm,ss_rsrq_db,sinr_db,mcs_mean,rank_mean,"
                        "prb_used_dl_pct,dl_tb,dl_tb_err,bler,harq_retx,dl_mac_thp_mbps,app_dl_thp_mbps,"
                        "app_rx_pkts,app_lost_pkts,elevation_deg,slant_range_km,rtt_ms,doppler_hz\n";
@@ -4745,6 +4776,211 @@ NtnRealStackHelper::RefreshCellBeams()
     {
         Simulator::Schedule(m_cellBeamRefresh, &NtnRealStackHelper::RefreshCellBeams, this);
     }
+}
+
+// ---- Wave 6A ---------------------------------------------------------------
+
+NtnRealStackHelper::LinkBudgetProfile
+NtnRealStackHelper::GetLinkBudgetProfile() const
+{
+    if (m_linkBudgetProfileExplicit)
+    {
+        return m_linkBudgetProfile;
+    }
+    StringValue v;
+    GlobalValue::GetValueByName("NtnRealStackLinkBudget", v);
+    if (v.Get() == "Legacy")
+    {
+        return LinkBudgetProfile::Legacy;
+    }
+    NS_ABORT_MSG_IF(v.Get() != "Tr38821Set1",
+                    "NtnRealStackLinkBudget must be Tr38821Set1 or Legacy, got " << v.Get());
+    return LinkBudgetProfile::Tr38821Set1;
+}
+
+void
+NtnRealStackHelper::ApplyDefaultLinkBudget()
+{
+    // Root cause of the 29-30 dB DL SINR in the published LEO datasets: runs
+    // that took the helper/example defaults radiated 70 dBm conducted + 18 dB
+    // UPA gain = 88 dBm over 20 MHz (75 dBm/MHz = 45 dBW/MHz, 11 dB above the
+    // TR 38.821 Set-1 S-band payload) into nr's 5 dB noise figure (the
+    // handheld is 7 dB). Hand budget at nadir, LEO-600, 2.185 GHz:
+    //   FSPL 154.8 dB; noise -174 + 60 + NF dBm/MHz; UE 1x2 array +3 dB.
+    //   legacy 70 dBm: 75 - 154.8 + 3 + 109 = 32.2 dB (29.5 dB after the
+    //   TR 38.811 excess terms), Set-1: 64 - 154.8 + 3 + 107 = 19.2 dB, and
+    //   at 30 deg elevation (FSPL 159.1 dB) with the TR 38.821 Table
+    //   6.1.3.3-1 margins (shadow 3, scintillation 2.2, gas 0.1) about 9 dB.
+    if (m_backend != RadioBackend::Nr || m_set1Applied ||
+        GetLinkBudgetProfile() != LinkBudgetProfile::Tr38821Set1)
+    {
+        return;
+    }
+    const bool sBand = m_freqHz <= 7.125e9;
+    if (sBand)
+    {
+        // TR 38.821 Table 6.1.1.1-3 handheld; m_ueRows x m_ueCols is already the
+        // 1x2 (two receive branches) panel unless the scenario changed it.
+        if (!std::isfinite(m_ueNoiseFigureDb))
+        {
+            m_ueNoiseFigureDb = 7.0;
+        }
+        if (!m_ueTxExplicit)
+        {
+            m_ueTxDbm = 23.0;
+        }
+        if (!m_satPowerExplicit)
+        {
+            SetSatEirpDensityDbwMhz(kTr38821Set1SBandEirpDensityDbwMhz);
+            m_defaultSet1Payload = true;
+        }
+    }
+    else if (!m_satPowerExplicit)
+    {
+        // Ka: the VSAT terminal only together with the Set-1 Ka payload.
+        if (!m_ueGainExplicit)
+        {
+            m_ueRows = 1;
+            m_ueCols = 1;
+            m_ueAntennaGainDbi = 39.7;
+        }
+        if (!std::isfinite(m_ueNoiseFigureDb))
+        {
+            m_ueNoiseFigureDb = (39.7 - 15.9) - 10.0 * std::log10(290.0);
+        }
+        if (!m_ueTxExplicit)
+        {
+            m_ueTxDbm = 33.0;
+        }
+        SetSatEirpDensityDbwMhz(4.0);
+        m_defaultSet1Payload = true;
+    }
+    NS_LOG_INFO("NtnRealStackHelper: default TR 38.821 Set-1 link budget ("
+                << (sBand ? "S-band handheld" : "Ka VSAT") << "), payload "
+                << (m_defaultSet1Payload ? "Set-1 density" : "declared by the scenario")
+                << ", UE NF " << m_ueNoiseFigureDb << " dB, UE Tx " << m_ueTxDbm << " dBm");
+}
+
+Time
+NtnRealStackHelper::ComputeUeGnbRtt(uint32_t ueIndex) const
+{
+    // TS 38.321 3: UE-gNB RTT = T_TA + k_mac. The UE's full TA pre-compensates
+    // the service-link round trip; k_mac is 0 because the gNB is on board
+    // (DL and UL frames aligned at the satellite in this model).
+    constexpr double kC = 299792458.0;
+    double slantKm = SlantKmToCell(ueIndex, GetUeServingCellId(ueIndex));
+    if (!std::isfinite(slantKm))
+    {
+        Ptr<MobilityModel> um = m_ue.Get(ueIndex)->GetObject<MobilityModel>();
+        double best = std::numeric_limits<double>::infinity();
+        for (uint32_t g = 0; g < m_gnb.GetN() && um; ++g)
+        {
+            Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
+            if (gm)
+            {
+                best = std::min(best, gm->GetDistanceFrom(um) / 1e3);
+            }
+        }
+        slantKm = best;
+    }
+    if (!std::isfinite(slantKm))
+    {
+        return Time();
+    }
+    return Seconds(2.0 * slantKm * 1e3 / kC);
+}
+
+void
+NtnRealStackHelper::ApplyRaWindowOffsets()
+{
+    if (m_backend != RadioBackend::Nr)
+    {
+        return;
+    }
+    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        for (uint8_t b = 0; b < nBwp; ++b)
+        {
+            Ptr<NrUeMac> mac = NrHelper::GetUeMac(m_ueDevs.Get(u), b);
+            if (!mac)
+            {
+                continue;
+            }
+            mac->TraceConnectWithoutContext(
+                "RarOutsideWindow",
+                MakeCallback(+[](uint32_t* n, uint64_t) { ++(*n); }).Bind(&m_rarOutsideWindow));
+            mac->TraceConnectWithoutContext(
+                "RaResponseTimeout",
+                MakeCallback(+[](uint32_t* n, uint64_t, bool, uint8_t, uint8_t) { ++(*n); })
+                    .Bind(&m_raResponseTimeouts));
+        }
+    }
+    if (!m_ntnRaWindowOffset || !m_airIfaceDelayActive)
+    {
+        return; // the MAC experiences no round trip: offset stays 0
+    }
+    RefreshRaWindowOffsets();
+}
+
+void
+NtnRealStackHelper::RefreshRaWindowOffsets()
+{
+    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        const Time rtt = ComputeUeGnbRtt(u);
+        for (uint8_t b = 0; b < nBwp; ++b)
+        {
+            Ptr<NrUeMac> mac = NrHelper::GetUeMac(m_ueDevs.Get(u), b);
+            if (mac)
+            {
+                mac->SetAttribute("RaResponseWindowStartOffset", TimeValue(rtt));
+            }
+        }
+    }
+    Simulator::Schedule(Seconds(1.0), &NtnRealStackHelper::RefreshRaWindowOffsets, this);
+}
+
+Time
+NtnRealStackHelper::GetRaWindowStartOffset(uint32_t ueIndex) const
+{
+    if (m_backend != RadioBackend::Nr || ueIndex >= m_ueDevs.GetN())
+    {
+        return Time();
+    }
+    Ptr<NrUeMac> mac = NrHelper::GetUeMac(m_ueDevs.Get(ueIndex), 0);
+    if (!mac)
+    {
+        return Time();
+    }
+    TimeValue v;
+    mac->GetAttribute("RaResponseWindowStartOffset", v);
+    return v.Get();
+}
+
+uint64_t
+NtnRealStackHelper::GetDlHarqFeedbackDisabledTxCount() const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr)
+    {
+        return 0;
+    }
+    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        for (uint8_t b = 0; b < nBwp; ++b)
+        {
+            Ptr<NrMacSchedulerNs3> sch =
+                DynamicCast<NrMacSchedulerNs3>(NrHelper::GetScheduler(m_enbDevs.Get(i), b));
+            if (sch)
+            {
+                n += sch->GetDlHarqFeedbackDisabledTxCount();
+            }
+        }
+    }
+    return n;
 }
 
 } // namespace ns3

@@ -180,6 +180,12 @@ class NrUeMac : public Object
                                                     Ptr<NrControlMessage> ctrlMessage);
 
     /**
+     * TracedCallback signature for per-UE MAC events identified by IMSI.
+     * \param [in] imsi the IMSI
+     */
+    typedef void (*ImsiTracedCallback)(const uint64_t imsi);
+
+    /**
      * \brief Sets the number of HARQ processes.
      * Called by the helper at the moment of UE attachment
      * \param numHarqProcesses the maximum number of harq processes
@@ -473,6 +479,10 @@ class NrUeMac : public Object
     TracedCallback<uint64_t, bool, uint8_t, uint8_t> m_raResponseTimeoutTrace;
 
     void StartWaitingForRaResponse();
+    /// NTN ra-ResponseWindow start offset, T_TA + k_mac (TS 38.321 5.1.4, Rel-17).
+    Time m_raWindowStartOffset{0};
+    /// RAR for this UE ignored because ra-ResponseWindow was not yet running.
+    TracedCallback<uint64_t> m_rarOutsideWindowTrace;
     bool m_rachConfigured = false;                ///< is RACH configured?
     NrUeCmacSapProvider::RachConfig m_rachConfig; ///< RACH configuration
     uint8_t m_preambleTransmissionCounter{0};     ///< preamble transmission counter

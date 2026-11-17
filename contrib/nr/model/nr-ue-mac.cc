@@ -19,6 +19,7 @@
 
 #include <ns3/boolean.h>
 #include <ns3/log.h>
+#include <ns3/nstime.h>
 #include <ns3/random-variable-stream.h>
 #include <ns3/uinteger.h>
 
@@ -214,6 +215,22 @@ NrUeMac::GetTypeId()
                 UintegerValue(16),
                 MakeUintegerAccessor(&NrUeMac::SetNumHarqProcess, &NrUeMac::GetNumHarqProcess),
                 MakeUintegerChecker<uint8_t>())
+            .AddAttribute(
+                "RaResponseWindowStartOffset",
+                "NTN (TS 38.321 5.1.4, Rel-17): extra delay between the end of the RA preamble "
+                "and the start of ra-ResponseWindow, i.e. the UE-gNB RTT T_TA + k_mac. The window "
+                "end moves by the same amount. A RAR that arrives before the window opens is "
+                "ignored, as the UE is not monitoring the RA-RNTI then. Zero (default) is the "
+                "terrestrial behavior.",
+                TimeValue(Time(0)),
+                MakeTimeAccessor(&NrUeMac::m_raWindowStartOffset),
+                MakeTimeChecker(Time(0)))
+            .AddTraceSource("RarOutsideWindow",
+                            "A RAR addressed to this UE arrived while ra-ResponseWindow was not "
+                            "running (before the NTN start offset elapsed) and was ignored. "
+                            "Exports the IMSI.",
+                            MakeTraceSourceAccessor(&NrUeMac::m_rarOutsideWindowTrace),
+                            "ns3::NrUeMac::ImsiTracedCallback")
             .AddTraceSource("UeMacRxedCtrlMsgsTrace",
                             "Ue MAC Control Messages Traces.",
                             MakeTraceSourceAccessor(&NrUeMac::m_macRxedCtrlMsgsTrace),
@@ -1039,6 +1056,24 @@ NrUeMac::DoReceiveControlMessage(Ptr<NrControlMessage> msg)
 
         m_macRxedCtrlMsgsTrace(m_currentSlot, GetCellId(), m_rnti, GetBwpId(), msg);
 
+        if (!m_waitingForRaResponse && m_raWindowStartOffset.IsStrictlyPositive() &&
+            m_noRaResponseReceivedEvent.IsPending())
+        {
+            Ptr<NrRarMessage> early = DynamicCast<NrRarMessage>(msg);
+            for (auto it = early->RarListBegin(); it != early->RarListEnd(); ++it)
+            {
+                if (it->rarPayload.raPreambleId == m_raPreambleId)
+                {
+                    NS_LOG_INFO("RAR for preamble " << +m_raPreambleId
+                                                    << " arrived before ra-ResponseWindow opened"
+                                                    << " (NTN start offset "
+                                                    << m_raWindowStartOffset.As(Time::MS)
+                                                    << "), ignored");
+                    m_rarOutsideWindowTrace(m_imsi);
+                    break;
+                }
+            }
+        }
         if (m_waitingForRaResponse)
         {
             Ptr<NrRarMessage> rarMsg = DynamicCast<NrRarMessage>(msg);
@@ -1159,8 +1194,17 @@ NrUeMac::SendRaPreamble(bool contention)
     m_phySapProvider->SendRachPreamble(m_raPreambleId, m_raRnti);
     NS_LOG_INFO(" Sent preamble id " << +m_raPreambleId
                                      << " at: " << Simulator::Now().As(Time::MS));
-    Time raWindowBegin = m_phySapProvider->GetSlotPeriod();
-    Time raWindowEnd = m_phySapProvider->GetSlotPeriod() * (6 + m_rachConfig.raResponseWindowSize);
+    // NTN (TS 38.321 5.1.4, Rel-17): the window starts T_TA + k_mac after the
+    // preamble, so the UE does not monitor (or time out on) a RAR that cannot
+    // have arrived yet. Both window edges move by the offset; with a zero
+    // offset this is the terrestrial window, unchanged.
+    Time raWindowBegin = m_phySapProvider->GetSlotPeriod() + m_raWindowStartOffset;
+    Time raWindowEnd = m_phySapProvider->GetSlotPeriod() * (6 + m_rachConfig.raResponseWindowSize) +
+                       m_raWindowStartOffset;
+    if (m_raWindowStartOffset.IsStrictlyPositive())
+    {
+        m_waitingForRaResponse = false;
+    }
     Simulator::Schedule(raWindowBegin, &NrUeMac::StartWaitingForRaResponse, this);
     m_noRaResponseReceivedEvent =
         Simulator::Schedule(raWindowEnd, &NrUeMac::RaResponseTimeout, this, contention);

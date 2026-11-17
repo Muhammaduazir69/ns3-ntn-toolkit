@@ -1,0 +1,172 @@
+diff --git a/model/nr-mac-scheduler-ns3.cc b/model/nr-mac-scheduler-ns3.cc
+index a96201264..65ef449a3 100644
+--- a/model/nr-mac-scheduler-ns3.cc
++++ b/model/nr-mac-scheduler-ns3.cc
+@@ -210,6 +210,18 @@ NrMacSchedulerNs3::GetTypeId()
+                           DoubleValue(1.0),
+                           MakeDoubleAccessor(&NrMacSchedulerNs3::m_ollaStep),
+                           MakeDoubleChecker<double>(0.01, 5.0))
++            .AddAttribute("DlHarqFeedbackDisabled",
++                          "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.321 5.3.2): "
++                          "bitmap over DL HARQ process IDs, bit i set = feedback disabled for "
++                          "process i. Such a process is released as soon as its transmission is "
++                          "scheduled instead of being held for an ACK/NACK one HARQ round trip "
++                          "later, so it never stalls on the satellite RTT; it is never "
++                          "retransmitted by HARQ (RLC recovers losses), and any feedback that "
++                          "still arrives for it is discarded. 0 (default) keeps every process "
++                          "feedback-enabled, the terrestrial behavior.",
++                          UintegerValue(0),
++                          MakeUintegerAccessor(&NrMacSchedulerNs3::m_dlHarqFeedbackDisabled),
++                          MakeUintegerChecker<uint32_t>())
+             .AddAttribute("EnableHarqReTx",
+                           "If true, it would set the max HARQ ReTx to 3; otherwise it set it to 0",
+                           BooleanValue(true),
+@@ -1576,6 +1588,17 @@ NrMacSchedulerNs3::DoScheduleDlData(PointInFTPlane* spoint,
+ 
+             NS_ABORT_IF(slotInfo.m_rlcPduInfo.empty());
+ 
++            // NTN downlinkHARQ-FeedbackDisabled-r17: a feedback-disabled
++            // process does not wait one HARQ round trip for an ACK/NACK that
++            // the UE is not expected to send. Release it now; the TB is
++            // already in slotInfo, and a late feedback for an INACTIVE process
++            // is discarded by DoSchedDlTriggerReq.
++            if (dci->m_harqProcess < 32 && ((m_dlHarqFeedbackDisabled >> dci->m_harqProcess) & 1U))
++            {
++                ue.first->m_dlHarq.Erase(dci->m_harqProcess);
++                ++m_dlHarqFeedbackDisabledTx;
++            }
++
+             slotAlloc->m_varTtiAllocInfo.emplace_back(slotInfo);
+         }
+         if (assigned)
+diff --git a/model/nr-mac-scheduler-ns3.h b/model/nr-mac-scheduler-ns3.h
+index fba0da284..3b68ba6c1 100644
+--- a/model/nr-mac-scheduler-ns3.h
++++ b/model/nr-mac-scheduler-ns3.h
+@@ -955,6 +955,18 @@ class NrMacSchedulerNs3 : public NrMacScheduler
+     bool m_ollaEnabled{true};      //!< outer-loop link adaptation on DL (attribute OllaEnabled)
+     double m_ollaBlerTarget{0.1};  //!< initial-transmission BLER target (attribute OllaBlerTarget)
+     double m_ollaStep{1.0};        //!< MCS-index increase per NACK (attribute OllaStep)
++    /// downlinkHARQ-FeedbackDisabled-r17 bitmap over DL HARQ process IDs (attribute).
++    uint32_t m_dlHarqFeedbackDisabled{0};
++    /// DL transmissions released without waiting for HARQ feedback.
++    mutable uint64_t m_dlHarqFeedbackDisabledTx{0};
++
++  public:
++    /// \return number of DL TBs sent on feedback-disabled HARQ processes (released
++    /// at scheduling time, TS 38.321 5.3.2 Rel-17).
++    uint64_t GetDlHarqFeedbackDisabledTxCount() const
++    {
++        return m_dlHarqFeedbackDisabledTx;
++    }
+ };
+ 
+ } // namespace ns3
+diff --git a/model/nr-ue-mac.cc b/model/nr-ue-mac.cc
+index f98718cf8..3749f2b12 100644
+--- a/model/nr-ue-mac.cc
++++ b/model/nr-ue-mac.cc
+@@ -19,6 +19,7 @@
+ 
+ #include <ns3/boolean.h>
+ #include <ns3/log.h>
++#include <ns3/nstime.h>
+ #include <ns3/random-variable-stream.h>
+ #include <ns3/uinteger.h>
+ 
+@@ -214,6 +215,22 @@ NrUeMac::GetTypeId()
+                 UintegerValue(16),
+                 MakeUintegerAccessor(&NrUeMac::SetNumHarqProcess, &NrUeMac::GetNumHarqProcess),
+                 MakeUintegerChecker<uint8_t>())
++            .AddAttribute(
++                "RaResponseWindowStartOffset",
++                "NTN (TS 38.321 5.1.4, Rel-17): extra delay between the end of the RA preamble "
++                "and the start of ra-ResponseWindow, i.e. the UE-gNB RTT T_TA + k_mac. The window "
++                "end moves by the same amount. A RAR that arrives before the window opens is "
++                "ignored, as the UE is not monitoring the RA-RNTI then. Zero (default) is the "
++                "terrestrial behavior.",
++                TimeValue(Time(0)),
++                MakeTimeAccessor(&NrUeMac::m_raWindowStartOffset),
++                MakeTimeChecker(Time(0)))
++            .AddTraceSource("RarOutsideWindow",
++                            "A RAR addressed to this UE arrived while ra-ResponseWindow was not "
++                            "running (before the NTN start offset elapsed) and was ignored. "
++                            "Exports the IMSI.",
++                            MakeTraceSourceAccessor(&NrUeMac::m_rarOutsideWindowTrace),
++                            "ns3::NrUeMac::ImsiTracedCallback")
+             .AddTraceSource("UeMacRxedCtrlMsgsTrace",
+                             "Ue MAC Control Messages Traces.",
+                             MakeTraceSourceAccessor(&NrUeMac::m_macRxedCtrlMsgsTrace),
+@@ -1039,6 +1056,24 @@ NrUeMac::DoReceiveControlMessage(Ptr<NrControlMessage> msg)
+ 
+         m_macRxedCtrlMsgsTrace(m_currentSlot, GetCellId(), m_rnti, GetBwpId(), msg);
+ 
++        if (!m_waitingForRaResponse && m_raWindowStartOffset.IsStrictlyPositive() &&
++            m_noRaResponseReceivedEvent.IsPending())
++        {
++            Ptr<NrRarMessage> early = DynamicCast<NrRarMessage>(msg);
++            for (auto it = early->RarListBegin(); it != early->RarListEnd(); ++it)
++            {
++                if (it->rarPayload.raPreambleId == m_raPreambleId)
++                {
++                    NS_LOG_INFO("RAR for preamble " << +m_raPreambleId
++                                                    << " arrived before ra-ResponseWindow opened"
++                                                    << " (NTN start offset "
++                                                    << m_raWindowStartOffset.As(Time::MS)
++                                                    << "), ignored");
++                    m_rarOutsideWindowTrace(m_imsi);
++                    break;
++                }
++            }
++        }
+         if (m_waitingForRaResponse)
+         {
+             Ptr<NrRarMessage> rarMsg = DynamicCast<NrRarMessage>(msg);
+@@ -1159,8 +1194,17 @@ NrUeMac::SendRaPreamble(bool contention)
+     m_phySapProvider->SendRachPreamble(m_raPreambleId, m_raRnti);
+     NS_LOG_INFO(" Sent preamble id " << +m_raPreambleId
+                                      << " at: " << Simulator::Now().As(Time::MS));
+-    Time raWindowBegin = m_phySapProvider->GetSlotPeriod();
+-    Time raWindowEnd = m_phySapProvider->GetSlotPeriod() * (6 + m_rachConfig.raResponseWindowSize);
++    // NTN (TS 38.321 5.1.4, Rel-17): the window starts T_TA + k_mac after the
++    // preamble, so the UE does not monitor (or time out on) a RAR that cannot
++    // have arrived yet. Both window edges move by the offset; with a zero
++    // offset this is the terrestrial window, unchanged.
++    Time raWindowBegin = m_phySapProvider->GetSlotPeriod() + m_raWindowStartOffset;
++    Time raWindowEnd = m_phySapProvider->GetSlotPeriod() * (6 + m_rachConfig.raResponseWindowSize) +
++                       m_raWindowStartOffset;
++    if (m_raWindowStartOffset.IsStrictlyPositive())
++    {
++        m_waitingForRaResponse = false;
++    }
+     Simulator::Schedule(raWindowBegin, &NrUeMac::StartWaitingForRaResponse, this);
+     m_noRaResponseReceivedEvent =
+         Simulator::Schedule(raWindowEnd, &NrUeMac::RaResponseTimeout, this, contention);
+diff --git a/model/nr-ue-mac.h b/model/nr-ue-mac.h
+index 16e5a0376..8f90f2913 100644
+--- a/model/nr-ue-mac.h
++++ b/model/nr-ue-mac.h
+@@ -179,6 +179,12 @@ class NrUeMac : public Object
+                                                     const uint8_t bwpId,
+                                                     Ptr<NrControlMessage> ctrlMessage);
+ 
++    /**
++     * TracedCallback signature for per-UE MAC events identified by IMSI.
++     * \param [in] imsi the IMSI
++     */
++    typedef void (*ImsiTracedCallback)(const uint64_t imsi);
++
+     /**
+      * \brief Sets the number of HARQ processes.
+      * Called by the helper at the moment of UE attachment
+@@ -473,6 +479,10 @@ class NrUeMac : public Object
+     TracedCallback<uint64_t, bool, uint8_t, uint8_t> m_raResponseTimeoutTrace;
+ 
+     void StartWaitingForRaResponse();
++    /// NTN ra-ResponseWindow start offset, T_TA + k_mac (TS 38.321 5.1.4, Rel-17).
++    Time m_raWindowStartOffset{0};
++    /// RAR for this UE ignored because ra-ResponseWindow was not yet running.
++    TracedCallback<uint64_t> m_rarOutsideWindowTrace;
+     bool m_rachConfigured = false;                ///< is RACH configured?
+     NrUeCmacSapProvider::RachConfig m_rachConfig; ///< RACH configuration
+     uint8_t m_preambleTransmissionCounter{0};     ///< preamble transmission counter
