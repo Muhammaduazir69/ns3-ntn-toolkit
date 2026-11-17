@@ -7,6 +7,7 @@
 #include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/simulator.h"
+#include "ns3/nstime.h"
 
 #include <cmath>
 
@@ -44,7 +45,16 @@ ContactGraphScheduler::GetTypeId()
                                           "behaviour.",
                                           DoubleValue(80.0e3),
                                           MakeDoubleAccessor(&ContactGraphScheduler::m_islMinTangentAltM),
-                                          MakeDoubleChecker<double>(0.0));
+                                          MakeDoubleChecker<double>(0.0))
+                            .AddAttribute("TransitionResolution",
+                                          "Wave 6B: each tick looks one sampling interval ahead "
+                                          "and schedules contact up/down events at the crossing "
+                                          "instant, bisected to this resolution, instead of on "
+                                          "the sampling grid. 0 restores grid-quantized "
+                                          "transitions (pre-Wave-6B behavior).",
+                                          TimeValue(MilliSeconds(1)),
+                                          MakeTimeAccessor(&ContactGraphScheduler::m_resolution),
+                                          MakeTimeChecker(Seconds(0)));
     return tid;
 }
 
@@ -221,7 +231,8 @@ ContactGraphScheduler::PredictContactEndS(uint32_t a,
         if (!ContactUpAt(a, b, isl, t))
         {
             double hi = t;
-            while (hi - lo > 0.01)
+            const double res = m_resolution.IsZero() ? 0.01 : m_resolution.GetSeconds();
+            while (hi - lo > res)
             {
                 const double mid = 0.5 * (lo + hi);
                 (ContactUpAt(a, b, isl, mid) ? lo : hi) = mid;
@@ -315,6 +326,35 @@ ContactGraphScheduler::Tick()
         return;
     }
     const double t = Simulator::Now().GetSeconds();
+    if (m_resolution.IsZero())
+    {
+        // Legacy: transitions land on the sampling grid.
+        SamplePass(t);
+    }
+    else if (!m_lookaheadInit)
+    {
+        // The first tick establishes the contacts that are up at t = 0 on the
+        // grid (there is no earlier sample to bisect against), then looks ahead.
+        SamplePass(t);
+        m_lookaheadInit = true;
+        for (auto& c : m_gslCand)
+        {
+            c.projUp = c.up;
+        }
+        m_gslProj = m_gslState;
+        m_islProj = m_islState;
+        LookaheadPass(t, false);
+    }
+    else
+    {
+        LookaheadPass(t, true);
+    }
+    m_tickEvent = Simulator::Schedule(m_dt, &ContactGraphScheduler::Tick, this);
+}
+
+void
+ContactGraphScheduler::SamplePass(double t)
+{
 
     // P7: sparse GSL sampling. Elevation changes no faster than kMaxElevRate deg/s at any LEO altitude
     // used here (0.9 deg/s overhead at 460 km), so a satellite e degrees below the mask cannot cross it
@@ -457,9 +497,271 @@ ContactGraphScheduler::Tick()
             }
         }
     }
+}
 
-    m_tickEvent =
-        Simulator::Schedule(m_dt, &ContactGraphScheduler::Tick, this);
+
+// ---------------------------------------------------------------------------
+// Wave 6B: event-driven contact transitions.
+//
+// The sampler used to declare a contact up or down on the tick that first saw
+// it, so every transition was quantized to the sampling interval (0.5 s in the
+// route-lifetime study, 1 s by default) and routing reacted up to one interval
+// late. Hypatia (IMC 2020) shows a 1 s forwarding-state step misses path
+// changes for 6 percent of pairs against 0.4 percent at 100 ms. Here each tick
+// LOOKS AHEAD one horizon on the same ephemeris, and when a link's state at
+// the horizon differs from its projected state the crossing is bisected to
+// TransitionResolution and the up/down event is SCHEDULED at that instant.
+// Geometry updates of established links still fire on the tick, with the
+// geometry of the tick.
+// ---------------------------------------------------------------------------
+
+double
+ContactGraphScheduler::GslElevationAt(Ptr<Sgp4MobilityModel> mob,
+                                      double latDeg,
+                                      double lonDeg,
+                                      double altM,
+                                      double offsetS) const
+{
+    Vector p;
+    Vector v;
+    mob->GetEcefStateAt(Seconds(offsetS), p, v);
+    return ElevationDeg(p, latDeg, lonDeg, altM);
+}
+
+double
+ContactGraphScheduler::BisectCrossing(const std::function<bool(double)>& isNew, double horizonS) const
+{
+    // isNew(0) is false (old state), isNew(horizonS) is true (new state).
+    double lo = 0.0;
+    double hi = horizonS;
+    const double res = std::max(1e-6, m_resolution.GetSeconds());
+    while (hi - lo > res)
+    {
+        const double mid = 0.5 * (lo + hi);
+        (isNew(mid) ? hi : lo) = mid;
+    }
+    return hi;
+}
+
+void
+ContactGraphScheduler::EmitGsl(uint32_t sat, uint32_t gs, bool up, int candIdx)
+{
+    if (!m_running)
+    {
+        return;
+    }
+    const std::pair<uint32_t, uint32_t> key{sat, gs};
+    auto it = m_gslState.find(key);
+    const bool prev = (it == m_gslState.end()) ? false : it->second;
+    if (prev == up)
+    {
+        return;
+    }
+    m_gslState[key] = up;
+    if (candIdx >= 0)
+    {
+        m_gslCand[candIdx].up = up;
+    }
+    const auto& g = m_gss.at(gs);
+    Ptr<Sgp4MobilityModel> mob = m_sats.at(sat);
+    // Exact state at the crossing instant: GetEcefPosition() is cached on a
+    // 100 ms grain and would report the geometry of the grain start.
+    Vector p;
+    Vector vel;
+    mob->GetEcefStateAt(Seconds(0), p, vel);
+    const double elev = ElevationDeg(p, g.lat_deg, g.lon_deg, g.alt_m);
+    const double lat = g.lat_deg * M_PI / 180.0;
+    const double lon = g.lon_deg * M_PI / 180.0;
+    const double Ngs = kEarthRadiusM / std::sqrt(1.0 - kWgs84E2 * std::sin(lat) * std::sin(lat));
+    const Vector gsE((Ngs + g.alt_m) * std::cos(lat) * std::cos(lon),
+                     (Ngs + g.alt_m) * std::cos(lat) * std::sin(lon),
+                     (Ngs * (1.0 - kWgs84E2) + g.alt_m) * std::sin(lat));
+    const double range = CalculateDistance(p, gsE);
+    ContactEvent ev{Simulator::Now().GetSeconds(), sat, gs, false, up, range, elev};
+    ++m_eventDrivenTransitions;
+    if (up)
+    {
+        ++m_gslUp;
+        m_contactUp(ev);
+    }
+    else
+    {
+        ++m_gslDown;
+        m_contactDown(ev);
+    }
+}
+
+void
+ContactGraphScheduler::EmitIsl(uint32_t a, uint32_t b, bool up)
+{
+    if (!m_running)
+    {
+        return;
+    }
+    const std::pair<uint32_t, uint32_t> key{a, b};
+    auto it = m_islState.find(key);
+    const bool prev = (it == m_islState.end()) ? false : it->second;
+    if (prev == up)
+    {
+        return;
+    }
+    m_islState[key] = up;
+    Vector pa;
+    Vector pb;
+    Vector v;
+    m_sats.at(a)->GetEcefStateAt(Seconds(0), pa, v);
+    m_sats.at(b)->GetEcefStateAt(Seconds(0), pb, v);
+    const double range = CalculateDistance(pa, pb);
+    ContactEvent ev{Simulator::Now().GetSeconds(), a, b, true, up, range, 0.0};
+    ++m_eventDrivenTransitions;
+    if (up)
+    {
+        ++m_islUp;
+        m_contactUp(ev);
+    }
+    else
+    {
+        ++m_islDown;
+        m_contactDown(ev);
+    }
+}
+
+void
+ContactGraphScheduler::LookaheadPass(double t, bool publishUpdates)
+{
+    const double H = m_dt.GetSeconds();
+    constexpr double kMaxElevRate = 2.0; // deg/s, as in SamplePass (P7)
+
+    auto gslUpdate = [this](uint32_t sat, uint32_t gs, Ptr<Sgp4MobilityModel> mob, double lat,
+                            double lon, double alt, const Vector& gsE) {
+        const Vector p = mob->GetEcefPosition();
+        const double elev = ElevationDeg(p, lat, lon, alt);
+        ContactEvent ev{Simulator::Now().GetSeconds(), sat, gs, false, true,
+                        CalculateDistance(p, gsE), elev};
+        m_contactUpdate(ev);
+    };
+
+    for (size_t idx = 0; idx < m_gslCand.size(); ++idx)
+    {
+        auto& c = m_gslCand[idx];
+        if (publishUpdates && c.up)
+        {
+            gslUpdate(c.sat, c.gs, c.mob, c.latDeg, c.lonDeg, c.altM, c.gsEcef);
+        }
+        if (!c.projUp && t + H < c.nextCheck)
+        {
+            continue;
+        }
+        const double elevH = GslElevationAt(c.mob, c.latDeg, c.lonDeg, c.altM, H);
+        const double thr = c.projUp ? m_minElevDeg - m_gateHysteresisDeg : m_minElevDeg;
+        const bool visH = elevH >= thr;
+        if (!visH)
+        {
+            c.nextCheck = t + H + std::max(0.0, (m_minElevDeg - elevH) / kMaxElevRate - 0.2);
+        }
+        if (visH != c.projUp)
+        {
+            const double tStar = BisectCrossing(
+                [&](double off) {
+                    return (GslElevationAt(c.mob, c.latDeg, c.lonDeg, c.altM, off) >= thr) == visH;
+                },
+                H);
+            c.projUp = visH;
+            Simulator::Schedule(Seconds(tStar), &ContactGraphScheduler::EmitGsl, this, c.sat, c.gs,
+                                visH, static_cast<int>(idx));
+        }
+    }
+
+    if (m_gslCand.empty())
+    {
+        for (auto& gsIt : m_gss)
+        {
+            const auto& g = gsIt.second;
+            const double lat = g.lat_deg * M_PI / 180.0;
+            const double lon = g.lon_deg * M_PI / 180.0;
+            const double Ngs =
+                kEarthRadiusM / std::sqrt(1.0 - kWgs84E2 * std::sin(lat) * std::sin(lat));
+            const Vector gsE((Ngs + g.alt_m) * std::cos(lat) * std::cos(lon),
+                             (Ngs + g.alt_m) * std::cos(lat) * std::sin(lon),
+                             (Ngs * (1.0 - kWgs84E2) + g.alt_m) * std::sin(lat));
+            for (auto& satIt : m_sats)
+            {
+                const std::pair<uint32_t, uint32_t> key{satIt.first, gsIt.first};
+                auto st = m_gslState.find(key);
+                if (publishUpdates && st != m_gslState.end() && st->second)
+                {
+                    gslUpdate(satIt.first, gsIt.first, satIt.second, g.lat_deg, g.lon_deg, g.alt_m,
+                              gsE);
+                }
+                bool& proj = m_gslProj[key];
+                const double thr = proj ? m_minElevDeg - m_gateHysteresisDeg : m_minElevDeg;
+                const bool visH =
+                    GslElevationAt(satIt.second, g.lat_deg, g.lon_deg, g.alt_m, H) >= thr;
+                if (visH != proj)
+                {
+                    Ptr<Sgp4MobilityModel> mob = satIt.second;
+                    const double tStar = BisectCrossing(
+                        [&](double off) {
+                            return (GslElevationAt(mob, g.lat_deg, g.lon_deg, g.alt_m, off) >=
+                                    thr) == visH;
+                        },
+                        H);
+                    proj = visH;
+                    Simulator::Schedule(Seconds(tStar), &ContactGraphScheduler::EmitGsl, this,
+                                        satIt.first, gsIt.first, visH, -1);
+                }
+            }
+        }
+    }
+
+    // ISLs: on refresh ticks only (SetIslRefreshEvery), looking ahead to the
+    // next refresh tick, so a transition anywhere in between is still caught
+    // and placed at its own instant.
+    const bool islTick = (m_tickN++ % m_islEvery == 0);
+    if (!islTick)
+    {
+        return;
+    }
+    const double Hi = H * m_islEvery;
+    auto checkPair = [&](uint32_t a, uint32_t b) {
+        const std::pair<uint32_t, uint32_t> key{a, b};
+        auto st = m_islState.find(key);
+        if (publishUpdates && st != m_islState.end() && st->second)
+        {
+            const double range =
+                CalculateDistance(m_sats.at(a)->GetEcefPosition(), m_sats.at(b)->GetEcefPosition());
+            ContactEvent ev{Simulator::Now().GetSeconds(), a, b, true, true, range, 0.0};
+            m_contactUpdate(ev);
+        }
+        bool& proj = m_islProj[key];
+        const bool upH = ContactUpAt(a, b, true, Hi);
+        if (upH != proj)
+        {
+            const double tStar =
+                BisectCrossing([&](double off) { return ContactUpAt(a, b, true, off) == upH; }, Hi);
+            proj = upH;
+            Simulator::Schedule(Seconds(tStar), &ContactGraphScheduler::EmitIsl, this, a, b, upH);
+        }
+    };
+    if (!m_islCandidates.empty())
+    {
+        for (const auto& [a, b] : m_islCandidates)
+        {
+            checkPair(a, b);
+        }
+    }
+    else if (m_sats.size() >= 2)
+    {
+        for (auto a = m_sats.begin(); a != m_sats.end(); ++a)
+        {
+            auto b = a;
+            ++b;
+            for (; b != m_sats.end(); ++b)
+            {
+                checkPair(a->first, b->first);
+            }
+        }
+    }
 }
 
 } // namespace ntncon

@@ -33,6 +33,7 @@
 #include <ns3/object.h>
 #include <ns3/traced-callback.h>
 
+#include <functional>
 #include <map>
 #include <set>
 #include <utility>
@@ -166,8 +167,32 @@ class ContactGraphScheduler : public Object
     /// addition to the transition traces.
     TracedCallback<ContactEvent> m_contactUpdate;
 
+    /// Wave 6B: resolution of event-driven transitions (0 = on the grid).
+    void SetTransitionResolution(Time r) { m_resolution = r; }
+    Time GetTransitionResolution() const { return m_resolution; }
+    /// Elevation (deg) of an ECEF point seen from a geodetic station (WGS-84
+    /// normal), the predicate the GSL gate uses.
+    static double ElevationFromEcef(const Vector& satEcef, double latDeg, double lonDeg,
+                                    double altM = 0.0)
+    {
+        return ElevationDeg(satEcef, latDeg, lonDeg, altM);
+    }
+    /// Transitions emitted off the sampling grid at their bisected instant.
+    uint64_t EventDrivenTransitions() const { return m_eventDrivenTransitions; }
+    /// Sampling interval in use.
+    Time GetSamplingInterval() const { return m_dt; }
+
   private:
     void Tick();
+    /// One grid-sampled pass (the pre-Wave-6B Tick body).
+    void SamplePass(double t);
+    /// Wave 6B: geometry updates on the grid, transitions by look-ahead and bisection.
+    void LookaheadPass(double t, bool publishUpdates);
+    double GslElevationAt(Ptr<Sgp4MobilityModel> mob, double latDeg, double lonDeg, double altM,
+                          double offsetS) const;
+    double BisectCrossing(const std::function<bool(double)>& isNew, double horizonS) const;
+    void EmitGsl(uint32_t sat, uint32_t gs, bool up, int candIdx);
+    void EmitIsl(uint32_t a, uint32_t b, bool up);
 
     struct GsRecord
     {
@@ -223,6 +248,7 @@ class ContactGraphScheduler : public Object
         double altM{0.0};
         Vector gsEcef;
         bool up{false};
+        bool projUp{false}; //!< Wave 6B: state at the look-ahead horizon
         double nextCheck{0.0};
     };
     std::vector<GslCand> m_gslCand;
@@ -236,6 +262,12 @@ class ContactGraphScheduler : public Object
 
     bool m_running{false};
     EventId m_tickEvent;
+
+    Time m_resolution{MilliSeconds(1)}; //!< Wave 6B transition resolution
+    bool m_lookaheadInit{false};
+    std::map<std::pair<uint32_t, uint32_t>, bool> m_gslProj; //!< projected GSL states
+    std::map<std::pair<uint32_t, uint32_t>, bool> m_islProj; //!< projected ISL states
+    uint64_t m_eventDrivenTransitions{0};
 };
 
 } // namespace ntncon

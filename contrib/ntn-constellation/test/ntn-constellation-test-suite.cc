@@ -2805,6 +2805,129 @@ class ContactSchedulerPredictContactEndTest : public TestCase
     }
 };
 
+
+/// Wave 6B: contact transitions are event-driven. With a 1 s sampling grid the
+/// legacy sampler fires each up/down on the first tick that sees it, up to one
+/// tick late; the look-ahead sampler bisects the crossing to 1 ms and fires the
+/// event at that instant. Checked against the elevation of the satellite at the
+/// event time on the same SGP4 ephemeris (normal path), and that an emission
+/// pending when the scheduler stops is not delivered (failure path).
+class ContactSchedulerEventDrivenTransitionTest : public TestCase
+{
+  public:
+    ContactSchedulerEventDrivenTransitionTest()
+        : TestCase("Wave 6B: GSL transitions fire at the crossing instant, not on the tick")
+    {
+    }
+
+  private:
+    struct Run
+    {
+        Ptr<ContactGraphScheduler> cg;
+        std::map<uint32_t, Ptr<Sgp4MobilityModel>> sats;
+        std::vector<double> upErrDeg;   // elevation at the up event minus the up threshold
+        std::vector<double> downErrDeg; // elevation at the down event minus the down threshold
+    };
+
+    static void OnEv(Run* r, bool up, ContactEvent ev)
+    {
+        if (ev.is_isl || ev.timestamp_s <= 0.0)
+        {
+            return; // contacts already up at t = 0 are an initial state, not a crossing
+        }
+        Ptr<Sgp4MobilityModel> m = r->sats.at(ev.node_a);
+        Vector p;
+        Vector v;
+        m->GetEcefStateAt(Seconds(0), p, v); // exact, not the 100 ms position cache
+        const double el = ContactGraphScheduler::ElevationFromEcef(p, 53.0, 0.0);
+        const double thr = up ? 10.0 : 8.0;
+        (up ? r->upErrDeg : r->downErrDeg).push_back(el - thr);
+    }
+
+    static void Setup(Run& r, double resolutionS)
+    {
+        WalkerConfig cfg;
+        cfg.inclination_deg = 53.0;
+        cfg.total_sats = 11;
+        cfg.num_planes = 1;
+        cfg.phasing_f = 0;
+        cfg.altitude_km = 550.0;
+        cfg.epoch_unix_s = 1577836800.0;
+        auto elts = WalkerConstellation::BuildDelta(cfg);
+        r.cg = CreateObject<ContactGraphScheduler>();
+        r.cg->SetSamplingInterval(Seconds(1.0));
+        r.cg->SetMinElevationDeg(10.0);
+        r.cg->SetTransitionResolution(Seconds(resolutionS));
+        for (size_t i = 0; i < elts.size(); ++i)
+        {
+            Ptr<Sgp4MobilityModel> s = CreateObject<Sgp4MobilityModel>();
+            s->SetElements(elts[i]);
+            r.cg->RegisterSatellite(static_cast<uint32_t>(i + 1), s);
+            r.sats[static_cast<uint32_t>(i + 1)] = s;
+        }
+        r.cg->RegisterGroundStation(101, 53.0, 0.0);
+        r.cg->m_contactUp.ConnectWithoutContext(MakeBoundCallback(&OnEv, &r, true));
+        r.cg->m_contactDown.ConnectWithoutContext(MakeBoundCallback(&OnEv, &r, false));
+        r.cg->Start();
+    }
+
+    void DoRun() override
+    {
+        Run legacy;
+        Run exact;
+        Setup(legacy, 0.0);
+        Setup(exact, 1e-3);
+        Simulator::Stop(Seconds(6000.0));
+        Simulator::Run();
+        legacy.cg->Stop();
+        exact.cg->Stop();
+
+        NS_TEST_ASSERT_MSG_GT(exact.downErrDeg.size(), 0u, "at least one complete pass");
+        NS_TEST_ASSERT_MSG_EQ(exact.downErrDeg.size(), legacy.downErrDeg.size(),
+                              "the same passes are detected");
+        NS_TEST_ASSERT_MSG_GT(exact.cg->EventDrivenTransitions(), 0u, "events fired off the grid");
+        NS_TEST_ASSERT_MSG_EQ(legacy.cg->EventDrivenTransitions(), 0u, "legacy stays on the grid");
+        // A LEO at 550 km moves at most ~1 deg/s in elevation, so a 1 ms
+        // bisection places the event within ~0.002 deg of the threshold.
+        double worstExact = 0.0;
+        double worstLegacy = 0.0;
+        for (double e : exact.upErrDeg)
+        {
+            NS_TEST_EXPECT_MSG_GT_OR_EQ(e, -1e-9, "an up event is not before the threshold");
+            worstExact = std::max(worstExact, std::abs(e));
+        }
+        for (double e : exact.downErrDeg)
+        {
+            NS_TEST_EXPECT_MSG_LT_OR_EQ(e, 1e-9, "a down event is not before the threshold");
+            worstExact = std::max(worstExact, std::abs(e));
+        }
+        for (double e : legacy.upErrDeg)
+        {
+            worstLegacy = std::max(worstLegacy, std::abs(e));
+        }
+        for (double e : legacy.downErrDeg)
+        {
+            worstLegacy = std::max(worstLegacy, std::abs(e));
+        }
+        NS_TEST_ASSERT_MSG_LT(worstExact, 0.005, "event-driven transitions sit on the threshold");
+        NS_TEST_ASSERT_MSG_GT(worstLegacy, 10.0 * worstExact,
+                              "the 1 s grid places them measurably past it");
+        Simulator::Destroy();
+
+        // Failure path: an emission scheduled by the look-ahead but due after
+        // Stop() is not delivered.
+        Run stopped;
+        Setup(stopped, 1e-3);
+        const uint64_t before = stopped.upErrDeg.size() + stopped.downErrDeg.size();
+        Simulator::Schedule(Seconds(0.0005), [&stopped]() { stopped.cg->Stop(); });
+        Simulator::Stop(Seconds(6000.0));
+        Simulator::Run();
+        const uint64_t after = stopped.upErrDeg.size() + stopped.downErrDeg.size();
+        NS_TEST_ASSERT_MSG_EQ(after, before, "nothing is delivered after Stop()");
+        Simulator::Destroy();
+    }
+};
+
 /// Route lifetime (Paper 7): registered ISL candidates restrict the topology.
 ///
 /// Four satellites in one plane at 90 deg spacing are all mutually within a
@@ -3067,6 +3190,7 @@ class NtnConstellationTestSuite : public TestSuite
                     Duration::QUICK);
         AddTestCase(new ContactGraphRouterLifetimeAwarePathTest, Duration::QUICK);
         AddTestCase(new ContactSchedulerPredictContactEndTest, Duration::QUICK);
+        AddTestCase(new ContactSchedulerEventDrivenTransitionTest, Duration::QUICK);
         AddTestCase(new ContactSchedulerIslCandidateTest, Duration::QUICK);
         AddTestCase(new SatLinkAltitudeFrameCacheTest, Duration::QUICK);
     }

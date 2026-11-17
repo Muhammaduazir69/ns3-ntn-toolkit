@@ -107,7 +107,7 @@ struct State
     std::map<Edge, double> satCache; // link with no end within the horizon: time of that prediction
     double satRecheck{900.0};
     std::string policy;
-    double period{1.0};
+    double period{0.1}; // snap: Hypatia 100 ms forwarding-state step (Wave 6B; was 1 s)
     double detect{0.05};
     double trigger{25.0};                         // elev policy: switch when an end satellite sinks below this (deg)
     std::vector<Ptr<Sgp4MobilityModel>> satMob;   // satellite mobilities, by node index
@@ -1067,7 +1067,15 @@ main(int argc, char* argv[])
     double lonB = -74.0;
     double minElev = 25.0;
     double duration = 600.0;
-    double tick = 0.5;
+    // Wave 6B: routing state at <= 100 ms (Hypatia, IMC 2020: a 1 s step
+    // misses path changes for 6 % of pairs, 100 ms for 0.4 %). The sampler
+    // ticks every 100 ms, ISL ranges (hence link delays) refresh every 100 ms,
+    // and contact transitions are event-driven: bisected to --transitionResMs
+    // and fired at their own instant instead of on the tick that saw them.
+    // --tick=0.5 --islRefresh=1 --transitionResMs=0 reproduces the pre-Wave-6B
+    // configuration.
+    double tick = 0.1;
+    double transitionResMs = 1.0;
     double rate = 20.0;
     double startOffset = 0.0;
     double islCapKm = 5000.0;
@@ -1088,6 +1096,10 @@ main(int argc, char* argv[])
     cmd.AddValue("trigger", "elev policy: switch when an end satellite sinks below this elevation (deg)", g.trigger);
     cmd.AddValue("duration", "simulated time (s)", duration);
     cmd.AddValue("tick", "contact sampling interval (s)", tick);
+    cmd.AddValue("transitionResMs",
+                 "contact transitions bisected to this resolution and fired at their instant (ms); "
+                 "0 = on the sampling grid (pre-Wave-6B)",
+                 transitionResMs);
     cmd.AddValue("rate", "UDP packets per second", rate);
     cmd.AddValue("startOffset", "seconds after the element epoch at which the run starts", startOffset);
     cmd.AddValue("islCapKm", "ISL range cap (km)", islCapKm);
@@ -1118,7 +1130,7 @@ main(int argc, char* argv[])
     cmd.AddValue("trackSamples", "track: readings over the arc, fitted by least squares", g.trackSamples);
     cmd.AddValue("floorGrid", "elevb: grid of the elevation floor (deg)", g.floorGrid);
     cmd.AddValue("logEvents", "print decisions, installs and breaks to stderr", g.logEvents);
-    double islRefresh = 1.0;
+    double islRefresh = 0.1;
     cmd.AddValue("islRefresh", "refresh interval of inter-satellite ranges (s), 0 = every tick", islRefresh);
     std::string tleFile, edgeFile;
     double epochUnix = 1792800000.0;
@@ -1151,6 +1163,7 @@ main(int argc, char* argv[])
     std::vector<Ptr<Sgp4MobilityModel>> sats;
     g.sched = CreateObject<ContactGraphScheduler>();
     g.sched->SetSamplingInterval(Seconds(tick));
+    g.sched->SetTransitionResolution(Seconds(transitionResMs * 1e-3));
     g.sched->SetMinElevationDeg(minElev);
     g.sched->SetMaxIslRangeM(islCapKm * 1e3);
     for (uint32_t k = 0; k < g.n; ++k)
@@ -1374,9 +1387,10 @@ main(int argc, char* argv[])
                         &Recompute);
     if (g.policy == "elev" || g.policy == "elevb" || g.policy == "track")
     {
-        Simulator::Schedule(Seconds(2 * tick + 0.5), &ElevCheck, 0.5);
+        Simulator::Schedule(Seconds(2 * tick + tick), &ElevCheck, tick);
     }
-    Simulator::Schedule(Seconds(t0), &ProbePath, 0.5);
+    // Path health is sampled on the routing-state step (was a fixed 0.5 s).
+    Simulator::Schedule(Seconds(t0), &ProbePath, tick);
     // Count only from the start of traffic, so the rates per hour are over the measured span.
     Simulator::Schedule(Seconds(t0), []() {
         g.changes = g.pathBreaks = g.computations = g.dijkstra = g.predictions = g.forced = 0;
@@ -1419,7 +1433,10 @@ main(int argc, char* argv[])
        << ",\"no_admissible\":" << g.noAdmissible << ",\"track_bad\":" << g.trackBad
        << ",\"fallback_share\":" << (g.mergedDecisions ? static_cast<double>(g.fallbackUsed) / g.mergedDecisions : NAN)
        << ",\"route_ms_mean\":" << (g.routeLenN ? 1e3 * g.routeLenSum / g.routeLenN / kC : NAN)
-       << ",\"propagator\":\"" << (sats[0]->IsUsingSgp4() ? "sgp4" : "kepler-j2") << "\"";
+       << ",\"propagator\":\"" << (sats[0]->IsUsingSgp4() ? "sgp4" : "kepler-j2") << "\""
+       << ",\"tick_s\":" << tick << ",\"isl_refresh_s\":" << islRefresh
+       << ",\"transition_res_ms\":" << transitionResMs
+       << ",\"event_driven_transitions\":" << g.sched->EventDrivenTransitions();
     js << ",\"policy\":\"" << g.policy << "\",\"eps\":" << g.eps << ",\"period\":" << g.period
        << ",\"tacq\":" << g.tAcq << ",\"guard\":" << g.guard << ",\"hold\":" << g.hold
        << ",\"pred_sigma_km\":" << predSigmaKm << ",\"cross_lat\":" << crossLat
