@@ -607,6 +607,8 @@ const KpmField kFields[] = {
     {"DRB.RlcSduDelayDl", &E2KpmReport::rlcSduDelayDl_ms, 10.0},  // 0.1 ms
     {"RRU.PrbUsedDl", &E2KpmReport::prbUsedDl, 1.0},
     {"RRU.PrbAvailDl", &E2KpmReport::prbAvailDl, 1.0},
+    // TS 28.552 V20.4.0 5.1.1.2.1 DL Total PRB Usage, percent (Wave 6B)
+    {"RRU.PrbDl", &E2KpmReport::prbUtilization, 100.0},
     {"TB.TotNbrDl", &E2KpmReport::tbTotDl, 1.0},
     {"TB.ErrTotNbrDl", &E2KpmReport::tbErrDl, 1.0},
     {"L1M.SS-RSRP", &E2KpmReport::rsrp_dBm, 1.0},

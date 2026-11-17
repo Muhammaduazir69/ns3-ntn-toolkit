@@ -29,6 +29,8 @@
 
 #include <functional>
 #include <map>
+#include <ostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -62,6 +64,37 @@ struct A1NtnPolicy : public A1Policy
     // QoS enforcement
     double maxHandoverRate;        //!< Max HO/min for this scope
     double minCoverageOverlap;     //!< Min beam overlap fraction for HO
+};
+
+// ============================================================================
+//  A1 policy status (Wave 6B)
+// ============================================================================
+
+/// O-RAN A1TD v09.00 (ETSI TS 103 988) 6.2.2.2: enforceStatus of a policy.
+enum class A1EnforceStatus : uint8_t
+{
+    ENFORCED = 0,
+    NOT_ENFORCED = 1,
+};
+/// A1TD 6.2.2.3: enforceReason, present when NOT_ENFORCED (NONE otherwise).
+enum class A1EnforceReason : uint8_t
+{
+    NONE = 0,
+    SCOPE_NOT_APPLICABLE = 1,     //!< the scope names nothing this Near-RT RIC manages
+    STATEMENT_NOT_APPLICABLE = 2, //!< no function here can act on the statement
+    OTHER_REASON = 3,             //!< e.g. arrived after validUntil, or lapsed
+};
+const char* A1EnforceStatusName(A1EnforceStatus s);
+const char* A1EnforceReasonName(A1EnforceReason r);
+
+/// One status report as received by the Non-RT RIC.
+struct A1PolicyStatusRecord
+{
+    uint32_t policyId{0};
+    A1EnforceStatus status{A1EnforceStatus::NOT_ENFORCED};
+    A1EnforceReason reason{A1EnforceReason::OTHER_REASON};
+    Time reportedAt; //!< when the Near-RT RIC issued it
+    Time receivedAt; //!< when the Non-RT RIC got it (A1 delay later)
 };
 
 // ============================================================================
@@ -125,6 +158,24 @@ class OranNtnA1PolicyManager : public Object
                                std::string status);
 
     void SetPolicyFeedbackCallback(PolicyFeedbackCallback cb);
+
+    /**
+     * \brief Wave 6B: receive an A1TD policy status (enforceStatus and
+     *        enforceReason) from the Near-RT RIC.
+     *
+     * Stores the latest status per policy, the full history, and the time
+     * each policy spent ENFORCED, and forwards to the legacy feedback path
+     * (m_policyEnforced trace, violation count, PolicyFeedbackCallback with
+     * the reason name as the status string).
+     */
+    void HandlePolicyStatus(A1PolicyStatusRecord rec);
+    /// Latest status known for \p policyId (NOT_ENFORCED/OTHER_REASON if none).
+    A1PolicyStatusRecord GetPolicyStatus(uint32_t policyId) const;
+    const std::vector<A1PolicyStatusRecord>& GetStatusHistory() const { return m_statusHistory; }
+    /// Share of time since its first status report that \p policyId was ENFORCED.
+    double GetEnforcedTimeShare(uint32_t policyId) const;
+    /// CSV: policy_id,reported_s,received_s,enforce_status,enforce_reason
+    void WritePolicyStatusCsv(std::ostream& os) const;
 
     // ---- NTN-specific ----
     /**
@@ -197,6 +248,15 @@ class OranNtnA1PolicyManager : public Object
     PolicyFeedbackCallback m_feedbackCb;
 
     uint32_t m_violationCount;
+
+    struct StatusTrack
+    {
+        A1PolicyStatusRecord last;
+        Time first;
+        Time enforcedAccum;
+    };
+    std::map<uint32_t, StatusTrack> m_status;
+    std::vector<A1PolicyStatusRecord> m_statusHistory;
 };
 
 // ============================================================================
@@ -246,6 +306,25 @@ class OranNtnA1Adapter : public Object
     typedef Callback<void, uint32_t, bool, std::string> FeedbackCallback;
     void SetFeedbackCallback(FeedbackCallback cb);
 
+    // ---- Wave 6B: A1TD policy status ----
+    /// Where status reports go (the Non-RT RIC), and the A1 delay back to it.
+    typedef Callback<void, A1PolicyStatusRecord> StatusCallback;
+    void SetStatusCallback(StatusCallback cb) { m_statusCb = cb; }
+    void SetFeedbackDelay(Time d) { m_feedbackDelay = d; }
+    Time GetFeedbackDelay() const { return m_feedbackDelay; }
+    /// Scopes this Near-RT RIC manages ("satellite:<id>", "slice:<id>", ...).
+    /// "global" always applies. With none registered every scope applies
+    /// (the pre-Wave-6B behavior).
+    void AddManagedScope(const std::string& scope) { m_scopes.insert(scope); }
+    /// Policy types some function here can enforce. With none registered
+    /// every statement applies (the pre-Wave-6B behavior).
+    void AddSupportedPolicyType(A1PolicyType t) { m_types.insert(static_cast<uint8_t>(t)); }
+    /// Evaluate \p p as it arrives: ENFORCED, or NOT_ENFORCED with a reason.
+    std::pair<A1EnforceStatus, A1EnforceReason> Evaluate(const A1NtnPolicy& p) const;
+    /// Issue a status report for \p policyId (delivered after FeedbackDelay).
+    void ReportPolicyStatus(uint32_t policyId, A1EnforceStatus s, A1EnforceReason r);
+    uint64_t GetStatusReportsSent() const { return m_statusSent; }
+
     TracedCallback<A1NtnPolicy> m_policyReceived;
     TracedCallback<uint32_t, bool> m_enforcementReported;
 
@@ -258,6 +337,15 @@ class OranNtnA1Adapter : public Object
 
     std::map<uint32_t, A1NtnPolicy> m_activePolicies;
     FeedbackCallback m_feedbackCb;
+    /// Lapse at validUntil: the policy stops being enforced and says so.
+    void OnPolicyLapse(uint32_t policyId);
+
+    StatusCallback m_statusCb;
+    Time m_feedbackDelay{Seconds(0)};
+    std::set<std::string> m_scopes;
+    std::set<uint8_t> m_types;
+    std::map<uint32_t, EventId> m_lapseEvents;
+    uint64_t m_statusSent{0};
 };
 
 } // namespace ns3

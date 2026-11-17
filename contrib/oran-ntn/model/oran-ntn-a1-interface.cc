@@ -208,6 +208,77 @@ OranNtnA1PolicyManager::SetPolicyFeedbackCallback(PolicyFeedbackCallback cb)
 }
 
 void
+OranNtnA1PolicyManager::HandlePolicyStatus(A1PolicyStatusRecord rec)
+{
+    auto it = m_status.find(rec.policyId);
+    if (it == m_status.end())
+    {
+        StatusTrack t;
+        t.last = rec;
+        t.first = rec.reportedAt;
+        m_status[rec.policyId] = t;
+    }
+    else
+    {
+        StatusTrack& t = it->second;
+        if (t.last.status == A1EnforceStatus::ENFORCED)
+        {
+            t.enforcedAccum += rec.reportedAt - t.last.reportedAt;
+        }
+        t.last = rec;
+    }
+    m_statusHistory.push_back(rec);
+    HandlePolicyFeedback(rec.policyId,
+                         rec.status == A1EnforceStatus::ENFORCED,
+                         rec.status == A1EnforceStatus::ENFORCED ? "ENFORCED"
+                                                                 : A1EnforceReasonName(rec.reason));
+}
+
+A1PolicyStatusRecord
+OranNtnA1PolicyManager::GetPolicyStatus(uint32_t policyId) const
+{
+    auto it = m_status.find(policyId);
+    if (it == m_status.end())
+    {
+        A1PolicyStatusRecord none;
+        none.policyId = policyId;
+        return none;
+    }
+    return it->second.last;
+}
+
+double
+OranNtnA1PolicyManager::GetEnforcedTimeShare(uint32_t policyId) const
+{
+    auto it = m_status.find(policyId);
+    if (it == m_status.end())
+    {
+        return 0.0;
+    }
+    const StatusTrack& t = it->second;
+    const Time now = Simulator::Now();
+    Time enforced = t.enforcedAccum;
+    if (t.last.status == A1EnforceStatus::ENFORCED)
+    {
+        enforced += now - t.last.reportedAt;
+    }
+    const Time span = now - t.first;
+    return span > Time() ? enforced.GetSeconds() / span.GetSeconds()
+                         : (t.last.status == A1EnforceStatus::ENFORCED ? 1.0 : 0.0);
+}
+
+void
+OranNtnA1PolicyManager::WritePolicyStatusCsv(std::ostream& os) const
+{
+    os << "policy_id,reported_s,received_s,enforce_status,enforce_reason\n";
+    for (const auto& r : m_statusHistory)
+    {
+        os << r.policyId << "," << r.reportedAt.GetSeconds() << "," << r.receivedAt.GetSeconds()
+           << "," << A1EnforceStatusName(r.status) << "," << A1EnforceReasonName(r.reason) << "\n";
+    }
+}
+
+void
 OranNtnA1PolicyManager::GenerateOrbitAwarePolicies(uint32_t numPlanes,
                                                      uint32_t satsPerPlane,
                                                      double inclinationDeg,
@@ -414,7 +485,98 @@ OranNtnA1Adapter::DoDispose()
 {
     m_activePolicies.clear();
     m_feedbackCb = MakeNullCallback<void, uint32_t, bool, std::string>();
+    m_statusCb = MakeNullCallback<void, A1PolicyStatusRecord>();
+    for (auto& [id, ev] : m_lapseEvents)
+    {
+        ev.Cancel();
+    }
+    m_lapseEvents.clear();
     Object::DoDispose();
+}
+
+// ---------------------------------------------------------------------------
+// Wave 6B: A1TD policy status (enforceStatus / enforceReason)
+//
+// The adapter used to accept every policy silently and the only feedback path,
+// ReportEnforcement(bool, free-text string), was called by nothing in the
+// toolkit, so the Non-RT RIC never learned whether a policy it issued was being
+// enforced, and a dataset could not show a closed policy loop. Each arriving
+// policy is now evaluated against what this Near-RT RIC manages and can do,
+// and an A1TD status (ENFORCED, or NOT_ENFORCED with SCOPE_NOT_APPLICABLE /
+// STATEMENT_NOT_APPLICABLE / OTHER_REASON) travels back over A1 with the A1
+// delay. A policy that lapses at its validUntil reports NOT_ENFORCED too.
+// ---------------------------------------------------------------------------
+
+const char*
+A1EnforceStatusName(A1EnforceStatus s)
+{
+    return s == A1EnforceStatus::ENFORCED ? "ENFORCED" : "NOT_ENFORCED";
+}
+
+const char*
+A1EnforceReasonName(A1EnforceReason r)
+{
+    switch (r)
+    {
+    case A1EnforceReason::NONE:
+        return "";
+    case A1EnforceReason::SCOPE_NOT_APPLICABLE:
+        return "SCOPE_NOT_APPLICABLE";
+    case A1EnforceReason::STATEMENT_NOT_APPLICABLE:
+        return "STATEMENT_NOT_APPLICABLE";
+    case A1EnforceReason::OTHER_REASON:
+        return "OTHER_REASON";
+    }
+    return "OTHER_REASON";
+}
+
+std::pair<A1EnforceStatus, A1EnforceReason>
+OranNtnA1Adapter::Evaluate(const A1NtnPolicy& p) const
+{
+    if (!IsLive(p))
+    {
+        return {A1EnforceStatus::NOT_ENFORCED, A1EnforceReason::OTHER_REASON};
+    }
+    if (!m_scopes.empty() && p.scope != "global" && !p.scope.empty() && !m_scopes.count(p.scope))
+    {
+        return {A1EnforceStatus::NOT_ENFORCED, A1EnforceReason::SCOPE_NOT_APPLICABLE};
+    }
+    if (!m_types.empty() && !m_types.count(static_cast<uint8_t>(p.type)))
+    {
+        return {A1EnforceStatus::NOT_ENFORCED, A1EnforceReason::STATEMENT_NOT_APPLICABLE};
+    }
+    return {A1EnforceStatus::ENFORCED, A1EnforceReason::NONE};
+}
+
+void
+OranNtnA1Adapter::ReportPolicyStatus(uint32_t policyId, A1EnforceStatus s, A1EnforceReason r)
+{
+    ++m_statusSent;
+    m_enforcementReported(policyId, s == A1EnforceStatus::ENFORCED);
+    if (m_statusCb.IsNull())
+    {
+        return;
+    }
+    A1PolicyStatusRecord rec;
+    rec.policyId = policyId;
+    rec.status = s;
+    rec.reason = (s == A1EnforceStatus::ENFORCED) ? A1EnforceReason::NONE : r;
+    rec.reportedAt = Simulator::Now();
+    // A1 back to the Non-RT RIC costs the same leg as the policy did.
+    Simulator::Schedule(m_feedbackDelay, [cb = m_statusCb, rec]() mutable {
+        rec.receivedAt = Simulator::Now();
+        cb(rec);
+    });
+}
+
+void
+OranNtnA1Adapter::OnPolicyLapse(uint32_t policyId)
+{
+    m_lapseEvents.erase(policyId);
+    if (m_activePolicies.erase(policyId))
+    {
+        ReportPolicyStatus(policyId, A1EnforceStatus::NOT_ENFORCED, A1EnforceReason::OTHER_REASON);
+    }
 }
 
 void
@@ -425,16 +587,42 @@ OranNtnA1Adapter::HandleIncomingPolicy(A1NtnPolicy policy)
     // ORAN-31: a policy that arrives after its validUntil is not activated. A
     // feeder outage can hold an A1 message long enough for its lease to lapse
     // in transit, and activating it on arrival would enforce an expired intent.
+    auto lapse = m_lapseEvents.find(policy.policyId);
+    if (lapse != m_lapseEvents.end())
+    {
+        lapse->second.Cancel();
+        m_lapseEvents.erase(lapse);
+    }
     if (policy.active && !IsLive(policy))
     {
         m_activePolicies.erase(policy.policyId);
         NS_LOG_INFO("A1 Adapter: Rejected policy " << policy.policyId
                     << " (arrived after validUntil)");
+        ReportPolicyStatus(policy.policyId, A1EnforceStatus::NOT_ENFORCED,
+                           A1EnforceReason::OTHER_REASON);
     }
     else if (policy.active)
     {
-        m_activePolicies[policy.policyId] = policy;
-        NS_LOG_INFO("A1 Adapter: Activated policy " << policy.policyId);
+        const auto [st, why] = Evaluate(policy);
+        if (st == A1EnforceStatus::ENFORCED)
+        {
+            m_activePolicies[policy.policyId] = policy;
+            NS_LOG_INFO("A1 Adapter: Activated policy " << policy.policyId);
+            if (policy.validUntil > Seconds(0))
+            {
+                m_lapseEvents[policy.policyId] =
+                    Simulator::Schedule(policy.validUntil - Simulator::Now(),
+                                        &OranNtnA1Adapter::OnPolicyLapse, this, policy.policyId);
+            }
+        }
+        else
+        {
+            // Not applicable here: not stored, so no xApp acts on it.
+            m_activePolicies.erase(policy.policyId);
+            NS_LOG_INFO("A1 Adapter: policy " << policy.policyId << " NOT_ENFORCED, "
+                        << A1EnforceReasonName(why));
+        }
+        ReportPolicyStatus(policy.policyId, st, why);
     }
     else
     {

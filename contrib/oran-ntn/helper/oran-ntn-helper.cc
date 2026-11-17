@@ -116,6 +116,10 @@ OranNtnHelper::ConnectA1Interface(Ptr<OranNtnNearRtRic> nearRtRic,
     // Near-RT RIC sends enforcement feedback back to Non-RT RIC
     a1Adapter->SetFeedbackCallback(
         MakeCallback(&OranNtnA1PolicyManager::HandlePolicyFeedback, nonRtRic));
+    // Wave 6B: A1TD policy status (enforceStatus / enforceReason), with the
+    // same A1 delay back as the policy took forward.
+    a1Adapter->SetStatusCallback(MakeCallback(&OranNtnA1PolicyManager::HandlePolicyStatus, nonRtRic));
+    a1Adapter->SetFeedbackDelay(nonRtRic->GetDeliveryDelay());
 
     NS_LOG_INFO("OranNtnHelper: Connected A1 interface between Non-RT RIC and Near-RT RIC");
 }

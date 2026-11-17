@@ -5,6 +5,7 @@
 #include "oran-ntn-kpm-canonical-ids.h"
 
 #include <sstream>
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -32,6 +33,7 @@ CanonicalMetricIds()
         kL1mRsSinrMean,
         kTbTotNbrDl,
         kTbErrTotNbrDl,
+        kRruPrbDl, // Wave 6B: appended, so existing indices keep their meaning
     };
     return ids;
 }
@@ -215,6 +217,26 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
             MakeMeasurement(kpm::kTbTotNbrDl, 0.0, /*present=*/false, base));
         out.push_back(
             MakeMeasurement(kpm::kTbErrTotNbrDl, r.harqBler, /*present=*/false, base));
+    }
+
+    // RRU.PrbDl (TS 28.552 V20.4.0 5.1.1.2.1): DL total PRB usage in percent,
+    // a single integer 0..100 = round(100 x used / available) over the period.
+    {
+        double pct = std::nan("");
+        if (std::isfinite(r.prbUsedDl) && r.prbAvailDl > 0.0)
+        {
+            pct = 100.0 * r.prbUsedDl / r.prbAvailDl;
+        }
+        else if (std::isfinite(r.prbUtilization))
+        {
+            pct = 100.0 * r.prbUtilization;
+        }
+        const bool ok = std::isfinite(pct);
+        out.push_back(MakeMeasurement(kpm::kRruPrbDl,
+                                      ok ? std::round(std::clamp(pct, 0.0, 100.0)) : 0.0,
+                                      ok,
+                                      base,
+                                      prbProv));
     }
 
     return out;

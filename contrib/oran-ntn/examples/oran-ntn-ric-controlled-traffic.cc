@@ -61,6 +61,25 @@
 // RIC's steps are CPU-only and the downlink still costs exactly one
 // FeederLinkDelay, so KPIs with --latencyProbe=1 match the default run.
 //
+// E2 PATH PER HOP AND A1 POLICY STATUS (Wave 6B)
+// ---------------------------------------------
+// The one-way E2 delay is an OranNtnE2Path refreshed every 100 ms from live
+// geometry: with --payload=regenerative (default, gNB on board, TS 38.300
+// 16.14) and --ricSite=ground, E2 crosses --islHops in-plane ISLs (real SGP4
+// neighbors of the serving satellite) to the satellite that sees the RIC's
+// gateway, then that feeder link, then --terrestrialMs of backhaul and
+// --e2ProcessingUs of E2 termination. --payload=transparent --ricSite=onboard
+// is the reverse placement (gNB at the gateway, space RIC on the satellite):
+// E2 crosses the feeder link only. e2_loop_budget.csv in --outputDir reports
+// each hop's one-way delay and its share of the loop (twice one-way), the
+// measured wait for the RIC tick, and the loop total. With --islHops=0 and no
+// terrestrial/processing terms the path is the single feeder hop of the
+// pre-Wave-6B runs, refreshed every 100 ms instead of every 1 s.
+// A Non-RT RIC (SMO) sends three A1 policies over --a1DelayMs; the Near-RT RIC
+// answers each with an A1TD status (ENFORCED, or NOT_ENFORCED with
+// SCOPE_NOT_APPLICABLE / STATEMENT_NOT_APPLICABLE / OTHER_REASON), written to
+// a1_policy_status.csv; the beam policy lapses at --a1ValidS and reports so.
+//
 // Quick test:  --simSeconds=40 --xapp=1
 #include "ns3/core-module.h"
 #include "ns3/mobility-module.h"
@@ -68,7 +87,9 @@
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/ntn-static-extra-loss-model.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/oran-ntn-a1-interface.h"
 #include "ns3/oran-ntn-e2-interface.h"
+#include "ns3/oran-ntn-e2-path.h"
 #include "ns3/oran-ntn-flexric-types.h"
 #include "ns3/oran-ntn-kpm-canonical-ids.h"
 #include "ns3/oran-ntn-loop-latency-probe.h"
@@ -88,6 +109,7 @@
 #include <cmath>
 #include <cstdio>
 #include <deque>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <string>
@@ -128,6 +150,9 @@ Ptr<OranNtnLoopLatencyProbe> g_probe;      //!< null unless --latencyProbe=1
 Ptr<OranNtnNearRtRic> g_ric;               //!< real RIC, only under the probe
 Ptr<OranNtnXappBase> g_ricXapp;            //!< RIC-registered decision owner
 Ptr<OranNtnServiceModelKpm> g_smKpm;       //!< off-path E2SM-KPM encoder
+// Wave 6B: measurement age at the xApp (uplink E2 path + RIC tick wait)
+double g_ageSumMs = 0.0;
+uint64_t g_ageN = 0;
 /// Measurement instants of actions accepted for delivery but not yet actuated.
 /// FIFO: the downlink feeder delay is constant, so actions actuate in the
 /// order they were routed. Popped in ApplyBeamRcAction to close the loop with
@@ -291,6 +316,8 @@ EncodeKpmOffPath(const E2KpmReport& r)
 void
 PrecoderXapp(E2Indication ind)
 {
+    g_ageSumMs += (Simulator::Now() - ind.originalTimestamp).GetSeconds() * 1e3;
+    ++g_ageN;
     if (!g_xappEnabled)
     {
         return; // beam starts (and stays) disengaged
@@ -417,7 +444,28 @@ main(int argc, char* argv[])
                  "so the RIC stages are measured, not estimated)",
                  latencyProbe);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    std::string payload = "regenerative";
+    std::string ricSite = "ground";
+    uint32_t islHops = 0;
+    double terrestrialMs = 0.0;
+    double e2ProcessingUs = 0.0;
+    double a1DelayMs = 10.0;
+    double a1ValidS = 0.0;
+    cmd.AddValue("payload", "regenerative (gNB on board) | transparent (gNB at the gateway)", payload);
+    cmd.AddValue("ricSite", "ground (RIC behind the gateway) | onboard (space RIC)", ricSite);
+    cmd.AddValue("islHops", "regenerative + ground RIC: ISLs from the serving satellite to the one "
+                 "that sees the RIC gateway", islHops);
+    cmd.AddValue("terrestrialMs", "gateway -> RIC site backhaul, one way (ms)", terrestrialMs);
+    cmd.AddValue("e2ProcessingUs", "E2 termination processing per direction (us)", e2ProcessingUs);
+    cmd.AddValue("a1DelayMs", "A1 delay Non-RT RIC <-> Near-RT RIC, each way (ms)", a1DelayMs);
+    cmd.AddValue("a1ValidS", "validUntil of the beam A1 policy (s), 0 = simSeconds/2", a1ValidS);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_UNLESS(payload == "regenerative" || payload == "transparent", "--payload");
+    NS_ABORT_MSG_UNLESS(ricSite == "ground" || ricSite == "onboard", "--ricSite");
+    NS_ABORT_MSG_IF(payload == "transparent" && ricSite == "ground",
+                    "transparent + ground RIC: the gNB and RIC are both on the ground, E2 does "
+                    "not cross the space segment");
+    NS_ABORT_MSG_IF(ricSite == "onboard" && islHops > 0, "--islHops applies to a ground RIC");
 
     g_sinrThreshDb = sinrThreshDb;
     g_xappEnabled = xappEnabled;
@@ -476,6 +524,28 @@ main(int argc, char* argv[])
     Ptr<ConstantPositionMobilityModel> gwMob = CreateObject<ConstantPositionMobilityModel>();
     gwMob->SetPosition(Vector(500.0e3, 0.0, 0.0));
 
+    // Wave 6B: in-plane neighbors for the ISL hops, on their own SGP4 orbits
+    // and in the same ENU frame; the RIC gateway then sits under the last one.
+    std::vector<Ptr<MobilityModel>> islChain = {satEnu};
+    Ptr<ConstantPositionMobilityModel> ricGwMob = gwMob;
+    for (uint32_t h = 1; h <= islHops; ++h)
+    {
+        Ptr<ns3::ntncon::Sgp4MobilityModel> nb = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+        nb->SetElements(elements[h % elements.size()]);
+        Ptr<NtnEnuProjectionMobilityModel> nbEnu = CreateObject<NtnEnuProjectionMobilityModel>();
+        nbEnu->SetSource(nb);
+        nbEnu->SetReference(subLat, subLon, 0.0);
+        islChain.push_back(nbEnu);
+        if (h == islHops)
+        {
+            double la, lo, al;
+            nb->GetGeodetic(la, lo, al);
+            ricGwMob = CreateObject<ConstantPositionMobilityModel>();
+            ricGwMob->SetPosition(
+                ntngeo::EcefToEnu(ntngeo::GeodeticToEcef(la, lo, 0.0), subLat, subLon, 0.0));
+        }
+    }
+
     NtnRealStackHelper rs;
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
                                          : NtnRealStackHelper::RadioBackend::Nr);
@@ -520,15 +590,35 @@ main(int argc, char* argv[])
     NS_ABORT_MSG_IF(feeder0 == Seconds(0),
                     "CVC-14: the feeder geometry is not wired, so the loop latency would be a "
                     "constant again; SetFeederGeometry must precede this");
-    g_e2->SetAttribute("FeederLinkDelay", TimeValue(feeder0));
-    // And re-evaluate it as the satellite recedes, or the first sample becomes
-    // the constant all over again.
-    rs.RegisterPeriodicCallback(Seconds(1.0), [&rs](Time) {
-        if (g_e2)
+    // Wave 6B: the E2 transport delay is the whole path, hop by hop, from live
+    // geometry every 100 ms (it was the serving feeder slant, every 1 s).
+    Ptr<OranNtnE2Path> e2Path = CreateObject<OranNtnE2Path>();
+    if (ricSite == "ground")
+    {
+        for (size_t h = 0; h + 1 < islChain.size(); ++h)
         {
-            g_e2->SetAttribute("FeederLinkDelay", TimeValue(rs.ComputeFeederLinkDelay()));
+            e2Path->AddGeometricHop("isl" + std::to_string(h + 1), OranNtnE2Path::HopKind::ISL,
+                                    islChain[h], islChain[h + 1]);
         }
-    });
+        e2Path->AddGeometricHop("feeder", OranNtnE2Path::HopKind::FEEDER_LINK, islChain.back(),
+                                ricGwMob);
+        if (terrestrialMs > 0.0)
+        {
+            e2Path->AddFixedHop("gw-ric", OranNtnE2Path::HopKind::TERRESTRIAL,
+                                MicroSeconds(static_cast<int64_t>(terrestrialMs * 1e3)));
+        }
+    }
+    else
+    {
+        // transparent payload, gNB at the gateway, RIC on the satellite
+        e2Path->AddGeometricHop("feeder", OranNtnE2Path::HopKind::FEEDER_LINK, gwMob, satEnu);
+    }
+    if (e2ProcessingUs > 0.0)
+    {
+        e2Path->AddFixedHop("e2-term", OranNtnE2Path::HopKind::PROCESSING,
+                            MicroSeconds(static_cast<int64_t>(e2ProcessingUs)));
+    }
+    e2Path->BindToE2Node(g_e2, MilliSeconds(100));
     g_e2->SetAttribute("AlignToControlLoop", BooleanValue(true));
     g_e2->RegisterRanFunction(2, "E2SM-KPM R004 v06.00");
     g_e2->RegisterRanFunction(3, "E2SM-RC R004 v07.00");
@@ -706,10 +796,72 @@ main(int argc, char* argv[])
                     smCcc->RicFunctionId(), cccBytes.size());
     }
 
+    // Wave 6B: A1 policies from a Non-RT RIC, with A1TD status coming back.
+    Ptr<OranNtnA1PolicyManager> nonRt = CreateObject<OranNtnA1PolicyManager>();
+    Ptr<OranNtnA1Adapter> a1 = CreateObject<OranNtnA1Adapter>();
+    nonRt->SetDeliveryDelay(MicroSeconds(static_cast<int64_t>(a1DelayMs * 1e3)));
+    nonRt->SetDistributionCallback(MakeCallback(&OranNtnA1Adapter::HandleIncomingPolicy, a1));
+    a1->SetStatusCallback(MakeCallback(&OranNtnA1PolicyManager::HandlePolicyStatus, nonRt));
+    a1->SetFeedbackDelay(nonRt->GetDeliveryDelay());
+    a1->AddManagedScope("satellite:" + std::to_string(kCellId));
+    a1->AddSupportedPolicyType(A1PolicyType::BEAM_PRIORITY); // the mMIMO precoder xApp
+    {
+        auto mk = [](uint32_t id, A1PolicyType t, const std::string& scope, Time until) {
+            A1NtnPolicy p{};
+            p.policyId = id;
+            p.type = t;
+            p.scope = scope;
+            p.active = true;
+            p.param1 = 12.0;
+            p.validUntil = until;
+            return p;
+        };
+        const Time until = Seconds(a1ValidS > 0 ? a1ValidS : simSeconds / 2.0);
+        const std::string here = "satellite:" + std::to_string(kCellId);
+        Simulator::Schedule(Seconds(1.0), [=]() {
+            nonRt->DistributePolicyForTest(mk(1, A1PolicyType::BEAM_PRIORITY, here, until));
+            nonRt->DistributePolicyForTest(mk(2, A1PolicyType::ENERGY_SAVING, here, Seconds(0)));
+            nonRt->DistributePolicyForTest(mk(3, A1PolicyType::BEAM_PRIORITY, "satellite:99", Seconds(0)));
+        });
+    }
+
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
+
+    {
+        // Per-hop E2 loop budget. The RIC tick wait is MEASURED: the age of
+        // each KPM at the xApp minus the uplink E2 path.
+        const double oneWay = e2Path->GetMeanOneWayMs();
+        const double age = g_ageN ? g_ageSumMs / g_ageN : 0.0;
+        const double wait = std::max(0.0, age - oneWay);
+        std::ofstream f(outputDir + "/e2_loop_budget.csv");
+        e2Path->WriteLoopBudgetCsv(f, wait);
+        std::printf("# E2 path (%s payload, %s RIC): ", payload.c_str(), ricSite.c_str());
+        for (const auto& h : e2Path->GetHopStats())
+        {
+            std::printf("%s[%s] %.3f ms one-way (%.0f km) | ", h.name.c_str(),
+                        OranNtnE2Path::KindName(h.kind), h.MeanMs(), h.MeanRangeKm());
+        }
+        std::printf("\n# E2 loop per hop: uplink %.3f ms + RIC tick wait %.3f ms (measured, KPM "
+                    "age %.3f ms over %llu indications) + downlink %.3f ms = %.3f ms; E2GAP 5.1 "
+                    "near-RT window 10 ms - 1 s: %s\n",
+                    oneWay, wait, age, static_cast<unsigned long long>(g_ageN), oneWay,
+                    2 * oneWay + wait,
+                    (2 * oneWay + wait >= 10.0 && 2 * oneWay + wait <= 1000.0) ? "inside" : "OUTSIDE");
+        std::ofstream a(outputDir + "/a1_policy_status.csv");
+        nonRt->WritePolicyStatusCsv(a);
+        std::printf("# A1 policy status (A1TD 6.2.2.2/6.2.2.3, over %.0f ms A1 each way): ", a1DelayMs);
+        for (uint32_t id : {1u, 2u, 3u})
+        {
+            const auto st = nonRt->GetPolicyStatus(id);
+            std::printf("policy %u %s%s%s enforced %.0f%% of its time | ", id,
+                        A1EnforceStatusName(st.status), st.reason == A1EnforceReason::NONE ? "" : " ",
+                        A1EnforceReasonName(st.reason), 100.0 * nonRt->GetEnforcedTimeShare(id));
+        }
+        std::printf("\n");
+    }
 
     std::printf("# === summary ===  xApp=%s beamActivations=%u  measured cell "
                 "SINR=%.2f dB TBLER=%.4f throughput=%.3f Mbps (control loop on the "

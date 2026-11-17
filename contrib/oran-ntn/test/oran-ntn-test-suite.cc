@@ -59,6 +59,8 @@
 #include "ns3/oran-ntn-xapp-ho-predict.h"
 #include "ns3/oran-ntn-helper.h"
 #include "ns3/oran-ntn-e2-transport.h"
+#include "ns3/oran-ntn-e2-path.h"
+#include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/data-rate.h"
 #include "ns3/ntn-static-extra-loss-model.h"
@@ -1714,8 +1716,8 @@ class OranNtnKpmCanonicalIdsListTestCase : public TestCase
     {
         const auto& ids = oranntn::kpm::CanonicalMetricIds();
         NS_TEST_ASSERT_MSG_EQ(ids.size(),
-                              12u,
-                              "canonical KPM set must have 12 entries");
+                              13u,
+                              "canonical KPM set must have 13 entries");
         NS_TEST_EXPECT_MSG_EQ(ids[0], "DRB.UEThpDl", "ids[0]");
         NS_TEST_EXPECT_MSG_EQ(ids[1], "DRB.UEThpUl", "ids[1]");
         NS_TEST_EXPECT_MSG_EQ(ids[2], "DRB.PdcpSduVolumeDL", "ids[2]");
@@ -1728,6 +1730,8 @@ class OranNtnKpmCanonicalIdsListTestCase : public TestCase
         NS_TEST_EXPECT_MSG_EQ(ids[9], "L1M.RS-SINR.Mean", "ids[9]");
         NS_TEST_EXPECT_MSG_EQ(ids[10], "TB.TotNbrDl", "ids[10]");
         NS_TEST_EXPECT_MSG_EQ(ids[11], "TB.ErrTotNbrDl", "ids[11]");
+        // TS 28.552 V20.4.0 5.1.1.2.1: the percentage counter is RRU.PrbDl.
+        NS_TEST_EXPECT_MSG_EQ(ids[12], "RRU.PrbDl", "ids[12]");
 
         NS_TEST_EXPECT_MSG_EQ(std::string(oranntn::label::kFiveQi),
                               "FIVE_QI",
@@ -1745,7 +1749,7 @@ class OranNtnKpmCanonicalBuildTestCase : public TestCase
 {
   public:
     OranNtnKpmCanonicalBuildTestCase()
-        : TestCase("BuildCanonicalKpmMeasurements emits all 12 IDs with correct values")
+        : TestCase("BuildCanonicalKpmMeasurements emits all 13 IDs with correct values")
     {
     }
 
@@ -1766,7 +1770,7 @@ class OranNtnKpmCanonicalBuildTestCase : public TestCase
             {oranntn::label::kPlmn, "00101"},
         };
         const auto v = oranntn::BuildCanonicalKpmMeasurements(r, base);
-        NS_TEST_ASSERT_MSG_EQ(v.size(), 12u, "vector size");
+        NS_TEST_ASSERT_MSG_EQ(v.size(), 13u, "vector size (12 + RRU.PrbDl, Wave 6B)");
 
         // Build a name->index map so the test is robust to ordering.
         std::map<std::string, size_t> idx;
@@ -1899,7 +1903,7 @@ class OranNtnKpmCanonicalLabelsTestCase : public TestCase
             {oranntn::label::kPlmn, "00102"},
         };
         const auto v = oranntn::BuildCanonicalKpmMeasurements(r, base);
-        NS_TEST_ASSERT_MSG_EQ(v.size(), 12u, "vector size");
+        NS_TEST_ASSERT_MSG_EQ(v.size(), 13u, "vector size (12 + RRU.PrbDl)");
         for (const auto& m : v)
         {
             NS_TEST_EXPECT_MSG_EQ(m.labels.at(oranntn::label::kFiveQi),
@@ -2267,7 +2271,7 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
 {
   public:
     OranNtnKpmCanonicalCsvTestCase()
-        : TestCase("Canonical kpm_canonical.csv is long-format with 12 rows per E2KpmReport")
+        : TestCase("Canonical kpm_canonical.csv is long-format with 13 rows per E2KpmReport")
     {
     }
 
@@ -2322,6 +2326,7 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
             oranntn::kpm::kRruPrbUsedDl,    oranntn::kpm::kRruPrbUsedUl,
             oranntn::kpm::kCarrAvgSinr,     oranntn::kpm::kL1mRsSinrMean,
             oranntn::kpm::kTbErrTotNbrDl,   oranntn::kpm::kTbTotNbrDl,
+            oranntn::kpm::kRruPrbDl,
         };
         size_t rowCount = 0;
         size_t notPresentCount = 0;
@@ -2372,11 +2377,11 @@ class OranNtnKpmCanonicalCsvTestCase : public TestCase
                 ++notPresentCount;
             }
         }
-        // 3 reports x 12 canonical metrics = 36 rows.
-        NS_TEST_EXPECT_MSG_EQ(rowCount, 36u, "row count");
+        // 3 reports x 13 canonical metrics = 39 rows.
+        NS_TEST_EXPECT_MSG_EQ(rowCount, 39u, "row count");
         NS_TEST_EXPECT_MSG_EQ(seenIds.size(),
-                              12u,
-                              "all 12 canonical IDs emitted at least once");
+                              13u,
+                              "all 13 canonical IDs emitted at least once");
         // Five IDs are not-present per report (3 UL-side: DRB.UEThpUl,
         // DRB.PdcpSduVolumeUL, RRU.PrbUsedUl; plus the two TB counters
         // TB.TotNbrDl / TB.ErrTotNbrDl which lack an integrating absolute-TB
@@ -7748,6 +7753,232 @@ class OranNtnE2PacketTransportTest : public TestCase
     }
 };
 
+
+/// Wave 6B: the E2 transport delay is the sum of its hops from live geometry.
+/// A regenerative gNB on a moving satellite reaches a ground RIC over one ISL
+/// and a feeder link plus fixed backhaul; the E2 node's one-way delay follows
+/// the path every 100 ms (normal path). After Unbind the delay is frozen while
+/// the geometry moves on (failure path: a stale binding shows as a mismatch).
+class OranNtnE2PathPerHopTest : public TestCase
+{
+  public:
+    OranNtnE2PathPerHopTest()
+        : TestCase("Wave 6B: E2 loop latency includes ISL + feeder + backhaul per hop")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        constexpr double kC = 299792458.0;
+        auto sat = CreateObject<ConstantVelocityMobilityModel>();
+        sat->SetPosition(Vector(0, 0, 600e3));
+        sat->SetVelocity(Vector(7500, 0, 0));
+        auto nb = CreateObject<ConstantVelocityMobilityModel>();
+        nb->SetPosition(Vector(700e3, 0, 600e3));
+        nb->SetVelocity(Vector(7500, 0, 0));
+        auto gw = CreateObject<ConstantPositionMobilityModel>();
+        gw->SetPosition(Vector(1200e3, 0, 0));
+        auto e2 = CreateObject<OranNtnE2Node>();
+        auto path = CreateObject<OranNtnE2Path>();
+        path->AddGeometricHop("isl1", OranNtnE2Path::HopKind::ISL, sat, nb);
+        path->AddGeometricHop("feeder", OranNtnE2Path::HopKind::FEEDER_LINK, nb, gw);
+        path->AddFixedHop("gw-ric", OranNtnE2Path::HopKind::TERRESTRIAL, MilliSeconds(5));
+
+        std::vector<std::pair<Time, Time>> seen; // (bound delay, recomputed path)
+        path->BindToE2Node(e2, MilliSeconds(100));
+        for (int t = 1; t <= 10; ++t)
+        {
+            Simulator::Schedule(Seconds(t) + MilliSeconds(1), [&]() {
+                seen.emplace_back(e2->GetFeederLinkDelay(), path->ComputeOneWay());
+            });
+        }
+        Time frozen;
+        Simulator::Schedule(Seconds(11), [&]() {
+            path->Unbind();
+            frozen = e2->GetFeederLinkDelay();
+        });
+        Time afterUnbind;
+        Time pathAfter;
+        Simulator::Schedule(Seconds(40), [&]() {
+            afterUnbind = e2->GetFeederLinkDelay();
+            pathAfter = path->ComputeOneWay();
+        });
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(seen.size(), 10u, "ten samples");
+        for (const auto& [bound, now] : seen)
+        {
+            // refreshed at most 100 ms ago: under 0.1 s x 7.5 km/s = 750 m = 2.5 us
+            NS_TEST_ASSERT_MSG_LT(std::abs((bound - now).GetSeconds()), 3e-6,
+                                  "E2 node delay tracks the whole path");
+        }
+        std::vector<OranNtnE2Path::HopSample> hs;
+        const Time total = path->ComputeOneWay(&hs);
+        NS_TEST_ASSERT_MSG_EQ(hs.size(), 3u, "three hops reported");
+        NS_TEST_ASSERT_MSG_EQ_TOL(hs[0].delay.GetSeconds(), 700e3 / kC, 1e-9,
+                                  "the ISL keeps its 700 km (same velocity)");
+        NS_TEST_ASSERT_MSG_EQ(hs[2].delay, MilliSeconds(5), "backhaul is fixed");
+        NS_TEST_ASSERT_MSG_EQ_TOL(total.GetSeconds(),
+                                  hs[0].delay.GetSeconds() + hs[1].delay.GetSeconds() + 0.005,
+                                  1e-12,
+                                  "total is the sum");
+        NS_TEST_ASSERT_MSG_GT(total, hs[1].delay, "the feeder alone understates the path");
+        const auto& st = path->GetHopStats();
+        NS_TEST_ASSERT_MSG_GT(st[1].maxMs, st[1].minMs, "the feeder hop moved with the satellite");
+        std::ostringstream csv;
+        path->WriteLoopBudgetCsv(csv, 50.0);
+        NS_TEST_ASSERT_MSG_NE(csv.str().find("loop_total"), std::string::npos, "loop row written");
+        NS_TEST_ASSERT_MSG_NE(csv.str().find("isl1,isl"), std::string::npos, "ISL row written");
+        NS_TEST_ASSERT_MSG_EQ(afterUnbind, frozen, "no refresh after Unbind");
+        NS_TEST_ASSERT_MSG_NE(pathAfter, frozen, "the real path changed meanwhile");
+        Simulator::Destroy();
+    }
+};
+
+/// Wave 6B: A1TD policy status. Normal path: an applicable policy is ENFORCED
+/// and the Non-RT RIC learns it one A1 delay later; at validUntil it lapses
+/// and reports NOT_ENFORCED / OTHER_REASON. Failure paths: an unsupported
+/// statement and a foreign scope are NOT_ENFORCED with their reasons and are
+/// not handed to xApps; a policy arriving after validUntil is OTHER_REASON.
+class OranNtnA1EnforceStatusTest : public TestCase
+{
+  public:
+    OranNtnA1EnforceStatusTest()
+        : TestCase("Wave 6B: A1 enforceStatus / enforceReason reported to the Non-RT RIC")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto nonRt = CreateObject<OranNtnA1PolicyManager>();
+        auto a1 = CreateObject<OranNtnA1Adapter>();
+        nonRt->SetDeliveryDelay(MilliSeconds(20));
+        nonRt->SetDistributionCallback(MakeCallback(&OranNtnA1Adapter::HandleIncomingPolicy, a1));
+        a1->SetStatusCallback(MakeCallback(&OranNtnA1PolicyManager::HandlePolicyStatus, nonRt));
+        a1->SetFeedbackDelay(MilliSeconds(20));
+        a1->AddManagedScope("satellite:7");
+        a1->AddSupportedPolicyType(A1PolicyType::BEAM_PRIORITY);
+        auto mk = [](uint32_t id, A1PolicyType t, std::string scope, Time until) {
+            A1NtnPolicy p{};
+            p.policyId = id;
+            p.type = t;
+            p.scope = scope;
+            p.active = true;
+            p.validUntil = until;
+            return p;
+        };
+        Simulator::Schedule(Seconds(1), [&]() {
+            nonRt->DistributePolicyForTest(
+                mk(1, A1PolicyType::BEAM_PRIORITY, "satellite:7", Seconds(5)));
+            nonRt->DistributePolicyForTest(
+                mk(2, A1PolicyType::ENERGY_SAVING, "satellite:7", Seconds(0)));
+            nonRt->DistributePolicyForTest(
+                mk(3, A1PolicyType::BEAM_PRIORITY, "satellite:99", Seconds(0)));
+            nonRt->DistributePolicyForTest(
+                mk(4, A1PolicyType::BEAM_PRIORITY, "global", Seconds(1.01)));
+        });
+        size_t activeAt2 = 0;
+        Simulator::Schedule(Seconds(2), [&]() { activeAt2 = a1->GetActivePolicies().size(); });
+        double shareAt9 = 0.0;
+        Simulator::Schedule(Seconds(9), [&]() { shareAt9 = nonRt->GetEnforcedTimeShare(1); });
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(activeAt2, 1u, "only the applicable policy reaches xApps");
+        auto s1 = nonRt->GetPolicyStatus(1);
+        NS_TEST_ASSERT_MSG_EQ((s1.status == A1EnforceStatus::NOT_ENFORCED), true,
+                              "lapsed at validUntil");
+        NS_TEST_ASSERT_MSG_EQ((s1.reason == A1EnforceReason::OTHER_REASON), true, "OTHER_REASON");
+        NS_TEST_ASSERT_MSG_EQ(
+            (nonRt->GetPolicyStatus(2).reason == A1EnforceReason::STATEMENT_NOT_APPLICABLE),
+            true,
+            "unsupported statement");
+        NS_TEST_ASSERT_MSG_EQ(
+            (nonRt->GetPolicyStatus(3).reason == A1EnforceReason::SCOPE_NOT_APPLICABLE),
+            true,
+            "foreign scope");
+        NS_TEST_ASSERT_MSG_EQ((nonRt->GetPolicyStatus(4).reason == A1EnforceReason::OTHER_REASON),
+                              true,
+                              "arrived after validUntil");
+        const auto& h = nonRt->GetStatusHistory();
+        NS_TEST_ASSERT_MSG_EQ(h.size(), 5u, "4 arrivals + 1 lapse");
+        NS_TEST_ASSERT_MSG_EQ((h[0].status == A1EnforceStatus::ENFORCED), true, "first ENFORCED");
+        NS_TEST_ASSERT_MSG_EQ(h[0].reportedAt, Seconds(1) + MilliSeconds(20), "issued on arrival");
+        NS_TEST_ASSERT_MSG_EQ(h[0].receivedAt, Seconds(1) + MilliSeconds(40), "one A1 delay back");
+        NS_TEST_ASSERT_MSG_EQ(h.back().reportedAt, Seconds(5), "lapse reported at validUntil");
+        // ENFORCED from 1.02 s to 5 s, then not: share over [1.02, 9] = 3.98 / 7.98.
+        NS_TEST_ASSERT_MSG_EQ_TOL(shareAt9, 3.98 / 7.98, 1e-6, "enforced time share");
+        NS_TEST_ASSERT_MSG_EQ(nonRt->GetViolationCount(), 4u, "NOT_ENFORCED reports counted");
+        std::ostringstream csv;
+        nonRt->WritePolicyStatusCsv(csv);
+        NS_TEST_ASSERT_MSG_NE(csv.str().find("SCOPE_NOT_APPLICABLE"), std::string::npos, "csv");
+        Simulator::Destroy();
+    }
+};
+
+/// Wave 6B: TS 28.552 V20.4.0 naming of PRB usage. RRU.PrbDl (5.1.1.2.1) is a
+/// percentage, RRU.PrbUsedDl (5.1.1.2.5) a mean count; both are in the
+/// canonical stream and RRU.PrbDl rides the E2 KPM payload. Built inside
+/// Simulator::Run; a report without PRB data marks RRU.PrbDl not present.
+class OranNtnKpmPrbNamingTest : public TestCase
+{
+  public:
+    OranNtnKpmPrbNamingTest()
+        : TestCase("Wave 6B: RRU.PrbDl percent vs RRU.PrbUsedDl count (TS 28.552 V20.4.0)")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        std::vector<oranntn::KpmMeasurement> withPrb;
+        std::vector<oranntn::KpmMeasurement> withoutPrb;
+        E2KpmReport decoded{};
+        bool decodeOk = false;
+        Simulator::Schedule(Seconds(1), [&]() {
+            E2KpmReport r{};
+            r.prbAvailDl = 51.0;
+            r.prbUsedDl = 25.5;
+            r.prbUtilization = 0.5;
+            r.prbMeasured = true;
+            const std::map<std::string, std::string> base = {{oranntn::label::kFiveQi, "9"},
+                                                             {oranntn::label::kSnssai, "1-000001"},
+                                                             {oranntn::label::kPlmn, "00101"}};
+            withPrb = oranntn::BuildCanonicalKpmMeasurements(r, base);
+            E2KpmReport empty{};
+            empty.prbUtilization = std::nan("");
+            withoutPrb = oranntn::BuildCanonicalKpmMeasurements(empty, base);
+            decodeOk = OranNtnE2Transport::DecodeKpm(OranNtnE2Transport::EncodeKpm(r), decoded);
+        });
+        Simulator::Run();
+        Simulator::Destroy();
+        auto find = [](const std::vector<oranntn::KpmMeasurement>& v, const std::string& id) {
+            for (const auto& m : v)
+            {
+                if (m.metricId == id)
+                {
+                    return m;
+                }
+            }
+            return oranntn::KpmMeasurement{"", -1.0, {}, ""};
+        };
+        const auto pct = find(withPrb, "RRU.PrbDl");
+        const auto used = find(withPrb, "RRU.PrbUsedDl");
+        NS_TEST_ASSERT_MSG_EQ(pct.metricId, "RRU.PrbDl", "percentage counter present");
+        NS_TEST_ASSERT_MSG_EQ_TOL(pct.value, 50.0, 1e-12, "integer percent 0..100");
+        NS_TEST_ASSERT_MSG_EQ_TOL(used.value, 25.5, 1e-12, "RRU.PrbUsedDl is the PRB count");
+        NS_TEST_ASSERT_MSG_EQ(pct.provenance, "measured", "measured provenance");
+        const auto none = find(withoutPrb, "RRU.PrbDl");
+        NS_TEST_ASSERT_MSG_EQ((none.labels.count("present") ? none.labels.at("present")
+                                                            : std::string()),
+                              "false",
+                              "no PRB data: RRU.PrbDl not present");
+        NS_TEST_ASSERT_MSG_EQ(decodeOk, true, "KPM payload decodes");
+        NS_TEST_ASSERT_MSG_EQ_TOL(decoded.prbUtilization, 0.5, 1e-9, "RRU.PrbDl round-trips");
+    }
+};
+
 class OranNtnTestSuite : public TestSuite
 {
   public:
@@ -8206,6 +8437,9 @@ class OranNtnPhyKpmUsesStandardTablesTest : public TestCase
         AddTestCase(new OranNtnAdmissionRefusesUnactuatedXappsTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2KpmPayloadRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2PacketTransportTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnE2PathPerHopTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnA1EnforceStatusTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnKpmPrbNamingTest, TestCase::Duration::QUICK);
     }
 };
 
