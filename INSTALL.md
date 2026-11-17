@@ -62,11 +62,13 @@ Ubuntu and Debian:
 sudo apt update
 sudo apt install -y build-essential cmake ninja-build git python3 python3-pip \
     libboost-all-dev libgsl-dev libxml2-dev libsqlite3-dev libpcap-dev \
-    libeigen3-dev pybind11-dev libprotobuf-dev protobuf-compiler
+    libeigen3-dev pybind11-dev libprotobuf-dev protobuf-compiler libabsl-dev \
+    libsctp-dev
 ```
 
-`libeigen3-dev` is needed by the NR MIMO path, and `pybind11-dev` plus the
-protobuf packages by the `ns3-ai-ntn` shared-memory bridge. Everything else is
+`libeigen3-dev` is needed by the NR MIMO path, `pybind11-dev` plus the
+protobuf and Abseil packages by the `ns3-ai-ntn` shared-memory bridge, and
+`libsctp-dev` by the O-RAN E2 transport (`netinet/sctp.h`). Everything else is
 the standard ns-3 toolchain.
 
 Python packages, only if you will use the reinforcement-learning bridge, the
