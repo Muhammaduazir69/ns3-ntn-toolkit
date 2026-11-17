@@ -60,10 +60,18 @@ COPY --chown=ntn:ntn ns-3-dev/ /home/ntn/ns-3-dev/
 # *-traffic examples, …) is runnable out of the box with `./ns3 run "<name>"`.
 # The multi-bss WiFi VR-app under ns3-ai-ntn pulls in Abseil, hence the
 # `libabsl-dev` dependency installed above.
+# Profile "release" (-O3, asserts and logging off) and NOT "optimized": ns-3's
+# "optimized" profile adds -march=native -mtune=native, which ties every binary
+# to the CPU of the machine that built the image. On an older x86-64 CPU, a
+# cloud VM with a different instruction set, or Apple Silicon running the amd64
+# image, those binaries die with "Illegal instruction". "release" targets the
+# generic x86-64 baseline, so the image runs on every amd64 host. Built files
+# have no profile suffix (libns3.43-ntn-cho.so, ns3.43-<example>).
 RUN ./ns3 configure \
         --enable-tests \
         --enable-examples \
-        --build-profile=optimized \
+        --build-profile=release \
+    && grep -q 'NS3_NATIVE_OPTIMIZATIONS:BOOL=OFF' cmake-cache/CMakeCache.txt \
     && ./ns3 build -j"$(nproc)"
 
 # Post-build housekeeping for a lean, fast-to-push image:
@@ -71,8 +79,14 @@ RUN ./ns3 configure \
 #  2) move the large, INVARIANT SNS3 satellite TLE corpus out of the tree so the
 #     runtime stage can COPY it as its own layer (pushed once, cached forever),
 #     keeping the volatile toolkit+build layer small. See SCOPE/Docker notes.
+#  3) strip symbol tables from the built libraries and programs. `strip -p` keeps
+#     each file's timestamp, so ninja still sees the tree as up to date and a
+#     user's `./ns3 build` / `./ns3 run` does not relink anything. Object files
+#     stay: without them the first `./ns3 build` would recompile everything.
 RUN rm -f *.pcap *_kpm_series.* 2>/dev/null || true \
-    && rm -rf doc docs Roadmap visualization ntn-cho-figures 2>/dev/null || true \
+    && rm -rf doc docs Roadmap visualization ntn-cho-figures contrib/*/papers contrib/*/paper 2>/dev/null || true \
+    && find build -type f \( -name '*.so' -o -perm -u+x \) -size +16k \
+         -exec sh -c 'for f; do strip -p --strip-unneeded "$f" 2>/dev/null || true; done' sh {} + \
     && mv /home/ntn/ns-3-dev/contrib/satellite /home/ntn/satellite-stable
 
 # -----------------------------------------------------------------------------
@@ -89,7 +103,7 @@ LABEL org.opencontainers.image.source="https://github.com/Muhammaduazir69/ns3-nt
 LABEL org.opencontainers.image.documentation="https://ns3-ntn-toolkit.dev/"
 LABEL org.opencontainers.image.authors="Muhammad Uzair <muhammaduzairr69@gmail.com>"
 LABEL org.opencontainers.image.licenses="GPL-2.0-only"
-LABEL org.opencontainers.image.version="2.4.0"
+LABEL org.opencontainers.image.version="2.7.0"
 
 # Runtime deps — note this is intentionally NOT a slim "runtime-only" set.
 # ns-3's `./ns3 run` wrapper unconditionally invokes the CMake build system
@@ -143,8 +157,8 @@ COPY --from=builder --chown=ntn:ntn /home/ntn/ns-3-dev /home/ntn/ns-3-dev
 
 # Install Python utilities (in-tree, editable).
 RUN python3 -m venv /home/ntn/.venv \
-    && /home/ntn/.venv/bin/pip install --upgrade pip wheel setuptools \
-    && /home/ntn/.venv/bin/pip install \
+    && /home/ntn/.venv/bin/pip install --no-cache-dir --upgrade pip wheel setuptools \
+    && /home/ntn/.venv/bin/pip install --no-cache-dir \
         /home/ntn/ns-3-dev/contrib/ntn-constellation \
         /home/ntn/ns-3-dev/contrib/ntn-digital-twin
 
@@ -175,11 +189,13 @@ RUN ./ns3 show version \
     && ./ns3 show profile \
     && { ./ns3 show config | grep -q 'Eigen3 support.*ON' \
          || { echo 'FATAL: Eigen3 support is OFF - nr would ship the no-eigen MIMO stub'; exit 1; }; } \
-    && test -e build/lib/libns3.43-ntn-cho-optimized.so \
-    && test -e build/lib/libns3.43-oran-ntn-optimized.so \
-    && test -e build/lib/libns3.43-thz-ntn-optimized.so \
-    && test -e build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-walker-traffic-optimized \
-    && test -e build/contrib/ntn-fapi/examples/ns3.43-ntn-fapi-leo-pass-slotloop-optimized \
+    && ./ns3 show profile | grep -qi release \
+    && test -e build/lib/libns3.43-ntn-cho.so \
+    && test -e build/lib/libns3.43-oran-ntn.so \
+    && test -e build/lib/libns3.43-thz-ntn.so \
+    && test -e build/contrib/ntn-constellation/examples/ns3.43-ntn-constellation-walker-traffic \
+    && test -e build/contrib/ntn-fapi/examples/ns3.43-ntn-fapi-leo-pass-slotloop \
+    && test ! -e contrib/ntn-v2x/papers && test ! -e contrib/ntn-constellation/papers \
     && python3 -c "import ntn_constellation, ntn_digital_twin; print('Python utilities OK')"
 
 # Ports:

@@ -16,7 +16,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 NS3 = os.path.abspath(os.path.join(HERE, "../../.."))
-BIN = os.path.join(NS3, "build/contrib/ntn-cho/examples/ns3.43-ntn-cho-tte-campaign-optimized")
+# The binary carries the build-profile suffix ("-optimized", "-default", none for "release").
+_EX = os.path.join(NS3, "build/contrib/ntn-cho/examples")
+BIN = next((os.path.join(_EX, "ns3.43-ntn-cho-tte-campaign" + sfx) for sfx in ("", "-optimized", "-default", "-debug")
+            if os.path.exists(os.path.join(_EX, "ns3.43-ntn-cho-tte-campaign" + sfx))),
+           os.path.join(_EX, "ns3.43-ntn-cho-tte-campaign"))
 TLE = os.path.abspath(os.path.join(NS3, "../papers/paper2_taes_tte_cho/sim/tle/tle_error_samples.csv"))
 
 

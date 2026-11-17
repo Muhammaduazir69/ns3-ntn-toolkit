@@ -150,7 +150,7 @@ if [ "${FORCE_CONFIGURE}" = "1" ] || \
    ! docker exec -u ntn "${CONTAINER}" test -d /home/ntn/ns-3-dev/cmake-cache; then
   say "configure (new modules/examples detected or forced)"
   docker exec -u ntn "${CONTAINER}" bash -lc \
-    'cd /home/ntn/ns-3-dev && ./ns3 configure --enable-tests --enable-examples --build-profile=optimized'
+    'cd /home/ntn/ns-3-dev && ./ns3 configure --enable-tests --enable-examples --build-profile=release'
 fi
 say "incremental ./ns3 build"
 docker exec -u ntn "${CONTAINER}" bash -lc 'cd /home/ntn/ns-3-dev && ./ns3 build -j"$(nproc)"'
