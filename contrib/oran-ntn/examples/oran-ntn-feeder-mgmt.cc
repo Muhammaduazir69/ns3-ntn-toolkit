@@ -65,6 +65,40 @@
 //             (E2 setup and subscriptions) ahead of the switch from the
 //             predicted schedule
 //
+// User plane (Wave 7B, --upUes, default 4; 0 turns it off). The control
+// study above has no radio, so a measured user plane rides the same orbits and
+// the same feeder outages next to it, on its own nodes and links so it cannot
+// queue against or draw random numbers from the control plane (every control
+// random variable has a fixed stream, and --upUes=0 reproduces the control
+// results byte for byte):
+//   * UEs: TR 38.811 Section 6.1.1.1 UE classes drawn from the Maritime
+//     scenario mix (ntn-cho NtnTr38811MobilityHelper) in a 0.1 deg box at the
+//     cell (the cell sits in the Arabian Sea).
+//   * Uplink apps: ntn-traffic NtnOranApplication, conversational voice
+//     (5QI 1, 92 B every 20 ms) on even UEs and mMTC telemetry (5QI 9, 128 B
+//     every 1 s) on odd UEs, to an
+//     NtnOranSink at a UPF next to the RIC.
+//   * Service link UE -> serving satellite: point-to-point, delay = live
+//     slant / c (SGP4) refreshed every 100 ms, loss from ntn-constellation's
+//     NtnSatLinkErrorModel per packet on the live geometry with the TR 38.821
+//     Table 6.1.1.1-2 Set-1 S-band uplink budget (23 dBm handheld EIRP, 0 dBi,
+//     satellite G/T 1.1 dB/K, 360 kHz) plus P.676 gas and P.618
+//     scintillation. A satellite that is not serving drops everything.
+//   * Feeder satellite -> gateway: point-to-point per (satellite, gateway),
+//     live slant delay, down whenever the control plane's feeder for the same
+//     pair is down (contact windows, acquisition gaps, rain outages: the same
+//     state, read per packet), else NtnSatLinkErrorModel with a Ka-band feeder
+//     budget (19.7 GHz, 50 dBW EIRP, gateway G/T 35 dB/K, 250 MHz; rain is
+//     already the outage process, so P.618 rain is off here). Each satellite
+//     forwards to the gateway its control plane uses.
+//   * Gateway -> UPF: fibre at 1.5 x the great-circle distance at 2e8 m/s
+//     plus 2 ms, as the RIC backhaul.
+//   * Measured: FlowMonitor (IP), the sinks' in-band one-way delay, RFC 3550
+//     jitter and sequence-gap loss, the TS 28.552 KPM series of the
+//     NtnOranAiFlowMonitor (up_kpm_series.csv), up_flows.csv, and line
+//     protocol points (ntn-observability NtnInfluxSink, up.lp). Packets lost
+//     while the serving feeder is down are counted apart from the rest.
+//
 // Variants (all strategies): --softSwitch (Rel-17 make-before-break feeder
 // switch-over, no gap on a geometric gateway change), --linkDetectS (the
 // satellite enters autonomy on link-layer loss of carrier instead of the
@@ -80,6 +114,16 @@
 // into anything else, so all variants see the same dynamics).
 
 #include "ns3/applications-module.h"
+#include "ns3/constant-position-mobility-model.h"
+#include "ns3/flow-monitor-helper.h"
+#include "ns3/ipv4-flow-classifier.h"
+#include "ns3/ntn-influx-sink.h"
+#include "ns3/ntn-oran-ai-flow-monitor.h"
+#include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-oran-sink.h"
+#include "ns3/ntn-realistic-mobility.h"
+#include "ns3/ntn-sat-link-error-model.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/network-module.h"
@@ -87,6 +131,7 @@
 #include "ns3/oran-ntn-authority-lease.h"
 #include "ns3/oran-ntn-contact-plan.h"
 #include "ns3/oran-ntn-flexric-types.h"
+#include "ns3/oran-ntn-gated-error-model.h"
 #include "ns3/oran-ntn-service-model-kpm.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -2871,6 +2916,391 @@ Mean(const std::vector<float>& v)
     return s / v.size();
 }
 
+
+
+// ---------------------------------------------------------------------------
+// Wave 7B: measured user plane over the same orbits and feeder state
+// ---------------------------------------------------------------------------
+
+constexpr double kCLight = 299792458.0;
+
+double
+UpDist(Ptr<MobilityModel> a, Ptr<MobilityModel> b)
+{
+    return CalculateDistance(a->GetPosition(), b->GetPosition());
+}
+
+struct UpPlane
+{
+    uint32_t numUes{4};
+    NodeContainer ues;
+    std::vector<Ptr<NtnTr38811MobilityModel>> ueMob;
+    std::vector<Ptr<Node>> sat; //!< user-plane node per sats[] index
+    std::vector<Ptr<Node>> gw;
+    std::vector<Ptr<MobilityModel>> gwMob;
+    Ptr<Node> upf;
+    // service link [u][k]: UE-side interface, satellite-side address, channel, gate
+    std::vector<std::vector<uint32_t>> ueIf;
+    std::vector<std::vector<Ipv4Address>> satAddrSvc;
+    std::vector<std::vector<Ptr<PointToPointChannel>>> svcCh;
+    std::vector<std::vector<Ptr<OranNtnGatedErrorModel>>> svcGate;
+    // feeder [k][j]
+    std::vector<std::vector<uint32_t>> satIfFeeder;
+    std::vector<std::vector<Ipv4Address>> gwAddrFeeder;
+    std::vector<std::vector<Ptr<PointToPointChannel>>> fdrCh;
+    std::vector<std::vector<Ptr<OranNtnGatedErrorModel>>> fdrGate;
+    std::vector<int> routedGw; //!< per satellite
+    int routedServing{-2};
+    std::vector<Ptr<NtnOranApplication>> apps;
+    std::vector<Ptr<NtnOranSink>> sinks;
+    Ptr<NtnOranAiFlowMonitor> kpm;
+    Ptr<FlowMonitor> fm;
+    FlowMonitorHelper fmh;
+    uint64_t ticks{0};
+    double propSumMs{0};
+    double bhSumMs{0};
+    std::vector<double> bhMs;
+    uint64_t propN{0};
+    uint64_t txDuringOutage{0};
+    uint64_t txTotal{0};
+};
+
+UpPlane up;
+
+void
+UpRouteDefault(Ptr<Node> n, Ipv4Address nh, uint32_t ifIndex)
+{
+    Ipv4StaticRoutingHelper h;
+    Ptr<Ipv4StaticRouting> sr = h.GetStaticRouting(n->GetObject<Ipv4>());
+    for (uint32_t i = sr->GetNRoutes(); i-- > 0;)
+    {
+        if (sr->GetRoute(i).IsDefault())
+        {
+            sr->RemoveRoute(i);
+        }
+    }
+    sr->SetDefaultRoute(nh, ifIndex);
+}
+
+/// Every 20 ms: follow the serving satellite and its active gateway; every
+/// 100 ms: link delays from the live SGP4 / TR 38.811 geometry.
+void
+UpTick()
+{
+    Simulator::Schedule(MilliSeconds(20), &UpTick);
+    if (servingIdx != up.routedServing && servingIdx >= 0)
+    {
+        for (uint32_t u = 0; u < up.numUes; ++u)
+        {
+            UpRouteDefault(up.ues.Get(u), up.satAddrSvc[u][servingIdx], up.ueIf[u][servingIdx]);
+        }
+        up.routedServing = servingIdx;
+    }
+    for (size_t k = 0; k < sats.size(); ++k)
+    {
+        const int a = sats[k].activeGw;
+        if (a >= 0 && a != up.routedGw[k])
+        {
+            UpRouteDefault(up.sat[k], up.gwAddrFeeder[k][a], up.satIfFeeder[k][a]);
+            up.routedGw[k] = a;
+        }
+    }
+    if (up.ticks++ % 5 != 0)
+    {
+        return;
+    }
+    for (size_t k = 0; k < sats.size(); ++k)
+    {
+        for (uint32_t u = 0; u < up.numUes; ++u)
+        {
+            up.svcCh[u][k]->SetAttribute(
+                "Delay", TimeValue(Seconds(UpDist(sats[k].mob, up.ueMob[u]) / kCLight)));
+        }
+        for (uint32_t j = 0; j < g.numGw; ++j)
+        {
+            up.fdrCh[k][j]->SetAttribute(
+                "Delay", TimeValue(Seconds(UpDist(sats[k].mob, up.gwMob[j]) / kCLight)));
+        }
+    }
+    if (servingIdx >= 0 && sats[servingIdx].activeGw >= 0)
+    {
+        const Sat& s = sats[servingIdx];
+        up.bhSumMs += up.bhMs[s.activeGw];
+        up.propSumMs += (UpDist(s.mob, up.ueMob[0]) +
+                         UpDist(s.mob, up.gwMob[s.activeGw])) /
+                        kCLight * 1e3;
+        ++up.propN;
+    }
+}
+
+/// Build the user plane (after the control plane; see the file comment).
+void
+BuildUserPlane(const std::vector<double>& upfBackhaulS)
+{
+    InternetStackHelper inet;
+    const size_t nSat = sats.size();
+    up.ues.Create(up.numUes);
+    inet.Install(up.ues);
+    NtnTr38811MobilityHelper ueMob(g.run);
+    up.ueMob = ueMob.Install(up.ues, NtnMobilityScenarios::Maritime(), g.cellLat - 0.05,
+                             g.cellLat + 0.05, g.cellLon - 0.05, g.cellLon + 0.05);
+    up.upf = CreateObject<Node>();
+    inet.Install(up.upf);
+    for (size_t k = 0; k < nSat; ++k)
+    {
+        up.sat.push_back(CreateObject<Node>());
+        inet.Install(up.sat.back());
+    }
+    Ipv4AddressHelper ah;
+    Ipv4StaticRoutingHelper srh;
+    Ipv4Address upfAddr;
+    for (uint32_t j = 0; j < g.numGw; ++j)
+    {
+        up.gw.push_back(CreateObject<Node>());
+        inet.Install(up.gw.back());
+        auto gm = CreateObject<ConstantPositionMobilityModel>();
+        gm->SetPosition(OranNtnContactPlan::GeodeticToEcef(kGw[j].lat, kGw[j].lon, 0.0));
+        up.gwMob.push_back(gm);
+        PointToPointHelper bh;
+        bh.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
+        bh.SetChannelAttribute("Delay", TimeValue(Seconds(upfBackhaulS[j])));
+        up.bhMs.push_back(upfBackhaulS[j] * 1e3);
+        NetDeviceContainer d = bh.Install(up.gw.back(), up.upf);
+        char base[32];
+        std::snprintf(base, sizeof(base), "172.40.%u.0", j);
+        ah.SetBase(base, "255.255.255.252");
+        Ipv4InterfaceContainer ii = ah.Assign(d);
+        if (j == 0)
+        {
+            upfAddr = ii.GetAddress(1);
+        }
+        UpRouteDefault(up.gw.back(), ii.GetAddress(1),
+                       up.gw.back()->GetObject<Ipv4>()->GetInterfaceForDevice(d.Get(0)));
+    }
+    // Feeders, satellite -> gateway direction measured at the gateway.
+    up.satIfFeeder.assign(nSat, {});
+    up.gwAddrFeeder.assign(nSat, {});
+    up.fdrCh.assign(nSat, {});
+    up.fdrGate.assign(nSat, {});
+    up.routedGw.assign(nSat, -1);
+    for (size_t k = 0; k < nSat; ++k)
+    {
+        for (uint32_t j = 0; j < g.numGw; ++j)
+        {
+            PointToPointHelper fl;
+            fl.SetDeviceAttribute("DataRate", StringValue("50Mbps"));
+            fl.SetChannelAttribute("Delay", TimeValue(Seconds(
+                                                UpDist(sats[k].mob, up.gwMob[j]) / kCLight)));
+            NetDeviceContainer d = fl.Install(up.sat[k], up.gw[j]);
+            char base[32];
+            std::snprintf(base, sizeof(base), "172.%u.%zu.%zu", 32 + j, k / 64, (k % 64) * 4);
+            ah.SetBase(base, "255.255.255.252");
+            Ipv4InterfaceContainer ii = ah.Assign(d);
+            up.satIfFeeder[k].push_back(up.sat[k]->GetObject<Ipv4>()->GetInterfaceForDevice(d.Get(0)));
+            up.gwAddrFeeder[k].push_back(ii.GetAddress(1));
+            up.fdrCh[k].push_back(DynamicCast<PointToPointChannel>(d.Get(0)->GetChannel()));
+            auto ka = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            ka->SetEndpoints(sats[k].mob, up.gwMob[j]);
+            ka->SetAttribute("CarrierHz", DoubleValue(19.7e9));
+            ka->SetAttribute("EirpDbw", DoubleValue(50.0));
+            ka->SetAttribute("RxGtDbK", DoubleValue(35.0));
+            ka->SetAttribute("BandwidthHz", DoubleValue(250e6));
+            ka->SetAttribute("EnableRain", BooleanValue(false));
+            ka->SetAttribute("StationLatitudeDeg", DoubleValue(kGw[j].lat));
+            auto gate = CreateObject<OranNtnGatedErrorModel>();
+            gate->SetGate(OranNtnGatedErrorModel::MirrorOutage(sats[k].emGw[j]));
+            gate->SetInner(ka);
+            d.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(gate));
+            up.fdrGate[k].push_back(gate);
+        }
+    }
+    // Service links, UE -> satellite direction measured at the satellite.
+    up.ueIf.assign(up.numUes, {});
+    up.satAddrSvc.assign(up.numUes, {});
+    up.svcCh.assign(up.numUes, {});
+    up.svcGate.assign(up.numUes, {});
+    for (uint32_t u = 0; u < up.numUes; ++u)
+    {
+        for (size_t k = 0; k < nSat; ++k)
+        {
+            PointToPointHelper sl;
+            sl.SetDeviceAttribute("DataRate", StringValue("1Mbps"));
+            sl.SetChannelAttribute("Delay", TimeValue(Seconds(
+                                                UpDist(sats[k].mob, up.ueMob[u]) / kCLight)));
+            NetDeviceContainer d = sl.Install(up.ues.Get(u), up.sat[k]);
+            char base[32];
+            std::snprintf(base, sizeof(base), "172.%u.%zu.%zu", 16 + u, k / 64, (k % 64) * 4);
+            ah.SetBase(base, "255.255.255.252");
+            Ipv4InterfaceContainer ii = ah.Assign(d);
+            up.ueIf[u].push_back(up.ues.Get(u)->GetObject<Ipv4>()->GetInterfaceForDevice(d.Get(0)));
+            up.satAddrSvc[u].push_back(ii.GetAddress(1));
+            up.svcCh[u].push_back(DynamicCast<PointToPointChannel>(d.Get(0)->GetChannel()));
+            auto sb = CreateObject<ntncon::NtnSatLinkErrorModel>();
+            sb->SetEndpoints(up.ueMob[u], sats[k].mob);
+            sb->SetAttribute("CarrierHz", DoubleValue(1.995e9));
+            sb->SetAttribute("EirpDbw", DoubleValue(-7.0));
+            sb->SetAttribute("RxGtDbK", DoubleValue(1.1));
+            sb->SetAttribute("BandwidthHz", DoubleValue(360e3));
+            sb->SetAttribute("EnableRain", BooleanValue(false));
+            sb->SetAttribute("StationLatitudeDeg", DoubleValue(g.cellLat));
+            auto gate = CreateObject<OranNtnGatedErrorModel>();
+            const int kk = static_cast<int>(k);
+            gate->SetGate([kk]() { return servingIdx != kk; });
+            gate->SetInner(sb);
+            d.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(gate));
+            up.svcGate[u].push_back(gate);
+        }
+    }
+    // Apps: voice on even UEs, mMTC telemetry on odd UEs; one sink port each.
+    up.kpm = CreateObject<NtnOranAiFlowMonitor>();
+    for (uint32_t u = 0; u < up.numUes; ++u)
+    {
+        const uint16_t port = static_cast<uint16_t>(9100 + u);
+        Ptr<NtnOranSink> sink = CreateObject<NtnOranSink>();
+        sink->SetAttribute("Local", AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+        up.upf->AddApplication(sink);
+        sink->SetStartTime(Seconds(0.0));
+        Ptr<NtnOranApplication> app = CreateObject<NtnOranApplication>();
+        app->SetRemote(InetSocketAddress(upfAddr, port));
+        const bool voice = (u % 2) == 0;
+        app->SetProfile(voice ? NtnOranApplication::CONVERSATIONAL_VOICE
+                              : NtnOranApplication::MMTC_PERIODIC);
+        // AMR-WB frame + RTP (92 B, as NtnRealStackHelper's voice flow) and a
+        // 128 B telemetry reading (its NB-IoT flow); the 1400 B default would
+        // be a video frame.
+        app->SetAttribute("PacketSize", UintegerValue(voice ? 92 : 128));
+        app->SetFlowIdentity(voice ? 1 : 9, voice ? 1 : 3, 0x000001, static_cast<uint16_t>(u + 1),
+                             1000);
+        up.ues.Get(u)->AddApplication(app);
+        app->SetStartTime(Seconds(1.0 + 0.001 * u));
+        app->SetStopTime(Seconds(g.simS - 1.0));
+        up.apps.push_back(app);
+        up.sinks.push_back(sink);
+        up.kpm->AddSource(app);
+        up.kpm->AddSink(sink, static_cast<int32_t>(u));
+    }
+    up.kpm->Start();
+    NodeContainer all(up.ues);
+    all.Add(up.upf);
+    for (auto& n : up.sat)
+    {
+        all.Add(n);
+    }
+    for (auto& n : up.gw)
+    {
+        all.Add(n);
+    }
+    up.fm = up.fmh.Install(all);
+    Simulator::Schedule(MilliSeconds(1), &UpTick);
+}
+
+/// Count the user-plane packets offered while the serving feeder is down.
+void
+UpOutageSampler()
+{
+    Simulator::Schedule(MilliSeconds(20), &UpOutageSampler);
+    if (servingIdx < 0)
+    {
+        return;
+    }
+    const Sat& s = sats[servingIdx];
+    const bool down = s.activeGw < 0 || s.emGw[s.activeGw]->GetRate() >= 1.0;
+    up.txTotal += 1;
+    up.txDuringOutage += down ? 1 : 0;
+}
+
+void
+WriteUserPlane()
+{
+    up.fm->CheckForLostPackets();
+    auto cls = DynamicCast<Ipv4FlowClassifier>(up.fmh.GetClassifier());
+    uint64_t fmTx = 0;
+    uint64_t fmRx = 0;
+    double jitterSum = 0.0;
+    uint64_t jitterN = 0;
+    double fmDelaySumMs = 0.0;
+    for (const auto& [id, fs] : up.fm->GetFlowStats())
+    {
+        fmTx += fs.txPackets;
+        fmRx += fs.rxPackets;
+        fmDelaySumMs += fs.delaySum.GetSeconds() * 1e3;
+        if (fs.rxPackets > 1)
+        {
+            jitterSum += fs.jitterSum.GetSeconds() * 1e3;
+            jitterN += fs.rxPackets - 1;
+        }
+    }
+    up.fm->SerializeToXmlFile(g.outDir + "/up_flowmon.xml", false, false);
+    up.kpm->WriteCsv(g.outDir + "/up_kpm_series.csv");
+    uint64_t svcGated = 0;
+    uint64_t svcLink = 0;
+    uint64_t svcPass = 0;
+    uint64_t fdrGated = 0;
+    uint64_t fdrLink = 0;
+    for (const auto& row : up.svcGate)
+    {
+        for (const auto& gte : row)
+        {
+            svcGated += gte->GetGatedDrops();
+            svcLink += gte->GetInnerDrops();
+            svcPass += gte->GetPassed();
+        }
+    }
+    for (const auto& row : up.fdrGate)
+    {
+        for (const auto& gte : row)
+        {
+            fdrGated += gte->GetGatedDrops();
+            fdrLink += gte->GetInnerDrops();
+        }
+    }
+    std::ofstream f(g.outDir + "/up_flows.csv");
+    f << "ue,class,five_qi,tx,rx,loss_ratio,owd_mean_ms,jitter_ms\n";
+    auto lp = CreateObject<ntnobs::NtnInfluxSink>();
+    lp->SetTransport(ntnobs::NtnInfluxSink::Transport::File);
+    lp->SetFilePath(g.outDir + "/up.lp");
+    lp->SetBaseEpoch(Time(0));
+    uint64_t tx = 0;
+    uint64_t rx = 0;
+    double owdW = 0.0;
+    for (uint32_t u = 0; u < up.numUes; ++u)
+    {
+        const bool voice = (u % 2) == 0;
+        const uint64_t t = up.apps[u]->GetTxPackets();
+        const uint64_t r = up.sinks[u]->GetRxPackets();
+        tx += t;
+        rx += r;
+        owdW += up.sinks[u]->GetMeanDelayMs() * r;
+        f << u << "," << up.ueMob[u]->GetClassName() << "," << (voice ? 1 : 9) << "," << t << ","
+          << r << "," << (t ? 1.0 - double(r) / t : 0.0) << "," << up.sinks[u]->GetMeanDelayMs()
+          << "," << up.sinks[u]->GetMeanJitterMs() << "\n";
+        ntnobs::Point p;
+        p.measurement = "feeder_mgmt_user_plane";
+        p.tags["ue"] = std::to_string(u);
+        p.tags["five_qi"] = voice ? "1" : "9";
+        p.fieldsInt["tx"] = static_cast<long long>(t);
+        p.fieldsInt["rx"] = static_cast<long long>(r);
+        p.fieldsFloat["owd_ms"] = up.sinks[u]->GetMeanDelayMs();
+        p.fieldsFloat["jitter_ms"] = up.sinks[u]->GetMeanJitterMs();
+        p.timestamp = Simulator::Now();
+        lp->Push(p);
+    }
+    lp->Flush();
+    const double outageShare = up.txTotal ? double(up.txDuringOutage) / up.txTotal : 0.0;
+    std::printf("# user plane: %u TR 38.811 UEs (maritime mix), sent %lu received %lu (loss %.4f; "
+                "FlowMonitor %lu/%lu, IP delay %.2f ms), owd mean %.2f ms vs propagation mean "
+                "%.2f ms + gateway-UPF fibre mean %.2f ms, jitter %.3f ms; drops: service not serving %lu, service link %lu, feeder down %lu, "
+                "feeder link %lu; serving feeder down %.4f of the time\n",
+                up.numUes, (unsigned long)tx, (unsigned long)rx, tx ? 1.0 - double(rx) / tx : 0.0,
+                (unsigned long)fmRx, (unsigned long)fmTx, fmRx ? fmDelaySumMs / fmRx : 0.0,
+                rx ? owdW / rx : 0.0, up.propN ? up.propSumMs / up.propN : 0.0,
+                up.propN ? up.bhSumMs / up.propN : 0.0, jitterN ? jitterSum / jitterN : 0.0,
+                (unsigned long)svcGated, (unsigned long)svcLink, (unsigned long)fdrGated,
+                (unsigned long)fdrLink, outageShare);
+    (void)svcPass;
+    (void)cls;
+}
+
 } // namespace
 
 int
@@ -2914,7 +3344,10 @@ main(int argc, char* argv[])
     cmd.AddValue("safeH", "headroom of the safe intent", g.safeH);
     cmd.AddValue("outputDir", "output directory", g.outDir);
     cmd.AddValue("run", "RNG run (seed index)", g.run);
+    cmd.AddValue("upUes", "measured user plane: TR 38.811 maritime UEs (0 = off, max 16)",
+                 up.numUes);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(up.numUes > 16, "upUes must be 0..16");
     g.stratName = strat;
     if (strat == "ground")
         g.strat = Strategy::Ground;
@@ -3280,6 +3713,19 @@ main(int argc, char* argv[])
     }
     ResetAppliedBeams();
 
+    // ---- Measured user plane (Wave 7B) --------------------------------------
+    if (up.numUes > 0)
+    {
+        std::vector<double> bhS;
+        for (uint32_t j = 0; j < g.numGw; ++j)
+        {
+            const Vector gp = OranNtnContactPlan::GeodeticToEcef(kGw[j].lat, kGw[j].lon, 0.0);
+            bhS.push_back(0.002 + 1.5 * CalculateDistance(gp, ricPos) / 2e8);
+        }
+        BuildUserPlane(bhS);
+        Simulator::Schedule(MilliSeconds(3), &UpOutageSampler);
+    }
+
     // ---- Health check: contact-plan geometry agrees with the propagator ----
     double maxElErr = 0;
     for (auto& s : sats)
@@ -3568,6 +4014,10 @@ main(int argc, char* argv[])
                 st.opp[kRT] ? double(st.hit[kRT]) / st.opp[kRT] : 0.0,
                 st.slaSamples ? double(st.slaViol) / st.slaSamples : 0.0, maxElErr,
                 (unsigned long)st.kpmDelivered, (unsigned long)st.kpmCodecFail);
+    if (up.numUes > 0)
+    {
+        WriteUserPlane();
+    }
     Simulator::Destroy();
     return 0;
 }

@@ -63,6 +63,7 @@
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/data-rate.h"
+#include "ns3/uinteger.h"
 #include "ns3/ntn-static-extra-loss-model.h"
 #include "ns3/oran-ntn-loop-latency-probe.h"
 #include "ns3/oran-ntn-twin-prediction-consumer.h"
@@ -7754,6 +7755,178 @@ class OranNtnE2PacketTransportTest : public TestCase
 };
 
 
+/// Wave 7B: E2AP over a reliable transport (one ns-3 TCP connection per E2
+/// node, length-prefixed messages, SCTP stand-in). Shared driver: a 1000 km
+/// feeder, one KPM subscription at 100 ms, one report every 100 ms.
+namespace
+{
+struct E2TcpRun
+{
+    OranNtnE2Transport::Counters c;
+    double owdMeanMs{0};
+    double owdSdMs{0};
+    std::vector<double> arrivals; //!< RIC-side delivery instants (s)
+};
+
+E2TcpRun
+RunE2Transport(OranNtnE2Transport::Protocol proto,
+               double per,
+               double outageAt,
+               double outageS,
+               uint32_t maxRetrans,
+               double stopS,
+               uint32_t reports)
+{
+    RngSeedManager::SetSeed(7);
+    RngSeedManager::SetRun(1);
+    auto helper = CreateObject<OranNtnHelper>();
+    auto ric = helper->CreateNearRtRic();
+    NodeContainer sats;
+    sats.Create(1);
+    auto e2 = helper->CreateSatelliteE2Nodes(sats, ric)[0];
+    E2Subscription sub{};
+    sub.ranFunctionId = 2;
+    sub.reportingPeriod = MilliSeconds(100);
+    sub.eventTrigger = false;
+    ric->GetE2Termination()->CreateSubscription(1, sub);
+    E2TcpRun out;
+    e2->SetIndicationCallback(MakeBoundCallback(
+        +[](std::vector<double>* v, E2Indication) { v->push_back(Simulator::Now().GetSeconds()); },
+        &out.arrivals));
+    auto sat = CreateObject<ConstantPositionMobilityModel>();
+    sat->SetPosition(Vector(0, 0, 1.0e6));
+    auto gw = CreateObject<ConstantPositionMobilityModel>();
+    gw->SetPosition(Vector(0, 0, 0));
+    auto tr = CreateObject<OranNtnE2Transport>();
+    tr->SetProtocol(proto);
+    tr->SetAttribute("MaxRetrans", UintegerValue(maxRetrans));
+    tr->SetGatewayToRicDelay(Seconds(0));
+    tr->SetBearerRate(DataRate("2Mbps"));
+    tr->Attach(e2, sat, gw);
+    tr->SetFeederPacketErrorRate(per);
+    tr->Start(Seconds(0.0));
+    if (outageS > 0)
+    {
+        tr->ScheduleOutage(1, Seconds(outageAt), Seconds(outageS));
+    }
+    E2KpmReport r{};
+    r.gnbId = 1;
+    r.isNtn = true;
+    r.sinr_dB = 10.0;
+    r.sinrMeasured = true;
+    for (uint32_t k = 0; k < reports; ++k)
+    {
+        Simulator::Schedule(MilliSeconds(100 * k) + MicroSeconds(1),
+                            &OranNtnE2Node::SubmitKpmMeasurement, e2, r);
+    }
+    Simulator::Stop(Seconds(stopS));
+    Simulator::Run();
+    out.c = tr->GetCounters();
+    out.owdMeanMs = tr->GetIndicationOwdMeanMs();
+    out.owdSdMs = tr->GetIndicationOwdSdMs();
+    Simulator::Destroy();
+    return out;
+}
+} // namespace
+
+/// Normal path: on a feeder losing 5 % of packets each way, UDP loses
+/// indications while TCP delivers every one it accepted, in order, and the
+/// recovered ones carry their retransmission delay in the one-way delay.
+class OranNtnE2TcpLossyFeederTest : public TestCase
+{
+  public:
+    OranNtnE2TcpLossyFeederTest()
+        : TestCase("Wave 7B: E2AP over TCP delivers every indication in order over a lossy "
+                   "feeder; UDP loses them")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using P = OranNtnE2Transport::Protocol;
+        const E2TcpRun udp = RunE2Transport(P::Udp, 0.05, 0, 0, 10, 32.0, 300);
+        const E2TcpRun tcp = RunE2Transport(P::Tcp, 0.05, 0, 0, 10, 32.0, 300);
+        NS_TEST_ASSERT_MSG_GT(udp.c.indicationsSent, 200u, "UDP: indications sent");
+        NS_TEST_EXPECT_MSG_LT(udp.c.indicationsReceived, udp.c.indicationsSent,
+                              "UDP: 5 % PER loses indications");
+        NS_TEST_ASSERT_MSG_EQ(tcp.c.connectionsEstablished, 1u, "TCP: one connection");
+        NS_TEST_EXPECT_MSG_EQ(tcp.c.setupDone, 1u, "TCP: E2 Setup completed");
+        NS_TEST_EXPECT_MSG_EQ(tcp.c.subscriptionsDone, 1u, "TCP: subscription completed");
+        NS_TEST_ASSERT_MSG_GT(tcp.c.indicationsSent, 200u, "TCP: indications sent");
+        NS_TEST_EXPECT_MSG_EQ(tcp.c.indicationsReceived, tcp.c.indicationsSent,
+                              "TCP: every indication sent is delivered (2 s drain margin)");
+        NS_TEST_EXPECT_MSG_EQ(tcp.c.outOfOrder, 0u, "TCP: in order");
+        NS_TEST_EXPECT_MSG_EQ(tcp.c.decodeFailures, 0u, "TCP: stream reassembly decodes all");
+        NS_TEST_EXPECT_MSG_EQ(tcp.arrivals.size(), tcp.c.indicationsReceived, "each dispatched");
+        // Floor: 1000 km / c = 3.34 ms. Retransmitted messages wait at least a
+        // fast-retransmit round, so the mean and the spread exceed UDP's.
+        NS_TEST_EXPECT_MSG_GT(udp.owdMeanMs, 3.33, "UDP owd >= propagation");
+        NS_TEST_EXPECT_MSG_GT(tcp.owdMeanMs, udp.owdMeanMs + 1.0,
+                              "TCP owd includes retransmission and head-of-line waits");
+        NS_TEST_EXPECT_MSG_GT(tcp.owdSdMs, 10.0 * udp.owdSdMs, "TCP delay spread from recovery");
+        // Lossless control: TCP and UDP deliver everything at the same floor
+        // (propagation plus serialization of the same E2AP bytes; the headers
+        // differ by a few bytes).
+        const E2TcpRun clean = RunE2Transport(P::Tcp, 0.0, 0, 0, 10, 32.0, 300);
+        const E2TcpRun cleanUdp = RunE2Transport(P::Udp, 0.0, 0, 0, 10, 32.0, 300);
+        std::cout << "[E2 TCP test] owd ms: udp lossy " << udp.owdMeanMs << " sd " << udp.owdSdMs
+                  << ", tcp lossy " << tcp.owdMeanMs << " sd " << tcp.owdSdMs << ", tcp clean "
+                  << clean.owdMeanMs << ", udp clean " << cleanUdp.owdMeanMs << "; udp lossy rx "
+                  << udp.c.indicationsReceived << "/" << udp.c.indicationsSent << "\n";
+        NS_TEST_EXPECT_MSG_EQ(clean.c.indicationsReceived, clean.c.indicationsSent, "clean");
+        NS_TEST_EXPECT_MSG_EQ(cleanUdp.c.indicationsReceived, cleanUdp.c.indicationsSent, "clean");
+        NS_TEST_EXPECT_MSG_GT(cleanUdp.owdMeanMs, 3.3356, "UDP clean owd >= slant / c");
+        NS_TEST_EXPECT_MSG_EQ_TOL(clean.owdMeanMs, cleanUdp.owdMeanMs, 0.3,
+                                  "clean TCP owd = clean UDP owd (no retransmission)");
+    }
+};
+
+/// Failure path: a 30 s feeder outage outlasts MaxRetrans = 3, so the
+/// connection is declared lost. Nothing is delivered during the outage,
+/// indications while the connection is down are counted and not sent, and
+/// after the feeder returns the agent re-connects, repeats E2 Setup and the
+/// RIC re-subscribes before indications flow again.
+class OranNtnE2TcpAssociationLossTest : public TestCase
+{
+  public:
+    OranNtnE2TcpAssociationLossTest()
+        : TestCase("Wave 7B: E2AP over TCP: a feeder outage past MaxRetrans loses the "
+                   "connection; re-connection repeats E2 Setup")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        using P = OranNtnE2Transport::Protocol;
+        const E2TcpRun tcp = RunE2Transport(P::Tcp, 0.0, 2.0, 30.0, 3, 50.0, 480);
+        NS_TEST_EXPECT_MSG_GT_OR_EQ(tcp.c.associationsLost, 1u, "connection declared lost");
+        NS_TEST_EXPECT_MSG_GT(tcp.c.indicationsNoAssociation, 0u,
+                              "indications while down are counted");
+        NS_TEST_EXPECT_MSG_GT_OR_EQ(tcp.c.connectionsEstablished, 2u, "re-connected");
+        NS_TEST_EXPECT_MSG_GT_OR_EQ(tcp.c.setupDone, 2u, "E2 Setup repeated");
+        NS_TEST_EXPECT_MSG_GT_OR_EQ(tcp.c.subscriptionsDone, 2u, "RIC re-subscribed");
+        NS_TEST_EXPECT_MSG_LT(tcp.c.indicationsReceived, tcp.c.indicationsSent,
+                              "in-flight messages die with the connection");
+        uint32_t during = 0;
+        uint32_t after = 0;
+        for (double t : tcp.arrivals)
+        {
+            during += (t > 2.01 && t < 32.0) ? 1 : 0;
+            after += t >= 32.0 ? 1 : 0;
+        }
+        NS_TEST_EXPECT_MSG_EQ(during, 0u, "nothing crosses the feeder during the outage");
+        NS_TEST_EXPECT_MSG_GT(after, 50u, "indications resume after re-establishment");
+        // UDP on the same outage has no association to lose: it resumes at once,
+        // but every message sent into the outage is gone.
+        const E2TcpRun udp = RunE2Transport(P::Udp, 0.0, 2.0, 30.0, 3, 50.0, 480);
+        NS_TEST_EXPECT_MSG_EQ(udp.c.setupDone, 1u, "UDP: one setup");
+        NS_TEST_EXPECT_MSG_GT(udp.c.indicationsSent - udp.c.indicationsReceived, 250u,
+                              "UDP loses the outage's indications");
+    }
+};
+
 /// Wave 6B: the E2 transport delay is the sum of its hops from live geometry.
 /// A regenerative gNB on a moving satellite reaches a ground RIC over one ISL
 /// and a feeder link plus fixed backhaul; the E2 node's one-way delay follows
@@ -8438,6 +8611,8 @@ class OranNtnPhyKpmUsesStandardTablesTest : public TestCase
         AddTestCase(new OranNtnE2KpmPayloadRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2PacketTransportTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2PathPerHopTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnE2TcpLossyFeederTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnE2TcpAssociationLossTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnA1EnforceStatusTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnKpmPrbNamingTest, TestCase::Duration::QUICK);
     }

@@ -8,6 +8,22 @@
 #include "ns3/oran-ntn-a1-interface.h"
 #include "ns3/oran-ntn-authority-lease.h"
 #include "ns3/oran-ntn-contact-plan.h"
+#include "ns3/oran-ntn-gated-error-model.h"
+#include "ns3/packet.h"
+#include "ns3/string.h"
+
+#include "ns3/constant-velocity-mobility-model.h"
+#include "ns3/error-model.h"
+#include "ns3/inet-socket-address.h"
+#include "ns3/internet-stack-helper.h"
+#include "ns3/ipv4-address-helper.h"
+#include "ns3/ipv4-static-routing-helper.h"
+#include "ns3/ntn-oran-application.h"
+#include "ns3/ntn-oran-sink.h"
+#include "ns3/point-to-point-channel.h"
+#include "ns3/point-to-point-helper.h"
+#include "ns3/pointer.h"
+#include "ns3/uinteger.h"
 
 #include <ns3/simulator.h>
 #include <ns3/test.h>
@@ -331,6 +347,121 @@ class OranNtnAuthorityLeaseRulesTest : public TestCase
     }
 };
 
+
+/// Wave 7B: the feeder-mgmt user plane. Voice packets cross UE -> satellite
+/// -> gateway over point-to-point links whose delays are the slant / c of a
+/// moving satellite, refreshed every 100 ms. The feeder's receive model is
+/// gated by the control plane's on/off RateErrorModel for the same pair.
+/// Normal path: everything sent while the control feeder is up arrives, at
+/// slant / c plus serialization. Failure path: a 1 s control outage drops
+/// exactly the packets sent into it (counted as gated, none delivered), and a
+/// lossy inner model on the service link drops packets counted apart.
+class OranNtnGatedUserPlaneTest : public TestCase
+{
+  public:
+    OranNtnGatedUserPlaneTest()
+        : TestCase("Wave 7B: user plane follows the control feeder state; delay = slant/c")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        constexpr double kC = 299792458.0;
+        NodeContainer n;
+        n.Create(3); // UE, satellite, gateway
+        InternetStackHelper inet;
+        inet.Install(n);
+        auto ueM = CreateObject<ConstantVelocityMobilityModel>();
+        ueM->SetPosition(Vector(0, 0, 0));
+        auto satM = CreateObject<ConstantVelocityMobilityModel>();
+        satM->SetPosition(Vector(-300e3, 0, 600e3));
+        satM->SetVelocity(Vector(7500, 0, 0));
+        auto gwM = CreateObject<ConstantVelocityMobilityModel>();
+        gwM->SetPosition(Vector(500e3, 0, 0));
+
+        PointToPointHelper svc;
+        svc.SetDeviceAttribute("DataRate", StringValue("1Mbps"));
+        NetDeviceContainer d1 = svc.Install(n.Get(0), n.Get(1));
+        PointToPointHelper fdr;
+        fdr.SetDeviceAttribute("DataRate", StringValue("50Mbps"));
+        NetDeviceContainer d2 = fdr.Install(n.Get(1), n.Get(2));
+        Ipv4AddressHelper ah;
+        ah.SetBase("172.16.0.0", "255.255.255.252");
+        Ipv4InterfaceContainer i1 = ah.Assign(d1);
+        ah.SetBase("172.32.0.0", "255.255.255.252");
+        Ipv4InterfaceContainer i2 = ah.Assign(d2);
+        Ipv4StaticRoutingHelper srh;
+        srh.GetStaticRouting(n.Get(0)->GetObject<Ipv4>())->SetDefaultRoute(i1.GetAddress(1), 1);
+        srh.GetStaticRouting(n.Get(1)->GetObject<Ipv4>())->SetDefaultRoute(i2.GetAddress(1), 2);
+        auto svcCh = DynamicCast<PointToPointChannel>(d1.Get(0)->GetChannel());
+        auto fdrCh = DynamicCast<PointToPointChannel>(d2.Get(0)->GetChannel());
+        std::function<void()> refresh = [&]() {
+            svcCh->SetAttribute("Delay", TimeValue(Seconds(satM->GetDistanceFrom(ueM) / kC)));
+            fdrCh->SetAttribute("Delay", TimeValue(Seconds(satM->GetDistanceFrom(gwM) / kC)));
+            Simulator::Schedule(MilliSeconds(100), refresh);
+        };
+        refresh();
+
+        // Control plane's on/off switch for this feeder pair; outage 2-3 s.
+        auto ctrl = CreateObject<RateErrorModel>();
+        ctrl->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
+        ctrl->SetRate(0.0);
+        Simulator::Schedule(Seconds(2.0), [ctrl]() { ctrl->SetRate(1.0); });
+        Simulator::Schedule(Seconds(3.0), [ctrl]() { ctrl->SetRate(0.0); });
+        auto fdrGate = CreateObject<OranNtnGatedErrorModel>();
+        fdrGate->SetGate(OranNtnGatedErrorModel::MirrorOutage(ctrl));
+        d2.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(fdrGate));
+        // Service link: open gate, lossless until 4 s, then a lossy inner model.
+        auto inner = CreateObject<RateErrorModel>();
+        inner->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
+        inner->SetRate(0.0);
+        Simulator::Schedule(Seconds(4.0), [inner]() { inner->SetRate(1.0); });
+        auto svcGate = CreateObject<OranNtnGatedErrorModel>();
+        svcGate->SetGate([]() { return false; });
+        svcGate->SetInner(inner);
+        d1.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(svcGate));
+
+        Ptr<NtnOranSink> sink = CreateObject<NtnOranSink>();
+        sink->SetAttribute("Local", AddressValue(InetSocketAddress(Ipv4Address::GetAny(), 9100)));
+        n.Get(2)->AddApplication(sink);
+        Ptr<NtnOranApplication> app = CreateObject<NtnOranApplication>();
+        app->SetRemote(InetSocketAddress(i2.GetAddress(1), 9100));
+        app->SetProfile(NtnOranApplication::CONVERSATIONAL_VOICE);
+        app->SetFlowIdentity(1, 1, 1, 1, 1000);
+        app->SetAttribute("PacketSize", UintegerValue(92));
+        n.Get(0)->AddApplication(app);
+        app->SetStartTime(Seconds(1.0));
+        app->SetStopTime(Seconds(5.0));
+        // Expected one-way delay at the mid-point of the delivered windows.
+        double expectMs = 0;
+        Simulator::Schedule(Seconds(2.5), [&]() {
+            expectMs = (satM->GetDistanceFrom(ueM) + satM->GetDistanceFrom(gwM)) / kC * 1e3 +
+                       (92 + 8 + 20 + 2) * 8.0 / 1e6 * 1e3 + (92 + 8 + 20 + 2) * 8.0 / 50e6 * 1e3;
+        });
+        uint64_t rxAt2 = 0;
+        Simulator::Schedule(Seconds(2.0), [&]() { rxAt2 = sink->GetRxPackets(); });
+        Simulator::Stop(Seconds(6.0));
+        Simulator::Run();
+
+        const uint64_t tx = app->GetTxPackets();
+        const uint64_t rx = sink->GetRxPackets();
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(tx, 199u, "4 s of 20 ms voice frames");
+        // 2-3 s: 50 frames die at the gated feeder; 4-5 s: 50 at the service link.
+        NS_TEST_EXPECT_MSG_EQ(fdrGate->GetGatedDrops(), 50u, "outage drops what was sent into it");
+        NS_TEST_EXPECT_MSG_GT_OR_EQ(svcGate->GetInnerDrops(), 49u,
+                                    "inner model drops counted apart");
+        NS_TEST_EXPECT_MSG_EQ(svcGate->GetGatedDrops(), 0u, "open service gate");
+        NS_TEST_EXPECT_MSG_EQ(rx, tx - fdrGate->GetGatedDrops() - svcGate->GetInnerDrops(),
+                              "everything else is delivered");
+        NS_TEST_EXPECT_MSG_EQ(rx, fdrGate->GetPassed(), "the sink saw what the feeder passed");
+        NS_TEST_EXPECT_MSG_GT(rxAt2, 45u, "delivered before the outage");
+        NS_TEST_EXPECT_MSG_EQ_TOL(sink->GetMeanDelayMs(), expectMs, 0.15,
+                                  "one-way delay = (service + feeder slant) / c + serialization");
+        Simulator::Destroy();
+    }
+};
+
 class OranNtnFeederMgmtTestSuite : public TestSuite
 {
   public:
@@ -342,6 +473,7 @@ class OranNtnFeederMgmtTestSuite : public TestSuite
         AddTestCase(new OranNtnContactPlanEdgesTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnContactPlanUnionTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnAuthorityLeaseRulesTest, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnGatedUserPlaneTest, TestCase::Duration::QUICK);
     }
 };
 

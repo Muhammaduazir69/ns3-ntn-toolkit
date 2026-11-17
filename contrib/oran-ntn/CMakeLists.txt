@@ -2,6 +2,7 @@ set(source_files
     # Core O-RAN framework
     model/oran-ntn-e2-interface.cc
     model/oran-ntn-e2-path.cc
+    model/oran-ntn-gated-error-model.cc
     model/oran-ntn-a1-interface.cc
     model/oran-ntn-conflict-manager.cc
     model/oran-ntn-xapp-base.cc
@@ -97,6 +98,7 @@ set(header_files
     model/oran-ntn-types.h
     model/oran-ntn-e2-interface.h
     model/oran-ntn-e2-path.h
+    model/oran-ntn-gated-error-model.h
     model/oran-ntn-a1-interface.h
     model/oran-ntn-conflict-manager.h
     model/oran-ntn-xapp-base.h

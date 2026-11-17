@@ -33,6 +33,43 @@
  * creation time), not ASN.1 APER (deferred item A4); the E2SM-KPM payload is
  * the in-tree OranNtnServiceModelKpm codec and is DECODED at the RIC, so the
  * xApps act on the bytes that crossed the link.
+ *
+ * Wave 7B: reliable transport (SetProtocol(Protocol::Tcp), attribute
+ * "Protocol"). ns-3 has no SCTP (O-RAN.WG3.E2GAP and E2AP v03.00 Section 7
+ * mandate SCTP, RFC 9260, with PPID 70 on port 36421). With Tcp, each E2 node
+ * opens ONE ns-3 TCP connection from its agent to the RIC (the analog of the
+ * one SCTP association per E2 node), and every E2AP message is written to
+ * the byte stream with a 4-byte length prefix; the receiver reassembles the
+ * stream and dispatches each complete message, so a message larger than one
+ * segment, or one that straddles segments, arrives whole or not at all. The
+ * E2AP message bytes are the same as in Udp mode; the 28 B SCTP common plus
+ * DATA chunk header padding is replaced by the 4 B length prefix, and TCP's
+ * own header (20 B plus 12 B timestamps option) stands in for SCTP's on the
+ * wire. E2 Setup is sent only once the connection is established, the RIC
+ * subscribes after the setup, and no indication leaves before the
+ * subscription is accepted, as in Udp mode.
+ *
+ * Reproduced from SCTP: reliable, ordered delivery per association with
+ * retransmission on loss (RTO.Min 1 s as in RFC 9260 Section 16, ns-3 TCP
+ * MinRto default), a bounded retransmission count after which the
+ * association is declared lost (attribute "MaxRetrans", default 10 =
+ * RFC 9260 Association.Max.Retrans; "MaxInitRetrans", default 8 =
+ * Max.Init.Retransmits for the connection setup), and re-establishment: on
+ * loss of the connection the agent re-connects after "ReconnectDelay" and
+ * repeats E2 Setup, and the RIC re-subscribes, as an E2 node does after an
+ * SCTP restart. Every E2 message therefore sees propagation, serialization,
+ * queueing, retransmission and head-of-line waiting.
+ *
+ * Not reproduced: SCTP multi-streaming (E2AP uses one stream for global
+ * procedures and others per RAN function; over one TCP byte stream a lost
+ * segment holds back every later message of the node, so head-of-line
+ * blocking is stronger than in SCTP), message-oriented framing (emulated by
+ * the length prefix), the PPID 70 field, the 4-way INIT/INIT-ACK/COOKIE
+ * handshake (TCP uses 3 ways, one round trip less before E2 Setup),
+ * HEARTBEAT path supervision (HB.interval 30 s; a silent dead path is found
+ * only when data is sent), multi-homing and SACK-based fast retransmit
+ * differences between TCP NewReno and SCTP. Udp mode is still the default so
+ * published runs reproduce.
  */
 
 #ifndef ORAN_NTN_E2_PACKET_TRANSPORT_H
@@ -77,6 +114,19 @@ class OranNtnE2Transport : public Object
     static TypeId GetTypeId();
     OranNtnE2Transport();
     ~OranNtnE2Transport() override;
+
+    /// Transport under E2AP (see the file comment).
+    enum class Protocol : uint8_t
+    {
+        Udp, //!< one datagram per message, SCTP header size as padding (default)
+        Tcp, //!< one reliable connection per E2 node, length-prefixed messages
+    };
+    /// Select the transport; call before Attach().
+    void SetProtocol(Protocol p);
+    Protocol GetProtocol() const { return m_proto; }
+    /// Packet error rate on both directions of every feeder link (also the
+    /// rate restored after an outage). Call before or after Attach().
+    void SetFeederPacketErrorRate(double per);
 
     /// E2AP v03.00 procedure codes used here.
     enum ProcedureCode : uint8_t
@@ -133,6 +183,13 @@ class OranNtnE2Transport : public Object
         uint64_t bytesUp{0};
         uint64_t bytesDown{0};
         uint64_t decodeFailures{0};
+        // Tcp mode (Wave 7B)
+        uint64_t connectionsEstablished{0}; //!< agent-side connect successes
+        uint64_t connectFailures{0};        //!< connect gave up (MaxInitRetrans)
+        uint64_t associationsLost{0};       //!< established connection lost (MaxRetrans)
+        uint64_t indicationsNoAssociation{0}; //!< indications while the connection was down
+        uint64_t sendBlocked{0};            //!< messages queued because the TX buffer was full
+        uint64_t outOfOrder{0};             //!< messages that arrived with an older sequence
     };
     const Counters& GetCounters() const { return m_c; }
     /// Mean / sd of the measured indication one-way delay (ms).
@@ -178,6 +235,15 @@ class OranNtnE2Transport : public Object
         Time lastIndicationRx{Seconds(-1)};
         double maxGapS{0.0};
         Ptr<Socket> ricSock; //!< RIC-side socket bound to this link's address
+        // Tcp mode
+        Ptr<Socket> ricListen;          //!< RIC listening socket for this link
+        bool assocUp{false};            //!< agent connection established
+        std::vector<uint8_t> agentRxBuf; //!< stream reassembly at the agent
+        std::vector<uint8_t> ricRxBuf;   //!< stream reassembly at the RIC
+        std::vector<Ptr<Packet>> agentTxQ; //!< waiting for TX buffer space
+        std::vector<Ptr<Packet>> ricTxQ;
+        int64_t lastUpSeq{-1};          //!< highest uplink sequence seen at the RIC
+        int64_t lastDownSeq{-1};        //!< highest downlink sequence seen at the agent
     };
 
     void Refresh();
@@ -198,6 +264,16 @@ class OranNtnE2Transport : public Object
                uint32_t bytes, double owdMs);
     Time LinkDelay(const Link& l) const;
     void SetOutage(uint32_t gnbId, bool on);
+    // Shared by the datagram and stream receive paths.
+    void Dispatch(uint32_t gnb, const uint8_t* buf, uint32_t bytes, bool atRic);
+    // Tcp mode
+    void TcpConnect(uint32_t gnb);
+    void TcpAgentRx(uint32_t gnb, Ptr<Socket> s);
+    void TcpRicRx(uint32_t gnb, Ptr<Socket> s);
+    void TcpDrain(std::vector<uint8_t>& buf, uint32_t gnb, bool atRic);
+    void TcpSend(Ptr<Socket> s, std::vector<Ptr<Packet>>& q, Ptr<Packet> p);
+    void TcpFlush(Ptr<Socket> s, std::vector<Ptr<Packet>>& q);
+    void TcpAssociationLost(uint32_t gnb);
 
     Ptr<Node> m_ric;
     std::map<uint32_t, Link> m_links; //!< by gnbId
@@ -206,6 +282,11 @@ class OranNtnE2Transport : public Object
     Time m_refresh{MilliSeconds(100)};
     EventId m_refreshEvent;
     uint32_t m_sctpPad{28};
+    Protocol m_proto{Protocol::Udp};
+    double m_per{0.0};
+    uint32_t m_maxRetrans{10};
+    uint32_t m_maxInitRetrans{8};
+    Time m_reconnect{Seconds(1)};
     uint32_t m_nextNet{0};
     Counters m_c;
     double m_owdSum{0.0};

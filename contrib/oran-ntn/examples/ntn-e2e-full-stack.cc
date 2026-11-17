@@ -21,6 +21,9 @@
  *   - E2: --e2Transport=event (delay events, default) or packet (E2AP as UDP
  *     datagrams over a per-satellite feeder link with live slant delay; E2
  *     Setup and RIC Subscription precede the first indication).
+ *     --e2Proto=tcp (Wave 7B) carries the E2AP messages over one reliable ns-3
+ *     TCP connection per E2 node instead (the SCTP stand-in documented in
+ *     oran-ntn-e2-transport.h); --e2FeederPer sets a feeder packet error rate.
  *   - ntn-observability: control plane and KPM points in line protocol on the
  *     simulation clock (out/ric.lp).
  *
@@ -98,6 +101,8 @@ main(int argc, char* argv[])
     double feederOutageS = 1.0;
     double gwDistanceKm = 500.0;
     double e2RateMbps = 10.0;
+    std::string e2Proto = "udp";
+    double e2FeederPer = 0.0;
     double ueAlongTrack = 0.5; // UE site between the serving (0) and neighbour (1) sub-points
     double a3OffsetDb = 3.0;
     std::string initialQuotas = "0.9,0.05,0.05";
@@ -114,6 +119,12 @@ main(int argc, char* argv[])
                  feederOutageAt);
     cmd.AddValue("feederOutageS", "packet transport: feeder outage duration (s)", feederOutageS);
     cmd.AddValue("e2RateMbps", "packet transport: E2 control bearer rate (Mb/s)", e2RateMbps);
+    cmd.AddValue("e2Proto",
+                 "packet transport: udp (datagrams) or tcp (one reliable connection per E2 "
+                 "node, SCTP stand-in)",
+                 e2Proto);
+    cmd.AddValue("e2FeederPer", "packet transport: feeder packet error rate (both ways)",
+                 e2FeederPer);
     cmd.AddValue("gwDistanceKm", "Gateway ground distance north of the UE site (km)", gwDistanceKm);
     cmd.AddValue("ueAlongTrack",
                  "UE site as a fraction of the way from the serving to the neighbour sub-point",
@@ -124,6 +135,7 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
     NS_ABORT_MSG_IF(e2Transport != "event" && e2Transport != "packet",
                     "--e2Transport must be event or packet");
+    NS_ABORT_MSG_IF(e2Proto != "udp" && e2Proto != "tcp", "--e2Proto must be udp or tcp");
     std::filesystem::create_directories(outputDir);
 
     // ---- Constellation: serving satellite + the approaching in-plane neighbour
@@ -212,6 +224,9 @@ main(int argc, char* argv[])
     if (e2Transport == "packet")
     {
         transport = CreateObject<OranNtnE2Transport>();
+        transport->SetProtocol(e2Proto == "tcp" ? OranNtnE2Transport::Protocol::Tcp
+                                                : OranNtnE2Transport::Protocol::Udp);
+        transport->SetFeederPacketErrorRate(e2FeederPer);
         transport->SetTraceFile(outputDir + "/e2_trace.csv");
         transport->SetBearerRate(DataRate(static_cast<uint64_t>(e2RateMbps * 1e6)));
         transport->Attach(e2Nodes[0], serv, gw);
@@ -400,6 +415,14 @@ main(int argc, char* argv[])
                   << ", acknowledged " << c.controlAcks << ", before setup "
                   << c.controlsBeforeSetup << "; bytes up " << c.bytesUp << ", down "
                   << c.bytesDown << "\n";
+        if (e2Proto == "tcp")
+        {
+            std::cout << "  TCP: connections " << c.connectionsEstablished << ", connect failures "
+                      << c.connectFailures << ", connections lost " << c.associationsLost
+                      << ", indications while down " << c.indicationsNoAssociation
+                      << ", out of order " << c.outOfOrder << ", blocked sends "
+                      << c.sendBlocked << "\n";
+        }
     }
     std::cout << "  observability: " << outputDir << "/ric.lp (" << sink->GetEmittedCount()
               << " points, simulation clock), KPM rows observed " << kpmRows << "\n";

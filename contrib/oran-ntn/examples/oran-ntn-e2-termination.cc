@@ -46,9 +46,32 @@
  * bytes {0x77} and the RIC acknowledged it without looking, so the "full E2
  * procedure" it reported would have been reported just the same by a peer that
  * sent nothing meaningful at all.
+ *
+ * Wave 7B: the KPM values are MEASURED, not constants. Before the agent
+ * connects, it runs one in-process ns-3 pass (one Walker LEO satellite at
+ * 600 km propagated by ntn-constellation's Sgp4MobilityModel, --simUes TR
+ * 38.811 UEs from ntn-cho under its sub-point, a 5G-LENA NR cell built by
+ * ntn-traffic's NtnRealStackHelper with the TR 38.821 Set-1 S-band budget and
+ * a feeder gateway, the MixedBouquet standards flows, and the
+ * NtnOranAiFlowMonitor over FlowMonitor). Indication k carries every metric the
+ * monitor measured in granularity period k (1 s), one E2SM-KPM
+ * measInfo row per (TS 28.552 measurement name, flow) with the flow's 5QI and
+ * S-NSSAI as labels; a metric the period did not measure is left out. The pass
+ * runs for --indications periods plus 2 s, so --indications=5 is a 7 s
+ * simulation (about 15 to 30 s wall clock with the NR stack). In the
+ * two-process mode start the RIC with a --duration that covers that; in
+ * --role=both the pass runs before the listener starts. The pass also writes
+ * <outputDir>/e2term_kpm_series.csv and sim_health.csv. The RIC side decodes
+ * every indication and prints the first ones, so the values that crossed the
+ * socket can be compared with the CSV.
  */
 
 #include "ns3/core-module.h"
+#include "ns3/ntn-oran-ai-flow-monitor.h"
+#include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 #include "ns3/e2-listener.h"
 #include "ns3/e2-message-types.h"
 #include "ns3/e2-transport.h"
@@ -59,6 +82,8 @@
 #include "ns3/oran-ntn-types.h"
 
 #include <chrono>
+#include <cstdio>
+#include <map>
 #include <iostream>
 #include <thread>
 
@@ -68,30 +93,138 @@ using namespace oranntn::flexric;
 namespace
 {
 
-/// Build a real PER-encoded E2SM-KPM indication payload.
+/// One measured KPM row: TS 28.552 name, flow labels, value.
+struct MeasuredRow
+{
+    std::string name;
+    uint8_t fiveQi{0};
+    std::string snssai;
+    double value{0.0};
+};
+
+/// One 1 s granularity period of measured KPM rows.
+struct MeasuredPeriod
+{
+    double tS{0.0};
+    std::vector<MeasuredRow> rows;
+};
+
+/// The measured pass behind the indications (see the file comment).
+std::vector<MeasuredPeriod>
+RunMeasuredPass(uint32_t periods, uint32_t numUes, const std::string& outDir)
+{
+    using namespace ns3::ntncon;
+    const double simS = periods + 2.0;
+    WalkerConfig wcfg;
+    wcfg.num_planes = 1;
+    wcfg.total_sats = 1;
+    wcfg.altitude_km = 600.0;
+    wcfg.inclination_deg = 53.0;
+    wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01
+    const auto elements = WalkerConstellation::BuildDelta(wcfg);
+    auto sat = CreateObject<Sgp4MobilityModel>();
+    sat->SetElementsSgp4(elements.front());
+    double subLat = 0;
+    double subLon = 0;
+    double subAlt = 0;
+    sat->GetGeodetic(subLat, subLon, subAlt);
+    NodeContainer satNodes;
+    satNodes.Create(1);
+    satNodes.Get(0)->AggregateObject(sat);
+    NodeContainer ueNodes;
+    ueNodes.Create(numUes);
+    NtnTr38811MobilityHelper ueMobility(1);
+    ueMobility.Install(ueNodes, NtnMobilityScenarios::MixedContinental(), subLat - 0.03,
+                       subLat + 0.03, subLon - 0.03, subLon + 0.03);
+
+    NtnRealStackHelper rs;
+    rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+    rs.SetNumerology(1);
+    rs.SetSimTime(Seconds(simS));
+    rs.SetOutputDir(outDir);
+    rs.SetRunTag("oran-ntn-e2-termination");
+    rs.ApplyTr38821Set1Defaults();
+    rs.Build(satNodes, ueNodes);
+    rs.SetFeederGatewayGeodetic(subLat + 5.0, subLon, 0.0);
+    rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet, Seconds(1.0),
+                      Seconds(simS - 0.5));
+    rs.EnableAiFlowMonitor(outDir + "/e2term");
+    Simulator::Stop(Seconds(simS));
+    Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
+
+    std::map<int64_t, MeasuredPeriod> byTime;
+    Ptr<NtnOranAiFlowMonitor> mon = rs.GetAiFlowMonitor();
+    for (const auto& [flowId, series] : mon->GetKpmSeries())
+    {
+        OranFlowKey key;
+        mon->GetClassifier()->FindFlow(flowId, key);
+        char snssai[16];
+        std::snprintf(snssai, sizeof(snssai), "%u-%06x", key.sst, key.sd & 0xFFFFFFu);
+        for (const auto& smp : series)
+        {
+            MeasuredPeriod& per = byTime[smp.time.GetNanoSeconds()];
+            per.tS = smp.time.GetSeconds();
+            for (const auto& [name, v] : smp.metrics)
+            {
+                if (std::isfinite(v))
+                {
+                    per.rows.push_back({name, key.fiveQi, snssai, v});
+                }
+            }
+        }
+    }
+    std::printf("[agent] measured pass: SGP4 LEO 600 km, %u TR 38.811 UEs, NR SINR %.2f dB, "
+                "DL %.3f Mb/s, owd %.2f ms, jitter %.3f ms, loss %.4f, %zu KPM periods\n",
+                numUes, rs.GetMeanDlSinrDb(), rs.GetRxThroughputMbps(), rs.GetMeanDelayMs(),
+                rs.GetMeanJitterMs(), rs.GetAppLossRatio(), byTime.size());
+    Simulator::Destroy();
+    std::vector<MeasuredPeriod> out;
+    for (auto& [t, per] : byTime)
+    {
+        if (!per.rows.empty())
+        {
+            out.push_back(std::move(per));
+        }
+    }
+    return out;
+}
+
+/// Build a real PER-encoded E2SM-KPM indication payload from one measured period.
 std::vector<uint8_t>
-MakeKpmIndicationBlob(double thpDl)
+MakeKpmIndicationBlob(const MeasuredPeriod& period)
 {
     using namespace oranntn::flexric::kpm_v3;
     kpm_ind_msg_format_1_t body{};
     body.gran_period_ms = 1000;
-    meas_info_format_1_lst_t row{};
-    row.meas_type.form = meas_type_form_t::name;
-    row.meas_type.meas_name = oranntn::kpm::kDrbUeThpDl;
-    meas_record_item_t r{};
-    r.form = meas_value_form_t::real;
-    r.real_val = thpDl;
-    row.meas_record_lst.push_back(r);
-    label_info_t lbl{};
-    lbl.five_qi = 9;
-    lbl.s_nssai = "1-000001";
-    lbl.plmn_id = "00101";
-    row.label_info_lst.push_back(lbl);
-    body.meas_info_lst.push_back(row);
-
+    for (const auto& m : period.rows)
+    {
+        meas_info_format_1_lst_t row{};
+        row.meas_type.form = meas_type_form_t::name;
+        row.meas_type.meas_name = m.name;
+        meas_record_item_t r{};
+        r.form = meas_value_form_t::real;
+        r.real_val = m.value;
+        row.meas_record_lst.push_back(r);
+        label_info_t lbl{};
+        lbl.five_qi = m.fiveQi;
+        lbl.s_nssai = m.snssai;
+        lbl.plmn_id = "00101";
+        row.label_info_lst.push_back(lbl);
+        body.meas_info_lst.push_back(row);
+    }
     OranNtnServiceModelKpm sm;
     return sm.EncodeIndication(&body);
 }
+
+/// RIC-side decode tally; the first indications are printed in full.
+struct RicDecode
+{
+    uint32_t ok{0};
+    uint32_t bad{0};
+    uint64_t rows{0};
+};
 
 int
 RunRic(E2Transport::Protocol proto, const std::string& host, uint16_t port, double durationSec)
@@ -109,17 +242,37 @@ RunRic(E2Transport::Protocol proto, const std::string& host, uint16_t port, doub
     // ORAN-11: decode, do not merely count. A listener that acknowledges a
     // control it never parsed cannot tell a real peer from a peer sending
     // three magic bytes, which is exactly what it used to be handed.
-    uint32_t indOk = 0;
-    uint32_t indBad = 0;
+    RicDecode ind;
     uint32_t ctrlOk = 0;
     uint32_t ctrlBad = 0;
 
     ric->SetIndicationSink(MakeCallback(
-        +[](uint32_t* okp, uint32_t* badp, std::vector<uint8_t> payload) {
+        +[](RicDecode* d, std::vector<uint8_t> payload) {
             OranNtnServiceModelKpm sm;
             oranntn::flexric::kpm_v3::kpm_ind_msg_format_1_t out{};
-            (sm.DecodeIndication(payload, out) ? *okp : *badp)++;
-        }).Bind(&indOk).Bind(&indBad));
+            if (!sm.DecodeIndication(payload, out))
+            {
+                ++d->bad;
+                return;
+            }
+            ++d->ok;
+            d->rows += out.meas_info_lst.size();
+            if (d->ok <= 3)
+            {
+                std::cout << "[ric] indication " << d->ok << ": " << out.meas_info_lst.size()
+                          << " rows;";
+                for (const auto& r : out.meas_info_lst)
+                {
+                    if (r.meas_type.meas_name == "DRB.UEThpDl" && !r.meas_record_lst.empty() &&
+                        !r.label_info_lst.empty() && r.label_info_lst[0].five_qi)
+                    {
+                        std::cout << " 5QI " << unsigned(*r.label_info_lst[0].five_qi)
+                                  << " DRB.UEThpDl=" << r.meas_record_lst[0].real_val;
+                    }
+                }
+                std::cout << "\n";
+            }
+        }).Bind(&ind));
     ric->SetControlSink(MakeCallback(
         +[](uint32_t* okp, uint32_t* badp, std::vector<uint8_t> payload) {
             OranNtnServiceModelRc sm;
@@ -137,10 +290,11 @@ RunRic(E2Transport::Protocol proto, const std::string& host, uint16_t port, doub
     std::cout << "[ric] clients=" << ric->NumClients()
               << " setups=" << ric->SetupRequestsHandled()
               << " indications=" << ric->IndicationsForwarded()
-              << " (KPM decoded ok=" << indOk << " bad=" << indBad << ")"
+              << " (KPM decoded ok=" << ind.ok << " bad=" << ind.bad << ", " << ind.rows
+              << " measured rows)"
               << " (RC control decoded ok=" << ctrlOk << " bad=" << ctrlBad << ")\n";
     const bool ok = ric->SetupRequestsHandled() >= 1 && ric->IndicationsForwarded() >= 1 &&
-                    indOk >= 1 && indBad == 0 && ctrlOk >= 1 && ctrlBad == 0;
+                    ind.ok >= 1 && ind.bad == 0 && ctrlOk >= 1 && ctrlBad == 0;
     ric->Stop();
     std::cout << "[ric] " << (ok ? "PASS" : "no traffic seen") << "\n";
     return ok ? 0 : 1;
@@ -194,8 +348,15 @@ int
 RunAgent(E2Transport::Protocol proto,
          const std::string& host,
          uint16_t port,
-         uint32_t indications)
+         uint32_t indications,
+         const std::vector<MeasuredPeriod>& measured)
 {
+    if (measured.size() < indications)
+    {
+        std::cerr << "[agent] the measured pass produced " << measured.size()
+                  << " KPM periods, fewer than --indications=" << indications << "\n";
+        return 1;
+    }
     auto c = MakeE2Transport(proto);
     if (!c->Connect(host, port))
     {
@@ -224,14 +385,15 @@ RunAgent(E2Transport::Protocol proto,
 
     for (uint32_t i = 0; i < indications; ++i)
     {
-        const std::vector<uint8_t> blob = MakeKpmIndicationBlob(10.0 + i);
+        const std::vector<uint8_t> blob = MakeKpmIndicationBlob(measured[i]);
         if (c->Send({E2MessageType::ric_indication, blob}) < 0)
         {
             std::cerr << "[agent] indication " << i << " send failed\n";
             return 1;
         }
     }
-    std::cout << "[agent] sent " << indications << " PER-encoded KPM indications\n";
+    std::cout << "[agent] sent " << indications
+              << " PER-encoded KPM indications of measured periods\n";
 
     const std::vector<uint8_t> ctrl = MakeRcControlBlob(/*targetGnbId=*/9);
     if (ctrl.empty())
@@ -278,6 +440,10 @@ main(int argc, char* argv[])
     cmd.AddValue("port", "E2 port", port);
     cmd.AddValue("duration", "RIC listen seconds", duration);
     cmd.AddValue("indications", "agent: number of RIC indications to send", indications);
+    uint32_t simUes = 2;
+    std::string outputDir = "oran-ntn-e2-termination-output";
+    cmd.AddValue("simUes", "agent: TR 38.811 UEs in the measured NR pass", simUes);
+    cmd.AddValue("outputDir", "agent: output directory of the measured pass", outputDir);
     cmd.Parse(argc, argv);
 
     const E2Transport::Protocol p =
@@ -285,7 +451,8 @@ main(int argc, char* argv[])
 
     if (role == "agent")
     {
-        return RunAgent(p, host, static_cast<uint16_t>(port), indications);
+        const auto measured = RunMeasuredPass(indications, simUes, outputDir);
+        return RunAgent(p, host, static_cast<uint16_t>(port), indications, measured);
     }
 
     if (role == "both")
@@ -304,12 +471,15 @@ main(int argc, char* argv[])
         // so the association, the PER-encoded KPM indications and the decode all
         // happen for real over a loopback SCTP (or TCP) socket. The two-process
         // roles are unchanged for anyone who wants them.
+        // The measured pass runs here, on the main thread and before the
+        // listener starts: the ns-3 simulator is not thread-safe.
+        const auto measured = RunMeasuredPass(indications, simUes, outputDir);
         int agentRc = 0;
         std::thread agent([&]() {
             // Let the listener bind before connecting; a connect that races the
             // bind fails for a reason that has nothing to do with E2.
             std::this_thread::sleep_for(std::chrono::milliseconds(400));
-            agentRc = RunAgent(p, host, static_cast<uint16_t>(port), indications);
+            agentRc = RunAgent(p, host, static_cast<uint16_t>(port), indications, measured);
         });
         const int ricRc = RunRic(p, host, static_cast<uint16_t>(port), duration);
         agent.join();

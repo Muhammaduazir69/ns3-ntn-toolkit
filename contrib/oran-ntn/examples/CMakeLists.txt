@@ -160,6 +160,9 @@ build_lib_example(
   LIBRARIES_TO_LINK
     ${liboran-ntn}
     ${libntn-traffic}
+    ${libntn-constellation}
+    ${libntn-cho}
+    ${libntn-observability}
     ${libmobility}
     ${libcore}
     ${libnetwork}
@@ -194,6 +197,9 @@ build_lib_example(
   SOURCE_FILES oran-ntn-e2-termination.cc
   LIBRARIES_TO_LINK
     ${liboran-ntn}
+    ${libntn-traffic}
+    ${libntn-constellation}
+    ${libntn-cho}
     ${libcore}
     ${libnetwork}
 )
@@ -206,6 +212,12 @@ build_lib_example(
   LIBRARIES_TO_LINK
     ${liboran-ntn}
     ${libntn-constellation}
+    ${libntn-cho}
+    ${libntn-traffic}
+    ${libntn-observability}
+    ${libflow-monitor}
+    ${libapplications}
+    ${libmobility}
     ${libcore}
     ${libnetwork}
     ${libmobility}

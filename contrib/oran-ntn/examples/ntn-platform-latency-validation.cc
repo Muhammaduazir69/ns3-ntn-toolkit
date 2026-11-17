@@ -62,8 +62,33 @@
 // on a band miss (for CI gates). GEO runs at the 10 deg default since the
 // helper clamps NrUeRrc::T300 at the TS 38.331 maximum of 2000 ms.
 //
+// Wave 7B (one flow through the toolkit, stack mode):
+//   * LEO, MEO and GEO platforms fly a real orbit: one satellite per class,
+//     propagated by ntn-constellation's Sgp4MobilityModel (Vallado SGP4, deep
+//     space for MEO/GEO). The UE site is placed cross-track of the sub-point at
+//     mid-run so the satellite is seen at --elevationDeg at its closest
+//     approach; the gateway sits on the other side at the same elevation. The
+//     elevation, slant and propagation therefore move during the run, and the
+//     reported prop_ms is the time average of (service + feeder slant) / c
+//     sampled every 100 ms while packets flow. UAV and HAP stay fixed above
+//     their site (quasi-stationary platforms, no orbit to propagate).
+//   * The UEs are TR 38.811 Section 6.1.1.1 handheld pedestrians (ntn-cho
+//     NtnTr38811MobilityHelper, 3 km/h) inside a 100 m box at the UE site,
+//     --numUes of them (default 1, as before).
+//   * Every class exports the TS 28.552 KPM series of its flows
+//     (NtnRealStackHelper::EnableAiFlowMonitor, <class>/kpm_kpm_series.csv),
+//     sim_health.csv, and line-protocol geometry and result points
+//     (ntn-observability NtnInfluxSink, <class>/platform_latency.lp).
+//   * platform_latency.csv gains jitter_ms, loss_ratio, elev_start_deg,
+//     elev_end_deg, platform_mobility and num_ues at the end of each row.
+//
 // Quick test: (no arguments; runs all five classes in one process)
 #include "ns3/core-module.h"
+#include "ns3/geographic-positions.h"
+#include "ns3/ntn-influx-sink.h"
+#include "ns3/ntn-realistic-mobility.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
 #include "ns3/mobility-module.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/internet-module.h"
@@ -96,24 +121,6 @@ SlantAtCellEdge(double hM)
     const double rs = kRe + hM;
     return -kRe * std::sin(e) + std::sqrt(rs * rs - kRe * kRe * std::cos(e) * std::cos(e));
 }
-/// Central angle (rad) between a ground point and the sub-point of a platform
-/// at altitude h seen at elevation e (spherical Earth).
-double
-CentralAngle(double hM, double eDeg)
-{
-    const double e = eDeg * M_PI / 180.0;
-    return std::acos(kRe * std::cos(e) / (kRe + hM)) - e;
-}
-
-Vector
-Ecef(double latRad, double lonRad, double altM)
-{
-    const double r = kRe + altM;
-    return Vector(r * std::cos(latRad) * std::cos(lonRad),
-                  r * std::cos(latRad) * std::sin(lonRad),
-                  r * std::sin(latRad));
-}
-
 double
 SlantAt(double hM, double eDeg)
 {
@@ -131,27 +138,135 @@ struct StackResult
     double tbler{0};
     uint64_t rx{0};
     uint64_t tbs{0};
+    double jitterMs{0};
+    double lossRatio{0};
+    double elevStartDeg{0};
+    double elevEndDeg{0};
+    bool orbit{false};
 };
+
+/// Elevation (deg) of an ECEF point seen from a WGS-84 ground site.
+double
+ElevationFrom(double latDeg, double lonDeg, double altM, const Vector& target)
+{
+    const Vector g = NtnRealStackHelper::GeodeticToEcef(latDeg, lonDeg, altM);
+    const double la = latDeg * M_PI / 180.0;
+    const double lo = lonDeg * M_PI / 180.0;
+    const Vector up(std::cos(la) * std::cos(lo), std::cos(la) * std::sin(lo), std::sin(la));
+    const Vector d = target - g;
+    const double r = d.GetLength();
+    return std::asin((d.x * up.x + d.y * up.y + d.z * up.z) / r) * 180.0 / M_PI;
+}
+
+/// Great-circle destination from (lat, lon) along azimuth az by central angle delta (rad).
+void
+Destination(double latDeg, double lonDeg, double azRad, double delta, double& outLat,
+            double& outLon)
+{
+    const double la = latDeg * M_PI / 180.0;
+    const double lo = lonDeg * M_PI / 180.0;
+    const double la2 = std::asin(std::sin(la) * std::cos(delta) +
+                                 std::cos(la) * std::sin(delta) * std::cos(azRad));
+    const double lo2 = lo + std::atan2(std::sin(azRad) * std::sin(delta) * std::cos(la),
+                                       std::cos(delta) - std::sin(la) * std::sin(la2));
+    outLat = la2 * 180.0 / M_PI;
+    outLon = std::remainder(lo2 * 180.0 / M_PI, 360.0);
+}
+
+/// Ground site along azimuth az from the sub-point that sees `target` at elevDeg.
+void
+SiteAtElevation(const Vector& target, double subLat, double subLon, double azRad, double elevDeg,
+                double& lat, double& lon)
+{
+    double lo = 0.0;
+    double hi = std::acos(kRe / target.GetLength()); // geometric horizon
+    for (int i = 0; i < 80; ++i)
+    {
+        const double mid = 0.5 * (lo + hi);
+        Destination(subLat, subLon, azRad, mid, lat, lon);
+        (ElevationFrom(lat, lon, 0.0, target) > elevDeg ? lo : hi) = mid;
+    }
+    Destination(subLat, subLon, azRad, 0.5 * (lo + hi), lat, lon);
+}
 
 /// One platform class on the measured NR stack.
 StackResult
-RunOnStack(double altM, double elevDeg, double simSeconds, const std::string& outDir)
+RunOnStack(double altM,
+           double elevDeg,
+           double simSeconds,
+           const std::string& outDir,
+           const std::string& className,
+           uint32_t numUes)
 {
-    const double theta = CentralAngle(altM, elevDeg);
-    const double lat0 = 10.0 * M_PI / 180.0;
-    const double lon0 = 20.0 * M_PI / 180.0;
+    // ---- Platform: SGP4 orbit (LEO/MEO/GEO) or a fixed UAV/HAP ----
+    const bool orbit = altM >= 300e3;
     NodeContainer gnb;
     gnb.Create(1);
-    NodeContainer ue;
-    ue.Create(1);
-    auto pm = CreateObject<ConstantPositionMobilityModel>();
-    pm->SetPosition(Ecef(lat0 + theta, lon0, altM));
+    Ptr<MobilityModel> pm;
+    Vector platMid;
+    Vector platVel(0, 0, 0);
+    if (orbit)
+    {
+        ntncon::KeplerianElements el;
+        el.semi_major_axis_m = 6378137.0 + altM;
+        el.eccentricity = altM > 30000e3 ? 1e-4 : 0.0;
+        el.inclination_rad = (altM > 30000e3 ? 0.05 : (altM > 5000e3 ? 50.0 : 53.0)) * M_PI / 180.0;
+        el.epoch_unix_s = 1735689600.0; // 2025-01-01 00:00:00 UTC
+        el.name = className;
+        auto sat = CreateObject<ntncon::Sgp4MobilityModel>();
+        if (!sat->SetElementsSgp4(el))
+        {
+            sat->SetElements(el); // Kepler + J2 when SGP4 rejects the elements
+        }
+        sat->GetEcefStateAt(Seconds(simSeconds / 2.0), platMid, platVel);
+        pm = sat;
+    }
+    else
+    {
+        auto cp = CreateObject<ConstantPositionMobilityModel>();
+        platMid = NtnRealStackHelper::GeodeticToEcef(10.0, 20.0, altM);
+        cp->SetPosition(platMid);
+        pm = cp;
+    }
     gnb.Get(0)->AggregateObject(pm);
-    auto um = CreateObject<ConstantPositionMobilityModel>();
-    um->SetPosition(Ecef(lat0, lon0, 1.5));
-    ue.Get(0)->AggregateObject(um);
-    auto gw = CreateObject<ConstantPositionMobilityModel>();
-    gw->SetPosition(Ecef(lat0 + 2.0 * theta, lon0, 0.0));
+    const Vector sub =
+        GeographicPositions::CartesianToGeographicCoordinates(platMid,
+                                                              GeographicPositions::WGS84);
+    // Cross-track of the ground track at mid-run (north for a fixed platform).
+    double crossAz = 0.0;
+    if (orbit)
+    {
+        const double la = sub.x * M_PI / 180.0;
+        const double lo = sub.y * M_PI / 180.0;
+        const Vector east(-std::sin(lo), std::cos(lo), 0.0);
+        const Vector north(-std::sin(la) * std::cos(lo), -std::sin(la) * std::sin(lo), std::cos(la));
+        const double ve = platVel.x * east.x + platVel.y * east.y + platVel.z * east.z;
+        const double vn = platVel.x * north.x + platVel.y * north.y + platVel.z * north.z;
+        crossAz = std::atan2(ve, vn) + M_PI / 2.0;
+    }
+    double ueLat = 0;
+    double ueLon = 0;
+    double gwLat = 0;
+    double gwLon = 0;
+    SiteAtElevation(platMid, sub.x, sub.y, crossAz, elevDeg, ueLat, ueLon);
+    SiteAtElevation(platMid, sub.x, sub.y, crossAz + M_PI, elevDeg, gwLat, gwLon);
+
+    // ---- TR 38.811 handheld pedestrian UEs in a 100 m box at the UE site ----
+    NodeContainer ue;
+    ue.Create(numUes);
+    MobilityProfile pedestrian{};
+    pedestrian.pStatic = 0.0;
+    pedestrian.pPedestrian = 1.0;
+    pedestrian.pVehicular = 0.0;
+    pedestrian.pHst = 0.0;
+    pedestrian.pMaritime = 0.0;
+    pedestrian.pAviation = 0.0;
+    pedestrian.pIot = 0.0;
+    NtnTr38811MobilityHelper ueMob(1);
+    const double box = 0.00045; // deg, about 50 m
+    auto ueModels = ueMob.Install(ue, pedestrian, ueLat - box, ueLat + box, ueLon - box,
+                                  ueLon + box);
+    Ptr<MobilityModel> um = ueModels.front();
 
     NtnRealStackHelper rs;
     rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
@@ -165,21 +280,88 @@ RunOnStack(double altM, double elevDeg, double simSeconds, const std::string& ou
                                20.0 * std::log10(slant / SlantAt(600e3, elevDeg)));
     rs.SetPayloadOption(NtnRealStackHelper::PayloadOption::Transparent);
     rs.Build(gnb, ue);
-    rs.SetFeederGateway(gw);
+    Ptr<MobilityModel> gw = rs.SetFeederGatewayGeodetic(gwLat, gwLon, 0.0);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::UrllcPings, Seconds(1.0),
                       Seconds(simSeconds - 0.5));
+    rs.EnableAiFlowMonitor(outDir + "/kpm"); // TS 28.552 KPM series per flow
+
+    // ---- Live geometry while packets flow (100 ms), line protocol at 1 s ----
+    auto sink = CreateObject<ntnobs::NtnInfluxSink>();
+    sink->SetTransport(ntnobs::NtnInfluxSink::Transport::File);
+    sink->SetFilePath(outDir + "/platform_latency.lp");
+    sink->SetBaseEpoch(Time(0));
+    sink->SetFlushPeriod(Seconds(1.0));
+    sink->Start();
+    StackResult r;
+    r.orbit = orbit;
+    double propSum = 0.0;
+    uint64_t propN = 0;
+    auto elevNow = [&]() {
+        double la = 0;
+        double lo = 0;
+        double h = 0;
+        ueModels.front()->GetGeodetic(la, lo, h);
+        return ElevationFrom(la, lo, h, pm->GetPosition());
+    };
+    std::function<void()> sample = [&]() {
+        const double prop = (pm->GetDistanceFrom(um) + pm->GetDistanceFrom(gw)) / kC * 1e3;
+        propSum += prop;
+        ++propN;
+        const double el = elevNow();
+        if (propN == 1)
+        {
+            r.elevStartDeg = el;
+        }
+        r.elevEndDeg = el;
+        if (propN % 10 == 1)
+        {
+            ntnobs::Point p;
+            p.measurement = "platform_geometry";
+            p.tags["platform"] = className;
+            p.fieldsFloat["elevation_deg"] = el;
+            p.fieldsFloat["service_slant_km"] = pm->GetDistanceFrom(um) / 1e3;
+            p.fieldsFloat["feeder_slant_km"] = pm->GetDistanceFrom(gw) / 1e3;
+            p.fieldsFloat["propagation_ms"] = prop;
+            p.timestamp = Simulator::Now();
+            sink->Push(p);
+        }
+        if (Simulator::Now() + MilliSeconds(100) <= Seconds(simSeconds - 0.5))
+        {
+            Simulator::Schedule(MilliSeconds(100), sample);
+        }
+    };
+    Simulator::Schedule(Seconds(1.0), sample);
+
     Simulator::Stop(Seconds(simSeconds));
     Simulator::Run();
     rs.Collect();
-    StackResult r;
+    rs.WriteHealthReport();
     const auto st = rs.GetSliceMeasuredStats(82);
     r.owdMs = rs.GetMeanDelayMs();
     r.p99Ms = st.p99OwdMs;
-    r.propMs = (slant + gw->GetDistanceFrom(pm)) / kC * 1e3;
+    r.propMs = propN ? propSum / propN : (slant + gw->GetDistanceFrom(pm)) / kC * 1e3;
     r.sinrDb = rs.GetMeanDlSinrDb();
     r.tbler = rs.GetMeanDlTbler();
     r.rx = st.rxPackets;
     r.tbs = rs.GetPhyRxTb();
+    r.jitterMs = rs.GetMeanJitterMs();
+    r.lossRatio = st.lossRatio;
+    {
+        ntnobs::Point p;
+        p.measurement = "platform_latency";
+        p.tags["platform"] = className;
+        p.fieldsFloat["owd_ms"] = r.owdMs;
+        p.fieldsFloat["p99_ms"] = r.p99Ms;
+        p.fieldsFloat["propagation_ms"] = r.propMs;
+        p.fieldsFloat["jitter_ms"] = r.jitterMs;
+        p.fieldsFloat["loss_ratio"] = r.lossRatio;
+        p.fieldsFloat["sinr_db"] = r.sinrDb;
+        p.fieldsInt["rx_packets"] = static_cast<long long>(r.rx);
+        p.timestamp = Simulator::Now();
+        sink->Push(p);
+    }
+    sink->Flush();
+    sink->Stop();
     Simulator::Destroy();
     return r;
 }
@@ -198,6 +380,8 @@ main(int argc, char* argv[])
     cmd.AddValue("elevationDeg", "stack mode: elevation of the platform at UE and gateway (deg)",
                  elevationDeg);
     bool strict = false;
+    uint32_t numUes = 1;
+    cmd.AddValue("numUes", "stack mode: TR 38.811 pedestrian UEs per class", numUes);
     cmd.AddValue("outputDir", "Output directory (health reports and platform_latency.csv)",
                  outputDir);
     cmd.AddValue("strict",
@@ -234,7 +418,8 @@ main(int argc, char* argv[])
                     "alt_km", "owd_ms", "p99_ms", "prop_ms", "ran_ms", "rtt2x_ms", "sinr_dB",
                     "tbler", "table3_band", "pass");
         csv << "mode,platform,alt_km,elevation_deg,owd_ms,p99_ms,prop_ms,ran_ms,rtt2x_ms,sinr_db,"
-               "tbler,rx_packets,phy_tbs,band_min_ms,band_max_ms,verdict\n";
+               "tbler,rx_packets,phy_tbs,band_min_ms,band_max_ms,verdict,jitter_ms,loss_ratio,"
+               "elev_start_deg,elev_end_deg,platform_mobility,num_ues\n";
         uint32_t nPass = 0;
         uint32_t nFail = 0;
         uint32_t nError = 0;
@@ -242,7 +427,7 @@ main(int argc, char* argv[])
         {
             const auto& spec = NtnPlatformSpec::Get(c.cls);
             const StackResult r = RunOnStack(c.altM, elevationDeg, simSeconds,
-                                             outputDir + "/" + spec.name);
+                                             outputDir + "/" + spec.name, spec.name, numUes);
             const double rtt = 2.0 * r.owdMs;
             // Fewer than 100 packets: the class was not measured (an error),
             // otherwise the band check is the result.
@@ -258,7 +443,12 @@ main(int argc, char* argv[])
             csv << "stack," << spec.name << "," << c.altM / 1e3 << "," << elevationDeg << ","
                 << r.owdMs << "," << r.p99Ms << "," << r.propMs << "," << r.owdMs - r.propMs
                 << "," << rtt << "," << r.sinrDb << "," << r.tbler << "," << r.rx << ","
-                << r.tbs << "," << c.rttMinMs << "," << c.rttMaxMs << "," << verdict << "\n";
+                << r.tbs << "," << c.rttMinMs << "," << c.rttMaxMs << "," << verdict << ","
+                << r.jitterMs << "," << r.lossRatio << "," << r.elevStartDeg << ","
+                << r.elevEndDeg << "," << (r.orbit ? "sgp4" : "fixed") << "," << numUes << "\n";
+            std::printf("#   jitter %.3f ms  loss %.4f  elevation %.2f -> %.2f deg (%s)\n",
+                        r.jitterMs, r.lossRatio, r.elevStartDeg, r.elevEndDeg,
+                        r.orbit ? "SGP4 orbit" : "fixed platform");
         }
         std::printf("# rtt2x = 2 x the measured DL one-way delay (the UL leg is not measured "
                     "here); ran_ms = owd - feeder/service propagation = scheduling, HARQ, RLC, "
