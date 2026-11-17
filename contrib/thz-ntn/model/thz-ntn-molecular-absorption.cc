@@ -25,12 +25,14 @@
 #include "thz-ntn-molecular-absorption.h"
 
 #include <ns3/double.h>
+#include <ns3/enum.h>
 #include <ns3/log.h>
 #include <ns3/string.h>
 #include <ns3/uinteger.h>
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 
 namespace ns3
 {
@@ -77,6 +79,16 @@ ThzNtnMolecularAbsorption::GetTypeId()
                           DoubleValue(1.0),
                           MakeDoubleAccessor(&ThzNtnMolecularAbsorption::m_waterVapourScale),
                           MakeDoubleChecker<double>(0.0, 50.0))
+            .AddAttribute("SlantPathMethod",
+                          "Slant-path integrator: Annex1RayTrace (ITU-R P.676-13 Annex 1 "
+                          "Sec. 2.2.1, 922 refracting shells, the default) or GeometricSlabs "
+                          "(pre-Wave-6B straight-ray slabs, kept to reproduce old datasets).",
+                          EnumValue(SlantPathMethod::ANNEX1_RAY_TRACE),
+                          MakeEnumAccessor<SlantPathMethod>(&ThzNtnMolecularAbsorption::m_slantMethod),
+                          MakeEnumChecker(SlantPathMethod::ANNEX1_RAY_TRACE,
+                                          "Annex1RayTrace",
+                                          SlantPathMethod::GEOMETRIC_SLABS,
+                                          "GeometricSlabs"))
             .AddAttribute("IntegrationSteps",
                           "Number of integration sub-steps per atmospheric layer",
                           UintegerValue(10),
@@ -914,49 +926,224 @@ ThzNtnMolecularAbsorption::ComputeSlantPathAbsorption(double freqHz,
     NS_LOG_FUNCTION(this << freqHz << elevationDeg << groundAlt_km << satAlt_km);
 
     // Ensure ground < satellite altitude
-    double hLow = std::min(groundAlt_km, satAlt_km);
-    double hHigh = std::max(groundAlt_km, satAlt_km);
+    const double hLow = std::max(0.0, std::min(groundAlt_km, satAlt_km));
+    const double hHigh = std::max(groundAlt_km, satAlt_km);
 
     // Both endpoints above atmosphere: vacuum (ISL)
     if (hLow >= 100.0)
     {
         NS_LOG_DEBUG("ISL link detected (both endpoints >= 100 km), absorption = 0");
+        m_lastElevationClamped = false;
+        m_lastIntegratedElevDeg = elevationDeg;
+        m_lastRayPathKm = 0.0;
         return 0.0;
     }
 
-    // Cap the upper integration limit at 100 km (top of atmosphere)
-    double hTop = std::min(hHigh, 100.0);
+    // Cap the upper integration limit at 100 km (top of the P.676 profile)
+    const double hTop = std::min(hHigh, 100.0);
 
-    // Elevation angle in radians.
-    //
-    // THZ-11: the integrator divides by sin(theta) and goes singular at the
-    // horizon, so the elevation is floored. That guard is fine; hiding it was
-    // not. A request at 2 degrees used to be answered with the 5 degree
-    // attenuation, silently, with no warning and no way for the caller to
-    // detect the substitution - and sub-THz slant loss is steepest exactly
-    // there, so the substitution is largest where it matters most. The floor is
-    // now recorded and warned about.
-    double thetaRad = elevationDeg * DEG_TO_RAD;
-    const double thetaFloorRad = kMinIntegratorElevationDeg * DEG_TO_RAD;
-    m_lastElevationClamped = (thetaRad < thetaFloorRad);
+    // THZ-11: an elevation below the integrator's floor is substituted, and
+    // the substitution is recorded and warned about. The Annex 1 ray tracer
+    // is valid down to the horizon, so its floor is 0 deg; the legacy slab
+    // integrator divides by sin(theta) and keeps its 5 deg floor.
+    const double floorDeg = GetElevationFloorDeg();
+    double elev = elevationDeg;
+    m_lastElevationClamped = (elev < floorDeg);
     if (m_lastElevationClamped)
     {
         NS_LOG_WARN("THZ-11: requested elevation " << elevationDeg
-                    << " deg is below the integrator floor of "
-                    << kMinIntegratorElevationDeg
-                    << " deg; returning the attenuation AT THE FLOOR, which "
-                       "understates the true slant loss. Check "
+                    << " deg is below the integrator floor of " << floorDeg
+                    << " deg; returning the attenuation AT THE FLOOR. Check "
                        "WasLastElevationClamped().");
-        thetaRad = thetaFloorRad;
+        elev = floorDeg;
     }
-    m_lastIntegratedElevDeg = thetaRad / DEG_TO_RAD;
+    m_lastIntegratedElevDeg = elev;
+
+    const double dB = (m_slantMethod == SlantPathMethod::ANNEX1_RAY_TRACE)
+                          ? ComputeSlantRayTrace(freqHz, elev, hLow, hTop)
+                          : ComputeSlantGeometric(freqHz, elev, hLow, hTop);
+
+    NS_LOG_DEBUG("Slant path absorption: " << dB << " dB, elev=" << elevationDeg
+                 << " deg, h_g=" << hLow << " km, h_s=" << hHigh << " km");
+    return std::max(0.0, dB);
+}
+
+// ---------------------------------------------------------------------------
+// Wave 6B: ITU-R P.676-13 Annex 1 Section 2.2.1 slant path.
+//
+// The previous integrator (kept as GEOMETRIC_SLABS) walked a STRAIGHT ray
+// through 13 slabs and floored the elevation at 5 deg. P.676-13 Annex 1
+// Section 2.2.1 prescribes a ray trace through thin spherical shells with
+// refraction, and the recommendation's own validation is done that way. Below
+// 10 deg the bent ray is measurably longer in the wet lower troposphere, which
+// is where sub-THz loss accumulates: at 140 GHz and 5 deg the straight ray
+// read 18.20 dB against 18.52 dB for the Annex 1 reference implementation.
+// ---------------------------------------------------------------------------
+
+double
+ThzNtnMolecularAbsorption::RadioRefractivity(double tempK, double dryPressureHPa, double vapourHPa)
+{
+    // ITU-R P.453-14 eq. (6): N = 77.6 Pd/T + 72 e/T + 3.75e5 e/T^2.
+    if (tempK <= 0.0)
+    {
+        return 0.0;
+    }
+    return 77.6 * dryPressureHPa / tempK + 72.0 * vapourHPa / tempK +
+           3.75e5 * vapourHPa / (tempK * tempK);
+}
+
+double
+ThzNtnMolecularAbsorption::RefractiveIndexAt(double hKm) const
+{
+    double tempK;
+    double pressureHPa;
+    double rho;
+    GetAtmosphericConditions(hKm, tempK, pressureHPa, rho);
+    const double e = std::max(0.0, rho) * tempK / 216.7; // P.676-13 eq. (4)
+    const double pd = std::max(0.0, pressureHPa - e);
+    return 1.0 + 1.0e-6 * RadioRefractivity(tempK, pd, e);
+}
+
+double
+ThzNtnMolecularAbsorption::SpecificAttenuationDbKmAt(double freqHz, double hKm, bool useLut) const
+{
+    if (useLut)
+    {
+        const double db = m_lut.Get(freqHz, hKm);
+        if (std::isfinite(db))
+        {
+            return db;
+        }
+    }
+    double tempK;
+    double pressureHPa;
+    double rho;
+    GetAtmosphericConditions(hKm, tempK, pressureHPa, rho);
+    return ComputeAbsorptionCoefficient(freqHz, tempK, pressureHPa, rho) * NP_TO_DB;
+}
+
+void
+ThzNtnMolecularAbsorption::EnsureShellGrid() const
+{
+    std::ostringstream tag;
+    tag.precision(17);
+    tag << static_cast<int>(m_profileKind) << "|" << m_waterVapourScale << "|"
+        << LutMatchesAtmosphere();
+    if (!m_shellBottomKm.empty() && tag.str() == m_shellTag)
+    {
+        return;
+    }
+    m_shellTag = tag.str();
+    m_shellGamma.clear();
+    m_shellBottomKm.clear();
+    m_shellIndex.clear();
+    // P.676-13 eq. (14): delta_i = 0.0001 exp((i - 1) / 100) km, i = 1..922,
+    // so the shell bottoms are h_i = sum_{j < i} delta_j (eq. (15)); shell 922
+    // ends just above 100 km.
+    double h = 0.0;
+    for (int i = 1; i <= 922; ++i)
+    {
+        m_shellBottomKm.push_back(h);
+        h += 0.0001 * std::exp((i - 1) / 100.0);
+    }
+    m_shellBottomKm.push_back(h); // top boundary of the last shell
+    for (size_t i = 0; i + 1 < m_shellBottomKm.size(); ++i)
+    {
+        m_shellIndex.push_back(
+            RefractiveIndexAt(0.5 * (m_shellBottomKm[i] + m_shellBottomKm[i + 1])));
+    }
+}
+
+double
+ThzNtnMolecularAbsorption::ComputeSlantRayTrace(double freqHz,
+                                                double elevationDeg,
+                                                double hLow,
+                                                double hTop) const
+{
+    EnsureShellGrid();
+    const bool useLut = LutMatchesAtmosphere();
+    const size_t nShell = m_shellIndex.size();
+
+    auto it = m_shellGamma.find(freqHz);
+    if (it == m_shellGamma.end())
+    {
+        if (m_shellGamma.size() > 512)
+        {
+            m_shellGamma.clear(); // bound the cache in wide frequency sweeps
+        }
+        std::vector<double> g(nShell);
+        for (size_t i = 0; i < nShell; ++i)
+        {
+            g[i] = SpecificAttenuationDbKmAt(
+                freqHz, 0.5 * (m_shellBottomKm[i] + m_shellBottomKm[i + 1]), useLut);
+        }
+        it = m_shellGamma.emplace(freqHz, std::move(g)).first;
+    }
+    const std::vector<double>& gamma = it->second;
+
+    // First shell crossed: the one containing the station.
+    size_t i0 = static_cast<size_t>(
+        std::upper_bound(m_shellBottomKm.begin(), m_shellBottomKm.end(), hLow) -
+        m_shellBottomKm.begin());
+    i0 = (i0 == 0) ? 0 : i0 - 1;
+
+    // beta_1 = 90 deg - elevation: the zenith angle of the ray at the station.
+    double beta = M_PI / 2.0 - elevationDeg * DEG_TO_RAD;
+    double aGasDb = 0.0;
+    double pathKm = 0.0;
+    for (size_t i = i0; i < nShell; ++i)
+    {
+        const double lo = std::max(m_shellBottomKm[i], hLow);
+        const double hi = std::min(m_shellBottomKm[i + 1], hTop);
+        if (hi <= lo)
+        {
+            if (m_shellBottomKm[i] >= hTop)
+            {
+                break;
+            }
+            continue;
+        }
+        const double delta = hi - lo;
+        const double r = EARTH_RADIUS_KM + lo;
+        const double cb = std::cos(beta);
+        // P.676-13 eq. (17): path length in the shell.
+        const double a =
+            -r * cb + 0.5 * std::sqrt(4.0 * r * r * cb * cb + 8.0 * r * delta + 4.0 * delta * delta);
+        // A partial shell (the station's own, or the one holding an endpoint
+        // below 100 km) is evaluated at its own mid height.
+        const bool full = (lo == m_shellBottomKm[i]) && (hi == m_shellBottomKm[i + 1]);
+        const double g = full ? gamma[i] : SpecificAttenuationDbKmAt(freqHz, 0.5 * (lo + hi), useLut);
+        aGasDb += a * g; // eq. (13)
+        pathKm += a;
+        if (hi >= hTop)
+        {
+            break;
+        }
+        // eq. (18a): zenith angle at the shell exit, then eq. (19a) Snell's law.
+        double c = (-a * a - 2.0 * r * delta - delta * delta) / (2.0 * a * r + 2.0 * a * delta);
+        c = std::max(-1.0, std::min(1.0, c));
+        const double alpha = M_PI - std::acos(c);
+        const double nRatio = (i + 1 < nShell) ? m_shellIndex[i] / m_shellIndex[i + 1] : 1.0;
+        beta = std::asin(std::max(-1.0, std::min(1.0, nRatio * std::sin(alpha))));
+    }
+    m_lastRayPathKm = pathKm;
+    return aGasDb;
+}
+
+double
+ThzNtnMolecularAbsorption::ComputeSlantGeometric(double freqHz,
+                                                 double elevationDeg,
+                                                 double hLow,
+                                                 double hTop) const
+{
+    const double thetaRad = elevationDeg * DEG_TO_RAD;
     double cosTheta = std::cos(thetaRad);
+    double totalAbsorption_Np = 0.0;
+    const bool useLut = LutMatchesAtmosphere();
 
     double R_E = EARTH_RADIUS_KM;
     double R_g = R_E + hLow;  // geocentric radius of ground station
 
-    double totalAbsorption_Np = 0.0;
-    const bool useLut = LutMatchesAtmosphere();
 
     // Iterate over atmospheric layers that the path intersects
     for (const auto& layer : m_layers)
@@ -1033,14 +1220,8 @@ ThzNtnMolecularAbsorption::ComputeSlantPathAbsorption(double freqHz,
         }
     }
 
-    // Convert from Np to dB
-    double totalAbsorption_dB = totalAbsorption_Np * NP_TO_DB;
-
-    NS_LOG_DEBUG("Slant path absorption: " << totalAbsorption_dB << " dB ("
-                 << totalAbsorption_Np << " Np), elev=" << elevationDeg
-                 << " deg, h_g=" << hLow << " km, h_s=" << hHigh << " km");
-
-    return std::max(0.0, totalAbsorption_dB);
+    m_lastRayPathKm = 0.0;
+    return totalAbsorption_Np * NP_TO_DB;
 }
 
 // ---------------------------------------------------------------------------

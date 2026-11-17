@@ -91,6 +91,29 @@ class Itu838RainModel
 };
 
 /**
+ * \brief Validity of the rain method at a carrier frequency (Wave 6B).
+ *
+ * ITU-R P.618-14 Section 2.2.1.1 (long-term slant-path rain attenuation) is
+ * validated up to 55 GHz. ITU-R P.838-3 publishes k and alpha up to 1000 GHz,
+ * so above 55 GHz a P.838 specific attenuation integrated over a P.618-style
+ * effective path is an EXTRAPOLATION of the path method, and above 1000 GHz
+ * even the coefficients are outside their fitted range. Every rain term in
+ * this module records which case it was in, so a dataset can carry the flag.
+ */
+enum class RainMethodValidity : uint8_t
+{
+    WITHIN_P618 = 0,             //!< f <= 55 GHz: P.618-14 2.2.1.1 validated range
+    P618_EXTRAPOLATED = 1,       //!< 55 < f <= 1000 GHz: P.838-3 k, alpha valid, path method not
+    BEYOND_P838 = 2,             //!< f > 1000 GHz: P.838-3 coefficients extrapolated too
+};
+constexpr double kP618RainMaxValidGHz = 55.0;   //!< P.618-14 2.2.1.1 upper validity
+constexpr double kP838MaxGHz = 1000.0;          //!< P.838-3 coefficient range
+/// Classify a carrier frequency against the rain-method ranges above.
+RainMethodValidity ClassifyRainFrequency(double freqHz);
+/// Short tag for logs and dataset columns ("p618", "p618-extrap", "p838-extrap").
+const char* RainValidityTag(RainMethodValidity v);
+
+/**
  * \brief ITU-R P.618-13 slant-path rain attenuation.
  *
  * Computes total rain attenuation along an Earth-space slant path at a
@@ -156,9 +179,17 @@ class Itu618LossModel : public Object
                                               double gammaR_dBkm,
                                               double freqHz);
 
+    /// Wave 6B: validity class of the most recent non-zero rain evaluation.
+    RainMethodValidity GetLastRainValidity() const { return m_lastValidity; }
+    /// Non-zero rain evaluations above 55 GHz (P.618 path method extrapolated).
+    uint64_t GetExtrapolatedRainCount() const { return m_extrapolated; }
+
   private:
     ClimateRegion m_region{ClimateRegion::midlat_summer};
     double m_latDeg{45.0};   //!< station latitude (deg), for v_0.01
+    mutable RainMethodValidity m_lastValidity{RainMethodValidity::WITHIN_P618};
+    mutable uint64_t m_extrapolated{0};
+    mutable bool m_warned{false};
 };
 
 /**

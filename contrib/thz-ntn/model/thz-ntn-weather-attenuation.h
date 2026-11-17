@@ -156,6 +156,12 @@ class ThzNtnWeatherAttenuation : public Object
      * no way to tell them apart.
      */
     bool UsedUnsourcedTerm() const { return m_usedUnsourcedTerm; }
+    /// Wave 6B: true if the most recent non-zero rain term was computed above
+    /// 55 GHz, where the ITU-R P.618-14 2.2.1.1 path method is not validated
+    /// (P.838-3 k and alpha still apply up to 1000 GHz).
+    bool WasLastRainExtrapolated() const { return m_lastRainExtrapolated; }
+    /// Non-zero rain evaluations above 55 GHz since construction.
+    uint64_t GetExtrapolatedRainCount() const { return m_extrapolatedRain; }
     void ResetProvenance() { m_usedUnsourcedTerm = false; }
     /// One line naming which weather terms are standards-based and which are not.
     std::string ProvenanceNote() const;
@@ -335,7 +341,8 @@ class ThzNtnWeatherAttenuation : public Object
      * \return effective path length in km.
      */
     double ComputeRainSlantPath(double elevationDeg,
-                                double rainHeight_km) const;
+                                double rainHeight_km,
+                                double rainRate_mm_h) const;
 
     /**
      * \brief Compute K_l (specific attenuation coefficient for liquid water)
@@ -379,6 +386,9 @@ class ThzNtnWeatherAttenuation : public Object
     double m_dustVisibility;       ///< dust storm visibility in km
     /// THZ-10: set by any unsourced term (snow, dust) that contributed.
     mutable bool m_usedUnsourcedTerm{false};
+    mutable bool m_lastRainExtrapolated{false}; //!< Wave 6B: rain above 55 GHz
+    mutable uint64_t m_extrapolatedRain{0};
+    mutable bool m_rainExtrapWarned{false};
     bool m_enableRain;             ///< flag to enable rain attenuation
     bool m_enableFog;              ///< flag to enable fog/cloud attenuation
     bool m_enableSnow;             ///< flag to enable snow attenuation

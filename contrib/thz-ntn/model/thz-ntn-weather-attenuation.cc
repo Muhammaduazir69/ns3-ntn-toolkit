@@ -247,9 +247,14 @@ ThzNtnWeatherAttenuation::GetRainHeight() const
 
 double
 ThzNtnWeatherAttenuation::ComputeRainSlantPath(double elevationDeg,
-                                                double rainHeight_km) const
+                                                double rainHeight_km,
+                                                double rainRate_mm_h) const
 {
-    NS_LOG_FUNCTION(this << elevationDeg << rainHeight_km);
+    NS_LOG_FUNCTION(this << elevationDeg << rainHeight_km << rainRate_mm_h);
+    // Wave 6B: the reduction factor uses the rain rate of THIS evaluation.
+    // It used to read the m_rainRate attribute, so a caller passing its own
+    // rate (ThzNtnPropagationLossModel, the rain sweeps) got gamma_R for its
+    // rate on a path shortened for the attribute's rate (0 by default).
 
     double deltaH = rainHeight_km - m_stationHeight;
     if (deltaH <= 0.0)
@@ -267,7 +272,7 @@ ThzNtnWeatherAttenuation::ComputeRainSlantPath(double elevationDeg,
 
         // Horizontal reduction factor (ITU-R P.530-17, simplified)
         // r = 1 / (1 + L_s / L_0) where L_0 depends on rain rate
-        double L0 = 35.0 * std::exp(-0.015 * m_rainRate); // km, effective rain cell size
+        double L0 = 35.0 * std::exp(-0.015 * rainRate_mm_h); // km, effective rain cell size
         if (L0 < 1.0)
         {
             L0 = 1.0;
@@ -287,7 +292,7 @@ ThzNtnWeatherAttenuation::ComputeRainSlantPath(double elevationDeg,
                     Re * sinEl;
 
         double Lh = Ls * std::cos(elevRad);
-        double L0 = 35.0 * std::exp(-0.015 * m_rainRate);
+        double L0 = 35.0 * std::exp(-0.015 * rainRate_mm_h);
         if (L0 < 1.0)
         {
             L0 = 1.0;
@@ -328,7 +333,24 @@ ThzNtnWeatherAttenuation::ComputeRainAttenuation_dB(double freqHz,
 
     // Effective slant path through rain layer
     double rainHeight = GetRainHeight();
-    double Leff = ComputeRainSlantPath(elevationDeg, rainHeight);
+    double Leff = ComputeRainSlantPath(elevationDeg, rainHeight, rainRate_mm_h);
+
+    // Wave 6B: flag the method range. P.838-3 k, alpha are fitted to 1000 GHz,
+    // but the effective-path method is validated to 55 GHz only (P.618-14
+    // 2.2.1.1); above that this term is an extrapolation and says so.
+    const auto validity = itu::ClassifyRainFrequency(freqHz);
+    m_lastRainExtrapolated = (validity != itu::RainMethodValidity::WITHIN_P618);
+    if (m_lastRainExtrapolated)
+    {
+        ++m_extrapolatedRain;
+        if (!m_rainExtrapWarned)
+        {
+            m_rainExtrapWarned = true;
+            NS_LOG_WARN("rain at " << freqGHz << " GHz is above the 55 GHz validity of ITU-R "
+                        "P.618-14 2.2.1.1: P.838-3 gamma_R on an effective path, extrapolated ("
+                        << itu::RainValidityTag(validity) << ")");
+        }
+    }
 
     double attenuation = gammaR * Leff;
 
@@ -627,6 +649,11 @@ ThzNtnWeatherAttenuation::ProvenanceNote() const
     // THZ-10: say which terms carry a standard and which do not.
     std::ostringstream os;
     os << "[thz-weather/provenance] rain=ITU-R P.838 gas=ITU-R P.676";
+    if (m_extrapolatedRain > 0)
+    {
+        os << " rain_above_55GHz=" << m_extrapolatedRain
+           << " (P.618-14 2.2.1.1 path method validated to 55 GHz; extrapolated)";
+    }
     if (m_enableSnow || m_enableDust)
     {
         os << " snow/dust=UNSOURCED (empirical coefficients with no ITU-R "

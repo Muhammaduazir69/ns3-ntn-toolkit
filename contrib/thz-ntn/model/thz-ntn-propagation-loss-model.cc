@@ -74,6 +74,9 @@ ThzNtnPropagationLossModel::DoCalcRxPower(double txPowerDbm,
             ? m_weather->ComputeSnowAttenuation_dB(m_freqHz, elevDeg, m_snowRateMmH, m_snowWet)
             : 0.0;
     m_lastLossDb = gaseousDb + rainDb + fogDb + snowDb;
+    m_lastGasDb = gaseousDb;
+    m_lastRainDb = rainDb;
+    m_lastRainExtrap = (rainDb > 0.0) && m_weather->WasLastRainExtrapolated();
     return txPowerDbm - m_lastLossDb;
 }
 

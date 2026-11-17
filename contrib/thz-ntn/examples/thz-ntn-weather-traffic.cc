@@ -276,9 +276,11 @@ main(int argc, char* argv[])
 
         const double occHz = rs.GetBwpPrbs() * 12.0 * 15e3 * (1u << numerology);
         const double noiseDbm = ThzNtnAperture::NoiseDbm(occHz, nfDb);
-        std::printf("# %5s  %7s  %8s  %8s  %8s  %8s  %8s  %8s  %8s  %8s  %9s\n", "t_s", "elev",
-                    "R_stn", "R_pathMx", "rain_dB", "rainSprd", "gas_dB", "budget", "sinr_dB",
-                    "tbler", "goodput");
+        // rainX = 1 when rain was applied above 55 GHz, outside the validated
+        // range of ITU-R P.618-14 2.2.1.1 (Wave 6B dataset flag).
+        std::printf("# %5s  %7s  %8s  %8s  %8s  %8s  %8s  %8s  %8s  %8s  %9s  %5s\n", "t_s",
+                    "elev", "R_stn", "R_pathMx", "rain_dB", "rainSprd", "gas_dB", "budget",
+                    "sinr_dB", "tbler", "goodput", "rainX");
         Ptr<MobilityModel> gndMob = gndNodes.Get(0)->GetObject<MobilityModel>();
         uint64_t lastRx = 0;
         double sumDry = 0.0;
@@ -318,9 +320,9 @@ main(int argc, char* argv[])
                 }
             }
             std::printf("  %5.1f  %7.2f  %8.2f  %8.2f  %8.2f  %8.3f  %8.3f  %8.2f  %8.2f  %8.3f  "
-                        "%9.3f\n",
+                        "%9.3f  %5d\n",
                         now.GetSeconds(), elev, rStn, atm->GetLastPathRainRate(), rain, sprd,
-                        gas, budget, sinr, tbler, mbps);
+                        gas, budget, sinr, tbler, mbps, atm->WasLastRainExtrapolated() ? 1 : 0);
         });
 
         Simulator::Stop(Seconds(simSeconds));
@@ -334,6 +336,9 @@ main(int argc, char* argv[])
         std::printf("# === summary ===  measured cell SINR=%.2f dB TBLER=%.4f "
                     "throughput=%.3f Mbps (rain cell field on real packets, per-RB P.838/P.676)\n",
                     rs.GetMeanDlSinrDb(), rs.GetMeanDlTbler(), rs.GetRxThroughputMbps());
+        std::printf("# rain validity: %llu link evaluations applied rain above 55 GHz "
+                    "(ITU-R P.618-14 2.2.1.1 validated to 55 GHz; P.838-3 to 1000 GHz)\n",
+                    static_cast<unsigned long long>(atm->GetExtrapolatedRainCount()));
         Simulator::Destroy();
         return 0;
     }

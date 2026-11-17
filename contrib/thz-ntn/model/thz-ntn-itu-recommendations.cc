@@ -196,6 +196,33 @@ Itu618LossModel::EffectivePathLengthFactor(double horizProjLenKm,
     return std::max(0.05, std::min(1.0, r));
 }
 
+RainMethodValidity
+ClassifyRainFrequency(double freqHz)
+{
+    const double fGhz = freqHz / 1e9;
+    if (fGhz <= kP618RainMaxValidGHz)
+    {
+        return RainMethodValidity::WITHIN_P618;
+    }
+    return fGhz <= kP838MaxGHz ? RainMethodValidity::P618_EXTRAPOLATED
+                               : RainMethodValidity::BEYOND_P838;
+}
+
+const char*
+RainValidityTag(RainMethodValidity v)
+{
+    switch (v)
+    {
+    case RainMethodValidity::WITHIN_P618:
+        return "p618";
+    case RainMethodValidity::P618_EXTRAPOLATED:
+        return "p618-extrap";
+    case RainMethodValidity::BEYOND_P838:
+        return "p838-extrap";
+    }
+    return "unknown";
+}
+
 double
 Itu618LossModel::SlantPathRainAttenuationDb(double freqHz,
                                               double elevationDeg,
@@ -213,6 +240,20 @@ Itu618LossModel::SlantPathRainAttenuationDb(double freqHz,
     if (hR <= groundAlt_km)
     {
         return 0.0;
+    }
+    // Wave 6B: P.618-14 2.2.1.1 is validated to 55 GHz only; record and warn
+    // (once per object) when the method is applied beyond it.
+    m_lastValidity = ClassifyRainFrequency(freqHz);
+    if (m_lastValidity != RainMethodValidity::WITHIN_P618)
+    {
+        ++m_extrapolated;
+        if (!m_warned)
+        {
+            m_warned = true;
+            NS_LOG_WARN("rain at " << freqHz / 1e9 << " GHz: ITU-R P.618-14 2.2.1.1 is validated "
+                        "to 55 GHz; this slant-path rain term is an extrapolation ("
+                        << RainValidityTag(m_lastValidity) << ")");
+        }
     }
 
     const double elevDeg = std::max(elevationDeg, 5.0);

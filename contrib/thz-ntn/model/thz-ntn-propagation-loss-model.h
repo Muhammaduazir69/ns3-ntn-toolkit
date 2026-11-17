@@ -46,6 +46,17 @@ class ThzNtnPropagationLossModel : public PropagationLossModel
     }
     /// Last total atmospheric loss applied (dB) — for logging/inspection.
     double GetLastLossDb() const { return m_lastLossDb; }
+    /// Wave 6B: per-term breakdown of the last evaluation (dB).
+    double GetLastGasDb() const { return m_lastGasDb; }
+    double GetLastRainDb() const { return m_lastRainDb; }
+    /// True when the last evaluation applied rain above 55 GHz, outside the
+    /// validated range of ITU-R P.618-14 2.2.1.1 (an extrapolation).
+    bool WasLastRainExtrapolated() const { return m_lastRainExtrap; }
+    /// Evaluations so far that applied rain above 55 GHz.
+    uint64_t GetExtrapolatedRainCount() const { return m_weather->GetExtrapolatedRainCount(); }
+    /// The molecular absorption model on the packet path (its attributes,
+    /// e.g. SlantPathMethod or HumidityProfile, can be set through it).
+    Ptr<ThzNtnMolecularAbsorption> GetAbsorptionModel() const { return m_absorption; }
 
   private:
     double DoCalcRxPower(double txPowerDbm,
@@ -61,6 +72,9 @@ class ThzNtnPropagationLossModel : public PropagationLossModel
     double m_snowRateMmH{0.0};
     bool m_snowWet{true};
     mutable double m_lastLossDb{0.0};
+    mutable double m_lastGasDb{0.0};
+    mutable double m_lastRainDb{0.0};
+    mutable bool m_lastRainExtrap{false};
 };
 
 } // namespace ns3

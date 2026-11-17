@@ -89,6 +89,12 @@ class ThzNtnSpectrumAtmosphereModel : public SpectrumPropagationLossModel
     double GetLastMaxLossDb() const;
     double GetLastGasCentreDb() const { return m_lastGasCentre; }
     double GetLastRainCentreDb() const { return m_lastRainCentre; }
+    /// Wave 6B: true if the last link carried a non-zero rain term on any RB
+    /// above 55 GHz, the validated limit of ITU-R P.618-14 2.2.1.1 (P.838-3
+    /// k, alpha are fitted to 1000 GHz; the path method is extrapolated).
+    bool WasLastRainExtrapolated() const { return m_lastRainExtrap; }
+    /// Link evaluations that applied rain above 55 GHz.
+    uint64_t GetExtrapolatedRainCount() const { return m_rainExtrapCount; }
     double GetLastElevationDeg() const { return m_lastElev; }
     /// Rain rate on the path below h_R (max over samples) of the last link.
     double GetLastPathRainRate() const { return m_lastPathRate; }
@@ -150,6 +156,8 @@ class ThzNtnSpectrumAtmosphereModel : public SpectrumPropagationLossModel
     mutable std::vector<double> m_lastLoss;
     mutable double m_lastGasCentre{0.0};
     mutable double m_lastRainCentre{0.0};
+    mutable bool m_lastRainExtrap{false};
+    mutable uint64_t m_rainExtrapCount{0};
     mutable double m_lastElev{0.0};
     mutable double m_lastPathRate{0.0};
     mutable uint64_t m_evals{0};

@@ -417,6 +417,10 @@ class ThzNtnSlantElevationClampIsVisibleTest : public TestCase
     void DoRun() override
     {
         auto m = CreateObject<ThzNtnMolecularAbsorption>();
+        // Wave 6B: the 5 deg floor belongs to the legacy straight-ray slab
+        // integrator, which this test pins. The default Annex 1 ray tracer is
+        // floored at the horizon (ThzNtnP676Annex1RayTraceTest).
+        m->SetSlantPathMethod(ThzNtnMolecularAbsorption::SlantPathMethod::GEOMETRIC_SLABS);
         const double f = 300e9;
 
         // Above the floor: no clamp, and the integrated angle is the one asked for.
@@ -459,6 +463,215 @@ class ThzNtnSlantElevationClampIsVisibleTest : public TestCase
         m->ComputeSlantPathAbsorption(f, 45.0, 0.0, 600.0);
         NS_TEST_ASSERT_MSG_EQ(m->WasLastElevationClamped(), false,
                               "the flag must reset on the next unclamped call");
+    }
+};
+
+
+// ---------------------------------------------------------------------------
+// Wave 6B: ITU-R P.676-13 Annex 1 Section 2.2.1 ray-traced slant path.
+//
+// References are ITU-Rpy 0.4.0 (itur.models.itu676, mode='exact'), an
+// independent implementation of the same Annex 1 line tables (all 79 lines
+// identical to Tables 1 and 2 used here) and the same eq. (13)-(19a) shell
+// ray trace, for the P.835 mean annual atmosphere with 7.5 g/m3 at sea level.
+// ITU-Rpy feeds the TOTAL pressure where Annex 1 asks for the dry pressure,
+// which makes its numbers about 0.3 to 1 percent higher; the tolerances below
+// allow that and nothing more.
+// ---------------------------------------------------------------------------
+class ThzNtnP676Annex1RayTraceTest : public TestCase
+{
+  public:
+    ThzNtnP676Annex1RayTraceTest()
+        : TestCase("Wave 6B: P.676-13 Annex 1 ray trace matches the reference at 100-300 GHz")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        auto m = CreateObject<ThzNtnMolecularAbsorption>();
+        struct Ref
+        {
+            double fGHz;
+            double gammaDbKm; // sea level, 1013.25 hPa, 288.15 K, 7.5 g/m3
+            double a90, a30, a10, a5, a2;
+        };
+        const Ref refs[] = {
+            {100.0, 0.4581, 0.912, 1.822, 5.204, 10.110, 22.339},
+            {140.0, 0.9232, 1.661, 3.320, 9.495, 18.521, 41.495},
+            {220.0, 2.4868, 4.341, 8.676, 24.823, 48.488, 109.138},
+            {300.0, 5.2471, 9.113, 18.214, 52.119, 101.824, 229.350},
+        };
+        for (const auto& r : refs)
+        {
+            const double f = r.fGHz * 1e9;
+            // Specific attenuation, eq. (1): sea-level state of the profile.
+            double t, p, rho;
+            t = 288.15;
+            p = 1013.25;
+            rho = 7.5;
+            const double g = m->ComputeAbsorptionCoefficient(f, t, p, rho) * 10.0 / std::log(10.0);
+            NS_TEST_ASSERT_MSG_EQ_TOL(g, r.gammaDbKm, 0.015 * r.gammaDbKm,
+                                      r.fGHz << " GHz: gamma " << g << " dB/km");
+            const double el[] = {90.0, 30.0, 10.0, 5.0, 2.0};
+            const double ref[] = {r.a90, r.a30, r.a10, r.a5, r.a2};
+            for (int k = 0; k < 5; ++k)
+            {
+                const double a = m->ComputeSlantPathAbsorption(f, el[k], 0.0, 550.0);
+                NS_TEST_ASSERT_MSG_EQ(m->WasLastElevationClamped(), false,
+                                      "the ray tracer is valid down to the horizon");
+                NS_TEST_ASSERT_MSG_EQ_TOL(a, ref[k], 0.02 * ref[k],
+                                          r.fGHz << " GHz at " << el[k] << " deg: " << a
+                                                 << " dB against " << ref[k] << " dB");
+            }
+        }
+
+        // Refraction lengthens the path at low elevation: the bent ray through
+        // the shells is longer than the straight chord to 100 km, and the
+        // legacy straight-ray integrator under-reads.
+        const double f = 140e9;
+        const double rt = m->ComputeSlantPathAbsorption(f, 5.0, 0.0, 550.0);
+        const double rayKm = m->GetLastRayPathLengthKm();
+        const double re = 6371.0;
+        const double e = 5.0 * M_PI / 180.0;
+        const double chord =
+            -re * std::sin(e) + std::sqrt(re * re * std::sin(e) * std::sin(e) + 2 * re * 100.0 + 1e4);
+        NS_TEST_ASSERT_MSG_GT(rayKm, chord, "the refracted ray is longer than the straight chord");
+        auto legacy = CreateObject<ThzNtnMolecularAbsorption>();
+        legacy->SetSlantPathMethod(ThzNtnMolecularAbsorption::SlantPathMethod::GEOMETRIC_SLABS);
+        const double geo = legacy->ComputeSlantPathAbsorption(f, 5.0, 0.0, 550.0);
+        NS_TEST_ASSERT_MSG_GT(rt, geo, "the straight-ray slabs under-read at 5 deg");
+
+        // An elevated station integrates from its own height: a 20 km HAPS
+        // is above almost all water vapour.
+        const double haps = m->ComputeSlantPathAbsorption(f, 30.0, 20.0, 550.0);
+        NS_TEST_ASSERT_MSG_LT(haps, 0.01 * m->ComputeSlantPathAbsorption(f, 30.0, 0.0, 550.0),
+                              "a 20 km station sees under 1 percent of the sea-level loss");
+        // An upper endpoint inside the atmosphere stops the integral there.
+        const double toHaps = m->ComputeSlantPathAbsorption(f, 30.0, 0.0, 20.0);
+        const double toSat = m->ComputeSlantPathAbsorption(f, 30.0, 0.0, 550.0);
+        NS_TEST_ASSERT_MSG_LT(toHaps, toSat, "a path to 20 km crosses less gas than to space");
+        NS_TEST_ASSERT_MSG_GT(toHaps, 0.95 * toSat, "but nearly all of it");
+
+        // Failure paths: a ray that starts downward is floored at the horizon
+        // and said to be; an ISL above 100 km crosses no gas at all.
+        const double neg = m->ComputeSlantPathAbsorption(f, -1.0, 0.0, 550.0);
+        NS_TEST_ASSERT_MSG_EQ(m->WasLastElevationClamped(), true, "negative elevation is flagged");
+        NS_TEST_ASSERT_MSG_EQ_TOL(m->GetLastIntegratedElevationDeg(), 0.0, 1e-12,
+                                  "and integrated at 0 deg");
+        NS_TEST_ASSERT_MSG_EQ_TOL(neg, m->ComputeSlantPathAbsorption(f, 0.0, 0.0, 550.0), 1e-9,
+                                  "the floored value is the horizon value");
+        NS_TEST_ASSERT_MSG_EQ(m->ComputeSlantPathAbsorption(f, 10.0, 550.0, 560.0), 0.0,
+                              "an ISL above 100 km has no gaseous loss");
+    }
+};
+
+/// Simulator::Run(): a 300 GHz downlink from a receding satellite through
+/// ThzNtnPropagationLossModel. The gas term on the packet path is the
+/// Annex 1 ray trace at the live elevation; rain at 300 GHz is flagged as a
+/// P.618 extrapolation, rain at 40 GHz is not, and the rain path reduction
+/// uses the rate of the call rather than the RainRate attribute.
+class ThzNtnRainValidityFlagSimTest : public TestCase
+{
+  public:
+    ThzNtnRainValidityFlagSimTest()
+        : TestCase("Wave 6B: live link carries Annex 1 gas and flags rain above 55 GHz")
+    {
+    }
+
+  private:
+    struct Sample
+    {
+        double elev;
+        double gas;
+        double rain;
+        bool extrap;
+    };
+
+    static void Probe(Ptr<ThzNtnPropagationLossModel> pl,
+                      Ptr<MobilityModel> gnd,
+                      Ptr<MobilityModel> sat,
+                      std::vector<Sample>* out)
+    {
+        pl->CalcRxPower(0.0, gnd, sat);
+        const Vector g = gnd->GetPosition();
+        const Vector s = sat->GetPosition();
+        const double d = CalculateDistance(g, s);
+        out->push_back({std::asin((s.z - g.z) / d) * 180.0 / M_PI, pl->GetLastGasDb(),
+                        pl->GetLastRainDb(), pl->WasLastRainExtrapolated()});
+    }
+
+    void DoRun() override
+    {
+        auto gnd = CreateObject<ConstantPositionMobilityModel>();
+        gnd->SetPosition(Vector(0, 0, 0));
+        auto sat = CreateObject<ConstantVelocityMobilityModel>();
+        sat->SetPosition(Vector(0, 0, 550e3));
+        sat->SetVelocity(Vector(7.5e3, 0, 0));
+
+        auto hi = CreateObject<ThzNtnPropagationLossModel>();
+        hi->SetFrequency(300e9);
+        hi->SetRainRate(10.0);
+        auto lo = CreateObject<ThzNtnPropagationLossModel>();
+        lo->SetFrequency(40e9);
+        lo->SetRainRate(10.0);
+        auto dry = CreateObject<ThzNtnPropagationLossModel>();
+        dry->SetFrequency(300e9);
+
+        std::vector<Sample> sHi, sLo, sDry;
+        for (int t = 0; t <= 60; t += 10)
+        {
+            Simulator::Schedule(Seconds(t), &Probe, hi, gnd, sat, &sHi);
+            Simulator::Schedule(Seconds(t), &Probe, lo, gnd, sat, &sLo);
+            Simulator::Schedule(Seconds(t), &Probe, dry, gnd, sat, &sDry);
+        }
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_ASSERT_MSG_EQ(sHi.size(), 7u, "seven samples");
+        auto ref = CreateObject<ThzNtnMolecularAbsorption>();
+        for (size_t i = 0; i < sHi.size(); ++i)
+        {
+            NS_TEST_ASSERT_MSG_EQ_TOL(sHi[i].gas,
+                                      ref->ComputeSlantPathAbsorption(300e9, sHi[i].elev, 0.0, 550.0),
+                                      1e-6 * sHi[i].gas,
+                                      "packet-path gas is the Annex 1 ray trace");
+            NS_TEST_ASSERT_MSG_GT(sHi[i].rain, 0.0, "rain is applied");
+            NS_TEST_ASSERT_MSG_EQ(sHi[i].extrap, true, "300 GHz rain is flagged");
+            NS_TEST_ASSERT_MSG_EQ(sLo[i].extrap, false, "40 GHz rain is inside P.618");
+            NS_TEST_ASSERT_MSG_GT(sLo[i].rain, 0.0, "and applied");
+            NS_TEST_ASSERT_MSG_EQ(sDry[i].extrap, false, "no rain, no flag");
+            NS_TEST_ASSERT_MSG_EQ(sDry[i].rain, 0.0, "no rain");
+            if (i > 0)
+            {
+                NS_TEST_ASSERT_MSG_GT(sHi[i].gas, sHi[i - 1].gas,
+                                      "gas loss grows as the satellite recedes");
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(hi->GetExtrapolatedRainCount(), 7u, "every 300 GHz rain call counted");
+        NS_TEST_ASSERT_MSG_EQ(lo->GetExtrapolatedRainCount(), 0u, "no 40 GHz call counted");
+
+        // Rain path reduction uses the rate of the call. With the attribute at
+        // its default 0 the old code shortened the path for R = 0 while gamma
+        // used the caller's R.
+        auto w0 = CreateObject<ThzNtnWeatherAttenuation>();
+        auto w50 = CreateObject<ThzNtnWeatherAttenuation>();
+        w50->SetAttribute("RainRate", DoubleValue(50.0));
+        NS_TEST_ASSERT_MSG_EQ_TOL(w0->ComputeRainAttenuation_dB(30e9, 30.0, 50.0),
+                                  w50->ComputeRainAttenuation_dB(30e9, 30.0, 50.0), 1e-9,
+                                  "rain loss depends on the rate passed, not on the attribute");
+        NS_TEST_ASSERT_MSG_EQ(w0->WasLastRainExtrapolated(), false, "30 GHz is in range");
+        w0->ComputeRainAttenuation_dB(1200e9, 30.0, 5.0);
+        NS_TEST_ASSERT_MSG_EQ(w0->WasLastRainExtrapolated(), true, "1.2 THz is flagged");
+        NS_TEST_ASSERT_MSG_EQ((itu::ClassifyRainFrequency(1200e9) == itu::RainMethodValidity::BEYOND_P838),
+                              true, "and classed beyond P.838");
+        NS_TEST_ASSERT_MSG_EQ((itu::ClassifyRainFrequency(55e9) == itu::RainMethodValidity::WITHIN_P618),
+                              true, "55 GHz is the validated edge");
+        auto p618 = CreateObject<itu::Itu618LossModel>();
+        p618->SlantPathRainAttenuationDb(140e9, 30.0, 20.0, 0.0, itu::Polarization::circular);
+        NS_TEST_ASSERT_MSG_EQ((p618->GetLastRainValidity() == itu::RainMethodValidity::P618_EXTRAPOLATED),
+                              true, "P.618 slant rain at 140 GHz is flagged");
+        NS_TEST_ASSERT_MSG_EQ(p618->GetExtrapolatedRainCount(), 1u, "and counted");
     }
 };
 
@@ -3190,6 +3403,8 @@ ThzNtnTestSuite::ThzNtnTestSuite()
     AddTestCase(new ThzNtnRisSmRisIdGuardTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnPhaseScintillationScalingTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnSlantElevationClampIsVisibleTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnP676Annex1RayTraceTest, TestCase::Duration::QUICK);
+    AddTestCase(new ThzNtnRainValidityFlagSimTest, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnLutProvenanceIsP676Test, TestCase::Duration::QUICK);
     AddTestCase(new ThzNtnWeatherProvenanceIsDeclaredTest, TestCase::Duration::QUICK);
 }

@@ -190,6 +190,20 @@ ThzNtnSpectrumAtmosphereModel::ComputeLossDb(const ThzNtnLinkGeometry& g,
             }
         }
     }
+    // Wave 6B: flag rain applied above the P.618 validated 55 GHz.
+    m_lastRainExtrap = false;
+    if ((m_field && m_lastPathRate > 0.0) || (!m_field && m_uniformRain > 0.0))
+    {
+        for (double f : freqsHz)
+        {
+            if (itu::ClassifyRainFrequency(f) != itu::RainMethodValidity::WITHIN_P618)
+            {
+                m_lastRainExtrap = true;
+                ++m_rainExtrapCount;
+                break;
+            }
+        }
+    }
     if (m_lwc > 0.0)
     {
         for (size_t i = 0; i < freqsHz.size(); ++i)

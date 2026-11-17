@@ -38,6 +38,7 @@
 
 #include <ns3/object.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -170,6 +171,51 @@ class ThzNtnMolecularAbsorption : public Object
     /// guard; doing it silently is not. A caller requesting 2 degrees was
     /// answered with the attenuation at 5 degrees and had no way to tell.
     static constexpr double kMinIntegratorElevationDeg = 5.0;
+
+    /**
+     * \brief Slant-path integration method (attribute SlantPathMethod).
+     *
+     * ANNEX1_RAY_TRACE (default since Wave 6B) is ITU-R P.676-13 Annex 1
+     * Section 2.2.1: 922 spherical shells whose thickness grows as
+     * delta_i = 0.0001 exp((i - 1) / 100) km (eq. 14) up to 100 km, the ray
+     * length a_n in each shell from eq. (17), the exit angle alpha_n from
+     * eq. (18a), Snell's law across shells with the refractive index of
+     * ITU-R P.453-14 eq. (6) evaluated on the same P.835 profile (eq. 19a),
+     * and A_gas = sum a_n gamma_n (eq. 13). Valid from 0 deg elevation.
+     *
+     * GEOMETRIC_SLABS is the pre-Wave-6B integrator: 13 slabs x
+     * IntegrationSteps sub-steps on a straight (unrefracted) ray with an
+     * Earth-curvature correction, floored at kMinIntegratorElevationDeg. It
+     * is kept only to reproduce earlier datasets; at 5 deg it under-reads
+     * the Annex 1 path by about 2 percent because it ignores refraction.
+     */
+    enum class SlantPathMethod
+    {
+        ANNEX1_RAY_TRACE,
+        GEOMETRIC_SLABS
+    };
+    /// Elevation floor of the Annex 1 ray tracer: the horizon. A negative
+    /// elevation (a ray that starts downward) is floored to 0 and flagged.
+    static constexpr double kMinRayTraceElevationDeg = 0.0;
+
+    void SetSlantPathMethod(SlantPathMethod m) { m_slantMethod = m; }
+    SlantPathMethod GetSlantPathMethod() const { return m_slantMethod; }
+    /// Elevation floor of the selected integrator (deg).
+    double GetElevationFloorDeg() const
+    {
+        return m_slantMethod == SlantPathMethod::ANNEX1_RAY_TRACE ? kMinRayTraceElevationDeg
+                                                                  : kMinIntegratorElevationDeg;
+    }
+    /// Refracted ray length (km) of the last ANNEX1_RAY_TRACE call, sum of a_n.
+    double GetLastRayPathLengthKm() const { return m_lastRayPathKm; }
+
+    /**
+     * \brief Radio refractivity N (N-units) of ITU-R P.453-14 eq. (6).
+     *
+     * N = 77.6 Pd / T + 72 e / T + 3.75e5 e / T^2, with Pd the dry-air and e
+     * the water-vapour partial pressure (hPa) and T in K.
+     */
+    static double RadioRefractivity(double tempK, double dryPressureHPa, double vapourHPa);
 
     /// True if the most recent ComputeSlantPathAbsorption() call had its
     /// elevation floored, i.e. the returned attenuation is for
@@ -372,6 +418,24 @@ class ThzNtnMolecularAbsorption : public Object
     /// THZ-11 bookkeeping: mutable because the compute path is const.
     mutable bool m_lastElevationClamped{false};
     mutable double m_lastIntegratedElevDeg{0.0};
+    mutable double m_lastRayPathKm{0.0};
+
+    /// Wave 6B: P.676-13 Annex 1 Section 2.2.1 ray tracer and its caches.
+    double ComputeSlantRayTrace(double freqHz, double elevationDeg, double hLow, double hTop) const;
+    double ComputeSlantGeometric(double freqHz, double elevationDeg, double hLow, double hTop) const;
+    /// Specific attenuation (dB/km) at height h with the configured atmosphere / LUT.
+    double SpecificAttenuationDbKmAt(double freqHz, double hKm, bool useLut) const;
+    /// Refractive index n = 1 + N 1e-6 at height h of the configured atmosphere.
+    double RefractiveIndexAt(double hKm) const;
+    /// Rebuild the shell grid and refractive-index profile when the
+    /// atmosphere changed (profile, water-vapour scale, LUT).
+    void EnsureShellGrid() const;
+
+    SlantPathMethod m_slantMethod{SlantPathMethod::ANNEX1_RAY_TRACE};
+    mutable std::vector<double> m_shellBottomKm; //!< shell lower boundaries, eq. (14)/(15)
+    mutable std::vector<double> m_shellIndex;    //!< refractive index at each shell mid
+    mutable std::map<double, std::vector<double>> m_shellGamma; //!< freq -> gamma (dB/km) per shell
+    mutable std::string m_shellTag;              //!< atmosphere the caches were built for
 
     // (ComputeSlantPathAbsorption) and GetTransmittance consult `m_lut` for the
     // per-sub-layer specific attenuation (dB/km). The single-point
