@@ -80,6 +80,10 @@ build_lib_example(
   SOURCE_FILES ntn-constellation-route-lifetime.cc
   LIBRARIES_TO_LINK
     ${libntn-constellation}
+    ${libntn-cho}
+    ${libntn-traffic}
+    ${libntn-observability}
+    ${libflow-monitor}
     ${libcore}
     ${libnetwork}
     ${libpoint-to-point}

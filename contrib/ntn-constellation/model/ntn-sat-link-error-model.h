@@ -23,6 +23,7 @@
 #define NTN_SAT_LINK_ERROR_MODEL_H
 
 #include <map>
+#include <string>
 #include <tuple>
 
 #include "ns3/error-model.h"
@@ -74,8 +75,65 @@ class NtnSatLinkErrorModel : public ErrorModel
     double LastRainDb() const { return m_lastRainDb; }
     double LastScintillationDb() const { return m_lastScintDb; }
 
+    /// Wave 7B: one documented Earth-space budget for a ground station (VSAT
+    /// class) to LEO-600 Ka link, so examples stop inventing EIRP values.
+    ///  - satellite to ground (downlink, 20 GHz): TR 38.821 Table 6.1.1.1-1
+    ///    Set-1 LEO-600 Ka EIRP density 4 dBW/MHz over the noise bandwidth;
+    ///    ground G/T 15.9 dB/K (Table 6.1.1.1-2 VSAT).
+    ///  - ground to satellite (uplink, 30 GHz): VSAT 33 dBm into 43.2 dBi
+    ///    (46.2 dBW); satellite Ka G/T 13 dB/K (Table 6.1.1.1-1).
+    ///  - MODCOD DVB-S2 8PSK 3/4: 2.228 b/symbol, QEF Es/No 7.91 dB
+    ///    (EN 302 307-1 Table 13); noise bandwidth = linkRateBps / 2.228; BLER
+    ///    from the SNS3 DVB-S2 normal-frame link-result table of that MODCOD.
+    ///  - ITU-R P.676 gas and P.618 scintillation at the station altitude taken
+    ///    from geometry; rain only when RainRateMmH > 0. The excess loss is
+    ///    cached on a 0.05 deg elevation grid (well inside P.618's accuracy).
+    /// The same figures as sagin-sgp4-routed-traffic.
+    ///
+    /// MODCOD choice (constant coding and modulation sized for the worst
+    /// geometry, the usual gateway-link design): the highest DVB-S2 QPSK/8PSK
+    /// MODCOD whose QEF Es/No (EN 302 307-1 Table 13, normal frame) plus
+    /// `marginDb` is met at `designElevDeg` for a satellite at `satAltKm`,
+    /// clear sky, with P.676 gas and P.618 scintillation at that elevation.
+    /// The noise bandwidth is linkRateBps / spectral efficiency of the chosen
+    /// MODCOD. Defaults reproduce 8PSK 3/4 when the link closes at zenith.
+    void ConfigureTr38821Set1KaGsl(bool satToGround,
+                                   double linkRateBps,
+                                   double stationLatDeg,
+                                   double designElevDeg = 90.0,
+                                   double satAltKm = 600.0,
+                                   double marginDb = 0.5);
+    static constexpr double kDvbS2Eff8psk34 = 2.228;
+    static constexpr double kDvbS2QefEsNo8psk34Db = 7.91;
+    /// Chosen MODCOD, its spectral efficiency (b/symbol) and QEF Es/No (dB).
+    const std::string& GetModcodName() const { return m_modcodName; }
+    double GetModcodEfficiency() const { return m_modcodEff; }
+    double GetDesignEsNoDb() const { return m_designEsNoDb; }
+
+    /// Wave 7B: the geometry contact gate on the same receive path. A device
+    /// carries one ReceiveErrorModel, so a link that needs both the routing gate
+    /// (elevation mask, ISL range cap) and the measured C/N0 -> BLER loss sets
+    /// the gate here: while it is down every packet is dropped and counted as a
+    /// gate drop; while it is up the BLER draw decides.
+    void SetContactUp(bool up) { m_contactUp = up; }
+    bool IsContactUp() const { return m_contactUp; }
+    uint64_t GetPacketsSeen() const { return m_seen; }
+    uint64_t GetGateDrops() const { return m_gateDrops; }
+    uint64_t GetBlerDrops() const { return m_blerDrops; }
+    /// Mean BLER over the packets that reached the draw (gate up).
+    double GetMeanBler() const { return m_blerN ? m_blerSum / m_blerN : 0.0; }
+
   private:
     bool DoCorrupt(Ptr<Packet> p) override;
+    bool m_contactUp{true};
+    std::string m_modcodName;
+    double m_modcodEff{0.0};
+    double m_designEsNoDb{0.0};
+    uint64_t m_seen{0};
+    uint64_t m_gateDrops{0};
+    uint64_t m_blerDrops{0};
+    uint64_t m_blerN{0};
+    double m_blerSum{0.0};
     void DoReset() override;
 
     double SlantRangeM() const;

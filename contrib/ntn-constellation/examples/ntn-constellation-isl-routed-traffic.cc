@@ -26,6 +26,8 @@
 #include "ns3/error-model.h"
 #include "ns3/ntn-oran-application.h"
 #include "ns3/ntn-oran-sink.h"
+#include "ns3/ntn-range-delay-channel.h"
+#include "ns3/ntn-sat-link-error-model.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
@@ -36,6 +38,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <vector>
 
 using namespace ns3;
 
@@ -49,6 +52,9 @@ constexpr uint32_t GS1 = 0, SATA = 1, SATB = 2, GS2 = 3;
 Ptr<MobilityModel> g_g1, g_satA, g_satB, g_g2;
 Ptr<PointToPointChannel> g_chGsl1, g_chIsl, g_chGsl2;
 Ptr<RateErrorModel> g_emGsl1, g_emIsl, g_emGsl2; // binary geometry contact gates
+// Wave 7B: GSL receive models (contact gate + TR 38.821 Ka C/N0 -> DVB-S2 BLER).
+std::vector<Ptr<ns3::ntncon::NtnSatLinkErrorModel>> g_slGsl1, g_slGsl2;
+bool g_exactDelay = true;
 double g_minElev = 10.0;
 double g_islRangeCapKm = 5000.0;
 double g_simTime = 40.0;
@@ -76,18 +82,33 @@ Tick()
     {
         return;
     }
-    g_chGsl1->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_g1, g_satA))));
-    g_chIsl->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_satA, g_satB))));
-    g_chGsl2->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_satB, g_g2))));
+    if (!g_exactDelay)
+    {
+        // Pre-Wave-7B staircase: the delay held for a whole second.
+        g_chGsl1->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_g1, g_satA))));
+        g_chIsl->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_satA, g_satB))));
+        g_chGsl2->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_satB, g_g2))));
+    }
 
     // Geometry contact gates (NOT a fabricated SINR): a hop forwards only while
     // in contact. error rate 0.0 = link up, 1.0 = out of contact (dropped).
     const bool gsl1 = ElevDeg(g_g1, g_satA) >= g_minElev;
     const bool isl = (g_satA->GetDistanceFrom(g_satB) / 1e3) <= g_islRangeCapKm;
     const bool gsl2 = ElevDeg(g_g2, g_satB) >= g_minElev;
-    g_emGsl1->SetRate(gsl1 ? 0.0 : 1.0);
+    if (g_emGsl1)
+    {
+        g_emGsl1->SetRate(gsl1 ? 0.0 : 1.0);
+        g_emGsl2->SetRate(gsl2 ? 0.0 : 1.0);
+    }
+    for (auto& em : g_slGsl1)
+    {
+        em->SetContactUp(gsl1);
+    }
+    for (auto& em : g_slGsl2)
+    {
+        em->SetContactUp(gsl2);
+    }
     g_emIsl->SetRate(isl ? 0.0 : 1.0);
-    g_emGsl2->SetRate(gsl2 ? 0.0 : 1.0);
     if (!(gsl1 && isl && gsl2))
     {
         ++g_contactDrops;
@@ -114,7 +135,23 @@ main(int argc, char* argv[])
     cmd.AddValue("minElev", "Min GSL elevation for contact (deg)", g_minElev);
     cmd.AddValue("islRangeCapKm", "Max ISL range for contact (km)", g_islRangeCapKm);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    std::string delayModel = "exact";
+    cmd.AddValue("delayModel",
+                 "exact: per-packet light-time delay on the exact SGP4 state; fixed: delay refreshed "
+                 "every 1 s (pre-Wave-7B)",
+                 delayModel);
+    std::string linkModel = "satlink";
+    cmd.AddValue("linkModel",
+                 "satlink: GSL hops carry the contact gate and a TR 38.821 Set-1 Ka C/N0 -> DVB-S2 "
+                 "8PSK 3/4 BLER model (P.676 gas, P.618 scintillation and rain); gate: gate only "
+                 "(pre-Wave-7B)",
+                 linkModel);
+    double rainRate = 0.0;
+    cmd.AddValue("rainRate", "satlink: ITU-R P.618 point rain rate R0.01 (mm/h), 0 = clear sky", rainRate);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(delayModel != "exact" && delayModel != "fixed", "--delayModel must be exact or fixed");
+    NS_ABORT_MSG_IF(linkModel != "satlink" && linkModel != "gate", "--linkModel must be satlink or gate");
+    g_exactDelay = delayModel == "exact";
     g_simTime = duration;
 
     std::cout << "\n=== ntn-constellation ISL-ROUTED (real packets through sat nodes) ===\n"
@@ -189,24 +226,61 @@ main(int argc, char* argv[])
 
     // Real link chain: GS1-satA (GSL), satA-satB (ISL), satB-GS2 (GSL).
     PointToPointHelper p2p;
-    p2p.SetDeviceAttribute("DataRate", DataRateValue(DataRate("50Mbps")));
+    const DataRate lineRate("50Mbps");
+    p2p.SetDeviceAttribute("DataRate", DataRateValue(lineRate));
     Ipv4AddressHelper ipv4;
+    std::vector<Ptr<ns3::ntncon::NtnRangeDelayChannel>> exactCh;
+    // gsl: 0 = ISL, 1 = GS1-satA (ground first), 2 = satB-GS2 (ground second).
     auto mkLink = [&](uint32_t x, uint32_t y, const char* net, Ptr<RateErrorModel>& emOut,
-                      Ptr<PointToPointChannel>& chOut) {
-        NetDeviceContainer d = p2p.Install(nodes.Get(x), nodes.Get(y));
-        emOut = CreateObject<RateErrorModel>();
-        emOut->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
-        emOut->SetRate(0.0);
-        d.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(emOut));
-        chOut = DynamicCast<PointToPointChannel>(d.Get(0)->GetChannel());
+                      Ptr<PointToPointChannel>& chOut, int gsl) {
+        NetDeviceContainer d;
+        if (g_exactDelay)
+        {
+            Ptr<ns3::ntncon::NtnRangeDelayChannel> ch;
+            d = ns3::ntncon::NtnRangeDelayChannel::Connect(nodes.Get(x), nodes.Get(y), lineRate,
+                                                           "100p", ch);
+            chOut = ch;
+            exactCh.push_back(ch);
+        }
+        else
+        {
+            d = p2p.Install(nodes.Get(x), nodes.Get(y));
+            chOut = DynamicCast<PointToPointChannel>(d.Get(0)->GetChannel());
+        }
+        if (gsl > 0 && linkModel == "satlink")
+        {
+            Ptr<MobilityModel> mx = nodes.Get(x)->GetObject<MobilityModel>();
+            Ptr<MobilityModel> my = nodes.Get(y)->GetObject<MobilityModel>();
+            auto& vec = gsl == 1 ? g_slGsl1 : g_slGsl2;
+            for (uint32_t k = 0; k < 2; ++k)
+            {
+                // Device k receives from the other end; the ground end is x on
+                // GSL 1 and y on GSL 2.
+                const bool rxIsGround = (gsl == 1) == (k == 0);
+                auto em = CreateObject<ns3::ntncon::NtnSatLinkErrorModel>();
+                em->ConfigureTr38821Set1KaGsl(rxIsGround, lineRate.GetBitRate(), satSubLat,
+                                              g_minElev, altKm);
+                em->SetAttribute("RainRateMmH", DoubleValue(rainRate));
+                em->SetEndpoints(k == 0 ? my : mx, k == 0 ? mx : my);
+                d.Get(k)->SetAttribute("ReceiveErrorModel", PointerValue(em));
+                vec.push_back(em);
+            }
+        }
+        else
+        {
+            emOut = CreateObject<RateErrorModel>();
+            emOut->SetUnit(RateErrorModel::ERROR_UNIT_PACKET);
+            emOut->SetRate(0.0);
+            d.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(emOut));
+        }
         ipv4.SetBase(net, "255.255.255.252");
         return ipv4.Assign(d);
     };
-    Ipv4InterfaceContainer icGsl1 = mkLink(GS1, SATA, "10.1.1.0", g_emGsl1, g_chGsl1);
+    Ipv4InterfaceContainer icGsl1 = mkLink(GS1, SATA, "10.1.1.0", g_emGsl1, g_chGsl1, 1);
     (void)icGsl1;
-    Ipv4InterfaceContainer icIsl = mkLink(SATA, SATB, "10.1.2.0", g_emIsl, g_chIsl);
+    Ipv4InterfaceContainer icIsl = mkLink(SATA, SATB, "10.1.2.0", g_emIsl, g_chIsl, 0);
     (void)icIsl;
-    Ipv4InterfaceContainer icGsl2 = mkLink(SATB, GS2, "10.1.3.0", g_emGsl2, g_chGsl2);
+    Ipv4InterfaceContainer icGsl2 = mkLink(SATB, GS2, "10.1.3.0", g_emGsl2, g_chGsl2, 2);
 
     // Real end-to-end routing: packets are forwarded through satA and satB.
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
@@ -254,6 +328,43 @@ main(int argc, char* argv[])
     out << "app_loss_ratio," << ps->GetLossRatio() << ",-,1,inband-seq\n";
     out << "app_delivery_ratio," << delivery << ",-,1,app-trace\n";
     out << "contact_drop_ticks," << g_contactDrops << ",-,1,router\n";
+    // Wave 7B: loss by cause on the ground links, and the per-packet delay the
+    // exact channels applied (spread = max - min over the run).
+    uint64_t blerDrops = 0;
+    uint64_t gateDrops = 0;
+    double esNoMin = 1e9;
+    for (const auto* vec : {&g_slGsl1, &g_slGsl2})
+    {
+        for (const auto& em : *vec)
+        {
+            blerDrops += em->GetBlerDrops();
+            gateDrops += em->GetGateDrops();
+            if (em->GetPacketsSeen() > em->GetGateDrops())
+            {
+                esNoMin = std::min(esNoMin, em->LastEsNoDb());
+            }
+        }
+    }
+    if (!g_slGsl1.empty())
+    {
+        out << "gsl_modcod_down," << g_slGsl1[0]->GetModcodName() << ",-,1,EN 302 307-1 Table 13\n";
+        out << "gsl_modcod_up," << g_slGsl1[1]->GetModcodName() << ",-,1,EN 302 307-1 Table 13\n";
+    }
+    out << "gsl_bler_drops," << blerDrops << ",-,1,NtnSatLinkErrorModel\n";
+    out << "gsl_gate_drops," << gateDrops << ",-,1,NtnSatLinkErrorModel\n";
+    if (esNoMin < 1e9)
+    {
+        out << "gsl_last_esno_db_min," << esNoMin << ",-,1,NtnSatLinkErrorModel\n";
+    }
+    for (size_t i = 0; i < exactCh.size(); ++i)
+    {
+        if (exactCh[i]->GetPacketCount() == 0)
+        {
+            continue;
+        }
+        out << "hop" << i << "_delay_ms_min," << 1e3 * exactCh[i]->GetMinDelayS() << ",-,1,NtnRangeDelayChannel\n";
+        out << "hop" << i << "_delay_ms_max," << 1e3 * exactCh[i]->GetMaxDelayS() << ",-,1,NtnRangeDelayChannel\n";
+    }
     out.close();
 
     std::cout << "\n--- ISL routing Summary (MEASURED, packets through sats) ---\n"

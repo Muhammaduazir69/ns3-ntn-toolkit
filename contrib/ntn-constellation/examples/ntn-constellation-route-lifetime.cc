@@ -43,6 +43,17 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
+// Wave 7B: one flow through the toolkit.
+#include "ns3/ntn-geodetic-fixed-mobility-model.h" // ntn-cho: WGS-84 ground terminals
+#include "ns3/ntn-oran-ai-flow-monitor.h"          // ntn-traffic: FlowMonitor + TS 28.552 KPM
+#include "ns3/ntn-oran-application.h"             // ntn-traffic: standards CBR source
+#include "ns3/ntn-oran-payload-header.h"
+#include "ns3/ntn-oran-sink.h"
+#include "ns3/ntn-range-delay-channel.h"          // exact per-packet light-time delay
+#include "ns3/ntn-sat-link-error-model.h"         // TR 38.821 Ka GSL C/N0 -> BLER
+#include "ns3/ntn-scene-helper.h"                 // ntn-observability: NetSimulyzer / CZML
+#include "ns3/flow-monitor-module.h"
+#include <filesystem>
 
 #include <sys/resource.h>
 #include <time.h>
@@ -74,8 +85,22 @@ constexpr double kC = 299792458.0;
 struct Link
 {
     Ptr<PointToPointChannel> ch;
-    Ptr<RateErrorModel> emA;
+    Ptr<RateErrorModel> emA; // contact gate (ISL, or GSL with --linkModel=gate)
     Ptr<RateErrorModel> emB;
+    Ptr<ns3::ntncon::NtnSatLinkErrorModel> slA; // Wave 7B GSL: gate + measured BLER
+    Ptr<ns3::ntncon::NtnSatLinkErrorModel> slB;
+    bool exactDelay{false};
+    void SetGate(bool up) const
+    {
+        if (slA)
+        {
+            slA->SetContactUp(up);
+            slB->SetContactUp(up);
+            return;
+        }
+        emA->SetRate(up ? 0.0 : 1.0);
+        emB->SetRate(up ? 0.0 : 1.0);
+    }
     uint32_t ifA;  // interface index at the low node
     uint32_t ifB;  // interface index at the high node
     Ipv4Address ipA;
@@ -325,7 +350,7 @@ InstallPath(const std::vector<uint32_t>& p)
         auto sr = srh.GetStaticRouting(g.nodes.Get(a)->GetObject<Ipv4>());
         sr->AddHostRouteTo(g.dst, aLow ? l.ipB : l.ipA, aLow ? l.ifA : l.ifB);
         const double w = g.router->EdgeWeight(a, b);
-        if (!std::isnan(w))
+        if (!std::isnan(w) && !l.exactDelay)
         {
             l.ch->SetAttribute("Delay", TimeValue(Seconds(w / kC)));
         }
@@ -400,8 +425,7 @@ Switch(const std::vector<uint32_t>& p)
                 const Edge ne = oe.second == g.gsA ? Canon(p[1], g.gsA) : Canon(p[p.size() - 2], g.gsB);
                 if (oe != ne && g.links.count(oe))
                 {
-                    g.links.at(oe).emA->SetRate(1.0);
-                    g.links.at(oe).emB->SetRate(1.0);
+                    g.links.at(oe).SetGate(false);
                     g.blocked.insert(oe);
                 }
             }
@@ -910,8 +934,7 @@ OnUp(ContactEvent ev)
     auto it = g.links.find(e);
     if (it != g.links.end() && !g.blocked.count(e))
     {
-        it->second.emA->SetRate(0.0);
-        it->second.emB->SetRate(0.0);
+        it->second.SetGate(true);
     }
 }
 
@@ -924,8 +947,7 @@ Unblock()
         auto it = g.links.find(e);
         if (it != g.links.end() && g.router->HasEdge(e.first, e.second))
         {
-            it->second.emA->SetRate(0.0);
-            it->second.emB->SetRate(0.0);
+            it->second.SetGate(true);
         }
     }
     g.blocked.clear();
@@ -942,7 +964,7 @@ OnUpdate(ContactEvent ev)
         return;
     }
     auto it = g.links.find(e);
-    if (it != g.links.end())
+    if (it != g.links.end() && !it->second.exactDelay)
     {
         it->second.ch->SetAttribute("Delay", TimeValue(Seconds(ev.range_m / kC)));
     }
@@ -957,8 +979,7 @@ OnDown(ContactEvent ev)
     auto it = g.links.find(e);
     if (it != g.links.end())
     {
-        it->second.emA->SetRate(1.0);
-        it->second.emB->SetRate(1.0);
+        it->second.SetGate(false);
     }
     if (!g.pathEdges.count(e))
     {
@@ -1033,9 +1054,9 @@ void
 OnRx(Ptr<const Packet> pkt, const Address&)
 {
     Ptr<Packet> c = pkt->Copy();
-    SeqTsHeader h;
+    NtnOranPayloadHeader h;
     c->RemoveHeader(h);
-    g.delays.push_back((Simulator::Now() - h.GetTs()).GetSeconds());
+    g.delays.push_back(Simulator::Now().GetSeconds() - 1e-9 * static_cast<double>(h.GetTxTimestampNs()));
     ++g.rx;
 }
 
@@ -1137,7 +1158,33 @@ main(int argc, char* argv[])
     cmd.AddValue("tle", "real shell: TLE file (3-line sets), propagated with Vallado SGP4", tleFile);
     cmd.AddValue("edges", "real shell: +Grid candidates, lines 'a b cross'", edgeFile);
     cmd.AddValue("epochUnix", "Unix time of simulation start before startOffset", epochUnix);
+    // Wave 7B: the data plane and its measurement run through the toolkit.
+    std::string delayModel = "exact";
+    cmd.AddValue("delayModel",
+                 "exact: per-packet light-time delay on the exact SGP4 state (NtnRangeDelayChannel); "
+                 "fixed: channel Delay set from the contact updates (pre-Wave-7B staircase)",
+                 delayModel);
+    std::string linkModel = "satlink";
+    cmd.AddValue("linkModel",
+                 "satlink: ground links carry the contact gate and a TR 38.821 Set-1 Ka C/N0 -> BLER "
+                 "error model (P.676 gas, P.618 scintillation, DVB-S2 8PSK 3/4); gate: gate only "
+                 "(pre-Wave-7B)",
+                 linkModel);
+    double rainRate = 0.0;
+    cmd.AddValue("rainRate", "satlink: ITU-R P.618 point rain rate R0.01 at both stations (mm/h), 0 = clear sky",
+                 rainRate);
+    double linkMbps = 100.0;
+    cmd.AddValue("linkMbps", "line rate of every link (Mb/s); sets the GSL noise bandwidth", linkMbps);
+    std::string outputDir = "ntn-constellation-route-lifetime-output";
+    cmd.AddValue("outputDir", "directory for flowmon.xml, kpm.csv and link_stats.csv", outputDir);
+    std::string czmlOut;
+    std::string netSimOut;
+    cmd.AddValue("czml", "ntn-observability: write a CZML scene of the ground stations and the path satellites", czmlOut);
+    cmd.AddValue("netSimOut", "ntn-observability: write a NetSimulyzer scene", netSimOut);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(delayModel != "exact" && delayModel != "fixed", "--delayModel must be exact or fixed");
+    NS_ABORT_MSG_IF(linkModel != "satlink" && linkModel != "gate", "--linkModel must be satlink or gate");
+    const bool exactDelay = delayModel == "exact";
 
     // ---- shell
     WalkerConfig wc;
@@ -1307,17 +1354,77 @@ main(int argc, char* argv[])
     stack.SetRoutingHelper(srh);
     stack.Install(g.nodes);
     }
+    // Mobility on the nodes: the exact-delay channel and the GSL error model
+    // read it. Satellites carry their Sgp4MobilityModel; the ground stations
+    // are ntn-cho WGS-84 terminals (ECEF, the satellites' frame).
+    std::vector<Ptr<NtnGeodeticFixedMobilityModel>> gsMob(2);
+    for (int i = 0; i < 2; ++i)
+    {
+        gsMob[i] = CreateObject<NtnGeodeticFixedMobilityModel>();
+        gsMob[i]->SetGeodetic(g.gsLat[i], g.gsLon[i], 0.0);
+    }
+    if (!g.noData)
+    {
+        for (uint32_t k = 0; k < g.n; ++k)
+        {
+            g.nodes.Get(k)->AggregateObject(sats[k]);
+        }
+        g.nodes.Get(g.gsA)->AggregateObject(gsMob[0]);
+        g.nodes.Get(g.gsB)->AggregateObject(gsMob[1]);
+    }
+    const DataRate lineRate(static_cast<uint64_t>(linkMbps * 1e6));
     PointToPointHelper p2p;
-    p2p.SetDeviceAttribute("DataRate", StringValue("100Mbps"));
+    p2p.SetDeviceAttribute("DataRate", DataRateValue(lineRate));
     p2p.SetChannelAttribute("Delay", TimeValue(MilliSeconds(5)));
     p2p.SetQueue("ns3::DropTailQueue<Packet>", "MaxSize", StringValue("200p"));
     Ipv4AddressHelper addr("10.0.0.0", "255.255.255.252");
+    std::vector<Ptr<ns3::ntncon::NtnRangeDelayChannel>> exactChannels;
     auto mk = [&](const Edge& e) {
-        NetDeviceContainer d = p2p.Install(g.nodes.Get(e.first), g.nodes.Get(e.second));
+        Link l;
+        NetDeviceContainer d;
+        if (exactDelay)
+        {
+            Ptr<ns3::ntncon::NtnRangeDelayChannel> ch;
+            d = ns3::ntncon::NtnRangeDelayChannel::Connect(g.nodes.Get(e.first),
+                                                           g.nodes.Get(e.second),
+                                                           lineRate,
+                                                           "200p",
+                                                           ch);
+            l.ch = ch;
+            l.exactDelay = true;
+            exactChannels.push_back(ch);
+        }
+        else
+        {
+            d = p2p.Install(g.nodes.Get(e.first), g.nodes.Get(e.second));
+            l.ch = DynamicCast<PointToPointChannel>(d.Get(0)->GetChannel());
+        }
         Ipv4InterfaceContainer ic = addr.Assign(d);
         addr.NewNetwork();
-        Link l;
-        l.ch = DynamicCast<PointToPointChannel>(d.Get(0)->GetChannel());
+        const bool gslLink = e.second >= g.n; // (sat, ground station): sat id < n <= gs id
+        if (gslLink && linkModel == "satlink")
+        {
+            // Device 0 sits on the satellite (receives the uplink), device 1 on
+            // the ground station (receives the downlink).
+            const int gi = e.second == g.gsA ? 0 : 1;
+            Ptr<MobilityModel> sm = sats[e.first];
+            Ptr<MobilityModel> gm = gsMob[gi];
+            l.slA = CreateObject<ns3::ntncon::NtnSatLinkErrorModel>();
+            l.slA->ConfigureTr38821Set1KaGsl(false, lineRate.GetBitRate(), g.gsLat[gi], minElev, altKm);
+            l.slA->SetEndpoints(gm, sm);
+            l.slB = CreateObject<ns3::ntncon::NtnSatLinkErrorModel>();
+            l.slB->ConfigureTr38821Set1KaGsl(true, lineRate.GetBitRate(), g.gsLat[gi], minElev, altKm);
+            l.slB->SetEndpoints(sm, gm);
+            for (auto em : {l.slA, l.slB})
+            {
+                em->SetAttribute("RainRateMmH", DoubleValue(rainRate));
+                em->SetContactUp(false); // down until the scheduler says up
+            }
+            d.Get(0)->SetAttribute("ReceiveErrorModel", PointerValue(l.slA));
+            d.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(l.slB));
+        }
+        else
+        {
         l.emA = CreateObject<RateErrorModel>();
         l.emB = CreateObject<RateErrorModel>();
         for (auto em : {l.emA, l.emB})
@@ -1327,6 +1434,7 @@ main(int argc, char* argv[])
         }
         d.Get(0)->SetAttribute("ReceiveErrorModel", PointerValue(l.emA));
         d.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(l.emB));
+        }
         l.ifA = ic.Get(0).second;
         l.ifB = ic.Get(1).second;
         l.ipA = ic.GetAddress(0);
@@ -1365,19 +1473,34 @@ main(int argc, char* argv[])
     const uint16_t port = 9000;
     const double t0 = 5.0;
     const uint64_t nPk = static_cast<uint64_t>((duration - t0) * rate);
+    // ntn-traffic: a 200 B constant-rate flow (NtnOranApplication, in-band
+    // sequence and timestamp) into an NtnOranSink, measured by the ntn-traffic
+    // NtnOranAiFlowMonitor (ns-3 FlowMonitor + TS 28.552 KPM series).
+    Ptr<NtnOranSink> sink;
+    Ptr<NtnOranApplication> src;
+    Ptr<NtnOranAiFlowMonitor> mon;
     if (!g.noData)
     {
-    PacketSinkHelper sinkH("ns3::UdpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
-    auto sinkApp = sinkH.Install(g.nodes.Get(g.gsB));
-    sinkApp.Get(0)->TraceConnectWithoutContext("Rx", MakeCallback(&OnRx));
-    sinkApp.Start(Seconds(0));
-    UdpClientHelper cli(g.dst, port);
-    cli.SetAttribute("MaxPackets", UintegerValue(nPk));
-    cli.SetAttribute("Interval", TimeValue(Seconds(1.0 / rate)));
-    cli.SetAttribute("PacketSize", UintegerValue(200));
-    auto cliApp = cli.Install(g.nodes.Get(g.gsA));
-    cliApp.Start(Seconds(t0));
-    cliApp.Stop(Seconds(duration));
+    sink = CreateObject<NtnOranSink>();
+    sink->SetAttribute("Local", AddressValue(InetSocketAddress(Ipv4Address::GetAny(), port)));
+    g.nodes.Get(g.gsB)->AddApplication(sink);
+    sink->TraceConnectWithoutContext("Rx", MakeCallback(&OnRx));
+    sink->SetStartTime(Seconds(0));
+    src = CreateObject<NtnOranApplication>();
+    src->SetRemote(InetSocketAddress(g.dst, port));
+    src->SetProfile(NtnOranApplication::CBR_SATURATING);
+    src->SetAttribute("PacketSize", UintegerValue(200));
+    src->SetAttribute("Period", TimeValue(Seconds(1.0 / rate)));
+    src->SetFlowIdentity(/*5qi*/ 9, /*sst*/ 1, /*sd*/ 0x000001, /*src*/ 1, /*dst*/ 2);
+    g.nodes.Get(g.gsA)->AddApplication(src);
+    // One packet every 1/rate from t0 to duration, as the UdpClient sent.
+    src->SetStartTime(Seconds(t0));
+    src->SetStopTime(Seconds(duration));
+    mon = CreateObject<NtnOranAiFlowMonitor>();
+    mon->SetGranularityPeriod(Seconds(1.0));
+    mon->AddSource(src);
+    mon->AddSink(sink);
+    mon->Start();
     }
 
     // Snapshot routing starts at a random phase of its clock, so its recomputations are not locked to
@@ -1405,7 +1528,36 @@ main(int argc, char* argv[])
         Simulator::Schedule(Seconds(t0), &DumpReach, 1.0);
     }
     Simulator::Stop(Seconds(duration + 1.0));
+    // ntn-observability: the two ground stations and the satellites of the
+    // current path (all 1584 only if asked for: --czml on a full shell is large).
+    Ptr<ns3::ntnobs::NtnSceneRecorder> scene;
+    if (!g.noData && (!czmlOut.empty() || !netSimOut.empty()))
+    {
+        ns3::ntnobs::NtnSceneHelper sh;
+        if (!czmlOut.empty())
+        {
+            sh.SetCzml(czmlOut);
+        }
+        if (!netSimOut.empty())
+        {
+            sh.SetNetSimulyzer(netSimOut);
+        }
+        sh.SetSampleInterval(Seconds(10.0));
+        NodeContainer satNodes;
+        NodeContainer gsNodes;
+        for (uint32_t k = 0; k < g.n; ++k)
+        {
+            satNodes.Add(g.nodes.Get(k));
+        }
+        gsNodes.Add(g.nodes.Get(g.gsA));
+        gsNodes.Add(g.nodes.Get(g.gsB));
+        scene = sh.Build(satNodes, gsNodes);
+    }
     Simulator::Run();
+    if (scene)
+    {
+        scene->Stop();
+    }
 
     const double hours = (duration - t0) / 3600.0;
     std::ostringstream js;
@@ -1449,8 +1601,9 @@ main(int argc, char* argv[])
        << ",\"forced_per_h\":" << g.forced / hours
        << ",\"computations_per_h\":" << g.computations / hours
        << ",\"dijkstra_per_h\":" << g.dijkstra / hours
-       << ",\"predictions_per_h\":" << g.predictions / hours << ",\"sent\":" << nPk
-       << ",\"received\":" << g.rx << ",\"loss\":" << 1.0 - static_cast<double>(g.rx) / nPk
+       << ",\"predictions_per_h\":" << g.predictions / hours
+       << ",\"sent\":" << (src ? static_cast<uint64_t>(src->GetTxPackets()) : nPk)
+       << ",\"received\":" << g.rx << ",\"loss\":" << 1.0 - static_cast<double>(g.rx) / (src ? std::max<uint64_t>(1, src->GetTxPackets()) : nPk)
        << ",\"broken_share\":" << g.brokenS / (duration - t0)
        << ",\"stretch_mean\":"
        << (g.stretch.empty() ? NAN
@@ -1460,7 +1613,84 @@ main(int argc, char* argv[])
        << (g.delays.empty() ? NAN
                             : 1e3 * std::accumulate(g.delays.begin(), g.delays.end(), 0.0) /
                                   g.delays.size())
-       << ",\"delay_ms_p99\":" << 1e3 * Pct(g.delays, 0.99) << "}";
+       << ",\"delay_ms_p99\":" << 1e3 * Pct(g.delays, 0.99);
+    // ---- Wave 7B: measured jitter, per-cause loss, exact delay, scheduler work.
+    uint64_t gateDrops = 0;
+    uint64_t blerDrops = 0;
+    uint64_t gslRx = 0;
+    double blerSum = 0.0;
+    std::filesystem::create_directories(outputDir);
+    std::ofstream ls(outputDir + "/link_stats.csv");
+    ls << "sat,gs,dir,packets,gate_drops,bler_drops,mean_bler\n";
+    for (const auto& [e, l] : g.links)
+    {
+        if (!l.slA)
+        {
+            continue;
+        }
+        for (int k = 0; k < 2; ++k)
+        {
+            auto em = k == 0 ? l.slA : l.slB;
+            gateDrops += em->GetGateDrops();
+            blerDrops += em->GetBlerDrops();
+            gslRx += em->GetPacketsSeen();
+            blerSum += em->GetMeanBler() * (em->GetPacketsSeen() - em->GetGateDrops());
+            if (em->GetPacketsSeen() > 0)
+            {
+                ls << e.first << "," << e.second << "," << (k == 0 ? "up" : "down") << ","
+                   << em->GetPacketsSeen() << "," << em->GetGateDrops() << "," << em->GetBlerDrops()
+                   << "," << em->GetMeanBler() << "\n";
+            }
+        }
+    }
+    // Jitter: mean |D_i - D_{i-1}| over consecutive received packets (RFC 3550
+    // without the 1/16 smoothing), the ns-3 FlowMonitor jitterSum definition.
+    double jit = 0.0;
+    for (size_t i = 1; i < g.delays.size(); ++i)
+    {
+        jit += std::abs(g.delays[i] - g.delays[i - 1]);
+    }
+    double chMin = 1e300;
+    double chMax = 0.0;
+    uint64_t chPk = 0;
+    for (const auto& ch : exactChannels)
+    {
+        if (ch->GetPacketCount())
+        {
+            chMin = std::min(chMin, ch->GetMinDelayS());
+            chMax = std::max(chMax, ch->GetMaxDelayS());
+            chPk += ch->GetPacketCount();
+        }
+    }
+    std::string mcDown;
+    std::string mcUp;
+    for (const auto& [e, l] : g.links)
+    {
+        if (l.slA)
+        {
+            mcUp = l.slA->GetModcodName();
+            mcDown = l.slB->GetModcodName();
+            break;
+        }
+    }
+    js << ",\"gsl_modcod_down\":\"" << mcDown << "\",\"gsl_modcod_up\":\"" << mcUp << "\"";
+    js << ",\"jitter_ms\":" << (g.delays.size() > 1 ? 1e3 * jit / (g.delays.size() - 1) : NAN)
+       << ",\"delay_model\":\"" << delayModel << "\",\"link_model\":\"" << linkModel << "\""
+       << ",\"rain_mmh\":" << rainRate << ",\"gsl_gate_drops\":" << gateDrops
+       << ",\"gsl_bler_drops\":" << blerDrops
+       << ",\"gsl_mean_bler\":" << (gslRx > gateDrops ? blerSum / (gslRx - gateDrops) : NAN)
+       << ",\"hop_tx_exact\":" << chPk << ",\"hop_delay_ms_min\":" << (chPk ? 1e3 * chMin : NAN)
+       << ",\"hop_delay_ms_max\":" << (chPk ? 1e3 * chMax : NAN)
+       << ",\"isl_checks\":" << g.sched->IslChecks()
+       << ",\"isl_checks_skipped\":" << g.sched->IslChecksSkipped();
+    if (sink)
+    {
+        js << ",\"sink_rx\":" << sink->GetRxPackets() << ",\"sink_loss\":" << sink->GetLossRatio()
+           << ",\"sink_jitter_ms\":" << sink->GetMeanJitterMs() << ",\"src_tx\":" << src->GetTxPackets();
+        mon->SerializeToXmlFile(outputDir + "/flowmon.xml");
+        mon->WriteCsv(outputDir + "/kpm.csv");
+    }
+    js << "}";
     std::cout << js.str() << std::endl;
     Simulator::Destroy();
     return 0;

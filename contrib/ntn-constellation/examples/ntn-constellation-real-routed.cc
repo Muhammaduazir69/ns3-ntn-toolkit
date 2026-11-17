@@ -31,6 +31,7 @@
 
 #include "ns3/applications-module.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/ntn-range-delay-channel.h"
 #include "ns3/ntn-sat-link-error-model.h"
 #include "ns3/pointer.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -74,6 +75,7 @@ Ipv4Address g_destAddr;
 Ipv4Address g_satA_fromGs1, g_satB_fromGs1;
 Ipv4Address g_gs2_fromA, g_gs2_fromB;
 Ptr<PointToPointChannel> g_chA1, g_chA2, g_chB1, g_chB2;
+bool g_exactDelay = true; // Wave 7B: NtnRangeDelayChannel per-packet light-time delay
 Ptr<NtnOranSink> g_sink;
 double g_minElev = 10.0;
 uint32_t g_currentSat = 0;
@@ -150,10 +152,13 @@ Tick()
     {
         return;
     }
-    g_chA1->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_g1, g_satA))));
-    g_chA2->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_satA, g_g2))));
-    g_chB1->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_g1, g_satB))));
-    g_chB2->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_satB, g_g2))));
+    if (!g_exactDelay)
+    {
+        g_chA1->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_g1, g_satA))));
+        g_chA2->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_satA, g_g2))));
+        g_chB1->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_g1, g_satB))));
+        g_chB2->SetAttribute("Delay", TimeValue(Seconds(RangeDelay(g_satB, g_g2))));
+    }
 
     double elA = std::min(ElevDeg(g_g1, g_satA), ElevDeg(g_g2, g_satA));
     double elB = std::min(ElevDeg(g_g1, g_satB), ElevDeg(g_g2, g_satB));
@@ -243,7 +248,14 @@ main(int argc, char* argv[])
                  "(replaces the binary contact gate with measured link quality)",
                  blerLinks);
     cmd.AddValue("linkEirpDbw", "Per-hop EIRP (dBW) for the BLER link model", linkEirpDbw);
+    std::string delayModel = "exact";
+    cmd.AddValue("delayModel",
+                 "exact: per-packet light-time delay on the exact SGP4 state; fixed: delay refreshed "
+                 "on the route tick (pre-Wave-7B)",
+                 delayModel);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(delayModel != "exact" && delayModel != "fixed", "--delayModel must be exact or fixed");
+    g_exactDelay = delayModel == "exact";
     g_simTime = duration;
     g_outDir = outputDir;
 
@@ -327,7 +339,17 @@ main(int argc, char* argv[])
     Ptr<ntncon::NtnSatLinkErrorModel> lastEm; // error model on the rx side of the link
     auto mkLink = [&](uint32_t x, uint32_t y, const char* net) {
         lastEm = nullptr;
-        NetDeviceContainer d = p2p.Install(nodes.Get(x), nodes.Get(y));
+        NetDeviceContainer d;
+        if (g_exactDelay)
+        {
+            Ptr<ntncon::NtnRangeDelayChannel> ch;
+            d = ntncon::NtnRangeDelayChannel::Connect(nodes.Get(x), nodes.Get(y),
+                                                      DataRate("50Mbps"), "100p", ch);
+        }
+        else
+        {
+            d = p2p.Install(nodes.Get(x), nodes.Get(y));
+        }
         ipv4.SetBase(net, "255.255.255.252");
         Ipv4InterfaceContainer ic = ipv4.Assign(d);
         // Replace the binary contact gate with a measured per-packet C/N0->BLER

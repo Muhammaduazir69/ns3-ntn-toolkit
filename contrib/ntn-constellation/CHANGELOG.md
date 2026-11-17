@@ -2,6 +2,27 @@
 
 All notable changes to **ntn-constellation** are recorded here.
 
+## Wave 7B (Nov 2026)
+
+- `NtnRangeDelayChannel`: point-to-point channel with a per-packet light-time
+  delay on the exact SGP4 state (no 100 ms position cache), receiver motion and
+  Sagnac rotation during the flight. Used by route-lifetime, isl-routed-traffic
+  and real-routed (`--delayModel=fixed` keeps the old refreshed delay).
+- `ContactGraphScheduler`: `IslMarginSkip` skips the ISL look-ahead of a pair
+  until its state could first change (range and limb margins over vis-viva
+  speed bounds); transitions are identical, route-lifetime CPU 19.6 s -> 6.8 s
+  for 600 s at the 100 ms step.
+- `NtnSatLinkErrorModel`: contact gate on the receive path with per-cause
+  counters; `ConfigureTr38821Set1KaGsl` (TR 38.821 Set-1 Ka budget, DVB-S2
+  MODCOD sized for the mask elevation from EN 302 307-1 Table 13, SNS3 DVB-S2
+  link-result curve); the binned P.676/P.618 excess-loss table is shared
+  across links.
+- route-lifetime runs through ntn-cho (WGS-84 ground terminals), ntn-traffic
+  (NtnOranApplication/NtnOranSink, NtnOranAiFlowMonitor: flowmon.xml, kpm.csv)
+  and ntn-observability (`--czml`, `--netSimOut`); GSLs carry the Ka error model
+  (`--linkModel=gate` for the old gate, `--rainRate` for a P.618 fade).
+- Tests: suite `ntn-constellation-exact-link` (4 cases).
+
 ## v0.1.0 (v2)
 
 First public release as part of the [ns3-ntn-toolkit](https://github.com/Muhammaduazir69/ns3-ntn-toolkit).

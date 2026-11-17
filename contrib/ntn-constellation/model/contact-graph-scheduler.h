@@ -179,6 +179,11 @@ class ContactGraphScheduler : public Object
     }
     /// Transitions emitted off the sampling grid at their bisected instant.
     uint64_t EventDrivenTransitions() const { return m_eventDrivenTransitions; }
+    /// Wave 7B: ISL look-ahead evaluations done and skipped by the margin bound.
+    uint64_t IslChecks() const { return m_islChecks; }
+    uint64_t IslChecksSkipped() const { return m_islChecksSkipped; }
+    /// Wave 7B: upper bound (m/s) on the ECEF speed of a registered satellite.
+    double SpeedBoundMps(uint32_t sat) const;
     /// Sampling interval in use.
     Time GetSamplingInterval() const { return m_dt; }
 
@@ -268,6 +273,15 @@ class ContactGraphScheduler : public Object
     std::map<std::pair<uint32_t, uint32_t>, bool> m_gslProj; //!< projected GSL states
     std::map<std::pair<uint32_t, uint32_t>, bool> m_islProj; //!< projected ISL states
     uint64_t m_eventDrivenTransitions{0};
+
+    /// Wave 7B: time (s) before which an ISL pair seen at state (pa, pb) cannot
+    /// change contact state.
+    double IslQuietTimeS(uint32_t a, const Vector& pa, uint32_t b, const Vector& pb, double range) const;
+    bool m_islMarginSkip{true};
+    std::map<std::pair<uint32_t, uint32_t>, double> m_islNextCheck;
+    mutable std::map<uint32_t, double> m_speedBound;
+    uint64_t m_islChecks{0};
+    uint64_t m_islChecksSkipped{0};
 };
 
 } // namespace ntncon

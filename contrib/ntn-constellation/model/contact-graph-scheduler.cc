@@ -4,12 +4,14 @@
 
 #include "contact-graph-scheduler.h"
 
+#include "ns3/boolean.h"
 #include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/simulator.h"
 #include "ns3/nstime.h"
 
 #include <cmath>
+#include <unordered_map>
 
 namespace ns3
 {
@@ -54,7 +56,17 @@ ContactGraphScheduler::GetTypeId()
                                           "transitions (pre-Wave-6B behavior).",
                                           TimeValue(MilliSeconds(1)),
                                           MakeTimeAccessor(&ContactGraphScheduler::m_resolution),
-                                          MakeTimeChecker(Seconds(0)));
+                                          MakeTimeChecker(Seconds(0)))
+                            .AddAttribute("IslMarginSkip",
+                                          "Wave 7B: skip the ISL look-ahead of a pair until its "
+                                          "state could first change, bounded by the range margin "
+                                          "over the closing-speed bound and the limb margin over "
+                                          "the speed bound (vis-viva perigee speed plus Earth "
+                                          "rotation at apogee). Exact: no transition is missed. "
+                                          "false re-evaluates every pair on every refresh tick.",
+                                          BooleanValue(true),
+                                          MakeBooleanAccessor(&ContactGraphScheduler::m_islMarginSkip),
+                                          MakeBooleanChecker());
     return tid;
 }
 
@@ -212,6 +224,61 @@ ContactGraphScheduler::ContactUpAt(uint32_t a, uint32_t b, bool isl, double offs
     const double dz = pa.z - pb.z;
     return std::sqrt(dx * dx + dy * dy + dz * dz) <= m_maxIslRangeM &&
            IsLimbClear(pa, pb, m_islMinTangentAltM) && !CrossPlaneBlocked(a, pa, b, pb);
+}
+
+double
+ContactGraphScheduler::SpeedBoundMps(uint32_t sat) const
+{
+    auto it = m_speedBound.find(sat);
+    if (it != m_speedBound.end())
+    {
+        return it->second;
+    }
+    // Vis-viva at perigee plus the Earth-rotation transport at apogee bounds
+    // the ECEF speed on the whole orbit; 5 % covers SGP4 mean-element
+    // perturbations. Without usable elements, 14.3 km/s bounds every bound
+    // orbit up to GEO radius (11.2 km/s + omega_E x 42164 km).
+    double vmax = 14.3e3;
+    const auto& el = m_sats.at(sat)->GetElements();
+    if (el.semi_major_axis_m > kEarthRadiusM && el.eccentricity >= 0.0 && el.eccentricity < 1.0)
+    {
+        constexpr double kMu = 3.986004418e14;
+        const double a = el.semi_major_axis_m;
+        const double e = el.eccentricity;
+        vmax = 1.05 * (std::sqrt(kMu * (1.0 + e) / (a * (1.0 - e))) +
+                       kEarthRotationRadS * a * (1.0 + e));
+    }
+    m_speedBound[sat] = vmax;
+    return vmax;
+}
+
+double
+ContactGraphScheduler::IslQuietTimeS(uint32_t a,
+                                     const Vector& pa,
+                                     uint32_t b,
+                                     const Vector& pb,
+                                     double range) const
+{
+    if (m_crossLatCutoffDeg > 0.0 && m_crossPlane.count({std::min(a, b), std::max(a, b)}))
+    {
+        return 0.0; // latitude cutoff: no bound kept, check every refresh
+    }
+    const double va = SpeedBoundMps(a);
+    const double vb = SpeedBoundMps(b);
+    // |d range / dt| <= |v_a - v_b| <= va + vb.
+    const double tRange = std::abs(m_maxIslRangeM - range) / (va + vb);
+    // Distance from the geocentre to the segment is 1-Lipschitz in each
+    // endpoint (Hausdorff), so it moves no faster than max(va, vb).
+    const double dx = pb.x - pa.x;
+    const double dy = pb.y - pa.y;
+    const double dz = pb.z - pa.z;
+    const double seg2 = dx * dx + dy * dy + dz * dz;
+    double tt = seg2 > 0.0 ? -(pa.x * dx + pa.y * dy + pa.z * dz) / seg2 : 0.0;
+    tt = std::min(1.0, std::max(0.0, tt));
+    const Vector c(pa.x + tt * dx, pa.y + tt * dy, pa.z + tt * dz);
+    const double dist = c.GetLength();
+    const double tLimb = std::abs(dist - (kEarthRadiusM + m_islMinTangentAltM)) / std::max(va, vb);
+    return std::min(tRange, tLimb);
 }
 
 double
@@ -723,25 +790,67 @@ ContactGraphScheduler::LookaheadPass(double t, bool publishUpdates)
         return;
     }
     const double Hi = H * m_islEvery;
+    // Wave 7B: one propagation per satellite per refresh tick at the horizon,
+    // instead of two per pair (each +Grid satellite sits in four pairs).
+    std::unordered_map<uint32_t, Vector> posH;
+    auto stateH = [&](uint32_t s) -> Vector {
+        auto it = posH.find(s);
+        if (it != posH.end())
+        {
+            return it->second;
+        }
+        Vector p;
+        Vector v;
+        m_sats.at(s)->GetEcefStateAt(Seconds(Hi), p, v);
+        posH.emplace(s, p);
+        return p;
+    };
+    // Wave 7B: the published geometry of an established ISL is the state at
+    // this tick, read once per satellite (each +Grid satellite is in four
+    // pairs) rather than once per pair end.
+    std::unordered_map<uint32_t, Vector> posNow;
+    auto stateNow = [&](uint32_t s) -> Vector {
+        auto it = posNow.find(s);
+        if (it != posNow.end())
+        {
+            return it->second;
+        }
+        const Vector p = m_sats.at(s)->GetEcefPosition();
+        posNow.emplace(s, p);
+        return p;
+    };
     auto checkPair = [&](uint32_t a, uint32_t b) {
         const std::pair<uint32_t, uint32_t> key{a, b};
         auto st = m_islState.find(key);
         if (publishUpdates && st != m_islState.end() && st->second)
         {
-            const double range =
-                CalculateDistance(m_sats.at(a)->GetEcefPosition(), m_sats.at(b)->GetEcefPosition());
+            const double range = CalculateDistance(stateNow(a), stateNow(b));
             ContactEvent ev{Simulator::Now().GetSeconds(), a, b, true, true, range, 0.0};
             m_contactUpdate(ev);
         }
+        double& next = m_islNextCheck[key];
+        if (m_islMarginSkip && t + Hi < next)
+        {
+            ++m_islChecksSkipped;
+            return;
+        }
+        ++m_islChecks;
         bool& proj = m_islProj[key];
-        const bool upH = ContactUpAt(a, b, true, Hi);
+        const Vector pa = stateH(a);
+        const Vector pb = stateH(b);
+        const double range = CalculateDistance(pa, pb);
+        const bool upH = range <= m_maxIslRangeM && IsLimbClear(pa, pb, m_islMinTangentAltM) &&
+                         !CrossPlaneBlocked(a, pa, b, pb);
         if (upH != proj)
         {
             const double tStar =
                 BisectCrossing([&](double off) { return ContactUpAt(a, b, true, off) == upH; }, Hi);
             proj = upH;
             Simulator::Schedule(Seconds(tStar), &ContactGraphScheduler::EmitIsl, this, a, b, upH);
+            next = 0.0;
+            return;
         }
+        next = t + Hi + IslQuietTimeS(a, pa, b, pb, range);
     };
     if (!m_islCandidates.empty())
     {

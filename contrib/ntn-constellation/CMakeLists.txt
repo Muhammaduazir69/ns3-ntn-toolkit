@@ -14,6 +14,8 @@ set(source_files
     model/ntn-sat-link-error-model.cc
     # C3 (Wave 1): geocentric view of any ECEF mobility for the TR 38.811 channel.
     model/ntn-geocentric-mobility-adapter.cc
+    # Wave 7B: per-packet light-time delay on the exact SGP4 state.
+    model/ntn-range-delay-channel.cc
 )
 
 set(header_files
@@ -30,10 +32,12 @@ set(header_files
     model/tr38821-corpus.h
     model/ntn-sat-link-error-model.h
     model/ntn-geocentric-mobility-adapter.h
+    model/ntn-range-delay-channel.h
 )
 
 set(test_sources
     test/ntn-constellation-test-suite.cc
+    test/ntn-constellation-exact-link-test.cc
 )
 
 build_lib(
@@ -43,6 +47,8 @@ build_lib(
   LIBRARIES_TO_LINK
     ${libcore}
     ${libmobility}
+    ${libnetwork}
+    ${libpoint-to-point}
     # Full Vallado SGP4 backend reuses the satellite module's reference sgp4unit.
     ${libsatellite}
     ${libthz-ntn}

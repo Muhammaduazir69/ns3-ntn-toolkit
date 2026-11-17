@@ -147,6 +147,89 @@ NtnSatLinkErrorModel::SetEndpoints(Ptr<MobilityModel> tx, Ptr<MobilityModel> rx)
     m_rx = rx;
 }
 
+void
+NtnSatLinkErrorModel::ConfigureTr38821Set1KaGsl(bool satToGround,
+                                                 double linkRateBps,
+                                                 double stationLatDeg,
+                                                 double designElevDeg,
+                                                 double satAltKm,
+                                                 double marginDb)
+{
+    // EN 302 307-1 V1.4.1 Table 13: spectral efficiency (b/symbol, normal
+    // FECFRAME, no pilots) and the Es/No for QEF on AWGN.
+    struct Mc
+    {
+        SatEnums::SatModcod_t id;
+        const char* name;
+        double eff;
+        double qefDb;
+    };
+    static const Mc kTable[] = {
+        {SatEnums::SAT_MODCOD_8PSK_9_TO_10, "8PSK 9/10", 2.679207, 10.98},
+        {SatEnums::SAT_MODCOD_8PSK_8_TO_9, "8PSK 8/9", 2.646012, 10.69},
+        {SatEnums::SAT_MODCOD_8PSK_5_TO_6, "8PSK 5/6", 2.478562, 9.35},
+        {SatEnums::SAT_MODCOD_8PSK_3_TO_4, "8PSK 3/4", 2.228124, 7.91},
+        {SatEnums::SAT_MODCOD_8PSK_2_TO_3, "8PSK 2/3", 1.980636, 6.62},
+        {SatEnums::SAT_MODCOD_QPSK_9_TO_10, "QPSK 9/10", 1.788612, 6.42},
+        {SatEnums::SAT_MODCOD_QPSK_8_TO_9, "QPSK 8/9", 1.766451, 6.20},
+        {SatEnums::SAT_MODCOD_QPSK_5_TO_6, "QPSK 5/6", 1.654663, 5.18},
+        {SatEnums::SAT_MODCOD_QPSK_4_TO_5, "QPSK 4/5", 1.587196, 4.68},
+        {SatEnums::SAT_MODCOD_QPSK_3_TO_4, "QPSK 3/4", 1.487473, 4.03},
+        {SatEnums::SAT_MODCOD_QPSK_2_TO_3, "QPSK 2/3", 1.322253, 3.10},
+        {SatEnums::SAT_MODCOD_QPSK_3_TO_5, "QPSK 3/5", 1.188304, 2.23},
+        {SatEnums::SAT_MODCOD_QPSK_1_TO_2, "QPSK 1/2", 0.988858, 1.00},
+        {SatEnums::SAT_MODCOD_QPSK_1_TO_3, "QPSK 1/3", 0.656448, -1.24},
+    };
+    if (satToGround)
+    {
+        m_rxGtDbK = 15.9;
+        m_carrierHz = 20e9;
+    }
+    else
+    {
+        m_eirpDbw = 46.2;
+        m_rxGtDbK = 13.0;
+        m_carrierHz = 30e9;
+    }
+    m_groundAltFromGeometry = true;
+    m_stationLatDeg = stationLatDeg;
+    m_excessElevStepDeg = 0.05;
+    // The measured DVB-S2 LDPC (64800-bit frame) curve, not the erfc abstraction.
+    m_useDvbS2LinkResults = true;
+
+    // Design slant range at designElevDeg (spherical Earth, mean radius).
+    const double re = 6371.0e3;
+    const double rs = re + satAltKm * 1e3;
+    const double el = designElevDeg * M_PI / 180.0;
+    const double slant = std::sqrt(rs * rs - std::pow(re * std::cos(el), 2.0)) - re * std::sin(el);
+    const double excess = ExcessLossDbFor(designElevDeg);
+    const Mc* pick = &kTable[sizeof(kTable) / sizeof(kTable[0]) - 1];
+    for (const Mc& mc : kTable)
+    {
+        const double bw = linkRateBps / mc.eff;
+        const double eirp = satToGround ? 4.0 + 10.0 * std::log10(bw / 1e6) : m_eirpDbw;
+        const double fspl = 20.0 * std::log10(4.0 * M_PI * slant * m_carrierHz / kC);
+        const double esNo =
+            eirp - fspl - excess + m_rxGtDbK - kBoltzDbwHzK - 10.0 * std::log10(bw);
+        if (esNo >= mc.qefDb + marginDb)
+        {
+            pick = &mc;
+            m_designEsNoDb = esNo;
+            break;
+        }
+        m_designEsNoDb = esNo;
+    }
+    m_bandwidthHz = linkRateBps / pick->eff;
+    if (satToGround)
+    {
+        m_eirpDbw = 4.0 + 10.0 * std::log10(m_bandwidthHz / 1e6);
+    }
+    m_thresholdEsNoDb = pick->qefDb;
+    m_modcod = static_cast<uint32_t>(pick->id);
+    m_modcodName = pick->name;
+    m_modcodEff = pick->eff;
+}
+
 double
 NtnSatLinkErrorModel::SlantRangeM() const
 {
@@ -226,9 +309,16 @@ NtnSatLinkErrorModel::ExcessLossDbFor(double elevationDeg) const
                                      flags,
                                      m_antennaDiameterM,
                                      m_stationLatDeg);
+    // Wave 7B: on the binned grid the terms depend on the key alone (the ITU
+    // model objects are built with defaults plus the keyed station latitude
+    // and aperture), so one process-wide table serves every link: a
+    // constellation run configures hundreds of ground links on the same grid
+    // and each P.676-13 Annex 1 ray trace costs milliseconds.
+    static decltype(m_excessCache) sharedBinned;
+    auto& cache = (m_excessElevStepDeg > 0.0) ? sharedBinned : m_excessCache;
     {
-        auto it = m_excessCache.find(key);
-        if (it != m_excessCache.end())
+        auto it = cache.find(key);
+        if (it != cache.end())
         {
             m_lastGaseousDb = it->second.gas;
             m_lastRainDb = it->second.rain;
@@ -279,7 +369,7 @@ NtnSatLinkErrorModel::ExcessLossDbFor(double elevationDeg) const
         m_lastScintDb = DynamicCast<ThzNtnScintillation>(m_scint)
                             ->ComputeScintillationFadeDepth_dB(m_carrierHz, elev, 0.01);
     }
-    m_excessCache[key] = ExcessTerms{m_lastGaseousDb, m_lastRainDb, m_lastScintDb};
+    cache[key] = ExcessTerms{m_lastGaseousDb, m_lastRainDb, m_lastScintDb};
     return m_lastGaseousDb + m_lastRainDb + m_lastScintDb;
 }
 
@@ -395,6 +485,12 @@ NtnSatLinkErrorModel::DoCorrupt(Ptr<Packet> p)
     {
         return false;
     }
+    ++m_seen;
+    if (!m_contactUp)
+    {
+        ++m_gateDrops;
+        return true;
+    }
     const double slant = SlantRangeM();
     if (slant < 0.0)
     {
@@ -402,7 +498,11 @@ NtnSatLinkErrorModel::DoCorrupt(Ptr<Packet> p)
     }
     m_lastEsNoDb = EsNoDbFor(slant);
     m_lastBler = BlerFor(m_lastEsNoDb);
-    return m_rng->GetValue(0.0, 1.0) < m_lastBler;
+    ++m_blerN;
+    m_blerSum += m_lastBler;
+    const bool lost = m_rng->GetValue(0.0, 1.0) < m_lastBler;
+    m_blerDrops += lost ? 1 : 0;
+    return lost;
 }
 
 void
