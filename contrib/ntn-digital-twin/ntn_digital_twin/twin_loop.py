@@ -111,10 +111,13 @@ class LoopConfig:
     a3_offset_db: float = 3.0
     a3_time_to_trigger_s: float = 0.0
     min_service_time_s: float = 0.0
-    # Link-budget terms for the twin's SNR. Defaults are the toolkit's S-band
-    # reference point; a scenario should set them to whatever it is modelling.
-    link_eirp_dbm: float = 62.0
-    link_gt_db_per_k: float = 1.1
+    # Link-budget terms for the twin's SNR: TR 38.821 Table 6.1.1.1-1/-2 Set-1,
+    # S band, LEO-600, handheld. EIRP 34 dBW/MHz over 20 MHz = 77.0 dBm; handheld
+    # G/T -31.6 dB/K (0 dBi, NF 7 dB, 290 K). The old 62 dBm / +1.1 dB/K pair was
+    # no TR 38.821 terminal and put a handheld at about 35 dB SNR at zenith. A3
+    # compares differences, so the admitted handovers do not change.
+    link_eirp_dbm: float = 77.0
+    link_gt_db_per_k: float = -31.6
     link_bandwidth_hz: float = 20.0e6
     link_frequency_hz: float = 2.0e9
 

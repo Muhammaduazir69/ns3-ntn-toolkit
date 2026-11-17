@@ -23,6 +23,7 @@
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 
+#include "ns3/ntn-slice-helper.h"
 #include "ns3/ntn-slice-types.h"
 #include "ns3/slice-isolation-monitor.h"
 
@@ -42,31 +43,43 @@ main(int argc, char* argv[])
 {
     double simSeconds = 15.0;
     uint32_t numUes = 9; // %3 -> mMTC / eMBB / URLLC (MixedBouquet order)
-    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    double satEirpDbm = -1.0; // -1: TR 38.821 Set-1 (nr) / 55 dBm conducted (mmwave)
     double backhaulMs = 5.0;
+    double gwDistanceKm = 500.0;
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-slice-isolation-output";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("simSeconds", "Simulation duration (s)", simSeconds);
     cmd.AddValue("numUes", "UEs on the shared cell (slice = ue%3)", numUes);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite power (dBm): -1 = TR 38.821 Set-1 (nr) or 55 dBm conducted (mmwave); else conducted dBm", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
-    cmd.AddValue("backhaulMs", "Feeder+core one-way delay (ms)", backhaulMs);
+    cmd.AddValue("backhaulMs",
+                 "Feeder+core one-way delay (ms), used only when gwDistanceKm <= 0",
+                 backhaulMs);
+    cmd.AddValue("gwDistanceKm",
+                 "Gateway ground distance north of the UE site (km); the feeder delay follows "
+                 "the live satellite-gateway range. <= 0 keeps the constant backhaulMs",
+                 gwDistanceKm);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.Parse(argc, argv);
 
-    // Backend-appropriate EIRP default (honoured only if the user did not set it):
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    if (satEirpDbm < 0.0)
-    {
-        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
-    }
-
+    // Wave 7C: -1 is the TR 38.821 Set-1 handheld + S-band payload on nr (it
+    // used to be 70 dBm CONDUCTED, about 83 dBm radiated: handheld SINR above
+    // 30 dB and not one packet lost). mmwave keeps 55 dBm conducted.
     std::printf("# ntn-slice-isolation-traffic (3 slices CONTEND on ONE real %s cell)\n"
-                "#   eMBB saturates the shared cell; URLLC/mMTC isolation is MEASURED\n"
-                "#   sim=%.0fs UEs=%u EIRP=%.1fdBm\n",
-                radio.c_str(), simSeconds, numUes, satEirpDbm);
+                "#   eMBB saturates the shared cell; URLLC/mMTC isolation is MEASURED\n",
+                radio.c_str());
+    if (satEirpDbm < 0.0 && radio != "mmwave")
+    {
+        std::printf("#   sim=%.0fs UEs=%u payload=TR 38.821 Set-1 (34 dBW/MHz, handheld)\n",
+                    simSeconds, numUes);
+    }
+    else
+    {
+        std::printf("#   sim=%.0fs UEs=%u conducted Tx=%.1fdBm\n", simSeconds, numUes,
+                    satEirpDbm < 0.0 ? 55.0 : satEirpDbm);
+    }
 
     // ---- Real NTN mobility: SGP4 Walker sat + TR 38.811 UEs at sub-point ----
     ns3::ntncon::WalkerConfig wcfg;
@@ -104,10 +117,7 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simSeconds));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-slice-isolation-traffic");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    NtnSliceHelper::ConfigureCellLinkBudget(rs, satEirpDbm, radio == "mmwave");
     rs.SetBackhaulDelay(MilliSeconds(backhaulMs));
     // GAP L1 FIX: real per-slice BWP isolation (see ntn-slice-real-stack). The
     // three 5QIs each get their own BWP + QoS scheduler instead of contending on
@@ -117,6 +127,7 @@ main(int argc, char* argv[])
         rs.SetSlices({{"eMBB", 2}, {"URLLC", 82}, {"mMTC", 9}});
     }
     rs.Build(satNodes, ueNodes);
+    const bool liveFeeder = NtnSliceHelper::ConfigureFeeder(rs, subLat, subLon, gwDistanceKm) != nullptr;
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simSeconds - 0.5));
     rs.EnableAiFlowMonitor("ntn-slice-isolation-traffic"); // WS2 KPM series (TS 28.552 names)
@@ -195,10 +206,10 @@ main(int argc, char* argv[])
                     sliceMbps[s], sliceSinr[s], static_cast<unsigned long>(sliceRxPkts[s]));
     }
     // One-way floor: the shell altitude / c (true lower bound for any
-    // elevation) plus the backhaul constant. A budget below it breaches on an
+    // elevation) plus altitude / c for the feeder, or the backhaul constant. A budget below it breaches on an
     // empty cell, so it says nothing about isolation (each slice has its own
     // BWP here) and must not be counted as an isolation violation.
-    const double floorMs = wcfg.altitude_km * 1e3 / 299792458.0 * 1e3 + backhaulMs;
+    const double floorMs = NtnSliceHelper::OneWayFloorMs(wcfg.altitude_km, liveFeeder, backhaulMs);
     uint32_t nBreach = 0;
     uint32_t nIsolation = 0;
     for (const auto& b : breaches)
@@ -218,7 +229,8 @@ main(int argc, char* argv[])
                         structural ? " (budget below the one-way floor: structural)" : "");
         }
     }
-    std::printf("#   one-way floor (altitude/c + backhaul) = %.2f ms\n", floorMs);
+    std::printf("#   one-way floor (altitude/c + %s) = %.2f ms\n",
+                liveFeeder ? "feeder altitude/c" : "backhaul", floorMs);
     std::printf("#   SLA breaches: %u/3, of which not explained by the floor: %u "
                 "(isolation %s under eMBB saturation)\n",
                 nBreach, nIsolation, nIsolation == 0 ? "HELD" : "violated");
@@ -228,7 +240,8 @@ main(int argc, char* argv[])
     // per slice, plus each slice's SLA breach verdict. URLLC latency conformance
     // is judged against the slice profile's 5 ms SLA budget (TS 22.261), not the
     // 5QI 82 PDB (10 ms, TS 23.501 Table 5.7.4-1); the 5 ms budget is below the
-    // ~6.8 ms one-way floor, so that breach is structural.
+    // one-way floor (about 3.7 ms with a live feeder, 6.8 ms with the 5 ms
+    // constant backhaul), so that breach is structural.
     {
         using SstT = decltype(profiles[0].snssai.sst);
         auto breachFor = [&](SstT sst, bool& lat, bool& rel) {

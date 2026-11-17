@@ -78,8 +78,9 @@ class PredictHandoverRequest(BaseModel):
     a3_offset_db: float = Field(default=3.0, ge=0.0, le=40.0)
     # Link-budget terms for the dB quantity. The twin has ephemeris but no
     # radio, so it forms an SNR from free-space loss over the slant range.
-    link_eirp_dbm: float = Field(default=62.0, ge=-30.0, le=120.0)
-    link_gt_db_per_k: float = Field(default=1.1, ge=-40.0, le=40.0)
+    # Defaults: TR 38.821 Set-1 S-band payload and handheld terminal.
+    link_eirp_dbm: float = Field(default=77.0, ge=-30.0, le=120.0)
+    link_gt_db_per_k: float = Field(default=-31.6, ge=-40.0, le=40.0)
     link_bandwidth_hz: float = Field(default=20.0e6, gt=0.0)
     link_frequency_hz: float = Field(default=2.0e9, gt=0.0)
 

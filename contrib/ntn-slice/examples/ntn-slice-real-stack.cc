@@ -28,6 +28,7 @@
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/walker-constellation.h"
 
+#include "ns3/ntn-slice-helper.h"
 #include "ns3/ntn-slice-types.h"
 #include "ns3/slice-isolation-monitor.h"
 
@@ -48,8 +49,9 @@ main(int argc, char* argv[])
     double duration = 15.0;
     uint32_t numUes = 9;
     double altitudeKm = 550.0;
-    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    double satEirpDbm = -1.0; // -1: TR 38.821 Set-1 (nr) / 55 dBm conducted (mmwave)
     double backhaulMs = 5.0;
+    double gwDistanceKm = 500.0;
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string outputDir = "ntn-slice-real-stack-output";
 
@@ -57,21 +59,25 @@ main(int argc, char* argv[])
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("numUes", "Number of UEs sharing the cell", numUes);
     cmd.AddValue("altitude", "Satellite altitude (km)", altitudeKm);
-    cmd.AddValue("satEirpDbm", "Satellite EIRP (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "Satellite power (dBm): -1 = TR 38.821 Set-1 (nr) or 55 dBm conducted (mmwave); else conducted dBm", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("backhaulMs",
+                 "Feeder+core one-way delay (ms), used only when gwDistanceKm <= 0",
+                 backhaulMs);
+    cmd.AddValue("gwDistanceKm",
+                 "Gateway ground distance north of the UE site (km); the feeder delay follows "
+                 "the live satellite-gateway range. <= 0 keeps the constant backhaulMs",
+                 gwDistanceKm);
     std::string netSimOut;
     std::string czmlOut;
     cmd.AddValue("netSim", "NetSimulyzer 3D JSON output (empty=off)", netSimOut);
     cmd.AddValue("czml", "Cesium CZML 3D output (empty=off)", czmlOut);
     cmd.Parse(argc, argv);
 
-    // Backend-appropriate EIRP default (honoured only if the user did not set it):
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    if (satEirpDbm < 0.0)
-    {
-        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
-    }
+    // Wave 7C: -1 is the TR 38.821 Set-1 handheld + S-band payload on nr (it
+    // used to be 70 dBm CONDUCTED, about 83 dBm radiated: handheld SINR above
+    // 30 dB). mmwave keeps 55 dBm conducted.
 
     std::cout << "\n=== ntn-slice REAL-STACK (slices share ONE real " << radio << " cell) ===\n"
               << "  per-slice SINR + throughput MEASURED from the shared cell\n"
@@ -113,10 +119,7 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-slice-real-stack");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    NtnSliceHelper::ConfigureCellLinkBudget(rs, satEirpDbm, radio == "mmwave");
     rs.SetBackhaulDelay(MilliSeconds(backhaulMs));
     // ---- GAP L1 FIX: request REAL per-slice BWP isolation --------------------
     // Previously this example never called SetSlices(), so all three "slices"
@@ -130,6 +133,7 @@ main(int argc, char* argv[])
         rs.SetSlices({{"eMBB", 2}, {"URLLC", 82}, {"mMTC", 9}});
     }
     rs.Build(satNodes, ueNodes);
+    const bool liveFeeder = NtnSliceHelper::ConfigureFeeder(rs, subLat, subLon, gwDistanceKm) != nullptr;
     // MixedBouquet spreads UEs across eMBB/URLLC/mMTC traffic; with SetSlices
     // above, each profile's 5QI now lands on its own BWP.
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
@@ -243,8 +247,9 @@ main(int argc, char* argv[])
     // Attribution: a budget below the one-way floor (altitude/c + backhaul)
     // breaches whatever the scheduler does, so it is not evidence about
     // isolation. Floor uses the altitude, a true lower bound for any elevation.
-    const double floorMs = altitudeKm * 1e3 / 299792458.0 * 1e3 + backhaulMs;
-    std::cout << "\n  one-way floor (altitude/c + backhaul) = " << floorMs << " ms\n";
+    const double floorMs = NtnSliceHelper::OneWayFloorMs(altitudeKm, liveFeeder, backhaulMs);
+    std::cout << "\n  one-way floor (altitude/c + " << (liveFeeder ? "feeder altitude/c" : "backhaul")
+              << ") = " << floorMs << " ms\n";
     for (const auto& b : breaches)
     {
         if (b.latencyBreach)

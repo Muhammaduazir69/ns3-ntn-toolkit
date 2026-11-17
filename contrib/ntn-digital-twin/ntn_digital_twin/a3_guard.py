@@ -51,10 +51,11 @@ class A3Params:
     time_to_trigger_s: float = 0.0
     min_service_s: float = 0.0
     min_elevation_deg: float = 0.0
-    # Link budget. Defaults are the toolkit's S-band reference point; a
-    # scenario should set them to whatever it is actually modelling.
-    link_eirp_dbm: float = 62.0
-    link_gt_db_per_k: float = 1.1
+    # Link budget: TR 38.821 Set-1 S-band LEO-600 payload (34 dBW/MHz over
+    # 20 MHz = 77.0 dBm) into the Set-1 handheld (G/T -31.6 dB/K). A scenario
+    # modelling something else should set its own values.
+    link_eirp_dbm: float = 77.0
+    link_gt_db_per_k: float = -31.6
     link_bandwidth_hz: float = 20.0e6
     link_frequency_hz: float = 2.0e9
 

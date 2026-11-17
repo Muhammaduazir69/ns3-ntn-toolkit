@@ -72,8 +72,9 @@ main(int argc, char* argv[])
     uint32_t numUes = 3;
     bool routeUrllcViaGeo = false;
     bool useRlShares = false;
-    double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
+    double satEirpDbm = -1.0; // -1: TR 38.821 Set-1 (nr) / 55 dBm conducted (mmwave)
     double backhaulMs = 5.0;
+    double gwDistanceKm = 500.0;
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
     std::string csvPath = "ntn-three-slice.csv";
     uint32_t totalPrb = 0; // 0: derive from the measured cell's carrier (see below)
@@ -87,18 +88,22 @@ main(int argc, char* argv[])
                  "Drive the orchestrator with StepWithShares(priority shares) instead of Step()",
                  useRlShares);
     cmd.AddValue("totalPrb", "Total PRB budget (0 = the cell's own N_RB)", totalPrb);
-    cmd.AddValue("satEirpDbm", "LEO EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
+    cmd.AddValue("satEirpDbm", "LEO power (dBm): -1 = TR 38.821 Set-1 (nr) or 55 dBm conducted (mmwave); else conducted dBm", satEirpDbm);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("csv", "Per-slice KPI CSV path", csvPath);
     cmd.AddValue("outputDir", "Output directory", outputDir);
+    cmd.AddValue("backhaulMs",
+                 "LEO feeder+core one-way delay (ms), used only when gwDistanceKm <= 0",
+                 backhaulMs);
+    cmd.AddValue("gwDistanceKm",
+                 "Gateway ground distance north of the UE site (km); the LEO feeder delay "
+                 "follows the live satellite-gateway range. <= 0 keeps the constant backhaulMs",
+                 gwDistanceKm);
     cmd.Parse(argc, argv);
 
-    // Backend-appropriate EIRP default (honoured only if the user did not set it):
-    // nr's Friis LEO link needs ~70 dBm for a healthy SINR; mmwave keeps 55 dBm.
-    if (satEirpDbm < 0.0)
-    {
-        satEirpDbm = (radio == "mmwave") ? 55.0 : 70.0;
-    }
+    // Wave 7C: -1 is the TR 38.821 Set-1 handheld + S-band payload on nr (it
+    // used to be 70 dBm CONDUCTED, about 83 dBm radiated: handheld SINR above
+    // 30 dB). mmwave keeps 55 dBm conducted.
 
     // ---- Real LEO cell: SGP4 Walker sat + TR 38.811 UEs (measured radio) ----
     ns3::ntncon::WalkerConfig wcfg;
@@ -135,10 +140,7 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(simTimeSec));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-three-slice-leo-geo");
-    // NT-02: declared as CONDUCTED power at the array input. This carrier has
-    // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
-    // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(satEirpDbm);
+    NtnSliceHelper::ConfigureCellLinkBudget(rs, satEirpDbm, radio == "mmwave");
     rs.SetBackhaulDelay(MilliSeconds(backhaulMs));
     // SLICE-3. This example is named for its three slices and never created
     // any: SetSlices() was missing, so nBwp collapsed to 1 and all three
@@ -151,6 +153,7 @@ main(int argc, char* argv[])
     // examples describe the same slice set.
     rs.SetSlices({{"eMBB", 2}, {"URLLC", 82}, {"mMTC", 9}});
     rs.Build(satNodes, ueNodes);
+    NtnSliceHelper::ConfigureFeeder(rs, subLat, subLon, gwDistanceKm);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
                       Seconds(1.0), Seconds(simTimeSec - 0.5));
     rs.EnableAiFlowMonitor("ntn-three-slice-leo-geo"); // WS2 KPM series (TS 28.552 names)

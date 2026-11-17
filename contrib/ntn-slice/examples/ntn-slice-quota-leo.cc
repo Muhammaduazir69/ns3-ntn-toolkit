@@ -20,6 +20,7 @@
 #include "ns3/nr-gnb-net-device.h"
 #include "ns3/ntn-oran-application.h"
 #include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-slice-helper.h"
 #include "ns3/ntn-slice-quota-scheduler.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -158,7 +159,11 @@ main(int argc, char* argv[])
     std::string policy = "reactive";
     std::string quotas = "0.5,0.3,0.2";
     double ctrlMs = 100.0;
-    double satEirpDbm = 70.0;
+    // Wave 7C: -1 = TR 38.821 Set-1 handheld + S-band payload (34 dBW/MHz). The
+    // old default, 70 dBm CONDUCTED at the array input, radiated about 88 dBm:
+    // handheld SINR above 30 dB, and over 30 s of the pass not one packet lost.
+    double satEirpDbm = -1.0;
+    double gwDistanceKm = 500.0;
     double startOffset = 0.0;
     std::string outputDir = "ntn-slice-quota-leo-output";
     double embbMbps = 5.0;      // per eMBB UE offered load
@@ -174,7 +179,13 @@ main(int argc, char* argv[])
     cmd.AddValue("policy", "pf | bwp | static | reactive", policy);
     cmd.AddValue("quotas", "static quotas eMBB,URLLC,mMTC", quotas);
     cmd.AddValue("ctrlMs", "control period of the reactive policy (ms)", ctrlMs);
-    cmd.AddValue("satEirpDbm", "satellite conducted power (dBm)", satEirpDbm);
+    cmd.AddValue("satEirpDbm",
+                 "satellite conducted power (dBm); -1 = TR 38.821 Set-1 (34 dBW/MHz, handheld)",
+                 satEirpDbm);
+    cmd.AddValue("gwDistanceKm",
+                 "gateway ground distance north of the UE site (km); the feeder delay follows the live "
+                 "satellite-gateway range. <= 0 keeps the constant 5 ms backhaul",
+                 gwDistanceKm);
     cmd.AddValue("startOffset", "seconds into the pass at which the run starts", startOffset);
     cmd.AddValue("outputDir", "output directory", outputDir);
     cmd.AddValue("embbMbps", "offered load per eMBB UE (Mb/s)", embbMbps);
@@ -218,9 +229,9 @@ main(int argc, char* argv[])
     rs.SetSimTime(Seconds(duration));
     rs.SetOutputDir(outputDir);
     rs.SetRunTag("ntn-slice-quota-leo");
-    rs.SetSatConductedPowerDbm(satEirpDbm);
     rs.SetBackhaulDelay(MilliSeconds(5));
     rs.SetBandwidthHz(bwMhz * 1e6);
+    NtnSliceHelper::ConfigureCellLinkBudget(rs, satEirpDbm, false);
     if (policy == "bwp")
     {
         rs.SetSlices({{"eMBB", 2}, {"URLLC", 82}, {"mMTC", 9}});
@@ -234,6 +245,7 @@ main(int argc, char* argv[])
         rs.SetSchedulerTypeName("ns3::ntnslice::NtnSliceQuotaScheduler");
     }
     rs.Build(satNodes, ueNodes);
+    NtnSliceHelper::ConfigureFeeder(rs, subLat + ueOffsetDeg, subLon, gwDistanceKm);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet, Seconds(1.0), Seconds(duration - 0.5));
     // the downlink clients sit on the remote host in UE order, so client k serves UE k (profile k % 3)
     std::vector<Ptr<NtnOranApplication>> embbApps;

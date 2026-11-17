@@ -4,6 +4,8 @@
  */
 #include "ntn-slice-helper.h"
 
+#include "ns3/ntn-real-stack-helper.h"
+
 namespace ns3
 {
 namespace ntnslice
@@ -38,6 +40,44 @@ NtnSliceHelper::ThreeSliceDefault()
     stack.monitor->RegisterSlice(stack.mmtc);
 
     return stack;
+}
+
+bool
+NtnSliceHelper::ConfigureCellLinkBudget(NtnRealStackHelper& rs, double satPowerDbm, bool mmwave)
+{
+    if (satPowerDbm >= 0.0)
+    {
+        rs.SetSatConductedPowerDbm(satPowerDbm);
+        return false;
+    }
+    if (mmwave)
+    {
+        rs.SetSatConductedPowerDbm(55.0);
+        return false;
+    }
+    rs.ApplyTr38821Set1Defaults();
+    return true;
+}
+
+Ptr<MobilityModel>
+NtnSliceHelper::ConfigureFeeder(NtnRealStackHelper& rs,
+                                double subLatDeg,
+                                double subLonDeg,
+                                double gwDistanceKm)
+{
+    if (gwDistanceKm <= 0.0)
+    {
+        return nullptr;
+    }
+    // 111.195 km per degree of latitude (mean Earth radius 6371 km).
+    return rs.SetFeederGatewayGeodetic(subLatDeg + gwDistanceKm / 111.195, subLonDeg, 0.0);
+}
+
+double
+NtnSliceHelper::OneWayFloorMs(double altitudeKm, bool liveFeeder, double backhaulMs)
+{
+    const double legMs = altitudeKm * 1e3 / 299792458.0 * 1e3;
+    return legMs + (liveFeeder ? legMs : backhaulMs);
 }
 
 } // namespace ntnslice

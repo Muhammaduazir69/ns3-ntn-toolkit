@@ -19,6 +19,7 @@ set(header_files
 set(test_sources
     test/ntn-slice-test-suite.cc
     test/ntn-slice-quota-scheduler-test.cc
+    test/ntn-slice-cell-realism-test.cc
 )
 
 build_lib(
