@@ -125,6 +125,14 @@ NrSpectrumPhy::GetTypeId()
                           BooleanValue(true),
                           MakeBooleanAccessor(&NrSpectrumPhy::SetDataErrorModelEnabled),
                           MakeBooleanChecker())
+            .AddAttribute("FlushDlSoftBufferOnNewData",
+                          "TS 38.321 5.3.2.2: a DL transport block with rv 0 (a new "
+                          "transmission) flushes the soft buffer of its HARQ process before "
+                          "decoding instead of being combined with a TB the gNB never "
+                          "retransmitted. false reproduces the pre-patch-15 combining.",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&NrSpectrumPhy::m_flushDlSoftBufferOnNewData),
+                          MakeBooleanChecker())
             .AddAttribute("ErrorModelType",
                           "Default type of the Error Model to apply to TBs of PDSCH and PUSCH",
                           TypeIdValue(NrLteMiErrorModel::GetTypeId()),
@@ -1354,6 +1362,23 @@ NrSpectrumPhy::CheckTransportBlockCorruptionStatus()
         if ((!m_dataErrorModelEnabled) || (m_rxPacketBurstList.empty()))
         {
             continue;
+        }
+
+        // TS 38.321 5.3.2.2: a new transmission (NDI toggled, signalled here by
+        // rv 0) replaces the soft buffer of its HARQ process instead of being
+        // combined with it. nr kept a NACKed TB's history whenever the gNB did
+        // not retransmit it (a feedback-disabled process, downlinkHARQ-
+        // FeedbackDisabled-r17, or a process the scheduler expired), so the next
+        // new TB on that process was decoded with the stale TB's mutual
+        // information added: an optimistic, unphysical decode.
+        if (m_flushDlSoftBufferOnNewData && tbInfo.m_expected.m_isDownlink &&
+            tbInfo.m_expected.m_rv == 0 &&
+            !m_harqPhyModule
+                 ->GetHarqProcessInfoDl(rnti, tbInfo.m_expected.m_harqProcessId)
+                 .empty())
+        {
+            m_harqPhyModule->ResetDlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
+            ++m_dlSoftBufferFlushes;
         }
 
         const NrErrorModel::NrErrorModelHistory& harqInfoList =

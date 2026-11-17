@@ -35,6 +35,11 @@
 #include "ns3/nr-gnb-mac.h"
 #include "ns3/nr-gnb-net-device.h"
 #include "ns3/node-list.h"
+#include "ns3/packet-sink.h"
+#include "ns3/packet-sink-helper.h"
+#include "ns3/cbr-helper.h"
+#include "ns3/cbr-application.h"
+#include "ns3/inet-socket-address.h"
 #include <sstream>
 #include "ns3/nr-epc-helper.h"
 #include "ns3/nr-helper.h"
@@ -71,6 +76,7 @@
 #include <cstdio>
 #include <chrono>
 #include <fstream>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1678,7 +1684,7 @@ class RealStackChannelUpdatePeriodTest : public TestCase
 {
   public:
     RealStackChannelUpdatePeriodTest()
-        : TestCase("NT-08 - the 3GPP cluster geometry can be made to evolve")
+        : TestCase("NT-08 - the 3GPP cluster geometry evolves on the beamforming cadence")
     {
     }
 
@@ -1723,14 +1729,36 @@ class RealStackChannelUpdatePeriodTest : public TestCase
 
     void DoRun() override
     {
-        // The knob must exist and default to the old frozen behaviour, so that
-        // enabling an evolving channel is a decision a scenario makes rather
-        // than something that happens to every run.
+        // Wave 7A: the default is 100 ms, the same cadence on which
+        // IdealBeamformingHelper recomputes the beam from the satellite's real
+        // position (BeamformingPeriodicity). This test used to assert a frozen
+        // 0 ms default, but the helper moved to 100 ms in 88979d3ac on purpose:
+        // with a frozen channel the beam tracks the satellite while the
+        // clusters still arrive from its t=0 position, which cost 17.5 dB of DL
+        // SINR on a 60 s smoke pass. The default must therefore match the
+        // beamforming cadence, and 0 (frozen) must stay selectable.
         NtnRealStackHelper probe;
-        NS_TEST_ASSERT_MSG_EQ(probe.GetChannelUpdatePeriod(), MilliSeconds(0),
-                              "the default must stay frozen: cluster regeneration is the "
-                              "expensive path and turning it on for every existing run would "
-                              "change both cost and results without anyone asking");
+        Time bfPeriod = Seconds(-1);
+        {
+            TypeId tid;
+            TypeId::AttributeInformation info;
+            if (TypeId::LookupByNameFailSafe("ns3::IdealBeamformingHelper", &tid) &&
+                tid.LookupAttributeByName("BeamformingPeriodicity", &info))
+            {
+                Ptr<const TimeValue> tv = DynamicCast<const TimeValue>(info.initialValue);
+                if (tv)
+                {
+                    bfPeriod = tv->Get();
+                }
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ((bfPeriod >= Seconds(0)), true,
+                              "nr IdealBeamformingHelper::BeamformingPeriodicity must exist");
+        NS_TEST_ASSERT_MSG_EQ(probe.GetChannelUpdatePeriod(), bfPeriod,
+                              "the channel must regenerate on the beamforming cadence by "
+                              "default, or the beam and the clusters drift apart over a pass");
+        NS_TEST_ASSERT_MSG_EQ(probe.GetChannelUpdatePeriod(), MilliSeconds(100),
+                              "default spatial-channel regeneration period is 100 ms");
 
         double wallFrozen = 0.0;
         double wallEvolving = 0.0;
@@ -4605,6 +4633,366 @@ class DlHarqFeedbackDisabledTest : public TestCase
     }
 };
 
+/// Wave 7A (nr patch 15): the UE does not report HARQ-ACK on PUCCH for a DL
+/// process whose feedback is disabled (downlinkHARQ-FeedbackDisabled-r17, TS
+/// 38.213 9.1.2), and a new transmission on such a process flushes the soft
+/// buffer of the TB the gNB never retransmitted (TS 38.321 5.3.2.2). Half the
+/// processes are disabled: the gNB MAC must receive feedback only for the other
+/// half. Failure paths: with the bitmap off every process reports and nothing
+/// is suppressed; with FlushDlSoftBufferOnNewData=false no buffer is flushed.
+class DlHarqFeedbackUeSuppressionTest : public TestCase
+{
+  public:
+    DlHarqFeedbackUeSuppressionTest()
+        : TestCase("Wave 7A: UE suppresses PUCCH HARQ-ACK for feedback-disabled DL processes")
+    {
+    }
+
+  private:
+    struct Result
+    {
+        std::map<uint8_t, uint64_t> fbPerProcess; ///< feedback received at the gNB MAC
+        uint64_t suppressed{0};
+        uint64_t flushes{0};
+        uint64_t disabledTx{0};
+        uint64_t rx{0};
+        DlTbCounter tbs;
+    };
+
+    static void OnFeedback(std::map<uint8_t, uint64_t>* m, const DlHarqInfo& info)
+    {
+        ++(*m)[info.m_harqProcessId];
+    }
+
+    void Run(uint32_t mask, bool flush, Result& r)
+    {
+        Config::SetDefault("ns3::NrSpectrumPhy::FlushDlSoftBufferOnNewData", BooleanValue(flush));
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(2.0));
+        rs.SetOutputDir("test-ntn-harq-fb-ue-suppress");
+        rs.SetDlHarqFeedbackDisabled(mask);
+        rs.Build(sats, ues);
+        r.tbs.Connect(ues);
+        for (uint32_t d = 0; d < sats.Get(0)->GetNDevices(); ++d)
+        {
+            Ptr<NrGnbNetDevice> gnb = DynamicCast<NrGnbNetDevice>(sats.Get(0)->GetDevice(d));
+            if (gnb)
+            {
+                gnb->GetMac(0)->TraceConnectWithoutContext(
+                    "DlHarqFeedback",
+                    MakeBoundCallback(&DlHarqFeedbackUeSuppressionTest::OnFeedback,
+                                      &r.fbPerProcess));
+            }
+        }
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(0.5),
+                          Seconds(1.9));
+        Simulator::Stop(Seconds(2.0));
+        Simulator::Run();
+        rs.Collect();
+        r.suppressed = rs.GetDlHarqFeedbackSuppressedCount();
+        r.flushes = rs.GetDlSoftBufferFlushCount();
+        r.disabledTx = rs.GetDlHarqFeedbackDisabledTxCount();
+        r.rx = rs.GetUeRxPackets(0);
+        Simulator::Destroy();
+        Config::SetDefault("ns3::NrSpectrumPhy::FlushDlSoftBufferOnNewData", BooleanValue(true));
+    }
+
+    void DoRun() override
+    {
+        const uint32_t evenOff = 0x55555555u; // processes 0, 2, 4, ... disabled
+        Result half;
+        Run(evenOff, true, half);
+        uint64_t fbDisabled = 0;
+        uint64_t fbEnabled = 0;
+        for (const auto& [pid, n] : half.fbPerProcess)
+        {
+            if (pid < 32 && ((evenOff >> pid) & 1U))
+            {
+                fbDisabled += n;
+            }
+            else
+            {
+                fbEnabled += n;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(fbDisabled, 0u,
+                              "no HARQ-ACK may reach the gNB for a feedback-disabled process");
+        NS_TEST_ASSERT_MSG_GT(fbEnabled, 0u, "feedback-enabled processes still report");
+        NS_TEST_ASSERT_MSG_GT(half.suppressed, 0u, "the UE suppressed the disabled reports");
+        NS_TEST_ASSERT_MSG_GT(half.disabledTx, 0u, "the gNB released the disabled processes");
+        NS_TEST_ASSERT_MSG_GT(half.rx, 0u, "the application still receives data");
+        // Each DL TB on a disabled process produces exactly one suppressed report.
+        // (reports still in flight when the run stops are not counted at the gNB)
+        NS_TEST_ASSERT_MSG_EQ((half.suppressed + fbEnabled <= half.tbs.tbs &&
+                               half.suppressed + fbEnabled + 20 >= half.tbs.tbs),
+                              true,
+                              "every received DL TB yields one report or one suppression");
+
+        // Failure path 1: bitmap off -> nothing suppressed, every used process reports.
+        Result all;
+        Run(0, true, all);
+        NS_TEST_ASSERT_MSG_EQ(all.suppressed, 0u, "feedback enabled: nothing is suppressed");
+        uint64_t fbAll = 0;
+        for (const auto& [pid, n] : all.fbPerProcess)
+        {
+            fbAll += n;
+        }
+        NS_TEST_ASSERT_MSG_EQ((fbAll <= all.tbs.tbs && fbAll + 20 >= all.tbs.tbs),
+                              true,
+                              "feedback enabled: one report per DL TB");
+
+        // Soft-buffer flush: all processes disabled, so corrupted TBs are never
+        // retransmitted and the next new TB on the process meets a stale buffer.
+        Result flushOn;
+        Run(0xFFFFFFFFu, true, flushOn);
+        NS_TEST_ASSERT_MSG_GT(flushOn.tbs.corrupt, 0u, "some TBs are corrupted");
+        NS_TEST_ASSERT_MSG_GT(flushOn.flushes, 0u,
+                              "a new TB on a process holding a corrupted TB flushes it");
+        // Failure path 2: flushing turned off -> no flush is counted.
+        Result flushOff;
+        Run(0xFFFFFFFFu, false, flushOff);
+        NS_TEST_ASSERT_MSG_EQ(flushOff.flushes, 0u, "FlushDlSoftBufferOnNewData=false never flushes");
+    }
+};
+
+/// Wave 7A: caller-installed flows. A CbrApplication with an in-band
+/// SeqTsSizeHeader on the remote host and a PacketSink on the UE, registered
+/// with AttachExternalDlFlow, are fully measured by the helper (per-UE packets
+/// in ue_kpi.csv, in-band one-way delay above the speed-of-light floor, IPDV,
+/// delivery). Failure path: the same flow without the header still counts
+/// packets and bytes but yields no delay sample (no timestamp to measure).
+class ExternalDlFlowTest : public TestCase
+{
+  public:
+    ExternalDlFlowTest()
+        : TestCase("Wave 7A: external CBR flow with in-band SeqTsSizeHeader is measured")
+    {
+    }
+
+  private:
+    struct Out
+    {
+        uint64_t rxPkts{0};
+        uint64_t rxBytes{0};
+        double meanDelayMs{0.0};
+        double jitterMs{0.0};
+        double floorMs{0.0};
+        uint64_t sent{0};
+        bool attached{false};
+    };
+
+    Out Run(bool header, const std::string& dir)
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(3.0));
+        rs.SetOutputDir(dir);
+        rs.Build(sats, ues);
+        PacketSinkHelper sinkH("ns3::UdpSocketFactory",
+                               InetSocketAddress(Ipv4Address::GetAny(), 4000));
+        sinkH.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(header));
+        ApplicationContainer sink = sinkH.Install(ues.Get(0));
+        CbrHelper cbr("ns3::UdpSocketFactory", InetSocketAddress(rs.GetUeIpv4Address(0), 4000));
+        cbr.SetConstantTraffic(MilliSeconds(5), 1024);
+        cbr.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(header));
+        ApplicationContainer app = cbr.Install(rs.GetRemoteHost());
+        app.Start(Seconds(0.5));
+        app.Stop(Seconds(2.5));
+        Out o;
+        o.attached = rs.AttachExternalDlFlow(0, app.Get(0), sink.Get(0), Seconds(0.5), Seconds(2.5));
+        Simulator::Stop(Seconds(3.0));
+        Simulator::Run();
+        rs.Collect();
+        o.rxPkts = rs.GetUeRxPackets(0);
+        o.rxBytes = rs.GetUeRxBytes(0);
+        o.meanDelayMs = rs.GetMeanDelayMs();
+        o.jitterMs = rs.GetMeanJitterMs();
+        o.floorMs = rs.ComputeOwdFloorMs();
+        o.sent = DynamicCast<CbrApplication>(app.Get(0))->GetSent();
+        Simulator::Destroy();
+        return o;
+    }
+
+    void DoRun() override
+    {
+        const Out with = Run(true, "test-ntn-ext-flow");
+        NS_TEST_ASSERT_MSG_EQ(with.attached, true, "client Tx and sink Rx traces connected");
+        NS_TEST_ASSERT_MSG_GT(with.rxPkts, 300u, "the flow crossed the NR-NTN data plane");
+        NS_TEST_ASSERT_MSG_EQ(with.rxBytes, with.rxPkts * 1024,
+                              "the header sits inside PacketSize: 1024 B on the wire per packet");
+        NS_TEST_ASSERT_MSG_EQ((with.rxBytes <= with.sent), true, "no more bytes than sent");
+        NS_TEST_ASSERT_MSG_GT(with.meanDelayMs, with.floorMs,
+                              "in-band one-way delay respects the altitude/c floor");
+        NS_TEST_ASSERT_MSG_GT(with.jitterMs, 0.0, "IPDV is measured and not zero");
+        const Out without = Run(false, "test-ntn-ext-flow-nohdr");
+        NS_TEST_ASSERT_MSG_GT(without.rxPkts, 300u, "packets still counted without the header");
+        NS_TEST_ASSERT_MSG_EQ(without.meanDelayMs, 0.0, "no timestamp: no delay sample");
+    }
+};
+
+/// Wave 7A (nr patch 15): TS 38.321 5.4.5 retxBSR-Timer. A handheld at the
+/// Set-1 budget sends a periodic uplink flow. Its full-band PUSCH runs near
+/// -11 dB SINR, so PUSCH carrying a BSR is often lost; with the timer the UE
+/// re-triggers SR and keeps the uplink alive. Failure path: with the timer off
+/// (the original nr behavior) the SR/BSR machine waits for a grant forever and
+/// the uplink delivers much less.
+class RetxBsrTimerTest : public TestCase
+{
+  public:
+    RetxBsrTimerTest()
+        : TestCase("Wave 7A: retxBSR-Timer re-triggers SR and keeps a weak uplink alive")
+    {
+    }
+
+  private:
+    uint64_t Run(bool timerOn, uint64_t& sent, uint64_t& retriggers, Time& applied)
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        // Zenith, 600 km: the full-band PUSCH of a 23 dBm handheld runs near
+        // -10 dB SINR, so PUSCH TBs carrying the BSR are often lost.
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(10.0));
+        rs.SetOutputDir("test-ntn-retx-bsr");
+        if (!timerOn)
+        {
+            rs.SetRetxBsrTimer(Time(0));
+        }
+        rs.Build(sats, ues);
+        applied = rs.GetRetxBsrTimer();
+        PacketSinkHelper sinkH("ns3::UdpSocketFactory",
+                               InetSocketAddress(Ipv4Address::GetAny(), 4001));
+        ApplicationContainer sink = sinkH.Install(rs.GetRemoteHost());
+        CbrHelper cbr("ns3::UdpSocketFactory",
+                      InetSocketAddress(rs.GetRemoteHostIpv4Address(), 4001));
+        cbr.SetConstantTraffic(MilliSeconds(100), 200);
+        ApplicationContainer app = cbr.Install(ues.Get(0));
+        app.Start(Seconds(1.0));
+        app.Stop(Seconds(9.5));
+        Simulator::Stop(Seconds(10.0));
+        Simulator::Run();
+        sent = DynamicCast<CbrApplication>(app.Get(0))->GetSent() / 200;
+        retriggers = rs.GetBsrRetriggerCount();
+        const uint64_t rx = DynamicCast<PacketSink>(sink.Get(0))->GetTotalRx() / 200;
+        Simulator::Destroy();
+        return rx;
+    }
+
+    void DoRun() override
+    {
+        uint64_t sentOn = 0;
+        uint64_t retrigOn = 0;
+        Time appliedOn;
+        const uint64_t rxOn = Run(true, sentOn, retrigOn, appliedOn);
+        uint64_t sentOff = 0;
+        uint64_t retrigOff = 0;
+        Time appliedOff;
+        const uint64_t rxOff = Run(false, sentOff, retrigOff, appliedOff);
+        std::cout << "  [retxBSR] on: " << rxOn << "/" << sentOn << " retriggers " << retrigOn
+                  << " timer " << appliedOn.As(Time::MS) << "; off: " << rxOff << "/"
+                  << sentOff << "\n";
+        NS_TEST_ASSERT_MSG_EQ((appliedOn >= MilliSeconds(80)), true, "default timer >= 80 ms");
+        NS_TEST_ASSERT_MSG_EQ(appliedOff, Time(0), "timer off when asked");
+        NS_TEST_ASSERT_MSG_GT(retrigOn, 0u, "the timer re-triggered SR at least once");
+        NS_TEST_ASSERT_MSG_EQ(retrigOff, 0u, "no re-trigger with the timer off");
+        NS_TEST_ASSERT_MSG_GT(rxOn, rxOff, "the timer delivers more uplink packets");
+        NS_TEST_ASSERT_MSG_GT(rxOn, sentOn / 2, "with the timer most of the uplink arrives");
+    }
+};
+
+/// Wave 7A: with several slice BWPs the amplifier is shared in proportion to
+/// bandwidth (constant EIRP density, TR 38.821) and GetEffectiveEirpDbm is the
+/// TOTAL over the carrier, so the Set-1 budget gate passes at the Set-1 total
+/// with three BWPs (it read -4.77 dB before). Failure path: explicit per-BWP
+/// powers whose sum exceeds the budget make the gate fail.
+class BwpPowerSplitTest : public TestCase
+{
+  public:
+    BwpPowerSplitTest()
+        : TestCase("Wave 7A: BWP power split by bandwidth; EIRP gate on the carrier total")
+    {
+    }
+
+  private:
+    void Run(const std::vector<double>& explicitDbm,
+             double& total,
+             std::vector<double>& perBwp,
+             int& gate,
+             uint64_t& tbs)
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(1.5));
+        rs.SetOutputDir("test-ntn-bwp-power");
+        rs.SetSlices({{"eMBB", 2}, {"URLLC", 82}, {"mMTC", 9}});
+        if (!explicitDbm.empty())
+        {
+            rs.SetPerBwpConductedPowerDbm(explicitDbm);
+        }
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::MixedBouquet,
+                          Seconds(0.5),
+                          Seconds(1.4));
+        Simulator::Stop(Seconds(1.5));
+        Simulator::Run();
+        rs.Collect();
+        total = rs.GetEffectiveEirpDbm();
+        perBwp.clear();
+        for (uint8_t b = 0; b < 3; ++b)
+        {
+            perBwp.push_back(rs.GetBwpConductedPowerDbm(b));
+        }
+        double budget = 0.0;
+        double tol = 0.0;
+        gate = rs.EvaluateEirpGate(budget, tol);
+        tbs = rs.GetPhyRxTb();
+        Simulator::Destroy();
+    }
+
+    void DoRun() override
+    {
+        double total = 0.0;
+        std::vector<double> per;
+        int gate = -1;
+        uint64_t tbs = 0;
+        Run({}, total, per, gate, tbs);
+        NS_TEST_ASSERT_MSG_EQ_TOL(total, 77.0103, 0.05, "carrier total = Set-1 EIRP over 20 MHz");
+        NS_TEST_ASSERT_MSG_EQ(gate, 1, "Set-1 budget gate passes with three BWPs");
+        // Equal BWPs: each gets a third of the amplifier, so the per-BWP EIRP
+        // density equals the carrier's.
+        for (double p : per)
+        {
+            NS_TEST_ASSERT_MSG_EQ_TOL(per[0] - p, 0.0, 1e-9, "equal BWPs, equal power");
+        }
+        NS_TEST_ASSERT_MSG_GT(tbs, 0u, "the sliced cell carried data");
+
+        // Explicit powers: the total is their sum; 4 dB over the default on
+        // every BWP is 4 dB over budget and the gate must fail.
+        std::vector<double> hot = {per[0] + 4.0, per[1] + 4.0, per[2] + 4.0};
+        Run(hot, total, per, gate, tbs);
+        NS_TEST_ASSERT_MSG_EQ_TOL(total, 77.0103 + 4.0, 0.05, "explicit per-BWP total");
+        NS_TEST_ASSERT_MSG_EQ_TOL(per[1], hot[1], 1e-9, "explicit per-BWP value applied");
+        NS_TEST_ASSERT_MSG_EQ(gate, 0, "4 dB over the Set-1 budget (tolerance 3 dB) fails the gate");
+    }
+};
+
 /// Wave 6A, SINR realism: an nr run that declares no link budget gets TR 38.821
 /// Set-1 (S-band handheld 1T2R 0 dBi NF 7 dB 23 dBm, payload 34 dBW/MHz), and
 /// the measured zenith SINR equals that closed form (about 19 dB at 600 km),
@@ -4703,6 +5091,10 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new Set1ZenithClosedFormTest, Duration::QUICK);
         AddTestCase(new RaWindowStartOffsetTest, Duration::QUICK);
         AddTestCase(new DlHarqFeedbackDisabledTest, Duration::QUICK);
+        AddTestCase(new DlHarqFeedbackUeSuppressionTest, Duration::QUICK);
+        AddTestCase(new ExternalDlFlowTest, Duration::QUICK);
+        AddTestCase(new RetxBsrTimerTest, Duration::QUICK);
+        AddTestCase(new BwpPowerSplitTest, Duration::QUICK);
         AddTestCase(new DefaultLinkBudgetIsSet1Test, Duration::QUICK);
         AddTestCase(new FeederGatewayDelayTest, Duration::QUICK);
         AddTestCase(new PeriodicMeasurementReportTest, Duration::QUICK);

@@ -93,6 +93,10 @@ build_lib_example(
   LIBRARIES_TO_LINK
     ${libntn-cho}
     ${libntn-constellation}
+    ${libntn-traffic}
+    ${libnr}
+    ${libinternet}
+    ${libapplications}
     ${libpropagation}
     ${libcore}
     ${libnetwork}

@@ -481,6 +481,21 @@ class NrUeMac : public Object
     void StartWaitingForRaResponse();
     /// NTN ra-ResponseWindow start offset, T_TA + k_mac (TS 38.321 5.1.4, Rel-17).
     Time m_raWindowStartOffset{0};
+    /// TS 38.321 5.4.5 retxBSR-Timer (0 = off).
+    Time m_retxBsrTimer{0};
+    /// Last SR sent or UL grant received (retxBSR-Timer start).
+    Time m_lastUlActivity{0};
+    /// SRs re-triggered by retxBSR-Timer expiry.
+    uint64_t m_bsrRetriggers{0};
+
+  public:
+    /// \return SRs re-triggered by retxBSR-Timer expiry (TS 38.321 5.4.5).
+    uint64_t GetBsrRetriggerCount() const
+    {
+        return m_bsrRetriggers;
+    }
+
+  private:
     /// RAR for this UE ignored because ra-ResponseWindow was not yet running.
     TracedCallback<uint64_t> m_rarOutsideWindowTrace;
     bool m_rachConfigured = false;                ///< is RACH configured?

@@ -302,6 +302,116 @@ class OranMonitorExportTest : public TestCase
     }
 };
 
+/// Wave 7A: an uplink flow is reported under the TS 28.552 UL names
+/// (DRB.UEThpUl, DRB.RlcDelayUl, DRB.PacketLossRateUl) with no DL metric, a
+/// flow registered without a direction keeps the DL names (failure path of the
+/// direction logic), and the first period's throughput is volume over the time
+/// the flow was transferring (TS 28.552 5.1.1.3), so it matches the steady state
+/// instead of being diluted by the idle part of the period.
+class OranMonitorUplinkNamesTest : public TestCase
+{
+  public:
+    OranMonitorUplinkNamesTest()
+        : TestCase("Wave 7A: UL flows use the UL KPM names; first-period throughput")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        P2pRig rig("10ms", "100Mbps");
+        Ptr<NtnOranAiFlowMonitor> mon = CreateObject<NtnOranAiFlowMonitor>();
+        // Uplink flow: explicit direction.
+        Ptr<NtnOranSink> ulSink = CreateObject<NtnOranSink>();
+        ulSink->SetAttribute("Local", AddressValue(InetSocketAddress(Ipv4Address::GetAny(), 7100)));
+        rig.nodes.Get(1)->AddApplication(ulSink);
+        ulSink->SetStartTime(Seconds(0.0));
+        Ptr<NtnOranApplication> ulApp = CreateObject<NtnOranApplication>();
+        ulApp->SetRemote(InetSocketAddress(rig.ifaces.GetAddress(1), 7100));
+        ulApp->SetProfile(NtnOranApplication::URLLC_PERIODIC);
+        ulApp->SetFlowIdentity(82, 2, 0x000001, 61, 1);
+        rig.nodes.Get(0)->AddApplication(ulApp);
+        ulApp->SetStartTime(Seconds(1.5)); // mid-period start
+        ulApp->SetStopTime(Seconds(8.0));
+        mon->AddSource(ulApp);
+        mon->AddSink(ulSink, 0, NtnOranAiFlowMonitor::Direction::Uplink);
+        // Downlink-named flow: no direction given, no PHY source.
+        MakeFlow(rig, mon, 7200, 9, 1, 62, 8.0);
+        mon->Start();
+        Simulator::Stop(Seconds(9.0));
+        Simulator::Run();
+
+        uint32_t ulSeries = 0;
+        uint32_t dlSeries = 0;
+        for (const auto& [id, series] : mon->GetKpmSeries())
+        {
+            OranFlowKey key;
+            mon->GetClassifier()->FindFlow(id, key);
+            bool hasUl = false;
+            bool hasDl = false;
+            for (const auto& smp : series)
+            {
+                hasUl = hasUl || smp.metrics.count("DRB.UEThpUl") || smp.metrics.count("DRB.RlcDelayUl") ||
+                        smp.metrics.count("DRB.PacketLossRateUl");
+                hasDl = hasDl || smp.metrics.count("DRB.UEThpDl") ||
+                        smp.metrics.count("DRB.RlcSduDelayDl") ||
+                        smp.metrics.count("DRB.PacketLossRateDl");
+            }
+            if (key.srcId == 61)
+            {
+                ++ulSeries;
+                NS_TEST_ASSERT_MSG_EQ(hasUl, true, "uplink flow carries the UL names");
+                NS_TEST_ASSERT_MSG_EQ(hasDl, false, "uplink flow carries no DL name");
+                // First non-empty period (data from 1.51 s, tick at 2 s) against
+                // the steady state of the next one.
+                double first = -1.0;
+                double steady = -1.0;
+                for (const auto& smp : series)
+                {
+                    const double v = smp.metrics.at("DRB.UEThpUl");
+                    if (v > 0.0 && first < 0.0)
+                    {
+                        first = v;
+                    }
+                    else if (v > 0.0 && first > 0.0)
+                    {
+                        steady = v;
+                        break;
+                    }
+                }
+                NS_TEST_ASSERT_MSG_GT(first, 0.0, "first period measured");
+                NS_TEST_ASSERT_MSG_EQ_TOL(first / steady, 1.0, 0.05,
+                                          "first-period throughput is over the active time");
+                // 0.1 ms units: 10 ms link + serialization -> about 100.
+                double d = 0.0;
+                for (const auto& smp : series)
+                {
+                    d = std::max(d, smp.metrics.at("DRB.RlcDelayUl"));
+                }
+                NS_TEST_ASSERT_MSG_EQ_TOL(d, 100.0, 2.0, "DRB.RlcDelayUl in 0.1 ms units");
+            }
+            else
+            {
+                ++dlSeries;
+                NS_TEST_ASSERT_MSG_EQ(hasDl, true, "undirected flow keeps the DL names");
+                NS_TEST_ASSERT_MSG_EQ(hasUl, false, "undirected flow has no UL name");
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(ulSeries, 1u, "one uplink series");
+        NS_TEST_ASSERT_MSG_EQ(dlSeries, 1u, "one downlink series");
+
+        // The CSV carries the UL columns and the units sidecar.
+        mon->WriteCsv("ntn-oran-monitor-ul-test.csv");
+        std::ifstream units("ntn-oran-monitor-ul-test_units.csv");
+        std::stringstream ss;
+        ss << units.rdbuf();
+        NS_TEST_ASSERT_MSG_EQ((ss.str().find("DRB.RlcSduDelayDl,0.1 ms") != std::string::npos),
+                              true,
+                              "units file documents the 0.1 ms delay unit");
+        Simulator::Destroy();
+    }
+};
+
 class NtnOranAiFlowMonitorTestSuite : public TestSuite
 {
   public:
@@ -312,6 +422,7 @@ class NtnOranAiFlowMonitorTestSuite : public TestSuite
         AddTestCase(new OranMonitorKnownLossTest, Duration::QUICK);
         AddTestCase(new OranMonitorMultiFlowTest, Duration::QUICK);
         AddTestCase(new OranMonitorExportTest, Duration::QUICK);
+        AddTestCase(new OranMonitorUplinkNamesTest, Duration::QUICK);
     }
 };
 

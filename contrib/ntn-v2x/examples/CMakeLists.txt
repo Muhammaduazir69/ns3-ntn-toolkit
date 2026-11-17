@@ -114,6 +114,12 @@ build_lib_example(
   SOURCE_FILES ntn-v2x-pc5-sidelink-bsm.cc
   LIBRARIES_TO_LINK
     ${libntn-v2x}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libntn-traffic}
+    ${libnr}
+    ${libinternet}
+    ${libapplications}
     ${libcore}
     ${libmobility}
 )
@@ -127,6 +133,9 @@ build_lib_example(
     ${libapplications}
     ${libntn-v2x}
     ${libntn-constellation}
+    ${libntn-traffic}
+    ${libnr}
+    ${libpropagation}
     ${libcore}
     ${libnetwork}
     ${libmobility}

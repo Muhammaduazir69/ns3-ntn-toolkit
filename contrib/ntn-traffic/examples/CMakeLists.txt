@@ -14,6 +14,8 @@ foreach(
     ${libntn-traffic}
     ${libntn-cho}
     ${libntn-constellation}
+    ${libnr}
+    ${libmobility}
     ${libapplications}
     ${libpoint-to-point}
     ${libinternet}
@@ -26,6 +28,10 @@ build_lib_example(
   SOURCE_FILES ntn-cbr-leo-link.cc
   LIBRARIES_TO_LINK
     ${libntn-traffic}
+    ${libntn-cho}
+    ${libntn-constellation}
+    ${libnr}
+    ${libmobility}
     ${libapplications}
     ${libpoint-to-point}
     ${libinternet}

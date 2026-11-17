@@ -36,6 +36,17 @@
  *
  * After that, the plot can be seen in the "nrtv-client-trace.png", which can
  * also be found in the working directory.
+ *
+ * Wave 7A: the two-node point-to-point link is now the `--radio=p2p`
+ * reference. The default `--radio=nr` streams the same NRTV session from the
+ * EPC remote host to a TR 38.811 UE (ntn-cho) through a 5G-LENA NR-NTN cell
+ * whose gNB rides an SGP4-propagated LEO satellite (ntn-constellation), with
+ * the TR 38.821 Set-1 S-band link budget, a WGS-84 feeder gateway, the EPC
+ * (GTP-U), PDCP, RLC, MAC/HARQ and the SINR-driven PHY error model
+ * (NtnRealStackHelper). Slice delay and jitter are measured in band from the
+ * NrtvHeader send timestamp for both TCP (NrtvTcpClient traces) and UDP (the
+ * header of every received datagram); UDP loss is server Tx minus client Rx.
+ * ue_kpi.csv, cell_kpi.csv, sim_health.csv and nrtv-qoe.csv go to --outputDir.
  */
 
 #include "ns3/applications-module.h"
@@ -44,7 +55,12 @@
 #include "ns3/network-module.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/ntn-traffic-module.h"
+#include "ns3/mobility-module.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sgp4-mobility-model.h"
+#include "ns3/walker-constellation.h"
 
+#include <filesystem>
 #include <fstream>
 
 using namespace ns3;
@@ -99,6 +115,41 @@ QoeRxSlice(Ptr<const Packet> slice)
     }
 }
 
+// Wave 7A, UDP path: every NRTV datagram starts with an NrtvHeader that
+// carries the server-side send time, so delay and jitter are measured in band
+// from the received bytes (the same quantities NrtvTcpClient reports for TCP).
+uint64_t g_udpRxPackets = 0;
+bool g_udpHaveLast = false;
+Time g_udpLastDelay;
+
+void
+QoeUdpRx(Ptr<const Packet> p, const Address& from)
+{
+    ++g_udpRxPackets;
+    NrtvHeader h;
+    if (p->GetSize() < h.GetSerializedSize())
+    {
+        return;
+    }
+    p->PeekHeader(h);
+    const Time delay = Simulator::Now() - h.GetArrivalTime();
+    QoeRxDelay(delay, from);
+    if (g_udpHaveLast)
+    {
+        QoeRxJitter(Abs(delay - g_udpLastDelay), from);
+    }
+    g_udpHaveLast = true;
+    g_udpLastDelay = delay;
+}
+
+uint64_t g_serverTxPackets = 0;
+
+void
+CountServerTx(Ptr<const Packet>)
+{
+    ++g_serverTxPackets;
+}
+
 void
 QoeRxFrame(uint32_t frameNumber, uint32_t numOfFrames)
 {
@@ -146,7 +197,27 @@ main(int argc, char* argv[])
     cmd.AddValue("time", "Simulation time in seconds", simTime);
     cmd.AddValue("protocol", "TCP or UDP protocol", protocol);
     cmd.AddValue("verbose", "Print trace information", verbose);
+    std::string radio = "nr";
+    double altitudeKm = 600.0;
+    double ueNorthOffsetKm = 300.0;
+    double gwDistanceKm = 500.0;
+    std::string outputDir = "nrtv-p2p-example-output";
+    cmd.AddValue("radio",
+                 "nr (default: SGP4 satellite gNB, NR-NTN radio, EPC) or p2p (the original "
+                 "5 Mb/s, 2 ms point-to-point link)",
+                 radio);
+    cmd.AddValue("altitudeKm", "nr: satellite altitude (km)", altitudeKm);
+    cmd.AddValue("ueNorthOffsetKm",
+                 "nr: UE ground offset north of the t=0 sub-satellite point (km)",
+                 ueNorthOffsetKm);
+    cmd.AddValue("gwDistanceKm", "nr: feeder gateway ground distance north of the UE (km)",
+                 gwDistanceKm);
+    cmd.AddValue("outputDir",
+                 "nr: directory for ue_kpi.csv, cell_kpi.csv, sim_health.csv and nrtv-qoe.csv",
+                 outputDir);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(radio != "nr" && radio != "p2p", "--radio must be nr or p2p");
+    const bool useNr = (radio == "nr");
 
     /// End of command line arguments ///
 
@@ -193,29 +264,85 @@ main(int argc, char* argv[])
     }
     /// End of log components ///
 
+    // node 1 = video server, node 0 = client (p2p); remote host / UE (nr).
+    Ptr<Node> serverNode;
+    Ptr<Node> clientNode;
     NodeContainer nodes;
-    nodes.Create(2);
+    NtnRealStackHelper rs;
+    NodeContainer gnbNodes;
+    NodeContainer ueNodes;
+    Ptr<ns3::ntncon::Sgp4MobilityModel> satMob;
+    if (!useNr)
+    {
+        nodes.Create(2);
 
-    PointToPointHelper pointToPoint;
-    pointToPoint.SetDeviceAttribute("DataRate", StringValue("5Mbps"));
-    pointToPoint.SetChannelAttribute("Delay", StringValue("2ms"));
+        PointToPointHelper pointToPoint;
+        pointToPoint.SetDeviceAttribute("DataRate", StringValue("5Mbps"));
+        pointToPoint.SetChannelAttribute("Delay", StringValue("2ms"));
 
-    NetDeviceContainer devices;
-    devices = pointToPoint.Install(nodes);
+        NetDeviceContainer devices;
+        devices = pointToPoint.Install(nodes);
 
-    InternetStackHelper stack;
-    stack.Install(nodes);
+        InternetStackHelper stack;
+        stack.Install(nodes);
 
-    Ipv4AddressHelper address;
-    address.SetBase("10.1.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer interfaces = address.Assign(devices);
+        Ipv4AddressHelper address;
+        address.SetBase("10.1.1.0", "255.255.255.0");
+        Ipv4InterfaceContainer interfaces = address.Assign(devices);
+        serverNode = nodes.Get(1);
+        clientNode = nodes.Get(0);
+    }
+    else
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        // SGP4 LEO satellite (ntn-constellation), slot 0 of a 53 deg Walker plane.
+        ns3::ntncon::WalkerConfig wcfg;
+        wcfg.num_planes = 1;
+        wcfg.total_sats = 80;
+        wcfg.altitude_km = altitudeKm;
+        wcfg.inclination_deg = 53.0;
+        wcfg.epoch_unix_s = 1735689600.0; // 2025-01-01T00:00:00Z
+        const auto elements = ns3::ntncon::WalkerConstellation::BuildDelta(wcfg);
+        gnbNodes.Create(1);
+        satMob = CreateObject<ns3::ntncon::Sgp4MobilityModel>();
+        satMob->SetElementsSgp4(elements[0]);
+        gnbNodes.Get(0)->AggregateObject(satMob);
+        double subLat;
+        double subLon;
+        double subAlt;
+        satMob->GetGeodetic(subLat, subLon, subAlt);
+        // TR 38.811 UE class (ntn-cho).
+        const double ueLat = subLat + ueNorthOffsetKm / 111.195;
+        ueNodes.Create(1);
+        NtnTr38811MobilityHelper ueMobility(1);
+        ueMobility.Install(ueNodes,
+                           NtnMobilityScenarios::MixedContinental(),
+                           ueLat - 0.03,
+                           ueLat + 0.03,
+                           subLon - 0.03,
+                           subLon + 0.03);
+        // NR-NTN cell + EPC, TR 38.821 Set-1 S-band link budget (helper default).
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(simTime));
+        rs.SetOutputDir(outputDir);
+        rs.SetRunTag("nrtv-p2p-example");
+        rs.Build(gnbNodes, ueNodes);
+        if (gwDistanceKm > 0.0)
+        {
+            rs.SetFeederGatewayGeodetic(ueLat + gwDistanceKm / 111.195, subLon, 0.0);
+        }
+        serverNode = rs.GetRemoteHost();
+        clientNode = ueNodes.Get(0);
+    }
 
     /// Server & Client setup using NrtvHelper ///
 
     NrtvHelper nrtvHelper(TypeId::LookupByName(prss.str()));
     nrtvHelper.SetVariablesAttribute("NumberOfVideos",
                                      StringValue("ns3::UniformRandomVariable[Min=2|Max=5]"));
-    nrtvHelper.InstallUsingIpv4(nodes.Get(1), nodes.Get(0));
+    nrtvHelper.InstallUsingIpv4(serverNode, clientNode);
     nrtvHelper.GetServer().Start(Seconds(2.0));
     nrtvHelper.GetClients().Start(Seconds(1.0));
 
@@ -235,9 +362,31 @@ main(int argc, char* argv[])
     /// client is a PacketSink, not an NrtvTcpClient, so the DynamicCast returns
     /// nullptr and these traces never fire -> guard on a non-null cast. ///
     Ptr<NrtvTcpClient> tcpClient = DynamicCast<NrtvTcpClient>(clientApp);
+    const std::string qoePath = useNr ? outputDir + "/nrtv-qoe.csv" : std::string("nrtv-qoe.csv");
+    Ptr<Application> serverApp = nrtvHelper.GetServer().Get(0);
+    serverApp->TraceConnectWithoutContext("Tx", MakeCallback(&CountServerTx));
+    if (useNr)
+    {
+        // The helper accounts for the flow (ue_kpi.csv app columns, delivery
+        // ratio for UDP where server Tx and client Rx count the same datagrams).
+        rs.AttachExternalDlFlow(0,
+                                tcpClient ? nullptr : serverApp,
+                                clientApp,
+                                Seconds(1.0),
+                                Seconds(simTime));
+        if (!tcpClient)
+        {
+            g_qoeCsv.open(qoePath, std::ios::out | std::ios::trunc);
+            if (g_qoeCsv.is_open())
+            {
+                g_qoeCsv << "time_s,kind,value,extra" << std::endl;
+            }
+            clientApp->TraceConnectWithoutContext("Rx", MakeCallback(&QoeUdpRx));
+        }
+    }
     if (tcpClient)
     {
-        g_qoeCsv.open("nrtv-qoe.csv", std::ios::out | std::ios::trunc);
+        g_qoeCsv.open(qoePath, std::ios::out | std::ios::trunc);
         if (g_qoeCsv.is_open())
         {
             g_qoeCsv << "time_s,kind,value,extra" << std::endl;
@@ -251,7 +400,41 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
 
-    if (tcpClient)
+    if (useNr)
+    {
+        rs.Collect();
+        rs.WriteHealthReport();
+        const double meanDelayMs = (g_delaySamples > 0) ? g_delaySumMs / g_delaySamples : 0.0;
+        const double meanJitterMs = (g_jitterSamples > 0) ? g_jitterSumMs / g_jitterSamples : 0.0;
+        const Vector ue = clientNode->GetObject<MobilityModel>()->GetPosition();
+        const Vector sat = satMob->GetPosition();
+        std::cout << "==== nrtv-p2p-example MEASURED KPIs (radio=nr, " << protocol
+                  << ", SGP4 + NR-NTN + EPC) ====" << std::endl;
+        std::cout << "nrtv_server_tx_packets = " << g_serverTxPackets << std::endl;
+        if (!tcpClient)
+        {
+            const double loss =
+                g_serverTxPackets > 0
+                    ? 1.0 - static_cast<double>(g_udpRxPackets) / g_serverTxPackets
+                    : 0.0;
+            std::cout << "nrtv_udp_rx_packets    = " << g_udpRxPackets << std::endl;
+            std::cout << "nrtv_udp_loss_ratio    = " << loss << std::endl;
+        }
+        std::cout << "nrtv_mean_delay_ms     = " << meanDelayMs << std::endl;
+        std::cout << "nrtv_mean_jitter_ms    = " << meanJitterMs << std::endl;
+        std::cout << "dl_throughput_mbps     = " << rs.GetRxThroughputMbps() << std::endl;
+        std::cout << "dl_sinr_db             = " << rs.GetMeanDlSinrDb() << std::endl;
+        std::cout << "dl_tbler               = " << rs.GetMeanDlTbler() << std::endl;
+        std::cout << "ue elevation end (deg) = " << ntngeo::ElevationDeg(ue, sat) << std::endl;
+        std::cout << "outputs in " << outputDir << std::endl;
+        std::cout << "=============================================" << std::endl;
+        if (g_qoeCsv.is_open())
+        {
+            g_qoeCsv.close();
+        }
+    }
+
+    if (tcpClient && !useNr)
     {
         if (g_qoeCsv.is_open())
         {

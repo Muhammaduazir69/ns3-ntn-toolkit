@@ -37,8 +37,10 @@
 #include "ns3/uinteger.h"
 #include "ns3/nr-gnb-net-device.h"
 #include "ns3/nr-ue-net-device.h"
+#include "ns3/nr-ue-mac.h"
 #include "ns3/nr-phy-rx-trace.h"
 #include "ns3/nr-spectrum-phy.h"
+#include "ns3/seq-ts-size-header.h"
 #include "ns3/nr-phy-mac-common.h"
 #include "ns3/ntn-oran-ai-flow-monitor.h"
 #include "ns3/ntn-oran-application.h"
@@ -1043,8 +1045,29 @@ NtnRealStackHelper::BuildNrRadio()
     if (m_dlHarqFbDisabled != 0)
     {
         m_nr->SetSchedulerAttribute("DlHarqFeedbackDisabled", UintegerValue(m_dlHarqFbDisabled));
+        // Wave 7A (nr patch 15): the UE reads the same RRC bitmap and stops
+        // reporting HARQ-ACK on PUCCH for those processes (TS 38.213 9.1.2).
+        m_nr->SetUePhyAttribute("DlHarqFeedbackDisabled", UintegerValue(m_dlHarqFbDisabled));
         NS_LOG_INFO("NtnRealStackHelper: DL HARQ feedback disabled on process bitmap 0x"
                     << std::hex << m_dlHarqFbDisabled << std::dec);
+    }
+
+    // Wave 7A (nr patch 15): TS 38.321 5.4.5 retxBSR-Timer.
+    {
+        Time t = m_retxBsrTimer;
+        if (!m_retxBsrTimerSet)
+        {
+            const double rttS = 2.0 * 2.0 * WorstCaseSlantM() / 299792458.0;
+            t = (GetLinkBudgetProfile() == LinkBudgetProfile::Legacy)
+                    ? Time(0)
+                    : std::max(MilliSeconds(80), MilliSeconds(static_cast<uint64_t>(
+                                                     std::ceil(rttS * 1e3))));
+        }
+        m_retxBsrTimerApplied = t;
+        if (t.IsStrictlyPositive())
+        {
+            m_nr->SetUeMacAttribute("RetxBsrTimer", TimeValue(t));
+        }
     }
 
     // Install devices on the caller's mobility-carrying nodes.
@@ -1061,8 +1084,44 @@ NtnRealStackHelper::BuildNrRadio()
     // power amplifier; giving every one of N slice BWPs the full m_satEirpDbm
     // radiated N x the power budget (+10log10(N) dB of free EIRP), so a 3-slice
     // run was ~4.8 dB hot relative to a 1-slice run of the "same" satellite.
-    const double bwpPowerSplitDb = 10.0 * std::log10(static_cast<double>(nBwp));
-    const double conductedPerBwpDbm = m_satEirpDbm - bwpPowerSplitDb;
+    // Wave 7A: share the amplifier in proportion to each BWP's bandwidth, so
+    // the EIRP density (dBW/MHz) is constant across BWPs (TR 38.821 Table
+    // 6.1.1.1-1 states the payload as a density). With equal BWPs this is the
+    // old 1/N split; with unequal ones an equal split gave the narrow BWP a
+    // hotter density than the wide one. A scenario may set each BWP itself.
+    m_bwpPowerApplied.assign(nBwp, m_satEirpDbm);
+    {
+        std::vector<double> bwHz(nBwp, m_bwHz / nBwp);
+        for (uint8_t b = 0; b < nBwp && b < allBwps.size(); ++b)
+        {
+            const double w = allBwps[b].get()->m_channelBandwidth;
+            if (w > 0.0)
+            {
+                bwHz[b] = w;
+            }
+        }
+        double sum = 0.0;
+        for (double w : bwHz)
+        {
+            sum += w;
+        }
+        if (!m_bwpPowerExplicit.empty())
+        {
+            NS_ABORT_MSG_IF(m_bwpPowerExplicit.size() != nBwp,
+                            "SetPerBwpConductedPowerDbm: " << m_bwpPowerExplicit.size()
+                                                           << " values for " << +nBwp << " BWPs");
+            m_bwpPowerApplied = m_bwpPowerExplicit;
+        }
+        else
+        {
+            for (uint8_t b = 0; b < nBwp; ++b)
+            {
+                m_bwpPowerApplied[b] = m_satEirpDbm + 10.0 * std::log10(bwHz[b] / sum);
+            }
+        }
+    }
+    const double bwpPowerSplitDb = m_satEirpDbm - m_bwpPowerApplied[0];
+    const double conductedPerBwpDbm = m_bwpPowerApplied[0];
     // R1/R3 K_offset CONSUMPTION: TS 38.213 §4.2. When enabled, extend each gNB
     // PHY's N2Delay (the DCI->PUSCH gap, in slots) by the geometry-derived
     // K_offset. nr-gnb-phy.cc does `ulSfn.Add(GetN2Delay())`, so the UE's uplink
@@ -1159,7 +1218,7 @@ NtnRealStackHelper::BuildNrRadio()
             m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
                 ->SetAttribute("Numerology", UintegerValue(m_numerology));
             m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
-                ->SetAttribute("TxPower", DoubleValue(conductedPerBwpDbm));
+                ->SetAttribute("TxPower", DoubleValue(m_bwpPowerApplied[b]));
             if (m_kOffsetConsumption)
             {
                 m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
@@ -1752,6 +1811,12 @@ NtnRealStackHelper::ConfigureNtnHarqProfileNr()
     n = std::max(16.0, std::min(32.0, n));
     m_nr->SetGnbMacAttribute("NumHarqProcess",
                              UintegerValue(static_cast<uint32_t>(n)));
+    // Wave 7A: the UE MAC needs the same pool (TS 38.331 nrofHARQ-ProcessesForPUSCH-r17,
+    // up to 32). The gNB issues UL grants on process IDs up to n - 1, and the UE kept
+    // nr's 16-entry UL HARQ buffer, so any UL grant on process 16 or above threw
+    // std::out_of_range in NrUeMac::SendNewData (found with a sustained uplink at
+    // 30 deg elevation, where the pool is 18).
+    m_nr->SetUeMacAttribute("NumHarqProcess", UintegerValue(static_cast<uint32_t>(n)));
     NS_LOG_INFO("NtnRealStackHelper nr HARQ profile: slant=" << slantM / 1e3 << " km, RTT="
                                                              << rttS * 1e3 << " ms -> NumHarqProcess="
                                                              << static_cast<uint32_t>(n));
@@ -1828,6 +1893,10 @@ NtnRealStackHelper::GetUeRxPackets(uint32_t ueIndex) const
             pkts += fs.rxPackets;
         }
     }
+    for (const auto& f : m_extFlows)
+    {
+        pkts += (f.ue == ueIndex) ? f.rxPkts : 0;
+    }
     return pkts;
 }
 
@@ -1852,6 +1921,15 @@ NtnRealStackHelper::GetUeLostPackets(uint32_t ueIndex) const
         for (const auto& [key, fs] : sink->GetFlowStats())
         {
             lost += fs.LostPackets();
+        }
+    }
+    // External flows: sequence-gap losses where the packets carry a
+    // SeqTsSizeHeader (expected from the highest sequence minus received).
+    for (const auto& f : m_extFlows)
+    {
+        if (f.ue == ueIndex && f.anySeq && f.highestSeq + 1 > f.seqRx)
+        {
+            lost += f.highestSeq + 1 - f.seqRx;
         }
     }
     return lost;
@@ -3267,10 +3345,37 @@ NtnRealStackHelper::ComputeOwdFloorMs() const
 double
 NtnRealStackHelper::GetEffectiveEirpDbm() const
 {
-    // Radiated EIRP = conducted power at the array input + array gain, less the
-    // per-BWP power split. Mirrors exactly what BuildNrRadio programs.
-    const double nBwp = static_cast<double>(std::max<size_t>(1, m_slices.size()));
-    return m_satEirpDbm - 10.0 * std::log10(nBwp) + ArrayGainDb();
+    // Wave 7A: the TOTAL radiated EIRP over the carrier, i.e. the sum over
+    // BWPs of what BuildNrRadio programs, plus the array gain. It used to be
+    // the per-BWP value, so the budget gate (a total over m_bwHz) read
+    // 10log10(N) low with N slices (-4.77 dB at three BWPs). Before Build() the
+    // proportional split sums to the amplifier power by construction.
+    if (m_bwpPowerApplied.empty())
+    {
+        if (!m_bwpPowerExplicit.empty())
+        {
+            double mw = 0.0;
+            for (double p : m_bwpPowerExplicit)
+            {
+                mw += std::pow(10.0, p / 10.0);
+            }
+            return 10.0 * std::log10(mw) + ArrayGainDb();
+        }
+        return m_satEirpDbm + ArrayGainDb();
+    }
+    double mw = 0.0;
+    for (double p : m_bwpPowerApplied)
+    {
+        mw += std::pow(10.0, p / 10.0);
+    }
+    return 10.0 * std::log10(mw) + ArrayGainDb();
+}
+
+double
+NtnRealStackHelper::GetBwpConductedPowerDbm(uint8_t b) const
+{
+    return b < m_bwpPowerApplied.size() ? m_bwpPowerApplied[b]
+                                        : std::numeric_limits<double>::quiet_NaN();
 }
 
 uint16_t
@@ -3436,6 +3541,30 @@ NtnRealStackHelper::Collect()
         {
             dlRxBytes += sink->GetTotalRx();
         }
+        else
+        {
+            dlRxBytes += ExtRxBytesOfSink(i);
+        }
+    }
+    // Wave 7A: caller-installed flows whose packets carry a SeqTsSizeHeader
+    // contribute their in-band one-way delay, IPDV and sequence-gap loss.
+    for (const auto& f : m_extFlows)
+    {
+        if (!f.anySeq)
+        {
+            continue;
+        }
+        sumDelayMs += f.sumDelayMs;
+        delaySamples += f.seqRx;
+        ipdvN += f.ipdvN;
+        ipdvSumAbs += f.ipdvSumAbsMs;
+        lostPkts += (f.highestSeq + 1 > f.seqRx) ? f.highestSeq + 1 - f.seqRx : 0;
+        expectedPkts += f.highestSeq + 1;
+        if (f.ipdvN > 0)
+        {
+            sumJitterMs += f.ipdvSumAbsMs / static_cast<double>(f.ipdvN);
+            ++jitterFlows;
+        }
     }
     // NT-12: divide by the window traffic was actually OFFERED in, not by the
     // whole simulation.
@@ -3553,6 +3682,10 @@ NtnRealStackHelper::GetUeRxBytes(uint32_t ueIndex) const
         if (sink)
         {
             total += sink->GetTotalRx();
+        }
+        else
+        {
+            total += ExtRxBytesOfSink(i);
         }
     }
     if (matched)
@@ -4977,6 +5110,195 @@ NtnRealStackHelper::GetDlHarqFeedbackDisabledTxCount() const
             if (sch)
             {
                 n += sch->GetDlHarqFeedbackDisabledTxCount();
+            }
+        }
+    }
+    return n;
+}
+
+uint64_t
+NtnRealStackHelper::GetDlHarqFeedbackSuppressedCount() const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr)
+    {
+        return 0;
+    }
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
+        if (!dev)
+        {
+            continue;
+        }
+        for (uint32_t b = 0; b < dev->GetCcMapSize(); ++b)
+        {
+            Ptr<NrUePhy> phy = dev->GetPhy(b);
+            if (phy)
+            {
+                n += phy->GetDlHarqFeedbackSuppressedCount();
+            }
+        }
+    }
+    return n;
+}
+
+uint64_t
+NtnRealStackHelper::GetDlSoftBufferFlushCount() const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr)
+    {
+        return 0;
+    }
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
+        if (!dev)
+        {
+            continue;
+        }
+        for (uint32_t b = 0; b < dev->GetCcMapSize(); ++b)
+        {
+            Ptr<NrUePhy> phy = dev->GetPhy(b);
+            if (phy && phy->GetSpectrumPhy())
+            {
+                n += phy->GetSpectrumPhy()->GetDlSoftBufferFlushCount();
+            }
+        }
+    }
+    return n;
+}
+
+Ipv4Address
+NtnRealStackHelper::GetUeIpv4Address(uint32_t ueIndex) const
+{
+    NS_ABORT_MSG_IF(ueIndex >= m_ueAddrs.size(), "GetUeIpv4Address: UE index out of range");
+    return m_ueAddrs[ueIndex];
+}
+
+bool
+NtnRealStackHelper::AttachExternalDlFlow(uint32_t ueIdx,
+                                         Ptr<Application> client,
+                                         Ptr<Application> sink,
+                                         Time start,
+                                         Time stop)
+{
+    NS_ABORT_MSG_IF(!m_built, "AttachExternalDlFlow before Build()");
+    NS_ABORT_MSG_IF(ueIdx >= m_ue.GetN(), "AttachExternalDlFlow: UE index out of range");
+    NS_ABORT_MSG_IF(!sink, "AttachExternalDlFlow: null sink");
+    // Throughput window: the union of every flow's emission window.
+    if (m_trafficStop <= m_trafficStart)
+    {
+        m_trafficStart = start;
+        m_trafficStop = stop;
+    }
+    else
+    {
+        m_trafficStart = std::min(m_trafficStart, start);
+        m_trafficStop = std::max(m_trafficStop, stop);
+    }
+    m_dlSinks.Add(sink);
+    m_dlSinkUe.push_back(ueIdx);
+    const bool rxOk =
+        sink->TraceConnectWithoutContext("Rx", MakeCallback(&NtnRealStackHelper::DlSinkRx, this));
+    const uint32_t flow = static_cast<uint32_t>(m_extFlows.size());
+    ExtFlowState st;
+    st.ue = ueIdx;
+    st.sinkIndex = m_dlSinks.GetN() - 1;
+    m_extFlows.push_back(st);
+    sink->TraceConnectWithoutContext("Rx",
+                                     MakeCallback(&NtnRealStackHelper::ExtSinkRx, this).Bind(flow));
+    // PacketSink fires this only when it parses an in-band SeqTsSizeHeader.
+    sink->TraceConnectWithoutContext(
+        "RxWithSeqTsSize",
+        MakeCallback(&NtnRealStackHelper::ExtSinkRxSeq, this).Bind(flow));
+    bool txOk = false;
+    if (client)
+    {
+        txOk = client->TraceConnectWithoutContext(
+            "Tx",
+            MakeCallback(&NtnRealStackHelper::DlClientTx, this));
+    }
+    if (m_backend == RadioBackend::Nr)
+    {
+        // Idempotent (m_pdcpConnected), so several flows may schedule it.
+        Simulator::Schedule(std::max(Seconds(0), start - Simulator::Now()),
+                            &NtnRealStackHelper::ConnectUePdcpTraces,
+                            this);
+    }
+    if (m_wallStartNs == 0)
+    {
+        m_wallStartNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count();
+    }
+    return rxOk && txOk;
+}
+
+void
+NtnRealStackHelper::ExtSinkRx(uint32_t flow, Ptr<const Packet> p, const Address&)
+{
+    ++m_extFlows[flow].rxPkts;
+    m_extFlows[flow].rxBytes += p->GetSize();
+}
+
+uint64_t
+NtnRealStackHelper::ExtRxBytesOfSink(uint32_t sinkIndex) const
+{
+    for (const auto& f : m_extFlows)
+    {
+        if (f.sinkIndex == sinkIndex)
+        {
+            return f.rxBytes;
+        }
+    }
+    return 0;
+}
+
+void
+NtnRealStackHelper::ExtSinkRxSeq(uint32_t flow,
+                                 Ptr<const Packet>,
+                                 const Address&,
+                                 const Address&,
+                                 const SeqTsSizeHeader& h)
+{
+    ExtFlowState& f = m_extFlows[flow];
+    const double d = (Simulator::Now() - h.GetTs()).GetSeconds() * 1e3;
+    f.sumDelayMs += d;
+    if (f.anySeq && h.GetSeq() == f.lastSeq + 1)
+    {
+        f.ipdvSumAbsMs += std::fabs(d - f.lastDelayMs);
+        ++f.ipdvN;
+    }
+    f.lastSeq = h.GetSeq();
+    f.lastDelayMs = d;
+    ++f.seqRx;
+    f.highestSeq = f.anySeq ? std::max<uint64_t>(f.highestSeq, h.GetSeq()) : h.GetSeq();
+    f.anySeq = true;
+}
+
+uint64_t
+NtnRealStackHelper::GetBsrRetriggerCount() const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr)
+    {
+        return 0;
+    }
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
+        if (!dev)
+        {
+            continue;
+        }
+        for (uint32_t b = 0; b < dev->GetCcMapSize(); ++b)
+        {
+            Ptr<NrUeMac> mac = DynamicCast<NrUeMac>(dev->GetMac(b));
+            if (mac)
+            {
+                n += mac->GetBsrRetriggerCount();
             }
         }
     }

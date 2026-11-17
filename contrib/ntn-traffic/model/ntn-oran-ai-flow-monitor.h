@@ -170,6 +170,19 @@ class NtnOranAiFlowMonitor : public Object
     /// cumulative per-flow stats feed the KPM series. \p ueIndex links the
     /// flow to the UE for PHY metrics (-1 = no PHY mapping).
     void AddSink(Ptr<NtnOranSink> sink, int32_t ueIndex = -1);
+    /// Direction of a registered flow, which selects the TS 28.552 metric
+    /// names (Dl or Ul).
+    enum class Direction : uint8_t
+    {
+        Auto,     ///< Uplink when a PHY source is set and the sink is not on UE ueIndex
+        Downlink, ///< sink on the UE: DRB.UEThpDl, DRB.RlcSduDelayDl, DRB.PacketLossRateDl
+        Uplink,   ///< sink on the network side: DRB.UEThpUl, DRB.RlcDelayUl, DRB.PacketLossRateUl
+    };
+    /// Wave 7A: register a sink whose flow runs in \p dir. An uplink flow
+    /// (UE -> network) is reported under the UL measurement names and gets no
+    /// DL PHY/RAN metrics (L1M.RS-SINR, TB.*, RRU.PrbUsedDl are DL quantities).
+    /// \p ueIndex is the UE that sends (UL) or receives (DL) the flow.
+    void AddSink(Ptr<NtnOranSink> sink, int32_t ueIndex, Direction dir);
     /// Start the granularity timer (call once after wiring; idempotent).
     void Start();
 
@@ -208,7 +221,10 @@ class NtnOranAiFlowMonitor : public Object
     {
         Ptr<NtnOranSink> sink;
         int32_t ueIndex;
+        Direction dir{Direction::Auto};
     };
+    /// Direction of \p ref, resolving Auto.
+    bool IsUplink(const SinkRef& ref) const;
 
   public:
     /// C6 (Wave 1): emit DRB.RlcSduDelayDl, TB.TotNbrDl, TB.ErrTotNbrDl and

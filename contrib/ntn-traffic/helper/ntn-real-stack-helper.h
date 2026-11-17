@@ -86,6 +86,7 @@ class SpectrumPropagationLossModel;
 class SpectrumChannel;
 class NtnOranAiFlowMonitor;
 class NtnEarthBlockageLossModel;
+class SeqTsSizeHeader;
 struct BandwidthPartInfo;
 // nr (5G-LENA) backend types — see SetRadioBackend / RadioBackend::Nr.
 class NrHelper;
@@ -306,6 +307,31 @@ class NtnRealStackHelper
     uint32_t GetDlHarqFeedbackDisabled() const { return m_dlHarqFbDisabled; }
     /// DL TBs sent on feedback-disabled processes, summed over gNBs and BWPs.
     uint64_t GetDlHarqFeedbackDisabledTxCount() const;
+    /// Wave 7A (nr patch 15): HARQ-ACK reports the UEs did NOT send on PUCCH
+    /// because the process has feedback disabled, summed over UEs and BWPs.
+    uint64_t GetDlHarqFeedbackSuppressedCount() const;
+    /// Wave 7A (nr patch 15): TS 38.321 5.4.5 retxBSR-Timer for every UE MAC.
+    /// While UL data waits and no grant has come for this long since the last
+    /// SR or UL grant, the UE triggers a new BSR and so a new SR. Without it a
+    /// single lost SR or a lost PUSCH carrying the BSR stalled the uplink for
+    /// the rest of the run (measured: ntn-v2x-canyon-relay vehicle 0 uplink
+    /// stopped for good after 10 s at the Set-1 handheld budget). Default: on,
+    /// max(80 ms, 2 x the worst-case service-link RTT), so the timer outlasts
+    /// the NTN grant loop; off under the Legacy link-budget profile so the old
+    /// runs reproduce. Time(0) disables it. Call before Build().
+    void SetRetxBsrTimer(Time t)
+    {
+        m_retxBsrTimer = t;
+        m_retxBsrTimerSet = true;
+    }
+    /// The retxBSR-Timer programmed at Build() (0 = off).
+    Time GetRetxBsrTimer() const { return m_retxBsrTimerApplied; }
+    /// SRs the UEs re-triggered on retxBSR-Timer expiry, summed over UEs and BWPs.
+    uint64_t GetBsrRetriggerCount() const;
+    /// Wave 7A (nr patch 15): stale DL soft buffers the UEs flushed when a new
+    /// transmission (rv 0) arrived on a process the gNB never retransmitted
+    /// (TS 38.321 5.3.2.2), summed over UEs and BWPs.
+    uint64_t GetDlSoftBufferFlushCount() const;
     bool GetKOffsetConsumption() const { return m_kOffsetConsumption; }
     /// The K_offset (in nr slots) actually applied to N2Delay after Build();
     /// 0 when consumption is off. Derived from the service-link round trip.
@@ -833,9 +859,10 @@ class NtnRealStackHelper
     /// 7.5 km/s that is not a small omission: the geometry that sets the
     /// cluster angles turns over completely during a pass.
     ///
-    /// Zero keeps the old frozen behaviour. Regeneration is the expensive path
-    /// in this model, so the default stays 0 and a scenario opts in rather than
-    /// every existing run silently changing cost and results.
+    /// The default is 100 ms, the IdealBeamformingHelper BeamformingPeriodicity,
+    /// so the channel and the beam that multiplies it are refreshed on the same
+    /// cadence (see m_channelUpdatePeriod). Zero restores the frozen t=0
+    /// channel for reproducing pre-NT-08 runs.
     ///
     /// Note what this does NOT do: there is still no carrier-frequency-offset
     /// term on the received waveform. Doppler here is the channel's own
@@ -940,6 +967,15 @@ class NtnRealStackHelper
     /// Slice isolation then EMERGES from the real MAC under contention instead
     /// of being asserted. Call before Build().
     void SetSlices(std::vector<SliceSpec> slices) { m_slices = std::move(slices); }
+    /// Wave 7A: conducted power (dBm, at the array input) of each BWP, in BWP
+    /// order, overriding the default split. By default the satellite's one
+    /// power amplifier (SetSatConductedPowerDbm / the Set-1 density) is shared
+    /// across BWPs in proportion to their bandwidth, so the EIRP density
+    /// (dBW/MHz, TR 38.821 Table 6.1.1.1-1) is the same on every BWP. Must have
+    /// one entry per BWP. Call before Build().
+    void SetPerBwpConductedPowerDbm(std::vector<double> dbm) { m_bwpPowerExplicit = std::move(dbm); }
+    /// Conducted power programmed on BWP \p b at Build() (dBm); NaN before.
+    double GetBwpConductedPowerDbm(uint8_t b) const;
     /// Per-BWP (per-slice) measured mean DL SINR (dB), NaN if no samples.
     double GetBwpMeanSinrDb(uint8_t bwpId) const;
     /// Per-BWP (per-slice) transport blocks decoded at the UE PHY.
@@ -1429,6 +1465,28 @@ class NtnRealStackHelper
     /// gNB device container for the active backend (mmwave or nr gNB devices).
     NetDeviceContainer GetEnbDevices() const { return m_enbDevs; }
     Ptr<Node> GetRemoteHost() const { return m_remoteHost; }
+    /// The EPC-assigned IPv4 address of UE \p ueIndex (valid after Build()).
+    Ipv4Address GetUeIpv4Address(uint32_t ueIndex) const;
+    /// The remote host's address on the SGi link toward the PGW (after Build()).
+    Ipv4Address GetRemoteHostIpv4Address() const { return m_remoteHostAddr; }
+
+    /**
+     * \brief Wave 7A: account for a downlink flow the caller installed itself
+     *        (e.g. a CbrApplication or an NRTV server on GetRemoteHost() and a
+     *        PacketSink on UE \p ueIdx), so the helper's measured KPIs cover
+     *        it: per-UE received bytes and packets in ue_kpi.csv, application
+     *        throughput over [\p start, \p stop], the app delivery ratio in
+     *        sim_health.csv (when the client exposes a "Tx" trace and the sink
+     *        an "Rx" trace), and the PDCP traces from \p start on. The flow is
+     *        not modified. Call after Build().
+     * \return true when both the client "Tx" and the sink "Rx" traces were
+     *         connected (the delivery ratio is then measured).
+     */
+    bool AttachExternalDlFlow(uint32_t ueIdx,
+                              Ptr<Application> client,
+                              Ptr<Application> sink,
+                              Time start,
+                              Time stop);
 
   private:
     void RecordHandoverRefusal(const char* reason);
@@ -1664,6 +1722,11 @@ class NtnRealStackHelper
     void RefreshRaWindowOffsets();
     void ApplyRaWindowOffsets();
     uint32_t m_dlHarqFbDisabled{0};
+    std::vector<double> m_bwpPowerExplicit;  //!< SetPerBwpConductedPowerDbm
+    std::vector<double> m_bwpPowerApplied;   //!< per-BWP conducted dBm at Build()
+    Time m_retxBsrTimer{0};
+    bool m_retxBsrTimerSet{false};
+    Time m_retxBsrTimerApplied{0};
     std::string m_prevElevationModel;
     int m_prevRsrpLinear{-1};
     bool m_ssbCellBeam{false};
@@ -1740,8 +1803,7 @@ class NtnRealStackHelper
     /// NT-04: periodic re-evaluation of the folded service-link delay.
     void RefreshBackhaulFold();
     Time m_backhaulRefresh{Seconds(1.0)};
-    /// NT-08: 3GPP cluster regeneration period; 0 = frozen at t=0.
-    /// NT-08. Spatial-channel regeneration period.
+    /// NT-08. Spatial-channel regeneration period (0 = frozen at t=0).
     ///
     /// This defaults to the SAME 100 ms that IdealBeamformingHelper uses for
     /// BeamformingPeriodicity, and the match is the point rather than a
@@ -1797,6 +1859,33 @@ class NtnRealStackHelper
     /// (vendored stacks without NTN Timing Advance cannot align multi-UE UL
     /// under a per-distance delay). Read by ComputePayloadExtraDelay to avoid
     /// double-counting the slant.
+    /// Wave 7A: per external (caller-installed) DL flow, the packets received
+    /// and, when the packets carry a SeqTsSizeHeader, the highest sequence seen.
+    struct ExtFlowState
+    {
+        uint32_t ue{0};
+        uint32_t sinkIndex{0};    //!< index in m_dlSinks
+        uint64_t rxBytes{0};      //!< bytes from the sink's "Rx" trace
+        uint64_t rxPkts{0};
+        uint64_t seqRx{0};
+        uint64_t highestSeq{0};
+        bool anySeq{false};
+        double sumDelayMs{0.0};   //!< in-band one-way delay sum
+        uint64_t lastSeq{0};
+        double lastDelayMs{0.0};
+        uint64_t ipdvN{0};        //!< RFC 3393 pairs (consecutive sequence numbers)
+        double ipdvSumAbsMs{0.0};
+    };
+    std::vector<ExtFlowState> m_extFlows;
+    void ExtSinkRx(uint32_t flow, Ptr<const Packet> p, const Address& from);
+    /// Bytes of an external flow whose sink is neither NtnOranSink nor
+    /// PacketSink (e.g. an NrtvTcpClient), counted from its "Rx" trace.
+    uint64_t ExtRxBytesOfSink(uint32_t sinkIndex) const;
+    void ExtSinkRxSeq(uint32_t flow,
+                      Ptr<const Packet> p,
+                      const Address& from,
+                      const Address& to,
+                      const SeqTsSizeHeader& h);
     Time m_trafficStart{Seconds(0)}; //!< NT-12: emission window start
     Time m_trafficStop{Seconds(0)};  //!< NT-12: emission window stop
     bool m_airIfaceDelayActive{false};

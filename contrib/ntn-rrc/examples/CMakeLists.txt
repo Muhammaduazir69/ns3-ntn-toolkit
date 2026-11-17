@@ -50,6 +50,11 @@ build_lib_example(
   LIBRARIES_TO_LINK
     ${libntn-rrc}
     ${libntn-constellation}
+    ${libntn-traffic}
+    ${libntn-cho}
+    ${libnr}
+    ${libinternet}
+    ${libapplications}
     ${libcore}
     ${libmobility}
 )

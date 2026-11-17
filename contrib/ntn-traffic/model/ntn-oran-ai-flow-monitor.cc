@@ -164,12 +164,39 @@ NtnOranAiFlowMonitor::AddSource(Ptr<NtnOranApplication> app)
 void
 NtnOranAiFlowMonitor::AddSink(Ptr<NtnOranSink> sink, int32_t ueIndex)
 {
+    AddSink(sink, ueIndex, Direction::Auto);
+}
+
+bool
+NtnOranAiFlowMonitor::IsUplink(const SinkRef& ref) const
+{
+    if (ref.dir != Direction::Auto)
+    {
+        return ref.dir == Direction::Uplink;
+    }
+    // Auto: with a PHY source, a sink that is not on the UE it is mapped to sits
+    // on the network side, so the flow is an uplink. Without one there is no way
+    // to tell, and the historical downlink naming is kept.
+    if (m_rs && ref.ueIndex >= 0 && ref.sink && ref.sink->GetNode())
+    {
+        const NetDeviceContainer ues = m_rs->GetUeDevices();
+        if (static_cast<uint32_t>(ref.ueIndex) < ues.GetN())
+        {
+            return ues.Get(ref.ueIndex)->GetNode() != ref.sink->GetNode();
+        }
+    }
+    return false;
+}
+
+void
+NtnOranAiFlowMonitor::AddSink(Ptr<NtnOranSink> sink, int32_t ueIndex, Direction dir)
+{
     Ptr<NtnOranFlowProbe> probe =
         Create<NtnOranFlowProbe>(m_monitor, m_classifier, "sink");
     m_probes.push_back(probe);
     // The sink's "Rx" trace fires with the full packet (header still inside).
     sink->TraceConnectWithoutContext("Rx", MakeBoundCallback(&SinkRxTrampoline, probe));
-    m_sinks.push_back({sink, ueIndex});
+    m_sinks.push_back({sink, ueIndex, dir});
 }
 
 void
@@ -199,44 +226,68 @@ NtnOranAiFlowMonitor::GranularityTick()
             const FlowId id = m_classifier->Classify(hdr);
 
             FlowCursor& cur = m_cursors[id];
+            const bool firstPeriod = (cur.rxPackets == 0);
             const uint64_t dBytes = fs.rxBytes - cur.rxBytes;
             const uint64_t dPkts = fs.rxPackets - cur.rxPackets;
-            const uint64_t dLost = fs.LostPackets() - cur.lostPackets;
+            // Wave 7A: the cumulative sequence-gap count can FALL when a late
+            // (reordered or HARQ-delayed) packet fills a gap counted lost in an
+            // earlier period. The unsigned difference then wrapped to ~1.8e19
+            // and the period reported an absurd loss rate. A healed gap is not a
+            // loss of this period, so the delta is clamped at zero.
+            const uint64_t lostNow = fs.LostPackets();
+            const uint64_t dLost = lostNow > cur.lostPackets ? lostNow - cur.lostPackets : 0;
             const double dDelaySum = fs.sumDelayMs - cur.sumDelayMs;
             cur.rxBytes = fs.rxBytes;
             cur.rxPackets = fs.rxPackets;
-            cur.lostPackets = fs.LostPackets();
+            cur.lostPackets = lostNow;
             cur.sumDelayMs = fs.sumDelayMs;
+            const bool ul = IsUplink(ref);
 
             KpmSample s;
             s.time = now;
-            const double periodS = m_granularity.GetSeconds();
-            // Values are all MEASURED (FlowMonitor byte/packet/delay deltas +
-            // PHY trace). Each is emitted in its canonical 3GPP TS 28.552 UNIT so
-            // the official measurement NAME and its unit contract agree:
-            //   DRB.UEThpDl  §5.1.1.3 — kbit/s (NOT Mbps)
-            s.metrics["DRB.UEThpDl"] = dBytes * 8.0 / periodS / 1e3; // kbit/s
-            //   DRB.PdcpSduVolumeDl: TS 28.552 5.1.2.1.1.1 defines the DL PDCP
-            //   SDU data volume in Mbit (was written in kbit, a factor 1e3 off).
-            s.metrics["DRB.PdcpSduVolumeDl"] = dBytes * 8.0 / 1e6; // Mbit
-            //   DRB.RlcSduDelayDl §5.1.1.2 — units of 0.1 ms (a value of 10 == 1 ms)
-            if (!m_ranKpm)
+            // TS 28.552 5.1.1.3 DRB.UEThpDl / DRB.UEThpUl: data volume over the
+            // time the flow was actually transferring (ThpVol / ThpTime), not
+            // over the whole granularity period. In the first period of a flow
+            // that starts mid-period the time base is first reception -> now;
+            // dividing by the full period understated it (884.8 kbit/s against
+            // a steady 2172.8 in sagin-a2g-real-stack).
+            double periodS = m_granularity.GetSeconds();
+            if (firstPeriod && fs.firstRx > now - m_granularity && fs.firstRx < now)
             {
-                s.metrics["DRB.RlcSduDelayDl"] = (dPkts ? dDelaySum / dPkts : 0.0) * 10.0;
+                periodS = (now - fs.firstRx).GetSeconds();
+            }
+            // Values are all MEASURED (in-band byte/packet/delay deltas + PHY
+            // trace), each in its TS 28.552 unit (see WriteCsv's units file):
+            //   DRB.UEThpDl/Ul       kbit/s
+            //   DRB.PdcpSduVolumeDl/Ul  Mbit (TS 28.552 5.1.2.1.1)
+            //   DRB.RlcSduDelayDl, DRB.RlcDelayUl  0.1 ms (a value of 10 == 1 ms)
+            //   DRB.PacketLossRateDl/Ul  1E-6 (fraction x 1e6), over the SDUs
+            //                            received plus those detected lost in
+            //                            the period
+            const double ms = dPkts ? dDelaySum / dPkts : 0.0;
+            s.metrics[ul ? "DRB.UEThpUl" : "DRB.UEThpDl"] =
+                periodS > 0 ? dBytes * 8.0 / periodS / 1e3 : 0.0; // kbit/s
+            s.metrics[ul ? "DRB.PdcpSduVolumeUl" : "DRB.PdcpSduVolumeDl"] =
+                dBytes * 8.0 / 1e6; // Mbit
+            if (ul)
+            {
+                s.metrics["DRB.RlcDelayUl"] = ms * 10.0; // 0.1 ms
+            }
+            else if (!m_ranKpm)
+            {
+                s.metrics["DRB.RlcSduDelayDl"] = ms * 10.0; // 0.1 ms
             }
             else
             {
                 // The application probe keeps its own, honest name.
-                s.metrics["app.OwdDl"] = dPkts ? dDelaySum / dPkts : 0.0; // ms
+                s.metrics["app.OwdDl"] = ms; // ms
             }
-            //   DRB.PacketLossRateDl §5.1.3.1 — integer in units of 1e-6 (a 0..1
-            //   fraction scaled by 1e6), NOT a raw 0..1 ratio.
             {
                 const double lossFrac =
                     (dPkts + dLost) ? static_cast<double>(dLost) / (dPkts + dLost) : 0.0;
-                s.metrics["DRB.PacketLossRateDl"] = lossFrac * 1e6;
+                s.metrics[ul ? "DRB.PacketLossRateUl" : "DRB.PacketLossRateDl"] = lossFrac * 1e6;
             }
-            if (m_ranKpm && m_rs && ref.ueIndex >= 0)
+            if (!ul && m_ranKpm && m_rs && ref.ueIndex >= 0)
             {
                 // C6: RAN counters, deltas over this granularity period, taken
                 // once per UE and per cell per tick (several flows of one UE
@@ -285,7 +336,7 @@ NtnOranAiFlowMonitor::GranularityTick()
                     s.metrics["RRU.PrbUsedDl"] = m_cellPrbTick[cell];
                 }
             }
-            if (m_rs && ref.ueIndex >= 0)
+            if (!ul && m_rs && ref.ueIndex >= 0)
             {
                 const double sinr = m_rs->GetUeRecentSinrDb(ref.ueIndex);
                 const double tbler = m_rs->GetUeRecentTbler(ref.ueIndex);
@@ -390,9 +441,13 @@ NtnOranAiFlowMonitor::GetFeatures(FlowId id) const
         // (thpMeanMbps, delayMeanMs, lossMean fraction) and feed RL/xApp logic,
         // so convert back here — export stays spec-correct, the model reads
         // physical quantities.
-        const double thp = metric(s, "DRB.UEThpDl") / 1e3;      // kbit/s -> Mbps
-        const double d = metric(s, "DRB.RlcSduDelayDl") / 10.0; // 0.1 ms units -> ms
-        const double l = metric(s, "DRB.PacketLossRateDl") / 1e6; // per-1e6 -> fraction
+        // An uplink series carries the Ul names (Wave 7A).
+        const bool ulS = s.metrics.count("DRB.UEThpUl") > 0;
+        const double thp = metric(s, ulS ? "DRB.UEThpUl" : "DRB.UEThpDl") / 1e3; // kbit/s -> Mbps
+        const double d =
+            metric(s, ulS ? "DRB.RlcDelayUl" : "DRB.RlcSduDelayDl") / 10.0; // 0.1 ms -> ms
+        const double l =
+            metric(s, ulS ? "DRB.PacketLossRateUl" : "DRB.PacketLossRateDl") / 1e6; // 1E-6 -> fraction
         const double si = metric(s, "L1M.RS-SINR");
         sumT += t;
         sumT2 += t * t;
@@ -449,7 +504,34 @@ NtnOranAiFlowMonitor::WriteCsv(const std::string& path) const
     {
         os << ",TB.TotNbrDl,RRU.PrbUsedDl,app.OwdDl,app.TbBlerDl";
     }
+    // Wave 7A: uplink flows carry the UL measurement names, appended so the
+    // downlink column layout is unchanged.
+    os << ",DRB.UEThpUl,DRB.PdcpSduVolumeUl,DRB.RlcDelayUl,DRB.PacketLossRateUl";
     os << "\n";
+    // Units of every column (TS 28.552), next to the series.
+    {
+        std::string unitsPath = path;
+        const auto dot = unitsPath.rfind(".csv");
+        unitsPath = (dot == std::string::npos ? unitsPath : unitsPath.substr(0, dot)) +
+                    "_units.csv";
+        std::ofstream u(unitsPath);
+        u << "column,unit,note\n"
+          << "DRB.UEThpDl,kbit/s,TS 28.552 5.1.1.3: volume over the time data was transferred\n"
+          << "DRB.UEThpUl,kbit/s,TS 28.552 5.1.1.3 (uplink)\n"
+          << "DRB.PdcpSduVolumeDl,Mbit,TS 28.552 5.1.2.1.1\n"
+          << "DRB.PdcpSduVolumeUl,Mbit,TS 28.552 5.1.2.1.1 (uplink)\n"
+          << "DRB.RlcSduDelayDl,0.1 ms,TS 28.552 5.1.1.1.1: a value of 224.9 is 22.49 ms; "
+             "measured in band (application one-way delay) unless RAN counters are on\n"
+          << "DRB.RlcDelayUl,0.1 ms,uplink delay measured in band (application one-way delay)\n"
+          << "DRB.PacketLossRateDl,1E-6,lost / (received + lost) in the period x 1e6\n"
+          << "DRB.PacketLossRateUl,1E-6,TS 28.552 UL PDCP SDU loss rate x 1e6\n"
+          << "L1M.RS-SINR,dB,raw measured DL SINR (not the TS 38.133 report index)\n"
+          << "TB.ErrTotNbrDl,fraction or count,BLER fraction unless RAN counters are on\n"
+          << "TB.TotNbrDl,count,TS 28.552 5.1.1.8 (RAN counters)\n"
+          << "RRU.PrbUsedDl,PRB,mean DL PRBs in use per slot (RAN counters)\n"
+          << "app.OwdDl,ms,application one-way delay (RAN counter mode)\n"
+          << "app.TbBlerDl,fraction,DL BLER (RAN counter mode)\n";
+    }
     // A metric the period did not measure (no UE-side PHY sample for this
     // flow, e.g. an uplink or gateway-side flow) is written as an empty field,
     // the CSV convention for a missing value, never as the text "nan".
@@ -480,6 +562,8 @@ NtnOranAiFlowMonitor::WriteCsv(const std::string& path) const
                 os << "," << get(s, "TB.TotNbrDl") << "," << get(s, "RRU.PrbUsedDl") << ","
                    << get(s, "app.OwdDl") << "," << get(s, "app.TbBlerDl");
             }
+            os << "," << get(s, "DRB.UEThpUl") << "," << get(s, "DRB.PdcpSduVolumeUl") << ","
+               << get(s, "DRB.RlcDelayUl") << "," << get(s, "DRB.PacketLossRateUl");
             os << "\n";
         }
     }

@@ -100,6 +100,8 @@ class CbrApplication : public Application
     EventId m_sendEvent;   // Event id of pending "send packet" event
     TypeId m_tid;
     bool m_isStatisticsTagsEnabled; ///< `EnableStatisticsTags` attribute.
+    bool m_enableSeqTsSizeHeader{false}; ///< `EnableSeqTsSizeHeader` attribute.
+    uint32_t m_seq{0};                   ///< next SeqTsSizeHeader sequence number
     TracedCallback<Ptr<const Packet>> m_txTrace;
 
     // inherited from Application base class.

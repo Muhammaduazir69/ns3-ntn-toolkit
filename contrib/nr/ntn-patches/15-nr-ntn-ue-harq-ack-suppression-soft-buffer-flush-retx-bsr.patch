@@ -1,0 +1,227 @@
+diff --git a/model/nr-spectrum-phy.cc b/model/nr-spectrum-phy.cc
+--- a/model/nr-spectrum-phy.cc
++++ b/model/nr-spectrum-phy.cc
+@@ -125,6 +125,14 @@
+                           BooleanValue(true),
+                           MakeBooleanAccessor(&NrSpectrumPhy::SetDataErrorModelEnabled),
+                           MakeBooleanChecker())
++            .AddAttribute("FlushDlSoftBufferOnNewData",
++                          "TS 38.321 5.3.2.2: a DL transport block with rv 0 (a new "
++                          "transmission) flushes the soft buffer of its HARQ process before "
++                          "decoding instead of being combined with a TB the gNB never "
++                          "retransmitted. false reproduces the pre-patch-15 combining.",
++                          BooleanValue(true),
++                          MakeBooleanAccessor(&NrSpectrumPhy::m_flushDlSoftBufferOnNewData),
++                          MakeBooleanChecker())
+             .AddAttribute("ErrorModelType",
+                           "Default type of the Error Model to apply to TBs of PDSCH and PUSCH",
+                           TypeIdValue(NrLteMiErrorModel::GetTypeId()),
+@@ -1356,6 +1364,23 @@
+             continue;
+         }
+ 
++        // TS 38.321 5.3.2.2: a new transmission (NDI toggled, signalled here by
++        // rv 0) replaces the soft buffer of its HARQ process instead of being
++        // combined with it. nr kept a NACKed TB's history whenever the gNB did
++        // not retransmit it (a feedback-disabled process, downlinkHARQ-
++        // FeedbackDisabled-r17, or a process the scheduler expired), so the next
++        // new TB on that process was decoded with the stale TB's mutual
++        // information added: an optimistic, unphysical decode.
++        if (m_flushDlSoftBufferOnNewData && tbInfo.m_expected.m_isDownlink &&
++            tbInfo.m_expected.m_rv == 0 &&
++            !m_harqPhyModule
++                 ->GetHarqProcessInfoDl(rnti, tbInfo.m_expected.m_harqProcessId)
++                 .empty())
++        {
++            m_harqPhyModule->ResetDlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
++            ++m_dlSoftBufferFlushes;
++        }
++
+         const NrErrorModel::NrErrorModelHistory& harqInfoList =
+             m_harqPhyModule->GetHarqProcessInfoDlUl(tbInfo.m_expected.m_isDownlink,
+                                                     rnti,
+diff --git a/model/nr-spectrum-phy.h b/model/nr-spectrum-phy.h
+--- a/model/nr-spectrum-phy.h
++++ b/model/nr-spectrum-phy.h
+@@ -651,6 +651,19 @@
+     // attributes
+     TypeId m_errorModelType{
+         Object::GetTypeId()}; //!< Error model type by default is NrLteMiErrorModel
++    /// TS 38.321 5.3.2.2 soft-buffer flush on a new DL transmission (attribute).
++    bool m_flushDlSoftBufferOnNewData{true};
++    /// Stale DL soft buffers flushed by a new transmission.
++    uint64_t m_dlSoftBufferFlushes{0};
++
++  public:
++    /// \return stale DL HARQ soft buffers flushed by a new transmission (rv 0).
++    uint64_t GetDlSoftBufferFlushCount() const
++    {
++        return m_dlSoftBufferFlushes;
++    }
++
++  private:
+     bool m_dataErrorModelEnabled{
+         true}; //!< whether the phy error model for DATA is enabled, by default is enabled
+     double m_ccaMode1ThresholdW{0}; //!< Clear channel assessment (CCA) threshold in Watts,
+diff --git a/model/nr-ue-mac.cc b/model/nr-ue-mac.cc
+--- a/model/nr-ue-mac.cc
++++ b/model/nr-ue-mac.cc
+@@ -225,6 +225,17 @@
+                 TimeValue(Time(0)),
+                 MakeTimeAccessor(&NrUeMac::m_raWindowStartOffset),
+                 MakeTimeChecker(Time(0)))
++            .AddAttribute(
++                "RetxBsrTimer",
++                "TS 38.321 5.4.5 retxBSR-Timer (with the SR repetition of 5.4.4): while UL data is "
++                "buffered and the SR/BSR machine has had no UL grant for this long since the last "
++                "SR or UL-SCH transmission, a regular BSR is triggered again, which sends a new "
++                "SR. Without it a lost SR, or a lost PUSCH carrying the BSR, left the UE waiting "
++                "for a grant forever with data in the buffer. Zero (default) keeps the original "
++                "single-SR behavior.",
++                TimeValue(Time(0)),
++                MakeTimeAccessor(&NrUeMac::m_retxBsrTimer),
++                MakeTimeChecker(Time(0)))
+             .AddTraceSource("RarOutsideWindow",
+                             "A RAR addressed to this UE arrived while ra-ResponseWindow was not "
+                             "running (before the NTN start offset elapsed) and was ignored. "
+@@ -564,11 +575,22 @@
+ 
+     RefreshHarqProcessesPacketBuffer();
+ 
++    // TS 38.321 5.4.5: retxBSR-Timer expiry with UL data available triggers a
++    // regular BSR, and with no UL-SCH resource that BSR triggers an SR (5.4.4).
++    if (m_retxBsrTimer.IsStrictlyPositive() && m_srState == ACTIVE && m_rnti != 0 &&
++        GetTotalBufSize() > 0 && Simulator::Now() - m_lastUlActivity >= m_retxBsrTimer)
++    {
++        NS_LOG_INFO("retxBSR-Timer expired with data buffered: ACTIVE -> TO_SEND");
++        m_srState = TO_SEND;
++        ++m_bsrRetriggers;
++    }
++
+     if (m_srState == TO_SEND)
+     {
+         NS_LOG_INFO("Sending SR to PHY in slot " << sfn);
+         SendSR();
+         m_srState = ACTIVE;
++        m_lastUlActivity = Simulator::Now();
+     }
+ 
+     // Feedback missing
+@@ -683,6 +705,7 @@
+ 
+     SfnSf dataSfn = m_currentSlot;
+     dataSfn.Add(dciMsg->GetKDelay());
++    m_lastUlActivity = Simulator::Now(); // UL grant: the retxBSR-Timer restarts
+ 
+     // Saving the data we need in DoTransmitPdu
+     m_ulDciSfnsf = dataSfn;
+diff --git a/model/nr-ue-mac.h b/model/nr-ue-mac.h
+--- a/model/nr-ue-mac.h
++++ b/model/nr-ue-mac.h
+@@ -481,6 +481,21 @@
+     void StartWaitingForRaResponse();
+     /// NTN ra-ResponseWindow start offset, T_TA + k_mac (TS 38.321 5.1.4, Rel-17).
+     Time m_raWindowStartOffset{0};
++    /// TS 38.321 5.4.5 retxBSR-Timer (0 = off).
++    Time m_retxBsrTimer{0};
++    /// Last SR sent or UL grant received (retxBSR-Timer start).
++    Time m_lastUlActivity{0};
++    /// SRs re-triggered by retxBSR-Timer expiry.
++    uint64_t m_bsrRetriggers{0};
++
++  public:
++    /// \return SRs re-triggered by retxBSR-Timer expiry (TS 38.321 5.4.5).
++    uint64_t GetBsrRetriggerCount() const
++    {
++        return m_bsrRetriggers;
++    }
++
++  private:
+     /// RAR for this UE ignored because ra-ResponseWindow was not yet running.
+     TracedCallback<uint64_t> m_rarOutsideWindowTrace;
+     bool m_rachConfigured = false;                ///< is RACH configured?
+diff --git a/model/nr-ue-phy.cc b/model/nr-ue-phy.cc
+--- a/model/nr-ue-phy.cc
++++ b/model/nr-ue-phy.cc
+@@ -26,6 +26,7 @@
+ #include <ns3/node.h>
+ #include <ns3/pointer.h>
+ #include <ns3/simulator.h>
++#include <ns3/uinteger.h>
+ 
+ #include <algorithm>
+ #include <cfloat>
+@@ -217,7 +218,21 @@
+                           "If true, RLF detection will be enabled.",
+                           BooleanValue(true),
+                           MakeBooleanAccessor(&NrUePhy::m_enableRlfDetection),
+-                          MakeBooleanChecker());
++                          MakeBooleanChecker())
++            .AddAttribute("DlHarqFeedbackDisabled",
++                          "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.213 9.1.2): "
++                          "bitmap over DL HARQ process IDs, bit i set = the UE does not report "
++                          "HARQ-ACK on PUCCH for a PDSCH received on process i. Must match the "
++                          "gNB scheduler's DlHarqFeedbackDisabled. 0 (default) reports every "
++                          "process, the terrestrial behavior.",
++                          UintegerValue(0),
++                          MakeUintegerAccessor(&NrUePhy::m_dlHarqFeedbackDisabled),
++                          MakeUintegerChecker<uint32_t>())
++            .AddTraceSource("DlHarqFeedbackSuppressed",
++                            "A DL HARQ-ACK that was not sent on PUCCH because its HARQ process "
++                            "has feedback disabled (RNTI, HARQ process ID).",
++                            MakeTraceSourceAccessor(&NrUePhy::m_dlHarqFeedbackSuppressedTrace),
++                            "ns3::NrUePhy::DlHarqFeedbackSuppressedTracedCallback");
+     return tid;
+ }
+ 
+@@ -1232,6 +1247,14 @@
+ NrUePhy::EnqueueDlHarqFeedback(const DlHarqInfo& m)
+ {
+     NS_LOG_FUNCTION(this);
++    // NTN downlinkHARQ-FeedbackDisabled-r17: no HARQ-ACK is reported for a
++    // feedback-disabled process, so nothing is put on PUCCH for it.
++    if (m.m_harqProcessId < 32 && ((m_dlHarqFeedbackDisabled >> m.m_harqProcessId) & 1U))
++    {
++        ++m_dlHarqFeedbackSuppressed;
++        m_dlHarqFeedbackSuppressedTrace(m.m_rnti, m.m_harqProcessId);
++        return;
++    }
+     // get the feedback from NrSpectrumPhy and send it through ideal PUCCH to gNB
+     Ptr<NrDlHarqFeedbackMessage> msg = Create<NrDlHarqFeedbackMessage>();
+     msg->SetSourceBwp(GetBwpId());
+diff --git a/model/nr-ue-phy.h b/model/nr-ue-phy.h
+--- a/model/nr-ue-phy.h
++++ b/model/nr-ue-phy.h
+@@ -252,6 +252,18 @@
+     void EnqueueDlHarqFeedback(const DlHarqInfo& m);
+ 
+     /**
++     * \return the number of DL HARQ-ACK reports not sent on PUCCH because the
++     * HARQ process has feedback disabled (attribute DlHarqFeedbackDisabled).
++     */
++    uint64_t GetDlHarqFeedbackSuppressedCount() const
++    {
++        return m_dlHarqFeedbackSuppressed;
++    }
++
++    /// TracedCallback signature for DlHarqFeedbackSuppressed (RNTI, HARQ process ID).
++    typedef void (*DlHarqFeedbackSuppressedTracedCallback)(uint16_t rnti, uint8_t harqProcessId);
++
++    /**
+      *  TracedCallback signature for DL CTRL SINR trace callback
+      *
+      * \param [in] cellId
+@@ -912,6 +924,13 @@
+     TracedCallback<SfnSf, uint16_t, uint16_t, uint8_t, uint8_t, uint32_t>
+         m_phyUeTxedHarqFeedbackTrace;
+ 
++    /// downlinkHARQ-FeedbackDisabled-r17 bitmap over DL HARQ process IDs (attribute).
++    uint32_t m_dlHarqFeedbackDisabled{0};
++    /// HARQ-ACK reports suppressed because of m_dlHarqFeedbackDisabled.
++    uint64_t m_dlHarqFeedbackSuppressed{0};
++    /// Fired for every suppressed HARQ-ACK report.
++    TracedCallback<uint16_t, uint8_t> m_dlHarqFeedbackSuppressedTrace;
++
+     /**
+      * The `ReportUeMeasurements` trace source. Contains trace information
+      * regarding RSRP and RSRQ measured from a specific cell (see TS 36.214).

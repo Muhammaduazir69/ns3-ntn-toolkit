@@ -651,6 +651,19 @@ class NrSpectrumPhy : public SpectrumPhy
     // attributes
     TypeId m_errorModelType{
         Object::GetTypeId()}; //!< Error model type by default is NrLteMiErrorModel
+    /// TS 38.321 5.3.2.2 soft-buffer flush on a new DL transmission (attribute).
+    bool m_flushDlSoftBufferOnNewData{true};
+    /// Stale DL soft buffers flushed by a new transmission.
+    uint64_t m_dlSoftBufferFlushes{0};
+
+  public:
+    /// \return stale DL HARQ soft buffers flushed by a new transmission (rv 0).
+    uint64_t GetDlSoftBufferFlushCount() const
+    {
+        return m_dlSoftBufferFlushes;
+    }
+
+  private:
     bool m_dataErrorModelEnabled{
         true}; //!< whether the phy error model for DATA is enabled, by default is enabled
     double m_ccaMode1ThresholdW{0}; //!< Clear channel assessment (CCA) threshold in Watts,

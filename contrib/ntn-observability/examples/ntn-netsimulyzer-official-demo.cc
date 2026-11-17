@@ -134,6 +134,15 @@ main(int argc, char* argv[])
     }
     rs.SetSimTime(Seconds(duration));
     rs.SetRunTag("ntn-netsimulyzer-official-demo");
+    // Wave 7A: set the run directory BEFORE Build(). The helper opens
+    // ue_kpi.csv / cell_kpi.csv (and the KPM prefix below) while the run is in
+    // progress, so a SetOutputDir() made after Run() came too late and those
+    // files landed in the launch directory. Every helper output now goes to
+    // --outputDir (or to the example's own folder when --outputDir is ".").
+    const std::string runDir = (outputDir.empty() || outputDir == ".")
+                                   ? std::string("./ntn-netsimulyzer-official-demo-output/")
+                                   : outputDir;
+    rs.SetOutputDir(runDir);
     // Wave 6A: the nr link budget is the helper default, TR 38.821 Set-1 (S-band
     // handheld 1T2R NF 7 dB 23 dBm, payload 34 dBW/MHz). The 70 dBm conducted
     // used here before radiated about 88 dBm over 20 MHz, 11 dB above Set-1,
@@ -164,7 +173,8 @@ main(int argc, char* argv[])
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
                       Seconds(1.0),
                       Seconds(duration - 0.5));
-    rs.EnableAiFlowMonitor("ntn-netsimulyzer-official-demo");
+    rs.EnableAiFlowMonitor(runDir + (runDir.back() == '/' ? "" : "/") +
+                           "ntn-netsimulyzer-official-demo");
 
     // ---- Home-grown scene spine (NtnSceneRecorder) as the SECOND sink ----
     // Instantiated directly (not via NtnSceneHelper) because TrackKpiSeries must
@@ -349,11 +359,7 @@ main(int argc, char* argv[])
     // phy_rx_tb and rx_throughput_mbps came out zero while the application
     // counters showed traffic flowing. A health record claiming the radio
     // carried nothing, in a run where it did, is worse than no record at all.
-    // OBS-18: honor --outputDir. The fixed "./...-output/" ignored it, so a
-    // run's sim_health.csv landed under the launch directory.
-    rs.SetOutputDir((outputDir.empty() || outputDir == ".")
-                        ? std::string("./ntn-netsimulyzer-official-demo-output/")
-                        : outputDir);
+    // OBS-18: honor --outputDir (runDir, set before Build()).
     rs.WriteHealthReport();
 
 

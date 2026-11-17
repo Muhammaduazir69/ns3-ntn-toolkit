@@ -252,6 +252,18 @@ class NrUePhy : public NrPhy
     void EnqueueDlHarqFeedback(const DlHarqInfo& m);
 
     /**
+     * \return the number of DL HARQ-ACK reports not sent on PUCCH because the
+     * HARQ process has feedback disabled (attribute DlHarqFeedbackDisabled).
+     */
+    uint64_t GetDlHarqFeedbackSuppressedCount() const
+    {
+        return m_dlHarqFeedbackSuppressed;
+    }
+
+    /// TracedCallback signature for DlHarqFeedbackSuppressed (RNTI, HARQ process ID).
+    typedef void (*DlHarqFeedbackSuppressedTracedCallback)(uint16_t rnti, uint8_t harqProcessId);
+
+    /**
      *  TracedCallback signature for DL CTRL SINR trace callback
      *
      * \param [in] cellId
@@ -911,6 +923,13 @@ class NrUePhy : public NrPhy
      */
     TracedCallback<SfnSf, uint16_t, uint16_t, uint8_t, uint8_t, uint32_t>
         m_phyUeTxedHarqFeedbackTrace;
+
+    /// downlinkHARQ-FeedbackDisabled-r17 bitmap over DL HARQ process IDs (attribute).
+    uint32_t m_dlHarqFeedbackDisabled{0};
+    /// HARQ-ACK reports suppressed because of m_dlHarqFeedbackDisabled.
+    uint64_t m_dlHarqFeedbackSuppressed{0};
+    /// Fired for every suppressed HARQ-ACK report.
+    TracedCallback<uint16_t, uint8_t> m_dlHarqFeedbackSuppressedTrace;
 
     /**
      * The `ReportUeMeasurements` trace source. Contains trace information

@@ -47,6 +47,19 @@
  * (--facadeFile, --gapEveryM, --gapLenM), urban sidelink channel (--slUrban), aligned reselection (--alignResel).
  *
  * Output: one CSV row per delivered message (src, seq, gen_s, rx_s, via), and a summary line.
+ *
+ * Wave 7A, packet-level check (--nrCheckS, default 20 s, 0 = off). After the run above (whose
+ * outputs are unchanged), vehicle 0 drives the same street again for --nrCheckS seconds as a UE of a
+ * 5G-LENA NR-NTN cell (ntn-traffic NtnRealStackHelper, TR 38.821 Set-1 S-band link budget) on the
+ * satellite above the mask whose line of sight from vehicle 0 changes most often in the window
+ * (ties: the higher one), flown through SGP4 from the same element set.
+ * The street's facades act on the radio itself: a chained propagation loss model applies the
+ * TR 38.811 Table 6.6.2-1 S-band urban clutter loss whenever the ray from the vehicle to the
+ * satellite is blocked by the same facade geometry (Los()) the study uses, and nothing otherwise. A
+ * downlink CbrApplication and the vehicle's 100 ms uplink status message (both with an in-band
+ * SeqTsSizeHeader) measure what the blocked and clear stretches do to delivery, delay and SINR.
+ * Outputs in --nrOutputDir (default <out stem>_nr_check): nr_check.csv (per second: line of sight,
+ * elevation, SINR, DL/UL packets), nr_check_summary.csv, ue_kpi.csv, cell_kpi.csv, sim_health.csv.
  */
 
 #include "ns3/applications-module.h"
@@ -58,11 +71,15 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/sgp4-mobility-model.h"
 #include "ns3/orbital-elements.h"
+#include "ns3/ntn-traffic-module.h"
+#include "ns3/propagation-loss-model.h"
+#include "ns3/seq-ts-size-header.h"
 
 #include <algorithm>
 #include <array>
 #include <deque>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <cstdio>
@@ -185,20 +202,26 @@ Dot(const Vector& a, const Vector& b)
 }
 
 double
-PosX(const Veh& v)
+PosXAt(const Veh& v, double tS)
 {
     // wrapped into [0, len): fmod keeps the sign, so vehicles driving in -x would otherwise get negative
     // positions and wrong neighbor distances and sidelink geometry
-    double x0 = v.x0 + v.v * Simulator::Now().GetSeconds();
+    double x0 = v.x0 + v.v * tS;
     if (g_useTrace)
     {
-        const double u = Simulator::Now().GetSeconds() / g_traceDt;
+        const double u = tS / g_traceDt;
         const size_t k = std::min(static_cast<size_t>(u), v.traceS.size() - 2);
         const double f = std::min(1.0, u - k);
         x0 = v.x0 + v.dir * (v.traceS[k] + f * (v.traceS[k + 1] - v.traceS[k]));
     }
     double x = std::fmod(x0, g_len);
     return x < 0 ? x + g_len : x;
+}
+
+double
+PosX(const Veh& v)
+{
+    return PosXAt(v, Simulator::Now().GetSeconds());
 }
 
 /// Facade height on the side the ray reaches, at along-street position xc.
@@ -822,6 +845,328 @@ ServerRx(uint16_t via, Ptr<Socket> s)
               << Simulator::Now().GetSeconds() << "," << via << "\n";
     }
 }
+/// Wave 7A: vehicle 0's street kinematics (PosX) as an ECEF mobility model,
+/// antenna kAnt above the road.
+class CanyonVehicleMobility : public MobilityModel
+{
+  public:
+    static TypeId GetTypeId()
+    {
+        static TypeId tid = TypeId("ns3::CanyonVehicleMobility")
+                                .SetParent<MobilityModel>()
+                                .AddConstructor<CanyonVehicleMobility>();
+        return tid;
+    }
+
+    uint32_t m_veh{0};
+
+    double X() const
+    {
+        return PosX(g_v[m_veh]);
+    }
+
+    double Y() const
+    {
+        return g_v[m_veh].y;
+    }
+
+  private:
+    Vector DoGetPosition() const override
+    {
+        const double az = g_az * M_PI / 180.0;
+        // street axis x at azimuth g_az from north; +y is 90 deg clockwise of it
+        const Vector ux(std::cos(az) * g_north.x + std::sin(az) * g_east.x,
+                        std::cos(az) * g_north.y + std::sin(az) * g_east.y,
+                        std::cos(az) * g_north.z + std::sin(az) * g_east.z);
+        const Vector uy(-std::sin(az) * g_north.x + std::cos(az) * g_east.x,
+                        -std::sin(az) * g_north.y + std::cos(az) * g_east.y,
+                        -std::sin(az) * g_north.z + std::cos(az) * g_east.z);
+        const double x = X();
+        const double y = Y();
+        return Vector(g_origin.x + x * ux.x + y * uy.x + kAnt * g_up.x,
+                      g_origin.y + x * ux.y + y * uy.y + kAnt * g_up.y,
+                      g_origin.z + x * ux.z + y * uy.z + kAnt * g_up.z);
+    }
+
+    void DoSetPosition(const Vector&) override
+    {
+    }
+
+    Vector DoGetVelocity() const override
+    {
+        return Vector(0, 0, 0);
+    }
+};
+
+/// Wave 7A: the street's facades on the radio path. When the ray from the
+/// vehicle to the satellite hits a facade (the study's own Los() geometry), the
+/// TR 38.811 Table 6.6.2-1 S-band (dense) urban clutter loss for that
+/// elevation is applied; a clear ray gets nothing extra.
+class CanyonFacadeLoss : public PropagationLossModel
+{
+  public:
+    static TypeId GetTypeId()
+    {
+        static TypeId tid = TypeId("ns3::CanyonFacadeLoss")
+                                .SetParent<PropagationLossModel>()
+                                .AddConstructor<CanyonFacadeLoss>();
+        return tid;
+    }
+
+    /// TR 38.811 Table 6.6.2-1, S band, dense urban and urban, 10..90 deg.
+    static double ClutterLossDb(double elevDeg)
+    {
+        static const double t[9] = {34.3, 30.9, 29.0, 27.7, 26.8, 26.2, 25.8, 25.5, 25.5};
+        const double e = std::min(90.0, std::max(10.0, elevDeg));
+        const double u = (e - 10.0) / 10.0;
+        const size_t k = std::min<size_t>(7, static_cast<size_t>(u));
+        return t[k] + (u - k) * (t[k + 1] - t[k]);
+    }
+
+    /// Line of sight and elevation of the satellite at \p sat from the vehicle.
+    static bool LosTo(Ptr<CanyonVehicleMobility> veh, const Vector& sat, double& elevDeg)
+    {
+        const Vector p = veh->GetPosition();
+        const Vector d(sat.x - p.x, sat.y - p.y, sat.z - p.z);
+        const double r = std::sqrt(Dot(d, d));
+        const double e = std::asin(Dot(d, g_up) / r);
+        const double az = std::atan2(Dot(d, g_east), Dot(d, g_north));
+        elevDeg = e * 180.0 / M_PI;
+        return Los(veh->X(), veh->Y(), e, az - g_az * M_PI / 180.0);
+    }
+
+    uint64_t m_blocked{0};
+    uint64_t m_clear{0};
+
+  private:
+    double DoCalcRxPower(double txPowerDbm, Ptr<MobilityModel> a, Ptr<MobilityModel> b) const override
+    {
+        Ptr<CanyonVehicleMobility> veh = DynamicCast<CanyonVehicleMobility>(a);
+        Ptr<MobilityModel> other = b;
+        if (!veh)
+        {
+            veh = DynamicCast<CanyonVehicleMobility>(b);
+            other = a;
+        }
+        if (!veh)
+        {
+            return txPowerDbm;
+        }
+        double elev = 0.0;
+        if (LosTo(veh, other->GetPosition(), elev))
+        {
+            ++const_cast<CanyonFacadeLoss*>(this)->m_clear;
+            return txPowerDbm;
+        }
+        ++const_cast<CanyonFacadeLoss*>(this)->m_blocked;
+        return txPowerDbm - ClutterLossDb(elev);
+    }
+
+    int64_t DoAssignStreams(int64_t) override
+    {
+        return 0;
+    }
+};
+
+/// In-band per-direction stats (SeqTsSizeHeader).
+struct NrDir
+{
+    uint64_t rx{0};
+    double sumDelayMs{0.0};
+    uint64_t lastSeq{0};
+    double lastDelayMs{0.0};
+    bool any{false};
+    uint64_t ipdvN{0};
+    double ipdvSumMs{0.0};
+    uint64_t rxThisSecond{0};
+
+    void Rx(Ptr<const Packet>, const Address&, const Address&, const SeqTsSizeHeader& h)
+    {
+        const double d = (Simulator::Now() - h.GetTs()).GetSeconds() * 1e3;
+        ++rx;
+        ++rxThisSecond;
+        sumDelayMs += d;
+        if (any && h.GetSeq() == lastSeq + 1)
+        {
+            ipdvSumMs += std::fabs(d - lastDelayMs);
+            ++ipdvN;
+        }
+        any = true;
+        lastSeq = h.GetSeq();
+        lastDelayMs = d;
+    }
+};
+
+int
+RunNrCheck(double T, const std::string& dir, uint32_t periodMs)
+{
+    // Satellite: among those above the mask at t = 0, the one whose line of
+    // sight from vehicle 0 changes most often over the window (the street's
+    // geometry, the vehicle's kinematics and the orbit, evaluated ahead without
+    // advancing the clock); ties go to the higher elevation. The highest
+    // satellite alone is usually never blocked and would test nothing.
+    // The clock restarted at 0 after the study run, but each satellite still
+    // holds the position it cached at the end of it, and Sgp4MobilityModel
+    // treats a cache from the "future" (negative age) as fresh. Re-anchoring
+    // the epoch to the same instant invalidates the cache.
+    for (auto& sat : g_sats)
+    {
+        sat->SetSimulationEpochUnix(sat->SimBaseUnix());
+    }
+    const auto vis = Visible();
+    if (vis.empty() || g_v.empty())
+    {
+        std::cout << "nr_check: no satellite above the mask at t=0; skipped\n";
+        return 0;
+    }
+    auto toggles = [&](const SatView& sv) {
+        uint32_t n = 0;
+        int prev = -1;
+        for (double t = 0.0; t <= T; t += 0.5)
+        {
+            Vector p;
+            Vector vel;
+            g_sats[sv.id]->GetEcefStateAt(Seconds(t), p, vel);
+            const Vector d(p.x - g_origin.x, p.y - g_origin.y, p.z - g_origin.z);
+            const double r = std::sqrt(Dot(d, d));
+            const double e = std::asin(Dot(d, g_up) / r);
+            if (e < g_mask * M_PI / 180.0)
+            {
+                continue;
+            }
+            const double az = std::atan2(Dot(d, g_east), Dot(d, g_north));
+            const int los = Los(PosXAt(g_v[0], t), g_v[0].y, e, az - g_az * M_PI / 180.0) ? 1 : 0;
+            n += (prev >= 0 && los != prev) ? 1 : 0;
+            prev = los;
+        }
+        return n;
+    };
+    auto best = vis.begin();
+    uint32_t bestToggles = toggles(*best);
+    for (auto it = vis.begin() + 1; it != vis.end(); ++it)
+    {
+        const uint32_t n = toggles(*it);
+        if (n > bestToggles || (n == bestToggles && it->e > best->e))
+        {
+            best = it;
+            bestToggles = n;
+        }
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    NodeContainer gnbNodes;
+    gnbNodes.Create(1);
+    gnbNodes.Get(0)->AggregateObject(g_sats[best->id]);
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
+    Ptr<CanyonVehicleMobility> vm = CreateObject<CanyonVehicleMobility>();
+    vm->m_veh = 0;
+    ueNodes.Get(0)->AggregateObject(vm);
+
+    NtnRealStackHelper rs;
+    rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+    rs.SetNumerology(1);
+    rs.SetSimTime(Seconds(T));
+    rs.SetOutputDir(dir);
+    rs.SetRunTag("ntn-v2x-canyon-relay-nr-check");
+    rs.Build(gnbNodes, ueNodes);
+    rs.SetFeederGatewayGeodetic(g_gwLat, g_gwLon, 0.0);
+    Ptr<CanyonFacadeLoss> facade = CreateObject<CanyonFacadeLoss>();
+    rs.AddExtraPropagationLoss(facade);
+
+    NrDir dl;
+    NrDir ul;
+    const uint16_t dlPort = 4000;
+    const uint16_t ulPort = 4001;
+    PacketSinkHelper dlSinkH("ns3::UdpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), dlPort));
+    dlSinkH.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(true));
+    ApplicationContainer dlSink = dlSinkH.Install(ueNodes.Get(0));
+    dlSink.Get(0)->TraceConnectWithoutContext("RxWithSeqTsSize", MakeCallback(&NrDir::Rx, &dl));
+    CbrHelper dlCbr("ns3::UdpSocketFactory", InetSocketAddress(rs.GetUeIpv4Address(0), dlPort));
+    dlCbr.SetConstantTraffic(MilliSeconds(5), 1024);
+    dlCbr.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(true));
+    ApplicationContainer dlApp = dlCbr.Install(rs.GetRemoteHost());
+    PacketSinkHelper ulSinkH("ns3::UdpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), ulPort));
+    ulSinkH.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(true));
+    ApplicationContainer ulSink = ulSinkH.Install(rs.GetRemoteHost());
+    ulSink.Get(0)->TraceConnectWithoutContext("RxWithSeqTsSize", MakeCallback(&NrDir::Rx, &ul));
+    // The study's status message: one per reservation period (--periodMs).
+    CbrHelper ulCbr("ns3::UdpSocketFactory",
+                    InetSocketAddress(rs.GetRemoteHostIpv4Address(), ulPort));
+    ulCbr.SetConstantTraffic(MilliSeconds(periodMs), 200);
+    ulCbr.SetAttribute("EnableSeqTsSizeHeader", BooleanValue(true));
+    ApplicationContainer ulApp = ulCbr.Install(ueNodes.Get(0));
+    dlApp.Start(Seconds(1.0));
+    ulApp.Start(Seconds(1.0));
+    dlApp.Stop(Seconds(T - 0.5));
+    ulApp.Stop(Seconds(T - 0.5));
+    rs.AttachExternalDlFlow(0, dlApp.Get(0), dlSink.Get(0), Seconds(1.0), Seconds(T - 0.5));
+
+    std::ofstream csv(dir + "/nr_check.csv");
+    csv << "t_s,veh_x_m,los,elev_deg,ue_sinr_db,dl_rx_pkts,ul_rx_pkts\n";
+    Ptr<MobilityModel> satMob = g_sats[best->id];
+    uint64_t losSeconds = 0;
+    uint64_t blockedSeconds = 0;
+    double sinrLos = 0.0;
+    double sinrBlk = 0.0;
+    uint64_t nLos = 0;
+    uint64_t nBlk = 0;
+    std::function<void()> sample = [&]() {
+        double elev = 0.0;
+        const bool los = CanyonFacadeLoss::LosTo(vm, satMob->GetPosition(), elev);
+        const double sinr = rs.TakeUeSinrWindowMeanDb(0);
+        (los ? losSeconds : blockedSeconds) += 1;
+        if (std::isfinite(sinr))
+        {
+            (los ? sinrLos : sinrBlk) += sinr;
+            (los ? nLos : nBlk) += 1;
+        }
+        csv << Simulator::Now().GetSeconds() << "," << vm->X() << "," << (los ? 1 : 0) << ","
+            << elev << "," << sinr << "," << dl.rxThisSecond << "," << ul.rxThisSecond << "\n";
+        dl.rxThisSecond = 0;
+        ul.rxThisSecond = 0;
+        if (Simulator::Now() + Seconds(1) < Seconds(T))
+        {
+            Simulator::Schedule(Seconds(1), sample);
+        }
+    };
+    Simulator::Schedule(Seconds(1), sample);
+    Simulator::Stop(Seconds(T));
+    Simulator::Run();
+    rs.Collect();
+    rs.WriteHealthReport();
+
+    const uint64_t dlSent = DynamicCast<CbrApplication>(dlApp.Get(0))->GetSent() / 1024;
+    const uint64_t ulSent = DynamicCast<CbrApplication>(ulApp.Get(0))->GetSent() / 200;
+    std::ofstream sum(dir + "/nr_check_summary.csv");
+    sum << "metric,value\n"
+        << "satellite_index," << best->id << "\n"
+        << "los_transitions_predicted," << bestToggles << "\n"
+        << "elevation_t0_deg," << best->e * 180.0 / M_PI << "\n"
+        << "los_seconds," << losSeconds << "\n"
+        << "blocked_seconds," << blockedSeconds << "\n"
+        << "sinr_los_mean_db," << (nLos ? sinrLos / nLos : std::nan("")) << "\n"
+        << "sinr_blocked_mean_db," << (nBlk ? sinrBlk / nBlk : std::nan("")) << "\n"
+        << "dl_sent," << dlSent << "\n"
+        << "dl_rx," << dl.rx << "\n"
+        << "dl_owd_mean_ms," << (dl.rx ? dl.sumDelayMs / dl.rx : 0.0) << "\n"
+        << "dl_ipdv_mean_ms," << (dl.ipdvN ? dl.ipdvSumMs / dl.ipdvN : 0.0) << "\n"
+        << "ul_sent," << ulSent << "\n"
+        << "ul_rx," << ul.rx << "\n"
+        << "ul_owd_mean_ms," << (ul.rx ? ul.sumDelayMs / ul.rx : 0.0) << "\n";
+    std::cout << "nr_check: sat=" << best->id << " elev_t0=" << best->e * 180.0 / M_PI
+              << " los_s=" << losSeconds << " blocked_s=" << blockedSeconds
+              << " sinr_los_db=" << (nLos ? sinrLos / nLos : std::nan(""))
+              << " sinr_blocked_db=" << (nBlk ? sinrBlk / nBlk : std::nan(""))
+              << " dl_rx=" << dl.rx << "/" << dlSent << " dl_owd_ms="
+              << (dl.rx ? dl.sumDelayMs / dl.rx : 0.0)
+              << " dl_ipdv_ms=" << (dl.ipdvN ? dl.ipdvSumMs / dl.ipdvN : 0.0) << " ul_rx=" << ul.rx
+              << "/" << ulSent << " ul_owd_ms=" << (ul.rx ? ul.sumDelayMs / ul.rx : 0.0)
+              << " out=" << dir << "\n";
+    Simulator::Destroy();
+    return 0;
+}
+
 } // namespace
 
 int
@@ -834,6 +1179,14 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("tle", "satellite element sets", tle);
     cmd.AddValue("out", "output CSV", out);
+    double nrCheckS = 20.0;
+    std::string nrOutputDir;
+    cmd.AddValue("nrCheckS",
+                 "Wave 7A: seconds of vehicle 0 on a packet-level NR-NTN cell with the facades on "
+                 "the radio path, after the study run (0 = off)",
+                 nrCheckS);
+    cmd.AddValue("nrOutputDir", "Directory of the NR check (default: <out stem>_nr_check)",
+                 nrOutputDir);
     cmd.AddValue("nVeh", "vehicles on the street", nVeh);
     cmd.AddValue("simSeconds", "simulated time (s)", simS);
     cmd.AddValue("policy", "direct | multisat | relay | blind | blindfar | blindlb | random", g_policy);
@@ -1063,5 +1416,14 @@ main(int argc, char* argv[])
     g_out.close();
     WritePrrType1(out, ch);
     Simulator::Destroy();
+    if (nrCheckS > 0.0)
+    {
+        if (nrOutputDir.empty())
+        {
+            const auto dot = out.rfind('.');
+            nrOutputDir = (dot == std::string::npos ? out : out.substr(0, dot)) + "_nr_check";
+        }
+        return RunNrCheck(nrCheckS, nrOutputDir, static_cast<uint32_t>(periodMs));
+    }
     return 0;
 }

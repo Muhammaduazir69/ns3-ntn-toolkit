@@ -26,6 +26,7 @@
 #include <ns3/node.h>
 #include <ns3/pointer.h>
 #include <ns3/simulator.h>
+#include <ns3/uinteger.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -217,7 +218,21 @@ NrUePhy::GetTypeId()
                           "If true, RLF detection will be enabled.",
                           BooleanValue(true),
                           MakeBooleanAccessor(&NrUePhy::m_enableRlfDetection),
-                          MakeBooleanChecker());
+                          MakeBooleanChecker())
+            .AddAttribute("DlHarqFeedbackDisabled",
+                          "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.213 9.1.2): "
+                          "bitmap over DL HARQ process IDs, bit i set = the UE does not report "
+                          "HARQ-ACK on PUCCH for a PDSCH received on process i. Must match the "
+                          "gNB scheduler's DlHarqFeedbackDisabled. 0 (default) reports every "
+                          "process, the terrestrial behavior.",
+                          UintegerValue(0),
+                          MakeUintegerAccessor(&NrUePhy::m_dlHarqFeedbackDisabled),
+                          MakeUintegerChecker<uint32_t>())
+            .AddTraceSource("DlHarqFeedbackSuppressed",
+                            "A DL HARQ-ACK that was not sent on PUCCH because its HARQ process "
+                            "has feedback disabled (RNTI, HARQ process ID).",
+                            MakeTraceSourceAccessor(&NrUePhy::m_dlHarqFeedbackSuppressedTrace),
+                            "ns3::NrUePhy::DlHarqFeedbackSuppressedTracedCallback");
     return tid;
 }
 
@@ -1232,6 +1247,14 @@ void
 NrUePhy::EnqueueDlHarqFeedback(const DlHarqInfo& m)
 {
     NS_LOG_FUNCTION(this);
+    // NTN downlinkHARQ-FeedbackDisabled-r17: no HARQ-ACK is reported for a
+    // feedback-disabled process, so nothing is put on PUCCH for it.
+    if (m.m_harqProcessId < 32 && ((m_dlHarqFeedbackDisabled >> m.m_harqProcessId) & 1U))
+    {
+        ++m_dlHarqFeedbackSuppressed;
+        m_dlHarqFeedbackSuppressedTrace(m.m_rnti, m.m_harqProcessId);
+        return;
+    }
     // get the feedback from NrSpectrumPhy and send it through ideal PUCCH to gNB
     Ptr<NrDlHarqFeedbackMessage> msg = Create<NrDlHarqFeedbackMessage>();
     msg->SetSourceBwp(GetBwpId());

@@ -20,6 +20,8 @@
 
 #include "cbr-application.h"
 
+#include "ns3/seq-ts-size-header.h"
+
 #include "traffic-time-tag.h"
 
 #include "ns3/boolean.h"
@@ -83,6 +85,15 @@ CbrApplication::GetTypeId(void)
                           "with statistics computation",
                           BooleanValue(false),
                           MakeBooleanAccessor(&CbrApplication::m_isStatisticsTagsEnabled),
+                          MakeBooleanChecker())
+            .AddAttribute("EnableSeqTsSizeHeader",
+                          "If true, every packet starts with an ns-3 SeqTsSizeHeader (sequence "
+                          "number, send time, packet size) carried as payload bytes, so a "
+                          "PacketSink with EnableSeqTsSizeHeader measures one-way delay, IPDV "
+                          "and sequence-gap loss in band, through any tunnel. The header is "
+                          "counted inside PacketSize, so the bytes on the wire are unchanged.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&CbrApplication::m_enableSeqTsSizeHeader),
                           MakeBooleanChecker())
             .AddTraceSource("Tx",
                             "A new packet is created and is sent",
@@ -194,7 +205,24 @@ CbrApplication::SendPacket()
     NS_LOG_FUNCTION(this);
 
     NS_ASSERT(m_sendEvent.IsExpired());
-    Ptr<Packet> packet = Create<Packet>(m_pktSize);
+    Ptr<Packet> packet;
+    if (m_enableSeqTsSizeHeader)
+    {
+        SeqTsSizeHeader header;
+        header.SetSeq(m_seq++);
+        header.SetSize(m_pktSize);
+        const uint32_t hdr = header.GetSerializedSize();
+        NS_ABORT_MSG_IF(m_pktSize < hdr,
+                        "CbrApplication: PacketSize " << m_pktSize
+                                                      << " is smaller than the SeqTsSizeHeader ("
+                                                      << hdr << " bytes)");
+        packet = Create<Packet>(m_pktSize - hdr);
+        packet->AddHeader(header);
+    }
+    else
+    {
+        packet = Create<Packet>(m_pktSize);
+    }
 
     if (m_isStatisticsTagsEnabled)
     {

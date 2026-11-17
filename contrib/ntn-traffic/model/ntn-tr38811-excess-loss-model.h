@@ -134,9 +134,9 @@ class Ntn38811ExcessLossModel : public PropagationLossModel
     /// ThreeGppChannelModel::UpdatePeriod to 0 and the model gates cluster
     /// regeneration on that being non-zero, so the geometry never evolved and
     /// neither did the phase. The period is configurable now
-    /// (NtnRealStackHelper::SetChannelUpdatePeriod) and still defaults to 0, so
-    /// unless a scenario sets it the channel remains frozen at t=0. There is
-    /// also no carrier-frequency-offset term on the received waveform at all.
+    /// (NtnRealStackHelper::SetChannelUpdatePeriod) and defaults to 100 ms, the
+    /// beamforming cadence, so the geometry and the phase evolve. There is still
+    /// no carrier-frequency-offset term on the received waveform at all.
     bool m_enableFastFading{false};
     Ptr<NormalRandomVariable> m_sfRng;    ///< shadow fading N(0,1)
     Ptr<NormalRandomVariable> m_scintRng; ///< scintillation N(0,1)

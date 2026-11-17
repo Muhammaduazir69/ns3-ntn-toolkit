@@ -9,7 +9,7 @@ SPDX-License-Identifier: GPL-2.0-only
 
 `contrib/nr` is **upstream 5G-LENA `nr` v3.3.1** (the latest release of the
 `5g-lena-v3.3.y` line, 15 Oct 2024) carried on the toolkit's **ns-3.43** base,
-with **fourteen** local adaptation patches applied on top. Nothing else in
+with **fifteen** local adaptation patches applied on top. Nothing else in
 the tree diverges from pristine upstream v3.3.1: a full-tree content diff of
 `model/` and `helper/` against pristine v3.3.1 reports only the files of the
 eleven patches below, and no added or removed files.
@@ -21,7 +21,7 @@ is compatible with this toolkit's ns-3 base. See
 and v5.0 (ns-3.48, the only line with native NTN) are ns-3-base migrations
 rather than in-place `nr` bumps.
 
-## The fourteen patches (apply in order from `contrib/nr/`)
+## The fifteen patches (apply in order from `contrib/nr/`)
 
     for p in ntn-patches/[0-9][0-9]-*.patch; do patch -p1 < "$p"; done
 
@@ -43,6 +43,7 @@ The eleven (apply in order; the two-digit glob sorts 10 and 11 after 09):
 | 12 | `model/nr-gnb-mac.cc/.h`, `model/nr-ue-mac.cc` | RACH at scale. `NrGnbMac::m_rapIdRntiMap` (RNTI to RA preamble ID) was keyed by `uint8_t`, so every RNTI above 255 folded onto a lower one and a RAR could carry another UE's preamble ID once a cell had allocated 256 temporary C-RNTIs (a few dozen UEs with RACH retries); it is keyed by the 16-bit RNTI (TS 38.321 7.1). `DoBuildRarList` now forgets only the RNTIs answered in the RAR it sends instead of clearing the map, which dropped RNTIs whose Msg3 was granted in a later slot. `NrUeMac` accepts only the first RAR subPDU whose RAPID matches its preamble (TS 38.321 5.1.4); a second match made `NrUeRrc` abort with "unexpected event in state IDLE_CONNECTING". This was the "about 16 UEs" connection-setup limit: ntn-v2x-rural-highway now attaches all 40 vehicles of its trace, and ntn-scalability-load-regimes runs 60 nr UEs. Runs that never reached the bug (every paper gate) are unchanged. Wave 4. |
 | 13 | `model/nr-mac-scheduler-ns3.cc/.h`, `model/nr-mac-scheduler-cqi-management.cc`, `model/nr-mac-scheduler-ue-info.h` | DL outer-loop link adaptation (OLLA). The scheduler set the DL MCS from the last wideband CQI only, so interference the CQI had not seen (a second co-channel satellite cell turning active, a handover into a loaded cell) left the first-transmission BLER near 0.34 for the rest of the run and the HARQ retransmissions inflated the delay (ntn-cho-real-stack: 29.2 ms mean). Deployed gNBs close this loop. Each UE now carries an offset in MCS indices subtracted from the CQI mapping: a NACK of a first transmission (RV 0) raises it by `OllaStep`, an ACK lowers it by `OllaStep` x target / (1 - target), so the initial BLER converges to `OllaBlerTarget` (default 0.1, the TS 38.214 5.2.2.1 CQI reference). Each feedback counts once (a NACKed process is re-evaluated every slot until its retransmission), the loop starts after the first wideband CQI, the offset is bounded to [-4, +8], and the MCS is capped at the table maximum. Same run: BLER 0.07, delay 6.2 ms, full offered load. `NrMacSchedulerNs3::OllaEnabled=false` restores the previous behavior bit for bit. Wave 5. |
 | 14 | `model/nr-ue-mac.cc/.h`, `model/nr-mac-scheduler-ns3.cc/.h` | Rel-17 NTN MAC timing. (a) TS 38.321 5.1.4: `NrUeMac::RaResponseWindowStartOffset` (Time, default 0) delays both edges of ra-ResponseWindow by T_TA + k_mac, the UE-gNB RTT. nr opened the window one slot after the preamble whatever the geometry, so with a real air-interface delay at LEO-600 the first RAR (6.5 ms after the preamble) overshot the terrestrial window and the first access attempt timed out. A RAR arriving before the window opens is ignored and reported by the new `RarOutsideWindow` trace. `NtnRealStackHelper` programs the per-UE RTT when the air-interface delay is on. (b) TS 38.331 downlinkHARQ-FeedbackDisabled-r17: `NrMacSchedulerNs3::DlHarqFeedbackDisabled` (uint32 bitmap over DL HARQ process IDs, default 0) releases a feedback-disabled process when its TB is scheduled instead of holding it one HARQ round trip for an ACK/NACK, so it is never retransmitted by HARQ; late feedback for it is discarded by the existing INACTIVE-process path. The UE still sends HARQ-ACK on PUCCH for those processes (not suppressed on the UE side), and OLLA gets no updates from them. Both defaults reproduce the 01-13 behavior bit for bit. Wave 6A. |
+| 15 | `model/nr-ue-phy.cc/.h`, `model/nr-spectrum-phy.cc/.h`, `model/nr-ue-mac.cc/.h` | Rel-17 NTN UE side of HARQ and the uplink request loop. (a) TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.213 9.1.2: `NrUePhy::DlHarqFeedbackDisabled` (uint32 bitmap, default 0) suppresses the PUCCH HARQ-ACK of a PDSCH received on a feedback-disabled process (counter `GetDlHarqFeedbackSuppressedCount`, trace `DlHarqFeedbackSuppressed`); patch 14 had only the gNB side, so the UE still reported every process. `NtnRealStackHelper::SetDlHarqFeedbackDisabled` now programs both ends. (b) TS 38.321 5.3.2.2: `NrSpectrumPhy::FlushDlSoftBufferOnNewData` (default true) flushes the soft buffer of a DL HARQ process when a new transmission (rv 0) arrives on it. nr kept the history of a NACKed TB whenever the gNB did not retransmit it (a feedback-disabled process, or a process the scheduler expired), and the next new TB on that process was decoded with the stale TB's mutual information added; `false` restores the old combining. (c) TS 38.321 5.4.5 retxBSR-Timer with the SR repetition of 5.4.4: `NrUeMac::RetxBsrTimer` (Time, default 0 = off) re-triggers a BSR, and so an SR, while UL data is buffered and no UL grant has arrived for that long since the last SR or grant (counter `GetBsrRetriggerCount`). nr sent one SR and then waited for a grant forever, so one lost SR, or one lost PUSCH carrying the BSR, stalled the UE's uplink for the rest of the run (ntn-v2x-canyon-relay vehicle 0, Set-1 handheld: no uplink packet after 10 s; helper test: 0 of 84 packets without the timer, 77 of 84 with it). `NtnRealStackHelper` enables it by default at max(80 ms, 2 x worst-case service RTT), off under the Legacy link-budget profile. All three defaults in nr reproduce the 01-14 behavior bit for bit, except (b), which changes a run only where a stale buffer existed. Wave 7A. |
 
 Patch 10 changes outputs only after a handover (the UE DL RX trace cell id,
 the per-UE and per-cell statistics built on it, and the UE-side cell id in the
@@ -66,7 +67,7 @@ plus the nine patches reproduces `model/` and `helper/` byte-for-byte
 (`diff -rq`: 0 mismatches). Verified 2026-11-16 (Wave 2 core) for 01-10: the
 same pristine tree plus the ten patches reproduces `model/` and `helper/`
 byte-for-byte (`diff -rq`: 0 mismatches). Verified again for 01-11 the same
-day after patch 11: 0 mismatches. Verified 2026-11-17 (Wave 4) for 01-12: 0 mismatches. Verified 2026-11-17 (Wave 5) for 13 against the 01-12 state: 0 mismatches. Verified 2026-11-18 (Wave 6A) for 14 against the 01-13 state: 0 mismatches.
+day after patch 11: 0 mismatches. Verified 2026-11-17 (Wave 4) for 01-12: 0 mismatches. Verified 2026-11-17 (Wave 5) for 13 against the 01-12 state: 0 mismatches. Verified 2026-11-18 (Wave 6A) for 14 against the 01-13 state: 0 mismatches. Verified 2026-11-18 (Wave 7A) for 15 against the 01-14 state: 0 mismatches.
 
 ## Upgrading later
 
@@ -75,3 +76,27 @@ native NTN), drop in the pristine upstream `nr` for that base and re-apply
 whichever of these patches upstream has not itself fixed. Patches 03/04
 (PDCP Control-PDU handling) are the ones most likely still required, since they
 reflect a modelling scope choice, not an ns-3-version quirk.
+
+## Not implemented: Msg4 contention resolution (TS 38.321 5.1.5)
+
+Checked in Wave 7A; not feasible as a local patch on nr v3.3, for these reasons:
+
+1. There is never anything to resolve. `NrGnbMac::ProcessRaPreambles` treats two or
+   more identical preambles in one occasion as a collision in which none is detected
+   (no RAR is sent, every colliding UE times out and retries). No two UEs can therefore
+   ever hold the same temporary C-RNTI, which is the situation Msg4 contention resolution
+   exists for. A capture (strongest preamble detected) model at the gNB PRACH would be
+   needed first.
+2. `NrUeMac::RecvRaResponse` declares random access successful on the RAR itself and
+   promotes the temporary C-RNTI (its own comment: "in principle we should wait for
+   contention resolution, but ... no one is received"), so there is no state in which a
+   ra-ContentionResolutionTimer could run.
+3. Msg3 and Msg4 are RRC messages carried by `NrRrcProtocolIdeal` by default (and
+   `NtnRealStackHelper` keeps the ideal protocol), so the 48-bit CCCH SDU that the UE
+   Contention Resolution Identity MAC CE echoes is not a MAC payload. `NrMacHeaderFsDl`
+   defines LCID 62 (UE_CONTENTION_RESOLUTION) but nothing builds or parses that CE.
+
+Doing it properly needs a PRACH detection model with capture, the real RRC protocol
+(SRB0 over RLC TM), the CE in the gNB MAC Msg4, and a UE timer started after Msg3 and,
+for NTN (Rel-17), extended by the UE-gNB RTT. That is the scope of the nr v5.0 / ns-3.48
+migration rather than a local patch.

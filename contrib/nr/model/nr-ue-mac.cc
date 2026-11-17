@@ -225,6 +225,17 @@ NrUeMac::GetTypeId()
                 TimeValue(Time(0)),
                 MakeTimeAccessor(&NrUeMac::m_raWindowStartOffset),
                 MakeTimeChecker(Time(0)))
+            .AddAttribute(
+                "RetxBsrTimer",
+                "TS 38.321 5.4.5 retxBSR-Timer (with the SR repetition of 5.4.4): while UL data is "
+                "buffered and the SR/BSR machine has had no UL grant for this long since the last "
+                "SR or UL-SCH transmission, a regular BSR is triggered again, which sends a new "
+                "SR. Without it a lost SR, or a lost PUSCH carrying the BSR, left the UE waiting "
+                "for a grant forever with data in the buffer. Zero (default) keeps the original "
+                "single-SR behavior.",
+                TimeValue(Time(0)),
+                MakeTimeAccessor(&NrUeMac::m_retxBsrTimer),
+                MakeTimeChecker(Time(0)))
             .AddTraceSource("RarOutsideWindow",
                             "A RAR addressed to this UE arrived while ra-ResponseWindow was not "
                             "running (before the NTN start offset elapsed) and was ignored. "
@@ -564,11 +575,22 @@ NrUeMac::DoSlotIndication(const SfnSf& sfn)
 
     RefreshHarqProcessesPacketBuffer();
 
+    // TS 38.321 5.4.5: retxBSR-Timer expiry with UL data available triggers a
+    // regular BSR, and with no UL-SCH resource that BSR triggers an SR (5.4.4).
+    if (m_retxBsrTimer.IsStrictlyPositive() && m_srState == ACTIVE && m_rnti != 0 &&
+        GetTotalBufSize() > 0 && Simulator::Now() - m_lastUlActivity >= m_retxBsrTimer)
+    {
+        NS_LOG_INFO("retxBSR-Timer expired with data buffered: ACTIVE -> TO_SEND");
+        m_srState = TO_SEND;
+        ++m_bsrRetriggers;
+    }
+
     if (m_srState == TO_SEND)
     {
         NS_LOG_INFO("Sending SR to PHY in slot " << sfn);
         SendSR();
         m_srState = ACTIVE;
+        m_lastUlActivity = Simulator::Now();
     }
 
     // Feedback missing
@@ -683,6 +705,7 @@ NrUeMac::ProcessUlDci(const Ptr<NrUlDciMessage>& dciMsg)
 
     SfnSf dataSfn = m_currentSlot;
     dataSfn.Add(dciMsg->GetKDelay());
+    m_lastUlActivity = Simulator::Now(); // UL grant: the retxBSR-Timer restarts
 
     // Saving the data we need in DoTransmitPdu
     m_ulDciSfnsf = dataSfn;
