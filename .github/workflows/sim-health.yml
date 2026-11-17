@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     steps:
+      # The repository root is the ns-3-dev tree itself; the old `working-directory: ns-3-dev`
+      # made every step fail before it started ("No such file or directory").
       - uses: actions/checkout@v4
 
       - name: Install build deps
@@ -26,17 +28,14 @@ jobs:
             libabsl-dev
 
       - name: Configure ns-3
-        working-directory: ns-3-dev
         run: ./ns3 configure --enable-examples --enable-tests --disable-werror
 
       - name: Build
-        working-directory: ns-3-dev
         run: ./ns3 build
 
       # The regression suites are the gate that matters: each one pins a defect
       # that reached a release once. Running them is what makes the fixes stick.
       - name: NTN test suites
-        working-directory: ns-3-dev
         run: |
           set -e
           fail=0
@@ -66,15 +65,13 @@ jobs:
       # producer. Two of four dashboards used to query measurements nothing
       # wrote, so they rendered empty forever and nothing said so.
       - name: Dashboard producers
-        working-directory: ns-3-dev
         run: python3 tools/check_dashboard_producers.py --repo .
 
       - name: Realism gates
-        working-directory: ns-3-dev
         run: python3 tools/check_protocol_fidelity.py --simTime=20 --out=sim_health_report.md
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: sim-health-report
-          path: ns-3-dev/sim_health_report.md
+          path: sim_health_report.md
