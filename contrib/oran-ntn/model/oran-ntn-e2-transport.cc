@@ -101,6 +101,7 @@ enum Flag : uint32_t
     kRsrq = 1u << 5,
     kLat = 1u << 6,
     kNtn = 1u << 7,
+    kNoRadio = 1u << 8, //!< E2KpmReport::radioValid == false
 };
 } // namespace
 
@@ -677,7 +678,8 @@ OranNtnE2Transport::EncodeKpm(const E2KpmReport& r)
     uint32_t flags = (r.sinrMeasured ? kSinr : 0) | (r.throughputMeasured ? kThp : 0) |
                      (r.prbMeasured ? kPrb : 0) | (r.blerMeasured ? kBler : 0) |
                      (r.rsrpMeasured ? kRsrp : 0) | (r.rsrqMeasured ? kRsrq : 0) |
-                     (r.latencyMeasured ? kLat : 0) | (r.isNtn ? kNtn : 0);
+                     (r.latencyMeasured ? kLat : 0) | (r.isNtn ? kNtn : 0) |
+                     (r.radioValid ? 0 : kNoRadio);
     addInt("CTX.UeId", r.ueId);
     addInt("CTX.SliceId", r.sliceId);
     addInt("CTX.ActiveUes", r.activeUes);
@@ -765,6 +767,7 @@ OranNtnE2Transport::DecodeKpm(const std::vector<uint8_t>& bytes, E2KpmReport& r)
     r.rsrqMeasured = flags & kRsrq;
     r.latencyMeasured = flags & kLat;
     r.isNtn = flags & kNtn;
+    r.radioValid = !(flags & kNoRadio);
     return true;
 }
 

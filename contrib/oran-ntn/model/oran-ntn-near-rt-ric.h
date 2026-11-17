@@ -209,6 +209,13 @@ class OranNtnNearRtRic : public Object
 
     RicMetrics GetMetrics() const;
 
+    /// KPM reports kept in the SDL but not routed to xApps because they carried no radio
+    /// measurement (E2KpmReport::radioValid == false).
+    uint64_t GetNoRadioReportCount() const
+    {
+        return m_noRadioReports;
+    }
+
     /**
      * \brief Write comprehensive metrics to file
      */
@@ -223,6 +230,8 @@ class OranNtnNearRtRic : public Object
 
   protected:
     void DoDispose() override;
+
+    uint64_t m_noRadioReports{0}; //!< see GetNoRadioReportCount()
 
   private:
     void RouteIndicationToXapps(uint32_t subscriptionId,

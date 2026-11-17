@@ -1157,7 +1157,12 @@ NrGnbMac::DoBuildRarList(SlotAllocInfo& slotAllocInfo)
 
     if (!slotAllocInfo.m_buildRarList.empty())
     {
-        m_rapIdRntiMap.clear(); // reset RA preamble to RNTI MAP
+        // Forget only the RNTIs answered in this RAR. Clearing the whole map dropped RNTIs whose
+        // Msg3 grant is scheduled in a later slot, and DoBuildRarList then aborted on them.
+        for (const auto& rar : slotAllocInfo.m_buildRarList)
+        {
+            m_rapIdRntiMap.erase(rar.ulMsg3Dci->m_rnti);
+        }
         NS_LOG_DEBUG("Sending RAR message to UE.");
     }
     else

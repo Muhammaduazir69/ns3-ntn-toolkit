@@ -1,0 +1,101 @@
+# NTN/ns-3.43 adaptation patch - order the DL control messages of a slot by message type, not by heap address (run-to-run determinism; from Wave 2 M2)
+# base: upstream 5g-lena v3.3.1 plus patches 01-10
+# apply from contrib/nr/ with: patch -p1 < ntn-patches/11-nr-gnb-ctrl-msg-order-by-type.patch
+#
+diff --git a/model/nr-gnb-phy.cc b/model/nr-gnb-phy.cc
+--- a/model/nr-gnb-phy.cc
++++ b/model/nr-gnb-phy.cc
+@@ -34,6 +34,25 @@
+ #include <unordered_set>
+ #include <vector>
+ 
++
++namespace
++{
++/**
++ * ntn-patch 11: order the control messages of a slot by message type, never by
++ * address. std::list<Ptr<T>>::sort() and merge() without a comparator use
++ * ns3::operator<(Ptr, Ptr), which compares raw heap pointers, so the order in
++ * which a UE received e.g. SIB1 and an UL DCI in the same slot depended on the
++ * allocator: outputs changed with ASLR, the length of the output path or any
++ * unrelated code change. list::sort and list::merge are stable, so messages of
++ * the same type keep their insertion order.
++ */
++bool
++CtrlMsgTypeLess(const ns3::Ptr<ns3::NrControlMessage>& a, const ns3::Ptr<ns3::NrControlMessage>& b)
++{
++    return a->GetMessageType() < b->GetMessageType();
++}
++} // namespace
++
+ namespace ns3
+ {
+ 
+@@ -913,8 +932,8 @@
+ {
+     NS_LOG_FUNCTION(this);
+     auto ctrlMsgs = PopCurrentSlotCtrlMsgs();
+-    ctrlMsgs.sort();
+-    ctrlMsgs.merge(RetrieveMsgsFromDCIs(m_currentSlot));
++    ctrlMsgs.sort(CtrlMsgTypeLess);
++    ctrlMsgs.merge(RetrieveMsgsFromDCIs(m_currentSlot), CtrlMsgTypeLess);
+ 
+     if (m_netDevice != nullptr)
+     {
+@@ -1195,7 +1214,7 @@
+             ctrlMsgs.push_back(msg);
+         }
+     }
+-    ctrlMsgs.sort();
++    ctrlMsgs.sort(CtrlMsgTypeLess);
+     return ctrlMsgs;
+ }
+ 
+@@ -1221,7 +1240,8 @@
+             ctrlMsgs.merge(RetrieveDciFromAllocation(m_currSlotAllocInfo,
+                                                      DciInfoElementTdma::DL,
+                                                      k0delay,
+-                                                     k1delay));
++                                                     k1delay),
++                           CtrlMsgTypeLess);
+         }
+         else if (SlotAllocInfoExists(targetSlot))
+         {
+@@ -1230,7 +1250,8 @@
+             ctrlMsgs.merge(RetrieveDciFromAllocation(PeekSlotAllocInfo(targetSlot),
+                                                      DciInfoElementTdma::DL,
+                                                      k0delay,
+-                                                     k1delay));
++                                                     k1delay),
++                           CtrlMsgTypeLess);
+         }
+         else
+         {
+@@ -1251,7 +1272,8 @@
+             ctrlMsgs.merge(RetrieveDciFromAllocation(m_currSlotAllocInfo,
+                                                      DciInfoElementTdma::UL,
+                                                      k2delay,
+-                                                     k1delay));
++                                                     k1delay),
++                           CtrlMsgTypeLess);
+         }
+         else if (SlotAllocInfoExists(targetSlot))
+         {
+@@ -1260,14 +1282,15 @@
+             ctrlMsgs.merge(RetrieveDciFromAllocation(PeekSlotAllocInfo(targetSlot),
+                                                      DciInfoElementTdma::UL,
+                                                      k2delay,
+-                                                     k1delay));
++                                                     k1delay),
++                           CtrlMsgTypeLess);
+         }
+         else
+         {
+             NS_LOG_DEBUG("No allocation found for slot " << targetSlot);
+         }
+     }
+-    ctrlMsgs.sort();
++    ctrlMsgs.sort(CtrlMsgTypeLess);
+     return ctrlMsgs;
+ }
+ 

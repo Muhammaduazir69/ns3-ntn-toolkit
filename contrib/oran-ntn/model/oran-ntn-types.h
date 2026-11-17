@@ -130,6 +130,13 @@ struct E2KpmReport
     /// exists to prevent. Defaults false so a caller must claim the
     /// measurement rather than inherit the claim.
     bool sinrMeasured = false;
+    /// Wave 4: false when no PHY/RRC measurement exists for this UE yet (for example before its
+    /// first transport block). rsrp/rsrq/sinr/cqi then carry no information and should be NaN.
+    /// The E2 node never evaluates a SINR event trigger on such a report, the near-RT RIC keeps it
+    /// in the SDL but does not route it to xApps, and the canonical KPM marks its SINR entries as
+    /// not present. Before this flag a producer had to put a sentinel (-100 dB) in sinr_dB, which
+    /// reached xApps, and fired "SINR below threshold" event triggers, as if it were measured.
+    bool radioValid = true;
     bool throughputMeasured = false;   //!< throughput_Mbps came from FlowMonitor/RX bytes
     bool prbMeasured = false;          //!< prbUtilization came from the real scheduler
     bool blerMeasured = false;         //!< harqBler came from measured HARQ NACKs

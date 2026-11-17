@@ -15,7 +15,7 @@
  * is the expected physical outcome, not a defect. The direct/relay/orphan split is therefore
  * driven by the MEASURED radio, not V2xLeoDirect's closed-form budget.
  *
- * Quick test:  --vehicles=16 --simTime=30 (at most 16 vehicles, see the nr limit below)
+ * Quick test:  --vehicles=16 --simTime=30 (up to 40 vehicles, the size of the FCD trace)
  */
 #include "ns3/command-line.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
@@ -67,7 +67,7 @@ Step()
         return;
     }
     g_bridge->Step();
-    // MEASURED LEO baseline SINR — live mean over the real-cell terminals.
+    // MEASURED LEO baseline SINR: live mean over the real-cell terminals.
     // GetMeanDlSinrDb() is an end-of-run aggregate (computed in Collect())
     // and reads 0 during the run, which froze every relay-decision column
     // at zero (caught by the regeneration sweep). Use the per-UE recent
@@ -162,11 +162,10 @@ Step()
 int
 main(int argc, char* argv[])
 {
-    // V2X-1: every vehicle is a real UE of the measured cell now, and the
-    // vendored nr v3.3 RRC cannot bring an arbitrary number of them through
-    // connection setup at once. Measured on this scenario: 16 attach cleanly,
-    // 24 aborts with "unexpected event in state IDLE_CONNECTING". The default
-    // is the largest count that actually runs rather than one that crashes.
+    // V2X-1: every vehicle is a real UE of the measured cell. More than 16 used to abort in nr v3.3
+    // connection setup ("unexpected event in state IDLE_CONNECTING"); the cause was the gNB MAC's
+    // RNTI-to-preamble map keyed by uint8_t plus a double RAR match, fixed by nr patch 12. All 40
+    // vehicles of the trace now attach. The default stays 16 to keep the run short.
     std::size_t nVehicles = 16;
     double simTimeSec = 30.0;
     double satEirpDbm = -1.0; // sentinel: backend-appropriate default chosen below
@@ -176,7 +175,7 @@ main(int argc, char* argv[])
     std::string outputDir = "ntn-v2x-rural-highway-output";
 
     CommandLine cmd(__FILE__);
-    cmd.AddValue("vehicles", "Number of vehicles (each is a real UE; see the nr limit below)",
+    cmd.AddValue("vehicles", "Number of vehicles, at most 40 (each is a real UE)",
                  nVehicles);
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
     cmd.AddValue("satEirpDbm", "Satellite EIRP / gNB Tx power (dBm); -1 = backend default", satEirpDbm);
@@ -207,7 +206,7 @@ main(int argc, char* argv[])
 
     // FCD-format CSV vehicle mobility (trace replay from a supplied file; the
     // module ships a synthetic constant-speed FCD-format CSV fixture as the
-    // default trace — not a SUMO microsimulation, and the loader reads a CSV
+    // default trace, not a SUMO microsimulation, and the loader reads a CSV
     // dialect, not SUMO's native fcd-output XML. Pass --trace for your own CSV,
     // e.g. one converted from a SUMO fcd-export).
     g_bridge = CreateObject<SumoTraciBridge>();
@@ -234,15 +233,10 @@ main(int argc, char* argv[])
     // once and needs no substitute model: GetUeRecentSinrDb(v) becomes vehicle
     // v's own PHY measurement, so blockage, shadowing and the elevation change
     // over the pass arrive through the channel that is already there.
-    // Fail with an explanation rather than an opaque RRC assertion deep in the
-    // vendored stack. This bound is a property of nr v3.3's connection setup,
-    // not of the scenario, and it lifts with the ns-3.48 migration.
-    NS_ABORT_MSG_IF(nVehicles > 16,
-                    "vehicles=" << nVehicles
-                                << ": each vehicle is a real UE, and vendored nr v3.3 cannot "
-                                   "bring more than about 16 through connection setup at once "
-                                   "(24 aborts with 'unexpected event in state "
-                                   "IDLE_CONNECTING'). Reduce --vehicles.");
+    // The bound is the trace: it holds 40 distinct vehicles.
+    NS_ABORT_MSG_IF(nVehicles > 40,
+                    "vehicles=" << nVehicles << ": the rural-highway FCD trace holds 40 vehicles. "
+                                   "Reduce --vehicles.");
     NodeContainer ueNodes;
     ueNodes.Create(static_cast<uint32_t>(nVehicles));
     for (std::size_t i = 0; i < nVehicles; ++i)
@@ -344,7 +338,7 @@ main(int argc, char* argv[])
     std::cout << "ntn-v2x-rural-highway done.\n"
               << "  vehicles            : " << nVehicles << "\n"
               << "  measured cell SINR  : " << rs.GetMeanDlSinrDb() << " dB (baseline)\n"
-              << "  OLD closed-form SINR: " << formula.snrDb << " dB (V2xLeoDirect — superseded)\n"
+              << "  OLD closed-form SINR: " << formula.snrDb << " dB (V2xLeoDirect, superseded)\n"
               << "  measured throughput : " << rs.GetRxThroughputMbps() << " Mbps\n"
               << "  csv                 : " << outputDir << "/ntn-v2x-rural-highway.csv\n";
     Simulator::Destroy();

@@ -215,6 +215,13 @@ OranNtnXappBase::HandleKpmIndication(uint32_t subscriptionId,
 {
     NS_LOG_FUNCTION(this << subscriptionId << report.gnbId);
 
+    // Same rule as the near-RT RIC router, for the local-delivery path: no radio measurement, no
+    // input to radio decisions (see E2KpmReport::radioValid).
+    if (!report.radioValid)
+    {
+        return;
+    }
+
     auto& gnbReports = m_kpmDatabase[report.gnbId];
     gnbReports.push_back(report);
 

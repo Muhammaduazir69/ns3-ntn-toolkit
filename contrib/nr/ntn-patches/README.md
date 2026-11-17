@@ -21,7 +21,7 @@ is compatible with this toolkit's ns-3 base. See
 and v5.0 (ns-3.48, the only line with native NTN) are ns-3-base migrations
 rather than in-place `nr` bumps.
 
-## The eleven patches (apply in order from `contrib/nr/`)
+## The twelve patches (apply in order from `contrib/nr/`)
 
     for p in ntn-patches/[0-9][0-9]-*.patch; do patch -p1 < "$p"; done
 
@@ -29,10 +29,10 @@ The eleven (apply in order; the two-digit glob sorts 10 and 11 after 09):
 
 | # | File | Why |
 |---|------|-----|
-| 01 | `model/nr-common.h` | `#undef` ns-3.43 LTE's `MIN_NO_CC`/`MAX_NO_CC` *macros* before nr's `constexpr` redeclaration — without this the two collide and nr fails to compile on ns-3.43. |
-| 02 | `model/nr-mac-scheduler-ns3.cc` | Tolerate a stale/zero CQI across an X2 handover reconfiguration instead of wedging the scheduler — required for NTN inter-satellite handover to complete. |
+| 01 | `model/nr-common.h` | `#undef` ns-3.43 LTE's `MIN_NO_CC`/`MAX_NO_CC` *macros* before nr's `constexpr` redeclaration: without this the two collide and nr fails to compile on ns-3.43. |
+| 02 | `model/nr-mac-scheduler-ns3.cc` | Tolerate a stale/zero CQI across an X2 handover reconfiguration instead of wedging the scheduler: required for NTN inter-satellite handover to complete. |
 | 03 | `model/nr-pdcp-header.cc` | TS 38.323 §6.2.2/§6.2.3: deserialize a Control PDU (D/C=0) instead of `NS_ASSERT`-aborting. A real X2/Xn handover with non-zero link delay (any NTN feeder/ISL leg) delivers Control PDUs to PDCP; asserting turned a spec-mandated PDU into a crash. |
-| 04 | `model/nr-pdcp.cc` | TS 38.323 §6.2.3: `DoReceivePdu` consumes and discards a Control PDU (status report / RoHC feedback — not modelled here) rather than delivering it upward as an SDU or advancing the RX sequence number. |
+| 04 | `model/nr-pdcp.cc` | TS 38.323 §6.2.3: `DoReceivePdu` consumes and discards a Control PDU (status report / RoHC feedback: not modelled here) rather than delivering it upward as an SDU or advancing the RX sequence number. |
 | 05 | `model/nr-gnb-phy.cc` | TS 38.213 §4.2 NTN K_offset: raise the `N2Delay` attribute checker upper bound from 4 to 320 slots. The terrestrial cap of 4 slots cannot hold the NTN cell-specific K_offset (~9–10 slots for a 600 km LEO round trip, far more for MEO/GEO), so `NtnRealStackHelper::SetKOffsetConsumption(true)` can program the geometry-derived K_offset into the UL DCI→PUSCH gap. |
 | 06 | `model/nr-mac-scheduler-tdma.cc` | `AssignRBGTDMA`: with as many active UEs as data symbols the allocator gave every UE one symbol (an 8-byte TB at MCS 0, below the DCI floor), so nothing was ever sent and the cell starved (UE12 livelock). Symbols are now shared so each scheduled UE gets a decodable TB. |
 | 07 | `model/nr-spectrum-phy.cc/.h` | Half-duplex DL control/data conflicts (a UE asked to receive while transmitting, which a ms-scale air delay without UE timing advance produces) are dropped and counted (`GetHalfDuplex*Drops`) instead of aborting the run; the counters feed the boundary A6/A9 diagnosis. |
@@ -40,6 +40,7 @@ The eleven (apply in order; the two-digit glob sorts 10 and 11 after 09):
 | 09 | `model/nr-gnb-phy.cc`, `helper/nr-helper.cc` | Control, including the PSS/SSB the UE measures, is sent on the gNB's configured cell beam (BeamManager predefined beam) and falls back to quasi-omni exactly as before when none is set (TS 38.215 5.1.1 SS-RSRP is a cell-level quantity). `NrHelper::DoAssignStreamsToChannelObjects` no longer dereferences a null `ThreeGppChannelModel` when another `MatrixBasedChannelModel` is plugged in. |
 | 10 | `model/nr-spectrum-phy.cc`, `model/nr-ue-net-device.cc/.h` | The UE serving cell follows handovers. `NrSpectrumPhy` labelled every UE DL TB in `RxPacketTraceUe` with `GetTargetGnb()->GetCellId()`, and `NrUeNetDevice::GetCellId()` returned the same; `m_targetGnb` is written once by `NrHelper::AttachToGnb` and no X2 handover (TS 38.331 5.3.5.5.2 reconfigurationWithSync) updates it. After the first handover every TB therefore carried the attach-time cell id, so any (cellId, RNTI) consumer lost the UE: `NtnRealStackHelper` per-UE SINR/TBLER went NaN, its per-UE RAN TB counters froze, and per-cell DL stats were credited to the old cell. `NrUeNetDevice::GetCellId()` now returns the cell the UE RRC is synchronized to (`NrUeRrc::GetCellId()`, the `targetPhysCellId` of the last reconfiguration), falling back to the attach-time gNB while the RRC has no cell, and the trace uses it. Identical to the old value until the first handover, so runs without handovers reproduce bit for bit. `GetTargetGnb()` itself is unchanged (setup-time DRB activation and beamforming pairing use it). |
 | 11 | `model/nr-gnb-phy.cc` | Run-to-run determinism. `NrGnbPhy` ordered the DL control messages of a slot with comparator-less `std::list::sort()` / `merge()`, which use `ns3::operator<(Ptr, Ptr)` and therefore compare raw heap addresses: the order in which a UE received, e.g., SIB1 and an UL DCI in the same slot depended on the allocator, so outputs changed with ASLR, the output-path length or any unrelated code change (the ntn-slice paper examples alternated between outputs on one binary). The messages are now ordered by message type with the same (stable) `sort`/`merge`, so messages of one type keep their insertion order. This can change the output of any run (the old order was arbitrary, not standard); it makes every run reproducible. Found by Wave 2 M2. |
+| 12 | `model/nr-gnb-mac.cc/.h`, `model/nr-ue-mac.cc` | RACH at scale. `NrGnbMac::m_rapIdRntiMap` (RNTI to RA preamble ID) was keyed by `uint8_t`, so every RNTI above 255 folded onto a lower one and a RAR could carry another UE's preamble ID once a cell had allocated 256 temporary C-RNTIs (a few dozen UEs with RACH retries); it is keyed by the 16-bit RNTI (TS 38.321 7.1). `DoBuildRarList` now forgets only the RNTIs answered in the RAR it sends instead of clearing the map, which dropped RNTIs whose Msg3 was granted in a later slot. `NrUeMac` accepts only the first RAR subPDU whose RAPID matches its preamble (TS 38.321 5.1.4); a second match made `NrUeRrc` abort with "unexpected event in state IDLE_CONNECTING". This was the "about 16 UEs" connection-setup limit: ntn-v2x-rural-highway now attaches all 40 vehicles of its trace, and ntn-scalability-load-regimes runs 60 nr UEs. Runs that never reached the bug (every paper gate) are unchanged. Wave 4. |
 
 Patch 10 changes outputs only after a handover (the UE DL RX trace cell id,
 the per-UE and per-cell statistics built on it, and the UE-side cell id in the
@@ -63,7 +64,7 @@ plus the nine patches reproduces `model/` and `helper/` byte-for-byte
 (`diff -rq`: 0 mismatches). Verified 2026-11-16 (Wave 2 core) for 01-10: the
 same pristine tree plus the ten patches reproduces `model/` and `helper/`
 byte-for-byte (`diff -rq`: 0 mismatches). Verified again for 01-11 the same
-day after patch 11: 0 mismatches.
+day after patch 11: 0 mismatches. Verified 2026-11-17 (Wave 4) for 01-12: 0 mismatches.
 
 ## Upgrading later
 

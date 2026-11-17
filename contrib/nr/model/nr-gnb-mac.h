@@ -324,7 +324,7 @@ class NrGnbMac : public Object
      * PHY through RAR control message
      * \param rarList list of messages that come from scheduler
      *
-     * Clears m_rapIdRntiMap.
+     * Removes the RNTIs answered in this RAR from m_rapIdRntiMap.
      */
     void DoBuildRarList(SlotAllocInfo& slotAllocInfo);
 
@@ -406,7 +406,10 @@ class NrGnbMac : public Object
 
     std::list<uint16_t> m_srRntiList; //!< List of RNTI that requested a SR
 
-    std::unordered_map<uint8_t, uint32_t> m_rapIdRntiMap; //!< RAPID RNTI map
+    // Keyed by RNTI (16 bit, TS 38.321 7.1). The key used to be uint8_t, which folded every RNTI
+    // above 255 onto a lower one, so RARs carried other UEs' preamble IDs once a cell had
+    // allocated 256 temporary C-RNTIs (a few dozen UEs with RACH retries).
+    std::unordered_map<uint16_t, uint32_t> m_rapIdRntiMap; //!< RNTI to RAPID map
 
     TracedCallback<uint8_t, uint16_t> m_srCallback; //!< Callback invoked when a UE requested a SR
 

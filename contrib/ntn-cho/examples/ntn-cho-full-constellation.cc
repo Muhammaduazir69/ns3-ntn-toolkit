@@ -782,7 +782,10 @@ main(int argc, char* argv[])
     cmd.AddValue("altitude", "Constellation altitude (km)", altitudeKm);
     cmd.AddValue("radio", "Radio backend: nr (5G-LENA FR1, 30 kHz SCS) | mmwave (FR2)", radio);
     cmd.AddValue("numCandidates", "Candidate satellite cells", numCandidates);
-    cmd.AddValue("satsPerPlane", "Walker in-plane satellites (spacing)", satsPerPlane);
+    cmd.AddValue("satsPerPlane",
+                 "Satellites in the whole Walker shell (T in T/P/F), despite the name; must be a "
+                 "multiple of numPlanes (with the default single plane it is the in-plane count)",
+                 satsPerPlane);
     cmd.AddValue("numPlanes", "Walker orbital planes", numPlanes);
     cmd.AddValue("inclinationDeg", "Walker inclination (deg)", inclinationDeg);
     cmd.AddValue("outputDir", "Output directory", outputDir);

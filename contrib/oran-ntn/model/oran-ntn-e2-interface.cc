@@ -263,7 +263,8 @@ OranNtnE2Node::SubmitKpmMeasurement(const E2KpmReport& report)
         if (sub.eventTrigger)
         {
             bool triggered = false;
-            if (report.sinr_dB < sub.eventThreshold)
+            // A report without a radio measurement cannot satisfy a SINR condition.
+            if (report.radioValid && report.sinr_dB < sub.eventThreshold)
             {
                 triggered = true;
             }

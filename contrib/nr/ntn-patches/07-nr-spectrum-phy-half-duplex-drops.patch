@@ -1,0 +1,200 @@
+# NTN/ns-3.43 adaptation patch - count and drop half-duplex DL control/data conflicts instead of aborting (boundary A6/A9 diagnosis)
+# base: upstream 5g-lena v3.3.1 plus patches 01-06
+# apply from contrib/nr/ with: patch -p1 < ntn-patches/07-nr-spectrum-phy-half-duplex-drops.patch
+#
+diff --git a/model/nr-spectrum-phy.cc b/model/nr-spectrum-phy.cc
+index 9184ac7f4..4b419f647 100644
+--- a/model/nr-spectrum-phy.cc
++++ b/model/nr-spectrum-phy.cc
+@@ -367,6 +367,14 @@ NrSpectrumPhy::SetDataErrorModelEnabled(bool dataErrorModelEnabled)
+     m_dataErrorModelEnabled = dataErrorModelEnabled;
+ }
+ 
++bool
++NrSpectrumPhy::IsDataErrorModelEnabled() const
++{
++    // NTN patch, see the header. The attribute is setter-only, so this is the
++    // only way to distinguish "error model off" from "clean link".
++    return m_dataErrorModelEnabled;
++}
++
+ void
+ NrSpectrumPhy::SetErrorModelType(TypeId errorModelType)
+ {
+@@ -579,7 +587,20 @@ NrSpectrumPhy::StartTxDataFrames(const Ptr<PacketBurst>& pb,
+         /* no break*/
+         [[fallthrough]];
+     case RX_UL_SRS:
+-        NS_FATAL_ERROR("Cannot TX while RX.");
++        // NTN patch, same rule as StartTxUlControlFrames. A TDD node cannot
++        // transmit and receive on one carrier at the same instant, and the
++        // modelled outcome is that the transmission does not happen, not that
++        // the simulation stops. Aborting models the absence of the scheduler
++        // rule, not a physical impossibility.
++        //
++        // Dropping DATA is more consequential than dropping control, because it
++        // removes user traffic and depresses throughput. It is therefore counted
++        // separately and reported: a run with a large GetDataDropCount() has an
++        // over-subscribed half-duplex node, and its throughput figure means
++        // something different from a run with zero. Silent loss here would be
++        // worse than the crash it replaces.
++        ++m_dataDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping DATA: half-duplex node is receiving (state " << m_state << ")");
+         break;
+     case TX:
+         // No break, gNB may transmit multiple times to multiple UEs
+@@ -657,7 +678,22 @@ NrSpectrumPhy::StartTxDlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
+     case RX_UL_CTRL:
+         /* no break*/
+     case RX_UL_SRS:
+-        NS_FATAL_ERROR("Cannot TX while RX.");
++        // NTN patch, same rule as the other transmit paths. A TDD gNB cannot
++        // send downlink control while it is receiving on the same carrier; the
++        // modelled outcome is that it does not send, not that the simulation
++        // stops.
++        //
++        // This is the site that blocked boundary A6: enabling a real
++        // ConstantSpeedPropagationDelayModel on the air interface, so the
++        // service-link slant is borne by the radio rather than folded into the
++        // backhaul, made the downlink control of one slot overlap the uplink
++        // reception of another once the slant exceeded a few hundred kilometres.
++        //
++        // Counted separately from uplink control, because a lost downlink
++        // control message costs the UE a grant or an acknowledgement and that is
++        // a different kind of damage from a lost SRS.
++        ++m_dlCtrlDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping DL CTRL: half-duplex node is receiving (state " << m_state << ")");
+         break;
+     case TX:
+         NS_FATAL_ERROR("Cannot TX while already TX.");
+@@ -708,7 +744,25 @@ NrSpectrumPhy::StartTxUlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
+     case RX_UL_CTRL:
+         /* no break */
+     case RX_UL_SRS:
+-        NS_FATAL_ERROR("Cannot TX while RX.");
++        // NTN patch. A half-duplex UE asked to transmit uplink control while it
++        // is receiving does not crash; it does not transmit. TS 38.213 defines
++        // the prioritisation, and dropping the lower-priority uplink is the
++        // modelled outcome. Aborting here models the ABSENCE of that rule, not a
++        // physical impossibility.
++        //
++        // This matters over NTN specifically. The cell-specific K_offset widens
++        // the gap between an uplink grant and the transmission it authorises
++        // from about 2 slots to about 13 at 780 km and 30 kHz SCS, and the
++        // scheduler does not reserve the target slot when it issues the grant,
++        // so across a window that wide it can later allocate a downlink to the
++        // same UE in the slot the grant claimed. Terrestrial spacing hides this.
++        //
++        // The drop is COUNTED, not silent: GetUlCtrlDropCount() reports it, so a
++        // run that quietly stopped sending uplink control is visible rather than
++        // merely not fatal. A scenario seeing a large count is over-subscribing
++        // its uplink, and should say so.
++        ++m_ulCtrlDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping UL CTRL: half-duplex UE is receiving (state " << m_state << ")");
+         break;
+     case TX:
+         NS_FATAL_ERROR("Cannot TX while already TX.");
+@@ -1159,8 +1213,20 @@ NrSpectrumPhy::StartRxSrs(const Ptr<NrSpectrumSignalParametersUlCtrlFrame>& para
+     }
+     break;
+     default: {
+-        // not allowed state for starting the SRS reception
+-        NS_FATAL_ERROR("Not allowed state for starting SRS reception.");
++        // NTN patch, same rule as the transmit paths above. A TDD gNB that is
++        // transmitting cannot simultaneously receive an SRS on the same
++        // carrier; the modelled outcome is that it does not receive it, not
++        // that the simulation stops.
++        //
++        // Reached over NTN because the cell-specific K_offset widens the
++        // grant-to-transmission gap enough that a UE's SRS can arrive while the
++        // gNB has begun a downlink it scheduled later. Counted, because an SRS
++        // the gNB never heard degrades its channel estimate and that should be
++        // visible rather than assumed away. Measured on
++        // ntn-cho-full-constellation at 8 UEs over 20 s: single-digit drops
++        // against ~144,000 received transport blocks.
++        ++m_srsDroppedHalfDuplex;
++        NS_LOG_WARN("Dropping SRS reception: node is not IDLE/BUSY (state " << m_state << ")");
+         break;
+     }
+     }
+diff --git a/model/nr-spectrum-phy.h b/model/nr-spectrum-phy.h
+index a7aaa5706..5bdd3bc91 100644
+--- a/model/nr-spectrum-phy.h
++++ b/model/nr-spectrum-phy.h
+@@ -234,6 +234,19 @@ class NrSpectrumPhy : public SpectrumPhy
+      * \param dataErrorModelEnabled boolean saying whether the data error model should be enabled
+      */
+     void SetDataErrorModelEnabled(bool dataErrorModelEnabled);
++
++    /**
++     * \brief NTN patch: read back whether the data error model is enabled.
++     *
++     * The DataErrorModelEnabled attribute is registered with a setter-only
++     * accessor, so GetAttribute on it aborts and a health gate cannot tell a
++     * disabled error model from a pristine link that simply produced no block
++     * errors. Both report a TBLER of exactly zero. This getter makes the
++     * distinction readable.
++     *
++     * \return true when the data error model is applied to received TBs
++     */
++    bool IsDataErrorModelEnabled() const;
+     /**
+      * \brief Sets the error model type
+      */
+@@ -469,7 +482,56 @@ class NrSpectrumPhy : public SpectrumPhy
+      */
+     void DoDispose() override;
+ 
++  public:
++    /**
++     * \brief Uplink control transmissions dropped because the half-duplex UE
++     *        was receiving at the time (NTN patch).
++     *
++     * Non-zero means the scheduler asked this UE to transmit uplink control in a
++     * slot it was already using to receive. Over NTN that is expected under a
++     * large cell-specific K_offset; a large count means the uplink is
++     * over-subscribed and the run should report it rather than hide it.
++     */
++    uint64_t GetUlCtrlDropCount() const { return m_ulCtrlDroppedHalfDuplex; }
++
++    /**
++     * \brief Data transmissions dropped because the half-duplex node was
++     *        receiving at the time (NTN patch).
++     *
++     * More consequential than a control drop: this is user traffic that never
++     * went out, so a non-zero count changes what the throughput figure means.
++     */
++    uint64_t GetDataDropCount() const { return m_dataDroppedHalfDuplex; }
++
++    /**
++     * \brief SRS receptions dropped because the node was not IDLE or BUSY
++     *        (NTN patch).
++     *
++     * An SRS the gNB never heard degrades its channel estimate for that UE, so
++     * a non-zero count is worth reporting rather than assuming away.
++     */
++    uint64_t GetSrsDropCount() const { return m_srsDroppedHalfDuplex; }
++
++    /**
++     * \brief Downlink control transmissions dropped because the half-duplex
++     *        node was receiving at the time (NTN patch).
++     *
++     * A lost downlink control message costs the UE a grant or an
++     * acknowledgement, which is a different kind of damage from a lost SRS, so
++     * it is counted apart from the uplink figure.
++     */
++    uint64_t GetDlCtrlDropCount() const { return m_dlCtrlDroppedHalfDuplex; }
++
+   private:
++    /// NTN patch: half-duplex uplink-control drops, see GetUlCtrlDropCount().
++    uint64_t m_ulCtrlDroppedHalfDuplex{0};
++    /// NTN patch: half-duplex data drops, see GetDataDropCount().
++    uint64_t m_dataDroppedHalfDuplex{0};
++    /// NTN patch: SRS receptions dropped, see GetSrsDropCount().
++    uint64_t m_srsDroppedHalfDuplex{0};
++    /// NTN patch: downlink-control drops, see GetDlCtrlDropCount().
++    uint64_t m_dlCtrlDroppedHalfDuplex{0};
++
+     std::vector<MimoSinrChunk>
+         m_mimoSinrPerceived; //!< received SINR values during data reception for TB decoding, to
+                              //!< replace m_sinrPerceived for all (MIMO and SISO) receivers

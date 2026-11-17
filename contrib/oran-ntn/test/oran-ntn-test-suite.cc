@@ -141,6 +141,57 @@ class OranNtnRicTestCase : public TestCase
 };
 
 // ============================================================================
+//  Wave 4: a KPM report without a radio measurement (radioValid = false)
+// ============================================================================
+
+/**
+ * Before the first PHY measurement a producer used to send a -100 dB sentinel SINR, which reached
+ * xApps (and SINR event triggers) as a real value. The report now says "no radio measurement":
+ * the flag survives the E2 packet transport, and the xApp base never stores or processes it.
+ */
+class OranNtnNoRadioMeasurementTestCase : public TestCase
+{
+  public:
+    OranNtnNoRadioMeasurementTestCase()
+        : TestCase("O-RAN NTN KPM without a radio measurement is carried but not acted on")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        E2KpmReport none{};
+        none.gnbId = 7;
+        none.ueId = 1;
+        none.timestamp = 1.0;
+        none.radioValid = false;
+        none.sinr_dB = std::nan("");
+        E2KpmReport back{};
+        NS_TEST_ASSERT_MSG_EQ(OranNtnE2Transport::DecodeKpm(OranNtnE2Transport::EncodeKpm(none), back),
+                              true, "decode");
+        NS_TEST_ASSERT_MSG_EQ(back.radioValid, false, "radioValid=false must survive the transport");
+
+        E2KpmReport meas = none;
+        meas.radioValid = true;
+        meas.sinr_dB = 12.5;
+        meas.timestamp = 2.0;
+        NS_TEST_ASSERT_MSG_EQ(OranNtnE2Transport::DecodeKpm(OranNtnE2Transport::EncodeKpm(meas), back),
+                              true, "decode");
+        NS_TEST_ASSERT_MSG_EQ(back.radioValid, true, "a measured report stays valid");
+
+        auto xapp = CreateObject<OranNtnXappHoPredict>();
+        xapp->HandleKpmIndication(1, none);
+        NS_TEST_ASSERT_MSG_EQ(xapp->GetLatestReport(7).timestamp, 0.0,
+                              "an xApp must not store a report without a radio measurement");
+        xapp->HandleKpmIndication(1, meas);
+        NS_TEST_ASSERT_MSG_EQ_TOL(xapp->GetLatestReport(7).sinr_dB, 12.5, 1e-9,
+                                  "a measured report is stored");
+        xapp->Dispose();
+        Simulator::Destroy();
+    }
+};
+
+// ============================================================================
 //  Test 2: E2 Interface subscription and indication flow
 // ============================================================================
 
@@ -7713,6 +7764,7 @@ class OranNtnTestSuite : public TestSuite
         AddTestCase(new A1GuidedConsultsPolicyTest, TestCase::Duration::QUICK);
         AddTestCase(new RcStyle3WireRoundTripTest, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnRicTestCase, TestCase::Duration::QUICK);
+        AddTestCase(new OranNtnNoRadioMeasurementTestCase, TestCase::Duration::QUICK);
         AddTestCase(new OranNtnE2TestCase, TestCase::Duration::QUICK);
         // E2 loop-timing realism: return-path RC delay, control-loop
         // alignment, Unix-epoch timestamp offset.

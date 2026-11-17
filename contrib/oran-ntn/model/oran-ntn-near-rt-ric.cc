@@ -594,6 +594,14 @@ OranNtnNearRtRic::RouteIndicationToXapps(uint32_t subscriptionId,
     m_sdl->StoreLatestKpm(report.gnbId, report);
     m_kpmReceived(report.gnbId, report);
 
+    // A report without a radio measurement stays in the SDL (with its flag) but is not routed:
+    // every xApp decision reads its radio fields, which carry no information yet.
+    if (!report.radioValid)
+    {
+        ++m_noRadioReports;
+        return;
+    }
+
     // Route to subscribed xApps
     for (auto& [id, xapp] : m_xapps)
     {

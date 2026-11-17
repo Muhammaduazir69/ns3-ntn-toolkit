@@ -179,13 +179,13 @@ BuildCanonicalKpmMeasurements(const E2KpmReport& r,
     // averaging is wired the per-UE sinr is forwarded; reviewers should treat
     // the FIVE_QI label as the disambiguator.
     out.push_back(
-        MakeMeasurement(kpm::kCarrAvgSinr, r.sinr_dB, /*present=*/true, base, sinrProv));
+        MakeMeasurement(kpm::kCarrAvgSinr, r.sinr_dB, /*present=*/r.radioValid, base, sinrProv));
 
     // L1M.RS-SINR.Mean — L1-measured RS-SINR mean (dB), per 3GPP TS 38.215
     // (RS-SINR PHY quantity), NOT a TS 28.552 PM counter. The mmwave PHY emits
     // the same source today; once srsRAN-style per-symbol L1 SINR averaging is
     // in place the two metrics will diverge.
-    out.push_back(MakeMeasurement(kpm::kL1mRsSinrMean, r.sinr_dB, /*present=*/true, base,
+    out.push_back(MakeMeasurement(kpm::kL1mRsSinrMean, r.sinr_dB, /*present=*/r.radioValid, base,
                                   sinrProv));
 
     // TB.TotNbrDl / TB.ErrTotNbrDl — canonical TS 28.552 DL transport-block

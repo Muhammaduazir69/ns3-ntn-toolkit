@@ -42,9 +42,6 @@ using namespace ns3;
 // read where the CSV row is written, so the provenance column cannot drift from
 // the value it describes.
 static bool g_rsrpMeasured = false;
-/// SINR the E2 report carries before the first PHY measurement (E2KpmReport
-/// has no noValue flag); the CSV writes empty fields for such rows.
-constexpr double kNoMeasSinrDb = -100.0;
 
 NS_LOG_COMPONENT_DEFINE("SaginFlightLeoE2");
 
@@ -134,7 +131,10 @@ EmitKpm(Context* ctx, Time reportPeriod)
     r.gnbId = ctx->e2node->GetNodeId();
     r.isNtn = true;
     r.ueId = 1;
-    r.sinr_dB = haveMeas ? measSinr : kNoMeasSinrDb;
+    // Before the first PHY measurement the report says so (radioValid=false, NaN radio fields)
+    // instead of carrying a -100 dB sentinel that the RIC would read as a measurement.
+    r.radioValid = haveMeas;
+    r.sinr_dB = haveMeas ? measSinr : std::nan("");
 
     // SAGIN-4. RSRP, RSRQ and CQI were derived algebraically from the SINR -
     // `sinr - 95`, an erfc-free RSRQ identity, and `sinr/2 + 7` - and written
@@ -157,9 +157,9 @@ EmitKpm(Context* ctx, Time reportPeriod)
     }
     else if (!haveMeas)
     {
-        // Before the first PHY measurement r.sinr_dB is the -100 dB sentinel;
-        // reconstructing RSRP from it wrote -195 dBm rows, below any TS 38.133
-        // reportable value (-156 dBm). No measurement, no RSRP.
+        // Before the first PHY measurement there is no SINR to reconstruct RSRP
+        // from (doing so from the old -100 dB sentinel wrote -195 dBm rows, below
+        // any TS 38.133 reportable value). No measurement, no RSRP.
         r.rsrp_dBm = std::nan("");
     }
     else
@@ -181,9 +181,17 @@ EmitKpm(Context* ctx, Time reportPeriod)
     // RSRQ and CQI remain ALGEBRAIC functions of the SINR. Neither is measured
     // anywhere on this path, and inventing a source for them would be worse
     // than saying so: the CSV now carries a provenance column that names them.
-    const double sinrLin = std::pow(10.0, r.sinr_dB / 10.0);
-    r.rsrq_dB = std::max(-19.5, std::min(-3.0, 10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
-    r.cqi = static_cast<uint8_t>(std::clamp(r.sinr_dB / 2.0 + 7.0, 0.0, 15.0));
+    if (haveMeas)
+    {
+        const double sinrLin = std::pow(10.0, r.sinr_dB / 10.0);
+        r.rsrq_dB = std::max(-19.5, std::min(-3.0, 10.0 * std::log10(sinrLin / (1.0 + sinrLin))));
+        r.cqi = static_cast<uint8_t>(std::clamp(r.sinr_dB / 2.0 + 7.0, 0.0, 15.0));
+    }
+    else
+    {
+        r.rsrq_dB = std::nan("");
+        r.cqi = 0; // TS 38.214 CQI 0 = "out of range"; radioValid=false marks it as no information
+    }
     // LIVE measured throughput over the report window: GetRxThroughputMbps()
     // is an end-of-run aggregate (computed in Collect()) and reads 0 during
     // the run — the regeneration sweep caught this column stuck at zero.
@@ -311,9 +319,9 @@ main(int argc, char* argv[])
     uint64_t indicationsDelivered = 0;
     e2->SetIndicationCallback([&kpmOut, &indicationsDelivered](E2Indication ind) {
         const E2KpmReport& r = ind.kpmReport;
-        // Before the first PHY measurement the report carries the E2 sentinel;
+        // Before the first PHY measurement the report has radioValid=false;
         // the CSV writes empty radio fields instead of a placeholder number.
-        const bool meas = r.sinr_dB != kNoMeasSinrDb;
+        const bool meas = r.radioValid;
         kpmOut << r.timestamp << "," << r.gnbId << "," << r.ueId << ",";
         if (meas && !std::isnan(r.rsrp_dBm))
         {

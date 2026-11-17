@@ -1,0 +1,58 @@
+# NTN/ns-3.43 adaptation patch - RACH at scale: key the gNB RNTI-to-RAPID map by the 16-bit RNTI (it was uint8_t, folding RNTIs above 255), forget only the RNTIs answered in a RAR, and let a UE accept only the first matching RAR subPDU (TS 38.321 5.1.4). Fixes the 'unexpected event in state IDLE_CONNECTING' abort with tens of UEs (Wave 4)
+# base: upstream 5g-lena v3.3.1 plus patches 01-11
+# apply from contrib/nr/ with: patch -p1 < ntn-patches/12-nr-rach-rar-rnti-map-and-single-match.patch
+#
+--- a/model/nr-gnb-mac.h	2026-11-17 08:57:03.385831214 +0500
++++ b/model/nr-gnb-mac.h	2026-11-17 08:57:11.438624544 +0500
+@@ -324,7 +324,7 @@
+      * PHY through RAR control message
+      * \param rarList list of messages that come from scheduler
+      *
+-     * Clears m_rapIdRntiMap.
++     * Removes the RNTIs answered in this RAR from m_rapIdRntiMap.
+      */
+     void DoBuildRarList(SlotAllocInfo& slotAllocInfo);
+ 
+@@ -406,7 +406,10 @@
+ 
+     std::list<uint16_t> m_srRntiList; //!< List of RNTI that requested a SR
+ 
+-    std::unordered_map<uint8_t, uint32_t> m_rapIdRntiMap; //!< RAPID RNTI map
++    // Keyed by RNTI (16 bit, TS 38.321 7.1). The key used to be uint8_t, which folded every RNTI
++    // above 255 onto a lower one, so RARs carried other UEs' preamble IDs once a cell had
++    // allocated 256 temporary C-RNTIs (a few dozen UEs with RACH retries).
++    std::unordered_map<uint16_t, uint32_t> m_rapIdRntiMap; //!< RNTI to RAPID map
+ 
+     TracedCallback<uint8_t, uint16_t> m_srCallback; //!< Callback invoked when a UE requested a SR
+ 
+--- a/model/nr-gnb-mac.cc	2026-11-17 08:56:52.273906745 +0500
++++ b/model/nr-gnb-mac.cc	2026-11-17 08:57:11.438502281 +0500
+@@ -1157,7 +1157,12 @@
+ 
+     if (!slotAllocInfo.m_buildRarList.empty())
+     {
+-        m_rapIdRntiMap.clear(); // reset RA preamble to RNTI MAP
++        // Forget only the RNTIs answered in this RAR. Clearing the whole map dropped RNTIs whose
++        // Msg3 grant is scheduled in a later slot, and DoBuildRarList then aborted on them.
++        for (const auto& rar : slotAllocInfo.m_buildRarList)
++        {
++            m_rapIdRntiMap.erase(rar.ulMsg3Dci->m_rnti);
++        }
+         NS_LOG_DEBUG("Sending RAR message to UE.");
+     }
+     else
+--- a/model/nr-ue-mac.cc	2026-11-17 08:56:52.273800551 +0500
++++ b/model/nr-ue-mac.cc	2026-11-17 08:57:11.438357726 +0500
+@@ -1048,7 +1048,12 @@
+             {
+                 if (it->rarPayload.raPreambleId == m_raPreambleId)
+                 {
++                    // TS 38.321 5.1.4: the first MAC subPDU whose RAPID matches the transmitted
++                    // preamble completes RAR reception. A RAR can also carry a stale entry for the
++                    // same (wrapped) preamble ID that another UE abandoned; handling a second match
++                    // made the RRC see "random access successful" twice and abort in IDLE_CONNECTING.
+                     RecvRaResponse(it->rarPayload);
++                    break;
+                 }
+             }
+         }

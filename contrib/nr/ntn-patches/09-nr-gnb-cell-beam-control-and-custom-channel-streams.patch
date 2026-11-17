@@ -1,0 +1,39 @@
+# NTN/ns-3.43 adaptation patch - control (PSS/SSB) on the configured cell beam (BeamManager predefined beam) instead of always quasi-omni; skip stream assignment for non-ThreeGpp matrix channel models
+# base: upstream 5g-lena v3.3.1 plus patches 01-08
+# apply from contrib/nr/ with: patch -p1 < ntn-patches/09-nr-gnb-cell-beam-control-and-custom-channel-streams.patch
+#
+diff --git a/helper/nr-helper.cc b/helper/nr-helper.cc
+index 0d22c3e0a..264f18db1 100644
+--- a/helper/nr-helper.cc
++++ b/helper/nr-helper.cc
+@@ -1649,7 +1649,12 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
+         {
+             Ptr<ThreeGppChannelModel> channel =
+                 DynamicCast<ThreeGppChannelModel>(spectrumLossModel->GetChannelModel());
+-            currentStream += channel->AssignStreams(currentStream);
++            // ntn-patch 09: another MatrixBasedChannelModel (e.g. a deterministic
++            // LOS model) may be plugged in; it has no random streams to assign.
++            if (channel)
++            {
++                currentStream += channel->AssignStreams(currentStream);
++            }
+             m_channelObjectsWithAssignedStreams.emplace_back(spectrumLossModel);
+         }
+     }
+diff --git a/model/nr-gnb-phy.cc b/model/nr-gnb-phy.cc
+index 806f3c84e..17696fd01 100644
+--- a/model/nr-gnb-phy.cc
++++ b/model/nr-gnb-phy.cc
+@@ -1476,7 +1476,11 @@ void
+ NrGnbPhy::StartVarTti(const std::shared_ptr<DciInfoElementTdma>& dci)
+ {
+     NS_LOG_FUNCTION(this);
+-    ChangeToQuasiOmniBeamformingVector(); // assume the control signal is omni
++    // ntn-patch 09: control (incl. the PSS/SSB that UEs measure SS-RSRP on,
++    // TS 38.215 5.1.1) goes on the cell beam when one is configured as the
++    // predefined beam; BeamManager falls back to quasi-omni otherwise, so an
++    // unconfigured gNB behaves exactly as before.
++    ChangeBeamformingVector(nullptr);
+     m_currSymStart = dci->m_symStart;
+ 
+     Time varTtiPeriod;

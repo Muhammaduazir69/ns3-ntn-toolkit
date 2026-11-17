@@ -1048,7 +1048,12 @@ NrUeMac::DoReceiveControlMessage(Ptr<NrControlMessage> msg)
             {
                 if (it->rarPayload.raPreambleId == m_raPreambleId)
                 {
+                    // TS 38.321 5.1.4: the first MAC subPDU whose RAPID matches the transmitted
+                    // preamble completes RAR reception. A RAR can also carry a stale entry for the
+                    // same (wrapped) preamble ID that another UE abandoned; handling a second match
+                    // made the RRC see "random access successful" twice and abort in IDLE_CONNECTING.
                     RecvRaResponse(it->rarPayload);
+                    break;
                 }
             }
         }
