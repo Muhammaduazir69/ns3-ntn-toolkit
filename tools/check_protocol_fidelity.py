@@ -53,6 +53,10 @@ KNOWN_FAILING_GATES = {
         "same non-closing THz budget on the inter-satellite link",
     ("thz-ntn-isl", "wall_clock_s"):
         "follows from the above",
+    ("oran-ntn-ric-controlled-traffic", "numerology"):
+        "the published runs used mu=1 (30 kHz) at the 20 GHz Ka-band carrier, which TS 38.101-5 "
+        "(FR2-NTN, mu 2 or 3) does not allow; the default is kept so the paper reproduces, the "
+        "example's own health row reports the deviation, and --numerology=2 or 3 is conformant",
 }
 
 # (display-name, binary, time-flag, extra-args)
