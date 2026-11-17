@@ -248,8 +248,9 @@ python3 tools/check_ntn_standards.py
 ```
 
 The Docker image is the reproducible path, because the SNS3 `satellite` tree is a
-compile-time dependency that this repository does not vendor. See
-[INSTALL.md](INSTALL.md) for how to obtain it for a source build.
+compile-time dependency that this repository does not vendor. For a source build,
+`contrib/sns3-patches/fetch-sns3.sh` fetches the exact pinned version with the
+toolkit patch; see [INSTALL.md](INSTALL.md).
 
 ---
 

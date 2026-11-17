@@ -90,15 +90,23 @@ same branch: <https://gitlab.com/ns3-ntn-toolkit/ns3-ntn-toolkit>.
 
 ### 2.4 Add the SNS3 `satellite` module, which is required
 
-The SNS3 satellite module is not bundled, because its TLE and antenna-pattern
-corpus is around 3.7 GB. Clone it into `contrib/`:
+The SNS3 satellite module is not bundled, because its data corpus (TLEs, antenna
+patterns, link results) is large. Fetch it with the script in this repository,
+which checks out the exact upstream commit the toolkit is built against and applies
+the toolkit patch (see [contrib/sns3-patches/README.md](contrib/sns3-patches/README.md)):
 
 ```bash
-git clone https://github.com/sns3/sns3-satellite.git contrib/satellite
+contrib/sns3-patches/fetch-sns3.sh            # code + data (about 2 GB)
+contrib/sns3-patches/fetch-sns3.sh --no-data  # code only, enough to build
 ```
 
-Without it, `ntn-cho`, `ntn-constellation`, `oran-ntn` and `thz-ntn` will not
-register, and the build will simply not contain them rather than failing loudly.
+Do not clone upstream `sns3-satellite` HEAD: it is newer than the pinned base and
+links SNS3's own `traffic` module, where the toolkit provides `ntn-traffic`.
+
+Without the module, `ntn-cho`, `ntn-constellation`, `oran-ntn` and `thz-ntn` do not
+build: their sources include SNS3 headers, so the build stops with a missing
+`ns3/satellite-*.h` header. Without the data, examples and tests that load SNS3
+scenarios abort at startup with "Directory not found ... contrib/satellite/data".
 
 ### 2.5 Configure and build
 

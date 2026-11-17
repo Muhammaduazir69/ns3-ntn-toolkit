@@ -19,6 +19,13 @@ jobs:
       # made every step fail before it started ("No such file or directory").
       - uses: actions/checkout@v4
 
+      # A full ns-3 build with examples and tests, plus the SNS3 data, needs more disk than a runner
+      # has free by default: drop preinstalled SDKs this job does not use.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -27,8 +34,13 @@ jobs:
             libeigen3-dev pybind11-dev libprotobuf-dev protobuf-compiler \
             libabsl-dev
 
+      # SNS3 is not vendored: fetch the pinned base plus the toolkit patch (and its data, which the
+      # SNS3-backed test suites load).
+      - name: Fetch SNS3 satellite module
+        run: contrib/sns3-patches/fetch-sns3.sh
+
       - name: Configure ns-3
-        run: ./ns3 configure --enable-examples --enable-tests --disable-werror
+        run: ./ns3 configure --build-profile=optimized --enable-examples --enable-tests --disable-werror
 
       - name: Build
         run: ./ns3 build
