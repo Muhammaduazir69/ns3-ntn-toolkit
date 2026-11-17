@@ -19,6 +19,19 @@
  * trace — and the LOS-vs-NLOS shadowing branch is visible as a real SINR /
  * throughput gap, exactly like a measured A2G link.
  *
+ * Wave 7B, one flow through the toolkit (space-air-ground):
+ *  - the ground UEs are TR 38.811 UE-class terminals (ntn-cho
+ *    NtnTr38811MobilityModel, urban-dense class mix: static and pedestrian
+ *    handhelds, vehicles, IoT) drawn in a box around the platform's ground
+ *    point and projected into the cell's local ENU frame
+ *    (NtnEnuProjectionMobilityModel). --ueLayout=line restores the earlier fixed
+ *    line of UEs at 150-630 m;
+ *  - the aerial gNB reaches its core over a bent-pipe LEO hop of a Walker shell
+ *    on Vallado SGP4 (ntn-constellation, sagin-leo-backhaul.h): live delay from
+ *    the exact SGP4 state every 100 ms, switches, outages, Ka-band loss from
+ *    two NtnSatLinkErrorModel legs. --leoBackhaul=0 restores the old backhaul;
+ *  - ntn-traffic eMBB traffic with the WS2 KPM series (TS 28.552 names).
+ *
  * Usage:
  *   ./ns3 run "sagin-a2g-real-stack --duration=12 --link=NLOS --scenario=UMa_AV"
  */
@@ -28,8 +41,14 @@
 #include "ns3/network-module.h"
 #include "ns3/ntn-real-stack-helper.h"
 #include "ns3/sagin-a2g-propagation-loss-model.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/system-path.h"
 
+#include "sagin-leo-backhaul.h"
+
+#include <cstdio>
 #include <iostream>
+#include <memory>
 #include <string>
 
 using namespace ns3;
@@ -78,7 +97,29 @@ main(int argc, char* argv[])
     cmd.AddValue("scenario", "TR 36.777 scenario: UMa_AV | RMa_AV | UMi_AV", scenarioStr);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
+    std::string ueLayout = "tr38811";
+    bool leoBackhaul = true;
+    SaginLeoBackhaulConfig bh;
+    bh.siteLatDeg = 39.74; // urban platform ground point (UMa_AV default)
+    bh.siteLonDeg = -104.99;
+    bh.gwLatDeg = 40.58; // gateway about 95 km away
+    bh.gwLonDeg = -105.08;
+    double bhMbps = 100.0;
+    cmd.AddValue("ueLayout", "ground UEs: tr38811 (TR 38.811 class mix, default) | line (fixed line)",
+                 ueLayout);
+    cmd.AddValue("leoBackhaul", "aerial gNB backhaul over a bent-pipe LEO hop (SGP4 Walker shell)",
+                 leoBackhaul);
+    cmd.AddValue("siteLat", "platform ground-point latitude (deg)", bh.siteLatDeg);
+    cmd.AddValue("siteLon", "platform ground-point longitude (deg)", bh.siteLonDeg);
+    cmd.AddValue("gwLat", "LEO gateway latitude (deg)", bh.gwLatDeg);
+    cmd.AddValue("gwLon", "LEO gateway longitude (deg)", bh.gwLonDeg);
+    cmd.AddValue("bhMaskDeg", "backhaul elevation mask at site and gateway (deg)", bh.siteMaskDeg);
+    cmd.AddValue("bhMbps", "backhaul rate (Mb/s), sets the Ka noise bandwidth", bhMbps);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_UNLESS(ueLayout == "tr38811" || ueLayout == "line", "--ueLayout=tr38811|line");
+    bh.gwMaskDeg = bh.siteMaskDeg;
+    bh.rateBps = bhMbps * 1e6;
+    bh.siteAltM = uavAltM; // the backhaul terminal rides on the platform
 
     const A2gLink link = (linkStr == "LOS") ? A2gLink::LOS : A2gLink::NLOS;
     const A2gScenario scenario = ParseScenario(scenarioStr);
@@ -102,13 +143,38 @@ main(int argc, char* argv[])
     gnbPos->Add(Vector(0.0, 0.0, uavAltM));
     mob.SetPositionAllocator(gnbPos);
     mob.Install(gnbNodes);
-    Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
-    for (uint32_t i = 0; i < numUes; ++i)
+    if (ueLayout == "line")
     {
-        uePos->Add(Vector(150.0 + 120.0 * i, 0.0, 1.5)); // ground UTs, 150-630 m out
+        Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
+        for (uint32_t i = 0; i < numUes; ++i)
+        {
+            uePos->Add(Vector(150.0 + 120.0 * i, 0.0, 1.5)); // ground UTs, 150-630 m out
+        }
+        mob.SetPositionAllocator(uePos);
+        mob.Install(ueNodes);
     }
-    mob.SetPositionAllocator(uePos);
-    mob.Install(ueNodes);
+    else
+    {
+        // TR 38.811 class terminals within ~450 m of the platform's ground point (the range
+        // the gNB power was set for), in the cell's ENU frame (UE height 1.5 m).
+        auto engine = std::make_shared<NtnRealisticMobilityHelper>(11);
+        const double dLat = 0.004, dLon = 0.004 / std::cos(bh.siteLatDeg * M_PI / 180.0);
+        auto ues = engine->GenerateUes(numUes, NtnMobilityScenarios::UrbanDense(),
+                                       bh.siteLatDeg - dLat, bh.siteLatDeg + dLat,
+                                       bh.siteLonDeg - dLon, bh.siteLonDeg + dLon);
+        for (uint32_t j = 0; j < numUes; ++j)
+        {
+            Ptr<NtnTr38811MobilityModel> src = CreateObject<NtnTr38811MobilityModel>();
+            src->SetUeState(ues[j], engine);
+            Ptr<NtnEnuProjectionMobilityModel> enu = CreateObject<NtnEnuProjectionMobilityModel>();
+            enu->SetSource(src);
+            enu->SetReference(bh.siteLatDeg, bh.siteLonDeg, -1.5);
+            ueNodes.Get(j)->AggregateObject(enu);
+            const Vector p = enu->GetPosition();
+            std::printf("  ground UE %u: TR 38.811 class %s, %.0f m from the platform ground point\n",
+                        j, ues[j].className.c_str(), std::hypot(p.x, p.y));
+        }
+    }
 
     // ---- Real mmwave NR air interface ----
     NtnRealStackHelper rs;
@@ -126,7 +192,18 @@ main(int argc, char* argv[])
     {
         rs.SetNumerology(1); // FR1 30 kHz SCS
     }
+    std::unique_ptr<SaginLeoBackhaul> leo;
+    if (leoBackhaul)
+    {
+        leo = std::make_unique<SaginLeoBackhaul>(bh);
+        leo->Configure(rs);
+    }
     rs.Build(gnbNodes, ueNodes);
+    if (leo)
+    {
+        SystemPath::MakeDirectories(outputDir);
+        leo->Attach(rs, outputDir + "/leo_backhaul.csv");
+    }
 
     // ---- Channel plug-in: TR 36.777 A2G loss attenuates real packets ----
     Ptr<SaginA2gPropagationLossModel> a2g = CreateObject<SaginA2gPropagationLossModel>();
@@ -142,8 +219,16 @@ main(int argc, char* argv[])
 
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
+    if (leo)
+    {
+        leo->Stop();
+    }
     rs.Collect();
     rs.WriteHealthReport();
+    if (leo)
+    {
+        leo->PrintSummary("sagin-a2g-real-stack");
+    }
 
     std::cout << "\n--- SAGIN A2G Summary (TR 36.777 on MEASURED radio) ---\n"
               << "  TR 36.777 branch:             " << scenarioStr << " / " << linkStr << "\n"
@@ -153,6 +238,8 @@ main(int argc, char* argv[])
               << "  MEASURED air-to-ground SINR:  " << rs.GetMeanDlSinrDb() << " dB\n"
               << "  measured DL TBLER (mean):     " << rs.GetMeanDlTbler() << "\n"
               << "  measured DL throughput:       " << rs.GetRxThroughputMbps() << " Mbps\n"
+              << "  measured app one-way delay:   " << rs.GetMeanDelayMs() << " ms (jitter "
+              << rs.GetMeanJitterMs() << " ms, app loss " << rs.GetAppLossRatio() << ")\n"
               << "  -> TR 36.777 A2G loss attenuates real packets; SINR is measured.\n";
 
     Simulator::Destroy();

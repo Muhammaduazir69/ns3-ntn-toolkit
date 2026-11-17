@@ -9,6 +9,8 @@ set(source_files
     model/sagin-bundle-protocol.cc
     # Wave 6B: CCSDS 734.3-B-1 SABR contact graph routing
     model/sagin-sabr-router.cc
+    # Wave 7B: residual bit errors delivered to the bundle layer (CRC exercise)
+    model/sagin-bit-error-model.cc
     model/aeronautical-scenario.cc
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
     model/opensky-adsb-trace.cc
@@ -36,6 +38,7 @@ set(header_files
     model/sagin-custody-queue.h
     model/sagin-bundle-protocol.h
     model/sagin-sabr-router.h
+    model/sagin-bit-error-model.h
     model/aeronautical-scenario.h
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
     model/opensky-adsb-trace.h
@@ -57,6 +60,7 @@ set(header_files
 set(test_sources
     test/ntn-sagin-test-suite.cc
     test/sagin-bpv7-test.cc
+    test/sagin-wave7b-test.cc
 )
 
 build_lib(

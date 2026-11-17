@@ -8,6 +8,19 @@
  * Each UAV is a UE; the per-UAV SINR/TBLER/throughput are MEASURED off the
  * mmwave PHY trace as the swarm manoeuvres — no closed-form path-loss CSV, no
  * P2P star. The UAV mobility (waypoint/patrol/search) is the real value kept.
+ *
+ * Wave 7B, one flow through the toolkit (space-air-ground):
+ *  - ground terminals next to the swarm (--groundUes, default 2) are TR 38.811
+ *    UE-class terminals (ntn-cho NtnTr38811MobilityModel, the IoT-field class
+ *    mix: fixed IoT, static handheld, vehicular) placed around the site and
+ *    projected into the cell's local ENU frame (NtnEnuProjectionMobilityModel);
+ *  - the gNB site reaches its core over a bent-pipe LEO hop of a Walker shell on
+ *    Vallado SGP4 (ntn-constellation; sagin-leo-backhaul.h): live one-way delay
+ *    from the exact SGP4 state every 100 ms, satellite switches, outages, and
+ *    loss from two NtnSatLinkErrorModel Ka legs. --leoBackhaul=0 restores the
+ *    terrestrial backhaul of the earlier runs;
+ *  - traffic is the ntn-traffic standards bouquet with the WS2 KPM series
+ *    (TS 28.552 names) from the FlowMonitor-based NtnOranAiFlowMonitor.
  */
 #include "ns3/box.h"
 #include "ns3/command-line.h"
@@ -18,9 +31,14 @@
 #include "ns3/sagin-a2g-propagation-loss-model.h"
 #include "ns3/sagin-helper.h"
 #include "ns3/uav-mobility-models.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/system-path.h"
+
+#include "sagin-leo-backhaul.h"
 
 #include <cstdio>
 #include <iostream>
+#include <memory>
 #include <vector>
 
 using namespace ns3;
@@ -64,7 +82,21 @@ main(int argc, char* argv[])
     cmd.AddValue("gnbTxDbm", "Ground gNB Tx power (dBm)", gnbTxDbm);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
+    uint32_t groundUes = 2;
+    bool leoBackhaul = true;
+    SaginLeoBackhaulConfig bh; // rural site, gateway about 250 km away
+    double bhMbps = 100.0;
+    cmd.AddValue("groundUes", "TR 38.811 ground terminals served next to the swarm", groundUes);
+    cmd.AddValue("leoBackhaul", "gNB backhaul over a bent-pipe LEO hop (SGP4 Walker shell)", leoBackhaul);
+    cmd.AddValue("siteLat", "gNB site latitude (deg)", bh.siteLatDeg);
+    cmd.AddValue("siteLon", "gNB site longitude (deg)", bh.siteLonDeg);
+    cmd.AddValue("gwLat", "LEO gateway latitude (deg)", bh.gwLatDeg);
+    cmd.AddValue("gwLon", "LEO gateway longitude (deg)", bh.gwLonDeg);
+    cmd.AddValue("bhMaskDeg", "backhaul elevation mask at site and gateway (deg)", bh.siteMaskDeg);
+    cmd.AddValue("bhMbps", "backhaul rate (Mb/s), sets the Ka noise bandwidth", bhMbps);
     cmd.Parse(argc, argv);
+    bh.gwMaskDeg = bh.siteMaskDeg;
+    bh.rateBps = bhMbps * 1e6;
     g_simTime = simTimeSec;
 
     SaginHelper helper;
@@ -88,10 +120,31 @@ main(int argc, char* argv[])
 
     // Each UAV is a UE; the ground gNB is the "satellite" endpoint.
     NodeContainer ueNodes;
-    ueNodes.Create(g_numUavs);
+    ueNodes.Create(g_numUavs + groundUes);
     for (uint32_t i = 0; i < g_numUavs; ++i)
     {
         ueNodes.Get(i)->AggregateObject(uavs[i]);
+    }
+    // TR 38.811 ground terminals within ~1 km of the mast, in the cell's ENU frame
+    // (UE height 1.5 m: the frame origin sits 1.5 m below the terrain).
+    if (groundUes > 0)
+    {
+        auto engine = std::make_shared<NtnRealisticMobilityHelper>(7);
+        const double dLat = 0.009, dLon = 0.009 / std::cos(bh.siteLatDeg * M_PI / 180.0);
+        auto ues = engine->GenerateUes(groundUes, NtnMobilityScenarios::IotField(),
+                                       bh.siteLatDeg - dLat, bh.siteLatDeg + dLat,
+                                       bh.siteLonDeg - dLon, bh.siteLonDeg + dLon);
+        for (uint32_t j = 0; j < groundUes; ++j)
+        {
+            Ptr<NtnTr38811MobilityModel> src = CreateObject<NtnTr38811MobilityModel>();
+            src->SetUeState(ues[j], engine);
+            Ptr<NtnEnuProjectionMobilityModel> enu = CreateObject<NtnEnuProjectionMobilityModel>();
+            enu->SetSource(src);
+            enu->SetReference(bh.siteLatDeg, bh.siteLonDeg, -1.5);
+            ueNodes.Get(g_numUavs + j)->AggregateObject(enu);
+            std::printf("# ground UE %u: TR 38.811 class %s at (%.4f, %.4f)\n", j,
+                        ues[j].className.c_str(), ues[j].lat, ues[j].lon);
+        }
     }
     NodeContainer gnbNodes;
     gnbNodes.Create(1);
@@ -114,7 +167,18 @@ main(int argc, char* argv[])
     {
         rs.SetNumerology(1); // FR1 30 kHz SCS
     }
+    std::unique_ptr<SaginLeoBackhaul> leo;
+    if (leoBackhaul)
+    {
+        leo = std::make_unique<SaginLeoBackhaul>(bh);
+        leo->Configure(rs);
+    }
     rs.Build(gnbNodes, ueNodes);
+    if (leo)
+    {
+        SystemPath::MakeDirectories(outputDir);
+        leo->Attach(rs, outputDir + "/leo_backhaul.csv");
+    }
     Ptr<SaginA2gPropagationLossModel> a2g = CreateObject<SaginA2gPropagationLossModel>();
     a2g->SetFrequencyGHz(fcGHz);
     a2g->SetScenario(A2gScenario::RMa_AV);
@@ -130,8 +194,19 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(2.0), &SwarmProbe);
     Simulator::Stop(Seconds(simTimeSec));
     Simulator::Run();
+    if (leo)
+    {
+        leo->Stop();
+    }
     rs.Collect();
     rs.WriteHealthReport();
+    if (leo)
+    {
+        leo->PrintSummary("sagin-uav-swarm");
+    }
+    std::printf("# measured app one-way delay %.3f ms, jitter %.3f ms, app loss %.5f; the cell "
+                "means below include %u TR 38.811 ground UEs\n",
+                rs.GetMeanDelayMs(), rs.GetMeanJitterMs(), rs.GetAppLossRatio(), groundUes);
 
     std::printf("# === summary ===  %u UAVs  measured SINR=%.2f dB  measured TBLER=%.4f  "
                 "measured throughput=%.3f Mbps\n",

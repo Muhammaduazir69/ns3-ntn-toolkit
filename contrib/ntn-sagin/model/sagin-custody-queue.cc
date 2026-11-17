@@ -37,6 +37,13 @@ SaginCustodyQueue::Offer(Ptr<Packet> p)
     {
         return false;
     }
+    if (m_integrity && !m_integrity(p))
+    {
+        // Wave 7B, RFC 9171 4.2.1: a block CRC failed (or the bundle does not
+        // parse); the bundle is unintelligible and is discarded, not stored.
+        ++m_corrupt;
+        return false;
+    }
     ExpireStale();
 
     Item fresh{p, Simulator::Now()};
@@ -516,5 +523,26 @@ SaginCustodyQueue::CheckCustodyTimeouts()
     }
 }
 
+} // namespace ntnsagin
+} // namespace ns3
+
+namespace ns3
+{
+namespace ntnsagin
+{
+void
+SaginCustodyQueue::VisitQueued(std::function<void(Ptr<const Packet>)> f) const
+{
+    for (const auto& it : m_queue)
+    {
+        f(it.pkt);
+    }
+}
+
+SaginCustodyQueue::IntegrityFunction
+SaginCustodyQueue::Bpv7CrcCheck()
+{
+    return [](Ptr<const Packet> p) { return VerifyBundle(p).status == BundleCheck::Ok; };
+}
 } // namespace ntnsagin
 } // namespace ns3

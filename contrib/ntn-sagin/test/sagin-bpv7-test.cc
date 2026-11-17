@@ -70,12 +70,13 @@ class SaginBpv7WireTest : public TestCase
         SaginBundleTrailer t;
         p->RemoveTrailer(t);
         NS_TEST_ASSERT_MSG_EQ(p->GetSize(), 52u, "only the payload remains");
-        // Primary-block first byte after 0x9F is array(8) = 0x88.
+        // Primary-block first byte after 0x9F is array(9) = 0x89: since Wave 7B
+        // the default bundle carries a CRC-16 (RFC 9171 4.3.1).
         Ptr<Packet> q = MakeBundle(1, 5, 0, 0);
         uint8_t buf[4];
         q->CopyData(buf, 4);
         NS_TEST_ASSERT_MSG_EQ(+buf[0], 0x9F, "indefinite array");
-        NS_TEST_ASSERT_MSG_EQ(+buf[1], 0x88, "primary block array(8)");
+        NS_TEST_ASSERT_MSG_EQ(+buf[1], 0x89, "primary block array(9) with CRC");
         NS_TEST_ASSERT_MSG_EQ(+buf[2], 0x07, "version 7");
 
         SaginCustodySignalHeader s;

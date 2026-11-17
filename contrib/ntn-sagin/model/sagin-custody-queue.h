@@ -133,6 +133,17 @@ class SaginCustodyQueue : public Object
     /// simulation time 0, which maps DTN time onto simulation time.
     static ExpiryFunction Bpv7PrimaryBlockExpiry(double simEpochUnixS);
 
+    /// Wave 7B: integrity check run on every Offer() before anything else
+    /// reads the packet. A bundle that fails it is discarded and counted
+    /// (GetCorrupt). Bpv7CrcCheck() verifies the RFC 9171 block CRCs.
+    using IntegrityFunction = std::function<bool(Ptr<const Packet>)>;
+    void SetIntegrityCheck(IntegrityFunction f) { m_integrity = std::move(f); }
+    static IntegrityFunction Bpv7CrcCheck();
+    uint64_t GetCorrupt() const { return m_corrupt; }
+    /// Wave 7B: visit every packet held in storage (not those awaiting a
+    /// custody signal), in queue order. Used for per-neighbor backlog.
+    void VisitQueued(std::function<void(Ptr<const Packet>)> f) const;
+
     /// Applied to a packet as it is forwarded, with the time it spent here.
     using ForwardTransform = std::function<Ptr<Packet>(Ptr<Packet>, Time dwell)>;
     void SetForwardTransform(ForwardTransform f) { m_transform = std::move(f); }
@@ -207,6 +218,8 @@ class SaginCustodyQueue : public Object
     void ScheduleExpiry();
     void OnExpiryTimer();
     ExpiryFunction m_expiryFn;
+    IntegrityFunction m_integrity;
+    uint64_t m_corrupt{0};
     ForwardTransform m_transform;
     EventId m_expiryEvent;
     Time m_expiryAt{Time::Max()};

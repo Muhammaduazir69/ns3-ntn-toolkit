@@ -40,7 +40,7 @@
 //        bundle until the next hop's custody signal (sent back over the same radio hop, so it
 //        can be lost too), retransmits after --custodyTimeoutS, refuses on depleted storage
 //        (reason 4) and answers duplicates with "redundant reception" (reason 3). The server
-//        delivers each bundle once (RFC 9171 5.7) and counts duplicates. Not implemented: CRCs,
+//        delivers each bundle once (RFC 9171 5.7) and counts duplicates. Not implemented:
 //        previous-node and hop-count blocks, fragmentation, BPSec, status reports on the wire
 //        (counted only), LTP/TCPCL convergence layers.
 //
@@ -57,6 +57,38 @@
 //        is sent only when its best candidate route's first contact is open; routes whose
 //        projected arrival is after the bundle's expiration are never used (3.2.6.9 a, e).
 //        Requires --dtn=bpv7.
+//
+// Wave 7B options (defaults keep the Wave 6B delivery behavior):
+//   --bpCrc=16 (default) | 32c | none  RFC 9171 4.2.1 CRC type on every block (primary, Bundle
+//        Age, class of service, payload). Every satellite, gateway and the server verifies the
+//        bundle with VerifyBundle() before it reads any field; a bundle whose CRC fails (or that
+//        no longer parses) is discarded and counted per node (crc_discarded_*). The sender
+//        keeps custody, so the custody timer retransmits it. none = the pre-7B wire format.
+//   --bundleBer=0  residual bit error rate delivered to the bundle layer on the radio hops
+//        (device->satellite, satellite->gateway, bundles only): SaginBitErrorModel flips bits in
+//        the UDP payload instead of dropping, as a convergence layer without a payload checksum
+//        would hand them up (UDP CL, RFC 7122). Needs --dtn=bpv7.
+//   --priority=normal (default) | bulk | expedited | mixed  class of service of each bundle
+//        (private block type 193, RFC 6258 semantics); mixed = device index mod 3. SABR keeps
+//        a volume (MTV) per priority (CCSDS 734.3-B-1 3.2.6.8).
+//   --criticalShare=0  share of bundles flagged critical; SABR sends a copy to the entry node
+//        of every candidate route (3.2.6.9.2, 3.2.8.1.3); the server delivers once.
+//   --sabrBacklog=0  1 wires the applicable backlog of 3.2.6.2 into SABR: the bits held in the
+//        node's custody queue already assigned to that neighbor at the bundle's priority or
+//        higher, plus the bytes waiting in the point-to-point device queue to it.
+// Integration with the rest of the toolkit (always on, no effect on the delivery CSV):
+//   - devices are TR 38.811 UE-class terminals (ntn-cho NtnTr38811MobilityModel, class
+//     IOT_FIXED: moored buoys, the stationary NB-IoT NTN UE of TR 36.763) at the CSV
+//     positions; gateways are ntn-cho NtnGeodeticFixedMobilityModel; satellites carry their
+//     SGP4 models;
+//   - every status report carries an ntn-traffic NtnOranPayloadHeader (mMTC reading, 5QI 9) in
+//     its 40-byte payload; an NtnOranFlowProbe reports first TX at generation and last RX at
+//     the server into an ns-3 FlowMonitor, so end-to-end delivery, delay and jitter per device
+//     are FlowMonitor measurements (<out stem>_e2e_flows.csv, <out stem>_e2e_flowmon.xml);
+//   - an IPv4 FlowMonitor on every node measures each radio and wired hop
+//     (<out stem>_hops.csv: packets, loss, mean delay and jitter next to the mean propagation
+//     plus serialization time of the packets sent on that hop);
+//   - --czml / --netsim write an ntn-observability scene of satellites, devices and gateways.
 
 #include "ns3/applications-module.h"
 #include "ns3/contact-graph-router.h"
@@ -72,7 +104,15 @@
 #include "ns3/sagin-custody-queue.h"
 #include "ns3/sagin-sabr-router.h"
 #include "ns3/sgp4-mobility-model.h"
+#include "ns3/flow-monitor-module.h"
+#include "ns3/ntn-geodetic-fixed-mobility-model.h"
+#include "ns3/ntn-oran-ai-flow-monitor.h"
+#include "ns3/ntn-oran-payload-header.h"
+#include "ns3/ntn-scene-helper.h"
+#include "ns3/ntn-tr38811-mobility-model.h"
+#include "ns3/sagin-bit-error-model.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <fstream>
@@ -251,6 +291,59 @@ std::vector<Ptr<ntnsagin::SaginSabrRouter>> g_devSabr, g_satSabr;
 uint64_t g_sabrFwd = 0, g_sabrHold = 0, g_sabrNoRoute = 0;
 uint64_t g_expiredAtGw = 0, g_expiredAtSrv = 0;
 SaginCustodyQueue::ExpiryFunction g_expiryFn;
+// ---- Wave 7B ----
+uint8_t g_crcType = ntnsagin::kBpCrc16;
+std::string g_priorityMode = "normal";
+double g_criticalShare = 0.0;
+bool g_sabrBacklog = false;
+Ptr<UniformRandomVariable> g_critRng;
+std::vector<uint64_t> g_crcFailSat; // per satellite
+std::vector<uint64_t> g_crcFailGw;  // per gateway
+uint64_t g_crcFailSrv = 0;
+uint64_t g_critCopies = 0, g_critBundles = 0;
+std::vector<Ptr<ntnsagin::SaginBitErrorModel>> g_berModels;
+/// SABR assignment of each bundle held at a node: entry neighbor, priority, bits.
+struct Assign
+{
+    uint32_t neighbor;
+    uint8_t prio;
+    double bits;
+};
+std::map<uint32_t, std::map<uint64_t, Assign>> g_assign; // node id -> bundle id -> assignment
+uint64_t g_routingBundle = 0;                           // bundle being routed (excluded)
+uint64_t g_backlogQueries = 0, g_backlogNonzero = 0;
+double g_backlogMaxBits = 0.0;
+// FlowMonitor (ntn-traffic NtnOranFlowProbe), end to end per device
+Ptr<FlowMonitor> g_e2eMon;
+Ptr<NtnOranFlowClassifier> g_e2eCls;
+Ptr<NtnOranFlowProbe> g_e2eTx, g_e2eRx;
+std::vector<double> g_e2eDelays;
+// per-hop propagation + serialization of what was sent (expected FlowMonitor delay)
+double g_hopModelSum[2] = {0, 0}; // 0 dev->sat, 1 sat->gw
+uint64_t g_hopModelN[2] = {0, 0};
+
+/// RFC 9171 4.2.1: verify every block CRC before anything reads the bundle.
+bool
+BundleIntact(Ptr<const Packet> p, uint64_t& counter)
+{
+    if (!g_bpv7 || ntnsagin::VerifyBundle(p).status == ntnsagin::BundleCheck::Ok)
+    {
+        return true;
+    }
+    ++counter;
+    return false;
+}
+
+/// Model delay of one packet on a hop: channel propagation + serialization (PPP 2 + IPv4 20 +
+/// UDP 8 header bytes on top of the UDP payload) at the hop's 1 Mb/s.
+void
+NoteHopSend(int hop, const Link& l, uint32_t bytes)
+{
+    TimeValue d;
+    l.chan->GetAttribute("Delay", d);
+    g_hopModelSum[hop] += d.Get().GetSeconds() + (bytes + 30) * 8.0 / 1e6;
+    ++g_hopModelN[hop];
+}
 
 bool
 DevSatVisible(uint32_t d, uint32_t k)
@@ -418,39 +511,145 @@ ChooseSatellite(uint32_t d)
     return bestK;
 }
 
+/// Priority and criticality of a held bundle (class-of-service block).
+void
+BundleCos(Ptr<const Packet> p, uint8_t& prio, bool& critical, uint64_t& id)
+{
+    SaginBundleHeader h;
+    p->PeekHeader(h);
+    prio = h.hasCosBlock ? h.priority : ntnsagin::kBpPriorityNormal;
+    critical = h.hasCosBlock && h.critical;
+    id = h.BundleId();
+}
+
+/// CCSDS 734.3-B-1 forwarding at one node: the best candidate route (or, for a critical
+/// bundle, every candidate entry node) decides the next hop; a copy goes now only where that
+/// route's first contact is open, otherwise the bundle stays in custody. \p canSend says
+/// whether the link to an entry node is usable now and \p send transmits a copy to it.
+bool
+SabrForward(uint32_t nodeId,
+            Ptr<ntnsagin::SaginSabrRouter> router,
+            Ptr<Packet> p,
+            const std::function<bool(uint32_t)>& canSend,
+            const std::function<bool(uint32_t)>& send)
+{
+    const double now = Simulator::Now().GetSeconds();
+    const double evc = p->GetSize() * 8.0;
+    uint8_t prio;
+    bool critical;
+    uint64_t id;
+    BundleCos(p, prio, critical, id);
+    g_routingBundle = id;
+    const double expiry = BundleDeadlineS(p, Simulator::Now());
+    std::vector<ntnsagin::SabrDecision> decs;
+    if (critical)
+    {
+        decs = router->RouteCritical(kServerId, now, evc, expiry, {}, true, false, prio);
+    }
+    else
+    {
+        auto dec = router->Route(kServerId, now, evc, expiry, {}, true, false, prio);
+        if (dec.found)
+        {
+            decs.push_back(dec);
+        }
+    }
+    g_routingBundle = 0;
+    if (decs.empty())
+    {
+        ++g_sabrNoRoute;
+        g_assign[nodeId].erase(id);
+        return false;
+    }
+    uint32_t sent = 0;
+    for (const auto& dec : decs)
+    {
+        const auto& c0 = router->GetContactPlan()[dec.route.contacts.front()];
+        if (now < c0.startS || !canSend(dec.entryNode))
+        {
+            continue;
+        }
+        if (send(dec.entryNode))
+        {
+            router->Reserve(dec.route, evc, prio);
+            ++sent;
+        }
+    }
+    if (sent == 0)
+    {
+        // held: it now waits for its best route's entry node (3.2.6.2 backlog)
+        g_assign[nodeId][id] = {decs.front().entryNode, prio, evc};
+        ++g_sabrHold;
+        return false;
+    }
+    g_assign[nodeId].erase(id);
+    g_sabrFwd += sent;
+    if (critical)
+    {
+        ++g_critBundles;
+        g_critCopies += sent;
+    }
+    return true;
+}
+
+/// 3.2.6.2 applicable backlog at \p nodeId toward \p neighbor for priority \p prio: bundles
+/// in custody assigned to that neighbor at that priority or higher, plus the bytes already in
+/// the point-to-point device queue of the link to it.
+double
+SabrBacklogBits(uint32_t nodeId, Ptr<SaginCustodyQueue> q, Ptr<NetDevice> dev, uint8_t prio,
+                uint32_t neighbor)
+{
+    double bits = 0.0;
+    auto& a = g_assign[nodeId];
+    q->VisitQueued([&](Ptr<const Packet> p) {
+        SaginBundleHeader h;
+        p->PeekHeader(h);
+        const uint64_t id = h.BundleId();
+        if (id == g_routingBundle)
+        {
+            return;
+        }
+        auto it = a.find(id);
+        if (it != a.end() && it->second.neighbor == neighbor && it->second.prio >= prio)
+        {
+            bits += it->second.bits;
+        }
+    });
+    Ptr<PointToPointNetDevice> pd = DynamicCast<PointToPointNetDevice>(dev);
+    if (pd && pd->GetQueue())
+    {
+        bits += pd->GetQueue()->GetNBytes() * 8.0;
+    }
+    ++g_backlogQueries;
+    g_backlogNonzero += bits > 0.0 ? 1 : 0;
+    g_backlogMaxBits = std::max(g_backlogMaxBits, bits);
+    return bits;
+}
+
 bool
 DeviceForward(uint32_t d, Ptr<Packet> p)
 {
     if (g_sabr)
     {
-        // CCSDS 734.3-B-1: the best candidate route decides the entry satellite; the bundle
-        // goes now only if that route's first contact is open, otherwise it stays in custody.
-        const double now = Simulator::Now().GetSeconds();
-        const double evc = p->GetSize() * 8.0;
-        auto dec = g_devSabr[d]->Route(kServerId, now, evc, BundleDeadlineS(p, Simulator::Now()),
-                                       {}, true, false);
-        if (!dec.found)
-        {
-            ++g_sabrNoRoute;
-            return false;
-        }
-        const uint32_t k = dec.entryNode - 1;
-        const auto& c0 = g_devSabr[d]->GetContactPlan()[dec.route.contacts.front()];
-        if (now < c0.startS || !DevSatVisible(d, k) ||
-            (g_upBudget > 0 && g_devUsed[d] >= g_upBudget))
-        {
-            ++g_sabrHold;
-            return false;
-        }
-        const bool ok =
-            g_devSock[d]->SendTo(p->Copy(), 0, InetSocketAddress(g_ds[d][k].addrB, kPort)) >= 0;
-        if (ok)
-        {
-            g_devSabr[d]->Reserve(dec.route, evc);
-            ++g_sabrFwd;
-            g_devUsed[d] += 1;
-        }
-        return ok;
+        return SabrForward(
+            kDevIdBase + d,
+            g_devSabr[d],
+            p,
+            [d](uint32_t entry) {
+                return DevSatVisible(d, entry - 1) &&
+                       !(g_upBudget > 0 && g_devUsed[d] >= g_upBudget);
+            },
+            [d, p](uint32_t entry) {
+                const uint32_t k = entry - 1;
+                const bool ok =
+                    g_devSock[d]->SendTo(p->Copy(), 0, InetSocketAddress(g_ds[d][k].addrB, kPort)) >= 0;
+                if (ok)
+                {
+                    NoteHopSend(0, g_ds[d][k], p->GetSize());
+                    g_devUsed[d] += 1;
+                }
+                return ok;
+            });
     }
     const int k = ChooseSatellite(d);
     if (k < 0 || (g_upBudget > 0 && g_devUsed[d] >= g_upBudget))
@@ -459,6 +658,10 @@ DeviceForward(uint32_t d, Ptr<Packet> p)
     }
     const bool ok = g_devSock[d]->SendTo(p->Copy(), 0, InetSocketAddress(g_ds[d][k].addrB, kPort)) >= 0;
     g_devUsed[d] += ok ? 1 : 0;
+    if (ok)
+    {
+        NoteHopSend(0, g_ds[d][k], p->GetSize());
+    }
     return ok;
 }
 
@@ -471,31 +674,25 @@ SatelliteForward(uint32_t k, Ptr<Packet> p)
     }
     if (g_sabr)
     {
-        const double now = Simulator::Now().GetSeconds();
-        const double evc = p->GetSize() * 8.0;
-        auto dec = g_satSabr[k]->Route(kServerId, now, evc, BundleDeadlineS(p, Simulator::Now()),
-                                       {}, true, false);
-        if (!dec.found)
-        {
-            ++g_sabrNoRoute;
-            return false;
-        }
-        const uint32_t g = dec.entryNode - kGwIdBase;
-        const auto& c0 = g_satSabr[k]->GetContactPlan()[dec.route.contacts.front()];
-        if (g >= g_gw.size() || now < c0.startS || !g_visSg[k][g])
-        {
-            ++g_sabrHold;
-            return false;
-        }
-        const bool ok =
-            g_satSock[k]->SendTo(p->Copy(), 0, InetSocketAddress(g_sg[k][g].addrA, kPort)) >= 0;
-        if (ok)
-        {
-            g_satSabr[k]->Reserve(dec.route, evc);
-            ++g_sabrFwd;
-            g_satUsed[k] += 1;
-        }
-        return ok;
+        return SabrForward(
+            k + 1,
+            g_satSabr[k],
+            p,
+            [k](uint32_t entry) {
+                const uint32_t g = entry - kGwIdBase;
+                return g < g_gw.size() && g_visSg[k][g];
+            },
+            [k, p](uint32_t entry) {
+                const uint32_t g = entry - kGwIdBase;
+                const bool ok =
+                    g_satSock[k]->SendTo(p->Copy(), 0, InetSocketAddress(g_sg[k][g].addrA, kPort)) >= 0;
+                if (ok)
+                {
+                    NoteHopSend(1, g_sg[k][g], p->GetSize());
+                    g_satUsed[k] += 1;
+                }
+                return ok;
+            });
     }
     if (g_cgr)
     {
@@ -512,6 +709,10 @@ SatelliteForward(uint32_t k, Ptr<Packet> p)
             ++g_routerGwPicks;
             const bool ok = g_satSock[k]->SendTo(p->Copy(), 0, InetSocketAddress(g_sg[k][g].addrA, kPort)) >= 0;
             g_satUsed[k] += ok ? 1 : 0;
+            if (ok)
+            {
+                NoteHopSend(1, g_sg[k][g], p->GetSize());
+            }
             return ok;
         }
         return false;
@@ -522,6 +723,10 @@ SatelliteForward(uint32_t k, Ptr<Packet> p)
         {
             const bool ok = g_satSock[k]->SendTo(p->Copy(), 0, InetSocketAddress(g_sg[k][g].addrA, kPort)) >= 0;
             g_satUsed[k] += ok ? 1 : 0;
+            if (ok)
+            {
+                NoteHopSend(1, g_sg[k][g], p->GetSize());
+            }
             return ok;
         }
     }
@@ -535,10 +740,17 @@ SatelliteReceive(uint32_t k, Ptr<Socket> s)
     Address from;
     while ((p = s->RecvFrom(from)))
     {
+        // The custodian relays at the bundle layer: what it sends on is a new IP flow, so the
+        // previous hop's FlowMonitor byte tag must not ride along.
+        p->RemoveAllByteTags();
         if (!g_bpv7)
         {
             g_satQ[k]->Offer(p);
             continue;
+        }
+        if (!BundleIntact(p, g_crcFailSat[k]))
+        {
+            continue; // RFC 9171 4.2.1: unintelligible, discarded; the sender retransmits
         }
         // RFC 5050 5.10: take custody (or refuse) and tell the previous custodian.
         SaginBundleHeader b;
@@ -574,6 +786,11 @@ GatewayReceive(uint32_t g, Ptr<Socket> s)
     Address from;
     while ((p = s->RecvFrom(from)))
     {
+        p->RemoveAllByteTags(); // new IP flow on the wired hop (see SatelliteReceive)
+        if (!BundleIntact(p, g_crcFailGw[g]))
+        {
+            continue; // corrupted on the feeder: discarded, no custody signal
+        }
         if (g_bpv7 && g_bundleExpiry && Simulator::Now().GetSeconds() >= BundleDeadlineS(p, Simulator::Now()))
         {
             ++g_expiredAtGw; // RFC 9171 5.5: expired, deleted, not handed on
@@ -617,6 +834,10 @@ ServerReceive(Ptr<Socket> s)
     Ptr<Packet> p;
     while ((p = s->Recv()))
     {
+        if (!BundleIntact(p, g_crcFailSrv))
+        {
+            continue;
+        }
         if (g_bpv7 && g_bundleExpiry && Simulator::Now().GetSeconds() >= BundleDeadlineS(p, Simulator::Now()))
         {
             ++g_expiredAtSrv; // RFC 9171 5.5: expired before delivery
@@ -626,7 +847,7 @@ ServerReceive(Ptr<Socket> s)
         {
             SaginBundleHeader b;
             p->RemoveHeader(b);
-            SaginBundleTrailer t;
+            SaginBundleTrailer t = b.MakeTrailer();
             p->RemoveTrailer(t);
             if (!g_srvSeen.insert(b.BundleId()).second)
             {
@@ -640,6 +861,8 @@ ServerReceive(Ptr<Socket> s)
         const uint32_t seq = h.GetSeq();
         g_out << (seq >> 20) << "," << (seq & 0xFFFFF) << "," << h.GetTs().GetSeconds() << ","
               << Simulator::Now().GetSeconds() << "\n";
+        g_e2eDelays.push_back((Simulator::Now() - h.GetTs()).GetSeconds());
+        g_e2eRx->ReportRx(p); // last RX of this device's flow (NtnOranPayloadHeader)
     }
 }
 
@@ -662,8 +885,20 @@ SourceKey(Ptr<const Packet> p)
 void
 Generate(uint32_t d, uint32_t seq, Time period)
 {
-    Ptr<Packet> p = Create<Packet>(40); // status report payload
-    SeqTsHeader h;                      // timestamp = generation time
+    // 40-byte status report payload: the ntn-traffic in-band header (24 bytes, mMTC reading,
+    // 5QI 9, keyed by device) followed by 16 bytes of reading. The size is the pre-7B one.
+    NtnOranPayloadHeader oh;
+    oh.SetPayloadType(NtnOranPayloadHeader::MMTC_READING);
+    oh.SetFiveQi(9);
+    oh.SetQfi(9);
+    oh.SetSrcId(static_cast<uint16_t>(d + 1));
+    oh.SetDstId(static_cast<uint16_t>(kServerId));
+    oh.SetSeq(seq);
+    oh.SetTxTimestampNs(static_cast<uint64_t>(Simulator::Now().GetNanoSeconds()));
+    Ptr<Packet> p = Create<Packet>(40 - NtnOranPayloadHeader::SERIALIZED_SIZE);
+    p->AddHeader(oh);
+    g_e2eTx->ReportTx(p); // first TX of the flow, into the FlowMonitor
+    SeqTsHeader h;        // timestamp = generation time
     h.SetSeq((d << 20) | (seq & 0xFFFFF));
     p->AddHeader(h);
     if (g_bpv7)
@@ -687,8 +922,29 @@ Generate(uint32_t d, uint32_t seq, Time period)
         b.creationSeq = seq;
         b.lifetimeMs = g_lifetimeMs;
         b.payloadLength = p->GetSize();
+        b.crcType = g_crcType;
+        uint8_t prio = ntnsagin::kBpPriorityNormal;
+        if (g_priorityMode == "bulk")
+        {
+            prio = ntnsagin::kBpPriorityBulk;
+        }
+        else if (g_priorityMode == "expedited")
+        {
+            prio = ntnsagin::kBpPriorityExpedited;
+        }
+        else if (g_priorityMode == "mixed")
+        {
+            prio = static_cast<uint8_t>(d % 3);
+        }
+        const bool critical = g_criticalShare > 0.0 && g_critRng->GetValue() < g_criticalShare;
+        if (prio != ntnsagin::kBpPriorityNormal || critical)
+        {
+            b.hasCosBlock = true;
+            b.priority = prio;
+            b.critical = critical;
+        }
         p->AddHeader(b);
-        p->AddTrailer(SaginBundleTrailer());
+        p->AddTrailer(b.MakeTrailer());
     }
     ++g_generated;
     g_devQ[d]->Offer(p);
@@ -913,7 +1169,32 @@ main(int argc, char* argv[])
                  bpv7Expiry);
     cmd.AddValue("clockless", "bundles with creation time 0 and a Bundle Age block (RFC 9171 4.2.7)",
                  g_clockless);
+    std::string bpCrc = "16";
+    double bundleBer = 0.0;
+    std::string czmlOut;
+    std::string netSimOut;
+    double sceneDtS = 60.0;
+    cmd.AddValue("bpCrc", "RFC 9171 block CRC: 16 (CRC-16 X.25, default) | 32c (CRC-32C) | none", bpCrc);
+    cmd.AddValue("bundleBer",
+                 "residual bit error rate delivered to the bundle layer on the radio hops (--dtn=bpv7)",
+                 bundleBer);
+    cmd.AddValue("priority", "bundle class of service: normal (default) | bulk | expedited | mixed",
+                 g_priorityMode);
+    cmd.AddValue("criticalShare", "share of bundles flagged critical (SABR copies on every route)",
+                 g_criticalShare);
+    cmd.AddValue("sabrBacklog", "wire the per-neighbor queue backlog into SABR (CCSDS 734.3-B-1 3.2.6.2)",
+                 g_sabrBacklog);
+    cmd.AddValue("czml", "ntn-observability Cesium CZML scene output (empty = off)", czmlOut);
+    cmd.AddValue("netsim", "ntn-observability NetSimulyzer scene output (empty = off)", netSimOut);
+    cmd.AddValue("sceneDt", "scene sampling interval (s)", sceneDtS);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_UNLESS(bpCrc == "16" || bpCrc == "32c" || bpCrc == "none", "--bpCrc=16|32c|none");
+    g_crcType = bpCrc == "16" ? ntnsagin::kBpCrc16
+                              : (bpCrc == "32c" ? ntnsagin::kBpCrc32c : ntnsagin::kBpCrcNone);
+    NS_ABORT_MSG_UNLESS(g_priorityMode == "normal" || g_priorityMode == "bulk" ||
+                            g_priorityMode == "expedited" || g_priorityMode == "mixed",
+                        "--priority=normal|bulk|expedited|mixed");
+    NS_ABORT_MSG_UNLESS(g_criticalShare >= 0.0 && g_criticalShare <= 1.0, "--criticalShare in [0,1]");
     NS_ABORT_MSG_UNLESS(linkModel == "gate" || linkModel == "satlink", "--linkModel=gate|satlink");
     NS_ABORT_MSG_UNLESS(contacts == "elevation" || contacts == "cgr", "--contacts=elevation|cgr");
     NS_ABORT_MSG_UNLESS(dtn == "none" || dtn == "bpv7", "--dtn=none|bpv7");
@@ -922,6 +1203,14 @@ main(int argc, char* argv[])
     g_bpv7 = dtn == "bpv7";
     NS_ABORT_MSG_UNLESS(bpv7Expiry == "bundle" || bpv7Expiry == "queue", "--bpv7Expiry=bundle|queue");
     g_bundleExpiry = g_bpv7 && bpv7Expiry == "bundle";
+    NS_ABORT_MSG_IF(bundleBer > 0.0 && !g_bpv7, "--bundleBer needs --dtn=bpv7 (only bundles carry CRCs)");
+    NS_ABORT_MSG_IF((g_priorityMode != "normal" || g_criticalShare > 0.0) && !g_bpv7,
+                    "--priority/--criticalShare need --dtn=bpv7 (class-of-service block)");
+    NS_ABORT_MSG_IF(g_sabrBacklog && g_policy != "sabr", "--sabrBacklog needs --policy=sabr");
+    if (g_criticalShare > 0.0)
+    {
+        g_critRng = CreateObject<UniformRandomVariable>();
+    }
     g_sabr = g_policy == "sabr";
     NS_ABORT_MSG_IF(g_sabr && !g_bpv7, "--policy=sabr routes bundles: it needs --dtn=bpv7");
     NS_ABORT_MSG_IF(g_clockless && !g_bundleExpiry,
@@ -968,6 +1257,36 @@ main(int argc, char* argv[])
     inet.Install(gwN);
     inet.Install(srvN);
 
+    // Toolkit mobility on every node (ntn-cho / ntn-constellation): the satellites carry their
+    // SGP4 models; each buoy is a TR 38.811 UE-class terminal (IOT_FIXED, the stationary NB-IoT
+    // NTN UE of TR 36.763) at its CSV position; each gateway is a WGS-84 fixed station. The
+    // elevation tests and the satlink slant ranges read these models.
+    auto ueEngine = std::make_shared<NtnRealisticMobilityHelper>(1);
+    for (uint32_t d = 0; d < D; ++d)
+    {
+        RealisticUe ue;
+        ue.id = d;
+        ue.ueClass = IOT_FIXED;
+        ue.className = "iot";
+        ue.lat = g_dev[d].latDeg;
+        ue.lon = g_dev[d].lonDeg;
+        Ptr<NtnTr38811MobilityModel> m = CreateObject<NtnTr38811MobilityModel>();
+        m->SetUeState(ue, ueEngine);
+        devN.Get(d)->AggregateObject(m);
+        g_dev[d].ecef = m->GetPosition();
+    }
+    for (uint32_t g = 0; g < G; ++g)
+    {
+        Ptr<NtnGeodeticFixedMobilityModel> m = CreateObject<NtnGeodeticFixedMobilityModel>();
+        m->SetGeodetic(g_gw[g].latDeg, g_gw[g].lonDeg, 0.0);
+        gwN.Get(g)->AggregateObject(m);
+        g_gw[g].ecef = m->GetPosition();
+    }
+    for (uint32_t k = 0; k < S; ++k)
+    {
+        satN.Get(k)->AggregateObject(g_sats[k]);
+    }
+
     // --linkModel=satlink: ground endpoints as ECEF mobility for the live slant range.
     std::vector<Ptr<MobilityModel>> devMob, gwMob;
     const double accessRateBps = 1e6;           // the hop's P2P DataRate below
@@ -976,17 +1295,13 @@ main(int argc, char* argv[])
     const double bwMhzDb = 10.0 * std::log10(noiseBwHz / 1e6);
     if (g_satlink)
     {
-        for (const auto& site : g_dev)
+        for (uint32_t d = 0; d < D; ++d)
         {
-            Ptr<ConstantPositionMobilityModel> m = CreateObject<ConstantPositionMobilityModel>();
-            m->SetPosition(site.ecef);
-            devMob.push_back(m);
+            devMob.push_back(devN.Get(d)->GetObject<MobilityModel>());
         }
-        for (const auto& site : g_gw)
+        for (uint32_t g = 0; g < G; ++g)
         {
-            Ptr<ConstantPositionMobilityModel> m = CreateObject<ConstantPositionMobilityModel>();
-            m->SetPosition(site.ecef);
-            gwMob.push_back(m);
+            gwMob.push_back(gwN.Get(g)->GetObject<MobilityModel>());
         }
         std::cout << "# satlink budget (TR 38.821 Set-1 LEO-600): noise BW " << noiseBwHz / 1e6
                   << " MHz; device EIRP -7 dBW, sat S G/T 1.1 dB/K, sat S EIRP "
@@ -1076,7 +1391,41 @@ main(int argc, char* argv[])
             }
         }
     }
+    // Wave 7B: residual bit errors reach the bundle agent on the radio hops that carry bundles
+    // (satellite receiving from a device, gateway receiving from a satellite). The gate or
+    // satlink model stays in front and still drops what it drops.
+    if (bundleBer > 0.0)
+    {
+        int64_t stream = 1000;
+        auto wrap = [&](Ptr<PointToPointChannel> ch, uint32_t devIdx) {
+            Ptr<NetDevice> nd = ch->GetDevice(devIdx);
+            PointerValue inner;
+            nd->GetAttribute("ReceiveErrorModel", inner);
+            Ptr<ntnsagin::SaginBitErrorModel> em = CreateObject<ntnsagin::SaginBitErrorModel>();
+            em->SetAttribute("BitErrorRate", DoubleValue(bundleBer));
+            em->SetAttribute("UdpDstPort", UintegerValue(kPort));
+            em->SetInner(inner.Get<ErrorModel>());
+            em->AssignStreams(stream++);
+            nd->SetAttribute("ReceiveErrorModel", PointerValue(em));
+            g_berModels.push_back(em);
+        };
+        for (uint32_t d = 0; d < D; ++d)
+        {
+            for (uint32_t k = 0; k < S; ++k)
+            {
+                wrap(g_ds[d][k].chan, 1); // satellite side
+            }
+        }
+        for (uint32_t k = 0; k < S; ++k)
+        {
+            for (uint32_t g = 0; g < G; ++g)
+            {
+                wrap(g_sg[k][g].chan, 0); // gateway side
+            }
+        }
+    }
     p2p.SetDeviceAttribute("DataRate", StringValue("100Mbps"));
+    std::vector<Ipv4Address> gwWiredAddr;
     for (uint32_t g = 0; g < G; ++g)
     {
         NetDeviceContainer nd = p2p.Install(gwN.Get(g), srvN.Get(0));
@@ -1085,6 +1434,7 @@ main(int argc, char* argv[])
         ip.SetBase(Ipv4Address(base), Ipv4Mask("255.255.255.252"));
         Ipv4InterfaceContainer ic = ip.Assign(nd);
         g_gwServerAddr.push_back(ic.GetAddress(1));
+        gwWiredAddr.push_back(ic.GetAddress(0));
     }
 
     // sockets and custody
@@ -1200,6 +1550,17 @@ main(int argc, char* argv[])
             Ptr<ntnsagin::SaginSabrRouter> r = CreateObject<ntnsagin::SaginSabrRouter>();
             r->SetLocalNode(kDevIdBase + d);
             r->SetContactPlan(plan);
+            if (g_sabrBacklog)
+            {
+                r->SetPriorityBacklogFunction([d](uint32_t nb, uint8_t prio) {
+                    if (nb < 1 || nb > g_sats.size())
+                    {
+                        return 0.0;
+                    }
+                    return SabrBacklogBits(kDevIdBase + d, g_devQ[d], g_ds[d][nb - 1].chan->GetDevice(0),
+                                           prio, nb);
+                });
+            }
             g_devSabr.push_back(r);
         }
         for (uint32_t k = 0; k < S; ++k)
@@ -1207,12 +1568,54 @@ main(int argc, char* argv[])
             Ptr<ntnsagin::SaginSabrRouter> r = CreateObject<ntnsagin::SaginSabrRouter>();
             r->SetLocalNode(k + 1);
             r->SetContactPlan(plan);
+            if (g_sabrBacklog)
+            {
+                r->SetPriorityBacklogFunction([k](uint32_t nb, uint8_t prio) {
+                    if (nb < kGwIdBase || nb >= kGwIdBase + g_gw.size())
+                    {
+                        return 0.0;
+                    }
+                    return SabrBacklogBits(k + 1, g_satQ[k], g_sg[k][nb - kGwIdBase].chan->GetDevice(1),
+                                           prio, nb);
+                });
+            }
             g_satSabr.push_back(r);
         }
         std::cout << "# sabr: contact plan " << plan.size() << " contacts (SGP4, " << g_tick
                   << " s resolution)\n";
     }
     g_genStop = horizon - 86400.0;
+    g_crcFailSat.assign(S, 0);
+    g_crcFailGw.assign(G, 0);
+
+    // End-to-end FlowMonitor keyed by the in-band ntn-traffic header (one flow per device).
+    // Bundles may take a day: lost-packet timeout and histogram bins are sized for that.
+    g_e2eMon = CreateObject<FlowMonitor>();
+    g_e2eMon->SetAttribute("MaxPerHopDelay", TimeValue(Seconds(2.0 * horizon)));
+    g_e2eMon->SetAttribute("DelayBinWidth", DoubleValue(60.0));
+    g_e2eMon->SetAttribute("JitterBinWidth", DoubleValue(60.0));
+    g_e2eMon->SetAttribute("FlowInterruptionsBinWidth", DoubleValue(3600.0));
+    g_e2eCls = Create<NtnOranFlowClassifier>();
+    g_e2eMon->AddFlowClassifier(g_e2eCls);
+    g_e2eTx = Create<NtnOranFlowProbe>(g_e2eMon, g_e2eCls, "device");
+    g_e2eRx = Create<NtnOranFlowProbe>(g_e2eMon, g_e2eCls, "server");
+    g_e2eMon->Start(Seconds(0));
+    // Per-hop IPv4 FlowMonitor on every node.
+    FlowMonitorHelper fmh;
+    fmh.SetMonitorAttribute("MaxPerHopDelay", TimeValue(Seconds(2.0 * horizon)));
+    fmh.SetMonitorAttribute("FlowInterruptionsBinWidth", DoubleValue(3600.0));
+    NodeContainer allN(devN, satN, gwN, srvN);
+    Ptr<FlowMonitor> hopMon = fmh.Install(allN);
+    // ntn-observability scene (satellites, devices, gateways), off by default.
+    ns3::ntnobs::NtnSceneHelper scene;
+    scene.SetCzml(czmlOut);
+    scene.SetNetSimulyzer(netSimOut);
+    scene.SetSampleInterval(Seconds(sceneDtS));
+    Ptr<ns3::ntnobs::NtnSceneRecorder> sceneRec;
+    if (scene.Enabled())
+    {
+        sceneRec = scene.Build(satN, devN, gwN);
+    }
     g_out.open(out);
     g_out << "device,seq,gen_s,rx_s\n";
 
@@ -1283,6 +1686,10 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(0), &Tick);
     Simulator::Stop(Seconds(horizon));
     Simulator::Run();
+    if (sceneRec)
+    {
+        sceneRec->Stop();
+    }
 
     // Counters per hop: the device queues supersede and expire too, so the satellite-side numbers are
     // reported apart from them.
@@ -1382,6 +1789,165 @@ main(int argc, char* argv[])
                   << " custody_signals_received=" << g_sigRecv << " custody_released=" << acc
                   << " custody_refusals_handled=" << ref << " custody_retransmissions=" << retx
                   << " still_awaiting_signal=" << awaiting << "\n";
+    }
+    if (g_bpv7)
+    {
+        uint64_t sat = 0, gw = 0, berPk = 0, berBits = 0, corrupt = 0;
+        for (auto v : g_crcFailSat)
+        {
+            sat += v;
+        }
+        for (auto v : g_crcFailGw)
+        {
+            gw += v;
+        }
+        for (auto& m : g_berModels)
+        {
+            berPk += m->GetPacketsSeen();
+            corrupt += m->GetPacketsCorrupted();
+            berBits += m->GetBitsFlipped();
+        }
+        std::cout << "bpv7_crc: type=" << bpCrc << " (RFC 9171 4.2.1) crc_discarded_sat=" << sat
+                  << " crc_discarded_gw=" << gw << " crc_discarded_srv=" << g_crcFailSrv
+                  << " bundle_ber=" << bundleBer << " radio_bundles_seen=" << berPk
+                  << " bundles_corrupted_in_transit=" << corrupt << " bits_flipped=" << berBits
+                  << "\n";
+        if (g_sabr)
+        {
+            std::cout << "sabr_cos: priority=" << g_priorityMode << " critical_share=" << g_criticalShare
+                      << " critical_bundles_forwarded=" << g_critBundles
+                      << " critical_copies=" << g_critCopies << " backlog=" << g_sabrBacklog
+                      << " backlog_queries=" << g_backlogQueries
+                      << " backlog_nonzero=" << g_backlogNonzero
+                      << " backlog_max_bits=" << g_backlogMaxBits << "\n";
+        }
+    }
+
+    // ---- measured KPIs: FlowMonitor end to end (per device) and per hop ----
+    std::string stem = out;
+    if (stem.size() > 4 && stem.substr(stem.size() - 4) == ".csv")
+    {
+        stem = stem.substr(0, stem.size() - 4);
+    }
+    {
+        std::ofstream f(stem + "_e2e_flows.csv");
+        f << "device,tx_bundles,rx_bundles,delivery_ratio,mean_delay_s,mean_jitter_s\n";
+        uint64_t tx = 0, rx = 0;
+        double jitSum = 0.0;
+        uint64_t jitN = 0;
+        for (const auto& [id, st] : g_e2eMon->GetFlowStats())
+        {
+            OranFlowKey key;
+            if (!g_e2eCls->FindFlow(id, key))
+            {
+                continue;
+            }
+            tx += st.txPackets;
+            rx += st.rxPackets;
+            jitSum += st.jitterSum.GetSeconds();
+            jitN += st.rxPackets > 1 ? st.rxPackets - 1 : 0;
+            f << key.srcId - 1 << "," << st.txPackets << "," << st.rxPackets << ","
+              << (st.txPackets ? double(st.rxPackets) / st.txPackets : 0.0) << ","
+              << (st.rxPackets ? st.delaySum.GetSeconds() / st.rxPackets : 0.0) << ","
+              << (st.rxPackets > 1 ? st.jitterSum.GetSeconds() / (st.rxPackets - 1) : 0.0) << "\n";
+        }
+        g_e2eMon->SerializeToXmlFile(stem + "_e2e_flowmon.xml", false, false);
+        std::vector<double> dl = g_e2eDelays;
+        std::sort(dl.begin(), dl.end());
+        auto pct = [&dl](double q) {
+            return dl.empty() ? 0.0 : dl[std::min(dl.size() - 1, static_cast<size_t>(q * dl.size()))];
+        };
+        double mean = 0.0;
+        for (double v : dl)
+        {
+            mean += v;
+        }
+        mean = dl.empty() ? 0.0 : mean / dl.size();
+        std::cout << "e2e_flowmon: flows=" << g_e2eMon->GetFlowStats().size() << " tx=" << tx
+                  << " rx=" << rx << " delivery_ratio=" << (tx ? double(rx) / tx : 0.0)
+                  << " delay_mean_min=" << mean / 60.0 << " delay_p50_min=" << pct(0.5) / 60.0
+                  << " delay_p95_min=" << pct(0.95) / 60.0
+                  << " jitter_mean_min=" << (jitN ? jitSum / jitN / 60.0 : 0.0) << " ("
+                  << stem << "_e2e_flows.csv)\n";
+    }
+    {
+        // address -> role: 0 device, 1 satellite, 2 gateway, 3 server
+        std::map<Ipv4Address, int> role;
+        for (uint32_t d = 0; d < D; ++d)
+        {
+            for (uint32_t k = 0; k < S; ++k)
+            {
+                role[g_ds[d][k].addrA] = 0;
+                role[g_ds[d][k].addrB] = 1;
+            }
+        }
+        for (uint32_t k = 0; k < S; ++k)
+        {
+            for (uint32_t g = 0; g < G; ++g)
+            {
+                role[g_sg[k][g].addrA] = 2;
+                role[g_sg[k][g].addrB] = 1;
+            }
+        }
+        for (uint32_t g = 0; g < G; ++g)
+        {
+            role[gwWiredAddr[g]] = 2;
+            role[g_gwServerAddr[g]] = 3;
+        }
+        struct HopAgg
+        {
+            uint32_t flows{0};
+            uint64_t tx{0}, rx{0}, jn{0};
+            double delay{0}, jitter{0};
+        };
+        const char* names[5] = {"dev->sat", "sat->dev", "sat->gw", "gw->sat", "gw->srv"};
+        HopAgg agg[5];
+        Ptr<Ipv4FlowClassifier> cls = DynamicCast<Ipv4FlowClassifier>(fmh.GetClassifier());
+        for (const auto& [id, st] : hopMon->GetFlowStats())
+        {
+            const auto t = cls->FindFlow(id);
+            if (!role.count(t.sourceAddress) || !role.count(t.destinationAddress))
+            {
+                continue;
+            }
+            const int a = role[t.sourceAddress], b = role[t.destinationAddress];
+            const int h = (a == 0 && b == 1) ? 0 : (a == 1 && b == 0) ? 1 : (a == 1 && b == 2) ? 2
+                        : (a == 2 && b == 1) ? 3 : (a == 2 && b == 3) ? 4 : -1;
+            if (h < 0)
+            {
+                continue;
+            }
+            HopAgg& x = agg[h];
+            ++x.flows;
+            x.tx += st.txPackets;
+            x.rx += st.rxPackets;
+            x.delay += st.delaySum.GetSeconds();
+            x.jitter += st.jitterSum.GetSeconds();
+            x.jn += st.rxPackets > 1 ? st.rxPackets - 1 : 0;
+        }
+        std::ofstream f(stem + "_hops.csv");
+        f << "hop,flows,tx_packets,rx_packets,lost_packets,loss_ratio,mean_delay_ms,mean_jitter_ms,"
+             "model_prop_plus_tx_ms\n";
+        for (int h = 0; h < 5; ++h)
+        {
+            const HopAgg& x = agg[h];
+            const double model = (h == 0 || h == 2) && g_hopModelN[h / 2]
+                                     ? 1e3 * g_hopModelSum[h / 2] / g_hopModelN[h / 2]
+                                     : -1.0;
+            const double md = x.rx ? 1e3 * x.delay / x.rx : 0.0;
+            const double mj = x.jn ? 1e3 * x.jitter / x.jn : 0.0;
+            const uint64_t lost = x.tx > x.rx ? x.tx - x.rx : 0;
+            f << names[h] << "," << x.flows << "," << x.tx << "," << x.rx << "," << lost << ","
+              << (x.tx ? double(lost) / x.tx : 0.0) << "," << md << "," << mj << "," << model << "\n";
+            std::cout << "hop_flowmon " << names[h] << ": tx=" << x.tx << " rx=" << x.rx
+                      << " loss=" << (x.tx ? double(lost) / x.tx : 0.0) << " delay_mean_ms=" << md
+                      << " jitter_mean_ms=" << mj;
+            if (model >= 0)
+            {
+                std::cout << " propagation_plus_serialization_ms=" << model;
+            }
+            std::cout << "\n";
+        }
     }
     g_out.close();
     Simulator::Destroy();

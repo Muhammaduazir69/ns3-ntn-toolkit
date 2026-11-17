@@ -14,6 +14,7 @@ set(_sagin_real_libs
   ${libapplications}
   ${libmmwave}
   ${liblte}
+  ${libpoint-to-point}
 )
 
 build_lib_example(
@@ -153,6 +154,10 @@ build_lib_example(
   LIBRARIES_TO_LINK
     ${libntn-sagin}
     ${libntn-constellation}
+    ${libntn-cho}
+    ${libntn-traffic}
+    ${libntn-observability}
+    ${libflow-monitor}
     ${libcore}
     ${libnetwork}
     ${libmobility}

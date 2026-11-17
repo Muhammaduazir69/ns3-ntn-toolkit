@@ -23,12 +23,19 @@
 //   3.2.5.2   excluded nodes (the node the bundle came from, unless the
 //             caller authorizes backward propagation).
 //   3.2.6.2   earliest transmission opportunity: adjusted start, applicable
-//             backlog, backlog relief from applicable prior contacts,
+//             backlog (Wave 7B: bits queued for the entry node at the
+//             bundle's priority or higher, from a per-neighbor backlog
+//             function), backlog relief from applicable prior contacts,
 //             residual backlog and backlog lien.
 //   3.2.6.3-7 first/last byte transmission and arrival times, projected
 //             bundle arrival time (PBAT).
-//   3.2.6.8   one priority level (the NOTE of 3.2.6.8.1 allows it): MTV,
-//             effective start/stop/duration, EVL, RVL, route depletion.
+//   3.2.6.8   MTV per priority level (Wave 7B): bulk 0, normal 1,
+//             expedited 2; enqueueing a bundle of priority p consumes the
+//             EVC from the MTV of p and of every lower level (a bulk bundle
+//             can be pre-empted by a normal or expedited one, so it does not
+//             reduce their volume; an expedited bundle delays everything
+//             below it). Effective start/stop/duration, EVL from the MTV of
+//             the bundle's priority, RVL, route depletion.
 //   3.2.6.9   candidate filters a) to h).
 //   3.2.6.9.1 the next best route is computed only while the list holds no
 //             candidate; the cap on additional routes (MaxRoutes) is the
@@ -41,10 +48,14 @@
 //   3.2.8.1   best candidate: earliest PBAT, then fewest contacts, then
 //             latest termination time, then smallest entry node number; on
 //             enqueue the MTV of every contact of the route drops by the EVC.
+//   3.2.6.9.2 / 3.2.8.1.3  critical bundles (Wave 7B, RouteCritical): every
+//             route up to MaxRoutes is computed, not only until a candidate
+//             appears, and one copy goes to the entry node of every
+//             candidate route (the best candidate route per entry node).
 //
-// Not implemented: critical bundles (3.2.6.9.2, 3.2.8.1.3), anticipatory
-// fragmentation (3.2.8.2), probe bundles and excluded-neighbor bookkeeping
-// beyond the caller's list (3.2.5.2 b), and multiple priority levels.
+// Not implemented: anticipatory fragmentation (3.2.8.2), the ordinal of
+// expedited bundles, probe bundles and excluded-neighbor bookkeeping beyond
+// the caller's list (3.2.5.2 b).
 // Contact plans in this toolkit come from SGP4 visibility (the ephemeris),
 // not from random contacts. The estimated volume consumption (EVC) is the
 // bundle's serialized size: convergence-layer overhead is not added.
@@ -54,6 +65,7 @@
 
 #include "ns3/object.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -64,6 +76,14 @@ namespace ns3
 {
 namespace ntnsagin
 {
+
+/// CCSDS 734.3-B-1 3.2.6.8 priority levels.
+enum SabrPriority : uint8_t
+{
+    SABR_BULK = 0,
+    SABR_NORMAL = 1,
+    SABR_EXPEDITED = 2,
+};
 
 /// One scheduled contact: an interval of opportunity from one node to another.
 struct SabrContact
@@ -129,6 +149,11 @@ class SaginSabrRouter : public Object
     /// applicable backlog of 3.2.6.2 b). Default: no backlog.
     using BacklogFunction = std::function<double(uint32_t neighbor)>;
     void SetBacklogFunction(BacklogFunction f) { m_backlog = std::move(f); }
+    /// Wave 7B, 3.2.6.2 b): bits queued at the local node for transmission to
+    /// \p neighbor whose priority is \p priority or higher. Takes precedence
+    /// over SetBacklogFunction.
+    using PriorityBacklogFunction = std::function<double(uint32_t neighbor, uint8_t priority)>;
+    void SetPriorityBacklogFunction(PriorityBacklogFunction f) { m_prioBacklog = std::move(f); }
 
     /**
      * \brief Select the forwarding route for one bundle (3.2.3 to 3.2.8.1).
@@ -141,6 +166,8 @@ class SaginSabrRouter : public Object
      * \param noFragment    the "must not be fragmented" flag (3.2.6.9 g)
      * \param reserve       on a decision, reduce the MTV of the route's contacts
      *                      by the EVC (3.2.8.1.2)
+     * \param priority      the bundle's priority (3.2.6.8); with a single
+     *                      priority in use every level behaves as one MTV
      */
     SabrDecision Route(uint32_t dest,
                        double nowS,
@@ -148,20 +175,55 @@ class SaginSabrRouter : public Object
                        double expiryS,
                        const std::set<uint32_t>& excluded = {},
                        bool noFragment = true,
-                       bool reserve = true);
+                       bool reserve = true,
+                       uint8_t priority = SABR_NORMAL);
+
+    /// Wave 7B, critical bundle (3.2.6.9.2, 3.2.8.1.3): all routes are
+    /// computed; returns the best candidate route of every distinct entry
+    /// node, best first. Empty when no route is a candidate.
+    std::vector<SabrDecision> RouteCritical(uint32_t dest,
+                                            double nowS,
+                                            double evcBits,
+                                            double expiryS,
+                                            const std::set<uint32_t>& excluded = {},
+                                            bool noFragment = true,
+                                            bool reserve = true,
+                                            uint8_t priority = SABR_NORMAL);
 
     /// 3.2.8.1.2: reduce the MTV of every contact of \p r by \p evcBits (use
-    /// with Route(..., reserve = false) once the bundle is actually enqueued).
-    void Reserve(const SabrRoute& r, double evcBits);
+    /// with Route(..., reserve = false) once the bundle is actually enqueued),
+    /// at \p priority and every lower level (3.2.6.8).
+    void Reserve(const SabrRoute& r, double evcBits, uint8_t priority = SABR_NORMAL);
     /// Route list currently held for D (for inspection and tests).
     const std::vector<SabrRoute>& GetRouteList(uint32_t dest) const;
-    /// Residual MTV (bits) of a contact.
-    double GetMtvBits(uint32_t contactIdx) const { return m_mtv.at(contactIdx); }
+    /// Residual MTV (bits) of a contact at a priority level.
+    double GetMtvBits(uint32_t contactIdx, uint8_t priority = SABR_NORMAL) const
+    {
+        return m_mtv.at(contactIdx).at(priority > 2 ? 2 : priority);
+    }
 
     uint64_t GetRouteComputations() const { return m_routeComputations; }
     uint64_t GetNoRouteDecisions() const { return m_noRoute; }
 
   private:
+    struct Cand
+    {
+        size_t idx;
+        double pbat;
+        double eto;
+        double rvl;
+    };
+    /// 3.2.6.9: the candidate routes among the routes held for \p dest.
+    std::vector<Cand> Evaluate(uint32_t dest,
+                               double nowS,
+                               double evcBits,
+                               double expiryS,
+                               const std::set<uint32_t>& excluded,
+                               bool noFragment,
+                               uint8_t priority);
+    /// 3.2.8.1.4 a) ordering.
+    bool Better(uint32_t dest, const Cand& a, const Cand& b) const;
+    SabrDecision MakeDecision(uint32_t dest, const Cand& c) const;
     /// Dijkstra over the contact graph from node \p fromNode available at
     /// \p fromTime, to D, avoiding banned contacts and nodes (3.2.4, 3.2.6.10).
     bool ShortestPath(uint32_t fromNode,
@@ -181,12 +243,13 @@ class SaginSabrRouter : public Object
     double m_owltMarginS{0.0};
     uint32_t m_maxRoutes{8};
     std::vector<SabrContact> m_plan;
-    std::vector<double> m_mtv;               //!< per-contact MTV (bits)
+    std::vector<std::array<double, 3>> m_mtv; //!< per-contact MTV per priority (bits)
     std::vector<bool> m_deleted;             //!< pruned contacts (3.2.3.2)
     std::map<uint32_t, std::vector<uint32_t>> m_byFrom; //!< node -> contacts from it
     std::map<uint32_t, std::vector<SabrRoute>> m_routes; //!< D -> route list
     std::map<uint32_t, std::vector<SabrRoute>> m_yenB;   //!< D -> Yen candidate heap
     BacklogFunction m_backlog;
+    PriorityBacklogFunction m_prioBacklog;
     uint64_t m_routeComputations{0};
     uint64_t m_noRoute{0};
 };

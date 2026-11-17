@@ -33,13 +33,14 @@ void
 SaginSabrRouter::SetContactPlan(const std::vector<SabrContact>& plan)
 {
     m_plan = plan;
-    m_mtv.assign(m_plan.size(), 0.0);
+    m_mtv.assign(m_plan.size(), {0.0, 0.0, 0.0});
     m_deleted.assign(m_plan.size(), false);
     m_byFrom.clear();
     for (uint32_t i = 0; i < m_plan.size(); ++i)
     {
         // 3.2.6.8.8: the initial MTV of a contact is its volume.
-        m_mtv[i] = m_plan[i].rateBps * std::max(0.0, m_plan[i].endS - m_plan[i].startS);
+        const double vol = m_plan[i].rateBps * std::max(0.0, m_plan[i].endS - m_plan[i].startS);
+        m_mtv[i] = {vol, vol, vol};
         m_byFrom[m_plan[i].from].push_back(i);
     }
     m_routes.clear(); // 3.2.3.1
@@ -50,7 +51,8 @@ void
 SaginSabrRouter::AddContact(const SabrContact& c)
 {
     m_plan.push_back(c);
-    m_mtv.push_back(c.rateBps * std::max(0.0, c.endS - c.startS));
+    const double vol = c.rateBps * std::max(0.0, c.endS - c.startS);
+    m_mtv.push_back({vol, vol, vol});
     m_deleted.push_back(false);
     m_byFrom[c.from].push_back(static_cast<uint32_t>(m_plan.size() - 1));
     m_routes.clear(); // 3.2.3.1: a plan change invalidates every route list
@@ -301,6 +303,141 @@ SaginSabrRouter::NextRoute(uint32_t dest, double nowS)
     return true;
 }
 
+std::vector<SaginSabrRouter::Cand>
+SaginSabrRouter::Evaluate(uint32_t dest,
+                          double nowS,
+                          double evcBits,
+                          double expiryS,
+                          const std::set<uint32_t>& excluded,
+                          bool noFragment,
+                          uint8_t priority)
+{
+    std::vector<Cand> cands;
+    auto& list = m_routes[dest];
+    for (size_t ri = 0; ri < list.size(); ++ri)
+    {
+        SabrRoute& r = list[ri];
+        FillRouteMetrics(r, nowS); // times move with the current time
+        // a) best-case delivery after expiration
+        if (r.bestCaseDeliveryS > expiryS)
+        {
+            continue;
+        }
+        // b) entry node excluded
+        if (excluded.count(r.entryNode))
+        {
+            continue;
+        }
+        // c) a contact back to X
+        bool toX = false;
+        for (uint32_t c : r.contacts)
+        {
+            toX = toX || (m_plan[c].to == m_local && dest != m_local);
+        }
+        if (toX)
+        {
+            continue;
+        }
+        // 3.2.6.2 earliest transmission opportunity. The applicable backlog
+        // is what is queued for the entry node at this priority or higher.
+        const SabrContact& c0 = m_plan[r.contacts.front()];
+        const double adjStart = std::max(c0.startS, nowS);
+        const double backlog = m_prioBacklog ? m_prioBacklog(r.entryNode, priority)
+                                             : (m_backlog ? m_backlog(r.entryNode) : 0.0);
+        double relief = 0.0;
+        for (uint32_t k = 0; k < m_plan.size(); ++k)
+        {
+            const SabrContact& p = m_plan[k];
+            if (!m_deleted[k] && p.from == c0.from && p.to == c0.to && p.startS < c0.startS &&
+                p.endS > nowS)
+            {
+                relief += p.rateBps * (p.endS - std::max(p.startS, nowS));
+            }
+        }
+        const double residual = std::max(0.0, backlog - relief);
+        const double eto = adjStart + (c0.rateBps > 0 ? residual / c0.rateBps : 0.0);
+        // d) ETO after the end of the initial contact
+        if (eto > c0.endS)
+        {
+            continue;
+        }
+        // 3.2.6.3 to 3.2.6.7: byte times along the route.
+        const size_t n = r.contacts.size();
+        std::vector<double> fbtt(n);
+        double lbat = 0.0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            const SabrContact& k = m_plan[r.contacts[i]];
+            fbtt[i] = (i == 0) ? eto : std::max(k.startS, lbat);
+            const double lbtt = fbtt[i] + (k.rateBps > 0 ? evcBits / k.rateBps : 0.0);
+            lbat = lbtt + k.owltS + m_owltMarginS;
+        }
+        const double pbat = lbat;
+        // e) projected arrival after expiration
+        if (pbat > expiryS)
+        {
+            continue;
+        }
+        // 3.2.6.8.5 to 3.2.6.8.10: effective times, EVL at this priority, RVL.
+        double rvl = std::numeric_limits<double>::infinity();
+        for (size_t i = 0; i < n; ++i)
+        {
+            const uint32_t ci = r.contacts[i];
+            double stop = m_plan[ci].endS;
+            for (size_t j = i + 1; j < n; ++j)
+            {
+                stop = std::min(stop, m_plan[r.contacts[j]].endS);
+            }
+            const double dur = stop - fbtt[i];
+            const double evl = std::min(m_mtv[ci][priority], m_plan[ci].rateBps * dur);
+            rvl = std::min(rvl, evl);
+        }
+        // f) depleted route; g) no fragmentation and RVL below the EVC
+        if (rvl <= 0.0 || (noFragment && rvl < evcBits))
+        {
+            continue;
+        }
+        cands.push_back({ri, pbat, eto, rvl}); // h)
+    }
+    return cands;
+}
+
+bool
+SaginSabrRouter::Better(uint32_t dest, const Cand& a, const Cand& b) const
+{
+    // 3.2.8.1.4 a): earliest PBAT, fewest contacts, latest termination,
+    // smallest entry node number.
+    const auto& list = m_routes.at(dest);
+    const SabrRoute& ra = list[a.idx];
+    const SabrRoute& rb = list[b.idx];
+    if (a.pbat != b.pbat)
+    {
+        return a.pbat < b.pbat;
+    }
+    if (ra.contacts.size() != rb.contacts.size())
+    {
+        return ra.contacts.size() < rb.contacts.size();
+    }
+    if (ra.terminationS != rb.terminationS)
+    {
+        return ra.terminationS > rb.terminationS;
+    }
+    return ra.entryNode < rb.entryNode;
+}
+
+SabrDecision
+SaginSabrRouter::MakeDecision(uint32_t dest, const Cand& c) const
+{
+    SabrDecision out;
+    out.found = true;
+    out.route = m_routes.at(dest)[c.idx];
+    out.entryNode = out.route.entryNode;
+    out.pbatS = c.pbat;
+    out.etoS = c.eto;
+    out.rvlBits = c.rvl;
+    return out;
+}
+
 SabrDecision
 SaginSabrRouter::Route(uint32_t dest,
                        double nowS,
@@ -308,9 +445,11 @@ SaginSabrRouter::Route(uint32_t dest,
                        double expiryS,
                        const std::set<uint32_t>& excluded,
                        bool noFragment,
-                       bool reserve)
+                       bool reserve,
+                       uint8_t priority)
 {
     SabrDecision out;
+    priority = std::min<uint8_t>(priority, SABR_EXPEDITED);
     Prune(nowS);
 
     // 3.2.2: CGR applies only if some contact transmits to D.
@@ -325,158 +464,95 @@ SaginSabrRouter::Route(uint32_t dest,
         return out;
     }
 
-    struct Cand
-    {
-        size_t idx;
-        double pbat;
-        double eto;
-        double rvl;
-    };
-    std::vector<Cand> cands;
-    auto evaluate = [&]() {
-        cands.clear();
-        auto& list = m_routes[dest];
-        for (size_t ri = 0; ri < list.size(); ++ri)
-        {
-            SabrRoute& r = list[ri];
-            FillRouteMetrics(r, nowS); // times move with the current time
-            // a) best-case delivery after expiration
-            if (r.bestCaseDeliveryS > expiryS)
-            {
-                continue;
-            }
-            // b) entry node excluded
-            if (excluded.count(r.entryNode))
-            {
-                continue;
-            }
-            // c) a contact back to X
-            bool toX = false;
-            for (uint32_t c : r.contacts)
-            {
-                toX = toX || (m_plan[c].to == m_local && dest != m_local);
-            }
-            if (toX)
-            {
-                continue;
-            }
-            // 3.2.6.2 earliest transmission opportunity.
-            const SabrContact& c0 = m_plan[r.contacts.front()];
-            const double adjStart = std::max(c0.startS, nowS);
-            const double backlog = m_backlog ? m_backlog(r.entryNode) : 0.0;
-            double relief = 0.0;
-            for (uint32_t k = 0; k < m_plan.size(); ++k)
-            {
-                const SabrContact& p = m_plan[k];
-                if (!m_deleted[k] && p.from == c0.from && p.to == c0.to && p.startS < c0.startS &&
-                    p.endS > nowS)
-                {
-                    relief += p.rateBps * (p.endS - std::max(p.startS, nowS));
-                }
-            }
-            const double residual = std::max(0.0, backlog - relief);
-            const double eto = adjStart + (c0.rateBps > 0 ? residual / c0.rateBps : 0.0);
-            // d) ETO after the end of the initial contact
-            if (eto > c0.endS)
-            {
-                continue;
-            }
-            // 3.2.6.3 to 3.2.6.7: byte times along the route.
-            const size_t n = r.contacts.size();
-            std::vector<double> fbtt(n);
-            double lbat = 0.0;
-            for (size_t i = 0; i < n; ++i)
-            {
-                const SabrContact& k = m_plan[r.contacts[i]];
-                fbtt[i] = (i == 0) ? eto : std::max(k.startS, lbat);
-                const double lbtt = fbtt[i] + (k.rateBps > 0 ? evcBits / k.rateBps : 0.0);
-                lbat = lbtt + k.owltS + m_owltMarginS;
-            }
-            const double pbat = lbat;
-            // e) projected arrival after expiration
-            if (pbat > expiryS)
-            {
-                continue;
-            }
-            // 3.2.6.8.5 to 3.2.6.8.10: effective times, EVL, RVL.
-            double rvl = std::numeric_limits<double>::infinity();
-            for (size_t i = 0; i < n; ++i)
-            {
-                const uint32_t ci = r.contacts[i];
-                double stop = m_plan[ci].endS;
-                for (size_t j = i + 1; j < n; ++j)
-                {
-                    stop = std::min(stop, m_plan[r.contacts[j]].endS);
-                }
-                const double dur = stop - fbtt[i];
-                const double evl = std::min(m_mtv[ci], m_plan[ci].rateBps * dur);
-                rvl = std::min(rvl, evl);
-            }
-            // f) depleted route; g) no fragmentation and RVL below the EVC
-            if (rvl <= 0.0 || (noFragment && rvl < evcBits))
-            {
-                continue;
-            }
-            cands.push_back({ri, pbat, eto, rvl}); // h)
-        }
-    };
-
-    evaluate();
+    auto cands = Evaluate(dest, nowS, evcBits, expiryS, excluded, noFragment, priority);
     // 3.2.6.9.1: compute the next best route only while there is no candidate.
     while (cands.empty() && m_routes[dest].size() < m_maxRoutes && NextRoute(dest, nowS))
     {
-        evaluate();
+        cands = Evaluate(dest, nowS, evcBits, expiryS, excluded, noFragment, priority);
     }
-    out.routesComputed = static_cast<uint32_t>(m_routes[dest].size());
-    out.candidates = static_cast<uint32_t>(cands.size());
     if (cands.empty())
     {
+        out.routesComputed = static_cast<uint32_t>(m_routes[dest].size());
         ++m_noRoute; // 3.2.7: CGR is not used for this bundle
         return out;
     }
-    // 3.2.8.1.4 a): earliest PBAT, fewest contacts, latest termination,
-    // smallest entry node number.
-    const auto& list = m_routes[dest];
-    auto better = [&](const Cand& a, const Cand& b) {
-        const SabrRoute& ra = list[a.idx];
-        const SabrRoute& rb = list[b.idx];
-        if (a.pbat != b.pbat)
-        {
-            return a.pbat < b.pbat;
-        }
-        if (ra.contacts.size() != rb.contacts.size())
-        {
-            return ra.contacts.size() < rb.contacts.size();
-        }
-        if (ra.terminationS != rb.terminationS)
-        {
-            return ra.terminationS > rb.terminationS;
-        }
-        return ra.entryNode < rb.entryNode;
-    };
-    const Cand best = *std::min_element(cands.begin(), cands.end(), better);
-    out.found = true;
-    out.route = list[best.idx];
-    out.entryNode = out.route.entryNode;
-    out.pbatS = best.pbat;
-    out.etoS = best.eto;
-    out.rvlBits = best.rvl;
+    const Cand best = *std::min_element(cands.begin(), cands.end(), [&](const Cand& a, const Cand& b) {
+        return Better(dest, a, b);
+    });
+    out = MakeDecision(dest, best);
+    out.routesComputed = static_cast<uint32_t>(m_routes[dest].size());
+    out.candidates = static_cast<uint32_t>(cands.size());
     if (reserve)
     {
-        Reserve(out.route, evcBits);
+        Reserve(out.route, evcBits, priority);
+    }
+    return out;
+}
+
+std::vector<SabrDecision>
+SaginSabrRouter::RouteCritical(uint32_t dest,
+                               double nowS,
+                               double evcBits,
+                               double expiryS,
+                               const std::set<uint32_t>& excluded,
+                               bool noFragment,
+                               bool reserve,
+                               uint8_t priority)
+{
+    std::vector<SabrDecision> out;
+    priority = std::min<uint8_t>(priority, SABR_EXPEDITED);
+    Prune(nowS);
+    // 3.2.6.9.2: for a critical bundle the route list is completed (up to the
+    // implementation cap), not grown only until a candidate exists.
+    while (m_routes[dest].size() < m_maxRoutes && NextRoute(dest, nowS))
+    {
+    }
+    auto cands = Evaluate(dest, nowS, evcBits, expiryS, excluded, noFragment, priority);
+    if (cands.empty())
+    {
+        ++m_noRoute;
+        return out;
+    }
+    std::sort(cands.begin(), cands.end(), [&](const Cand& a, const Cand& b) { return Better(dest, a, b); });
+    // 3.2.8.1.3: one copy to the entry node of every candidate route; the
+    // best candidate of each entry node carries it.
+    std::set<uint32_t> entries;
+    for (const auto& c : cands)
+    {
+        const SabrRoute& r = m_routes[dest][c.idx];
+        if (!entries.insert(r.entryNode).second)
+        {
+            continue;
+        }
+        SabrDecision d = MakeDecision(dest, c);
+        d.routesComputed = static_cast<uint32_t>(m_routes[dest].size());
+        d.candidates = static_cast<uint32_t>(cands.size());
+        out.push_back(d);
+    }
+    if (reserve)
+    {
+        for (const auto& d : out)
+        {
+            Reserve(d.route, evcBits, priority);
+        }
     }
     return out;
 }
 
 void
-SaginSabrRouter::Reserve(const SabrRoute& r, double evcBits)
+SaginSabrRouter::Reserve(const SabrRoute& r, double evcBits, uint8_t priority)
 {
-    // 3.2.8.1.2: enqueueing consumes the EVC on every contact of the route.
+    // 3.2.8.1.2 with 3.2.6.8: enqueueing consumes the EVC on every contact of
+    // the route, at the bundle's priority and every lower level.
+    priority = std::min<uint8_t>(priority, SABR_EXPEDITED);
     for (uint32_t c : r.contacts)
     {
         if (c < m_mtv.size())
         {
-            m_mtv[c] = std::max(0.0, m_mtv[c] - evcBits);
+            for (uint8_t q = 0; q <= priority; ++q)
+            {
+                m_mtv[c][q] = std::max(0.0, m_mtv[c][q] - evcBits);
+            }
         }
     }
 }
