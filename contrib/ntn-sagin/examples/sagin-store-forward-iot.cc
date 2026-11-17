@@ -41,8 +41,22 @@
 //        can be lost too), retransmits after --custodyTimeoutS, refuses on depleted storage
 //        (reason 4) and answers duplicates with "redundant reception" (reason 3). The server
 //        delivers each bundle once (RFC 9171 5.7) and counts duplicates. Not implemented: CRCs,
-//        extension blocks, fragmentation, BPSec, status reports on the wire (counted only),
-//        LTP/TCPCL convergence layers, SABR (CCSDS 734.3-B-1) route computation.
+//        previous-node and hop-count blocks, fragmentation, BPSec, status reports on the wire
+//        (counted only), LTP/TCPCL convergence layers.
+//
+// Wave 6B options:
+//   --bpv7Expiry=bundle (default with --dtn=bpv7)  RFC 9171 5.5 expiry from each bundle's own
+//        primary block: deleted on arrival if expired, never forwarded once expired, deleted from
+//        storage AT its deadline by a timer, and also checked at the gateway and the server.
+//        --bpv7Expiry=queue reproduces the earlier queue-level lifetime.
+//   --clockless=1  bundles carry creation time 0 and a Bundle Age block (RFC 9171 4.2.7, 4.4.2);
+//        every custodian adds its dwell time to the age when it forwards.
+//   --policy=sabr  CCSDS 734.3-B-1 SABR contact graph routing (sagin-sabr-router.h) on every
+//        device and satellite, over a contact plan derived from the SGP4 ephemeris at the tick
+//        resolution (device->satellite, satellite->gateway, gateway->server contacts). A bundle
+//        is sent only when its best candidate route's first contact is open; routes whose
+//        projected arrival is after the bundle's expiration are never used (3.2.6.9 a, e).
+//        Requires --dtn=bpv7.
 
 #include "ns3/applications-module.h"
 #include "ns3/contact-graph-router.h"
@@ -56,6 +70,7 @@
 #include "ns3/orbital-elements.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/sagin-custody-queue.h"
+#include "ns3/sagin-sabr-router.h"
 #include "ns3/sgp4-mobility-model.h"
 
 #include <cmath>
@@ -227,6 +242,15 @@ uint64_t g_sigSentRefused = 0;
 uint64_t g_sigSentRedundant = 0;
 uint64_t g_sigRecv = 0;
 std::vector<Ptr<Socket>> g_devSigSock, g_satSigSock;
+// ---- Wave 6B ----
+bool g_bundleExpiry = false; // RFC 9171 5.5 per-bundle expiry
+bool g_clockless = false;    // creation time 0 + Bundle Age block
+bool g_sabr = false;
+constexpr uint32_t kServerId = 9000;
+std::vector<Ptr<ntnsagin::SaginSabrRouter>> g_devSabr, g_satSabr;
+uint64_t g_sabrFwd = 0, g_sabrHold = 0, g_sabrNoRoute = 0;
+uint64_t g_expiredAtGw = 0, g_expiredAtSrv = 0;
+SaginCustodyQueue::ExpiryFunction g_expiryFn;
 
 bool
 DevSatVisible(uint32_t d, uint32_t k)
@@ -285,6 +309,14 @@ SendCustodySignal(Ptr<Socket> sock, const SaginBundleHeader& b, Address to, bool
     {
         ++g_sigSentOk;
     }
+}
+
+/// RFC 9171 5.5 deadline (simulation seconds) of a bundle that arrived at \p arrival.
+double
+BundleDeadlineS(Ptr<const Packet> p, Time arrival)
+{
+    const auto e = g_expiryFn(p, arrival);
+    return e.wellFormed ? e.deadline.GetSeconds() : -1.0;
 }
 
 void
@@ -389,6 +421,37 @@ ChooseSatellite(uint32_t d)
 bool
 DeviceForward(uint32_t d, Ptr<Packet> p)
 {
+    if (g_sabr)
+    {
+        // CCSDS 734.3-B-1: the best candidate route decides the entry satellite; the bundle
+        // goes now only if that route's first contact is open, otherwise it stays in custody.
+        const double now = Simulator::Now().GetSeconds();
+        const double evc = p->GetSize() * 8.0;
+        auto dec = g_devSabr[d]->Route(kServerId, now, evc, BundleDeadlineS(p, Simulator::Now()),
+                                       {}, true, false);
+        if (!dec.found)
+        {
+            ++g_sabrNoRoute;
+            return false;
+        }
+        const uint32_t k = dec.entryNode - 1;
+        const auto& c0 = g_devSabr[d]->GetContactPlan()[dec.route.contacts.front()];
+        if (now < c0.startS || !DevSatVisible(d, k) ||
+            (g_upBudget > 0 && g_devUsed[d] >= g_upBudget))
+        {
+            ++g_sabrHold;
+            return false;
+        }
+        const bool ok =
+            g_devSock[d]->SendTo(p->Copy(), 0, InetSocketAddress(g_ds[d][k].addrB, kPort)) >= 0;
+        if (ok)
+        {
+            g_devSabr[d]->Reserve(dec.route, evc);
+            ++g_sabrFwd;
+            g_devUsed[d] += 1;
+        }
+        return ok;
+    }
     const int k = ChooseSatellite(d);
     if (k < 0 || (g_upBudget > 0 && g_devUsed[d] >= g_upBudget))
     {
@@ -405,6 +468,34 @@ SatelliteForward(uint32_t k, Ptr<Packet> p)
     if (g_feedBudget > 0 && g_satUsed[k] >= g_feedBudget)
     {
         return false;
+    }
+    if (g_sabr)
+    {
+        const double now = Simulator::Now().GetSeconds();
+        const double evc = p->GetSize() * 8.0;
+        auto dec = g_satSabr[k]->Route(kServerId, now, evc, BundleDeadlineS(p, Simulator::Now()),
+                                       {}, true, false);
+        if (!dec.found)
+        {
+            ++g_sabrNoRoute;
+            return false;
+        }
+        const uint32_t g = dec.entryNode - kGwIdBase;
+        const auto& c0 = g_satSabr[k]->GetContactPlan()[dec.route.contacts.front()];
+        if (g >= g_gw.size() || now < c0.startS || !g_visSg[k][g])
+        {
+            ++g_sabrHold;
+            return false;
+        }
+        const bool ok =
+            g_satSock[k]->SendTo(p->Copy(), 0, InetSocketAddress(g_sg[k][g].addrA, kPort)) >= 0;
+        if (ok)
+        {
+            g_satSabr[k]->Reserve(dec.route, evc);
+            ++g_sabrFwd;
+            g_satUsed[k] += 1;
+        }
+        return ok;
     }
     if (g_cgr)
     {
@@ -458,10 +549,16 @@ SatelliteReceive(uint32_t k, Ptr<Socket> s)
             SendCustodySignal(g_satSigSock[k], b, from, true, ntnsagin::kCustodyReasonRedundant);
             continue;
         }
+        const uint64_t expiredBefore = g_satQ[k]->GetExpiredOnArrival() + g_satQ[k]->GetMalformed();
         if (g_satQ[k]->Offer(p))
         {
             g_satSeen[k].insert(id);
             SendCustodySignal(g_satSigSock[k], b, from, true, ntnsagin::kCustodyReasonNone);
+        }
+        else if (g_satQ[k]->GetExpiredOnArrival() + g_satQ[k]->GetMalformed() > expiredBefore)
+        {
+            // RFC 9171 5.5: deleted on arrival as expired. The upstream copy has the same
+            // absolute deadline, so its own expiry timer has already deleted it.
         }
         else
         {
@@ -477,6 +574,11 @@ GatewayReceive(uint32_t g, Ptr<Socket> s)
     Address from;
     while ((p = s->RecvFrom(from)))
     {
+        if (g_bpv7 && g_bundleExpiry && Simulator::Now().GetSeconds() >= BundleDeadlineS(p, Simulator::Now()))
+        {
+            ++g_expiredAtGw; // RFC 9171 5.5: expired, deleted, not handed on
+            continue;
+        }
         if (g_bpv7)
         {
             // The gateway is the last custodian before the server's wired link: it accepts
@@ -515,6 +617,11 @@ ServerReceive(Ptr<Socket> s)
     Ptr<Packet> p;
     while ((p = s->Recv()))
     {
+        if (g_bpv7 && g_bundleExpiry && Simulator::Now().GetSeconds() >= BundleDeadlineS(p, Simulator::Now()))
+        {
+            ++g_expiredAtSrv; // RFC 9171 5.5: expired before delivery
+            continue;
+        }
         if (g_bpv7)
         {
             SaginBundleHeader b;
@@ -570,6 +677,13 @@ Generate(uint32_t d, uint32_t seq, Time period)
         b.reportService = 0;
         b.creationMs = static_cast<uint64_t>((g_epochUnix - ntnsagin::kDtnEpochUnixS) * 1000.0) +
                        static_cast<uint64_t>(Simulator::Now().GetMilliSeconds());
+        if (g_clockless)
+        {
+            // RFC 9171 4.2.7: no accurate clock, so creation time 0 and a Bundle Age block.
+            b.creationMs = 0;
+            b.hasAgeBlock = true;
+            b.ageMs = 0;
+        }
         b.creationSeq = seq;
         b.lifetimeMs = g_lifetimeMs;
         b.payloadLength = p->GetSize();
@@ -677,6 +791,72 @@ BuildPlan(double horizonS)
         }
     }
 }
+/// Wave 6B: the SABR contact plan from the SGP4 ephemeris at the tick resolution.
+std::vector<ntnsagin::SabrContact>
+BuildSabrPlan(double horizonS)
+{
+    const uint32_t S = g_sats.size();
+    const uint32_t D = g_dev.size();
+    const uint32_t G = g_gw.size();
+    const uint32_t T = static_cast<uint32_t>(horizonS / g_tick) + 1;
+    std::vector<ntnsagin::SabrContact> plan;
+    // open run start per (d,k) and (k,g); -1 = no run
+    std::vector<std::vector<int64_t>> runDs(D, std::vector<int64_t>(S, -1));
+    std::vector<std::vector<int64_t>> runSg(S, std::vector<int64_t>(G, -1));
+    auto close = [&](uint32_t from, uint32_t to, int64_t t0, uint32_t t1, const Vector& a,
+                     uint32_t sat) {
+        ntnsagin::SabrContact c;
+        c.from = from;
+        c.to = to;
+        c.startS = t0 * g_tick;
+        c.endS = t1 * g_tick;
+        c.rateBps = 1e6; // the access P2P DataRate
+        Vector p, v;
+        g_sats[sat]->GetEcefStateAt(Seconds(0.5 * (c.startS + c.endS)), p, v);
+        c.owltS = CalculateDistance(a, p) / kC; // range at mid-contact
+        plan.push_back(c);
+    };
+    for (uint32_t t = 0; t <= T; ++t)
+    {
+        for (uint32_t k = 0; k < S; ++k)
+        {
+            Vector p, v;
+            g_sats[k]->GetEcefStateAt(Seconds(t * g_tick), p, v);
+            for (uint32_t d = 0; d < D; ++d)
+            {
+                const bool vis = t < T && SinElevation(g_dev[d].ecef, p) >= g_sinDevMask;
+                if (vis && runDs[d][k] < 0)
+                {
+                    runDs[d][k] = t;
+                }
+                else if (!vis && runDs[d][k] >= 0)
+                {
+                    close(kDevIdBase + d, k + 1, runDs[d][k], t, g_dev[d].ecef, k);
+                    runDs[d][k] = -1;
+                }
+            }
+            for (uint32_t g = 0; g < G; ++g)
+            {
+                const bool vis = t < T && SinElevation(g_gw[g].ecef, p) >= g_sinGwMask;
+                if (vis && runSg[k][g] < 0)
+                {
+                    runSg[k][g] = t;
+                }
+                else if (!vis && runSg[k][g] >= 0)
+                {
+                    close(k + 1, kGwIdBase + g, runSg[k][g], t, g_gw[g].ecef, k);
+                    runSg[k][g] = -1;
+                }
+            }
+        }
+    }
+    for (uint32_t g = 0; g < G; ++g)
+    {
+        // the wired gateway -> server link is always up (100 Mb/s, 5 ms)
+        plan.push_back({kGwIdBase + g, kServerId, 0.0, horizonS + g_tick, 100e6, 0.005});
+    }
+    return plan;
+}
 } // namespace
 
 int
@@ -705,7 +885,7 @@ main(int argc, char* argv[])
     cmd.AddValue("periodMin", "status update period (min)", periodMin);
     cmd.AddValue("devMask", "device elevation mask (deg)", devMaskDeg);
     cmd.AddValue("gwMask", "gateway elevation mask (deg)", gwMaskDeg);
-    cmd.AddValue("policy", "bp | sf1 | sfe", g_policy);
+    cmd.AddValue("policy", "bp | sf1 | sfe | sabr (CCSDS 734.3-B-1, needs --dtn=bpv7)", g_policy);
     cmd.AddValue("lifetimeH", "custody lifetime per hop (h), 0 = none", lifetimeH);
     cmd.AddValue("satBufferBytes", "on-board custody capacity (bytes)", satBufferBytes);
     cmd.AddValue("keepNewest", "keep only the newest update of each device in custody", keepNewest);
@@ -727,6 +907,12 @@ main(int argc, char* argv[])
                  contacts);
     cmd.AddValue("dtn", "none (default) | bpv7 (RFC 9171 bundles + RFC 5050 custody transfer)", dtn);
     cmd.AddValue("custodyTimeoutS", "custody retransmission timer (s), --dtn=bpv7", custodyTimeoutS);
+    std::string bpv7Expiry = "bundle";
+    cmd.AddValue("bpv7Expiry",
+                 "bundle (RFC 9171 5.5 per-bundle expiry, default) | queue (pre-Wave-6B queue lifetime)",
+                 bpv7Expiry);
+    cmd.AddValue("clockless", "bundles with creation time 0 and a Bundle Age block (RFC 9171 4.2.7)",
+                 g_clockless);
     cmd.Parse(argc, argv);
     NS_ABORT_MSG_UNLESS(linkModel == "gate" || linkModel == "satlink", "--linkModel=gate|satlink");
     NS_ABORT_MSG_UNLESS(contacts == "elevation" || contacts == "cgr", "--contacts=elevation|cgr");
@@ -734,7 +920,14 @@ main(int argc, char* argv[])
     g_satlink = linkModel == "satlink";
     g_cgr = contacts == "cgr";
     g_bpv7 = dtn == "bpv7";
+    NS_ABORT_MSG_UNLESS(bpv7Expiry == "bundle" || bpv7Expiry == "queue", "--bpv7Expiry=bundle|queue");
+    g_bundleExpiry = g_bpv7 && bpv7Expiry == "bundle";
+    g_sabr = g_policy == "sabr";
+    NS_ABORT_MSG_IF(g_sabr && !g_bpv7, "--policy=sabr routes bundles: it needs --dtn=bpv7");
+    NS_ABORT_MSG_IF(g_clockless && !g_bundleExpiry,
+                    "--clockless needs --dtn=bpv7 --bpv7Expiry=bundle (age-block expiry)");
     g_epochUnix = epochUnix;
+    g_expiryFn = SaginCustodyQueue::Bpv7PrimaryBlockExpiry(epochUnix);
     g_lifetimeMs = static_cast<uint64_t>((lifetimeH > 0 ? lifetimeH * 3600.0 : days * 86400.0) * 1000.0);
     g_sinDevMask = std::sin(devMaskDeg * M_PI / 180.0);
     g_sinGwMask = std::sin(gwMaskDeg * M_PI / 180.0);
@@ -909,14 +1102,24 @@ main(int argc, char* argv[])
             q->SetReplaceSameSource(g_bpv7 ? &BundleSourceKey : &SourceKey);
         }
         q->SetLastComeFirstServed(lcfs);
+        q->SetPerBundleDrain(g_sabr); // SABR decides per bundle (no head-of-line blocking)
         if (lifetimeE2E && !g_bpv7)
         {
             q->SetOriginFunction(&GenTime);
         }
+        if (g_bundleExpiry)
+        {
+            // RFC 9171 5.5: each bundle expires at its own primary-block deadline.
+            q->SetBundleExpiry(g_expiryFn);
+            q->SetForwardTransform(SaginCustodyQueue::Bpv7AgeUpdate());
+        }
         if (g_bpv7)
         {
             // RFC 9171 4.2.2: the lifetime runs from the creation timestamp.
-            q->SetOriginFunction(&BundleCreation);
+            if (!g_bundleExpiry)
+            {
+                q->SetOriginFunction(&BundleCreation);
+            }
             q->SetCustodyTransfer(true, Seconds(custodyTimeoutS), &BundleIdOf);
             Ptr<Socket> sig = Socket::CreateSocket(devN.Get(d), udp);
             sig->Bind(InetSocketAddress(Ipv4Address::GetAny(), kSigPort));
@@ -942,13 +1145,19 @@ main(int argc, char* argv[])
             q->SetReplaceSameSource(g_bpv7 ? &BundleSourceKey : &SourceKey);
         }
         q->SetLastComeFirstServed(lcfs);
+        q->SetPerBundleDrain(g_sabr); // SABR decides per bundle (no head-of-line blocking)
         if (lifetimeE2E && g_policy != "bp" && !g_bpv7)
         {
             q->SetOriginFunction(&GenTime);
         }
         if (g_bpv7)
         {
-            if (g_policy != "bp")
+            if (g_policy != "bp" && g_bundleExpiry)
+            {
+                q->SetBundleExpiry(g_expiryFn);
+                q->SetForwardTransform(SaginCustodyQueue::Bpv7AgeUpdate());
+            }
+            else if (g_policy != "bp")
             {
                 q->SetOriginFunction(&BundleCreation);
             }
@@ -982,6 +1191,26 @@ main(int argc, char* argv[])
     if (g_policy == "sfe")
     {
         BuildPlan(horizon + 86400.0);
+    }
+    if (g_sabr)
+    {
+        const auto plan = BuildSabrPlan(horizon + 86400.0);
+        for (uint32_t d = 0; d < D; ++d)
+        {
+            Ptr<ntnsagin::SaginSabrRouter> r = CreateObject<ntnsagin::SaginSabrRouter>();
+            r->SetLocalNode(kDevIdBase + d);
+            r->SetContactPlan(plan);
+            g_devSabr.push_back(r);
+        }
+        for (uint32_t k = 0; k < S; ++k)
+        {
+            Ptr<ntnsagin::SaginSabrRouter> r = CreateObject<ntnsagin::SaginSabrRouter>();
+            r->SetLocalNode(k + 1);
+            r->SetContactPlan(plan);
+            g_satSabr.push_back(r);
+        }
+        std::cout << "# sabr: contact plan " << plan.size() << " contacts (SGP4, " << g_tick
+                  << " s resolution)\n";
     }
     g_genStop = horizon - 86400.0;
     g_out.open(out);
@@ -1117,6 +1346,34 @@ main(int argc, char* argv[])
             }
         }
         const uint64_t sent = g_sigSentOk + g_sigSentRedundant + g_sigSentRefused;
+        uint64_t expArr = 0, expSto = 0, malformed = 0;
+        for (auto* v : {&g_devQ, &g_satQ})
+        {
+            for (auto& q : *v)
+            {
+                expArr += q->GetExpiredOnArrival();
+                expSto += q->GetExpiredInStorage();
+                malformed += q->GetMalformed();
+            }
+        }
+        std::cout << "bpv7_expiry: mode=" << (g_bundleExpiry ? "bundle(RFC9171-5.5)" : "queue")
+                  << " clockless=" << g_clockless << " expired_on_arrival=" << expArr
+                  << " expired_in_storage=" << expSto << " expired_at_gateway=" << g_expiredAtGw
+                  << " expired_at_server=" << g_expiredAtSrv << " malformed=" << malformed << "\n";
+        if (g_sabr)
+        {
+            uint64_t comps = 0;
+            for (auto* v : {&g_devSabr, &g_satSabr})
+            {
+                for (auto& r : *v)
+                {
+                    comps += r->GetRouteComputations();
+                }
+            }
+            std::cout << "sabr: forwarded=" << g_sabrFwd << " held_for_later_contact=" << g_sabrHold
+                      << " no_candidate_route=" << g_sabrNoRoute << " route_computations=" << comps
+                      << "\n";
+        }
         std::cout << "bpv7: bundles_generated=" << g_generated << " bundles_delivered=" << g_delivered
                   << " duplicates_at_server=" << g_dupAtServer << " bundles_expired=" << (expSat + expDev)
                   << " deletion_status_reports=" << delRep << " custody_signals_sent=" << sent

@@ -23,13 +23,20 @@
 //    creation timestamp), CBOR encoded. BPv7 removed custody transfer from the
 //    base protocol; this keeps the RFC 5050 semantics as an extension.
 //
-// What is NOT implemented: CRC-16/CRC-32C block CRCs (CRC type 0 is legal),
-// extension blocks (previous node, bundle age, hop count), fragmentation
+//  - the Bundle Age extension block (RFC 9171 4.4.2, block type 7), Wave 6B,
+//    carried when the creation time is 0 and updated at every forwarding by
+//    SaginCustodyQueue (the dwell time at the node is added).
+//
+// What is NOT implemented: CRC-16/CRC-32C block CRCs (CRC type 0; RFC 9171
+// 4.3.1 requires a CRC on the primary block unless a BIB protects it, so this
+// is a known deviation), the previous node and hop count extension blocks,
+// fragmentation
 // (4.2.3 flag never set), BPSec (RFC 9172), administrative records sent as
 // bundles (the custody signal is a bare record over UDP), bundle status
 // reports on the wire (they are counted, see SaginCustodyQueue), a
 // convergence-layer protocol (LTP RFC 5326, TCPCL RFC 9174: UDP datagrams
-// carry one bundle each), and CCSDS 734.3-B-1 SABR contact-graph routing.
+// carry one bundle each). CCSDS 734.3-B-1 SABR contact graph routing is in
+// sagin-sabr-router.h (Wave 6B).
 
 #ifndef SAGIN_BUNDLE_PROTOCOL_H
 #define SAGIN_BUNDLE_PROTOCOL_H
@@ -91,6 +98,12 @@ class SaginBundleHeader : public Header
     uint64_t creationSeq{0}; //!< sequence number within the ms
     uint64_t lifetimeMs{0};
     uint64_t payloadLength{0}; //!< bytes of the ns-3 payload after this header
+    /// Bundle Age extension block (RFC 9171 4.4.2, block type 7, block
+    /// number 2), placed before the payload block. RFC 9171 4.2.7: a bundle
+    /// whose creation time is 0 (no accurate clock at the source) MUST carry
+    /// it, and its age is then the only basis for expiry (5.5).
+    bool hasAgeBlock{false};
+    uint64_t ageMs{0}; //!< elapsed ms since creation, as of the latest forwarding
 
     /// Bundle identifier (source node, creation timestamp) folded to 64 bits.
     uint64_t BundleId() const;

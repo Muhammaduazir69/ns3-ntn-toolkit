@@ -176,7 +176,14 @@ SaginBundleHeader::GetSerializedSize() const
                        HeadSize(creationMs) + HeadSize(creationSeq) + HeadSize(lifetimeMs);
     uint32_t payloadHead = 1 /*array(5)*/ + HeadSize(1) + HeadSize(1) + HeadSize(0) + HeadSize(0) +
                            HeadSize(payloadLength) /*bstr head*/;
-    return 1 /*0x9F*/ + primary + payloadHead;
+    uint32_t age = 0;
+    if (hasAgeBlock)
+    {
+        // [7, 2, 0, 0, bstr(uint age)] (RFC 9171 4.3.2 canonical block, 4.4.2)
+        age = 1 + HeadSize(7) + HeadSize(2) + HeadSize(0) + HeadSize(0) +
+              HeadSize(HeadSize(ageMs)) + HeadSize(ageMs);
+    }
+    return 1 /*0x9F*/ + primary + age + payloadHead;
 }
 
 void
@@ -195,6 +202,18 @@ SaginBundleHeader::Serialize(Buffer::Iterator i) const
     WriteHead(i, kUint, creationMs);
     WriteHead(i, kUint, creationSeq);
     WriteHead(i, kUint, lifetimeMs);
+    if (hasAgeBlock)
+    {
+        // Bundle Age block (RFC 9171 4.4.2): type 7, block number 2, flags 0,
+        // CRC 0, block-type-specific data = bstr holding the CBOR uint age.
+        WriteHead(i, kArray, 5);
+        WriteHead(i, kUint, 7);
+        WriteHead(i, kUint, 2);
+        WriteHead(i, kUint, 0);
+        WriteHead(i, kUint, 0);
+        WriteHead(i, kBytes, HeadSize(ageMs));
+        WriteHead(i, kUint, ageMs);
+    }
     // Payload block (RFC 9171 4.3.2): [type 1, number 1, flags 0, CRC 0, bstr]
     WriteHead(i, kArray, 5);
     WriteHead(i, kUint, 1);
@@ -221,8 +240,22 @@ SaginBundleHeader::Deserialize(Buffer::Iterator start)
     creationMs = ReadHead(i, kUint);
     creationSeq = ReadHead(i, kUint);
     lifetimeMs = ReadHead(i, kUint);
-    NS_ABORT_MSG_IF(ReadHead(i, kArray) != 5, "payload block: expected 5 items");
-    NS_ABORT_MSG_IF(ReadHead(i, kUint) != 1, "payload block: type is not 1");
+    hasAgeBlock = false;
+    ageMs = 0;
+    NS_ABORT_MSG_IF(ReadHead(i, kArray) != 5, "canonical block: expected 5 items");
+    uint64_t type = ReadHead(i, kUint);
+    if (type == 7)
+    {
+        ReadHead(i, kUint); // block number
+        ReadHead(i, kUint); // flags
+        NS_ABORT_MSG_IF(ReadHead(i, kUint) != 0, "bundle age block: only CRC type 0 supported");
+        ReadHead(i, kBytes);
+        ageMs = ReadHead(i, kUint);
+        hasAgeBlock = true;
+        NS_ABORT_MSG_IF(ReadHead(i, kArray) != 5, "payload block: expected 5 items");
+        type = ReadHead(i, kUint);
+    }
+    NS_ABORT_MSG_IF(type != 1, "payload block: type is not 1");
     ReadHead(i, kUint);
     ReadHead(i, kUint);
     ReadHead(i, kUint);
@@ -236,6 +269,10 @@ SaginBundleHeader::Print(std::ostream& os) const
     os << "bpv7 ipn:" << srcNode << "." << srcService << " -> ipn:" << destNode << "."
        << destService << " ts=[" << creationMs << "," << creationSeq << "] life=" << lifetimeMs
        << "ms flags=0x" << std::hex << flags << std::dec;
+    if (hasAgeBlock)
+    {
+        os << " age=" << ageMs << "ms";
+    }
 }
 
 // ---------------------------------------------------------------------------

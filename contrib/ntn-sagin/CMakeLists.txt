@@ -7,6 +7,8 @@ set(source_files
     model/sagin-custody-queue.cc
     # Wave 2 M3: BPv7 primary block + RFC 5050 custody signal (CBOR)
     model/sagin-bundle-protocol.cc
+    # Wave 6B: CCSDS 734.3-B-1 SABR contact graph routing
+    model/sagin-sabr-router.cc
     model/aeronautical-scenario.cc
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
     model/opensky-adsb-trace.cc
@@ -33,6 +35,7 @@ set(header_files
     model/multi-layer-router.h
     model/sagin-custody-queue.h
     model/sagin-bundle-protocol.h
+    model/sagin-sabr-router.h
     model/aeronautical-scenario.h
     # 4.4.1 — OpenSky ADS-B trace importer + mobility model (Roadmap §4.4.1)
     model/opensky-adsb-trace.h

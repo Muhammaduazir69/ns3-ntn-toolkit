@@ -4,9 +4,13 @@
 
 #include "sagin-custody-queue.h"
 
+#include "sagin-bundle-protocol.h"
+
 #include "ns3/log.h"
 #include "ns3/simulator.h"
 #include "ns3/uinteger.h"
+
+#include <algorithm>
 
 namespace ns3
 {
@@ -35,14 +39,34 @@ SaginCustodyQueue::Offer(Ptr<Packet> p)
     }
     ExpireStale();
 
-    if (m_contactUp && m_queue.empty() && m_forward && m_forward(p))
+    Item fresh{p, Simulator::Now()};
+    if (m_expiryFn)
+    {
+        // RFC 9171 5.5: expiry from the bundle's own primary block.
+        const BundleExpiry e = m_expiryFn(p, fresh.enqueued);
+        if (!e.wellFormed)
+        {
+            ++m_malformed; // creation time 0 and no Bundle Age block (4.2.7)
+            return false;
+        }
+        fresh.deadline = e.deadline;
+        fresh.reportDel = e.reportDeletion;
+        if (fresh.enqueued >= fresh.deadline)
+        {
+            CountExpired(fresh, false); // expired on arrival: deleted, not stored
+            return false;
+        }
+    }
+
+    if (m_contactUp && m_queue.empty() && m_forward &&
+        m_forward(m_transform ? m_transform(p->Copy(), Time()) : p))
     {
         ++m_fwdNow;
         if (m_custody)
         {
-            Item it{p, Simulator::Now()};
             m_bytes += p->GetSize();
-            Retain(it);
+            Retain(fresh);
+            ScheduleExpiry();
         }
         return true;
     }
@@ -80,8 +104,9 @@ SaginCustodyQueue::Offer(Ptr<Packet> p)
         ++m_droppedSpace; // does not fit even in an empty queue
         return false;
     }
-    m_queue.push_back({p, Simulator::Now()});
+    m_queue.push_back(fresh);
     m_bytes += sz;
+    ScheduleExpiry();
 
     if (m_contactUp)
     {
@@ -103,13 +128,104 @@ SaginCustodyQueue::SetContactUp(bool up)
 }
 
 void
+SaginCustodyQueue::CountExpired(const Item& it, bool inStorage)
+{
+    ++m_expired;
+    ++(inStorage ? m_expiredInStorage : m_expiredOnArrival);
+    if (it.reportDel)
+    {
+        ++m_deletionReports; // RFC 9171 6.1.1 reason code 1, requested by bit 18
+    }
+}
+
+void
+SaginCustodyQueue::ScheduleExpiry()
+{
+    if (!m_expiryFn)
+    {
+        return;
+    }
+    Time next = Time::Max();
+    for (const auto& it : m_queue)
+    {
+        next = std::min(next, it.deadline);
+    }
+    for (const auto& kv : m_pending)
+    {
+        next = std::min(next, kv.second.item.deadline);
+    }
+    if (next == Time::Max())
+    {
+        return;
+    }
+    if (m_expiryEvent.IsPending() && m_expiryAt <= next)
+    {
+        return;
+    }
+    m_expiryEvent.Cancel();
+    m_expiryAt = next;
+    m_expiryEvent = Simulator::Schedule(std::max(Time(), next - Simulator::Now()),
+                                        &SaginCustodyQueue::OnExpiryTimer,
+                                        this);
+}
+
+void
+SaginCustodyQueue::OnExpiryTimer()
+{
+    m_expiryAt = Time::Max();
+    ExpireStale();
+    ScheduleExpiry();
+}
+
+void
+SaginCustodyQueue::DoDispose()
+{
+    m_expiryEvent.Cancel();
+    m_forward = nullptr;
+    m_expiryFn = nullptr;
+    m_transform = nullptr;
+    Object::DoDispose();
+}
+
+void
 SaginCustodyQueue::ExpireStale()
 {
+    const Time now = Simulator::Now();
+    if (m_expiryFn)
+    {
+        // Wave 6B: every bundle at its own RFC 9171 deadline.
+        for (auto it = m_pending.begin(); it != m_pending.end();)
+        {
+            if (now >= it->second.item.deadline)
+            {
+                m_bytes -= it->second.item.pkt->GetSize();
+                CountExpired(it->second.item, true);
+                it = m_pending.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        for (auto it = m_queue.begin(); it != m_queue.end();)
+        {
+            if (now >= it->deadline)
+            {
+                m_bytes -= it->pkt->GetSize();
+                CountExpired(*it, true);
+                it = m_queue.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        return;
+    }
     if (m_lifetime <= Time())
     {
         return;
     }
-    const Time now = Simulator::Now();
     if (m_custody)
     {
         // RFC 9171 5.4.1: a retained bundle past its lifetime is deleted too.
@@ -173,10 +289,63 @@ SaginCustodyQueue::Drain()
         return;
     }
     const Time now = Simulator::Now();
+    if (m_perBundleDrain && !m_lcfs)
+    {
+        // Wave 6B: per-bundle forwarding decisions (contact graph routing).
+        // A bundle whose route is not open now is skipped, not a barrier for
+        // the bundles behind it, which may have different routes or deadlines.
+        for (auto it = m_queue.begin(); it != m_queue.end();)
+        {
+            if (m_expiryFn && now >= it->deadline)
+            {
+                m_bytes -= it->pkt->GetSize();
+                CountExpired(*it, true);
+                it = m_queue.erase(it);
+                continue;
+            }
+            Ptr<Packet> out =
+                m_transform ? m_transform(it->pkt->Copy(), now - it->enqueued) : it->pkt;
+            if (!m_forward(out))
+            {
+                ++m_skipped;
+                ++it;
+                continue;
+            }
+            m_maxCustody = std::max(m_maxCustody, now - it->enqueued);
+            if (m_custody)
+            {
+                Retain(*it);
+            }
+            else
+            {
+                m_bytes -= it->pkt->GetSize();
+            }
+            it = m_queue.erase(it);
+            ++m_fwdCustody;
+        }
+        return;
+    }
     while (!m_queue.empty())
     {
         Item& front = m_lcfs ? m_queue.back() : m_queue.front();
-        if (!m_forward(front.pkt))
+        if (m_expiryFn && now >= front.deadline)
+        {
+            // RFC 9171 5.5: an expired bundle is deleted, never forwarded.
+            m_bytes -= front.pkt->GetSize();
+            CountExpired(front, true);
+            if (m_lcfs)
+            {
+                m_queue.pop_back();
+            }
+            else
+            {
+                m_queue.pop_front();
+            }
+            continue;
+        }
+        Ptr<Packet> out = m_transform ? m_transform(front.pkt->Copy(), now - front.enqueued)
+                                      : front.pkt;
+        if (!m_forward(out))
         {
             // The forwarder refused. Custody is retained and the drain stops:
             // a hop that could not take the packet has not taken it, and
@@ -206,6 +375,51 @@ SaginCustodyQueue::Drain()
         }
         ++m_fwdCustody;
     }
+}
+
+SaginCustodyQueue::ExpiryFunction
+SaginCustodyQueue::Bpv7PrimaryBlockExpiry(double simEpochUnixS)
+{
+    const int64_t epochDtnMs = static_cast<int64_t>((simEpochUnixS - kDtnEpochUnixS) * 1000.0);
+    return [epochDtnMs](Ptr<const Packet> p, Time arrival) {
+        BundleExpiry e;
+        SaginBundleHeader h;
+        p->PeekHeader(h);
+        e.reportDeletion = (h.flags & kBpFlagReportDeletion) != 0;
+        if (h.creationMs != 0)
+        {
+            // Age = current time - creation time (5.5 a): the deadline is fixed.
+            e.deadline = MilliSeconds(static_cast<int64_t>(h.creationMs) - epochDtnMs +
+                                      static_cast<int64_t>(h.lifetimeMs));
+        }
+        else if (h.hasAgeBlock)
+        {
+            // No accurate clock at the source: age from the Bundle Age block.
+            e.deadline = arrival + MilliSeconds(static_cast<int64_t>(h.lifetimeMs) -
+                                                static_cast<int64_t>(h.ageMs));
+        }
+        else
+        {
+            e.wellFormed = false;
+        }
+        return e;
+    };
+}
+
+SaginCustodyQueue::ForwardTransform
+SaginCustodyQueue::Bpv7AgeUpdate()
+{
+    return [](Ptr<Packet> p, Time dwell) {
+        SaginBundleHeader h;
+        p->PeekHeader(h);
+        if (h.hasAgeBlock && dwell > Time())
+        {
+            p->RemoveHeader(h);
+            h.ageMs += static_cast<uint64_t>(dwell.GetMilliSeconds());
+            p->AddHeader(h);
+        }
+        return p;
+    };
 }
 
 void

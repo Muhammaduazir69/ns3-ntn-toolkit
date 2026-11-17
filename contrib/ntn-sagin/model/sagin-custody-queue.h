@@ -27,10 +27,24 @@
 // succeeded = 1); RefuseCustody() returns it to the queue (refused, the sender
 // keeps custody); no signal within the retransmission timeout returns it to
 // the queue for another attempt (RFC 5050 5.10.1 custody transfer timer).
-// Lifetime applies to retained bundles too (RFC 9171 4.2.2 / 5.4.1: a bundle
+// Lifetime applies to retained bundles too (RFC 9171 4.2.2 / 5.5: a bundle
 // whose age exceeds its lifetime is deleted, status report reason code 1
 // "lifetime expired", RFC 9171 6.1.1), and the deletion is counted as a
-// generated bundle-deletion status report. The bundle format itself (CBOR
+// generated bundle-deletion status report.
+//
+// Wave 6B, BPv7 expiry (SetBundleExpiry). The queue-level lifetime above is a
+// per-hop or per-origin timer configured on the QUEUE. RFC 9171 5.5 makes
+// expiry a property of the BUNDLE: it expires when its age exceeds the
+// lifetime field of its own primary block, age being current time minus the
+// creation timestamp, or, when the creation time is 0, the Bundle Age block
+// (4.4.2). With an expiry function set, every bundle carries its own deadline
+// from its own header; it is deleted on arrival if already expired, never
+// forwarded once expired (checked at the moment of forwarding), and deleted
+// from storage AT its deadline by a timer, not at the next contact change, so
+// expired bundles stop occupying storage when they expire. A deletion status
+// report is counted only when the bundle asked for one (RFC 9171 4.2.3 bit
+// 18). A bundle with creation time 0 and no Bundle Age block is malformed
+// (RFC 9171 4.2.7) and is deleted. The bundle format itself (CBOR
 // primary block) lives in sagin-bundle-protocol.h; fragmentation,
 // convergence-layer (LTP, RFC 5326) and security (BPSec, RFC 9172) are not
 // implemented.
@@ -38,6 +52,7 @@
 #ifndef SAGIN_CUSTODY_QUEUE_H
 #define SAGIN_CUSTODY_QUEUE_H
 
+#include "ns3/event-id.h"
 #include "ns3/nstime.h"
 #include "ns3/object.h"
 #include "ns3/packet.h"
@@ -85,6 +100,14 @@ class SaginCustodyQueue : public Object
     /// does not matter; when a contact ends mid-drain, LCFS has delivered the
     /// freshest updates and FCFS the stalest.
     void SetLastComeFirstServed(bool on) { m_lcfs = on; }
+    /// Wave 6B: decide per bundle when draining. A refused bundle is skipped
+    /// and the drain continues with the next one (FIFO order kept), instead
+    /// of stopping at the first refusal. Contact graph routing needs this:
+    /// each bundle has its own route and deadline, so one bundle waiting for
+    /// a later contact must not block the others (head-of-line blocking).
+    void SetPerBundleDrain(bool on) { m_perBundleDrain = on; }
+    /// Bundles skipped by a per-bundle drain (refused by the forwarder).
+    uint64_t GetSkipped() const { return m_skipped; }
     /// Measure the lifetime end to end: when set, an item's age is Now() minus
     /// the origin time this function reads from the packet (for instance the
     /// generation timestamp of a status update), not the time it entered this
@@ -93,6 +116,29 @@ class SaginCustodyQueue : public Object
     using OriginFunction = std::function<Time(Ptr<const Packet>)>;
     void SetOriginFunction(OriginFunction f) { m_origin = std::move(f); }
     Time GetLifetime() const { return m_lifetime; }
+
+    /// Wave 6B: per-bundle expiry (RFC 9171 5.5). \p arrival is when the
+    /// bundle reached this node.
+    struct BundleExpiry
+    {
+        Time deadline{Time::Max()}; //!< simulation time at which the bundle expires
+        bool reportDeletion{false}; //!< RFC 9171 4.2.3 bit 18 set
+        bool wellFormed{true};      //!< false: no way to know its age (4.2.7)
+    };
+    using ExpiryFunction = std::function<BundleExpiry(Ptr<const Packet>, Time arrival)>;
+    void SetBundleExpiry(ExpiryFunction f) { m_expiryFn = std::move(f); }
+    /// The RFC 9171 expiry of a packet that starts with a SaginBundleHeader:
+    /// creation timestamp + lifetime, or arrival + (lifetime - Bundle Age)
+    /// when the creation time is 0. \p simEpochUnixS is the Unix time of
+    /// simulation time 0, which maps DTN time onto simulation time.
+    static ExpiryFunction Bpv7PrimaryBlockExpiry(double simEpochUnixS);
+
+    /// Applied to a packet as it is forwarded, with the time it spent here.
+    using ForwardTransform = std::function<Ptr<Packet>(Ptr<Packet>, Time dwell)>;
+    void SetForwardTransform(ForwardTransform f) { m_transform = std::move(f); }
+    /// RFC 9171 4.4.2: add the dwell time at this node to the Bundle Age
+    /// block, if the bundle carries one, on every forwarding.
+    static ForwardTransform Bpv7AgeUpdate();
 
     /// Offer a packet. Accepted into custody when the contact is DOWN, or
     /// forwarded immediately when it is up and the forwarder takes it.
@@ -112,6 +158,11 @@ class SaginCustodyQueue : public Object
     uint64_t GetForwardedImmediately() const { return m_fwdNow; }
     uint64_t GetForwardedFromCustody() const { return m_fwdCustody; }
     uint64_t GetExpired() const { return m_expired; }
+    /// Wave 6B: expired bundles deleted on arrival, deleted from storage by
+    /// the expiry timer or at forwarding time, and malformed ones deleted.
+    uint64_t GetExpiredOnArrival() const { return m_expiredOnArrival; }
+    uint64_t GetExpiredInStorage() const { return m_expiredInStorage; }
+    uint64_t GetMalformed() const { return m_malformed; }
     uint64_t GetDroppedForSpace() const { return m_droppedSpace; }
     uint64_t GetInCustody() const { return m_queue.size(); }
     uint64_t GetBytesInCustody() const { return m_bytes; }
@@ -139,12 +190,31 @@ class SaginCustodyQueue : public Object
     /// lifetime expired), one per expired bundle while custody transfer is on.
     uint64_t GetDeletionReports() const { return m_deletionReports; }
 
+  protected:
+    void DoDispose() override;
+
   private:
     struct Item
     {
         Ptr<Packet> pkt;
         Time enqueued;
+        Time deadline{Time::Max()}; //!< Wave 6B: RFC 9171 5.5 expiry
+        bool reportDel{false};
     };
+    /// Delete \p it as expired; counts the deletion report when requested.
+    void CountExpired(const Item& it, bool inStorage);
+    /// Arm the expiry timer at the earliest deadline held.
+    void ScheduleExpiry();
+    void OnExpiryTimer();
+    ExpiryFunction m_expiryFn;
+    ForwardTransform m_transform;
+    EventId m_expiryEvent;
+    Time m_expiryAt{Time::Max()};
+    uint64_t m_expiredOnArrival{0};
+    uint64_t m_expiredInStorage{0};
+    uint64_t m_malformed{0};
+    bool m_perBundleDrain{false};
+    uint64_t m_skipped{0};
 
     void Drain();
     /// Forwarded: release (no custody transfer) or retain awaiting a signal.
