@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# ns3-ntn-toolkit — pre-built ns-3.43 + 13 contrib modules + Python utilities
+# ns3-ntn-toolkit: pre-built ns-3.43 + toolkit contrib modules + Python utilities
 #
 # Build:  docker build -t uzairdocker69/ns3-ntn-toolkit:latest -f distribution/docker/Dockerfile .
 # Run:    docker run --rm -it -p 8090:8090 -p 3000:3000 uzairdocker69/ns3-ntn-toolkit:latest
@@ -12,7 +12,7 @@ ARG UBUNTU_VERSION=22.04
 ARG NS3_VERSION=3.43
 
 # -----------------------------------------------------------------------------
-# Stage 1: builder — clone, configure, build ns-3 + contrib modules
+# Stage 1: builder: clone, configure, build ns-3 + contrib modules
 #
 # IMPORTANT: the builder and runtime stages share the SAME absolute install
 # path (/home/ntn/ns-3-dev) and the SAME UID (1000). ns-3 bakes absolute
@@ -90,7 +90,7 @@ RUN rm -f *.pcap *_kpm_series.* 2>/dev/null || true \
     && mv /home/ntn/ns-3-dev/contrib/satellite /home/ntn/satellite-stable
 
 # -----------------------------------------------------------------------------
-# Stage 2: runtime — slim image with the built ns-3 + Python utilities
+# Stage 2: runtime: slim image with the built ns-3 + Python utilities
 # -----------------------------------------------------------------------------
 FROM ubuntu:${UBUNTU_VERSION} AS runtime
 
@@ -105,14 +105,14 @@ LABEL org.opencontainers.image.authors="Muhammad Uzair <muhammaduzairr69@gmail.c
 LABEL org.opencontainers.image.licenses="GPL-2.0-only"
 LABEL org.opencontainers.image.version="2.7.0"
 
-# Runtime deps — note this is intentionally NOT a slim "runtime-only" set.
+# Runtime deps: note this is intentionally NOT a slim "runtime-only" set.
 # ns-3's `./ns3 run` wrapper unconditionally invokes the CMake build system
 # to perform an incremental rebuild check before launching a scenario (see
 # Muhammaduazir69/ns3-ntn-toolkit#2). That step:
 #   1. requires cmake + ninja + g++ on PATH, otherwise every `./ns3 run …`
 #      aborts with "Error:  CMake not found; please install …";
 #   2. re-runs every `find_package(...)` from contrib modules' CMakeLists
-#      — so removing dev headers (Boost, GSL, libxml2, sqlite, libpcap,
+#     : so removing dev headers (Boost, GSL, libxml2, sqlite, libpcap,
 #      protobuf, pybind11) makes the reconfigure fail with errors like
 #      "Could NOT find Boost: Found unsuitable version 0.0.0".
 # Mirroring the builder's apt install in the runtime stage is the only way
@@ -135,7 +135,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wget curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user for the runtime container — same UID/GID as builder so the
+# Non-root user for the runtime container: same UID/GID as builder so the
 # tree we COPY --from=builder keeps its ownership and the embedded absolute
 # paths in .lock-ns3 / CMakeCache.txt stay valid.
 RUN groupadd --gid 1000 ntn \
@@ -175,7 +175,7 @@ WORKDIR /home/ntn/ns-3-dev
 
 # Smoke test (lightweight): ns-3 reports its version/profile, contrib modules
 # are linked into libraries, and the Python utilities are importable.
-# We intentionally don't run a full scenario here — scenario failures should
+# We intentionally don't run a full scenario here: scenario failures should
 # surface in the user's `docker run`, not as an image-build failure (so users
 # can still pull the image, drop into a shell, and debug).
 #
@@ -199,8 +199,8 @@ RUN ./ns3 show version \
     && python3 -c "import ntn_constellation, ntn_digital_twin; print('Python utilities OK')"
 
 # Ports:
-#   8090 — ntn-twin-api (FastAPI)
-#   3000 — Grafana (when observability stack is brought up)
+#   8090: ntn-twin-api (FastAPI)
+#   3000: Grafana (when observability stack is brought up)
 EXPOSE 8090 3000
 
 # Default: drop into a shell. Users can override with `docker run … cmd`.

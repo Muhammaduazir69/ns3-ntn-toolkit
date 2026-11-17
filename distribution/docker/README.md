@@ -23,7 +23,7 @@ The multi-stage build keeps `./ns3 run` working inside the runtime image:
 cmake/ninja/g++ and the same dev headers as the builder stage are installed in
 the runtime stage, the build path matches the runtime path
 (`/home/ntn/ns-3-dev`, UID 1000), and `LD_LIBRARY_PATH` is baked into the
-image environment. Don't strip any of these — `./ns3 run` re-drives CMake on
+image environment. Don't strip any of these: `./ns3 run` re-drives CMake on
 every invocation and breaks without them.
 
 ## Run
@@ -61,15 +61,15 @@ docker push uzairdocker69/ns3-ntn-toolkit:latest
 
 Multi-stage build: the builder stage configures and compiles; the runtime
 stage carries the built tree plus the toolchain `./ns3 run` needs. Expect
-**~7.5 GB extracted** — the SNS3 satellite module's antenna-pattern and
+**~7.5 GB extracted**: the SNS3 satellite module's antenna-pattern and
 constellation data accounts for most of it.
 
 ## What's NOT in the image
 
-- **NVIDIA Sionna RT** — requires NVIDIA Container Toolkit + CUDA. Run
+- **NVIDIA Sionna RT**: requires NVIDIA Container Toolkit + CUDA. Run
   separately on a GPU host; the toolkit talks to it over UDP.
-- **FlexRIC live mode** — has its own docker-compose at
+- **FlexRIC live mode**: has its own docker-compose at
   `contrib/oran-ntn/flexric-bridge/docker/`. Bring up alongside.
-- Papers, run outputs, and internal planning documents — excluded by
+- Papers, run outputs, and internal planning documents: excluded by
   `.dockerignore`; the image contains only the published source tree plus the
   SNS3 satellite dependency.

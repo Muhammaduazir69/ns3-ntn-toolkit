@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# sync-publish.sh — incremental, in-place update of the PUBLISHED toolkit image.
+# sync-publish.sh: incremental, in-place update of the PUBLISHED toolkit image.
 # =============================================================================
 #
 # THE PROBLEM THIS SOLVES
 # -----------------------
 # A from-scratch `docker build` recompiles every shared library, so the whole
 # built-tree layer (and, with the layer split, the 5 GB satellite corpus too)
-# gets a brand-new content digest and re-uploads on EVERY push — gigabytes a
+# gets a brand-new content digest and re-uploads on EVERY push: gigabytes a
 # day even when one .cc changed. Docker can only skip a layer whose exact bytes
 # already exist on the registry; a clean rebuild changes those bytes wholesale.
 #
@@ -108,7 +108,7 @@ fi
 # NOTE: *.pb.h/*.pb.cc/*_pb2.py are protoc-GENERATED (not tracked) and the host
 # protoc (3.21) emits code incompatible with the container's libprotobuf (3.12).
 # Excluding them lets the container regenerate matching pb sources with its own
-# protoc — otherwise the synced host pb files cause "abstract type DataContainer".
+# protoc: otherwise the synced host pb files cause "abstract type DataContainer".
 say "rsync source into builder (build/, cmake-cache/, satellite corpus, generated pb excluded)"
 rsync -a --delete --info=stats1 \
   --rsh='docker exec -i' \
@@ -129,12 +129,12 @@ rsync -a --delete --info=stats1 \
 # rsync ran as root; hand the SYNCED SOURCE back to the runtime user (uid 1000).
 #
 # CRITICAL: do NOT `chown -R` the whole tree. overlayfs copies up a file on ANY
-# chown syscall — even a no-op one to the same owner — so a blanket recursive
+# chown syscall: even a no-op one to the same owner: so a blanket recursive
 # chown over build/ (already 1000:1000, ~6 GB) would copy up the entire build
 # tree into the commit layer, making every push a full-image (~6 GB) upload
 # instead of the intended thin delta. Prune build/ and cmake-cache/ (never
 # rsync'd, already 1000-owned) and only touch files that are genuinely not
-# owned by uid/gid 1000 — i.e. just the freshly rsync'd source.
+# owned by uid/gid 1000: i.e. just the freshly rsync'd source.
 docker exec -u root "${CONTAINER}" bash -lc \
   'find /home/ntn/ns-3-dev \
       -path /home/ntn/ns-3-dev/build -prune -o \
@@ -161,7 +161,7 @@ docker exec -u ntn "${CONTAINER}" bash -lc 'cd /home/ntn/ns-3-dev && ./ns3 build
 #    CRITICAL: `docker commit` snapshots the CONTAINER'S RUNTIME CONFIG, not the
 #    base image's. The builder above is deliberately started as `-u root ... sleep
 #    infinity` (root is needed for rsync/apt), so a plain commit bakes
-#    USER=root + CMD=["sleep","infinity"] into the published image — which makes
+#    USER=root + CMD=["sleep","infinity"] into the published image: which makes
 #    `docker run -it <image>` hang forever instead of opening a shell, and drops
 #    the non-root runtime user. Restore both explicitly on every commit.
 #    ENV/EXPOSE/WORKDIR/LABELS do carry over from the base and need no --change.
@@ -188,4 +188,4 @@ say "config verified: USER=${COMMITTED_USER} CMD=${COMMITTED_CMD}"
 say "push ${TARGET} (only the changed-file layer uploads)"
 docker push "${TARGET}"
 
-say "done — satellite corpus + toolchain reused from base; pushed only the delta."
+say "done: satellite corpus + toolchain reused from base; pushed only the delta."
