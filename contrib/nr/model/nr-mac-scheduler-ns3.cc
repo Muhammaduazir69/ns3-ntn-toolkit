@@ -17,6 +17,7 @@
 #include "nr-mac-short-bsr-ce.h"
 
 #include <ns3/boolean.h>
+#include <ns3/double.h>
 #include <ns3/integer.h>
 #include <ns3/log.h>
 #include <ns3/pointer.h>
@@ -188,6 +189,27 @@ NrMacSchedulerNs3::GetTypeId()
                           MakeIntegerAccessor(&NrMacSchedulerNs3::SetMaxDlMcs,
                                               &NrMacSchedulerNs3::GetMaxDlMcs),
                           MakeIntegerChecker<int8_t>(-1, 30))
+            .AddAttribute("OllaEnabled",
+                          "Outer-loop link adaptation on DL: the CQI-derived MCS is reduced by an "
+                          "offset driven by HARQ feedback on first transmissions, so the initial "
+                          "BLER converges to OllaBlerTarget (TS 38.214 5.2.2.1 defines the CQI for a "
+                          "0.1 BLER; deployed gNBs close this loop). Without it, link adaptation "
+                          "ignores interference the CQI did not see, e.g. a second co-channel "
+                          "satellite cell turning active.",
+                          BooleanValue(true),
+                          MakeBooleanAccessor(&NrMacSchedulerNs3::m_ollaEnabled),
+                          MakeBooleanChecker())
+            .AddAttribute("OllaBlerTarget",
+                          "Target BLER of first transmissions for the outer loop",
+                          DoubleValue(0.1),
+                          MakeDoubleAccessor(&NrMacSchedulerNs3::m_ollaBlerTarget),
+                          MakeDoubleChecker<double>(0.001, 0.5))
+            .AddAttribute("OllaStep",
+                          "MCS-index increase of the OLLA offset on a NACK (an ACK lowers it by "
+                          "OllaStep * target / (1 - target))",
+                          DoubleValue(1.0),
+                          MakeDoubleAccessor(&NrMacSchedulerNs3::m_ollaStep),
+                          MakeDoubleChecker<double>(0.01, 5.0))
             .AddAttribute("EnableHarqReTx",
                           "If true, it would set the max HARQ ReTx to 3; otherwise it set it to 0",
                           BooleanValue(true),
@@ -1082,6 +1104,23 @@ NrMacSchedulerNs3::ProcessHARQFeedbacks(
         // RV number should not be greater than 3
         NS_ASSERT(ueProcess.m_dciElement->m_rv < 4);
         uint8_t maxHarqReTx = m_enableHarqReTx ? 3 : 0;
+
+        // Outer-loop link adaptation from the feedback of first transmissions (RV 0), counted once
+        // per feedback: a NACKed process stays in this list (status RECEIVED_FEEDBACK) until its
+        // retransmission is scheduled and is evaluated again every slot meanwhile.
+        // The loop starts once the UE has reported a wideband CQI (connection-setup transmissions
+        // run at the start MCS), and the backoff is bounded to [-4, +8] MCS indices, about the
+        // +/-10 dB range deployed loops use: an unbounded offset could reach MCS 0, where nothing
+        // decodable is scheduled, no ACK arrives, and the loop could never recover.
+        auto& ollaUe = m_ueMap.find(rnti)->second;
+        if (m_ollaEnabled && direction == "DL" && ueProcess.m_dciElement->m_rv == 0 &&
+            ueProcess.m_status != HarqProcess::RECEIVED_FEEDBACK &&
+            ollaUe->m_dlCqi.m_cqiType == NrMacSchedulerUeInfo::CqiInfo::WB)
+        {
+            const double down = m_ollaStep * m_ollaBlerTarget / (1.0 - m_ollaBlerTarget);
+            ollaUe->m_dlOllaOffset += harqFeedbackIt->IsReceivedOk() ? -down : m_ollaStep;
+            ollaUe->m_dlOllaOffset = std::clamp(ollaUe->m_dlOllaOffset, -4.0, 8.0);
+        }
 
         if (harqFeedbackIt->IsReceivedOk() || ueProcess.m_dciElement->m_rv == maxHarqReTx)
         {

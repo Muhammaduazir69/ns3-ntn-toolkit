@@ -952,6 +952,9 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     friend NrSchedGeneralTestCase;
 
     bool m_enableHarqReTx{true}; //!< Flag to enable or disable HARQ ReTx (attribute)
+    bool m_ollaEnabled{true};      //!< outer-loop link adaptation on DL (attribute OllaEnabled)
+    double m_ollaBlerTarget{0.1};  //!< initial-transmission BLER target (attribute OllaBlerTarget)
+    double m_ollaStep{1.0};        //!< MCS-index increase per NACK (attribute OllaStep)
 };
 
 } // namespace ns3

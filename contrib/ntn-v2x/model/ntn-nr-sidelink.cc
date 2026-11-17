@@ -498,21 +498,9 @@ NtnSlChannel::SlotTick()
                 }
                 const double dist = t.ue->GetMobility()->GetDistanceFrom(rxUe->GetMobility());
                 ++m_rxAttempt;
-                bool placed = false;
-                for (auto& b : m_rangeBuckets)
-                {
-                    if (std::abs(b.range - dist) < 25.0)
-                    {
-                        ++b.attempt;
-                        ++b.halfDuplex;
-                        placed = true;
-                        break;
-                    }
-                }
-                if (!placed)
-                {
-                    m_rangeBuckets.push_back({dist, 1, 0, 1});
-                }
+                RangeBucket& b = BucketOf(dist);
+                ++b.attempt;
+                ++b.halfDuplex;
             }
             continue;
         }
@@ -521,23 +509,8 @@ NtnSlChannel::SlotTick()
             double rsrp = SlRsrpDbm(t.ue->GetMobility(), rxUe->GetMobility());
             double dist = t.ue->GetMobility()->GetDistanceFrom(rxUe->GetMobility());
             ++m_rxAttempt;
-            // range bucket
-            {
-                bool placed = false;
-                for (auto& b : m_rangeBuckets)
-                {
-                    if (std::abs(b.range - dist) < 25.0)
-                    {
-                        ++b.attempt;
-                        placed = true;
-                        break;
-                    }
-                }
-                if (!placed)
-                {
-                    m_rangeBuckets.push_back({dist, 1, 0});
-                }
-            }
+            // exact distance bin (kPrrBinM wide)
+            ++BucketOf(dist).attempt;
 
             bool decodable;
             if (m_useTr37885)
@@ -591,14 +564,7 @@ NtnSlChannel::SlotTick()
             if (decodable)
             {
                 ++m_rxSuccess;
-                for (auto& b : m_rangeBuckets)
-                {
-                    if (std::abs(b.range - dist) < 25.0)
-                    {
-                        ++b.success;
-                        break;
-                    }
-                }
+                ++BucketOf(dist).success;
                 // V2X-5. Delivery used to happen synchronously inside SlotTick,
                 // in the same event as the transmission, so the one-way delay of
                 // every PC5 message was identically zero and the module exposed
@@ -687,14 +653,23 @@ NtnSlChannel::SlotTick()
     Simulator::Schedule(m_pool.slotDuration, &NtnSlChannel::SlotTick, this);
 }
 
+NtnSlChannel::RangeBucket&
+NtnSlChannel::BucketOf(double distM) const
+{
+    const auto bin = static_cast<uint32_t>(std::max(0.0, distM) / kPrrBinM);
+    RangeBucket& b = m_rangeBuckets[bin];
+    b.range = (bin + 1) * kPrrBinM;  // upper edge of the bin
+    return b;
+}
+
 double
 NtnSlChannel::GetPrrWithinRange(double rangeM) const
 {
     uint64_t att = 0;
     uint64_t suc = 0;
-    for (const auto& b : m_rangeBuckets)
+    for (const auto& [bin, b] : m_rangeBuckets)
     {
-        if (b.range <= rangeM)
+        if (b.range <= rangeM + 1e-9)
         {
             att += b.attempt;
             suc += b.success;
@@ -703,14 +678,40 @@ NtnSlChannel::GetPrrWithinRange(double rangeM) const
     return att ? double(suc) / att : 0.0;
 }
 
+std::vector<NtnSlChannel::PrrBin>
+NtnSlChannel::GetPrrType1Curve(double binM) const
+{
+    NS_ABORT_MSG_IF(binM < kPrrBinM || std::fmod(binM, kPrrBinM) > 1e-9,
+                    "GetPrrType1Curve: bin width must be a multiple of " << kPrrBinM << " m");
+    const auto per = static_cast<uint32_t>(std::lround(binM / kPrrBinM));
+    std::map<uint32_t, PrrBin> out;
+    for (const auto& [bin, b] : m_rangeBuckets)
+    {
+        const uint32_t k = bin / per;
+        PrrBin& o = out[k];
+        o.loM = k * binM;
+        o.hiM = (k + 1) * binM;
+        o.attempts += b.attempt;
+        o.success += b.success;
+        o.halfDuplex += b.halfDuplex;
+    }
+    std::vector<PrrBin> v;
+    for (auto& [k, o] : out)
+    {
+        o.prr = o.attempts ? double(o.success) / o.attempts : 0.0;
+        v.push_back(o);
+    }
+    return v;
+}
+
 double
 NtnSlChannel::GetPrrWithinRangeExcludingHalfDuplex(double rangeM) const
 {
     uint64_t att = 0;
     uint64_t suc = 0;
-    for (const auto& b : m_rangeBuckets)
+    for (const auto& [bin, b] : m_rangeBuckets)
     {
-        if (b.range <= rangeM)
+        if (b.range <= rangeM + 1e-9)
         {
             att += b.attempt - b.halfDuplex;
             suc += b.success;

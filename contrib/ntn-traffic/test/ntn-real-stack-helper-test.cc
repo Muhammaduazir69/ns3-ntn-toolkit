@@ -33,6 +33,9 @@
 #include "ns3/ntn-oran-sink.h"
 #include "ns3/nr-gnb-cmac-sap.h"
 #include "ns3/nr-gnb-mac.h"
+#include "ns3/nr-gnb-net-device.h"
+#include "ns3/node-list.h"
+#include <sstream>
 #include "ns3/nr-epc-helper.h"
 #include "ns3/nr-helper.h"
 #include "ns3/ntn-rach-window.h"
@@ -3784,6 +3787,120 @@ class RanCounterKpmTest : public TestCase
     }
 };
 
+/// Wave 5: the per-UE / per-cell KPI dataset is written by default for an nr run, its geometry
+/// matches the scene (zenith pass at 600 km: elevation near 90 deg, slant ~600 km, RTT ~4 ms), its
+/// RAN columns are in range, and the outer loop keeps the first-transmission BLER near its 10%
+/// target. The nr gNB HARQ pool is sized to the satellite RTT within TS 38.331's 16..32.
+class UeKpiDatasetTest : public TestCase
+{
+  public:
+    UeKpiDatasetTest()
+        : TestCase("W5: per-UE/per-cell KPI dataset, OLLA BLER and the RTT-sized HARQ pool")
+    {
+    }
+
+  private:
+    static std::vector<std::string> Split(const std::string& line)
+    {
+        std::vector<std::string> out;
+        std::stringstream ss(line);
+        std::string f;
+        while (std::getline(ss, f, ','))
+        {
+            out.push_back(f);
+        }
+        if (!line.empty() && line.back() == ',')
+        {
+            out.emplace_back();
+        }
+        return out;
+    }
+
+    void DoRun() override
+    {
+        const std::string dir = "test-ntn-ue-kpi";
+        std::filesystem::remove_all(dir);
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(6.0));
+        rs.SetOutputDir(dir);
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(5.9));
+        // HARQ pool: the RTT-sized NTN pool is the nr default, within TS 38.331's 16..32.
+        uint32_t harq = 0;
+        for (uint32_t n = 0; n < NodeList::GetNNodes(); ++n)
+        {
+            Ptr<Node> node = NodeList::GetNode(n);
+            for (uint32_t d = 0; d < node->GetNDevices(); ++d)
+            {
+                if (auto gnb = DynamicCast<NrGnbNetDevice>(node->GetDevice(d)))
+                {
+                    harq = gnb->GetMac(0)->GetNumHarqProcess();
+                }
+            }
+        }
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(harq, 16u, "HARQ pool at least the legacy 16");
+        NS_TEST_ASSERT_MSG_LT_OR_EQ(harq, 32u, "HARQ pool within the Rel-17 maximum of 32");
+        Simulator::Stop(Seconds(6.0));
+        Simulator::Run();
+        rs.Collect();
+
+        std::ifstream f(dir + "/ue_kpi.csv");
+        NS_TEST_ASSERT_MSG_EQ(f.good(), true, "ue_kpi.csv written by default");
+        std::string line;
+        std::getline(f, line);
+        const auto head = Split(line);
+        auto col = [&head](const std::string& name) {
+            return static_cast<size_t>(std::find(head.begin(), head.end(), name) - head.begin());
+        };
+        const size_t cT = col("time_s"), cElev = col("elevation_deg"), cRange = col("slant_range_km"),
+                     cRtt = col("rtt_ms"), cPrb = col("prb_used_dl_pct"), cBler = col("bler"),
+                     cMac = col("dl_mac_thp_mbps"), cSinr = col("sinr_db"), cTb = col("dl_tb");
+        NS_TEST_ASSERT_MSG_LT(cTb, head.size(), "dl_tb column present");
+        NS_TEST_ASSERT_MSG_EQ(head.size(), 22u, "22 dataset columns");
+        uint32_t rows = 0, busy = 0;
+        uint64_t tb = 0;
+        double errWeighted = 0.0;
+        while (std::getline(f, line))
+        {
+            const auto v = Split(line);
+            NS_TEST_ASSERT_MSG_EQ(v.size(), head.size(), "row width");
+            ++rows;
+            const double t = std::stod(v[cT]);
+            NS_TEST_ASSERT_MSG_GT(std::stod(v[cElev]), 80.0, "zenith pass elevation");
+            NS_TEST_ASSERT_MSG_EQ_TOL(std::stod(v[cRange]), 600.0, 15.0, "slant range ~ altitude");
+            NS_TEST_ASSERT_MSG_EQ_TOL(std::stod(v[cRtt]), 4.0, 0.15, "RTT = 2 x slant / c");
+            const double prb = std::stod(v[cPrb]);
+            NS_TEST_ASSERT_MSG_GT_OR_EQ(prb, 0.0, "PRB usage >= 0");
+            NS_TEST_ASSERT_MSG_LT_OR_EQ(prb, 100.0, "PRB usage <= 100 %");
+            if (t >= 3.0 && !v[cBler].empty())
+            {
+                const uint64_t n = std::stoull(v[cTb]);
+                tb += n;
+                errWeighted += std::stod(v[cBler]) * n;
+                NS_TEST_ASSERT_MSG_EQ(std::isfinite(std::stod(v[cSinr])), true, "SINR present with TBs");
+                busy += std::stod(v[cMac]) > 0.1 ? 1 : 0;
+            }
+        }
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(rows, 5u, "one row per UE per second");
+        NS_TEST_ASSERT_MSG_GT(busy, 0u, "MAC throughput during traffic");
+        NS_TEST_ASSERT_MSG_GT(tb, 100u, "TBs counted");
+        // OLLA holds the first-transmission BLER near the 0.1 target (well below the ~0.3 seen
+        // without it after an interference change); here it must stay under 0.2.
+        NS_TEST_ASSERT_MSG_LT(errWeighted / tb, 0.2, "OLLA keeps the BLER near its target");
+        std::ifstream cell(dir + "/cell_kpi.csv");
+        NS_TEST_ASSERT_MSG_EQ(cell.good(), true, "cell_kpi.csv written");
+        Simulator::Destroy();
+    }
+};
+
 /// Wave 2 core: SetBroadcastKOffsetSlots takes the SIB19 cellSpecificKoffset
 /// in 15 kHz reference slots (TS 38.331; TS 38.213 4.2) and must convert it to
 /// cell-numerology slots (x 2^mu) whether it is called before or after Build().
@@ -4279,6 +4396,7 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new FeederGatewayDelayTest, Duration::QUICK);
         AddTestCase(new PeriodicMeasurementReportTest, Duration::QUICK);
         AddTestCase(new RanCounterKpmTest, Duration::QUICK);
+        AddTestCase(new UeKpiDatasetTest, Duration::QUICK);
         AddTestCase(new RealStackX2DelayAppliedTest, Duration::QUICK);
         AddTestCase(new NtnRachWindowAppliedTest, Duration::QUICK);
         AddTestCase(new NtnRachWindowOffTest, Duration::QUICK);

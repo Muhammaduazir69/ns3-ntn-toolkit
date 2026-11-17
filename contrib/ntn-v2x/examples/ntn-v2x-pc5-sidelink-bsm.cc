@@ -232,6 +232,14 @@ main(int argc, char* argv[])
                     << ch->GetPrrWithinRange(r) << ",ratio,ts38885\n";
             }
             std::printf("#   wrote %s\n", path.c_str());
+            // TR 37.885 6.1.6 PRR type 1 in 20 m distance bins.
+            std::ofstream curve(outputDir + "/prr_type1.csv");
+            curve << "bin_lo_m,bin_hi_m,rx_attempts,rx_success,half_duplex_miss,prr\n";
+            for (const auto& b : ch->GetPrrType1Curve(20.0))
+            {
+                curve << b.loM << "," << b.hiM << "," << b.attempts << "," << b.success << ","
+                      << b.halfDuplex << "," << b.prr << "\n";
+            }
         }
     }
 

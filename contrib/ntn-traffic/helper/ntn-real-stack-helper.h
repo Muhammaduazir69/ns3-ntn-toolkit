@@ -976,6 +976,15 @@ class NtnRealStackHelper
     /// backend by the GlobalValue NtnRealStackUeStatsTrace (1 s period), e.g.
     /// --NtnRealStackUeStatsTrace=out/ue_stats.csv on any example command line.
     void EnableUeStatsTrace(const std::string& csvPath, Time period = Seconds(1));
+    /// Per-UE and per-cell KPI dataset (Wave 5), written by default to <outputDir>/ue_kpi.csv and
+    /// cell_kpi.csv every \p period (GlobalValue NtnRealStackUeKpiPeriod, seconds; 0 disables).
+    /// Interval values: SS-RSRP/SS-RSRQ from the UE's measurement reports (TS 38.215 5.1.1/5.1.3),
+    /// SINR as the linear mean of the received DL TBs (L1M.RS-SINR), MCS, MIMO rank, PRB usage
+    /// (RRU.PrbUsedDl, TS 28.552 5.1.1.2), DL TBs, BLER, HARQ retransmissions (TBs with RV > 0),
+    /// MAC and application DL throughput, received and lost packets, and the geometry to the
+    /// serving satellite: elevation, slant range, round-trip time and Doppler (from the range
+    /// rate). Read-only: it consumes no decision window, so it cannot change a run.
+    void EnableUeKpiDataset(Time period = Seconds(1));
     /// Cell-level SS-RSRP (TS 38.215 5.1.1): every gNB transmits its control
     /// region, including the PSS/SSB the UE measures, on a CELL beam instead
     /// of quasi-omni (nr patch 09: the predefined beam of the gNB BeamManager).
@@ -1188,6 +1197,12 @@ class NtnRealStackHelper
         double rlcSduDelaySumMs{0.0};
         uint64_t rlcSdus{0};
         double prbSymSum{0.0};
+        // Wave 5 (per-UE KPI dataset): interval-differenced by EnableUeKpiDataset.
+        double sumMcs{0.0};      //!< sum of the MCS index of every received DL TB
+        double sumRank{0.0};     //!< sum of the MIMO rank of every received DL TB
+        uint64_t harqRetx{0};    //!< DL TBs received with redundancy version > 0 (HARQ retransmissions)
+        double okBits{0.0};      //!< bits of DL TBs decoded without error (MAC throughput)
+        double sinrLinSum{0.0};  //!< sum of the linear TB SINR (L1M.RS-SINR averaging, TS 38.215)
     };
     UeRanCounters GetUeRanCounters(uint32_t ueIndex) const;
     /// Cumulative PRB-slots used on DL in \p cellId (sum of PRB x symbols/14).
@@ -1580,6 +1595,19 @@ class NtnRealStackHelper
     };
     std::map<uint32_t, UeSinrWindow> m_ueSinrWin; // per UE index (TakeUeSinrWindowMeanDb)
     std::shared_ptr<std::ofstream> m_ueStatsTrace;  // EnableUeStatsTrace
+    // EnableUeKpiDataset
+    void SampleUeKpi();
+    Time m_ueKpiPeriod{Seconds(0)};
+    EventId m_ueKpiEvent;
+    std::shared_ptr<std::ofstream> m_ueKpiCsv;
+    std::shared_ptr<std::ofstream> m_cellKpiCsv;
+    std::map<uint32_t, UeRanCounters> m_ueKpiPrev;       // counters at the previous sample
+    std::map<uint32_t, uint64_t> m_ueKpiPrevRxBytes;
+    std::map<uint32_t, uint64_t> m_ueKpiPrevRxPkts;
+    std::map<uint32_t, uint64_t> m_ueKpiPrevLostPkts;
+    std::map<uint32_t, double> m_ueKpiPrevRangeM;        // for the range rate (Doppler)
+    std::map<uint32_t, uint16_t> m_ueKpiPrevCell;        // serving cell at the previous sample
+    std::map<uint16_t, double> m_ueKpiPrevCellPrb;
     DataRate m_embbRate{DataRate("5Mb/s")};          // SetEmbbRate
     bool m_embbRateSet{false};
     Time m_ueStatsPeriod{Seconds(1)};

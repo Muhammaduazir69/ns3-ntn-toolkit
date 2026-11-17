@@ -102,6 +102,8 @@ sim_health_report.md
 /ntn-v2x-*.csv
 /sagin-*.csv
 /sim_health.csv
+/ue_kpi.csv
+/cell_kpi.csv
 
 # Personal planning / audit notes — kept locally, not pushed
 ROADMAP_EXECUTION.md
@@ -186,3 +188,9 @@ test1.db
 # Study datasets live in each module repository (paper/), audit run outputs stay local
 contrib/*/paper/
 toolkit-audit-*/
+test-ntn-ho-serving-stats/
+test-ntn-periodic-meas/
+test-ntn-ran-kpm/
+test-ntn-seam-plugin/
+test-ntn-set1-zenith/
+test-ntn-ue-kpi/

@@ -261,6 +261,19 @@ class NtnSlChannel : public Object
     /// path loss and co-channel interference alone leave; GetPrrWithinRange
     /// counts half-duplex misses as failures, as TR 37.885 does.
     double GetPrrWithinRangeExcludingHalfDuplex(double rangeM) const;
+    /// One distance bin of the TR 37.885 6.1.6 PRR type-1 curve.
+    struct PrrBin
+    {
+        double loM{0.0};
+        double hiM{0.0};
+        uint64_t attempts{0};    //!< (tx, rx) pairs with the receiver in [loM, hiM)
+        uint64_t success{0};     //!< of which decoded
+        uint64_t halfDuplex{0};  //!< of which lost because the receiver was transmitting
+        double prr{0.0};
+    };
+    /// PRR type 1 (TR 37.885 6.1.6): per transmitted packet, the receivers in each distance bin
+    /// (default 20 m) that decode it over the receivers in that bin, summed over packets.
+    std::vector<PrrBin> GetPrrType1Curve(double binM = 20.0) const;
 
     /// V2X-5: mean PC5 one-way delay in ms over every successful reception.
     ///
@@ -342,8 +355,13 @@ class NtnSlChannel : public Object
     double m_delayMaxS{0.0};
     uint64_t m_delayCount{0};
     // range-bucketed
-    struct RangeBucket { double range; uint64_t attempt; uint64_t success; uint64_t halfDuplex{0}; };
-    mutable std::vector<RangeBucket> m_rangeBuckets;
+    struct RangeBucket { double range{0.0}; uint64_t attempt{0}; uint64_t success{0}; uint64_t halfDuplex{0}; };
+    /// Exact distance bins of kPrrBinM (10 m): bin i holds pairs at [i*10, (i+1)*10) m, so the
+    /// cumulative "within R" PRR is exact for R a multiple of 10 m and the TR 37.885 20 m type-1
+    /// curve is two bins merged. (It used to merge any pair within 25 m of the first distance seen.)
+    static constexpr double kPrrBinM = 10.0;
+    RangeBucket& BucketOf(double distM) const;
+    mutable std::map<uint32_t, RangeBucket> m_rangeBuckets;
 };
 
 } // namespace ns3

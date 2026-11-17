@@ -149,6 +149,23 @@ Vector g_origin, g_east, g_north, g_up, g_gw;
 std::vector<std::pair<double, double>> g_visEA; // (elevation, street-relative azimuth) of satellites above the mask
 Ipv4Address g_srvAddr;
 std::ofstream g_out;
+
+/// TR 37.885 6.1.6 PRR type 1 in 20 m distance bins, next to the main CSV (<out stem>_prr_type1.csv).
+static void
+WritePrrType1(const std::string& out, Ptr<NtnSlChannel> ch)
+{
+    std::string path = out;
+    const auto dot = path.rfind(".csv");
+    path = (dot == std::string::npos ? path : path.substr(0, dot)) + "_prr_type1.csv";
+    std::ofstream f(path);
+    f << "bin_lo_m,bin_hi_m,rx_attempts,rx_success,half_duplex_miss,prr,prr_excl_half_duplex\n";
+    for (const auto& b : ch->GetPrrType1Curve(20.0))
+    {
+        const uint64_t eff = b.attempts - b.halfDuplex;
+        f << b.loM << "," << b.hiM << "," << b.attempts << "," << b.success << "," << b.halfDuplex
+          << "," << b.prr << "," << (eff ? static_cast<double>(b.success) / eff : 0.0) << "\n";
+    }
+}
 std::ofstream g_trace; // optional per-tick link states of the first vehicles (--traceOut)
 
 Vector
@@ -1036,13 +1053,15 @@ main(int argc, char* argv[])
               << " relayed=" << relayed << " blocked_gen=" << blockedGen << " ul_sent=" << g_ulSent
               << " ul_drop_q=" << g_ulDropQ << " ul_drop_los=" << g_ulDropLos << " ul_bytes=" << g_ulBytes
               << " ul_wait_ms=" << (g_ulSent ? 1e3 * g_ulWaitSum / g_ulSent : 0.0);
-    for (double r : {25.0, 50.0, 100.0, 150.0, 200.0, 300.0})
+    // Cumulative ranges on the exact 10 m bins (the 25 m figure is now 20 m: bins are exact).
+    for (double r : {20.0, 50.0, 100.0, 150.0, 200.0, 300.0})
     {
         std::cout << " prr_" << static_cast<int>(r) << "=" << ch->GetPrrWithinRange(r);
         std::cout << " prrnohd_" << static_cast<int>(r) << "=" << ch->GetPrrWithinRangeExcludingHalfDuplex(r);
     }
     std::cout << " out=" << out << "\n";
     g_out.close();
+    WritePrrType1(out, ch);
     Simulator::Destroy();
     return 0;
 }

@@ -11,7 +11,10 @@
 
 #include "nr-amc.h"
 
+#include <algorithm>
+#include <cmath>
 #include <ns3/log.h>
+#include <ns3/simulator.h>
 #include <ns3/nr-spectrum-value-helper.h>
 
 namespace ns3
@@ -144,9 +147,17 @@ NrMacSchedulerCQIManagement::DlWBCQIReported(const DlCqiInfo& info,
     ueInfo->m_dlCqi.m_wbCqi = info.m_wbCqi;
     ueInfo->m_dlCqi.m_timer = expirationTime;
     ueInfo->m_dlCqi.m_wbCqi = info.m_wbCqi;
-    ueInfo->m_dlMcs =
-        std::min(static_cast<uint8_t>(GetAmcDl()->GetMcsFromCqi(ueInfo->m_dlCqi.m_wbCqi)),
-                 static_cast<uint8_t>(maxDlMcs));
+    {
+        // CQI-derived MCS, corrected by the outer loop (m_dlOllaOffset stays 0 when OLLA is off).
+        const int mcs = static_cast<int>(GetAmcDl()->GetMcsFromCqi(ueInfo->m_dlCqi.m_wbCqi)) -
+                        static_cast<int>(std::lround(ueInfo->m_dlOllaOffset));
+        // maxDlMcs < 0 means "no cap" (it was cast to uint8_t, 255, by the original code).
+        // The outer loop may also raise the MCS above the CQI mapping (negative offset), but never
+        // above the highest index of the configured MCS table.
+        const int cap = std::min(static_cast<int>(static_cast<uint8_t>(maxDlMcs)),
+                                 static_cast<int>(GetAmcDl()->GetMaxMcs()));
+        ueInfo->m_dlMcs = static_cast<uint8_t>(std::min(std::max(mcs, 0), cap));
+    }
     NS_LOG_INFO("Calculated MCS for UE " << ueInfo->m_rnti << " is "
                                          << static_cast<uint32_t>(ueInfo->m_dlMcs));
 

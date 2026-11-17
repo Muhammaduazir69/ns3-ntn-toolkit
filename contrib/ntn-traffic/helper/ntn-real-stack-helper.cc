@@ -93,6 +93,23 @@ static GlobalValue g_ntnRealStackUeStatsTrace(
     StringValue(""),
     MakeStringChecker());
 
+// Wave 5: the per-UE / per-cell KPI dataset (ue_kpi.csv, cell_kpi.csv) is on by default for every
+// nr real-stack run, so every module's dataset carries the RAN and geometry metrics.
+static GlobalValue g_ntnRealStackNrHarqProfile(
+    "NtnRealStackNrHarqProfile",
+    "Size the nr gNB HARQ process pool to the satellite RTT (16 to 32 processes, TS 38.331 "
+    "nrofHARQ-ProcessesForPDSCH-v1700) for every nr real-stack run; false keeps the 16-process "
+    "terrestrial default unless an example calls SetNtnHarqProfile(true)",
+    BooleanValue(true),
+    MakeBooleanChecker());
+
+static GlobalValue g_ntnRealStackUeKpiPeriod(
+    "NtnRealStackUeKpiPeriod",
+    "Sampling period (s) of the per-UE and per-cell KPI dataset NtnRealStackHelper writes to "
+    "<outputDir>/ue_kpi.csv and cell_kpi.csv (nr backend); 0 disables it",
+    DoubleValue(1.0),
+    MakeDoubleChecker<double>(0.0));
+
 namespace
 {
 // Map a 5QI to the BwpManagerAlgorithmStatic attribute that routes that QCI to a
@@ -119,6 +136,7 @@ NtnRealStackHelper::NtnRealStackHelper() = default;
 NtnRealStackHelper::~NtnRealStackHelper()
 {
     m_ueStatsEvent.Cancel();
+    m_ueKpiEvent.Cancel();
     // C3: restore the process-wide elevation convention this helper switched,
     // so later scenarios in the same process (test-runner) see the default.
     if (!m_prevElevationModel.empty())
@@ -1378,6 +1396,12 @@ NtnRealStackHelper::BuildNrRadio()
         {
             EnableUeStatsTrace(ueStatsPath.Get(), Seconds(1));
         }
+        DoubleValue kpiPeriod;
+        GlobalValue::GetValueByName("NtnRealStackUeKpiPeriod", kpiPeriod);
+        if (kpiPeriod.Get() > 0.0)
+        {
+            EnableUeKpiDataset(Seconds(kpiPeriod.Get()));
+        }
     }
 
     // S2: when the air interface could not take the slant (multi-UE without TA),
@@ -1675,7 +1699,11 @@ NtnRealStackHelper::ConfigureNtnHarqProfileNr()
     // Only when the caller opted into the NTN HARQ profile. NR runs HARQ by
     // default; the NTN hazard is recycling a stop-and-wait process before its
     // feedback returns over the LEO slant. Size the pool to cover the RTT.
-    if (!m_ntnHarqProfile)
+    // Wave 5: on by default for the nr backend (GlobalValue NtnRealStackNrHarqProfile), since
+    // every nr run here is a satellite link; SetNtnHarqProfile(true) still forces it.
+    BooleanValue byDefault;
+    GlobalValue::GetValueByName("NtnRealStackNrHarqProfile", byDefault);
+    if (!m_ntnHarqProfile && !byDefault.Get())
     {
         return;
     }
@@ -1685,7 +1713,15 @@ NtnRealStackHelper::ConfigureNtnHarqProfileNr()
     const double slotS = 1.0e-3 / std::pow(2.0, m_numerology); // NR slot duration
     constexpr double kRounds = 4.0;                // initial TX + 3 retx in flight
     double n = std::ceil(rttS / slotS) + kRounds;
-    n = std::max(20.0, std::min(255.0, n));        // NumHarqProcess is uint8_t
+    // TS 38.331 PDSCH-ServingCellConfig nrofHARQ-ProcessesForPDSCH-v1700 allows up to n32 (Rel-17
+    // NTN, 5-bit HARQ process ID in DCI per TS 38.212); 16 is the legacy pool. Beyond 32 the
+    // standard relies on HARQ feedback disabling, so the pool is capped at 32, not stretched.
+    if (n > 32.0)
+    {
+        NS_LOG_WARN("NtnRealStackHelper nr HARQ: RTT needs " << n
+                    << " processes; capped at the TS 38.331 maximum of 32");
+    }
+    n = std::max(16.0, std::min(32.0, n));
     m_nr->SetGnbMacAttribute("NumHarqProcess",
                              UintegerValue(static_cast<uint32_t>(n)));
     NS_LOG_INFO("NtnRealStackHelper nr HARQ profile: slant=" << slantM / 1e3 << " km, RTT="
@@ -2740,6 +2776,11 @@ NtnRealStackHelper::DlRxTraceNr(::ns3::RxPacketTraceParams params)
             c.dlTb += 1;
             c.dlTbErr += params.m_corrupt ? 1 : 0;
             c.prbSymSum += prbSlots;
+            c.sumMcs += params.m_mcs;
+            c.sumRank += params.m_rank;
+            c.harqRetx += (params.m_rv > 0 && params.m_rv != std::numeric_limits<uint8_t>::max()) ? 1 : 0;
+            c.okBits += params.m_corrupt ? 0.0 : 8.0 * params.m_tbSize;
+            c.sinrLinSum += std::max(params.m_sinr, 1e-30);
             // Per-UE decision window (TakeUeSinrWindowMeanDb): keyed by the UE
             // index, so it is continuous across handovers.
             UeSinrWindow& w = m_ueSinrWin[static_cast<uint32_t>(ue)];
@@ -4355,6 +4396,144 @@ NtnRealStackHelper::SampleUeStats()
     }
     m_ueStatsTrace->flush();
     m_ueStatsEvent = Simulator::Schedule(m_ueStatsPeriod, &NtnRealStackHelper::SampleUeStats, this);
+}
+
+void
+NtnRealStackHelper::EnableUeKpiDataset(Time period)
+{
+    NS_ABORT_MSG_IF(period <= Seconds(0), "EnableUeKpiDataset: period must be positive");
+    m_ueKpiPeriod = period;
+    if (!m_ueKpiEvent.IsPending())
+    {
+        m_ueKpiEvent = Simulator::Schedule(period, &NtnRealStackHelper::SampleUeKpi, this);
+    }
+}
+
+void
+NtnRealStackHelper::SampleUeKpi()
+{
+    constexpr double kC = 299792458.0;
+    if (Simulator::Now() > m_simTime)
+    {
+        return;
+    }
+    if (!m_ueKpiCsv)
+    {
+        // Opened at the first sample, so the example's SetOutputDir (any time before Run) applies.
+        std::error_code ec;
+        std::filesystem::create_directories(m_outputDir, ec);
+        m_ueKpiCsv = std::make_shared<std::ofstream>(m_outputDir + "/ue_kpi.csv");
+        *m_ueKpiCsv << "time_s,ue,rnti,serving_cell,ss_rsrp_dbm,ss_rsrq_db,sinr_db,mcs_mean,rank_mean,"
+                       "prb_used_dl_pct,dl_tb,dl_tb_err,bler,harq_retx,dl_mac_thp_mbps,app_dl_thp_mbps,"
+                       "app_rx_pkts,app_lost_pkts,elevation_deg,slant_range_km,rtt_ms,doppler_hz\n";
+        m_cellKpiCsv = std::make_shared<std::ofstream>(m_outputDir + "/cell_kpi.csv");
+        *m_cellKpiCsv << "time_s,cell_id,active_ues,prb_used_dl_pct,dl_mac_thp_mbps,sinr_db,bler\n";
+    }
+    const double dt = m_ueKpiPeriod.GetSeconds();
+    // Available DL PRB-slots in one period: PRBs of the BWP x slots per second x period.
+    const double prbCapacity =
+        static_cast<double>(m_nrBandRb) * (1000.0 * (1 << m_numerology)) * dt;
+    auto field = [](double v, int prec = 3) {
+        std::ostringstream f;
+        if (std::isfinite(v))
+        {
+            f << std::fixed << std::setprecision(prec) << v;
+        }
+        return f.str();
+    };
+    struct CellAgg
+    {
+        uint32_t ues{0};
+        double bits{0.0};
+        double sinrLin{0.0};
+        uint64_t tb{0};
+        uint64_t tbErr{0};
+    };
+    std::map<uint16_t, CellAgg> cells;
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        const UeRanCounters c = GetUeRanCounters(u);
+        const UeRanCounters p = m_ueKpiPrev[u];
+        const uint64_t tb = c.dlTb - p.dlTb;
+        const uint64_t tbErr = c.dlTbErr - p.dlTbErr;
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        const double sinrDb = tb ? 10.0 * std::log10((c.sinrLinSum - p.sinrLinSum) / tb) : nan;
+        const double mcs = tb ? (c.sumMcs - p.sumMcs) / tb : nan;
+        const double rank = tb ? (c.sumRank - p.sumRank) / tb : nan;
+        const double bler = tb ? static_cast<double>(tbErr) / tb : nan;
+        const double prbPct = prbCapacity > 0 ? 100.0 * (c.prbSymSum - p.prbSymSum) / prbCapacity : nan;
+        const double macMbps = (c.okBits - p.okBits) / dt / 1e6;
+        const uint64_t rxB = GetUeRxBytes(u), rxP = GetUeRxPackets(u), lost = GetUeLostPackets(u);
+        const double appMbps = 8.0 * (rxB - m_ueKpiPrevRxBytes[u]) / dt / 1e6;
+        const uint16_t cell = GetUeServingCellId(u);
+        // Geometry to the serving satellite (the gNB whose cell serves this UE).
+        double elev = nan, rangeM = nan, doppler = nan;
+        Ptr<MobilityModel> um = m_ue.Get(u)->GetObject<MobilityModel>();
+        for (uint32_t g = 0; g < m_gnb.GetN() && um; ++g)
+        {
+            if (cell == 0 || GetGnbCellId(g) != cell)
+            {
+                continue;
+            }
+            Ptr<MobilityModel> gm = m_gnb.Get(g)->GetObject<MobilityModel>();
+            if (!gm)
+            {
+                break;
+            }
+            const Vector ue = NtnEarthBlockageLossModel::EcefOf(um);
+            const Vector sat = NtnEarthBlockageLossModel::EcefOf(gm);
+            elev = NtnEarthBlockageLossModel::GeodeticElevationDeg(ue, sat);
+            rangeM = CalculateDistance(ue, sat);
+            break;
+        }
+        // The range rate is only defined against the same satellite: across a handover the previous
+        // range belongs to the old serving satellite, so the Doppler of that interval stays empty.
+        const bool sameSat = m_ueKpiPrevCell.count(u) && m_ueKpiPrevCell[u] == cell;
+        if (sameSat && std::isfinite(rangeM) && m_ueKpiPrevRangeM.count(u) && std::isfinite(m_ueKpiPrevRangeM[u]))
+        {
+            // Doppler of the carrier from the measured range rate: positive while the satellite approaches.
+            doppler = -(rangeM - m_ueKpiPrevRangeM[u]) / dt * m_freqHz / kC;
+        }
+        const double rssp = GetUeServingRsrpDbm(u), rsrq = GetUeServingRsrqDb(u);
+        *m_ueKpiCsv << field(Simulator::Now().GetSeconds()) << "," << u << "," << GetUeRnti(u) << ","
+                    << cell << "," << field(rssp, 1) << "," << field(rsrq, 1) << "," << field(sinrDb, 2)
+                    << "," << field(mcs, 2) << "," << field(rank, 2) << "," << field(prbPct, 2) << ","
+                    << tb << "," << tbErr << "," << field(bler, 5) << "," << (c.harqRetx - p.harqRetx)
+                    << "," << field(macMbps, 4) << "," << field(appMbps, 4) << ","
+                    << (rxP - m_ueKpiPrevRxPkts[u]) << "," << (lost - m_ueKpiPrevLostPkts[u]) << ","
+                    << field(elev, 3) << "," << field(rangeM / 1e3, 3) << ","
+                    << field(2.0 * rangeM / kC * 1e3, 4) << "," << field(doppler, 1) << "\n";
+        if (cell != 0)
+        {
+            CellAgg& a = cells[cell];
+            a.ues += 1;
+            a.bits += c.okBits - p.okBits;
+            a.sinrLin += c.sinrLinSum - p.sinrLinSum;
+            a.tb += tb;
+            a.tbErr += tbErr;
+        }
+        m_ueKpiPrev[u] = c;
+        m_ueKpiPrevRxBytes[u] = rxB;
+        m_ueKpiPrevRxPkts[u] = rxP;
+        m_ueKpiPrevLostPkts[u] = lost;
+        m_ueKpiPrevRangeM[u] = rangeM;
+        m_ueKpiPrevCell[u] = cell;
+    }
+    for (const auto& [cell, a] : cells)
+    {
+        const double used = GetCellDlPrbSlotsUsed(cell);
+        const double prbPct = prbCapacity > 0 ? 100.0 * (used - m_ueKpiPrevCellPrb[cell]) / prbCapacity
+                                              : std::numeric_limits<double>::quiet_NaN();
+        m_ueKpiPrevCellPrb[cell] = used;
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        *m_cellKpiCsv << field(Simulator::Now().GetSeconds()) << "," << cell << "," << a.ues << ","
+                      << field(prbPct, 2) << "," << field(a.bits / dt / 1e6, 4) << ","
+                      << field(a.tb ? 10.0 * std::log10(a.sinrLin / a.tb) : nan, 2) << ","
+                      << field(a.tb ? static_cast<double>(a.tbErr) / a.tb : nan, 5) << "\n";
+    }
+    m_ueKpiCsv->flush();
+    m_cellKpiCsv->flush();
+    m_ueKpiEvent = Simulator::Schedule(m_ueKpiPeriod, &NtnRealStackHelper::SampleUeKpi, this);
 }
 
 void

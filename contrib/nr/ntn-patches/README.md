@@ -21,7 +21,7 @@ is compatible with this toolkit's ns-3 base. See
 and v5.0 (ns-3.48, the only line with native NTN) are ns-3-base migrations
 rather than in-place `nr` bumps.
 
-## The twelve patches (apply in order from `contrib/nr/`)
+## The thirteen patches (apply in order from `contrib/nr/`)
 
     for p in ntn-patches/[0-9][0-9]-*.patch; do patch -p1 < "$p"; done
 
@@ -41,6 +41,7 @@ The eleven (apply in order; the two-digit glob sorts 10 and 11 after 09):
 | 10 | `model/nr-spectrum-phy.cc`, `model/nr-ue-net-device.cc/.h` | The UE serving cell follows handovers. `NrSpectrumPhy` labelled every UE DL TB in `RxPacketTraceUe` with `GetTargetGnb()->GetCellId()`, and `NrUeNetDevice::GetCellId()` returned the same; `m_targetGnb` is written once by `NrHelper::AttachToGnb` and no X2 handover (TS 38.331 5.3.5.5.2 reconfigurationWithSync) updates it. After the first handover every TB therefore carried the attach-time cell id, so any (cellId, RNTI) consumer lost the UE: `NtnRealStackHelper` per-UE SINR/TBLER went NaN, its per-UE RAN TB counters froze, and per-cell DL stats were credited to the old cell. `NrUeNetDevice::GetCellId()` now returns the cell the UE RRC is synchronized to (`NrUeRrc::GetCellId()`, the `targetPhysCellId` of the last reconfiguration), falling back to the attach-time gNB while the RRC has no cell, and the trace uses it. Identical to the old value until the first handover, so runs without handovers reproduce bit for bit. `GetTargetGnb()` itself is unchanged (setup-time DRB activation and beamforming pairing use it). |
 | 11 | `model/nr-gnb-phy.cc` | Run-to-run determinism. `NrGnbPhy` ordered the DL control messages of a slot with comparator-less `std::list::sort()` / `merge()`, which use `ns3::operator<(Ptr, Ptr)` and therefore compare raw heap addresses: the order in which a UE received, e.g., SIB1 and an UL DCI in the same slot depended on the allocator, so outputs changed with ASLR, the output-path length or any unrelated code change (the ntn-slice paper examples alternated between outputs on one binary). The messages are now ordered by message type with the same (stable) `sort`/`merge`, so messages of one type keep their insertion order. This can change the output of any run (the old order was arbitrary, not standard); it makes every run reproducible. Found by Wave 2 M2. |
 | 12 | `model/nr-gnb-mac.cc/.h`, `model/nr-ue-mac.cc` | RACH at scale. `NrGnbMac::m_rapIdRntiMap` (RNTI to RA preamble ID) was keyed by `uint8_t`, so every RNTI above 255 folded onto a lower one and a RAR could carry another UE's preamble ID once a cell had allocated 256 temporary C-RNTIs (a few dozen UEs with RACH retries); it is keyed by the 16-bit RNTI (TS 38.321 7.1). `DoBuildRarList` now forgets only the RNTIs answered in the RAR it sends instead of clearing the map, which dropped RNTIs whose Msg3 was granted in a later slot. `NrUeMac` accepts only the first RAR subPDU whose RAPID matches its preamble (TS 38.321 5.1.4); a second match made `NrUeRrc` abort with "unexpected event in state IDLE_CONNECTING". This was the "about 16 UEs" connection-setup limit: ntn-v2x-rural-highway now attaches all 40 vehicles of its trace, and ntn-scalability-load-regimes runs 60 nr UEs. Runs that never reached the bug (every paper gate) are unchanged. Wave 4. |
+| 13 | `model/nr-mac-scheduler-ns3.cc/.h`, `model/nr-mac-scheduler-cqi-management.cc`, `model/nr-mac-scheduler-ue-info.h` | DL outer-loop link adaptation (OLLA). The scheduler set the DL MCS from the last wideband CQI only, so interference the CQI had not seen (a second co-channel satellite cell turning active, a handover into a loaded cell) left the first-transmission BLER near 0.34 for the rest of the run and the HARQ retransmissions inflated the delay (ntn-cho-real-stack: 29.2 ms mean). Deployed gNBs close this loop. Each UE now carries an offset in MCS indices subtracted from the CQI mapping: a NACK of a first transmission (RV 0) raises it by `OllaStep`, an ACK lowers it by `OllaStep` x target / (1 - target), so the initial BLER converges to `OllaBlerTarget` (default 0.1, the TS 38.214 5.2.2.1 CQI reference). Each feedback counts once (a NACKed process is re-evaluated every slot until its retransmission), the loop starts after the first wideband CQI, the offset is bounded to [-4, +8], and the MCS is capped at the table maximum. Same run: BLER 0.07, delay 6.2 ms, full offered load. `NrMacSchedulerNs3::OllaEnabled=false` restores the previous behavior bit for bit. Wave 5. |
 
 Patch 10 changes outputs only after a handover (the UE DL RX trace cell id,
 the per-UE and per-cell statistics built on it, and the UE-side cell id in the
@@ -64,12 +65,12 @@ plus the nine patches reproduces `model/` and `helper/` byte-for-byte
 (`diff -rq`: 0 mismatches). Verified 2026-11-16 (Wave 2 core) for 01-10: the
 same pristine tree plus the ten patches reproduces `model/` and `helper/`
 byte-for-byte (`diff -rq`: 0 mismatches). Verified again for 01-11 the same
-day after patch 11: 0 mismatches. Verified 2026-11-17 (Wave 4) for 01-12: 0 mismatches.
+day after patch 11: 0 mismatches. Verified 2026-11-17 (Wave 4) for 01-12: 0 mismatches. Verified 2026-11-17 (Wave 5) for 13 against the 01-12 state: 0 mismatches.
 
 ## Upgrading later
 
 When the toolkit's ns-3 base moves to 3.44 (→ nr v4.0) or 3.48 (→ nr v5.0,
 native NTN), drop in the pristine upstream `nr` for that base and re-apply
-whichever of these eleven patches upstream has not itself fixed. Patches 03/04
+whichever of these patches upstream has not itself fixed. Patches 03/04
 (PDCP Control-PDU handling) are the ones most likely still required, since they
 reflect a modelling scope choice, not an ns-3-version quirk.

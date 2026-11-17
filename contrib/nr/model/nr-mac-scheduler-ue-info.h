@@ -255,6 +255,10 @@ class NrMacSchedulerUeInfo
     uint8_t m_ulSym{0};      //!< Number of (new data) symbols assigned in this slot.
 
     uint8_t m_dlMcs{0}; //!< DL MCS
+    /// Outer-loop link adaptation (OLLA) offset in MCS indices, subtracted from the CQI-derived DL
+    /// MCS. Raised on a NACK and lowered on an ACK of a first transmission so the initial BLER
+    /// converges to the target (NrMacSchedulerNs3 OllaEnabled / OllaBlerTarget / OllaStep).
+    double m_dlOllaOffset{0.0};
     uint8_t m_ulMcs{0}; //!< UL MCS
 
     uint32_t m_dlTbSize{0}; //!< DL Transport Block Size, depends on MCS and RBG,
