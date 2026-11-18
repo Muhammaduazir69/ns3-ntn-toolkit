@@ -194,6 +194,7 @@ set(test_sources
     test/oran-ntn-multi-tier-ric-test.cc
     test/oran-ntn-feeder-mgmt-test.cc
     test/oran-ntn-ws4-test.cc
+    test/oran-ntn-indepth-test.cc
 )
 
 set(oran_ntn_extra_libs "")
@@ -244,3 +245,9 @@ build_lib(
         ${oran_ntn_extra_libs}
     TEST_SOURCES ${test_sources}
 )
+
+# The in-depth suite (oran-ntn-indepth) measures a UDP flow with FlowMonitor
+# and feeds it into the E2 node. Only the test library links flow-monitor.
+if(TARGET oran-ntn-test)
+  target_link_libraries(oran-ntn-test ${libflow-monitor})
+endif()

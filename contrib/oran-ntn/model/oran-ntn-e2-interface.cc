@@ -186,6 +186,16 @@ OranNtnE2Node::HandleSubscriptionRequest(const E2Subscription& sub)
         return false;
     }
 
+    // A request for an id that is already active replaces it (E2AP RIC
+    // Subscription Modification semantics). The old report timer used to keep
+    // running next to the new one, so a re-subscription doubled the indication
+    // rate and the old period never stopped.
+    auto old = m_reportTimers.find(sub.subscriptionId);
+    if (old != m_reportTimers.end())
+    {
+        Simulator::Cancel(old->second);
+        m_reportTimers.erase(old);
+    }
     m_subscriptions[sub.subscriptionId] = sub;
 
     // Start periodic reporting if configured
@@ -260,6 +270,14 @@ OranNtnE2Node::SubmitKpmMeasurement(const E2KpmReport& report)
         }
 
         // Check event trigger if applicable
+        // E2SM-KPM periodic report style: with periodic reporting on, a
+        // periodic subscription reports on its timer only. Emitting on every
+        // measurement as well doubled the indication stream (measurement rate
+        // plus reporting rate) the moment SetPeriodicReporting was enabled.
+        if (!sub.eventTrigger && m_periodicReporting && sub.reportingPeriod.IsStrictlyPositive())
+        {
+            continue;
+        }
         if (sub.eventTrigger)
         {
             bool triggered = false;
@@ -345,6 +363,10 @@ OranNtnE2Node::FlushBufferedReports()
 {
     NS_LOG_FUNCTION(this);
     Time now = Simulator::Now();
+    // maxBufferAge was declared and CheckBufferAge() implemented, but nothing
+    // called it, so a long feeder outage delivered every stale report on
+    // restoration. Age the buffer out before it is flushed.
+    CheckBufferAge();
 
     while (!m_reportBuffer.empty())
     {
@@ -672,7 +694,8 @@ OranNtnE2Node::CheckBufferAge()
         if (sub != m_subscriptions.end())
         {
             Time age = now - it->originalTimestamp;
-            if (age > sub->second.maxBufferAge)
+            // A zero (unset) maxBufferAge means no age limit.
+            if (sub->second.maxBufferAge.IsStrictlyPositive() && age > sub->second.maxBufferAge)
             {
                 it = m_reportBuffer.erase(it);
                 m_totalReportsDropped++;
