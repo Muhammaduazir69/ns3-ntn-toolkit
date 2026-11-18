@@ -441,6 +441,68 @@ class NtnRealStackHelper
     }
     /// Whether Build() enabled the handover-target UE beam.
     bool IsHandoverTargetBeamActive() const { return m_hoTargetBeamApplied; }
+
+    /// Wave 11: frequency reuse among the satellite cells (TR 38.821 clause
+    /// 6.1.1.1, Table 6.1.1.1-5: FRF 1 and FRF 3 are the Set-1 evaluation
+    /// cases; 4 is also accepted). With FRF k > 1 the carrier (each DL BWP, and
+    /// the paired UL BWP under FDD) is split into k sub-bands of equal RBG
+    /// count; gNB i transmits its PDSCH and its control region (PDCCH, PSS/SSB)
+    /// only in sub-band GetCellReuseColor(i), and schedules its UEs' PUSCH only
+    /// there, so adjacent satellites never share PRBs. The total bandwidth and
+    /// the EIRP density are unchanged: each cell's conducted power is the
+    /// carrier's power times its share of the RBs, so per-beam power follows
+    /// the bandwidth. The UE measures every cell's SSB on its own RBs (TS
+    /// 38.215 5.1.1; nr patch 19), and handover between cells of different
+    /// sub-bands is an ordinary reconfiguration with sync. 0 = Auto (GlobalValue
+    /// NtnRealStackFrequencyReuse, default Auto): 3 under the Set-1 budget when
+    /// the run has two or more gNBs, otherwise 1; Legacy is always 1. Call
+    /// before Build().
+    void SetFrequencyReuse(uint8_t frf)
+    {
+        m_frf = frf;
+        m_frfSet = true;
+    }
+    /// Reuse color (sub-band index) of gNB \p gnbIndex; default gnbIndex mod
+    /// FRF. Call before Build().
+    void SetCellReuseColor(uint32_t gnbIndex, uint8_t color)
+    {
+        m_cellColorExplicit[gnbIndex] = color;
+    }
+    /// Frequency reuse factor Build() applied (1: every cell on the full carrier).
+    uint8_t GetFrequencyReuseApplied() const { return m_frfApplied; }
+    /// The reuse factor Build() will apply to a run with \p nGnb gNBs (the Auto
+    /// rule, the GlobalValue, the profile and SetFrequencyReuse), so a scenario
+    /// can size its carrier before Build(), e.g. the whole n256 block for three
+    /// 10 MHz cells.
+    uint8_t ResolveFrequencyReuse(uint32_t nGnb) const;
+    /// Sub-band (reuse color) gNB \p gnbIndex uses; 0 under FRF 1.
+    uint8_t GetCellReuseColor(uint32_t gnbIndex) const
+    {
+        return gnbIndex < m_cellColor.size() ? m_cellColor[gnbIndex] : 0;
+    }
+    /// First RB and RB count of gNB \p gnbIndex's sub-band on DL BWP \p bwp
+    /// (count 0 under FRF 1: the full BWP).
+    std::pair<uint32_t, uint32_t> GetCellRbRange(uint32_t gnbIndex, uint8_t bwp = 0) const;
+
+    /// Wave 11: SS/PBCH block beam grid for Earth-moving cells
+    /// (SetSsbCellBeam(true, nullptr)). Instead of one nadir beam, each
+    /// satellite sweeps its SSB over a hexagonal grid of beams fixed in its
+    /// body frame (along-track oriented) that tiles the field of view down to
+    /// the horizon, one SSB index per beam (TS 38.213 4.1); the UE measures
+    /// SS-RSRP per SSB beam (TS 38.215 5.1.1) and takes the cell quality from
+    /// the best beam (TS 38.331 5.5.3.3), and the uplink path-loss reference is
+    /// the best SSB (TS 38.213 7.1.1). Spacing: the array's half-power
+    /// beamwidth in direction-cosine space times sqrt(3)/2 (adjacent 3 dB
+    /// contours touch). Default on (GlobalValue NtnRealStackSsbBeamGrid), off
+    /// under Legacy; false restores the single Earth-moving nadir beam. No
+    /// effect on Earth-fixed cells. Call before Build().
+    void SetSsbBeamGrid(bool enable)
+    {
+        m_ssbGrid = enable;
+        m_ssbGridSet = true;
+    }
+    /// SSB beams per satellite Build() configured (0: no grid).
+    uint32_t GetSsbBeamGridSize() const { return m_ssbGridSize; }
     /// Handover targets that registered a UE for its UE-directed beam.
     uint32_t GetHandoverTargetBeamRegistrations() const { return m_hoTargetBeamRegistrations; }
     /// SHORT_BSR CEs the UEs sent as NrUeMac::BsrType t, summed over UEs and BWPs.
@@ -1863,6 +1925,21 @@ class NtnRealStackHelper
     bool m_bsrTriggeringSet{false};
     Time m_periodicBsrTimer{MilliSeconds(20)};
     bool m_bsrTriggeringApplied{false};
+    // Wave 11: frequency reuse and the SSB beam grid.
+    uint8_t m_frf{0};
+    bool m_frfSet{false};
+    uint8_t m_frfApplied{1};
+    std::map<uint32_t, uint8_t> m_cellColorExplicit;
+    std::vector<uint8_t> m_cellColor;
+    std::vector<std::vector<std::pair<uint32_t, uint32_t>>> m_cellRbRange; // [gnb][dl bwp]
+    bool m_ssbGrid{true};
+    bool m_ssbGridSet{false};
+    bool m_ssbGridApplied{false};
+    uint32_t m_ssbGridSize{0};
+    std::vector<std::pair<double, double>> m_ssbGridUv;      // (u, v) per SSB beam
+    std::vector<std::vector<Ptr<MobilityModel>>> m_ssbGridTargets; // [gnb][beam]
+    void ApplyFrequencyReuse();
+    void BuildSsbBeamGrid();
     bool m_hoTargetBeam{true};
     bool m_hoTargetBeamSet{false};
     bool m_hoTargetBeamApplied{false};

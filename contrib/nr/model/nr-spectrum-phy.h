@@ -147,6 +147,25 @@ class NrSpectrumPhy : public SpectrumPhy
      */
     void SetPhyRxPssCallback(const NrPhyRxPssCallback& c);
 
+    /// ntn-patch 19: SSB index value meaning "the cell does not sweep SSB beams".
+    static constexpr uint8_t NO_SSB_INDEX = 255;
+    /**
+     * \brief ntn-patch 19: SSB index (TS 38.213 4.1) carried by the DL control
+     * frames this PHY transmits from now on; NO_SSB_INDEX (default) for none.
+     */
+    void SetTxSsbIndex(uint8_t ssbIndex)
+    {
+        m_txSsbIndex = ssbIndex;
+    }
+    /**
+     * \brief ntn-patch 19: SSB index of the last PSS this PHY received,
+     * valid inside the PSS callback; NO_SSB_INDEX when the cell does not sweep.
+     */
+    uint8_t GetLastRxSsbIndex() const
+    {
+        return m_lastRxSsbIndex;
+    }
+
     /**
      * \brief Sets the callback to be called when DL HARQ feedback is generated
      */
@@ -732,6 +751,8 @@ class NrSpectrumPhy : public SpectrumPhy
     NrPhyRxDataEndOkCallback
         m_phyRxDataEndOkCallback;          //!< callback that is notified when the DATA is received
     NrPhyRxPssCallback m_phyRxPssCallback; ///< the phy receive PSS callback
+    uint8_t m_txSsbIndex{NO_SSB_INDEX};     ///< ntn-patch 19: SSB index of transmitted DL CTRL
+    uint8_t m_lastRxSsbIndex{NO_SSB_INDEX}; ///< ntn-patch 19: SSB index of the last received PSS
     NrPhyDlHarqFeedbackCallback
         m_phyDlHarqFeedbackCallback; //!< callback that is notified when the DL HARQ feedback is
                                      //!< being generated

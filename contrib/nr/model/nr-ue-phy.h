@@ -14,6 +14,8 @@
 
 #include <ns3/traced-callback.h>
 
+#include <deque>
+
 namespace ns3
 {
 
@@ -124,6 +126,13 @@ class NrUePhy : public NrPhy
      * Called by NrUePowerControl.
      */
     double GetRsrp() const;
+
+    /**
+     * \brief ntn-patch 19: SSB index of the best SSB beam of \p cellId in the
+     * last layer-1 measurement period (TS 38.331 5.5.3.3), or 255 when that
+     * cell does not sweep SSB beams or was not measured.
+     */
+    uint8_t GetBestSsbIndex(uint16_t cellId) const;
 
     /**
      * \brief Get NR uplink power control entity
@@ -871,6 +880,17 @@ class NrUePhy : public NrPhy
      * Indexed by the physical cell ID where the measurements come from.
      */
     std::map<uint16_t, UeMeasurementsElement> m_ueMeasurementsMap;
+    /// ntn-patch 19: per-SSB-beam layer-1 samples of the cells that sweep SSB beams.
+    std::map<uint16_t, std::map<uint16_t, UeMeasurementsElement>> m_ueSsbMeasurementsMap;
+    /// ntn-patch 19: best SSB index per cell in the last layer-1 period.
+    std::map<uint16_t, uint8_t> m_bestSsbIndex;
+    /// ntn-patch 19 (attribute SsRsrpOnOccupiedRbs): average SS-RSRP over the
+    /// RBs that carry the SSB only.
+    bool m_ssRsrpOnOccupiedRbs{false};
+    /// ntn-patch 19 (attribute SsbBeamsPerBurst): SSB beams of the serving cell.
+    uint32_t m_ssbBeamsPerBurst{0};
+    /// ntn-patch 19: RS received power (mW) of the last SsbBeamsPerBurst samples.
+    std::deque<double> m_rsPowerBurstMw;
     /**
      * The `UeMeasurementsFilterPeriod` attribute. Time period for reporting UE
      * measurements, i.e., the length of layer-1 filtering (default 200 ms).

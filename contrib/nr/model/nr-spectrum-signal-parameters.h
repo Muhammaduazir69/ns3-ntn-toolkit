@@ -73,6 +73,7 @@ struct NrSpectrumSignalParametersDlCtrlFrame : public SpectrumSignalParameters
     std::list<Ptr<NrControlMessage>> ctrlMsgList; //!< CTRL message list
     bool pss;                                     //!< PSS (?)
     uint16_t cellId;                              //!< cell id
+    uint8_t ssbIndex{255}; //!< ntn-patch 19: SSB index (TS 38.213 4.1), 255 = no SSB beam sweep
 };
 
 /**

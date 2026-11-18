@@ -1639,6 +1639,30 @@ NrGnbPhy::SendCtrlChannels(const Time& varTtiPeriod)
     {
         fullBwRb[i] = static_cast<int>(i);
     }
+    // ntn-patch 19: a cell of a frequency reuse plan sends its control region
+    // (and so its PSS/SSB) only in its own sub-band (TR 38.821 6.1.1.1).
+    if (m_cellRbCount > 0)
+    {
+        const uint32_t last = std::min<uint32_t>(GetRbNum(), m_cellRbFirst + m_cellRbCount);
+        fullBwRb.clear();
+        for (uint32_t i = m_cellRbFirst; i < last; ++i)
+        {
+            fullBwRb.push_back(static_cast<int>(i));
+        }
+        NS_ASSERT_MSG(!fullBwRb.empty(), "SetCellRbRange outside the BWP");
+    }
+    // ntn-patch 19: SS/PBCH block beam sweep (TS 38.213 4.1). Each DL control
+    // region carries the SSB of the next index on that index's beam; the beam
+    // is reset to the predefined one at the next StartVarTti.
+    if (!m_ssbSweep.empty())
+    {
+        const uint32_t idx = m_ssbSweepNext % m_ssbSweep.size();
+        m_ssbSweepNext = (idx + 1) % m_ssbSweep.size();
+        Ptr<PhasedArrayModel> array = m_spectrumPhy->GetAntenna()->GetObject<PhasedArrayModel>();
+        NS_ASSERT_MSG(array, "SSB beam sweep needs a phased array");
+        array->SetBeamformingVector(m_ssbSweep[idx]);
+        m_spectrumPhy->SetTxSsbIndex(static_cast<uint8_t>(idx));
+    }
 
     // Transmit power for the current signal is distributed over the full bandwidth. This is the
     // only signal, so the bandwidth occupied by all concurrent transmissions is also the full
@@ -1697,6 +1721,30 @@ NrGnbPhy::SendCtrlChannels(const Time& varTtiPeriod)
     {
         m_spectrumPhy->StartTxDlControlFrames(m_ctrlMsgs, varTtiPeriod);
         m_ctrlMsgs.clear();
+    }
+}
+
+void
+NrGnbPhy::SetCellRbRange(uint32_t first, uint32_t count)
+{
+    NS_LOG_FUNCTION(this << first << count);
+    m_cellRbFirst = first;
+    m_cellRbCount = count;
+}
+
+void
+NrGnbPhy::SetSsbBeamSweep(const std::vector<PhasedArrayModel::ComplexVector>& beams)
+{
+    NS_LOG_FUNCTION(this << beams.size());
+    NS_ABORT_MSG_IF(beams.size() > 255, "at most 255 SSB beams (index 255 means no sweep)");
+    m_ssbSweep = beams;
+    if (m_ssbSweepNext >= m_ssbSweep.size())
+    {
+        m_ssbSweepNext = 0;
+    }
+    if (m_ssbSweep.empty())
+    {
+        m_spectrumPhy->SetTxSsbIndex(NrSpectrumPhy::NO_SSB_INDEX);
     }
 }
 

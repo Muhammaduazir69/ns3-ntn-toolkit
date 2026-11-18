@@ -5780,6 +5780,307 @@ class HandoverTargetBeamTest : public TestCase
     }
 };
 
+/// Wave 11: frequency reuse among satellite cells (TR 38.821 clause 6.1.1.1).
+/// Two satellites 600 km up, 200 km apart along y; U0 (y = 80 km) is served by
+/// A, U1 (y = 120 km) by B, both saturating. Seen from each satellite the two
+/// UEs are about 4 deg apart, inside the 8x8 array's main lobe, so on one
+/// carrier (FRF 1) each UE's PDSCH is hit by the other satellite's PDSCH at
+/// almost full gain. With FRF 3 the cells use disjoint thirds of the band and
+/// the interference is gone; the energy per RE (SS-RSRP) is unchanged because
+/// each cell's power is scaled to its sub-band. At 3.9 s U0 is handed from A
+/// (sub-band 0) to B (sub-band 1): the reconfiguration with sync works across
+/// sub-bands. Failure paths: FRF 1 is interference-limited, Legacy stays at FRF
+/// 1, a single cell keeps the whole carrier under Auto.
+class FrequencyReuseTest : public TestCase
+{
+  public:
+    FrequencyReuseTest()
+        : TestCase("Wave 11: FRF 3 sub-bands per satellite cell remove co-channel PDSCH "
+                   "interference, keep the energy per RE and hand over across sub-bands")
+    {
+    }
+
+  private:
+    struct Result
+    {
+        uint8_t frf{0};
+        uint8_t color0{0};
+        uint8_t color1{0};
+        std::pair<uint32_t, uint32_t> rb0{0, 0};
+        std::pair<uint32_t, uint32_t> rb1{0, 0};
+        double u0PreDb{0.0};
+        double u1PreDb{0.0};
+        double u0PostDb{0.0};
+        double rsrp0Dbm{0.0};
+        uint32_t hoCount{0};
+        uint16_t endCell{0};
+        uint16_t target{0};
+        double txPower0Dbm{0.0};
+        double txPowerCarrierDbm{0.0};
+        bool fdd{false};
+    };
+
+    // mode 0: Auto (Set-1), 1: FRF 1 explicit, 2: Legacy profile, 3: one satellite (Auto)
+    static Result Run(int mode)
+    {
+        const uint32_t nSat = (mode == 3) ? 1 : 2;
+        NodeContainer sats;
+        sats.Create(nSat);
+        for (uint32_t i = 0; i < nSat; ++i)
+        {
+            auto m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(Vector(0.0, i == 0 ? 0.0 : 200e3, 600e3));
+            sats.Get(i)->AggregateObject(m);
+        }
+        NodeContainer ues;
+        ues.Create(2);
+        const double uy[2] = {80e3, 120e3};
+        for (uint32_t u = 0; u < 2; ++u)
+        {
+            auto um = CreateObject<ConstantPositionMobilityModel>();
+            um->SetPosition(Vector(0.0, uy[u], 0.0));
+            ues.Get(u)->AggregateObject(um);
+        }
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(8.0));
+        rs.SetOutputDir("test-ntn-freq-reuse");
+        if (nSat >= 2)
+        {
+            rs.SetHandover(true, 3.0, MilliSeconds(256));
+            rs.SetAutonomousHandover(false);
+        }
+        rs.SetPeriodicMeasurementReports(true, MilliSeconds(480));
+        // SSB on an Earth-fixed cell beam between the UEs, so both FRF runs
+        // report main-lobe SS-RSRP with the linear L1 average (TS 38.215 5.1.1).
+        auto center = CreateObject<ConstantPositionMobilityModel>();
+        center->SetPosition(Vector(0.0, 100e3, 0.0));
+        rs.SetSsbCellBeam(true, center);
+        if (mode == 2)
+        {
+            rs.SetLinkBudgetProfile(NtnRealStackHelper::LinkBudgetProfile::Legacy);
+        }
+        else
+        {
+            rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        }
+        if (mode == 1)
+        {
+            rs.SetFrequencyReuse(1);
+        }
+        // Full buffer: both cells transmit in (almost) every slot, so on one
+        // carrier every PDSCH meets the other cell's PDSCH.
+        rs.SetEmbbRate(DataRate("80Mb/s"));
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(7.8));
+        Result r;
+        r.frf = rs.GetFrequencyReuseApplied();
+        r.fdd = rs.IsFddActive();
+        r.color0 = rs.GetCellReuseColor(0);
+        r.color1 = rs.GetCellReuseColor(nSat - 1);
+        r.rb0 = rs.GetCellRbRange(0);
+        r.rb1 = rs.GetCellRbRange(nSat - 1);
+        r.txPowerCarrierDbm = rs.GetBwpConductedPowerDbm(0);
+        {
+            DoubleValue tx;
+            NrHelper::GetGnbPhy(rs.GetEnbDevices().Get(0), 0)->GetAttribute("TxPower", tx);
+            r.txPower0Dbm = tx.Get();
+        }
+        Simulator::Schedule(Seconds(1.5), [&rs]() {
+            rs.TakeUeSinrWindowMeanDb(0);
+            rs.TakeUeSinrWindowMeanDb(1);
+        });
+        Simulator::Schedule(Seconds(3.9), [&]() {
+            r.u0PreDb = rs.TakeUeSinrWindowMeanDb(0);
+            r.u1PreDb = rs.TakeUeSinrWindowMeanDb(1);
+            r.rsrp0Dbm = rs.GetUeServingRsrpDbm(0);
+            if (nSat >= 2)
+            {
+                r.target = rs.GetGnbCellId(1);
+                rs.TriggerHandover(0, r.target);
+            }
+        });
+        Simulator::Schedule(Seconds(5.0), [&rs]() { rs.TakeUeSinrWindowMeanDb(0); });
+        Simulator::Schedule(Seconds(7.5), [&]() {
+            r.u0PostDb = rs.TakeUeSinrWindowMeanDb(0);
+            r.endCell = rs.GetUeServingCellId(0);
+        });
+        Simulator::Stop(Seconds(8.0));
+        Simulator::Run();
+        r.hoCount = rs.GetHandoverCount();
+        Simulator::Destroy();
+        return r;
+    }
+
+    void DoRun() override
+    {
+        const Result reuse = Run(0);
+        NS_TEST_ASSERT_MSG_EQ(+reuse.frf, 3, "Auto under Set-1 with two cells is FRF 3");
+        NS_TEST_ASSERT_MSG_EQ(reuse.fdd, true, "on the Wave 9 paired-FDD carrier (n256)");
+        NS_TEST_ASSERT_MSG_NE(+reuse.color0, +reuse.color1, "adjacent cells get different colors");
+        NS_TEST_ASSERT_MSG_GT(reuse.rb0.second, 0u, "cell 0 has a sub-band");
+        NS_TEST_ASSERT_MSG_EQ((reuse.rb0.first + reuse.rb0.second <= reuse.rb1.first) ||
+                                  (reuse.rb1.first + reuse.rb1.second <= reuse.rb0.first),
+                              true,
+                              "the two sub-bands share no RB");
+        // Power follows the bandwidth (constant EIRP density).
+        const double share = 10.0 * std::log10(1.0 / 3.0);
+        NS_TEST_ASSERT_MSG_EQ_TOL(reuse.txPower0Dbm,
+                                  reuse.txPowerCarrierDbm + share,
+                                  0.6,
+                                  "cell power = carrier power x its RB share");
+
+        const Result one = Run(1);
+        NS_TEST_ASSERT_MSG_EQ(+one.frf, 1, "SetFrequencyReuse(1) keeps one carrier");
+        NS_TEST_ASSERT_MSG_EQ(one.rb0.second, 0u, "no sub-band under FRF 1");
+        NS_TEST_ASSERT_MSG_EQ_TOL(one.txPower0Dbm, one.txPowerCarrierDbm, 1e-9,
+                                  "FRF 1 radiates the carrier power");
+        // Failure path: on one carrier the two cells interfere at main-lobe gain.
+        NS_TEST_ASSERT_MSG_LT(one.u0PreDb, 8.0, "FRF 1 is interference-limited here");
+        NS_TEST_ASSERT_MSG_GT(reuse.u0PreDb, one.u0PreDb + 8.0, "FRF 3 removes it for U0");
+        NS_TEST_ASSERT_MSG_GT(reuse.u1PreDb, one.u1PreDb + 8.0, "and for U1");
+        NS_TEST_ASSERT_MSG_GT(reuse.u0PreDb, 12.0, "a noise-limited SINR under FRF 3");
+        // SS-RSRP is energy per RE (TS 38.215 5.1.1): unchanged by the split.
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(reuse.rsrp0Dbm) && std::isfinite(one.rsrp0Dbm), true,
+                              "serving SS-RSRP reported");
+        NS_TEST_ASSERT_MSG_EQ_TOL(reuse.rsrp0Dbm, one.rsrp0Dbm, 1.5,
+                                  "the energy per RE of the SSB does not change with FRF");
+        // Handover from sub-band 0 to sub-band 1.
+        NS_TEST_ASSERT_MSG_EQ(reuse.hoCount, 1u, "the handover across sub-bands completes");
+        NS_TEST_ASSERT_MSG_EQ(reuse.endCell, reuse.target, "U0 ends on the target cell");
+        NS_TEST_ASSERT_MSG_GT(reuse.u0PostDb, 10.0, "U0 is served in the target's sub-band");
+
+        const Result legacy = Run(2);
+        NS_TEST_ASSERT_MSG_EQ(+legacy.frf, 1, "Legacy keeps reuse 1");
+        const Result single = Run(3);
+        NS_TEST_ASSERT_MSG_EQ(+single.frf, 1, "a single cell keeps the whole carrier under Auto");
+    }
+};
+
+/// Wave 11 (nr patch 19): Earth-moving cells sweep their SSB over a beam grid.
+/// One satellite at 600 km above the equator, the UE 250 km off its nadir
+/// along y, about 22 deg off the satellite's nadir: far outside the 12.7 deg
+/// nadir beam of the 8x8 array. With one Earth-moving nadir beam the UE's
+/// SS-RSRP is a sidelobe value; with the grid the best SSB beam is one that
+/// points near the UE, and the reported SS-RSRP and the uplink path-loss
+/// reference are within a few dB of an Earth-fixed beam steered at the UE.
+class SsbBeamGridTest : public TestCase
+{
+  public:
+    SsbBeamGridTest()
+        : TestCase("Wave 11 (nr patch 19): SSB beam grid, cell quality from the best SSB beam")
+    {
+    }
+
+  private:
+    struct Result
+    {
+        double rsrpDbm{0.0};
+        double rsDbm{0.0};
+        uint32_t gridSize{0};
+        uint8_t bestSsb{255};
+    };
+
+    // mode 0: grid (default), 1: single nadir beam, 2: Earth-fixed beam at the UE, 3: Legacy
+    static Result Run(int mode)
+    {
+        const double re = 6371.0e3;
+        const double phi = 250.0e3 / re;
+        NodeContainer sats;
+        sats.Create(1);
+        auto sm = CreateObject<ConstantPositionMobilityModel>();
+        sm->SetPosition(Vector(re + 600.0e3, 0.0, 0.0));
+        sats.Get(0)->AggregateObject(sm);
+        NodeContainer ues;
+        ues.Create(1);
+        auto um = CreateObject<ConstantPositionMobilityModel>();
+        um->SetPosition(Vector(re * std::cos(phi), re * std::sin(phi), 0.0));
+        ues.Get(0)->AggregateObject(um);
+
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(3.0));
+        rs.SetOutputDir("test-ntn-ssb-grid");
+        rs.SetPeriodicMeasurementReports(true, MilliSeconds(480));
+        if (mode == 3)
+        {
+            rs.SetLinkBudgetProfile(NtnRealStackHelper::LinkBudgetProfile::Legacy);
+        }
+        else
+        {
+            rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        }
+        if (mode == 2)
+        {
+            auto center = CreateObject<ConstantPositionMobilityModel>();
+            center->SetPosition(um->GetPosition());
+            rs.SetSsbCellBeam(true, center);
+        }
+        else
+        {
+            rs.SetSsbCellBeam(true, nullptr);
+        }
+        if (mode == 1)
+        {
+            rs.SetSsbBeamGrid(false);
+        }
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(2.9));
+        Result r;
+        Ptr<NrUePhy> phy = DynamicCast<NrUeNetDevice>(rs.GetUeDevices().Get(0))->GetPhy(0);
+        Simulator::Schedule(Seconds(2.95), [&]() {
+            r.rsrpDbm = rs.GetUeServingRsrpDbm(0);
+            r.rsDbm = phy->GetRsrp();
+            r.bestSsb = phy->GetBestSsbIndex(phy->GetCellId());
+        });
+        Simulator::Stop(Seconds(3.0));
+        Simulator::Run();
+        r.gridSize = rs.GetSsbBeamGridSize();
+        Simulator::Destroy();
+        return r;
+    }
+
+    void DoRun() override
+    {
+        const Result grid = Run(0);
+        const Result nadir = Run(1);
+        const Result fixed = Run(2);
+        NS_TEST_ASSERT_MSG_GT(grid.gridSize, 19u, "the grid tiles the field of view");
+        NS_TEST_ASSERT_MSG_LT(grid.gridSize, 255u, "within the SSB index range");
+        NS_TEST_ASSERT_MSG_EQ(nadir.gridSize, 0u, "SetSsbBeamGrid(false): one nadir beam");
+        NS_TEST_ASSERT_MSG_EQ(fixed.gridSize, 0u, "Earth-fixed cells keep one beam");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(grid.rsrpDbm) && std::isfinite(nadir.rsrpDbm) &&
+                                  std::isfinite(fixed.rsrpDbm),
+                              true,
+                              "SS-RSRP reported in every mode");
+        NS_TEST_ASSERT_MSG_NE(+grid.bestSsb, 255, "the UE derived a best SSB beam");
+        NS_TEST_ASSERT_MSG_NE(+grid.bestSsb, 0, "and it is not the nadir beam");
+        NS_TEST_ASSERT_MSG_EQ(+fixed.bestSsb, 255, "no SSB index without a sweep");
+        // Cell quality from the best beam: close to a beam steered at the UE
+        // (the grid beam is up to half a spacing off, about 3 dB at the edge).
+        NS_TEST_ASSERT_MSG_GT(grid.rsrpDbm, fixed.rsrpDbm - 4.5,
+                              "best-SSB cell quality within a beam-edge loss of the steered beam");
+        // Upper bound: the steered beam's gain at the UE plus the fading spread
+        // of a best-of-K selection over per-beam averages (measured up to +3 dB).
+        NS_TEST_ASSERT_MSG_LT(grid.rsrpDbm, fixed.rsrpDbm + 4.5,
+                              "not above the steered beam beyond the fading spread");
+        // Failure path: the single Earth-moving beam reports a sidelobe level.
+        NS_TEST_ASSERT_MSG_LT(nadir.rsrpDbm, fixed.rsrpDbm - 10.0,
+                              "one nadir beam gives sidelobe SS-RSRP off its footprint");
+        // TS 38.213 7.1.1: the path-loss reference is the best SSB of the burst.
+        NS_TEST_ASSERT_MSG_GT(grid.rsDbm, fixed.rsDbm - 4.5,
+                              "uplink path-loss reference on the best SSB beam");
+        const Result legacy = Run(3);
+        NS_TEST_ASSERT_MSG_EQ(legacy.gridSize, 0u, "Legacy keeps the single nadir beam");
+    }
+};
+
 /// Wave 10 (nr patch 18): C-RNTIs are unique only within a cell (TS 38.321
 /// 7.1), but NrGnbPhy picked a scheduled RNTI's beam from every UE device ever
 /// registered with it, and a device that handed over away keeps its entry.
@@ -5913,6 +6214,8 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new HandoverStatsFollowServingCellTest, Duration::QUICK);
         AddTestCase(new HandoverTargetBeamTest, Duration::QUICK);
         AddTestCase(new ServingCellBeamLookupTest, Duration::QUICK);
+        AddTestCase(new FrequencyReuseTest, Duration::QUICK);
+        AddTestCase(new SsbBeamGridTest, Duration::QUICK);
         AddTestCase(new SeamPluginChangesMeasuredSinrTest, Duration::QUICK);
         AddTestCase(new EmbbRateHonoredTest, Duration::QUICK);
         AddTestCase(new ExcessLossP618AndIslTest, Duration::QUICK);

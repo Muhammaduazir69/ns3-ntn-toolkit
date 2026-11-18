@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <limits>
 
 namespace ns3
 {
@@ -219,6 +220,27 @@ NrUePhy::GetTypeId()
                           BooleanValue(true),
                           MakeBooleanAccessor(&NrUePhy::m_enableRlfDetection),
                           MakeBooleanChecker())
+            .AddAttribute(
+                "SsRsrpOnOccupiedRbs",
+                "ntn-patch 19 (TS 38.215 5.1.1: SS-RSRP is the linear average over the REs "
+                "that carry the SSS): average the PSS power per RB over the RBs that carry the "
+                "cell's SSB, i.e. those with a non-zero received PSD (nr's own convention, "
+                "NrAmc: 'SINR == 0 means no signal in this RB'). Needed when cells send their "
+                "control region in a sub-band (frequency reuse); false (nr default) averages "
+                "over every RB of the BWP.",
+                BooleanValue(false),
+                MakeBooleanAccessor(&NrUePhy::m_ssRsrpOnOccupiedRbs),
+                MakeBooleanChecker())
+            .AddAttribute(
+                "SsbBeamsPerBurst",
+                "ntn-patch 19: number of SSB beams the serving cell sweeps (TS 38.213 4.1, "
+                "ssb-PositionsInBurst). The path-loss reference of uplink power control is then "
+                "the best SSB of the last burst (TS 38.213 7.1.1, the SS/PBCH block the UE "
+                "uses as q_d) instead of the last control region received, which is sent on "
+                "whichever beam the sweep is at. 0 (default): no sweep, nr behavior.",
+                UintegerValue(0),
+                MakeUintegerAccessor(&NrUePhy::m_ssbBeamsPerBurst),
+                MakeUintegerChecker<uint32_t>(0, 255))
             .AddAttribute("DlHarqFeedbackDisabled",
                           "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.213 9.1.2): "
                           "bitmap over DL HARQ process IDs, bit i set = the UE does not report "
@@ -1390,6 +1412,19 @@ NrUePhy::ReportRsReceivedPower(const SpectrumValue& rsReceivedPower)
 {
     NS_LOG_FUNCTION(this << rsReceivedPower);
     m_rsrp = 10 * log10(Integral(rsReceivedPower)) + 30;
+    // ntn-patch 19: with an SSB beam sweep the control region of each slot
+    // goes out on another beam; the downlink path-loss reference is the best
+    // SS/PBCH block (TS 38.213 7.1.1 q_d), here the strongest of the last burst.
+    if (m_ssbBeamsPerBurst > 0)
+    {
+        m_rsPowerBurstMw.push_back(std::pow(10.0, m_rsrp / 10.0));
+        while (m_rsPowerBurstMw.size() > m_ssbBeamsPerBurst)
+        {
+            m_rsPowerBurstMw.pop_front();
+        }
+        const double best = *std::max_element(m_rsPowerBurstMw.begin(), m_rsPowerBurstMw.end());
+        m_rsrp = 10.0 * std::log10(best);
+    }
     NS_LOG_DEBUG("RSRP value updated: " << m_rsrp << " dBm");
 
     if (m_enableUplinkPowerControl)
@@ -1413,10 +1448,19 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
     Values::const_iterator itPi;
     for (itPi = p->ConstValuesBegin(); itPi != p->ConstValuesEnd(); itPi++)
     {
+        // ntn-patch 19: only the RBs that carry this cell's SSB (TS 38.215 5.1.1)
+        if (m_ssRsrpOnOccupiedRbs && (*itPi) == 0.0)
+        {
+            continue;
+        }
         // convert PSD [W/Hz] to linear power [W] for the single RE
         double powerTxW = (*itPi) * subcarrierSpacing;
         sum += powerTxW;
         nRB++;
+    }
+    if (nRB == 0)
+    {
+        return; // ntn-patch 19: nothing of this SSB falls in the BWP
     }
 
     // measure instantaneous RSRP now (in dBm)
@@ -1433,10 +1477,18 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
         rsrp = std::pow(10.0, rsrp / 10.0);
     }
 
+    // ntn-patch 19: a cell that sweeps SSB beams is measured per SSB index
+    // (TS 38.215 5.1.1 SS-RSRP per SS/PBCH block); its cell quality is derived
+    // from the best beam in ReportUeMeasurements (TS 38.331 5.5.3.3).
+    const uint8_t ssbIndex = m_spectrumPhy->GetLastRxSsbIndex();
+    auto& measMap = (ssbIndex == NrSpectrumPhy::NO_SSB_INDEX)
+                        ? m_ueMeasurementsMap
+                        : m_ueSsbMeasurementsMap[cellId];
+    const uint16_t measKey = (ssbIndex == NrSpectrumPhy::NO_SSB_INDEX) ? cellId : ssbIndex;
+
     // store RSRP measurements
-    std::map<uint16_t, UeMeasurementsElement>::iterator itMeasMap =
-        m_ueMeasurementsMap.find(cellId);
-    if (itMeasMap == m_ueMeasurementsMap.end())
+    std::map<uint16_t, UeMeasurementsElement>::iterator itMeasMap = measMap.find(measKey);
+    if (itMeasMap == measMap.end())
     {
         // insert new entry
         UeMeasurementsElement newEl;
@@ -1449,7 +1501,7 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
                                                     << " RSRP: " << newEl.rsrpSum << " dBm"
                                                     << " number of entries: " << +newEl.rsrpNum);
 
-        m_ueMeasurementsMap.insert(std::pair<uint16_t, UeMeasurementsElement>(cellId, newEl));
+        measMap.insert(std::pair<uint16_t, UeMeasurementsElement>(measKey, newEl));
     }
     else if (linAvg.Get())
     {
@@ -1475,6 +1527,13 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
     }
 }
 
+uint8_t
+NrUePhy::GetBestSsbIndex(uint16_t cellId) const
+{
+    auto it = m_bestSsbIndex.find(cellId);
+    return it == m_bestSsbIndex.end() ? NrSpectrumPhy::NO_SSB_INDEX : it->second;
+}
+
 void
 NrUePhy::ReportUeMeasurements()
 {
@@ -1484,6 +1543,39 @@ NrUePhy::ReportUeMeasurements()
 
     BooleanValue linAvgReport;
     g_nrUeRsrpLinearAverage.GetValue(linAvgReport);
+    // ntn-patch 19: TS 38.331 5.5.3.3 cell quality of a cell that sweeps SSB
+    // beams. Without nrofSS-BlocksToAverage the cell quality is the highest
+    // beam measurement quantity, so the layer-1 result of the best SSB beam
+    // (per-beam average over this period, TS 38.215 5.1.1) stands for the cell.
+    m_bestSsbIndex.clear();
+    for (const auto& [cell, beams] : m_ueSsbMeasurementsMap)
+    {
+        double bestDbm = -std::numeric_limits<double>::infinity();
+        const UeMeasurementsElement* best = nullptr;
+        uint16_t bestIdx = NrSpectrumPhy::NO_SSB_INDEX;
+        for (const auto& [idx, el] : beams)
+        {
+            if (el.rsrpNum == 0)
+            {
+                continue;
+            }
+            const double dbm = linAvgReport.Get()
+                                   ? 10.0 * std::log10(std::max(el.rsrpSum, 1e-300))
+                                   : el.rsrpSum / static_cast<double>(el.rsrpNum);
+            if (dbm > bestDbm)
+            {
+                bestDbm = dbm;
+                best = &el;
+                bestIdx = idx;
+            }
+        }
+        if (best)
+        {
+            m_ueMeasurementsMap[cell] = *best;
+            m_bestSsbIndex[cell] = static_cast<uint8_t>(bestIdx);
+        }
+    }
+    m_ueSsbMeasurementsMap.clear();
     // ntn-patch 08: RSSI over the measurement bandwidth, if RSRQ is enabled.
     BooleanValue rsrqOn;
     g_nrUeRsrqFromRssi.GetValue(rsrqOn);

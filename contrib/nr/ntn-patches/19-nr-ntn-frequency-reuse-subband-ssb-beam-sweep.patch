@@ -1,0 +1,403 @@
+# NTN/ns-3.43 adaptation patch 19 - control region and SS-RSRP on the cell's reuse sub-band (SetCellRbRange, SsRsrpOnOccupiedRbs); SSB beam sweep with best-beam cell quality (SetSsbBeamSweep, SsbBeamsPerBurst)
+# base: upstream 5g-lena v3.3.1 plus patches 01-18
+# apply from contrib/nr/ with: patch -p1 < ntn-patches/19-nr-ntn-frequency-reuse-subband-ssb-beam-sweep.patch
+#
+--- a/model/nr-gnb-phy.cc
++++ b/model/nr-gnb-phy.cc
+@@ -1639,6 +1639,30 @@ NrGnbPhy::SendCtrlChannels(const Time& varTtiPeriod)
+     {
+         fullBwRb[i] = static_cast<int>(i);
+     }
++    // ntn-patch 19: a cell of a frequency reuse plan sends its control region
++    // (and so its PSS/SSB) only in its own sub-band (TR 38.821 6.1.1.1).
++    if (m_cellRbCount > 0)
++    {
++        const uint32_t last = std::min<uint32_t>(GetRbNum(), m_cellRbFirst + m_cellRbCount);
++        fullBwRb.clear();
++        for (uint32_t i = m_cellRbFirst; i < last; ++i)
++        {
++            fullBwRb.push_back(static_cast<int>(i));
++        }
++        NS_ASSERT_MSG(!fullBwRb.empty(), "SetCellRbRange outside the BWP");
++    }
++    // ntn-patch 19: SS/PBCH block beam sweep (TS 38.213 4.1). Each DL control
++    // region carries the SSB of the next index on that index's beam; the beam
++    // is reset to the predefined one at the next StartVarTti.
++    if (!m_ssbSweep.empty())
++    {
++        const uint32_t idx = m_ssbSweepNext % m_ssbSweep.size();
++        m_ssbSweepNext = (idx + 1) % m_ssbSweep.size();
++        Ptr<PhasedArrayModel> array = m_spectrumPhy->GetAntenna()->GetObject<PhasedArrayModel>();
++        NS_ASSERT_MSG(array, "SSB beam sweep needs a phased array");
++        array->SetBeamformingVector(m_ssbSweep[idx]);
++        m_spectrumPhy->SetTxSsbIndex(static_cast<uint8_t>(idx));
++    }
+ 
+     // Transmit power for the current signal is distributed over the full bandwidth. This is the
+     // only signal, so the bandwidth occupied by all concurrent transmissions is also the full
+@@ -1700,6 +1724,30 @@ NrGnbPhy::SendCtrlChannels(const Time& varTtiPeriod)
+     }
+ }
+ 
++void
++NrGnbPhy::SetCellRbRange(uint32_t first, uint32_t count)
++{
++    NS_LOG_FUNCTION(this << first << count);
++    m_cellRbFirst = first;
++    m_cellRbCount = count;
++}
++
++void
++NrGnbPhy::SetSsbBeamSweep(const std::vector<PhasedArrayModel::ComplexVector>& beams)
++{
++    NS_LOG_FUNCTION(this << beams.size());
++    NS_ABORT_MSG_IF(beams.size() > 255, "at most 255 SSB beams (index 255 means no sweep)");
++    m_ssbSweep = beams;
++    if (m_ssbSweepNext >= m_ssbSweep.size())
++    {
++        m_ssbSweepNext = 0;
++    }
++    if (m_ssbSweep.empty())
++    {
++        m_spectrumPhy->SetTxSsbIndex(NrSpectrumPhy::NO_SSB_INDEX);
++    }
++}
++
+ bool
+ NrGnbPhy::IsScheduledUe(const Ptr<NrUeNetDevice>& ueDev, uint16_t rnti, uint8_t ueBwp) const
+ {
+--- a/model/nr-gnb-phy.h
++++ b/model/nr-gnb-phy.h
+@@ -239,6 +239,39 @@ class NrGnbPhy : public NrPhy
+      */
+     bool IsScheduledUe(const Ptr<NrUeNetDevice>& ueDev, uint16_t rnti, uint8_t ueBwp) const;
+ 
++    /**
++     * \brief ntn-patch 19: confine the downlink control region, including the
++     * PSS/SSB, to RBs [first, first + count) of this BWP, the cell's sub-band
++     * under a frequency reuse plan (TR 38.821 clause 6.1.1.1, FRF 3 or 4: each
++     * beam uses its own part of the band). The control power is spread over
++     * those RBs, so with the TxPower scaled to the sub-band the energy per RE
++     * equals that of a full-band cell. count 0 (default) is the full band.
++     */
++    void SetCellRbRange(uint32_t first, uint32_t count);
++    /// The control RB range set by SetCellRbRange (count 0: full band).
++    std::pair<uint32_t, uint32_t> GetCellRbRange() const
++    {
++        return {m_cellRbFirst, m_cellRbCount};
++    }
++
++    /**
++     * \brief ntn-patch 19: SS/PBCH block beam sweep (TS 38.213 clause 4.1).
++     *
++     * With K beams, the downlink control region of successive DL slots, which
++     * carries the PSS/SSB the UE measures, goes out on beam 0, 1, ..., K-1, 0,
++     * ... and is tagged with that SSB index, so the UE can measure SS-RSRP per
++     * SSB beam (TS 38.215 5.1.1) and derive the cell quality from the best
++     * beam (TS 38.331 5.5.3.3). An empty vector (default) keeps the control on
++     * the predefined (cell) beam, as before. The vectors are used as given;
++     * the caller re-steers them as the satellite moves.
++     */
++    void SetSsbBeamSweep(const std::vector<PhasedArrayModel::ComplexVector>& beams);
++    /// Number of SSB beams in the sweep (0: no sweep).
++    uint32_t GetSsbBeamSweepSize() const
++    {
++        return static_cast<uint32_t>(m_ssbSweep.size());
++    }
++
+     /**
+      * \brief Receive a PHY data packet
+      *
+@@ -841,6 +874,10 @@ class NrGnbPhy : public NrPhy
+ 
+     Time m_lastBfChange; //!< Saves the timestamp when the beamforming vector changes.
+     bool m_beamLookupServingUeOnly{false}; //!< ntn-patch 18, see BeamLookupServingUeOnly
++    uint32_t m_cellRbFirst{0}; //!< ntn-patch 19: first RB of the cell's control sub-band
++    uint32_t m_cellRbCount{0}; //!< ntn-patch 19: RBs of the control sub-band (0: full band)
++    std::vector<PhasedArrayModel::ComplexVector> m_ssbSweep; //!< ntn-patch 19: SSB beams
++    uint32_t m_ssbSweepNext{0}; //!< ntn-patch 19: SSB index of the next DL control region
+ };
+ 
+ } // namespace ns3
+--- a/model/nr-spectrum-phy.cc
++++ b/model/nr-spectrum-phy.cc
+@@ -504,6 +504,7 @@ NrSpectrumPhy::StartRx(Ptr<SpectrumSignalParameters> params)
+ 
+                 if (!m_phyRxPssCallback.IsNull())
+                 {
++                    m_lastRxSsbIndex = dlCtrlRxParams->ssbIndex; // ntn-patch 19
+                     m_phyRxPssCallback(dlCtrlRxParams->cellId, dlCtrlRxParams->psd);
+                 }
+             }
+@@ -720,6 +721,7 @@ NrSpectrumPhy::StartTxDlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
+         txParams->psd = m_txPsd;
+         txParams->cellId = GetCellId();
+         txParams->pss = true;
++        txParams->ssbIndex = m_txSsbIndex; // ntn-patch 19
+         txParams->ctrlMsgList = ctrlMsgList;
+ 
+         m_txCtrlTrace(duration);
+--- a/model/nr-spectrum-phy.h
++++ b/model/nr-spectrum-phy.h
+@@ -147,6 +147,25 @@ class NrSpectrumPhy : public SpectrumPhy
+      */
+     void SetPhyRxPssCallback(const NrPhyRxPssCallback& c);
+ 
++    /// ntn-patch 19: SSB index value meaning "the cell does not sweep SSB beams".
++    static constexpr uint8_t NO_SSB_INDEX = 255;
++    /**
++     * \brief ntn-patch 19: SSB index (TS 38.213 4.1) carried by the DL control
++     * frames this PHY transmits from now on; NO_SSB_INDEX (default) for none.
++     */
++    void SetTxSsbIndex(uint8_t ssbIndex)
++    {
++        m_txSsbIndex = ssbIndex;
++    }
++    /**
++     * \brief ntn-patch 19: SSB index of the last PSS this PHY received,
++     * valid inside the PSS callback; NO_SSB_INDEX when the cell does not sweep.
++     */
++    uint8_t GetLastRxSsbIndex() const
++    {
++        return m_lastRxSsbIndex;
++    }
++
+     /**
+      * \brief Sets the callback to be called when DL HARQ feedback is generated
+      */
+@@ -732,6 +751,8 @@ class NrSpectrumPhy : public SpectrumPhy
+     NrPhyRxDataEndOkCallback
+         m_phyRxDataEndOkCallback;          //!< callback that is notified when the DATA is received
+     NrPhyRxPssCallback m_phyRxPssCallback; ///< the phy receive PSS callback
++    uint8_t m_txSsbIndex{NO_SSB_INDEX};     ///< ntn-patch 19: SSB index of transmitted DL CTRL
++    uint8_t m_lastRxSsbIndex{NO_SSB_INDEX}; ///< ntn-patch 19: SSB index of the last received PSS
+     NrPhyDlHarqFeedbackCallback
+         m_phyDlHarqFeedbackCallback; //!< callback that is notified when the DL HARQ feedback is
+                                      //!< being generated
+--- a/model/nr-spectrum-signal-parameters.cc
++++ b/model/nr-spectrum-signal-parameters.cc
+@@ -61,6 +61,7 @@ NrSpectrumSignalParametersDlCtrlFrame::NrSpectrumSignalParametersDlCtrlFrame(
+     NS_LOG_FUNCTION(this << &p);
+     cellId = p.cellId;
+     pss = p.pss;
++    ssbIndex = p.ssbIndex;
+     ctrlMsgList = p.ctrlMsgList;
+ }
+ 
+--- a/model/nr-spectrum-signal-parameters.h
++++ b/model/nr-spectrum-signal-parameters.h
+@@ -73,6 +73,7 @@ struct NrSpectrumSignalParametersDlCtrlFrame : public SpectrumSignalParameters
+     std::list<Ptr<NrControlMessage>> ctrlMsgList; //!< CTRL message list
+     bool pss;                                     //!< PSS (?)
+     uint16_t cellId;                              //!< cell id
++    uint8_t ssbIndex{255}; //!< ntn-patch 19: SSB index (TS 38.213 4.1), 255 = no SSB beam sweep
+ };
+ 
+ /**
+--- a/model/nr-ue-phy.cc
++++ b/model/nr-ue-phy.cc
+@@ -31,6 +31,7 @@
+ #include <algorithm>
+ #include <cfloat>
+ #include <cmath>
++#include <limits>
+ 
+ namespace ns3
+ {
+@@ -219,6 +220,27 @@ NrUePhy::GetTypeId()
+                           BooleanValue(true),
+                           MakeBooleanAccessor(&NrUePhy::m_enableRlfDetection),
+                           MakeBooleanChecker())
++            .AddAttribute(
++                "SsRsrpOnOccupiedRbs",
++                "ntn-patch 19 (TS 38.215 5.1.1: SS-RSRP is the linear average over the REs "
++                "that carry the SSS): average the PSS power per RB over the RBs that carry the "
++                "cell's SSB, i.e. those with a non-zero received PSD (nr's own convention, "
++                "NrAmc: 'SINR == 0 means no signal in this RB'). Needed when cells send their "
++                "control region in a sub-band (frequency reuse); false (nr default) averages "
++                "over every RB of the BWP.",
++                BooleanValue(false),
++                MakeBooleanAccessor(&NrUePhy::m_ssRsrpOnOccupiedRbs),
++                MakeBooleanChecker())
++            .AddAttribute(
++                "SsbBeamsPerBurst",
++                "ntn-patch 19: number of SSB beams the serving cell sweeps (TS 38.213 4.1, "
++                "ssb-PositionsInBurst). The path-loss reference of uplink power control is then "
++                "the best SSB of the last burst (TS 38.213 7.1.1, the SS/PBCH block the UE "
++                "uses as q_d) instead of the last control region received, which is sent on "
++                "whichever beam the sweep is at. 0 (default): no sweep, nr behavior.",
++                UintegerValue(0),
++                MakeUintegerAccessor(&NrUePhy::m_ssbBeamsPerBurst),
++                MakeUintegerChecker<uint32_t>(0, 255))
+             .AddAttribute("DlHarqFeedbackDisabled",
+                           "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.213 9.1.2): "
+                           "bitmap over DL HARQ process IDs, bit i set = the UE does not report "
+@@ -1390,6 +1412,19 @@ NrUePhy::ReportRsReceivedPower(const SpectrumValue& rsReceivedPower)
+ {
+     NS_LOG_FUNCTION(this << rsReceivedPower);
+     m_rsrp = 10 * log10(Integral(rsReceivedPower)) + 30;
++    // ntn-patch 19: with an SSB beam sweep the control region of each slot
++    // goes out on another beam; the downlink path-loss reference is the best
++    // SS/PBCH block (TS 38.213 7.1.1 q_d), here the strongest of the last burst.
++    if (m_ssbBeamsPerBurst > 0)
++    {
++        m_rsPowerBurstMw.push_back(std::pow(10.0, m_rsrp / 10.0));
++        while (m_rsPowerBurstMw.size() > m_ssbBeamsPerBurst)
++        {
++            m_rsPowerBurstMw.pop_front();
++        }
++        const double best = *std::max_element(m_rsPowerBurstMw.begin(), m_rsPowerBurstMw.end());
++        m_rsrp = 10.0 * std::log10(best);
++    }
+     NS_LOG_DEBUG("RSRP value updated: " << m_rsrp << " dBm");
+ 
+     if (m_enableUplinkPowerControl)
+@@ -1413,11 +1448,20 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
+     Values::const_iterator itPi;
+     for (itPi = p->ConstValuesBegin(); itPi != p->ConstValuesEnd(); itPi++)
+     {
++        // ntn-patch 19: only the RBs that carry this cell's SSB (TS 38.215 5.1.1)
++        if (m_ssRsrpOnOccupiedRbs && (*itPi) == 0.0)
++        {
++            continue;
++        }
+         // convert PSD [W/Hz] to linear power [W] for the single RE
+         double powerTxW = (*itPi) * subcarrierSpacing;
+         sum += powerTxW;
+         nRB++;
+     }
++    if (nRB == 0)
++    {
++        return; // ntn-patch 19: nothing of this SSB falls in the BWP
++    }
+ 
+     // measure instantaneous RSRP now (in dBm)
+     double rsrp = 10 * log10(1000 * (sum / static_cast<double>(nRB)));
+@@ -1433,10 +1477,18 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
+         rsrp = std::pow(10.0, rsrp / 10.0);
+     }
+ 
++    // ntn-patch 19: a cell that sweeps SSB beams is measured per SSB index
++    // (TS 38.215 5.1.1 SS-RSRP per SS/PBCH block); its cell quality is derived
++    // from the best beam in ReportUeMeasurements (TS 38.331 5.5.3.3).
++    const uint8_t ssbIndex = m_spectrumPhy->GetLastRxSsbIndex();
++    auto& measMap = (ssbIndex == NrSpectrumPhy::NO_SSB_INDEX)
++                        ? m_ueMeasurementsMap
++                        : m_ueSsbMeasurementsMap[cellId];
++    const uint16_t measKey = (ssbIndex == NrSpectrumPhy::NO_SSB_INDEX) ? cellId : ssbIndex;
++
+     // store RSRP measurements
+-    std::map<uint16_t, UeMeasurementsElement>::iterator itMeasMap =
+-        m_ueMeasurementsMap.find(cellId);
+-    if (itMeasMap == m_ueMeasurementsMap.end())
++    std::map<uint16_t, UeMeasurementsElement>::iterator itMeasMap = measMap.find(measKey);
++    if (itMeasMap == measMap.end())
+     {
+         // insert new entry
+         UeMeasurementsElement newEl;
+@@ -1449,7 +1501,7 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
+                                                     << " RSRP: " << newEl.rsrpSum << " dBm"
+                                                     << " number of entries: " << +newEl.rsrpNum);
+ 
+-        m_ueMeasurementsMap.insert(std::pair<uint16_t, UeMeasurementsElement>(cellId, newEl));
++        measMap.insert(std::pair<uint16_t, UeMeasurementsElement>(measKey, newEl));
+     }
+     else if (linAvg.Get())
+     {
+@@ -1475,6 +1527,13 @@ NrUePhy::ReceivePss(uint16_t cellId, const Ptr<SpectrumValue>& p)
+     }
+ }
+ 
++uint8_t
++NrUePhy::GetBestSsbIndex(uint16_t cellId) const
++{
++    auto it = m_bestSsbIndex.find(cellId);
++    return it == m_bestSsbIndex.end() ? NrSpectrumPhy::NO_SSB_INDEX : it->second;
++}
++
+ void
+ NrUePhy::ReportUeMeasurements()
+ {
+@@ -1484,6 +1543,39 @@ NrUePhy::ReportUeMeasurements()
+ 
+     BooleanValue linAvgReport;
+     g_nrUeRsrpLinearAverage.GetValue(linAvgReport);
++    // ntn-patch 19: TS 38.331 5.5.3.3 cell quality of a cell that sweeps SSB
++    // beams. Without nrofSS-BlocksToAverage the cell quality is the highest
++    // beam measurement quantity, so the layer-1 result of the best SSB beam
++    // (per-beam average over this period, TS 38.215 5.1.1) stands for the cell.
++    m_bestSsbIndex.clear();
++    for (const auto& [cell, beams] : m_ueSsbMeasurementsMap)
++    {
++        double bestDbm = -std::numeric_limits<double>::infinity();
++        const UeMeasurementsElement* best = nullptr;
++        uint16_t bestIdx = NrSpectrumPhy::NO_SSB_INDEX;
++        for (const auto& [idx, el] : beams)
++        {
++            if (el.rsrpNum == 0)
++            {
++                continue;
++            }
++            const double dbm = linAvgReport.Get()
++                                   ? 10.0 * std::log10(std::max(el.rsrpSum, 1e-300))
++                                   : el.rsrpSum / static_cast<double>(el.rsrpNum);
++            if (dbm > bestDbm)
++            {
++                bestDbm = dbm;
++                best = &el;
++                bestIdx = idx;
++            }
++        }
++        if (best)
++        {
++            m_ueMeasurementsMap[cell] = *best;
++            m_bestSsbIndex[cell] = static_cast<uint8_t>(bestIdx);
++        }
++    }
++    m_ueSsbMeasurementsMap.clear();
+     // ntn-patch 08: RSSI over the measurement bandwidth, if RSRQ is enabled.
+     BooleanValue rsrqOn;
+     g_nrUeRsrqFromRssi.GetValue(rsrqOn);
+--- a/model/nr-ue-phy.h
++++ b/model/nr-ue-phy.h
+@@ -14,6 +14,8 @@
+ 
+ #include <ns3/traced-callback.h>
+ 
++#include <deque>
++
+ namespace ns3
+ {
+ 
+@@ -125,6 +127,13 @@ class NrUePhy : public NrPhy
+      */
+     double GetRsrp() const;
+ 
++    /**
++     * \brief ntn-patch 19: SSB index of the best SSB beam of \p cellId in the
++     * last layer-1 measurement period (TS 38.331 5.5.3.3), or 255 when that
++     * cell does not sweep SSB beams or was not measured.
++     */
++    uint8_t GetBestSsbIndex(uint16_t cellId) const;
++
+     /**
+      * \brief Get NR uplink power control entity
+      *
+@@ -871,6 +880,17 @@ class NrUePhy : public NrPhy
+      * Indexed by the physical cell ID where the measurements come from.
+      */
+     std::map<uint16_t, UeMeasurementsElement> m_ueMeasurementsMap;
++    /// ntn-patch 19: per-SSB-beam layer-1 samples of the cells that sweep SSB beams.
++    std::map<uint16_t, std::map<uint16_t, UeMeasurementsElement>> m_ueSsbMeasurementsMap;
++    /// ntn-patch 19: best SSB index per cell in the last layer-1 period.
++    std::map<uint16_t, uint8_t> m_bestSsbIndex;
++    /// ntn-patch 19 (attribute SsRsrpOnOccupiedRbs): average SS-RSRP over the
++    /// RBs that carry the SSB only.
++    bool m_ssRsrpOnOccupiedRbs{false};
++    /// ntn-patch 19 (attribute SsbBeamsPerBurst): SSB beams of the serving cell.
++    uint32_t m_ssbBeamsPerBurst{0};
++    /// ntn-patch 19: RS received power (mW) of the last SsbBeamsPerBurst samples.
++    std::deque<double> m_rsPowerBurstMw;
+     /**
+      * The `UeMeasurementsFilterPeriod` attribute. Time period for reporting UE
+      * measurements, i.e., the length of layer-1 filtering (default 200 ms).

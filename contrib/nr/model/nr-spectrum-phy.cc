@@ -504,6 +504,7 @@ NrSpectrumPhy::StartRx(Ptr<SpectrumSignalParameters> params)
 
                 if (!m_phyRxPssCallback.IsNull())
                 {
+                    m_lastRxSsbIndex = dlCtrlRxParams->ssbIndex; // ntn-patch 19
                     m_phyRxPssCallback(dlCtrlRxParams->cellId, dlCtrlRxParams->psd);
                 }
             }
@@ -720,6 +721,7 @@ NrSpectrumPhy::StartTxDlControlFrames(const std::list<Ptr<NrControlMessage>>& ct
         txParams->psd = m_txPsd;
         txParams->cellId = GetCellId();
         txParams->pss = true;
+        txParams->ssbIndex = m_txSsbIndex; // ntn-patch 19
         txParams->ctrlMsgList = ctrlMsgList;
 
         m_txCtrlTrace(duration);

@@ -240,6 +240,39 @@ class NrGnbPhy : public NrPhy
     bool IsScheduledUe(const Ptr<NrUeNetDevice>& ueDev, uint16_t rnti, uint8_t ueBwp) const;
 
     /**
+     * \brief ntn-patch 19: confine the downlink control region, including the
+     * PSS/SSB, to RBs [first, first + count) of this BWP, the cell's sub-band
+     * under a frequency reuse plan (TR 38.821 clause 6.1.1.1, FRF 3 or 4: each
+     * beam uses its own part of the band). The control power is spread over
+     * those RBs, so with the TxPower scaled to the sub-band the energy per RE
+     * equals that of a full-band cell. count 0 (default) is the full band.
+     */
+    void SetCellRbRange(uint32_t first, uint32_t count);
+    /// The control RB range set by SetCellRbRange (count 0: full band).
+    std::pair<uint32_t, uint32_t> GetCellRbRange() const
+    {
+        return {m_cellRbFirst, m_cellRbCount};
+    }
+
+    /**
+     * \brief ntn-patch 19: SS/PBCH block beam sweep (TS 38.213 clause 4.1).
+     *
+     * With K beams, the downlink control region of successive DL slots, which
+     * carries the PSS/SSB the UE measures, goes out on beam 0, 1, ..., K-1, 0,
+     * ... and is tagged with that SSB index, so the UE can measure SS-RSRP per
+     * SSB beam (TS 38.215 5.1.1) and derive the cell quality from the best
+     * beam (TS 38.331 5.5.3.3). An empty vector (default) keeps the control on
+     * the predefined (cell) beam, as before. The vectors are used as given;
+     * the caller re-steers them as the satellite moves.
+     */
+    void SetSsbBeamSweep(const std::vector<PhasedArrayModel::ComplexVector>& beams);
+    /// Number of SSB beams in the sweep (0: no sweep).
+    uint32_t GetSsbBeamSweepSize() const
+    {
+        return static_cast<uint32_t>(m_ssbSweep.size());
+    }
+
+    /**
      * \brief Receive a PHY data packet
      *
      * Connected by the helper to a callback of the spectrum.
@@ -841,6 +874,10 @@ class NrGnbPhy : public NrPhy
 
     Time m_lastBfChange; //!< Saves the timestamp when the beamforming vector changes.
     bool m_beamLookupServingUeOnly{false}; //!< ntn-patch 18, see BeamLookupServingUeOnly
+    uint32_t m_cellRbFirst{0}; //!< ntn-patch 19: first RB of the cell's control sub-band
+    uint32_t m_cellRbCount{0}; //!< ntn-patch 19: RBs of the control sub-band (0: full band)
+    std::vector<PhasedArrayModel::ComplexVector> m_ssbSweep; //!< ntn-patch 19: SSB beams
+    uint32_t m_ssbSweepNext{0}; //!< ntn-patch 19: SSB index of the next DL control region
 };
 
 } // namespace ns3

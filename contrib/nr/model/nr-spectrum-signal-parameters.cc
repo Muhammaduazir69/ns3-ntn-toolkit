@@ -61,6 +61,7 @@ NrSpectrumSignalParametersDlCtrlFrame::NrSpectrumSignalParametersDlCtrlFrame(
     NS_LOG_FUNCTION(this << &p);
     cellId = p.cellId;
     pss = p.pss;
+    ssbIndex = p.ssbIndex;
     ctrlMsgList = p.ctrlMsgList;
 }
 

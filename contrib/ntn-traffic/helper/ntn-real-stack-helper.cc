@@ -42,6 +42,11 @@
 #include "ns3/nr-ue-mac.h"
 #include "ns3/nr-phy-rx-trace.h"
 #include "ns3/nr-spectrum-phy.h"
+#include "ns3/nr-mac-scheduler-ns3.h"
+#include "ns3/nr-gnb-phy.h"
+#include "ns3/nr-gnb-mac.h"
+
+#include <tuple>
 #include "ns3/seq-ts-size-header.h"
 #include "ns3/nr-phy-mac-common.h"
 #include "ns3/ntn-oran-ai-flow-monitor.h"
@@ -157,6 +162,30 @@ static GlobalValue g_ntnRealStackHoTargetBeam(
     "every gNB PHY matches the scheduled RNTI only against the UEs it serves (nr patch 18). Off "
     "under NtnRealStackLinkBudget=Legacy; false restores the Wave 9 behavior unless a scenario "
     "calls SetHandoverTargetBeam(true)",
+    BooleanValue(true),
+    MakeBooleanChecker());
+
+// Wave 11: frequency reuse among the satellite cells (TR 38.821 6.1.1.1).
+static GlobalValue g_ntnRealStackFrequencyReuse(
+    "NtnRealStackFrequencyReuse",
+    "nr backend: frequency reuse factor among the gNBs (TR 38.821 clause 6.1.1.1, Table "
+    "6.1.1.1-5): Auto (3 under the TR 38.821 Set-1 budget when the run has two or more gNBs, "
+    "otherwise 1), 1, 3 or 4. With FRF k > 1 every carrier is split into k sub-bands and gNB i "
+    "sends its PDSCH and control region (PSS/SSB) and schedules its UEs' PUSCH only in sub-band "
+    "i mod k, with its power scaled to the sub-band (constant EIRP density). Legacy is always 1 "
+    "unless a scenario calls SetFrequencyReuse",
+    StringValue("Auto"),
+    MakeStringChecker());
+
+// Wave 11: SSB beam grid for Earth-moving cells (TS 38.213 4.1, TS 38.331 5.5.3.3).
+static GlobalValue g_ntnRealStackSsbBeamGrid(
+    "NtnRealStackSsbBeamGrid",
+    "nr backend, Earth-moving cells (SetSsbCellBeam(true, nullptr)): every satellite sweeps its "
+    "SSB over a hexagonal grid of body-fixed beams covering its field of view, one SSB index "
+    "per beam, and the UE derives the cell quality from the best SSB beam (TS 38.331 5.5.3.3, nr "
+    "patch 19) instead of one nadir beam whose SS-RSRP falls into the sidelobes once the UE "
+    "leaves its footprint. Off under NtnRealStackLinkBudget=Legacy; false restores the single "
+    "nadir beam unless a scenario calls SetSsbBeamGrid(true)",
     BooleanValue(true),
     MakeBooleanChecker());
 
@@ -1609,6 +1638,10 @@ NtnRealStackHelper::BuildNrRadio()
     }
     m_nr->UpdateDeviceConfigs(m_enbDevs);
     m_nr->UpdateDeviceConfigs(m_ueDevs);
+    // Wave 11: frequency reuse among the cells. After the device configuration,
+    // which gives each PHY its RB count and each MAC its RBG count, and after
+    // the per-BWP powers above, which it scales to the cell's sub-band.
+    ApplyFrequencyReuse();
 
     // ---- Enabler A: instantiate + cross-wire the A3-RSRP handover algorithm.
     // This is the wiring the vendored NrHelper omits (see the note above). It
@@ -1866,10 +1899,15 @@ NtnRealStackHelper::BuildNrRadio()
     if (m_ssbCellBeam)
     {
         // C2: cell (SSB) beam per gNB, re-steered as the satellites move.
-        BooleanValue prev;
-        GlobalValue::GetValueByName("NrUeRsrpLinearAverage", prev);
-        m_prevRsrpLinear = prev.Get() ? 1 : 0;
+        if (m_prevRsrpLinear < 0) // Wave 11: reuse may have saved it already
+        {
+            BooleanValue prev;
+            GlobalValue::GetValueByName("NrUeRsrpLinearAverage", prev);
+            m_prevRsrpLinear = prev.Get() ? 1 : 0;
+        }
         GlobalValue::Bind("NrUeRsrpLinearAverage", BooleanValue(true));
+        // Wave 11: Earth-moving cells sweep their SSB over a beam grid.
+        BuildSsbBeamGrid();
         RefreshCellBeams();
     }
 
@@ -4204,7 +4242,20 @@ NtnRealStackHelper::WriteHealthReport()
     // than an inline approximation, so the tag names the band correctly and
     // checks the channel against that band's supported set instead of merely
     // against the block width.
-    const NtnFr1Band band = ClassifyNtnFr1(m_freqHz, m_bwHz);
+    NtnFr1Band band = ClassifyNtnFr1(m_freqHz, m_bwHz);
+    // Wave 11: under frequency reuse k the cells may also be k carriers of
+    // m_bwHz / k each inside the block (TR 38.821 Set-1 S band: 30 MHz shared by
+    // three 10 MHz beams). That is conformant when each cell channel is a
+    // supported bandwidth and the k of them fit in the block; otherwise the
+    // sub-bands are BWPs of the configured carrier and the carrier is judged.
+    if (m_frfApplied > 1 && !band.conformant)
+    {
+        const NtnFr1Band cell = ClassifyNtnFr1(m_freqHz, m_bwHz / m_frfApplied);
+        if (cell.conformant && m_bwHz <= cell.blockWidthHz + 1.0)
+        {
+            band = cell;
+        }
+    }
     bool ntnBandOk = true;
     std::string bandTag;
     if (frTag == std::string("fr1"))
@@ -4353,6 +4404,11 @@ NtnRealStackHelper::WriteHealthReport()
         << (m_bsrTriggeringApplied ? "ts38321-5.4.5" : "nr-bsr-in-every-tb") << "\n";
     out << "ho_target_ue_beam," << (m_hoTargetBeamApplied ? 1 : 0) << ",-,-,"
         << (m_hoTargetBeamApplied ? "registered-on-handover" : "nr-attach-only") << "\n";
+    // Wave 11: reuse factor and SSB beams per satellite.
+    out << "frequency_reuse," << +m_frfApplied << ",-,-,"
+        << (m_frfApplied > 1 ? "tr38821-6.1.1.1 (sub-band per cell)" : "reuse-1") << "\n";
+    out << "ssb_beam_grid," << m_ssbGridSize << ",-,-,"
+        << (m_ssbGridApplied ? "ts38331-5.5.3.3 (best SSB beam)" : "single-cell-beam") << "\n";
     // WF-11: refusals reach the health file, so they are visible in the
     // release build where NS_LOG_WARN is compiled out. pass=0 when a decision
     // module asked for a handover the stack could not perform.
@@ -4365,6 +4421,13 @@ NtnRealStackHelper::WriteHealthReport()
     // would dilute the gate rather than sharpen it.
     out << "channel_bw_hz," << m_bwHz << ",-,-,ts38101-5-table-5.3.5-1"
         << (band.bandwidthSupported ? "" : " (UNSUPPORTED for this band)") << "\n";
+    if (m_frfApplied > 1)
+    {
+        out << "cell_bw_hz," << m_bwHz / m_frfApplied << ",-,-,tr38821-6.1.1.1 (carrier / FRF)\n";
+        // Per-beam EIRP at the carrier's EIRP density over the cell's sub-band.
+        out << "cell_eirp_dbm," << GetEffectiveEirpDbm() - 10.0 * std::log10(m_frfApplied)
+            << ",-,-,tr38821-table-6.1.1.1-1 (constant density)\n";
+    }
     out << "ntn_fr1_band," << band.name << ",-,-,ts38101-5-table-5.2-1"
         << (band.carrierInDownlink ? " (downlink)" : " (carrier NOT in the downlink block)")
         << "\n";
@@ -5296,21 +5359,314 @@ NtnRealStackHelper::RefreshCellBeams()
             m_nadirCenters[i]->SetPosition(GeodeticToEcef(lat, lon, 0.0));
             target = m_nadirCenters[i];
         }
+        // Wave 11: the SSB grid's body frame. nadir n (towards the Earth's
+        // center), e1 along-track (velocity without its radial part), e2 = n x e1.
+        std::vector<Ptr<MobilityModel>>* gridTargets = nullptr;
+        if (m_ssbGridApplied && !m_cellBeamCenter && i < m_ssbGridTargets.size())
+        {
+            const Vector p = gm->GetPosition();
+            const double r = p.GetLength();
+            const Vector n(-p.x / r, -p.y / r, -p.z / r);
+            Vector v = gm->GetVelocity();
+            const double vn = v.x * n.x + v.y * n.y + v.z * n.z;
+            Vector e1(v.x - vn * n.x, v.y - vn * n.y, v.z - vn * n.z);
+            double l1 = e1.GetLength();
+            if (l1 < 1e-9)
+            {
+                // No velocity (a static gNB): any direction normal to nadir.
+                e1 = (std::abs(n.z) < 0.9) ? Vector(-n.y, n.x, 0.0) : Vector(0.0, -n.z, n.y);
+                l1 = e1.GetLength();
+            }
+            e1 = Vector(e1.x / l1, e1.y / l1, e1.z / l1);
+            const Vector e2(n.y * e1.z - n.z * e1.y, n.z * e1.x - n.x * e1.z, n.x * e1.y - n.y * e1.x);
+            const double reach = 1.0e6; // any point on the ray: only the direction matters
+            gridTargets = &m_ssbGridTargets[i];
+            for (size_t k = 0; k < m_ssbGridUv.size(); ++k)
+            {
+                const double u = m_ssbGridUv[k].first;
+                const double w = m_ssbGridUv[k].second;
+                const double c = std::sqrt(std::max(0.0, 1.0 - u * u - w * w));
+                const Vector d(u * e1.x + w * e2.x + c * n.x,
+                               u * e1.y + w * e2.y + c * n.y,
+                               u * e1.z + w * e2.z + c * n.z);
+                (*gridTargets)[k]->SetPosition(
+                    Vector(p.x + reach * d.x, p.y + reach * d.y, p.z + reach * d.z));
+            }
+        }
         for (uint8_t b = 0; b < nBwp; ++b)
         {
-            Ptr<NrSpectrumPhy> sp = m_nr->GetGnbPhy(m_enbDevs.Get(i), b)->GetSpectrumPhy();
+            Ptr<NrGnbPhy> gphy = m_nr->GetGnbPhy(m_enbDevs.Get(i), b);
+            Ptr<NrSpectrumPhy> sp = gphy->GetSpectrumPhy();
             Ptr<const UniformPlanarArray> upa = sp->GetAntenna()->GetObject<UniformPlanarArray>();
             if (!upa)
             {
                 continue;
             }
             sp->GetBeamManager()->SetPredefinedBeam(CreateDirectPathBfv(gm, target, upa));
+            if (gridTargets && b < m_nrDlBwpCount)
+            {
+                // nr patch 19: SSB index k on beam k (index 0 is the nadir beam,
+                // which also stays the predefined beam for UL control and the
+                // data fallback).
+                std::vector<PhasedArrayModel::ComplexVector> sweep;
+                sweep.reserve(gridTargets->size());
+                for (const auto& t : *gridTargets)
+                {
+                    sweep.push_back(CreateDirectPathBfv(gm, t, upa));
+                }
+                gphy->SetSsbBeamSweep(sweep);
+            }
         }
     }
     if (m_cellBeamRefresh.IsStrictlyPositive())
     {
         Simulator::Schedule(m_cellBeamRefresh, &NtnRealStackHelper::RefreshCellBeams, this);
     }
+}
+
+// ---- Wave 11: frequency reuse and the SSB beam grid --------------------------
+
+uint8_t
+NtnRealStackHelper::ResolveFrequencyReuse(uint32_t nGnb) const
+{
+    if (m_backend != RadioBackend::Nr)
+    {
+        return 1;
+    }
+    uint8_t k = m_frf;
+    if (!m_frfSet)
+    {
+        StringValue gv;
+        GlobalValue::GetValueByName("NtnRealStackFrequencyReuse", gv);
+        const std::string v = gv.Get();
+        NS_ABORT_MSG_IF(v != "Auto" && v != "1" && v != "3" && v != "4",
+                        "NtnRealStackFrequencyReuse must be Auto, 1, 3 or 4, got " << v);
+        k = (v == "Auto") ? 0 : static_cast<uint8_t>(std::stoi(v));
+        if (GetLinkBudgetProfile() == LinkBudgetProfile::Legacy)
+        {
+            k = 1; // Legacy reproduces the reuse-1 runs
+        }
+    }
+    if (k == 0)
+    {
+        // TR 38.821 Table 6.1.1.1-5 evaluates FRF 1 and FRF 3; Table 6.1.1.2-1
+        // gives FRF 3 the better geometry SINR (SC10 median 8.2 dB against
+        // -1.1 dB for FRF 1, SC9). A single cell has no co-channel neighbor
+        // in the run, so it keeps the whole carrier.
+        k = (GetLinkBudgetProfile() == LinkBudgetProfile::Tr38821Set1 && nGnb >= 2) ? 3 : 1;
+    }
+    NS_ABORT_MSG_IF(k != 1 && k != 3 && k != 4,
+                    "SetFrequencyReuse: FRF must be 1, 3 or 4 (TR 38.821 6.1.1.1), got " << +k);
+    return k;
+}
+
+void
+NtnRealStackHelper::ApplyFrequencyReuse()
+{
+    const uint32_t nGnb = m_enbDevs.GetN();
+    m_frfApplied = 1;
+    m_cellColor.assign(nGnb, 0);
+    m_cellRbRange.assign(nGnb, {});
+    const uint8_t k = ResolveFrequencyReuse(nGnb);
+    if (k == 1)
+    {
+        return;
+    }
+    m_frfApplied = k;
+    const uint8_t nBwpAll = m_nrBwpTotal;
+    for (uint32_t i = 0; i < nGnb; ++i)
+    {
+        auto it = m_cellColorExplicit.find(i);
+        const uint8_t c = (it != m_cellColorExplicit.end()) ? it->second
+                                                            : static_cast<uint8_t>(i % k);
+        NS_ABORT_MSG_IF(c >= k, "SetCellReuseColor: color " << +c << " >= FRF " << +k);
+        m_cellColor[i] = c;
+        m_cellRbRange[i].assign(m_nrDlBwpCount, {0, 0});
+        for (uint8_t b = 0; b < nBwpAll; ++b)
+        {
+            Ptr<NrGnbPhy> phy = m_nr->GetGnbPhy(m_enbDevs.Get(i), b);
+            Ptr<NrGnbMac> mac = NrHelper::GetGnbMac(m_enbDevs.Get(i), b);
+            Ptr<NrMacSchedulerNs3> sched =
+                DynamicCast<NrMacSchedulerNs3>(m_nr->GetScheduler(m_enbDevs.Get(i), b));
+            NS_ABORT_MSG_IF(!phy || !mac || !sched, "frequency reuse needs an nr ns-3 scheduler");
+            const uint32_t nRb = phy->GetRbNum();
+            const uint32_t rbPerRbg = std::max<uint32_t>(1, mac->GetNumRbPerRbg());
+            const uint32_t nRbg = nRb / rbPerRbg;
+            NS_ABORT_MSG_IF(nRbg < k,
+                            "frequency reuse " << +k << ": BWP " << +b << " has only " << nRbg
+                                               << " RBGs");
+            // Equal RBG shares, contiguous: sub-band c = RBGs [c G/k, (c+1) G/k).
+            const uint32_t g0 = c * nRbg / k;
+            const uint32_t g1 = (c + 1) * nRbg / k;
+            std::vector<uint8_t> mask(nRbg, 0);
+            for (uint32_t g = g0; g < g1; ++g)
+            {
+                mask[g] = 1;
+            }
+            const uint32_t rbFirst = g0 * rbPerRbg;
+            const uint32_t rbCount = (g1 - g0) * rbPerRbg;
+            const bool dl = !m_fddApplied || b < m_nrDlBwpCount;
+            const bool ul = !m_fddApplied || b >= m_nrDlBwpCount;
+            if (dl)
+            {
+                // PDSCH only in the sub-band (nr's notched-RBG scheduling) and
+                // the control region, PSS/SSB included, only there (nr patch 19).
+                sched->SetDlNotchedRbgMask(mask);
+                phy->SetCellRbRange(rbFirst, rbCount);
+                m_cellRbRange[i][b] = {rbFirst, rbCount};
+            }
+            if (ul)
+            {
+                // The cell grants PUSCH only in its sub-band.
+                sched->SetUlNotchedRbgMask(mask);
+            }
+            // Constant EIRP density (TR 38.821 Table 6.1.1.1-1 states the
+            // payload as dBW/MHz): the cell radiates the carrier's power times
+            // its share of the RBs. With nr's power over the used RBs this keeps
+            // the energy per RE of the PDSCH and of the SSB equal to FRF 1.
+            const double share = static_cast<double>(rbCount) / static_cast<double>(nRb);
+            phy->SetAttribute("TxPower",
+                              DoubleValue(m_bwpPowerApplied[b % m_nrDlBwpCount] +
+                                          10.0 * std::log10(share)));
+        }
+    }
+    // TS 38.215 5.1.1: SS-RSRP is the LINEAR average of the power of the REs
+    // that carry the SSB. nr's default L1 average is taken in dB over a uint8_t
+    // sample count (patch 08 notes): over the 17 RBs of a sub-band the per-sample
+    // spread is larger than over the whole carrier, and that dB average put the
+    // serving cell 6 dB under its neighbors often enough for A3 (6 dB, 1024 ms)
+    // to cycle three cells 94 times in ntn-cho-full-constellation (none with the
+    // linear average, measured). So reuse turns the linear average on, as the
+    // SSB cell beam already does.
+    if (m_prevRsrpLinear < 0)
+    {
+        BooleanValue prev;
+        GlobalValue::GetValueByName("NrUeRsrpLinearAverage", prev);
+        m_prevRsrpLinear = prev.Get() ? 1 : 0;
+        GlobalValue::Bind("NrUeRsrpLinearAverage", BooleanValue(true));
+    }
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        for (uint8_t b = 0; b < nBwpAll; ++b)
+        {
+            m_nr->GetUePhy(m_ueDevs.Get(u), b)
+                ->SetAttribute("SsRsrpOnOccupiedRbs", BooleanValue(true));
+        }
+    }
+    // The PRBs a cell can use (RRU.PrbAvailDl) are its sub-band.
+    m_nrBandRb = std::max<uint32_t>(1, m_nrBandRb / k);
+    NS_LOG_INFO("NtnRealStackHelper: frequency reuse " << +k << " over " << nGnb
+                                                      << " cells (TR 38.821 6.1.1.1)");
+}
+
+std::pair<uint32_t, uint32_t>
+NtnRealStackHelper::GetCellRbRange(uint32_t gnbIndex, uint8_t bwp) const
+{
+    if (gnbIndex >= m_cellRbRange.size() || bwp >= m_cellRbRange[gnbIndex].size())
+    {
+        return {0, 0};
+    }
+    return m_cellRbRange[gnbIndex][bwp];
+}
+
+void
+NtnRealStackHelper::BuildSsbBeamGrid()
+{
+    m_ssbGridApplied = false;
+    m_ssbGridSize = 0;
+    m_ssbGridUv.clear();
+    m_ssbGridTargets.clear();
+    if (m_cellBeamCenter || m_backend != RadioBackend::Nr)
+    {
+        return; // Earth-fixed cell: one beam steered at the cell center
+    }
+    bool on = m_ssbGrid;
+    if (!m_ssbGridSet)
+    {
+        BooleanValue gv;
+        GlobalValue::GetValueByName("NtnRealStackSsbBeamGrid", gv);
+        on = gv.Get() && GetLinkBudgetProfile() != LinkBudgetProfile::Legacy;
+    }
+    if (!on || m_enbDevs.GetN() == 0)
+    {
+        return;
+    }
+    // Half-power beamwidth of an N-element half-wavelength array in
+    // direction-cosine space, about 0.886 x 2 / N; hexagonal spacing sqrt(3)/2 of
+    // it makes adjacent 3 dB contours touch (no coverage hole on the grid).
+    const double nEl = std::max<double>(1.0, std::max(m_gnbRows, m_gnbCols));
+    double delta = std::sqrt(3.0) / 2.0 * 0.886 * 2.0 / nEl;
+    // Field of view down to the horizon of the lowest satellite.
+    double sinLimb = 0.0;
+    for (uint32_t i = 0; i < m_gnb.GetN(); ++i)
+    {
+        Ptr<MobilityModel> gm = m_gnb.Get(i)->GetObject<MobilityModel>();
+        const double r = gm ? gm->GetPosition().GetLength() : 0.0;
+        if (r > 6371.0e3)
+        {
+            sinLimb = std::max(sinLimb, 6371.0e3 / r);
+        }
+    }
+    if (sinLimb <= 0.0)
+    {
+        return; // not an orbital geometry
+    }
+    std::vector<std::tuple<int, double, double, double>> pts; // ring, angle, u, v
+    for (;;)
+    {
+        pts.clear();
+        const int rings = static_cast<int>(std::ceil(sinLimb / delta));
+        for (int b = -rings; b <= rings; ++b)
+        {
+            for (int a = -rings; a <= rings; ++a)
+            {
+                const int ring = std::max({std::abs(a), std::abs(b), std::abs(a + b)});
+                if (ring > rings)
+                {
+                    continue;
+                }
+                const double u = delta * (a + 0.5 * b);
+                const double v = delta * (std::sqrt(3.0) / 2.0 * b);
+                if (u * u + v * v > sinLimb * sinLimb)
+                {
+                    continue;
+                }
+                pts.emplace_back(ring, std::atan2(v, u), u, v);
+            }
+        }
+        if (pts.size() <= 254)
+        {
+            break;
+        }
+        delta *= 1.1; // nr patch 19 carries at most 255 SSB indices
+    }
+    std::sort(pts.begin(), pts.end());
+    for (const auto& p : pts)
+    {
+        m_ssbGridUv.emplace_back(std::get<2>(p), std::get<3>(p));
+    }
+    m_ssbGridSize = static_cast<uint32_t>(m_ssbGridUv.size());
+    m_ssbGridTargets.resize(m_enbDevs.GetN());
+    for (auto& t : m_ssbGridTargets)
+    {
+        for (uint32_t k = 0; k < m_ssbGridSize; ++k)
+        {
+            t.push_back(CreateObject<ConstantPositionMobilityModel>());
+        }
+    }
+    // The UE takes its uplink path-loss reference from the best SSB of a burst.
+    for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
+    {
+        for (uint8_t b = 0; b < m_nrBwpTotal; ++b)
+        {
+            m_nr->GetUePhy(m_ueDevs.Get(u), b)
+                ->SetAttribute("SsbBeamsPerBurst", UintegerValue(m_ssbGridSize));
+        }
+    }
+    m_ssbGridApplied = true;
+    NS_LOG_INFO("NtnRealStackHelper: Earth-moving SSB beam grid, " << m_ssbGridSize
+                                                                   << " beams per satellite, spacing "
+                                                                   << delta << " in u/v");
 }
 
 // ---- Wave 6A ---------------------------------------------------------------

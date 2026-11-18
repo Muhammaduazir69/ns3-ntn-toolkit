@@ -164,6 +164,15 @@ main(int argc, char* argv[])
     {
         rs.SetSlices({{"eMBB", 2}, {"URLLC", 82}, {"mMTC", 9}});
     }
+    // Wave 11: keep both cells on the whole carrier (reuse 1). The helper's
+    // Set-1 default, FRF 3 (TR 38.821 6.1.1.1), would put each cell on a third
+    // of the band and, with the three slice BWPs above, leave each slice of a
+    // cell a ninth of it (5 or 6 RBs): measured, the eMBB/URLLC/mMTC bouquet then
+    // drew 1.7 of its 10.4 Mb/s at a 1.2 s OWD. Its two cells are not
+    // interference-limited (DL SINR 23.1 dB at FRF 1, 27.7 dB at FRF 3), so
+    // the reuse buys little here and costs most of the capacity the demo shows.
+    // --NtnRealStackFrequencyReuse does not override this explicit choice.
+    rs.SetFrequencyReuse(1);
     // Enabler A: NR inter-cell handover across the two satellites.
     rs.SetHandover(true, /*hysteresisDb=*/3.0, /*ttt=*/MilliSeconds(256));
     // C2: A3 on cell-level SS-RSRP. Both satellites put their SSB on a cell

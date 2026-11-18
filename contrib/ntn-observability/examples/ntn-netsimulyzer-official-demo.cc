@@ -159,6 +159,19 @@ main(int argc, char* argv[])
     {
         rs.SetSatConductedPowerDbm(55.0);
     }
+    // Wave 11: frequency reuse among the satellite cells (helper default under
+    // Set-1: FRF 3, TR 38.821 clause 6.1.1.1). Set-1 gives the S band 30 MHz in
+    // total, which FRF 3 shares as three 10 MHz beams; n256's downlink block is
+    // exactly 30 MHz wide and 10 MHz is one of its channel bandwidths (TS
+    // 38.101-5 Tables 5.2-1 and 5.3.5-1). So under FRF 3 this demo plans the
+    // whole block, one 10 MHz cell per color, at the same EIRP density. Split
+    // from the 20 MHz carrier instead, each cell would get 6.7 MHz, below the
+    // 20 Mb/s its four UEs request (OWD 0.7-1.3 s, measured). FRF 1 keeps the
+    // 20 MHz carrier and so reproduces Wave 10.
+    if (radio != "mmwave" && rs.ResolveFrequencyReuse(sats) == 3)
+    {
+        rs.SetBandwidthHz(30.0e6);
+    }
     // Enable the REAL NR inter-cell handover path (A3-RSRP + X2) so the scene's
     // handover events, if any, come from a genuine RRC serving-cell change
     // (TS 38.300: reconfiguration-with-sync) — not a geometric guess. Requires
