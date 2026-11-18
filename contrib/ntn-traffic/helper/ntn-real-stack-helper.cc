@@ -3885,6 +3885,19 @@ NtnRealStackHelper::Collect()
         delaySamples += f.seqRx;
         ipdvN += f.ipdvN;
         ipdvSumAbs += f.ipdvSumAbsMs;
+        ipdvOverflow += f.ipdvOverflow;
+        for (size_t b = 0; b < f.ipdvHistAbs.size() && b < ipdvHist.size(); ++b)
+        {
+            ipdvHist[b] += f.ipdvHistAbs[b];
+        }
+        for (size_t b = 0; b < f.owdHistFine.size() && b < owdHist.size(); ++b)
+        {
+            owdHist[b] += f.owdHistFine[b];
+            owdN += f.owdHistFine[b];
+        }
+        owdOverflow += f.owdFineOverflow;
+        owdN += f.owdFineOverflow;
+        owdMax = std::max(owdMax, f.maxDelayMs);
         lostPkts += (f.highestSeq + 1 > f.seqRx) ? f.highestSeq + 1 - f.seqRx : 0;
         expectedPkts += f.highestSeq + 1;
         if (f.ipdvN > 0)
@@ -5604,10 +5617,38 @@ NtnRealStackHelper::ExtSinkRxSeq(uint32_t flow,
     ExtFlowState& f = m_extFlows[flow];
     const double d = (Simulator::Now() - h.GetTs()).GetSeconds() * 1e3;
     f.sumDelayMs += d;
+    f.maxDelayMs = std::max(f.maxDelayMs, d);
+    if (f.owdHistFine.empty())
+    {
+        f.owdHistFine.assign(NtnOranSink::FlowStats::kFineBins, 0u);
+    }
+    const uint32_t fbin = static_cast<uint32_t>(std::max(0.0, d) / NtnOranSink::FlowStats::kFineBinMs);
+    if (fbin < NtnOranSink::FlowStats::kFineBins)
+    {
+        f.owdHistFine[fbin]++;
+    }
+    else
+    {
+        f.owdFineOverflow++;
+    }
     if (f.anySeq && h.GetSeq() == f.lastSeq + 1)
     {
-        f.ipdvSumAbsMs += std::fabs(d - f.lastDelayMs);
+        const double absIpdv = std::fabs(d - f.lastDelayMs);
+        f.ipdvSumAbsMs += absIpdv;
         ++f.ipdvN;
+        if (f.ipdvHistAbs.empty())
+        {
+            f.ipdvHistAbs.assign(NtnOranSink::FlowStats::kIpdvBins, 0u);
+        }
+        const uint32_t ibin = static_cast<uint32_t>(absIpdv / NtnOranSink::FlowStats::kIpdvBinMs);
+        if (ibin < NtnOranSink::FlowStats::kIpdvBins)
+        {
+            f.ipdvHistAbs[ibin]++;
+        }
+        else
+        {
+            f.ipdvOverflow++;
+        }
     }
     f.lastSeq = h.GetSeq();
     f.lastDelayMs = d;

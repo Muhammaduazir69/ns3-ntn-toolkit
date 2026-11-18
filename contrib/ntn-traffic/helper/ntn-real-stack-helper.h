@@ -1445,6 +1445,9 @@ class NtnRealStackHelper
     /// RFC 3393 IPDV over consecutive-sequence pairs, all DL flows (ms).
     double GetIpdvMeanAbsMs() const { return m_ipdvMeanAbsMs; }
     double GetIpdvP95AbsMs() const { return m_ipdvP95AbsMs; }
+    /// One-way-delay percentiles (0.1 ms bins) and maximum over all DL flows, NaN when none was received.
+    double GetOwdP95Ms() const { return m_owdP95Ms; }
+    double GetOwdMaxMs() const { return m_owdMaxMs; }
 
     /// NT-04: how often the folded service-link delay is re-evaluated.
     ///
@@ -1992,6 +1995,14 @@ class NtnRealStackHelper
         double lastDelayMs{0.0};
         uint64_t ipdvN{0};        //!< RFC 3393 pairs (consecutive sequence numbers)
         double ipdvSumAbsMs{0.0};
+        // Same 0.1 ms OWD and 10 us |IPDV| histograms as NtnOranSink::FlowStats, so
+        // these flows reach the reported percentiles too (without them p50/p95/p99
+        // were empty and the IPDV p95 was NaN on examples that use only such flows).
+        std::vector<uint32_t> owdHistFine;  //!< lazily sized to FlowStats::kFineBins
+        uint64_t owdFineOverflow{0};
+        double maxDelayMs{0.0};
+        std::vector<uint32_t> ipdvHistAbs;  //!< lazily sized to FlowStats::kIpdvBins
+        uint64_t ipdvOverflow{0};
     };
     std::vector<ExtFlowState> m_extFlows;
     void ExtSinkRx(uint32_t flow, Ptr<const Packet> p, const Address& from);

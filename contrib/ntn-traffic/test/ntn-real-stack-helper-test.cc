@@ -4786,6 +4786,9 @@ class ExternalDlFlowTest : public TestCase
         double meanDelayMs{0.0};
         double jitterMs{0.0};
         double floorMs{0.0};
+        double owdP95Ms{0.0};
+        double owdMaxMs{0.0};
+        double ipdvP95Ms{0.0};
         uint64_t sent{0};
         bool attached{false};
     };
@@ -4821,6 +4824,9 @@ class ExternalDlFlowTest : public TestCase
         o.meanDelayMs = rs.GetMeanDelayMs();
         o.jitterMs = rs.GetMeanJitterMs();
         o.floorMs = rs.ComputeOwdFloorMs();
+        o.owdP95Ms = rs.GetOwdP95Ms();
+        o.owdMaxMs = rs.GetOwdMaxMs();
+        o.ipdvP95Ms = rs.GetIpdvP95AbsMs();
         o.sent = DynamicCast<CbrApplication>(app.Get(0))->GetSent();
         Simulator::Destroy();
         return o;
@@ -4837,9 +4843,16 @@ class ExternalDlFlowTest : public TestCase
         NS_TEST_ASSERT_MSG_GT(with.meanDelayMs, with.floorMs,
                               "in-band one-way delay respects the altitude/c floor");
         NS_TEST_ASSERT_MSG_GT(with.jitterMs, 0.0, "IPDV is measured and not zero");
+        // The flow fills the percentile histograms too (they were empty, p95 NaN).
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(with.owdP95Ms), true, "OWD p95 from the external flow");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(with.owdP95Ms + 0.05, with.meanDelayMs * 0.5, "p95 is a delay, not a bin index");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(with.owdMaxMs + 0.05, with.owdP95Ms, "max >= p95 (bin midpoint)");
+        NS_TEST_ASSERT_MSG_GT(with.owdP95Ms, with.floorMs, "p95 above the altitude/c floor");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(with.ipdvP95Ms), true, "IPDV p95 from the external flow");
         const Out without = Run(false, "test-ntn-ext-flow-nohdr");
         NS_TEST_ASSERT_MSG_GT(without.rxPkts, 300u, "packets still counted without the header");
         NS_TEST_ASSERT_MSG_EQ(without.meanDelayMs, 0.0, "no timestamp: no delay sample");
+        NS_TEST_ASSERT_MSG_EQ(std::isnan(without.owdP95Ms), true, "no timestamp: no delay percentile");
     }
 };
 
