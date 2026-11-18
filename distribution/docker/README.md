@@ -78,7 +78,12 @@ constellation data accounts for most of it.
 ## What's NOT in the image
 
 - **NVIDIA Sionna RT**: requires NVIDIA Container Toolkit + CUDA. Run
-  separately on a GPU host; the toolkit talks to it over UDP.
+  separately on a GPU host; the toolkit talks to it over UDP. The ntn-sionna
+  examples stop with an error when no server answers, rather than silently
+  using free space. To try them without a GPU, start the protocol stub (closed-form
+  FSPL) on the default port first:
+  `python3 contrib/ntn-sionna/test/sionna-stub-server.py --port 8765 &`,
+  or pass `--allowFallback=1` to the example.
 - **FlexRIC live mode**: has its own docker-compose at
   `contrib/oran-ntn/flexric-bridge/docker/`. Bring up alongside.
 - Papers, run outputs, and internal planning documents: `build-release.sh`
