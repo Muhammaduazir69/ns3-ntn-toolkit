@@ -13,11 +13,15 @@
 #include "ns3/node-container.h"
 #include "ns3/ntn-fapi-sap-bridge.h"
 #include "ns3/ntn-real-stack-helper.h"
+#include "ns3/ntn-static-extra-loss-model.h"
+#include "ns3/rng-seed-manager.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 #include "ns3/vector.h"
 
+#include <array>
 #include <cmath>
+#include <map>
 #include <variant>
 
 using namespace ns3;
@@ -668,6 +672,649 @@ class FapiRachTimingAdvanceTest : public TestCase
     }
 };
 
+// ===========================================================================
+// In-depth cases (Nov 2026 test campaign). Every case below drives a live
+// mmwave cell built by NtnRealStackHelper (ntn-traffic) through
+// Simulator::Run(), decorates its MAC<->PHY SAP with the bridge, and checks
+// the FAPI stream against the real PHY decode, the application counters, or a
+// published reference (SCF 222.10.02, TS 38.211 / 38.213 / 38.214 / 38.321).
+// ===========================================================================
+
+namespace
+{
+
+/// One LEO-600 cell per satellite, `uesPerSat` UEs at its nadir (geodetic
+/// placement, so the bridge's one-way floor is the true 600 km).
+struct FapiRig
+{
+    NodeContainer sats;
+    NodeContainer ues;
+    NtnRealStackHelper rs;
+
+    void Build(uint32_t nSat, uint32_t uesPerSat, double simTime, bool uplink = false)
+    {
+        sats.Create(nSat);
+        ues.Create(nSat * uesPerSat);
+        for (uint32_t s = 0; s < nSat; ++s)
+        {
+            // Satellites 20 deg of longitude apart: separate cells, no overlap.
+            auto m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(NtnRealStackHelper::GeodeticToEcef(10.0, 20.0 * s, 600e3));
+            sats.Get(s)->AggregateObject(m);
+            for (uint32_t u = 0; u < uesPerSat; ++u)
+            {
+                auto um = CreateObject<ConstantPositionMobilityModel>();
+                um->SetPosition(
+                    NtnRealStackHelper::GeodeticToEcef(10.0 + 0.01 * u, 20.0 * s, 0.0));
+                ues.Get(s * uesPerSat + u)->AggregateObject(um);
+            }
+        }
+        rs.SetSimTime(Seconds(simTime));
+        rs.SetUplink(uplink);
+        rs.Build(sats, ues);
+    }
+
+    Ptr<mmwave::MmWaveEnbNetDevice> Enb(uint32_t i) const
+    {
+        return DynamicCast<mmwave::MmWaveEnbNetDevice>(rs.GetEnbDevices().Get(i));
+    }
+};
+
+/// Independent per-cell, per-RNTI tally of the real DL decode, taken from the
+/// same RxPacketTraceUe the bridge consumes, so the FAPI stream can be checked
+/// against the PHY rather than against itself.
+struct PhyTally
+{
+    struct Counts
+    {
+        uint64_t tb{0};
+        uint64_t corrupt{0};
+        uint64_t okBytes{0};
+    };
+
+    std::map<std::pair<uint64_t, uint16_t>, Counts> perCellRnti;
+    std::vector<Ptr<NtnFapiSapBridge>> bridges;
+
+    void OnRx(mmwave::RxPacketTraceParams p)
+    {
+        if (p.m_tbSize > 0)
+        {
+            auto& c = perCellRnti[{p.m_cellId, p.m_rnti}];
+            ++c.tb;
+            c.corrupt += p.m_corrupt ? 1 : 0;
+            c.okBytes += p.m_corrupt ? 0 : p.m_tbSize;
+        }
+        for (auto& b : bridges)
+        {
+            b->OnPhyRx(p);
+        }
+    }
+
+    void Connect()
+    {
+        Config::ConnectWithoutContextFailSafe(
+            "/NodeList/*/DeviceList/*/ComponentCarrierMap/*/MmWaveUePhy/DlSpectrumPhy/"
+            "RxPacketTraceUe",
+            MakeCallback(&PhyTally::OnRx, this));
+    }
+};
+
+uint32_t
+SlotsPerSubframe(Ptr<mmwave::MmWaveEnbNetDevice> enb)
+{
+    return enb->GetPhy()->GetConfigurationParameters()->GetSlotsPerSubframe();
+}
+
+} // namespace
+
+/// SCF 222.10.02 section 3.4.1: one SLOT.indication per slot, and TS 38.211
+/// section 4.3.1: a frame is 10 subframes, SFN runs 0..1023. Over 1 s of a live
+/// cell the indications must arrive at exactly 1 / slot period, with every
+/// consecutive pair one slot apart (no gap, no duplicate), and the scheduling
+/// pipeline (SLOT.indication minus DL_TTI.request for the same slot) is
+/// non-negative and below one frame.
+class FapiSlotCadenceAndSfnTest : public TestCase
+{
+  public:
+    FapiSlotCadenceAndSfnTest()
+        : TestCase("SCF 3.4.1 / TS 38.211 4.3.1: one SLOT.indication per slot, contiguous SFN/slot")
+    {
+    }
+
+  private:
+    std::vector<SlotIndication> m_seen;
+
+    void OnSlot(SlotIndication s) { m_seen.push_back(s); }
+
+    void DoRun() override
+    {
+        const double simTime = 1.0;
+        FapiRig rig;
+        rig.Build(1, 1, simTime);
+        rig.rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::UrllcPings,
+                              Seconds(0.2),
+                              Seconds(simTime - 0.05));
+        auto bridge = CreateObject<NtnFapiSapBridge>();
+        bridge->InstallEnb(rig.Enb(0));
+        bridge->TraceConnectWithoutContext("SlotIndication",
+                                           MakeCallback(&FapiSlotCadenceAndSfnTest::OnSlot, this));
+        const auto cfg = rig.Enb(0)->GetPhy()->GetConfigurationParameters();
+        const uint32_t spsf = cfg->GetSlotsPerSubframe();
+        const double slotS = cfg->GetSlotPeriod().GetSeconds();
+        Simulator::Stop(Seconds(simTime));
+        Simulator::Run();
+
+        const double expected = simTime / slotS;
+        NS_TEST_ASSERT_MSG_EQ_TOL(static_cast<double>(bridge->GetSlotIndicationCount()),
+                                  expected,
+                                  expected * 0.005 + 2.0,
+                                  "one SLOT.indication per slot (FAPI-5), 1/slot period per s");
+        NS_TEST_ASSERT_MSG_EQ(m_seen.size(), bridge->GetSlotIndicationCount(),
+                              "the trace fires once per counted indication");
+        const uint32_t slotsPerFrame = 10 * spsf;
+        uint64_t gaps = 0;
+        bool rangeOk = true;
+        for (std::size_t i = 0; i < m_seen.size(); ++i)
+        {
+            rangeOk = rangeOk && m_seen[i].sfn <= 1023 && m_seen[i].slot < slotsPerFrame;
+            if (i > 0)
+            {
+                const uint64_t a = m_seen[i - 1].sfn * slotsPerFrame + m_seen[i - 1].slot;
+                const uint64_t b = m_seen[i].sfn * slotsPerFrame + m_seen[i].slot;
+                const uint64_t mod = 1024ull * slotsPerFrame;
+                gaps += ((a + 1) % mod == b) ? 0 : 1;
+            }
+        }
+        NS_TEST_ASSERT_MSG_EQ(rangeOk, true, "SFN in 0..1023, slot in 0..10*2^mu-1");
+        NS_TEST_ASSERT_MSG_EQ(gaps, 0u, "consecutive SLOT.indications are exactly one slot apart");
+        const double pipe = bridge->GetMeanSchedPipelineSec();
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(pipe), true, "the scheduling pipeline was measured");
+        NS_TEST_ASSERT_MSG_GT(pipe + 1e-12, 0.0, "DL_TTI.request precedes its slot");
+        NS_TEST_ASSERT_MSG_LT(pipe, 0.010, "and by less than one 10 ms frame");
+        Simulator::Destroy();
+    }
+};
+
+/// P5 CONFIG.request is filled from the live PHY (SCF 222.10.02 section 3.3.2,
+/// carrier and cell config TLVs): carrier frequency in kHz and bandwidth in MHz
+/// equal what the helper configured, the grid size is set for the ACTIVE
+/// numerology only (the TLV is per numerology; other entries are 0), the cell
+/// id is the real cell id, and the duplex type is TDD. Failure path: a bridge
+/// that was never installed reports no configuration and no latency, not a
+/// fabricated number.
+class FapiConfigRequestFromPhyTest : public TestCase
+{
+  public:
+    FapiConfigRequestFromPhyTest()
+        : TestCase("SCF 3.3.2 CONFIG.request mirrors the live PHY; uninstalled bridge reports nothing")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        {
+            auto idle = CreateObject<NtnFapiSapBridge>();
+            NS_TEST_ASSERT_MSG_EQ(idle->IsConfigured(), false, "not configured before install");
+            NS_TEST_ASSERT_MSG_EQ(std::isnan(idle->GetMeanSapLatencySec()), true,
+                                  "no latency before any match");
+            NS_TEST_ASSERT_MSG_EQ(std::isnan(idle->GetLastSapLatencySec()), true,
+                                  "no last latency either");
+            NS_TEST_ASSERT_MSG_EQ(idle->HasSlotAlignedLatency(), false, "no aligned latency");
+            NS_TEST_ASSERT_MSG_EQ(idle->GetSlotIndicationCount(), 0u, "no slots");
+            // A decode for an RNTI the filter excludes is ignored; a control TB is ignored.
+            idle->SetUeRnti(5);
+            mmwave::RxPacketTraceParams p{};
+            p.m_rnti = 6;
+            p.m_tbSize = 100;
+            idle->OnPhyRx(p);
+            p.m_rnti = 5;
+            p.m_tbSize = 0;
+            idle->OnPhyRx(p);
+            NS_TEST_ASSERT_MSG_EQ(idle->GetCrcIndicationCount(), 0u,
+                                  "other-RNTI and control TBs produce no CRC.indication");
+        }
+
+        const double simTime = 0.5;
+        FapiRig rig;
+        rig.Build(1, 1, simTime);
+        auto bridge = CreateObject<NtnFapiSapBridge>();
+        bridge->InstallEnb(rig.Enb(0));
+        const auto cfg = rig.Enb(0)->GetPhy()->GetConfigurationParameters();
+        const CarrierConfig& c = bridge->GetCarrierConfig();
+        NS_TEST_ASSERT_MSG_EQ(bridge->IsConfigured(), true, "CONFIG.request consumed");
+        NS_TEST_ASSERT_MSG_EQ(c.dlFrequency,
+                              static_cast<uint32_t>(cfg->GetCenterFrequency() / 1e3),
+                              "dlFrequency is the PHY center frequency in kHz");
+        NS_TEST_ASSERT_MSG_EQ_TOL(static_cast<double>(c.dlFrequency) * 1e3,
+                                  rig.rs.GetCarrierFrequencyHz(),
+                                  1e3,
+                                  "and equals the carrier the helper configured");
+        NS_TEST_ASSERT_MSG_EQ(c.dlBandwidth,
+                              static_cast<uint32_t>(std::lround(cfg->GetBandwidth() / 1e6)),
+                              "dlBandwidth in MHz");
+        const uint32_t mu = static_cast<uint32_t>(std::lround(std::log2(SlotsPerSubframe(rig.Enb(0)))));
+        NS_TEST_ASSERT_MSG_LT(mu, 5u, "numerology index 0..4 (TS 38.211 Table 4.2-1)");
+        for (uint32_t i = 0; i < 5; ++i)
+        {
+            const uint16_t want = (i == mu) ? static_cast<uint16_t>(cfg->GetNumRb()) : 0;
+            NS_TEST_ASSERT_MSG_EQ(c.dlGridSize[i], want,
+                                  "dlGridSize is set for the active numerology " << mu
+                                                                                 << " only, i=" << i);
+            NS_TEST_ASSERT_MSG_EQ(c.ulGridSize[i], want, "ulGridSize likewise, i=" << i);
+        }
+        NS_TEST_ASSERT_MSG_EQ(bridge->GetCellConfig().phyCellId, rig.rs.GetGnbCellId(0),
+                              "phyCellId is the real cell id");
+        NS_TEST_ASSERT_MSG_EQ(+bridge->GetCellConfig().frameDuplexType, 1, "mmwave is TDD");
+        Simulator::Stop(Seconds(simTime));
+        Simulator::Run();
+        NS_TEST_ASSERT_MSG_GT(bridge->GetSlotIndicationCount(), 100u, "the cell ran");
+        Simulator::Destroy();
+    }
+};
+
+/// Every DL_TTI.request built from the real scheduler decision is well formed
+/// against the specifications: PDCCH and PDSCH counts match the PDU list, each
+/// PDSCH follows the PDCCH that carries its DCI with the same RNTI, MCS is in
+/// TS 38.214 Table 5.1.3.1-1 (0..28), the HARQ id is below the configured
+/// process count (TS 38.321 section 5.3.2: 16, extended to 32 for NTN in
+/// Rel-17), the TB is
+/// non-empty and the symbols fit in the slot.
+class FapiDlTtiPduConformanceTest : public TestCase
+{
+  public:
+    FapiDlTtiPduConformanceTest()
+        : TestCase("DL_TTI.request PDUs: PDCCH/PDSCH pairing, MCS 0..28, HARQ id, symbols in slot")
+    {
+    }
+
+  private:
+    uint64_t m_reqs{0};
+    uint64_t m_bad{0};
+    uint64_t m_pdsch{0};
+    uint64_t m_schedBytes{0};
+    uint32_t m_maxHarq{16};
+    uint32_t m_symPerSlot{14};
+    std::string m_firstBad;
+
+    void Flag(const std::string& why)
+    {
+        if (m_bad++ == 0)
+        {
+            m_firstBad = why;
+        }
+    }
+
+    void OnDlTti(DlTtiRequest r)
+    {
+        ++m_reqs;
+        if (r.pduList.size() != 2u * r.nPdusOfEachType[1] ||
+            r.nPdusOfEachType[0] != r.nPdusOfEachType[1] || r.pduList.empty())
+        {
+            Flag("PDU counts disagree with the list");
+            return;
+        }
+        for (std::size_t i = 0; i + 1 < r.pduList.size(); i += 2)
+        {
+            const auto* pdcch = std::get_if<PdcchPdu>(&r.pduList[i].pdu);
+            const auto* pdsch = std::get_if<PdschPdu>(&r.pduList[i + 1].pdu);
+            if (!pdcch || !pdsch || pdcch->dciList.empty())
+            {
+                Flag("PDCCH/PDSCH order");
+                continue;
+            }
+            ++m_pdsch;
+            m_schedBytes += pdsch->codewords[0].tbSize;
+            if (pdcch->dciList[0].rnti != pdsch->rnti || pdsch->rnti == 0)
+            {
+                Flag("RNTI mismatch");
+            }
+            if (pdsch->codewords[0].mcsIndex > 28)
+            {
+                Flag("MCS > 28");
+            }
+            if (pdsch->harqProcessId >= m_maxHarq)
+            {
+                Flag("HARQ id out of range");
+            }
+            if (pdsch->codewords[0].tbSize == 0)
+            {
+                Flag("empty TB");
+            }
+            if (pdsch->nrOfSymbols == 0 ||
+                pdsch->startSymbolIndex + pdsch->nrOfSymbols > m_symPerSlot)
+            {
+                Flag("symbols exceed the slot");
+            }
+        }
+    }
+
+    void DoRun() override
+    {
+        const double simTime = 1.5;
+        FapiRig rig;
+        rig.Build(1, 2, simTime);
+        rig.rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                              Seconds(0.3),
+                              Seconds(simTime - 0.1));
+        auto bridge = CreateObject<NtnFapiSapBridge>();
+        bridge->InstallEnb(rig.Enb(0));
+        const auto cfg = rig.Enb(0)->GetPhy()->GetConfigurationParameters();
+        m_maxHarq = cfg->GetNumHarqProcess();
+        m_symPerSlot = cfg->GetSymbPerSlot();
+        bridge->TraceConnectWithoutContext("DlTtiRequest",
+                                           MakeCallback(&FapiDlTtiPduConformanceTest::OnDlTti, this));
+        Simulator::Stop(Seconds(simTime));
+        Simulator::Run();
+
+        NS_TEST_ASSERT_MSG_EQ(m_reqs, bridge->GetDlTtiWithDataCount(),
+                              "the trace fires for every DL_TTI.request with data");
+        NS_TEST_ASSERT_MSG_GT(m_pdsch, 200u, "two saturating UEs fill hundreds of PDSCHs");
+        NS_TEST_ASSERT_MSG_EQ(m_bad, 0u, "every PDU conforms; first violation: " << m_firstBad);
+        NS_TEST_ASSERT_MSG_LT(m_maxHarq, 33u,
+                              "the configured HARQ process count is within the Rel-17 NTN 32");
+        NS_TEST_ASSERT_MSG_GT(m_schedBytes, 100000u, "the scheduled TBs carry the eMBB load");
+        NS_TEST_ASSERT_MSG_GT(bridge->GetDlTtiRequestCount(), bridge->GetDlTtiWithDataCount(),
+                              "control-only slots are counted but carry no data PDU");
+        Simulator::Destroy();
+    }
+};
+
+/// CRC.indication and RX_DATA.indication are the real PHY decode, TB for TB:
+/// the CRC count equals the data TBs the UE PHY decoded, the CRC failures equal
+/// the error model's corrupt TBs, RX_DATA counts and bytes equal the successful
+/// TBs, and the application bytes the UE received never exceed the RX_DATA
+/// bytes (the MAC/RLC/PDCP/IP headers sit between them).
+class FapiCrcMatchesPhyDecodeTest : public TestCase
+{
+  public:
+    FapiCrcMatchesPhyDecodeTest()
+        : TestCase("CRC/RX_DATA.indication equal the PHY decode TB for TB; app bytes <= RX_DATA bytes")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const double simTime = 2.0;
+        FapiRig rig;
+        rig.Build(1, 1, simTime);
+        rig.rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                              Seconds(0.3),
+                              Seconds(simTime - 0.1));
+        auto bridge = CreateObject<NtnFapiSapBridge>();
+        bridge->InstallEnb(rig.Enb(0));
+        PhyTally tally;
+        tally.bridges.push_back(bridge);
+        tally.Connect();
+        Simulator::Stop(Seconds(simTime));
+        Simulator::Run();
+        rig.rs.Collect();
+
+        const uint16_t rnti = rig.rs.GetUeRnti(0);
+        const auto& per = bridge->GetPerRntiStats();
+        NS_TEST_ASSERT_MSG_EQ(per.count(rnti), 1u, "the UE's RNTI is accounted");
+        const auto phy = tally.perCellRnti[{rig.rs.GetGnbCellId(0), rnti}];
+        const auto fapi = per.count(rnti) ? per.at(rnti) : NtnFapiSapBridge::RntiStats{};
+        NS_TEST_ASSERT_MSG_GT(phy.tb, 500u, "the PHY decoded hundreds of data TBs");
+        NS_TEST_ASSERT_MSG_EQ(fapi.crc, phy.tb, "one CRC.indication report per data TB");
+        NS_TEST_ASSERT_MSG_EQ(fapi.crcFail, phy.corrupt, "CRC failures = corrupt TBs");
+        NS_TEST_ASSERT_MSG_EQ(fapi.rxData, phy.tb - phy.corrupt, "RX_DATA only for decoded TBs");
+        NS_TEST_ASSERT_MSG_EQ(fapi.rxBytes, phy.okBytes, "RX_DATA bytes = decoded TB bytes");
+        NS_TEST_ASSERT_MSG_EQ(bridge->GetCrcIndicationCount(), fapi.crc, "single-UE totals");
+        const uint64_t appBytes = rig.rs.GetUeRxBytes(0);
+        NS_TEST_ASSERT_MSG_GT(appBytes, 0u, "the application received data");
+        NS_TEST_ASSERT_MSG_LT(appBytes, fapi.rxBytes + 1,
+                              "app bytes cannot exceed the decoded MAC bytes");
+        NS_TEST_ASSERT_MSG_GT(appBytes, fapi.rxBytes / 2,
+                              "and the UDP payload is most of them (1400 B packets)");
+        NS_TEST_ASSERT_MSG_GT(bridge->GetMatchedLatencyCount(), phy.tb / 2,
+                              "most CRCs pair with their DL_TTI.request (SFN/slot aligned)");
+        Simulator::Destroy();
+    }
+};
+
+/// Two cells, one bridge per cell: each bridge must account only the TBs of its
+/// own cell. RNTIs are allocated per cell (TS 38.321 section 7.1), so the same
+/// RNTI exists in both cells; a bridge that did not filter on the cell id
+/// counted the other cell's decode as its own.
+class FapiMultiCellIsolationTest : public TestCase
+{
+  public:
+    FapiMultiCellIsolationTest()
+        : TestCase("Two cells, two bridges: each accounts only its own cell's TBs")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const double simTime = 1.5;
+        FapiRig rig;
+        rig.Build(2, 1, simTime);
+        rig.rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                              Seconds(0.3),
+                              Seconds(simTime - 0.1));
+        auto b0 = CreateObject<NtnFapiSapBridge>();
+        auto b1 = CreateObject<NtnFapiSapBridge>();
+        b0->InstallEnb(rig.Enb(0));
+        b1->InstallEnb(rig.Enb(1));
+        PhyTally tally;
+        tally.bridges = {b0, b1};
+        tally.Connect();
+        Simulator::Stop(Seconds(simTime));
+        Simulator::Run();
+
+        const uint16_t c0 = rig.rs.GetGnbCellId(0);
+        const uint16_t c1 = rig.rs.GetGnbCellId(1);
+        NS_TEST_ASSERT_MSG_NE(c0, c1, "two distinct cells");
+        uint64_t phy0 = 0;
+        uint64_t phy1 = 0;
+        for (const auto& [key, cnt] : tally.perCellRnti)
+        {
+            (key.first == c0 ? phy0 : phy1) += cnt.tb;
+        }
+        NS_TEST_ASSERT_MSG_GT(phy0, 100u, "cell 0 carried data");
+        NS_TEST_ASSERT_MSG_GT(phy1, 100u, "cell 1 carried data");
+        NS_TEST_ASSERT_MSG_EQ(b0->GetCrcIndicationCount(), phy0, "bridge 0 sees only cell 0");
+        NS_TEST_ASSERT_MSG_EQ(b1->GetCrcIndicationCount(), phy1, "bridge 1 sees only cell 1");
+        NS_TEST_ASSERT_MSG_EQ(rig.rs.GetUeServingCellId(0), c0, "UE 0 under satellite 0");
+        NS_TEST_ASSERT_MSG_EQ(rig.rs.GetUeServingCellId(1), c1, "UE 1 under satellite 1");
+        Simulator::Destroy();
+    }
+};
+
+/// RACH.indication timing advance on the live initial access, in TA command
+/// units (TS 38.213 section 4.2: N_TA = T_A * 16 * 64 / 2^mu T_c; the RAR TA
+/// command is 12 bits, 0..3846, TS 38.321 section 6.2.3). Three runs:
+/// a 10 us residual maps to round(10 us / (1024 / 2^mu T_c)); the
+/// uncompensated 600 km round trip (4.0036 ms) saturates at 3846; full
+/// pre-compensation reports 0.
+class FapiRachTaCommandOnAttachTest : public TestCase
+{
+  public:
+    FapiRachTaCommandOnAttachTest()
+        : TestCase("TS 38.213 4.2: RACH.indication TA command on live attach (residual, saturation, 0)")
+    {
+    }
+
+  private:
+    static std::pair<uint64_t, uint16_t> Attach(Time rtt, Time preComp, uint32_t& spsf)
+    {
+        FapiRig rig;
+        rig.Build(1, 1, 0.4);
+        auto bridge = CreateObject<NtnFapiSapBridge>();
+        bridge->InstallEnb(rig.Enb(0));
+        spsf = SlotsPerSubframe(rig.Enb(0));
+        bridge->SetNtnTimingAdvance(rtt, preComp);
+        Simulator::Stop(Seconds(0.4));
+        Simulator::Run();
+        const auto n = bridge->GetRachIndicationCount();
+        const auto& r = bridge->LastRachIndication();
+        const uint16_t ta = r.preambles.empty() ? 0xFFFF : r.preambles.front().timingAdvance;
+        Simulator::Destroy();
+        return {n, ta};
+    }
+
+    void DoRun() override
+    {
+        const Time rtt = NanoSeconds(4003600); // 2 x 600 km / c
+        uint32_t spsf = 1;
+        const auto partial = Attach(rtt, rtt - MicroSeconds(10), spsf);
+        NS_TEST_ASSERT_MSG_GT(partial.first, 0u, "the UE's preamble reached the gNB");
+        const double tc = 1.0 / (480e3 * 4096.0);
+        const double unit = 16.0 * 64.0 / spsf * tc;
+        const auto expect = static_cast<uint16_t>(std::llround(10e-6 / unit));
+        NS_TEST_ASSERT_MSG_EQ(partial.second, expect,
+                              "10 us residual in TA-command units at mu=log2(" << spsf << ")");
+        const auto none = Attach(rtt, Time(), spsf);
+        NS_TEST_ASSERT_MSG_EQ(none.second, 3846u,
+                              "the uncompensated NTN round trip saturates the 12-bit command");
+        const auto full = Attach(rtt, rtt, spsf);
+        NS_TEST_ASSERT_MSG_EQ(full.second, 0u, "full pre-compensation leaves nothing to report");
+    }
+};
+
+/// Link outage on the live cell (failure path): an 80 dB excess loss between
+/// 0.8 s and 1.3 s. The L1/L2 boundary must keep its slot cadence through the
+/// outage (SLOT.indication is a timing message, not a data message), the decode
+/// must fail or stop during it, and the stream must recover after it.
+class FapiLinkOutageTest : public TestCase
+{
+  public:
+    FapiLinkOutageTest()
+        : TestCase("Failure path: an 80 dB outage keeps SLOT cadence, fails/stops CRC, then recovers")
+    {
+    }
+
+  private:
+    struct Snap
+    {
+        uint64_t slots{0};
+        uint64_t crc{0};
+        uint64_t ok{0};
+    };
+
+    static Snap Take(Ptr<NtnFapiSapBridge> b)
+    {
+        return {b->GetSlotIndicationCount(), b->GetCrcIndicationCount(), b->GetRxDataIndicationCount()};
+    }
+
+    void DoRun() override
+    {
+        const double simTime = 2.0;
+        FapiRig rig;
+        rig.Build(1, 1, simTime);
+        rig.rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                              Seconds(0.3),
+                              Seconds(simTime - 0.05));
+        auto bridge = CreateObject<NtnFapiSapBridge>();
+        bridge->InstallEnb(rig.Enb(0));
+        PhyTally tally;
+        tally.bridges.push_back(bridge);
+        tally.Connect();
+        auto outage = CreateObject<NtnStaticExtraLossModel>();
+        outage->SetLossDb(0.0);
+        rig.rs.AddExtraPropagationLoss(outage);
+        const double slotS =
+            rig.Enb(0)->GetPhy()->GetConfigurationParameters()->GetSlotPeriod().GetSeconds();
+        std::array<Snap, 4> s{};
+        Simulator::Schedule(Seconds(0.8), [&]() {
+            s[0] = Take(bridge);
+            outage->SetLossDb(80.0);
+        });
+        // Leave 100 ms for in-flight HARQ to drain before measuring the outage.
+        Simulator::Schedule(Seconds(0.9), [&]() { s[1] = Take(bridge); });
+        Simulator::Schedule(Seconds(1.3), [&]() {
+            s[2] = Take(bridge);
+            outage->SetLossDb(0.0);
+        });
+        Simulator::Schedule(Seconds(1.95), [&]() { s[3] = Take(bridge); });
+        Simulator::Stop(Seconds(simTime));
+        Simulator::Run();
+
+        const double outSlots = static_cast<double>(s[2].slots - s[1].slots);
+        NS_TEST_ASSERT_MSG_EQ_TOL(outSlots, 0.4 / slotS, 0.4 / slotS * 0.01 + 2,
+                                  "SLOT.indication keeps the slot cadence during the outage");
+        const double okBefore = static_cast<double>(s[0].ok) ;
+        const uint64_t okDuring = s[2].ok - s[1].ok;
+        const uint64_t okAfter = s[3].ok - s[2].ok;
+        NS_TEST_ASSERT_MSG_GT(okBefore, 100.0, "TBs decode before the outage");
+        NS_TEST_ASSERT_MSG_LT(okDuring, 5u, "nothing decodes 80 dB below the budget");
+        NS_TEST_ASSERT_MSG_GT(okAfter, 100u, "the stream recovers after the outage");
+        Simulator::Destroy();
+    }
+};
+
+/// Determinism: the same RngRun reproduces the FAPI stream exactly; another run
+/// stays inside the physical bounds (a fade can move the CRC failures, not the
+/// slot cadence).
+class FapiDeterminismTest : public TestCase
+{
+  public:
+    FapiDeterminismTest()
+        : TestCase("Determinism: same RngRun gives an identical FAPI stream, another run stays bounded")
+    {
+    }
+
+  private:
+    struct Out
+    {
+        uint64_t slots;
+        uint64_t dlData;
+        uint64_t crc;
+        uint64_t rxBytes;
+        uint64_t txBytes;
+    };
+
+    static Out Run(uint64_t run)
+    {
+        RngSeedManager::SetSeed(1);
+        RngSeedManager::SetRun(run);
+        // Stream numbers are handed out in creation order for the whole
+        // process; reset them so a second run in the same process repeats.
+        RngSeedManager::ResetNextStreamIndex();
+        FapiRig rig;
+        rig.Build(1, 1, 1.0);
+        rig.rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                              Seconds(0.3),
+                              Seconds(0.95));
+        auto bridge = CreateObject<NtnFapiSapBridge>();
+        bridge->InstallEnb(rig.Enb(0));
+        PhyTally tally;
+        tally.bridges.push_back(bridge);
+        tally.Connect();
+        Simulator::Stop(Seconds(1.0));
+        Simulator::Run();
+        Out o{bridge->GetSlotIndicationCount(),
+              bridge->GetDlTtiWithDataCount(),
+              bridge->GetCrcIndicationCount(),
+              bridge->GetRxDataBytes(),
+              bridge->GetTxDataBytes()};
+        Simulator::Destroy();
+        return o;
+    }
+
+    void DoRun() override
+    {
+        const Out a = Run(1);
+        const Out b = Run(1);
+        const Out c = Run(7);
+        RngSeedManager::SetRun(1);
+        NS_TEST_ASSERT_MSG_EQ(a.slots, b.slots, "same run: same slots");
+        NS_TEST_ASSERT_MSG_EQ(a.dlData, b.dlData, "same run: same DL_TTI data count");
+        NS_TEST_ASSERT_MSG_EQ(a.crc, b.crc, "same run: same CRC count");
+        NS_TEST_ASSERT_MSG_EQ(a.rxBytes, b.rxBytes, "same run: same RX_DATA bytes");
+        NS_TEST_ASSERT_MSG_EQ(a.txBytes, b.txBytes, "same run: same TX_DATA bytes");
+        NS_TEST_ASSERT_MSG_EQ(c.slots, a.slots, "slot cadence does not depend on the seed");
+        NS_TEST_ASSERT_MSG_GT(c.crc, 0u, "another seed still decodes");
+        NS_TEST_ASSERT_MSG_EQ_TOL(static_cast<double>(c.rxBytes),
+                                  static_cast<double>(a.rxBytes),
+                                  0.25 * a.rxBytes,
+                                  "and delivers the same load within 25%");
+    }
+};
+
 class NtnFapiTestSuite : public TestSuite
 {
   public:
@@ -683,6 +1330,14 @@ class NtnFapiTestSuite : public TestSuite
         AddTestCase(new FapiUlTtiFromRealGrantsTest, TestCase::Duration::QUICK);
         AddTestCase(new FapiRachTimingAdvanceTest, TestCase::Duration::QUICK);
         AddTestCase(new FapiHarqIdIsPerUeTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiSlotCadenceAndSfnTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiConfigRequestFromPhyTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiDlTtiPduConformanceTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiCrcMatchesPhyDecodeTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiMultiCellIsolationTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiRachTaCommandOnAttachTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiLinkOutageTest, TestCase::Duration::QUICK);
+        AddTestCase(new FapiDeterminismTest, TestCase::Duration::QUICK);
     }
 };
 

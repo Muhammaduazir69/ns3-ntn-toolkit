@@ -203,10 +203,20 @@ NtnFapiSapBridge::InstallEnb(Ptr<mmwave::MmWaveEnbNetDevice> enb)
     carrier.ulBandwidth = carrier.dlBandwidth;
     carrier.numRxAnt = 1;
     carrier.numTxAnt = 1;
+    // SCF 222.10.02 carrier config: dlGridSize / ulGridSize are indexed by
+    // numerology and only the configured one is non-zero. The grid used to be
+    // written into all five entries, which declares the carrier at every SCS
+    // from 15 to 240 kHz at once.
+    uint32_t mu = 0;
+    while ((1u << (mu + 1)) <= m_slotsPerSubframe && mu < 4)
+    {
+        ++mu;
+    }
     for (uint32_t i = 0; i < 5; ++i)
     {
-        carrier.dlGridSize[i] = static_cast<uint16_t>(cfg->GetNumRb());
-        carrier.ulGridSize[i] = static_cast<uint16_t>(cfg->GetNumRb());
+        const uint16_t grid = (i == mu) ? static_cast<uint16_t>(cfg->GetNumRb()) : 0;
+        carrier.dlGridSize[i] = grid;
+        carrier.ulGridSize[i] = grid;
         carrier.dlK0[i] = 0;
         carrier.ulK0[i] = 0;
     }
@@ -384,6 +394,14 @@ NtnFapiSapBridge::OnPhyRx(const mmwave::RxPacketTraceParams& p)
     if (m_ueRnti != 0 && p.m_rnti != m_ueRnti)
     {
         return; // other UE
+    }
+    // The bridge decorates ONE cell, while the UE decode trace is usually
+    // connected with a /NodeList/* wildcard. RNTIs are allocated per cell
+    // (TS 38.321 section 7.1), so without this a second cell's TBs were
+    // counted as this cell's CRC.indications, under colliding RNTIs.
+    if (m_configured && p.m_cellId != m_cell.phyCellId)
+    {
+        return; // another cell
     }
 
     const uint64_t key = SlotKey(p.m_frameNum, p.m_sfNum, p.m_slotNum);
