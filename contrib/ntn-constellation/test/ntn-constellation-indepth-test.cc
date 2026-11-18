@@ -43,7 +43,9 @@
 #include "ns3/walker-constellation.h"
 
 #include <cmath>
+#include <limits>
 #include <map>
+#include <memory>
 #include <tuple>
 #include <vector>
 
@@ -256,6 +258,21 @@ class ConJ2PrecessionTest : public TestCase
     }
 
   private:
+    /// Mean nodal drift in deg/day, from the RAAN at an ascending-node
+    /// crossing near t = 0 and at one near t = 1 day.
+    ///
+    /// The plane through two nearby positions (r(t) x r(t + dt), as this test
+    /// first did) is the OSCULATING plane, and the osculating node of a J2
+    /// orbit oscillates about the mean node with the argument of latitude u:
+    /// in the Kepler+J2 model the plane turns at Omega_dot while the satellite
+    /// moves, so r x dr/dt picks up Omega_dot z x r, a tilt of order
+    /// Omega_dot / n (0.05 deg) times a function of u; real J2 adds its own
+    /// short-period node terms (Brouwer), proportional to sin 2u for a circular
+    /// orbit. Sampled at u = 0 (t = 0) and at whatever u the satellite had one
+    /// day later, the difference read 0.38 % low (-4.472 against -4.489
+    /// deg/day) for any dt. At a node crossing u = 0, both effects vanish and
+    /// the RAAN is atan2(y, x) of the crossing point, so measuring node to node
+    /// returns the secular rate the closed form describes.
     double Measure(const KeplerianElements& el, bool sgp4)
     {
         Ptr<Sgp4MobilityModel> m = CreateObject<Sgp4MobilityModel>();
@@ -267,16 +284,40 @@ class ConJ2PrecessionTest : public TestCase
         {
             m->SetElements(el);
         }
-        std::vector<Vector> r;
-        for (double t : {0.0, 1.0, 86400.0, 86401.0})
+        // (time, RAAN) of the first ascending node in each window.
+        std::vector<std::pair<double, double>> nodes;
+        for (double w0 : {0.0, 86400.0})
         {
-            Simulator::Schedule(Seconds(t), [&r, m]() { r.push_back(m->GetEciPosition()); });
+            auto prev = std::make_shared<std::pair<double, Vector>>(-1.0, Vector());
+            auto done = std::make_shared<bool>(false);
+            for (int k = 0; k <= 6000; ++k)
+            {
+                const double t = w0 + k;
+                Simulator::Schedule(Seconds(t), [&nodes, m, t, prev, done]() {
+                    const Vector r = m->GetEciPosition();
+                    if (!*done && prev->first >= 0.0 && prev->second.z < 0.0 && r.z >= 0.0)
+                    {
+                        // Linear interpolation to z = 0 over a 1 s step: the
+                        // chord point's direction differs from the arc's by
+                        // (n dt)^2 / 8 ~ 1e-7 rad.
+                        const double f = -prev->second.z / (r.z - prev->second.z);
+                        const double x = prev->second.x + f * (r.x - prev->second.x);
+                        const double y = prev->second.y + f * (r.y - prev->second.y);
+                        nodes.emplace_back(prev->first + f * (t - prev->first), std::atan2(y, x));
+                        *done = true;
+                    }
+                    *prev = {t, r};
+                });
+            }
         }
         Simulator::Run();
         Simulator::Destroy();
-        double d = RaanFrom(r[2], r[3]) - RaanFrom(r[0], r[1]);
-        d = std::remainder(d, 2 * M_PI);
-        return d / kDeg; // deg per day
+        if (nodes.size() != 2)
+        {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        const double d = std::remainder(nodes[1].second - nodes[0].second, 2 * M_PI);
+        return d / (nodes[1].first - nodes[0].first) * 86400.0 / kDeg; // deg per day
     }
 
     void DoRun() override
@@ -284,12 +325,24 @@ class ConJ2PrecessionTest : public TestCase
         const KeplerianElements shell = Circular(550.0, 53.0, 30.0);
         const double analytic = RaanDotJ2(shell) * 86400.0 / kDeg;
         NS_TEST_ASSERT_MSG_EQ_TOL(analytic, -4.49, 0.03, "published Starlink shell drift");
-        NS_TEST_ASSERT_MSG_EQ_TOL(Measure(shell, false), analytic, 0.03, "Kepler+J2 drift within 0.7%");
-        NS_TEST_ASSERT_MSG_EQ_TOL(Measure(shell, true), analytic, 0.05, "SGP4 drift (J2 + J4) within 1%");
+        // The Kepler+J2 model applies exactly this rate to the mean node, so the
+        // node-to-node measurement must agree to the interpolation error.
+        NS_TEST_ASSERT_MSG_EQ_TOL(Measure(shell, false), analytic, 0.001 * std::abs(analytic),
+                                  "Kepler+J2 drift within 0.1%");
+        // SGP4 adds J4 and second-order J2 secular terms and its own
+        // (Brouwer) mean motion (Hoots and Roehrich 1980), each of order
+        // J4/J2 (R/p)^2 or J2, about 0.1 %, relative to the first-order rate;
+        // measured 0.013 % here and 0.17 % for the SSO below. Bound: 0.3 %.
+        NS_TEST_ASSERT_MSG_EQ_TOL(Measure(shell, true), analytic, 0.003 * std::abs(analytic),
+                                  "SGP4 drift (J2 + J4) within 0.3%");
 
         const KeplerianElements sso = Circular(550.0, 97.59, 30.0);
-        NS_TEST_ASSERT_MSG_EQ_TOL(Measure(sso, false), 0.9856, 0.01, "Kepler+J2 SSO drift");
-        NS_TEST_ASSERT_MSG_EQ_TOL(Measure(sso, true), 0.9856, 0.03, "SGP4 SSO drift");
+        const double analyticSso = RaanDotJ2(sso) * 86400.0 / kDeg;
+        NS_TEST_ASSERT_MSG_EQ_TOL(analyticSso, 0.9856, 0.01, "97.59 deg at 550 km is sun-synchronous");
+        NS_TEST_ASSERT_MSG_EQ_TOL(Measure(sso, false), analyticSso, 0.001 * std::abs(analyticSso),
+                                  "Kepler+J2 SSO drift within 0.1%");
+        NS_TEST_ASSERT_MSG_EQ_TOL(Measure(sso, true), analyticSso, 0.003 * std::abs(analyticSso),
+                                  "SGP4 SSO drift within 0.3%");
 
         // a polar orbit does not precess (cos 90 deg = 0)
         NS_TEST_ASSERT_MSG_EQ_TOL(Measure(Circular(550.0, 90.0, 30.0), false), 0.0, 1e-6,
