@@ -38,6 +38,7 @@ set(header_files
 set(test_sources
     test/ntn-constellation-test-suite.cc
     test/ntn-constellation-exact-link-test.cc
+    test/ntn-constellation-indepth-test.cc
 )
 
 build_lib(
@@ -54,3 +55,16 @@ build_lib(
     ${libthz-ntn}
   TEST_SOURCES ${test_sources}
 )
+
+# The in-depth suite (ntn-constellation-indepth) carries XnAP and UDP traffic
+# over IPv4 with FlowMonitor and uses the WGS-84 ground terminal of ntn-cho.
+# Only the test library links them.
+if(TARGET ntn-constellation-test)
+  target_link_libraries(
+    ntn-constellation-test
+    ${libinternet}
+    ${libapplications}
+    ${libflow-monitor}
+    ntn-cho
+  )
+endif()

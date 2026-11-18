@@ -5,6 +5,7 @@
 #include "ntn-xn-handover.h"
 
 #include "ns3/log.h"
+#include "ns3/nstime.h"
 #include "ns3/simulator.h"
 
 namespace ns3
@@ -21,7 +22,15 @@ NtnXnHandover::GetTypeId()
     static TypeId tid = TypeId("ns3::ntncon::NtnXnHandover")
                             .SetParent<Object>()
                             .SetGroupName("NtnConstellation")
-                            .AddConstructor<NtnXnHandover>();
+                            .AddConstructor<NtnXnHandover>()
+                            .AddAttribute("RelocPrepTimer",
+                                          "TXnRELOCprep (TS 38.423 clause 8.2.1.2): how long the "
+                                          "source waits for HANDOVER REQUEST ACKNOWLEDGE or "
+                                          "PREPARATION FAILURE before it cancels the handover "
+                                          "with HANDOVER CANCEL. 0 disables the timer.",
+                                          TimeValue(Seconds(1)),
+                                          MakeTimeAccessor(&NtnXnHandover::m_relocPrep),
+                                          MakeTimeChecker(Time(0)));
     return tid;
 }
 
@@ -68,6 +77,14 @@ NtnXnHandover::StartHandover(uint32_t ueXnapId, uint32_t targetGnb, uint64_t tar
     p.dlSn = dlPdcpSn;
     p.ulSn = ulPdcpSn;
     p.hfn = hfn;
+    // Without TXnRELOCprep a lost request or answer (an ISL outage, a target
+    // that never replies) left the handover pending forever and the
+    // completion callback never fired.
+    if (m_relocPrep.IsStrictlyPositive())
+    {
+        p.prepTimer =
+            Simulator::Schedule(m_relocPrep, &NtnXnHandover::PrepTimerExpired, this, ueXnapId);
+    }
     m_pending[ueXnapId] = p;
 
     NtnXnapHeader h;
@@ -124,6 +141,7 @@ NtnXnHandover::Receive(NtnXnapHeader msg)
             NS_LOG_WARN("ACK for an unknown UE XnAP ID " << msg.GetSourceUeXnapId());
             return;
         }
+        it->second.prepTimer.Cancel(); // preparation phase over
         NtnXnapHeader sn;
         sn.SetMessageType(XnapMessageType::SnStatusTransfer);
         sn.SetSourceUeXnapId(msg.GetSourceUeXnapId());
@@ -178,6 +196,7 @@ NtnXnHandover::Receive(NtnXnapHeader msg)
         {
             return;
         }
+        it->second.prepTimer.Cancel();
         const Time elapsed = Simulator::Now() - it->second.started;
         m_pending.erase(it);
         if (!m_complete.IsNull())
@@ -190,6 +209,32 @@ NtnXnHandover::Receive(NtnXnapHeader msg)
     case XnapMessageType::HandoverCancel:
         m_pending.erase(msg.GetSourceUeXnapId());
         break;
+    }
+}
+
+void
+NtnXnHandover::PrepTimerExpired(uint32_t ueXnapId)
+{
+    auto it = m_pending.find(ueXnapId);
+    if (it == m_pending.end())
+    {
+        return;
+    }
+    const uint32_t target = it->second.targetGnb;
+    const Time elapsed = Simulator::Now() - it->second.started;
+    m_pending.erase(it);
+    // TS 38.423 clause 8.2.1.2: on TXnRELOCprep expiry the source cancels the
+    // preparation and informs the target with HANDOVER CANCEL (clause 8.2.4).
+    NtnXnapHeader c;
+    c.SetMessageType(XnapMessageType::HandoverCancel);
+    c.SetSourceUeXnapId(ueXnapId);
+    c.SetSourceGnbId(m_gnbId);
+    c.SetTargetGnbId(target);
+    ++m_cancelSent;
+    SendTo(target, c);
+    if (!m_complete.IsNull())
+    {
+        m_complete(ueXnapId, elapsed, false);
     }
 }
 

@@ -180,6 +180,11 @@ TleRecord::ToKeplerian(KeplerianElements& out) const
         return false;
     if (line1[0] != '1' || line2[0] != '2')
         return false;
+    // Both lines must describe the same object: the catalog number in columns
+    // 3-7 of line 1 and line 2 has to agree, otherwise line 1 (epoch, drag) of
+    // one satellite would be combined with the orbit of another.
+    if (line1.substr(2, 5) != line2.substr(2, 5))
+        return false;
 
     // Line 1: cols 19-32 epoch, cols 54-61 Bstar mantissa+exp.
     double epoch_s = 0.0;
@@ -204,6 +209,9 @@ TleRecord::ToKeplerian(KeplerianElements& out) const
     }
 
     // Mean motion (rev/day) -> rad/s -> semi-major axis from n^2 a^3 = GM.
+    // Physically meaningful ranges (inclination 0..180 deg).
+    if (inc_deg < 0.0 || inc_deg > 180.0)
+        return false;
     const double n_rad_s = mm_revday * kTwoPi / 86400.0;
     if (n_rad_s <= 0.0)
         return false;

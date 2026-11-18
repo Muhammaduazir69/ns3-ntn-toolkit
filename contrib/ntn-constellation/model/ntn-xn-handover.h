@@ -11,6 +11,7 @@
 #include "ntn-xnap-messages.h"
 
 #include "ns3/callback.h"
+#include "ns3/event-id.h"
 #include "ns3/nstime.h"
 #include "ns3/object.h"
 
@@ -98,6 +99,10 @@ class NtnXnHandover : public Object
     uint32_t GetSnStatusTransfers() const { return m_snXfer; }
     uint32_t GetContextReleases() const { return m_ctxRel; }
     uint32_t GetCompleted() const { return m_completed; }
+    /// HANDOVER CANCEL messages sent after TXnRELOCprep expired.
+    uint32_t GetCancelsSent() const { return m_cancelSent; }
+    /// Handovers in preparation (waiting for the target's answer or release).
+    uint32_t GetPendingCount() const { return static_cast<uint32_t>(m_pending.size()); }
     /// PDCP DL SN the target most recently received in SN STATUS TRANSFER.
     uint32_t GetLastReceivedDlPdcpSn() const { return m_lastDlSn; }
     uint32_t GetLastReceivedHfn() const { return m_lastHfn; }
@@ -110,7 +115,10 @@ class NtnXnHandover : public Object
         uint32_t dlSn{0};
         uint32_t ulSn{0};
         uint32_t hfn{0};
+        EventId prepTimer; //!< TXnRELOCprep (TS 38.423 clause 8.2.1.2)
     };
+
+    void PrepTimerExpired(uint32_t ueXnapId);
 
     void SendTo(uint32_t peer, const NtnXnapHeader& h);
 
@@ -130,6 +138,8 @@ class NtnXnHandover : public Object
     uint32_t m_snXfer{0};
     uint32_t m_ctxRel{0};
     uint32_t m_completed{0};
+    uint32_t m_cancelSent{0};
+    Time m_relocPrep{Seconds(1)}; //!< TXnRELOCprep; 0 disables the timer
     uint32_t m_lastDlSn{0};
     uint32_t m_lastHfn{0};
 };
