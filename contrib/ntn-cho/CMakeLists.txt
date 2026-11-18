@@ -34,6 +34,7 @@ set(header_files
 set(test_sources
     test/ntn-cho-test-suite.cc
     test/ntn-standards-validation-test.cc
+    test/ntn-cho-depth-test.cc
 )
 
 # ns3-ai is an OPTIONAL dependency: only NtnAiInterface (the learning-based
@@ -70,4 +71,10 @@ build_lib(
 
 if(ntn_cho_optional_libs)
   target_compile_definitions(${libntn-cho} PRIVATE NTN_CHO_HAS_NS3AI)
+endif()
+
+# The depth tests run the KPI recorder on real NR handovers (NtnRealStackHelper,
+# ntn-traffic). Only the test library links it.
+if(TARGET ntn-cho-test)
+  target_link_libraries(ntn-cho-test ntn-traffic)
 endif()

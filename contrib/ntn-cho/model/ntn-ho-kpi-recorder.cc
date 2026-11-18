@@ -166,6 +166,17 @@ NtnHoKpiRecorder::NotifyHandoverStart(uint32_t ueIndex, uint64_t imsi, uint16_t 
 {
     UeState& u = Ue(ueIndex);
     m_imsiToUe[imsi] = ueIndex;
+    if (u.openRecord >= 0)
+    {
+        // A new attempt while one is still open: the open one never completed.
+        // It used to stay open forever, so it was neither a success nor a
+        // failure and the failure count missed it. Close it as a failure now.
+        HoRecord& stale = m_records[u.openRecord];
+        stale.tEnd = Simulator::Now();
+        stale.closed = true;
+        stale.success = false;
+        u.openRecord = -1;
+    }
     HoRecord r;
     r.ueIndex = ueIndex;
     r.imsi = imsi;
