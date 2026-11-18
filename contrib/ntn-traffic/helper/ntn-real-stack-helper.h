@@ -501,6 +501,40 @@ class NtnRealStackHelper
         m_ssbGrid = enable;
         m_ssbGridSet = true;
     }
+
+    /// Wave 11b: robust downlink MCS on the handover target until the UE's first
+    /// CSI report there (TS 38.214 5.2.2.5: the CSI reference resource is in the
+    /// serving cell; TS 38.331 5.3.5.5.2: CSI reporting restarts after the
+    /// reconfigurationWithSync). Two parts (nr patch 20):
+    /// (1) the UE's MAC reset ends the source downlink (TS 38.321 5.12): a
+    /// source PDSCH still on the air is not delivered to the re-established RLC,
+    /// and the CQI / HARQ-ACK reports derived from the source are not sent to the
+    /// target (NrUePhy::HandoverRxFlush). nr delivered that last source PDU to the
+    /// new RLC UM entity, whose receive window jumped to the source's sequence
+    /// number and discarded the target's PDUs for up to a window (38 to 167
+    /// packets per handover in ntn-nr-handover-pass under FRF 3), and the target
+    /// took the source's last CQI as its first (optimistic first MCS).
+    /// (2) when the target admits the UE it gets an MCS derived from the
+    /// handover-time SS-RSRP the UE reported (target over co-channel cells plus
+    /// noise per RE, Shannon gap of nr's AMC), used until the first DL CQI
+    /// (NrMacSchedulerNs3::SetUeDlMcsUntilCsi); without a report it is nr's
+    /// StartingMcsDl (MCS 0). Default on (GlobalValue NtnRealStackHoRobustMcs),
+    /// off under Legacy. Call before Build().
+    void SetHandoverRobustMcs(bool enable)
+    {
+        m_hoRobustMcs = enable;
+        m_hoRobustMcsSet = true;
+    }
+    /// Whether Build() enabled the handover flush (nr patch 20).
+    bool IsHandoverRobustMcsActive() const { return m_hoRobustMcsApplied; }
+    /// Source-cell PDSCH receptions the UEs abandoned at a handover, summed over UEs and BWPs.
+    uint64_t GetHandoverAbortedDlRxCount() const;
+    /// Source-cell DL CQI and HARQ-ACK reports the UEs dropped at a handover.
+    uint64_t GetHandoverFlushedReportCount() const;
+    /// Handover targets that got an RSRP-derived MCS for the time before the first CSI.
+    uint32_t GetHandoverRobustMcsCount() const { return m_hoRobustMcsCount; }
+    /// The RSRP-derived MCS of each such admission, in order.
+    const std::vector<uint8_t>& GetHandoverRobustMcsList() const { return m_hoRobustMcsList; }
     /// SSB beams per satellite Build() configured (0: no grid).
     uint32_t GetSsbBeamGridSize() const { return m_ssbGridSize; }
     /// Handover targets that registered a UE for its UE-directed beam.
@@ -1940,6 +1974,13 @@ class NtnRealStackHelper
     std::vector<std::vector<Ptr<MobilityModel>>> m_ssbGridTargets; // [gnb][beam]
     void ApplyFrequencyReuse();
     void BuildSsbBeamGrid();
+    bool m_hoRobustMcs{true};
+    bool m_hoRobustMcsSet{false};
+    bool m_hoRobustMcsApplied{false};
+    uint32_t m_hoRobustMcsCount{0};
+    std::vector<uint8_t> m_hoRobustMcsList;
+    void NrNewUeContext(std::string ctx, uint16_t cellId, uint16_t rnti);
+    void ApplyHoRobustMcs(uint16_t cellId, uint16_t rnti);
     bool m_hoTargetBeam{true};
     bool m_hoTargetBeamSet{false};
     bool m_hoTargetBeamApplied{false};

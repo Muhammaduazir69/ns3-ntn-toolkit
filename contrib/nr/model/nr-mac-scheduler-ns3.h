@@ -418,6 +418,21 @@ class NrMacSchedulerNs3 : public NrMacScheduler
      * \param v the value
      */
     void SetStartMcsDl(uint8_t v);
+
+    /**
+     * \brief ntn-patch 20: DL MCS for one UE until its first DL CQI in this cell.
+     *
+     * A UE admitted by a handover has sent no CSI to this cell yet (TS 38.214
+     * 5.2.2.5: the CSI reference resource is in the serving cell), so the
+     * scheduler has no measured MCS for it. The caller (e.g. from the
+     * handover-time SS-RSRP the UE reported) sets a robust MCS here; it is
+     * used, instead of StartingMcsDl, until the first DL CQI of the UE arrives,
+     * after which the CQI (and OLLA) take over as usual.
+     * \param rnti the UE's C-RNTI in this cell
+     * \param mcs the MCS (capped at the table maximum)
+     * \return false if the RNTI is unknown or a DL CQI was already received
+     */
+    bool SetUeDlMcsUntilCsi(uint16_t rnti, uint8_t mcs);
     /**
      * \brief Get the DL MCS starting value
      * \return the value

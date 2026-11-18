@@ -250,6 +250,17 @@ NrUePhy::GetTypeId()
                           UintegerValue(0),
                           MakeUintegerAccessor(&NrUePhy::m_dlHarqFeedbackDisabled),
                           MakeUintegerChecker<uint32_t>())
+            .AddAttribute("HandoverRxFlush",
+                          "ntn-patch 20 (TS 38.331 5.3.5.5.2, TS 38.321 5.12): when the MAC "
+                          "entity is reset for a reconfigurationWithSync the UE abandons the "
+                          "PDSCH of the source cell still being received (not delivered to the "
+                          "MAC, no HARQ-ACK, no CSI derived from it) and drops the DL CQI and DL "
+                          "HARQ-ACK reports still pending for the source cell, so the target "
+                          "schedules the UE at its StartingMcsDl until the first CSI measured on "
+                          "its own PDSCH. false (default) keeps nr's behavior.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&NrUePhy::m_handoverRxFlush),
+                          MakeBooleanChecker())
             .AddTraceSource("DlHarqFeedbackSuppressed",
                             "A DL HARQ-ACK that was not sent on PUCCH because its HARQ process "
                             "has feedback disabled (RNTI, HARQ process ID).",
@@ -1270,6 +1281,11 @@ void
 NrUePhy::GenerateDlCqiReport(const SpectrumValue& sinr)
 {
     NS_LOG_FUNCTION(this);
+    // ntn-patch 20: no CSI from a source-cell PDSCH that ends after the MAC reset.
+    if (m_handoverRxFlush && m_spectrumPhy && m_spectrumPhy->IsDlDataRxAborted())
+    {
+        return;
+    }
     // Not totally sure what this is about. We have to check.
     if (m_ulConfigured && (m_rnti > 0) && m_receptionEnabled)
     {
@@ -1311,7 +1327,15 @@ NrUePhy::EnqueueDlHarqFeedback(const DlHarqInfo& m)
                  << " K1: " << k1It->second << " Frame " << m_currentSlot);
 
     Time event = m_lastSlotStart + (GetSlotPeriod() * k1It->second);
-    if (event <= Simulator::Now())
+    if (m_handoverRxFlush)
+    {
+        Simulator::Schedule(std::max(event - Simulator::Now(), Time(0)),
+                            &NrUePhy::SendDlHarqFeedbackOfEpoch,
+                            this,
+                            msg,
+                            m_resetEpoch);
+    }
+    else if (event <= Simulator::Now())
     {
         Simulator::ScheduleNow(&NrUePhy::DoSendControlMessageNow, this, msg);
     }
@@ -1350,6 +1374,33 @@ NrUePhy::DoReset()
     NS_LOG_FUNCTION(this);
     m_raPreambleId = 255; // value out of range
     m_isConnected = false;
+    // ntn-patch 20: a MAC reset (reconfigurationWithSync, TS 38.321 5.12)
+    // flushes the DL HARQ processes. A PDSCH of the source cell still on the air
+    // is not delivered, and the CQI and HARQ-ACK reports derived from the
+    // source's PDSCH and not yet sent would otherwise reach the target, whose
+    // scheduler takes the CQI as its own (it derives the first MCS from it) and
+    // the HARQ-ACK as feedback for its own processes.
+    if (m_handoverRxFlush)
+    {
+        ++m_resetEpoch;
+        if (m_spectrumPhy)
+        {
+            m_spectrumPhy->AbortDlDataRx();
+        }
+        m_hoFlushedReports +=
+            RemoveQueuedCtrlMsgs({NrControlMessage::DL_CQI, NrControlMessage::DL_HARQ});
+    }
+}
+
+void
+NrUePhy::SendDlHarqFeedbackOfEpoch(Ptr<NrControlMessage> msg, uint32_t epoch)
+{
+    if (epoch != m_resetEpoch)
+    {
+        ++m_hoFlushedReports;
+        return;
+    }
+    DoSendControlMessageNow(msg);
 }
 
 void
@@ -1968,6 +2019,11 @@ void
 NrUePhy::GenerateDlCqiReportMimo(const std::vector<MimoSignalChunk>& mimoChunks)
 {
     NS_LOG_FUNCTION(this);
+    // ntn-patch 20: no CSI from a source-cell PDSCH that ends after the MAC reset.
+    if (m_handoverRxFlush && m_spectrumPhy && m_spectrumPhy->IsDlDataRxAborted())
+    {
+        return;
+    }
     // Adopted from NrUePhy::GenerateDlCqiReport: CQI feedback requires properly configured UE
     if (!m_ulConfigured || (m_rnti == 0))
     {

@@ -285,6 +285,9 @@ class NrMacSchedulerUeInfo
     uint32_t m_srsPeriodicity{0}; //!< SRS periodicity
     uint32_t m_srsOffset{0};      //!< SRS offset
     uint8_t m_startMcsDlUe{0};    //!< Starting DL MCS to be used
+    /// ntn-patch 20: m_startMcsDlUe was set per UE (SetUeDlMcsUntilCsi) and
+    /// holds until the first DL CQI of this UE in this cell.
+    bool m_dlMcsUntilCsi{false};
 
   protected:
     /**

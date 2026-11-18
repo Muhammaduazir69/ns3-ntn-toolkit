@@ -146,6 +146,7 @@ NrMacSchedulerCQIManagement::DlWBCQIReported(const DlCqiInfo& info,
     ueInfo->m_dlCqi.m_cqiType = NrMacSchedulerUeInfo::CqiInfo::WB;
     ueInfo->m_dlCqi.m_wbCqi = info.m_wbCqi;
     ueInfo->m_dlCqi.m_timer = expirationTime;
+    ueInfo->m_dlMcsUntilCsi = false; // ntn-patch 20: measured CSI from here on
     ueInfo->m_dlCqi.m_wbCqi = info.m_wbCqi;
     {
         // CQI-derived MCS, corrected by the outer loop (m_dlOllaOffset stays 0 when OLLA is off).
@@ -190,7 +191,8 @@ NrMacSchedulerCQIManagement::RefreshDlCqiMaps(
         {
             ue->m_dlCqi.m_wbCqi = 1; // lowest value for trying a transmission
             ue->m_dlCqi.m_cqiType = NrMacSchedulerUeInfo::CqiInfo::WB;
-            ue->m_dlMcs = GetStartMcsDl();
+            // ntn-patch 20: a per-UE MCS set for the time before the first CQI.
+            ue->m_dlMcs = ue->m_dlMcsUntilCsi ? ue->m_startMcsDlUe : GetStartMcsDl();
         }
         else
         {

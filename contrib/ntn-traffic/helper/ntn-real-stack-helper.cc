@@ -165,6 +165,17 @@ static GlobalValue g_ntnRealStackHoTargetBeam(
     BooleanValue(true),
     MakeBooleanChecker());
 
+// Wave 11b: robust MCS on the handover target until its first CSI (nr patch 20).
+static GlobalValue g_ntnRealStackHoRobustMcs(
+    "NtnRealStackHoRobustMcs",
+    "nr backend: the handover target schedules a newly admitted UE at an MCS derived from the "
+    "handover-time SS-RSRP the UE reported until its first DL CQI in that cell, and the UE's MAC "
+    "reset drops the source cell's PDSCH still on the air and the CQI / HARQ-ACK reports pending "
+    "for the source (nr patch 20). Off under NtnRealStackLinkBudget=Legacy; false restores the "
+    "Wave 11 behavior unless a scenario calls SetHandoverRobustMcs(true)",
+    BooleanValue(true),
+    MakeBooleanChecker());
+
 // Wave 11: frequency reuse among the satellite cells (TR 38.821 6.1.1.1).
 static GlobalValue g_ntnRealStackFrequencyReuse(
     "NtnRealStackFrequencyReuse",
@@ -1365,6 +1376,22 @@ NtnRealStackHelper::BuildNrRadio()
         }
     }
 
+    // Wave 11b (nr patch 20): robust MCS on the target until its first CSI.
+    {
+        bool on = m_hoRobustMcs;
+        if (!m_hoRobustMcsSet)
+        {
+            BooleanValue gv;
+            GlobalValue::GetValueByName("NtnRealStackHoRobustMcs", gv);
+            on = gv.Get() && GetLinkBudgetProfile() != LinkBudgetProfile::Legacy;
+        }
+        m_hoRobustMcsApplied = on;
+        if (on)
+        {
+            m_nr->SetUePhyAttribute("HandoverRxFlush", BooleanValue(true));
+        }
+    }
+
     // Install devices on the caller's mobility-carrying nodes.
     m_enbDevs = m_nr->InstallGnbDevice(m_gnb, allBwps);
     m_ueDevs = m_nr->InstallUeDevice(m_ue, allBwps);
@@ -1828,6 +1855,11 @@ NtnRealStackHelper::BuildNrRadio()
         m_nr->AddX2Interface(m_gnb);
         Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/HandoverEndOk",
                         MakeCallback(&NtnRealStackHelper::NrHandoverEndOk, this));
+        if (m_hoRobustMcsApplied)
+        {
+            Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/NewUeContext",
+                            MakeCallback(&NtnRealStackHelper::NrNewUeContext, this));
+        }
         // CHO-6: neighbour RSRP from the UE's own RRC measurement reports.
         Config::Connect("/NodeList/*/DeviceList/*/NrGnbRrc/RecvMeasurementReport",
                         MakeCallback(&NtnRealStackHelper::NrMeasurementReport, this));
@@ -1992,6 +2024,104 @@ NtnRealStackHelper::SetHandover(bool enable, double hysteresisDb, Time ttt)
     m_handover = enable;
     m_hoHystDb = hysteresisDb;
     m_hoTtt = ttt;
+}
+
+void
+NtnRealStackHelper::NrNewUeContext(std::string /*ctx*/, uint16_t cellId, uint16_t rnti)
+{
+    // The target RRC stores the IMSI of a handover UE right after it fires
+    // NewUeContext, so read the context once this event is done.
+    Simulator::ScheduleNow(&NtnRealStackHelper::ApplyHoRobustMcs, this, cellId, rnti);
+}
+
+void
+NtnRealStackHelper::ApplyHoRobustMcs(uint16_t cellId, uint16_t rnti)
+{
+    // Wave 11b: a UE admitted by a handover has sent this cell no CSI yet. Its
+    // first MCS comes from the SS-RSRP it reported for this cell before the
+    // handover (the A3/CHO report the decision used), not from the source's CQI.
+    Ptr<NrGnbNetDevice> gnb;
+    uint32_t gnbIdx = 0;
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        Ptr<NrGnbNetDevice> g = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
+        if (g && g->GetCellId() == cellId)
+        {
+            gnb = g;
+            gnbIdx = i;
+            break;
+        }
+    }
+    if (!gnb || !gnb->GetRrc()->HasUeManager(rnti))
+    {
+        return;
+    }
+    Ptr<NrUeManager> um = gnb->GetRrc()->GetUeManager(rnti);
+    if (um->GetState() != NrUeManager::HANDOVER_JOINING)
+    {
+        return; // initial access: nr's StartingMcsDl
+    }
+    const int32_t ue = UeIndexOfImsi(um->GetImsi());
+    if (ue < 0)
+    {
+        return;
+    }
+    const double rsrpT = GetUeNeighbourRsrpDbm(static_cast<uint32_t>(ue), cellId);
+    if (!std::isfinite(rsrpT))
+    {
+        return; // nothing reported for this cell: StartingMcsDl
+    }
+    // Co-channel cells: every other reported cell on the same reuse color.
+    const uint8_t myColor = gnbIdx < m_cellColor.size() ? m_cellColor[gnbIdx] : 0;
+    double iMw = 0.0;
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        Ptr<NrGnbNetDevice> g = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
+        if (!g || i == gnbIdx)
+        {
+            continue;
+        }
+        const uint8_t c = i < m_cellColor.size() ? m_cellColor[i] : 0;
+        if (m_frfApplied > 1 && c != myColor)
+        {
+            continue;
+        }
+        const double r = GetUeNeighbourRsrpDbm(static_cast<uint32_t>(ue), g->GetCellId());
+        if (std::isfinite(r))
+        {
+            iMw += std::pow(10.0, r / 10.0);
+        }
+    }
+    // Thermal noise per RE (SS-RSRP is a per-RE power, TS 38.215 5.1.1).
+    Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(static_cast<uint32_t>(ue)));
+    DoubleValue nf(5.0);
+    if (ueDev)
+    {
+        ueDev->GetPhy(0)->GetAttribute("NoiseFigure", nf);
+    }
+    const double nDbm = -174.0 + nf.Get() + 10.0 * std::log10(15e3 * std::pow(2.0, m_numerology));
+    const double sinr = std::pow(10.0, rsrpT / 10.0) / (iMw + std::pow(10.0, nDbm / 10.0));
+    // nr's AMC Shannon gap for the NR error models (NrAmc::GetBer, BER 1e-5).
+    const double gap = -std::log(5.0 * 1e-5) / 1.5;
+    const double se = std::log2(1.0 + sinr / gap);
+    const uint8_t nBwp = GetNrBwpCount();
+    uint8_t mcs = 0;
+    bool set = false;
+    for (uint8_t b = 0; b < nBwp && b < gnb->GetCcMapSize(); ++b)
+    {
+        Ptr<NrMacSchedulerNs3> sched = DynamicCast<NrMacSchedulerNs3>(gnb->GetScheduler(b));
+        if (!sched || !sched->GetDlAmc())
+        {
+            continue;
+        }
+        mcs = sched->GetDlAmc()->GetMcsFromSpectralEfficiency(se);
+        set = sched->SetUeDlMcsUntilCsi(rnti, mcs) || set;
+    }
+    if (set)
+    {
+        ++m_hoRobustMcsCount;
+        m_hoRobustMcsList.push_back(mcs);
+    }
 }
 
 void
@@ -4404,6 +4534,25 @@ NtnRealStackHelper::WriteHealthReport()
         << (m_bsrTriggeringApplied ? "ts38321-5.4.5" : "nr-bsr-in-every-tb") << "\n";
     out << "ho_target_ue_beam," << (m_hoTargetBeamApplied ? 1 : 0) << ",-,-,"
         << (m_hoTargetBeamApplied ? "registered-on-handover" : "nr-attach-only") << "\n";
+    // Wave 11b: source downlink flushed at the handover's MAC reset.
+    out << "ho_robust_mcs," << (m_hoRobustMcsApplied ? 1 : 0) << ",-,-,"
+        << (m_hoRobustMcsApplied ? "ts38214-5.2.2.5 (rsrp-derived mcs until first csi)"
+                                 : "nr-default")
+        << "\n";
+    if (m_hoRobustMcsApplied)
+    {
+        double sum = 0.0;
+        for (uint8_t m : m_hoRobustMcsList)
+        {
+            sum += m;
+        }
+        out << "ho_robust_mcs_mean,"
+            << (m_hoRobustMcsList.empty() ? std::numeric_limits<double>::quiet_NaN()
+                                          : sum / m_hoRobustMcsList.size())
+            << ",-," << m_hoRobustMcsList.size() << ",nr-patch-20\n";
+        out << "ho_aborted_dl_rx," << GetHandoverAbortedDlRxCount() << ",-,-,nr-patch-20\n";
+        out << "ho_flushed_reports," << GetHandoverFlushedReportCount() << ",-,-,nr-patch-20\n";
+    }
     // Wave 11: reuse factor and SSB beams per satellite.
     out << "frequency_reuse," << +m_frfApplied << ",-,-,"
         << (m_frfApplied > 1 ? "tr38821-6.1.1.1 (sub-band per cell)" : "reuse-1") << "\n";
@@ -6136,6 +6285,50 @@ NtnRealStackHelper::GetBsrRetriggerCount() const
             if (mac)
             {
                 n += mac->GetBsrRetriggerCount();
+            }
+        }
+    }
+    return n;
+}
+
+uint64_t
+NtnRealStackHelper::GetHandoverAbortedDlRxCount() const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr || !m_nr)
+    {
+        return 0;
+    }
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
+        for (uint32_t b = 0; dev && b < dev->GetCcMapSize(); ++b)
+        {
+            if (Ptr<NrUePhy> phy = dev->GetPhy(b))
+            {
+                n += phy->GetSpectrumPhy()->GetDlDataRxAbortedCount();
+            }
+        }
+    }
+    return n;
+}
+
+uint64_t
+NtnRealStackHelper::GetHandoverFlushedReportCount() const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr || !m_nr)
+    {
+        return 0;
+    }
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
+        for (uint32_t b = 0; dev && b < dev->GetCcMapSize(); ++b)
+        {
+            if (Ptr<NrUePhy> phy = dev->GetPhy(b))
+            {
+                n += phy->GetHandoverFlushedReportCount();
             }
         }
     }

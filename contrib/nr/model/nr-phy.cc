@@ -471,6 +471,26 @@ NrPhy::EnqueueCtrlMsgNow(const std::list<Ptr<NrControlMessage>>& listOfMsgs)
     }
 }
 
+uint64_t
+NrPhy::RemoveQueuedCtrlMsgs(const std::set<NrControlMessage::messageType>& types)
+{
+    NS_LOG_FUNCTION(this);
+    auto match = [&types](const Ptr<NrControlMessage>& m) {
+        return types.count(m->GetMessageType()) > 0;
+    };
+    uint64_t n = 0;
+    for (auto& slotMsgs : m_controlMessageQueue)
+    {
+        const auto before = slotMsgs.size();
+        slotMsgs.remove_if(match);
+        n += before - slotMsgs.size();
+    }
+    const auto before = m_ctrlMsgs.size();
+    m_ctrlMsgs.remove_if(match);
+    n += before - m_ctrlMsgs.size();
+    return n;
+}
+
 void
 NrPhy::EncodeCtrlMsg(const Ptr<NrControlMessage>& msg)
 {

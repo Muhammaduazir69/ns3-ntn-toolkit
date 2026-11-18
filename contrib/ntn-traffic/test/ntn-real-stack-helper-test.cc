@@ -5960,6 +5960,179 @@ class FrequencyReuseTest : public TestCase
     }
 };
 
+/// Wave 11b (nr patch 20): robust MCS on the handover target until the UE's
+/// first CSI there. Two satellites under FRF 3, one UE between them with a
+/// 10 Mb/s downlink (each SDU over several TBs in the sub-band), three
+/// commanded handovers. nr let the target take the source's last CQI as its
+/// first (and delivered a source PDSCH still on the air to the re-established
+/// RLC UM entity, whose window then discarded the target's PDUs). With the
+/// feature the target's first DCI carries the MCS derived from the SS-RSRP the
+/// UE reported before the handover, the source's PDSCH and reports are flushed
+/// at the UE's MAC reset, and the CQI takes over from the first report.
+class HandoverRobustMcsTest : public TestCase
+{
+  public:
+    HandoverRobustMcsTest()
+        : TestCase("Wave 11b (nr patch 20): handover target schedules an RSRP-derived robust "
+                   "MCS until the UE's first CSI; the UE flushes the source downlink")
+    {
+    }
+
+  private:
+    struct Result
+    {
+        bool active{false};
+        uint32_t hoCount{0};
+        uint64_t aborted{0};
+        uint64_t flushed{0};
+        uint64_t lost{0};
+        std::vector<int> firstMcs; // first DL DCI of the target after each handover
+        std::vector<uint8_t> robustMcs; // the RSRP-derived MCS of each admission
+    };
+
+    // mode 0: default (flush on), 1: SetHandoverRobustMcs(false), 2: Legacy profile
+    static Result Run(int mode)
+    {
+        NodeContainer sats;
+        sats.Create(2);
+        for (uint32_t i = 0; i < 2; ++i)
+        {
+            auto m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(Vector(0.0, i == 0 ? 0.0 : 200e3, 600e3));
+            sats.Get(i)->AggregateObject(m);
+        }
+        NodeContainer ues;
+        ues.Create(1);
+        auto um = CreateObject<ConstantPositionMobilityModel>();
+        um->SetPosition(Vector(0.0, 100e3, 0.0));
+        ues.Get(0)->AggregateObject(um);
+
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(9.0));
+        rs.SetOutputDir("test-ntn-ho-rx-flush");
+        rs.SetHandover(true, 3.0, MilliSeconds(256));
+        rs.SetAutonomousHandover(false);
+        auto center = CreateObject<ConstantPositionMobilityModel>();
+        center->SetPosition(Vector(0.0, 100e3, 0.0));
+        rs.SetSsbCellBeam(true, center);
+        if (mode == 2)
+        {
+            rs.SetLinkBudgetProfile(NtnRealStackHelper::LinkBudgetProfile::Legacy);
+        }
+        else
+        {
+            rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        }
+        if (mode == 1)
+        {
+            rs.SetHandoverRobustMcs(false);
+        }
+        rs.SetEmbbRate(DataRate("10Mb/s"));
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(8.8));
+
+        Result r;
+        r.active = rs.IsHandoverRobustMcsActive();
+        // First DL DCI (new data) each gNB sends after the handover towards it
+        // was commanded: the target has no other UE, so it is the UE's.
+        auto awaiting = std::make_shared<std::vector<bool>>(2, false);
+        auto first = std::make_shared<std::vector<int>>();
+        for (uint32_t i = 0; i < 2; ++i)
+        {
+            NrHelper::GetGnbMac(rs.GetEnbDevices().Get(i), 0)
+                ->TraceConnectWithoutContext(
+                    "DlScheduling",
+                    MakeCallback(
+                        +[](std::shared_ptr<std::vector<bool>> aw,
+                            std::shared_ptr<std::vector<int>> fm,
+                            uint32_t gnb,
+                            NrSchedulingCallbackInfo info) {
+                            if ((*aw)[gnb] && info.m_rv == 0)
+                            {
+                                (*aw)[gnb] = false;
+                                fm->push_back(info.m_mcs);
+                            }
+                        })
+                        .Bind(awaiting, first, i));
+        }
+        const double hoAt[3] = {3.0, 5.0, 7.0};
+        for (uint32_t k = 0; k < 3; ++k)
+        {
+            const uint32_t to = (k % 2 == 0) ? 1 : 0;
+            Simulator::Schedule(Seconds(hoAt[k]), [&rs, awaiting, to]() {
+                (*awaiting)[to] = true;
+                rs.TriggerHandover(0, rs.GetGnbCellId(to));
+            });
+        }
+        Simulator::Stop(Seconds(9.0));
+        Simulator::Run();
+        rs.Collect();
+        r.hoCount = rs.GetHandoverCount();
+        r.aborted = rs.GetHandoverAbortedDlRxCount();
+        r.flushed = rs.GetHandoverFlushedReportCount();
+        r.lost = rs.GetUeLostPackets(0);
+        r.firstMcs = *first;
+        r.robustMcs = rs.GetHandoverRobustMcsList();
+        Simulator::Destroy();
+        return r;
+    }
+
+    void DoRun() override
+    {
+        const Result on = Run(0);
+        NS_TEST_ASSERT_MSG_EQ(on.active, true, "on by default under the Set-1 budget");
+        NS_TEST_ASSERT_MSG_EQ(on.hoCount, 3u, "the three commanded handovers complete");
+        NS_TEST_ASSERT_MSG_EQ(on.robustMcs.size(), 3u, "each target got an RSRP-derived MCS");
+        NS_TEST_ASSERT_MSG_EQ(on.firstMcs.size(), 3u, "each target scheduled the UE");
+        for (std::size_t k = 0; k < std::min(on.firstMcs.size(), on.robustMcs.size()); ++k)
+        {
+            NS_TEST_ASSERT_MSG_EQ(on.firstMcs[k], +on.robustMcs[k],
+                                  "the target's first DCI uses the RSRP-derived MCS");
+            NS_TEST_ASSERT_MSG_GT(+on.robustMcs[k], 0, "a noise-limited target is not MCS 0");
+        }
+        NS_TEST_ASSERT_MSG_GT(on.flushed + on.aborted, 0u,
+                              "source-cell reports or receptions were flushed at the reset");
+
+        const Result off = Run(1);
+        NS_TEST_ASSERT_MSG_EQ(off.active, false, "SetHandoverRobustMcs(false) turns it off");
+        NS_TEST_ASSERT_MSG_EQ(off.hoCount, 3u, "the handovers complete without it too");
+        NS_TEST_ASSERT_MSG_EQ(off.aborted + off.flushed, 0u, "nothing is flushed when off");
+        NS_TEST_ASSERT_MSG_EQ(off.robustMcs.size(), 0u, "no RSRP-derived MCS when off");
+        NS_TEST_ASSERT_MSG_EQ(off.firstMcs.size(), 3u, "each target scheduled the UE");
+        // Failure path: without the feature the target's first MCS is either the
+        // source's last CQI, sent to the target after the switch (higher than the
+        // robust MCS and never measured on the target), or MCS 0 when no such
+        // report was in flight; it is never the RSRP-derived one.
+        uint32_t optimistic = 0;
+        for (std::size_t k = 0; k < std::min(off.firstMcs.size(), on.robustMcs.size()); ++k)
+        {
+            if (off.firstMcs[k] > on.robustMcs[k])
+            {
+                ++optimistic;
+            }
+            NS_TEST_ASSERT_MSG_EQ((off.firstMcs[k] > on.robustMcs[k]) || (off.firstMcs[k] == 0),
+                                  true,
+                                  "without the feature: the source's CQI or StartingMcsDl");
+        }
+        NS_TEST_ASSERT_MSG_GT(optimistic, 0u,
+                              "without the feature a target starts from the source's CQI");
+        // The RLC UM burst needs a source PDSCH on the air at the reset and an SN
+        // distance that outlives t-Reassembly, which this short geometry does not
+        // reliably give (ntn-nr-handover-pass shows it); the feature must never
+        // lose more than nr did, and only a few packets per handover.
+        NS_TEST_ASSERT_MSG_LT_OR_EQ(on.lost, off.lost, "no more loss than nr");
+        NS_TEST_ASSERT_MSG_LT_OR_EQ(on.lost, 15u, "at most 5 packets per handover");
+
+        const Result legacy = Run(2);
+        NS_TEST_ASSERT_MSG_EQ(legacy.active, false, "off under the Legacy profile");
+        NS_TEST_ASSERT_MSG_EQ(legacy.robustMcs.size(), 0u, "and no RSRP-derived MCS");
+    }
+};
+
 /// Wave 11 (nr patch 19): Earth-moving cells sweep their SSB over a beam grid.
 /// One satellite at 600 km above the equator, the UE 250 km off its nadir
 /// along y, about 22 deg off the satellite's nadir: far outside the 12.7 deg
@@ -6216,6 +6389,7 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new ServingCellBeamLookupTest, Duration::QUICK);
         AddTestCase(new FrequencyReuseTest, Duration::QUICK);
         AddTestCase(new SsbBeamGridTest, Duration::QUICK);
+        AddTestCase(new HandoverRobustMcsTest, Duration::QUICK);
         AddTestCase(new SeamPluginChangesMeasuredSinrTest, Duration::QUICK);
         AddTestCase(new EmbbRateHonoredTest, Duration::QUICK);
         AddTestCase(new ExcessLossP618AndIslTest, Duration::QUICK);

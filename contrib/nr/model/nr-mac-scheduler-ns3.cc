@@ -1025,6 +1025,26 @@ NrMacSchedulerNs3::DoSchedUlMacCtrlInfoReq(
  * If the CQI is sub-band, the method NrMacSchedulerCQIManagement::SBCQIReported
  * will be called, otherwise NrMacSchedulerCQIManagement::WBCQIReported.
  */
+bool
+NrMacSchedulerNs3::SetUeDlMcsUntilCsi(uint16_t rnti, uint8_t mcs)
+{
+    NS_LOG_FUNCTION(this << rnti << +mcs);
+    auto it = m_ueMap.find(rnti);
+    if (it == m_ueMap.end() || it->second->m_dlCqi.m_timer > 0)
+    {
+        return false;
+    }
+    const auto& ue = it->second;
+    const uint8_t cap = m_dlAmc ? static_cast<uint8_t>(m_dlAmc->GetMaxMcs()) : mcs;
+    ue->m_startMcsDlUe = std::min(mcs, cap);
+    ue->m_dlMcsUntilCsi = true;
+    if (!m_fixedMcsDl)
+    {
+        ue->m_dlMcs = ue->m_startMcsDlUe;
+    }
+    return true;
+}
+
 void
 NrMacSchedulerNs3::DoSchedDlCqiInfoReq(
     const NrMacSchedSapProvider::SchedDlCqiInfoReqParameters& params)

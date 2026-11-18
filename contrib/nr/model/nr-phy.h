@@ -10,6 +10,8 @@
 
 #include <ns3/nr-spectrum-value-helper.h>
 
+#include <set>
+
 namespace ns3
 {
 
@@ -549,6 +551,14 @@ class NrPhy : public Object
      * \param listOfMsgs The list of messages to enqueue
      */
     void EnqueueCtrlMsgNow(const std::list<Ptr<NrControlMessage>>& listOfMsgs);
+
+    /**
+     * \brief ntn-patch 20: remove the CTRL messages of the given types that are
+     * waiting in the L1L2CtrlLatency queue or for this slot's transmission.
+     * \param types the message types to remove
+     * \return the number of messages removed
+     */
+    uint64_t RemoveQueuedCtrlMsgs(const std::set<NrControlMessage::messageType>& types);
 
     /**
      * \brief Initialize the message list

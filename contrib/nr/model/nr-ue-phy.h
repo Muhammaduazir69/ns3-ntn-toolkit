@@ -280,6 +280,15 @@ class NrUePhy : public NrPhy
         return m_dlHarqFeedbackSuppressed;
     }
 
+    /**
+     * \return ntn-patch 20: DL CQI and DL HARQ-ACK reports for the source cell
+     * dropped at a MAC reset (attribute HandoverRxFlush).
+     */
+    uint64_t GetHandoverFlushedReportCount() const
+    {
+        return m_hoFlushedReports;
+    }
+
     /// TracedCallback signature for DlHarqFeedbackSuppressed (RNTI, HARQ process ID).
     typedef void (*DlHarqFeedbackSuppressedTracedCallback)(uint16_t rnti, uint8_t harqProcessId);
 
@@ -961,6 +970,16 @@ class NrUePhy : public NrPhy
     uint64_t m_dlHarqFeedbackSuppressed{0};
     /// Fired for every suppressed HARQ-ACK report.
     TracedCallback<uint16_t, uint8_t> m_dlHarqFeedbackSuppressedTrace;
+
+    /// ntn-patch 20: flush the source cell's DL reception and reports at a MAC reset.
+    bool m_handoverRxFlush{false};
+    /// Incremented at every reset with m_handoverRxFlush; a HARQ-ACK scheduled
+    /// before the reset carries the old value and is dropped.
+    uint32_t m_resetEpoch{0};
+    /// DL CQI / DL HARQ-ACK reports dropped at a reset.
+    uint64_t m_hoFlushedReports{0};
+    /// Send a DL HARQ-ACK scheduled at epoch \p epoch unless the MAC was reset since.
+    void SendDlHarqFeedbackOfEpoch(Ptr<NrControlMessage> msg, uint32_t epoch);
 
     /**
      * The `ReportUeMeasurements` trace source. Contains trace information

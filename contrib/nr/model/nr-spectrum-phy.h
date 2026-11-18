@@ -682,6 +682,32 @@ class NrSpectrumPhy : public SpectrumPhy
         return m_dlSoftBufferFlushes;
     }
 
+    /**
+     * ntn-patch 20: abandon the DL data reception in progress (UE only). Called
+     * by NrUePhy when the MAC entity is reset for a reconfigurationWithSync
+     * (TS 38.331 5.3.5.5.2, TS 38.321 5.12): the PDSCH being received was
+     * scheduled by the source cell, so at its end it is not delivered to the
+     * MAC, no HARQ-ACK is sent for it and no CSI is derived from it. No-op on a
+     * gNB or when no DL data is being received.
+     */
+    void AbortDlDataRx();
+    /// \return true while an aborted DL data reception is still on the air.
+    bool IsDlDataRxAborted() const
+    {
+        return m_dlDataRxAborted;
+    }
+    /// \return DL data receptions abandoned by AbortDlDataRx().
+    uint64_t GetDlDataRxAbortedCount() const
+    {
+        return m_dlDataRxAbortedCount;
+    }
+
+  private:
+    bool m_dlDataRxAborted{false};       //!< current DL data reception is from the old cell
+    uint64_t m_dlDataRxAbortedCount{0}; //!< receptions abandoned by AbortDlDataRx()
+
+  public:
+
   private:
     bool m_dataErrorModelEnabled{
         true}; //!< whether the phy error model for DATA is enabled, by default is enabled

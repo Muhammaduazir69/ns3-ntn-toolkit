@@ -1613,12 +1613,37 @@ NrSpectrumPhy::ProcessReceivedPacketBurst()
 }
 
 void
+NrSpectrumPhy::AbortDlDataRx()
+{
+    NS_LOG_FUNCTION(this);
+    if (!m_isGnb && m_state == RX_DATA)
+    {
+        m_dlDataRxAborted = true;
+    }
+}
+
+void
 NrSpectrumPhy::EndRxData()
 {
     NS_LOG_FUNCTION(this);
     m_interferenceData->EndRx();
 
     NS_ASSERT(m_state == RX_DATA);
+
+    // ntn-patch 20: the reception started in the source cell and the MAC was
+    // reset by a reconfigurationWithSync meanwhile (TS 38.321 5.12): nothing of
+    // it reaches the MAC, no HARQ-ACK goes out, and the chunk processors have
+    // already skipped the CSI (NrUePhy checks IsDlDataRxAborted()).
+    if (m_dlDataRxAborted)
+    {
+        m_dlDataRxAborted = false;
+        ++m_dlDataRxAbortedCount;
+        ChangeState(IDLE, Seconds(0));
+        m_rxPacketBurstList.clear();
+        m_transportBlocks.clear();
+        m_rxControlMessageList.clear();
+        return;
+    }
 
     // check if transport blocks are corrupted
     CheckTransportBlockCorruptionStatus();
