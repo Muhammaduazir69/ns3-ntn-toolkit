@@ -19,6 +19,7 @@
 #include <ns3/simulator.h>
 
 #include <algorithm>
+#include <set>
 #include <cmath>
 
 namespace ns3
@@ -688,22 +689,50 @@ NtnOrbitPredictor::GetVisibleSatellites(GeoCoordinate uePosition,
                                         double minElevation_deg) const
 {
     NS_LOG_FUNCTION(this << minElevation_deg);
-    NS_ASSERT_MSG(m_initialized, "NtnOrbitPredictor not initialized.");
+    // A predictor configured through SetKinematicsSource alone (CHO-2) is a
+    // supported configuration and has never been through Initialize().
+    NS_ASSERT_MSG(m_initialized || !m_kinematics.empty(), "NtnOrbitPredictor not initialized.");
 
     std::vector<VisibleSatellite> visible;
 
+    // Candidates: every satellite registered through Initialize() AND every
+    // satellite given only as a kinematics source. The loop used to run over
+    // m_satellites alone, so a constellation registered the CHO-2 way (SGP4
+    // kinematics, no SatMobilityModel) had no visible satellite at all, and
+    // the measurement model's ScanVisibleBeams returned nothing for it.
+    std::set<uint32_t> ids;
     for (uint32_t satId = 0; satId < m_satellites.GetN(); satId++)
     {
+        ids.insert(satId);
+    }
+    for (const auto& [satId, mob] : m_kinematics)
+    {
+        if (mob)
+        {
+            ids.insert(satId);
+        }
+    }
+
+    for (uint32_t satId : ids)
+    {
+        GeoCoordinate satPos;
+        if (!ResolveSatPosition(satId, satPos))
+        {
+            continue;
+        }
         double elev = ComputeElevationAngle(uePosition, satId);
         if (elev < minElevation_deg)
         {
             continue;
         }
 
-        // Find best beam for this satellite
+        // Find best beam for this satellite. The SNS3 pattern container is
+        // indexed by the satellites given to Initialize(); a kinematics-only
+        // satellite has no pattern there and needs the analytic beam.
+        const bool hasPattern = m_agpContainer && GetSatelliteMobility(satId);
         uint32_t bestBeamId = 0;
         double bestGain_dB = -100.0;
-        if (m_agpContainer)
+        if (hasPattern)
         {
             bestBeamId = m_agpContainer->GetBestBeamId(satId, uePosition, true);
             const double bestGain = m_agpContainer->GetBeamGain(satId, bestBeamId, uePosition);
@@ -714,6 +743,12 @@ NtnOrbitPredictor::GetVisibleSatellites(GeoCoordinate uePosition,
             // P1-H: analytic steered beam, no SNS3 pattern container needed.
             bestGain_dB = ComputeBeamGain(satId, 0, uePosition);
         }
+        else
+        {
+            NS_LOG_WARN("NtnOrbitPredictor: satellite " << satId
+                                                        << " has no beam model (no pattern, no "
+                                                           "SetGeometricBeam); not reported visible");
+        }
 
         if (bestGain_dB >= m_minGainThreshold_dB)
         {
@@ -722,11 +757,9 @@ NtnOrbitPredictor::GetVisibleSatellites(GeoCoordinate uePosition,
             vs.bestBeamId = bestBeamId;
             vs.bestGain_dB = bestGain_dB;
             vs.elevationAngle_deg = elev;
-            Ptr<SatMobilityModel> sm = GetSatelliteMobility(satId);
-            vs.slantRange_km =
-                sm ? Compute3dDistance(uePosition, sm->GetGeoPosition()) / 1000.0
-                   : ComputePropagationDelay(uePosition, satId).GetSeconds() * 299792458.0 /
-                         1000.0; // P1-H: kinematics-only satellites
+            // Slant range from the same position the elevation used (the
+            // kinematics source when there is one, with any ephemeris error).
+            vs.slantRange_km = Compute3dDistance(uePosition, satPos) / 1000.0;
             visible.push_back(vs);
         }
     }

@@ -11,6 +11,7 @@
 
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
+#include "ns3/double.h"
 #include "ns3/ntn-cho-cond-event-ie.h"
 #include "ns3/ntn-ho-kpi-recorder.h"
 #include "ns3/ntn-measurement-model.h"
@@ -25,6 +26,7 @@
 #include <fstream>
 #include <functional>
 #include <numeric>
+#include <set>
 #include <vector>
 
 using namespace ns3;
@@ -522,6 +524,142 @@ class MeasurementModelGeometrySweepTest : public TestCase
     }
 };
 
+/// fixes-3: GetVisibleSatellites over satellites registered ONLY as
+/// kinematics sources (CHO-2, no Initialize(), no SatMobilityModel). Two
+/// satellites start 600 km above the UE's horizontal plane and fly along +y at
+/// 7.56 km/s, one over the UE and one 4000 km behind it (8.5 deg elevation,
+/// rising above 10 deg at y = -h / tan 10 deg, t = 79 s; the leading one sets
+/// at y = +3403 km, t = 450 s). Sampled every 10 s for 900 s inside a running
+/// simulation, the visible set must equal the satellites whose independently
+/// computed elevation is at least 10 deg (TR 38.821 Section 6.1 minimum
+/// elevation), with elevation and slant from the kinematics position, sorted
+/// by the steered-beam gain (highest elevation first). The measurement model's
+/// ScanVisibleBeams sees the same set. Both satellites are visible at some
+/// point, and the coverage passes from the first to the second. Failure paths:
+/// a stationary source is refused and never reported; a satellite nothing
+/// knows is not reported. Before the fix the loop ran over Initialize()'s
+/// satellites only and returned nothing here.
+class VisibleSatellitesFromKinematicsTest : public TestCase
+{
+  public:
+    VisibleSatellitesFromKinematicsTest()
+        : TestCase("Orbit predictor: kinematics-only satellites are visible above the 10 deg mask")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const double h = 600e3;
+        std::vector<Ptr<ConstantVelocityMobilityModel>> sats;
+        for (double y0 : {0.0, -4000e3})
+        {
+            auto m = CreateObject<ConstantVelocityMobilityModel>();
+            m->SetPosition(Vector(kRe + h, y0, 0.0));
+            m->SetVelocity(Vector(0.0, 7560.0, 0.0));
+            sats.push_back(m);
+        }
+        auto pred = CreateObject<NtnOrbitPredictor>();
+        pred->SetKinematicsSource(3, sats[0]);
+        pred->SetKinematicsSource(5, sats[1]);
+        auto still = CreateObject<ConstantPositionMobilityModel>();
+        still->SetPosition(Vector(kRe + h, 0.0, 0.0));
+        pred->SetKinematicsSource(7, still); // refused: zero velocity
+        pred->SetReferenceEarthRadius(kRe);
+        pred->SetGeometricBeam(30.0, 4.4127);
+        pred->SetSteeredBeam(true);
+        // Coverage gated by the elevation mask alone: the steered beam's scan
+        // loss at 10 deg elevation is about -4.3 dB (cos^1.2 of a 64 deg scan),
+        // below the default -3 dB gain threshold.
+        pred->SetAttribute("MinGainThreshold", DoubleValue(-30.0));
+        auto model = MakeModel(pred);
+        const GeoCoordinate ueGeo(0.0, 0.0, 0.0);
+        const Vector ue = ueGeo.ToVector();
+
+        uint32_t mismatches = 0;
+        uint32_t geomErrors = 0;
+        uint32_t orderErrors = 0;
+        uint32_t scanMismatches = 0;
+        uint32_t seen3 = 0;
+        uint32_t seen5 = 0;
+        uint32_t seenBoth = 0;
+        uint32_t seen7 = 0;
+        double last3 = -1.0;
+        double first5 = -1.0;
+        for (int k = 0; k <= 90; ++k)
+        {
+            Simulator::Schedule(Seconds(10.0 * k), [&]() {
+                const auto vis = pred->GetVisibleSatellites(ueGeo, 10.0);
+                std::set<uint32_t> got;
+                for (size_t j = 0; j < vis.size(); ++j)
+                {
+                    got.insert(vis[j].satId);
+                    seen7 += (vis[j].satId == 7);
+                    if (j > 0 && vis[j].bestGain_dB > vis[j - 1].bestGain_dB)
+                    {
+                        ++orderErrors;
+                    }
+                }
+                std::set<uint32_t> expect;
+                const uint32_t ids[2] = {3, 5};
+                for (uint32_t s = 0; s < 2; ++s)
+                {
+                    const Vector p = sats[s]->GetPosition();
+                    const Vector d(p.x - ue.x, p.y - ue.y, p.z - ue.z);
+                    const double el =
+                        std::asin((d.x * ue.x + d.y * ue.y + d.z * ue.z) / (d.GetLength() * ue.GetLength())) *
+                        180.0 / M_PI;
+                    if (el >= 10.0)
+                    {
+                        expect.insert(ids[s]);
+                    }
+                    for (const auto& v : vis)
+                    {
+                        if (v.satId == ids[s])
+                        {
+                            geomErrors += std::abs(v.elevationAngle_deg - el) > 0.01;
+                            geomErrors += std::abs(v.slantRange_km * 1e3 - d.GetLength()) > 1.0;
+                        }
+                    }
+                }
+                mismatches += (got != expect);
+                scanMismatches += (model->ScanVisibleBeams(ueGeo, 10.0).size() != vis.size());
+                const double t = Simulator::Now().GetSeconds();
+                if (got.count(3))
+                {
+                    ++seen3;
+                    last3 = t;
+                }
+                if (got.count(5))
+                {
+                    ++seen5;
+                    if (first5 < 0)
+                    {
+                        first5 = t;
+                    }
+                }
+                seenBoth += (got.count(3) && got.count(5));
+            });
+        }
+        Simulator::Stop(Seconds(901.0));
+        Simulator::Run();
+        Simulator::Destroy();
+        NS_TEST_ASSERT_MSG_EQ(mismatches, 0u, "visible set = satellites above the 10 deg mask");
+        NS_TEST_ASSERT_MSG_EQ(geomErrors, 0u, "elevation within 0.01 deg, slant within 1 m");
+        NS_TEST_ASSERT_MSG_EQ(orderErrors, 0u, "sorted by beam gain, descending");
+        NS_TEST_ASSERT_MSG_EQ(scanMismatches, 0u, "ScanVisibleBeams measures the same set");
+        NS_TEST_ASSERT_MSG_GT(seen3, 10u, "the satellite over the UE is visible at the start");
+        NS_TEST_ASSERT_MSG_GT(seen5, 10u, "the trailing satellite rises and is visible");
+        NS_TEST_ASSERT_MSG_GT(seenBoth, 0u, "an overlap where both are candidates");
+        NS_TEST_ASSERT_MSG_EQ_TOL(first5, 80.0, 0.5, "the trailing satellite rises at 79 s (10 s grid)");
+        NS_TEST_ASSERT_MSG_EQ_TOL(last3, 450.0, 10.5, "the leading satellite sets at 450 s");
+        NS_TEST_ASSERT_MSG_EQ(seen7, 0u, "a refused stationary source is never visible");
+        NS_TEST_ASSERT_MSG_EQ(pred->HasUsableKinematics(7), false, "stationary source refused");
+        double el = pred->ComputeElevationAngle(ueGeo, 11);
+        NS_TEST_ASSERT_MSG_EQ_TOL(el, -90.0, 1e-9, "an unknown satellite is below the horizon");
+    }
+};
+
 class NtnChoDepthTestSuite : public TestSuite
 {
   public:
@@ -535,6 +673,7 @@ class NtnChoDepthTestSuite : public TestSuite
         AddTestCase(new KpiRecorderOnRealNrHandoverTest, TestCase::Duration::QUICK);
         AddTestCase(new CondEventsOnMovingUeTest, TestCase::Duration::QUICK);
         AddTestCase(new MeasurementModelGeometrySweepTest, TestCase::Duration::QUICK);
+        AddTestCase(new VisibleSatellitesFromKinematicsTest, TestCase::Duration::QUICK);
     }
 };
 
