@@ -4,6 +4,8 @@
  */
 #include "v2x-leo-relay.h"
 
+#include <limits>
+
 #include "ns3/double.h"
 #include "ns3/log.h"
 
@@ -96,7 +98,11 @@ V2xLeoRelay::EvaluateAll() const
         {
             blockage = bit->second;
         }
-        directSnr[id] = lb.snrDb - blockage;
+        // A satellite below the vehicle's horizon has no line of sight: the
+        // free-space budget is still finite (it ignores the Earth), so without
+        // this a vehicle could be sent "direct to LEO" through the ground.
+        directSnr[id] = lb.aboveHorizon ? lb.snrDb - blockage
+                                        : -std::numeric_limits<double>::infinity();
     }
 
     for (const auto& [id, mob] : m_vehicles)

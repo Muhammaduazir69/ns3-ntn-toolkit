@@ -97,6 +97,10 @@ SumoTraciBridge::ConnectTcp(const std::string& host, uint16_t port)
 bool
 SumoTraciBridge::LoadFcdTrace(const std::string& path)
 {
+    // Loading replaces the previous trace. Appending made a second load of the
+    // same file replay every sample twice.
+    m_samples.clear();
+    m_lastSample.clear();
     if (!ParseFcdCsv(path))
     {
         return false;
@@ -153,6 +157,14 @@ SumoTraciBridge::ParseFcdCsv(const std::string& path)
         catch (const std::exception&)
         {
             // Malformed row (non-numeric field): skip it rather than abort the run.
+            continue;
+        }
+        // std::stod accepts "nan" and "inf"; such a row would put a non-finite
+        // position into the mobility model, so it is dropped like a malformed one.
+        if (!std::isfinite(s.simulationTimeSec) || !std::isfinite(s.x) || !std::isfinite(s.y) ||
+            !std::isfinite(s.z) || !std::isfinite(s.speedMps))
+        {
+            NS_LOG_WARN("skipping non-finite FCD row: " << line);
             continue;
         }
         m_samples.push_back(s);

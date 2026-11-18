@@ -20,6 +20,7 @@ set(header_files
 
 set(test_sources
     test/ntn-v2x-test-suite.cc
+    test/ntn-v2x-indepth-test.cc
 )
 
 build_lib(
@@ -32,3 +33,19 @@ build_lib(
     ${libmobility}
   TEST_SOURCES ${test_sources}
 )
+
+# The in-depth suite (ntn-v2x-indepth) runs the PC5 sidelink over a real IPv4
+# satellite hop timed by an SGP4 orbit, so its test library also needs the
+# internet, point-to-point and flow-monitor stacks, the SGP4 propagator
+# (ntn-constellation) and the ENU projection (ntn-cho). Only the test library
+# links them; the module library keeps its own small dependency set.
+if(TARGET ntn-v2x-test)
+  target_link_libraries(
+    ntn-v2x-test
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libflow-monitor}
+    ntn-constellation
+    ntn-cho
+  )
+endif()
