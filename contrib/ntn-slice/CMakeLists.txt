@@ -36,3 +36,10 @@ build_lib(
     ${libnetwork}
   TEST_SOURCES ${test_sources}
 )
+
+# The quota-scheduler suite drives the quotas through the O-RAN E2SM-RC slice
+# actuator (oran-ntn), which itself links ntn-slice. Only the test library links
+# oran-ntn, so the module dependency graph keeps no cycle.
+if(TARGET ntn-slice-test)
+  target_link_libraries(ntn-slice-test oran-ntn)
+endif()

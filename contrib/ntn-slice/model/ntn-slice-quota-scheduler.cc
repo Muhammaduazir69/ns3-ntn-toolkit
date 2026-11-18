@@ -57,20 +57,60 @@ NtnSliceQuotaScheduler::GetSliceOfRnti(uint16_t rnti) const
     return it == m_sliceOfRnti.end() ? 0 : it->second;
 }
 
+bool
+NtnSliceQuotaScheduler::ValidateQuotas(const std::vector<double>& shares, std::string* why)
+{
+    // A NaN share passed the old checks (NaN < 0 and NaN > 1 are both false) and reached
+    // static_cast<uint32_t>(floor(NaN * RBGs)), which is undefined behavior. Every share is checked
+    // for being finite before the sum.
+    double sum = 0.0;
+    for (size_t s = 0; s < shares.size(); ++s)
+    {
+        if (!std::isfinite(shares[s]) || shares[s] < 0.0 || shares[s] > 1.0)
+        {
+            if (why)
+            {
+                *why = "slice " + std::to_string(s) + " quota " + std::to_string(shares[s]) +
+                       " is not a finite share in [0, 1]";
+            }
+            return false;
+        }
+        sum += shares[s];
+    }
+    if (sum > 1.0 + 1e-9)
+    {
+        if (why)
+        {
+            *why = "slice quotas sum to " + std::to_string(sum) + " > 1";
+        }
+        return false;
+    }
+    return true;
+}
+
 void
 NtnSliceQuotaScheduler::SetQuotas(const std::vector<double>& shares)
 {
-    const double sum = std::accumulate(shares.begin(), shares.end(), 0.0);
-    NS_ABORT_MSG_IF(sum > 1.0 + 1e-9, "slice quotas sum to " << sum << " > 1");
-    for (double s : shares)
+    std::string why;
+    NS_ABORT_MSG_IF(!ValidateQuotas(shares, &why), why);
+    TrySetQuotas(shares);
+}
+
+bool
+NtnSliceQuotaScheduler::TrySetQuotas(const std::vector<double>& shares)
+{
+    std::string why;
+    if (!ValidateQuotas(shares, &why))
     {
-        NS_ABORT_MSG_IF(s < 0, "negative slice quota");
+        NS_LOG_WARN("quota vector refused: " << why);
+        return false;
     }
     m_quota = shares;
     if (m_rbgCount.size() < shares.size())
     {
         m_rbgCount.resize(shares.size(), 0);
     }
+    return true;
 }
 
 std::vector<double>
@@ -111,9 +151,11 @@ NtnSliceQuotaScheduler::TakeBytesPerRbg()
     std::vector<double> out(m_tbBytes.size(), 0.0);
     for (size_t s = 0; s < out.size(); ++s)
     {
-        out[s] = (s < m_rbgCount.size() && m_rbgCount[s]) ? m_tbBytes[s] / m_rbgCount[s] : 0.0;
+        // Its own RBG window: dividing by m_rbgCount returned zeros whenever TakeRbgCounts ran first.
+        out[s] = (s < m_tbRbgCount.size() && m_tbRbgCount[s]) ? m_tbBytes[s] / m_tbRbgCount[s] : 0.0;
     }
     std::fill(m_tbBytes.begin(), m_tbBytes.end(), 0.0);
+    std::fill(m_tbRbgCount.begin(), m_tbRbgCount.end(), 0);
     return out;
 }
 
@@ -157,6 +199,7 @@ NtnSliceQuotaScheduler::AssignDLRBG(uint32_t symAvail, const ActiveUeMap& active
         {
             m_backlogSum.resize(nSlices, 0.0);
             m_tbBytes.resize(nSlices, 0.0);
+            m_tbRbgCount.resize(nSlices, 0);
         }
         for (const auto& u : ueVector)
         {
@@ -211,6 +254,7 @@ NtnSliceQuotaScheduler::AssignDLRBG(uint32_t symAvail, const ActiveUeMap& active
         for (size_t s = 0; s < nSlices; ++s)
         {
             m_rbgCount[s] += used[s];
+            m_tbRbgCount[s] += used[s];
             m_sliceAlloc(static_cast<uint32_t>(s), used[s], total);
         }
         ++m_slots;

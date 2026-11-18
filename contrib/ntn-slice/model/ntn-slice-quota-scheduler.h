@@ -9,6 +9,7 @@
 #include "ns3/traced-callback.h"
 
 #include <map>
+#include <string>
 #include <vector>
 
 namespace ns3
@@ -35,10 +36,21 @@ class NtnSliceQuotaScheduler : public NrMacSchedulerOfdmaPF
 
     /// Assign a UE to a slice (slice indices from 0); unknown RNTIs count as slice 0.
     void SetSliceOfRnti(uint16_t rnti, uint32_t slice);
-    /// Set the per-slice quota as shares of the RBGs of a slot; the shares must sum to at most 1.
+    /**
+     * Check a quota vector: every share finite and in [0, 1], and the shares summing to at most 1 (the TS 28.541
+     * RRMPolicyRatio rule that dedicated ratios add up to at most 100 %). An empty vector is valid (no slicing).
+     * \param shares the per-slice shares of the RBGs of a slot
+     * \param why if not null, receives the reason a vector is refused
+     * \return true if the vector may be applied
+     */
+    static bool ValidateQuotas(const std::vector<double>& shares, std::string* why = nullptr);
+    /// Set the per-slice quota as shares of the RBGs of a slot; aborts on a vector ValidateQuotas refuses.
     void SetQuotas(const std::vector<double>& shares);
+    /// As SetQuotas, but an invalid vector is refused (false) and the quotas in force stay unchanged.
+    bool TrySetQuotas(const std::vector<double>& shares);
     std::vector<double> GetQuotas() const;
     /// RBGs given to each slice since the last call, and the number of slots counted; resets the counters.
+    /// It does not reset the window of TakeBytesPerRbg, so the two may be called in either order.
     std::vector<uint64_t> TakeRbgCounts(uint64_t* slots);
     uint32_t GetSliceOfRnti(uint16_t rnti) const;
     /// Mean downlink backlog (bytes) per slice over the slots since the last call, and the bytes delivered per
@@ -58,6 +70,7 @@ class NtnSliceQuotaScheduler : public NrMacSchedulerOfdmaPF
     mutable std::vector<double> m_backlogSum;   ///< summed buffer requests per slice
     mutable uint64_t m_backlogSlots{0};
     mutable std::vector<double> m_tbBytes;      ///< TB bytes assigned per slice
+    mutable std::vector<uint64_t> m_tbRbgCount; ///< RBGs per slice in the TakeBytesPerRbg window
     TracedCallback<uint32_t, uint32_t, uint32_t> m_sliceAlloc; ///< slice, RBGs this slot, RBGs in the slot
 };
 

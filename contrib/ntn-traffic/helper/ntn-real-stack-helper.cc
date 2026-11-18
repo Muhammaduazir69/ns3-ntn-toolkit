@@ -1406,6 +1406,17 @@ NtnRealStackHelper::BuildNrRadio()
     // Install devices on the caller's mobility-carrying nodes.
     m_enbDevs = m_nr->InstallGnbDevice(m_gnb, allBwps);
     m_ueDevs = m_nr->InstallUeDevice(m_ue, allBwps);
+    // RRU.PrbAvailDl (TS 28.552 5.1.1.2) is the PRB count the PHY can schedule. nr removes its RbOverhead (4 % by
+    // default) before dividing by the RB width, so a 20 MHz BWP at 30 kHz has 53 PRBs, not the 55 of bandwidth /
+    // (12 SCS) above; with 55 the PRB usage never exceeded 96.4 %. The PHY learns its bandwidth only when the RRC
+    // configures it, so apply nr's own rule here (NrPhy::DoUpdateRbNum: the bandwidth in 100 kHz units, less the
+    // installed PHY's RbOverhead, over the RB width).
+    if (m_enbDevs.GetN() > 0)
+    {
+        const double oh = m_nr->GetGnbPhy(m_enbDevs.Get(0), 0)->GetRbOverhead();
+        const double bwpHz = std::floor((m_bwHz / nBwp) / 1e5 + 1e-9) * 1e5;
+        m_nrBandRb = std::max<uint32_t>(1, static_cast<uint32_t>(bwpHz * (1.0 - oh) / (12.0 * scsHz)));
+    }
     if (m_fddApplied)
     {
         // Wave 9 FDD: every slot of a DL BWP is DL, every slot of a UL BWP is
