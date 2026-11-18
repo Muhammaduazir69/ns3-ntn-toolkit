@@ -84,9 +84,13 @@ EscapeKey(const std::string& s)
 std::string
 EscapeMeasurement(const std::string& s)
 {
+    // A newline in the measurement ends the line early and lets the rest of
+    // the name be parsed as a separate (forged) point, so control characters
+    // are stripped here exactly as they are for tag keys and values.
+    const std::string clean = StripControl(s);
     std::string out;
-    out.reserve(s.size());
-    for (char c : s)
+    out.reserve(clean.size());
+    for (char c : clean)
     {
         if (c == ',' || c == ' ')
         {
@@ -147,9 +151,16 @@ EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulationTime)
         // entirely rather than producing an invalid fieldless line.
         std::string fields;
         bool first = true;
+        // Line protocol has no empty measurement, tag key, tag value or field
+        // key; a line with one is rejected whole by InfluxDB, so such a point
+        // or element is left out instead of poisoning the batch.
+        if (p.measurement.empty())
+        {
+            continue;
+        }
         for (const auto& [k, v] : p.fieldsFloat)
         {
-            if (!std::isfinite(v))
+            if (k.empty() || !std::isfinite(v))
             {
                 continue; // NaN / +-Inf is invalid line protocol — skip the field
             }
@@ -162,6 +173,10 @@ EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulationTime)
         }
         for (const auto& [k, v] : p.fieldsInt)
         {
+            if (k.empty())
+            {
+                continue;
+            }
             if (!first)
                 fields.push_back(',');
             fields += EscapeKey(k);
@@ -172,6 +187,10 @@ EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulationTime)
         }
         for (const auto& [k, v] : p.fieldsString)
         {
+            if (k.empty())
+            {
+                continue;
+            }
             if (!first)
                 fields.push_back(',');
             fields += EscapeKey(k);
@@ -186,6 +205,10 @@ EncodeLineProtocol(const std::vector<Point>& pts, bool useSimulationTime)
         out += EscapeMeasurement(p.measurement);
         for (const auto& [k, v] : p.tags)
         {
+            if (k.empty() || v.empty())
+            {
+                continue;
+            }
             out.push_back(',');
             out += EscapeKey(k);
             out.push_back('=');
@@ -329,9 +352,19 @@ NtnInfluxSink::TimeAnchorNote() const
 }
 
 void
+NtnInfluxSink::SetDefaultTag(const std::string& key, const std::string& value)
+{
+    m_defaultTags[key] = value;
+}
+
+void
 NtnInfluxSink::Push(const Point& p)
 {
     Point copy = p;
+    for (const auto& [k, v] : m_defaultTags)
+    {
+        copy.tags.emplace(k, v); // a tag the point already carries wins
+    }
     // Interpret the incoming timestamp as SIM time (explicit `now`, or, when it
     // is unset and auto-stamping is on, Simulator::Now()). Add the base epoch so
     // the wire timestamp is an absolute Unix time (base + simTime).
@@ -356,7 +389,8 @@ NtnInfluxSink::Push(const Point& p)
             ++it;
         }
     }
-    if (copy.fieldsFloat.empty() && copy.fieldsInt.empty() && copy.fieldsString.empty())
+    if (copy.measurement.empty() ||
+        (copy.fieldsFloat.empty() && copy.fieldsInt.empty() && copy.fieldsString.empty()))
     {
         m_droppedPoints++;
         if (!m_dropWarned)
@@ -399,9 +433,11 @@ NtnInfluxSink::Flush()
     {
         SendUdp(payload);
     }
-    else
+    else if (!AppendToFile(payload))
     {
-        AppendToFile(payload);
+        // The batch is gone: count it, so a bad path is visible in
+        // GetDroppedPoints() rather than losing every point silently.
+        m_droppedPoints += m_buffer.size();
     }
     m_buffer.clear();
 }
@@ -520,12 +556,12 @@ NtnInfluxSink::SendUdp(const std::string& payload)
     }
 }
 
-void
+bool
 NtnInfluxSink::AppendToFile(const std::string& payload)
 {
     if (m_filePath.empty())
     {
-        return;
+        return false;
     }
     // OBS-15: truncate on this sink's first write, append afterwards. Always
     // appending meant a rerun (or a crashed attempt followed by a retry) into
@@ -536,10 +572,11 @@ NtnInfluxSink::AppendToFile(const std::string& payload)
     if (!f)
     {
         NS_LOG_WARN("could not open " << m_filePath << " for writing");
-        return;
+        return false;
     }
     m_fileOpened = true;
     f.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+    return static_cast<bool>(f);
 }
 
 } // namespace ntnobs

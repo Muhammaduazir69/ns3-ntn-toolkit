@@ -7,6 +7,7 @@
 #include <ns3/log.h>
 #include <ns3/simulator.h>
 
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 
@@ -54,6 +55,10 @@ JsonEscape(const std::string& s)
 std::string
 FormatDouble(double v)
 {
+    if (!std::isfinite(v))
+    {
+        return "null"; // JSON has no NaN or Infinity literal
+    }
     std::ostringstream ss;
     ss << std::setprecision(12) << v;
     return ss.str();
@@ -149,7 +154,13 @@ NtnNetSimulyzerExporter::Start()
 {
     NS_ASSERT_MSG(!m_path.empty(), "output path required");
     m_out.open(m_path, std::ios::out | std::ios::trunc);
-    NS_ASSERT_MSG(m_out, "could not open output");
+    if (!m_out)
+    {
+        // NS_ASSERT compiles out of optimized builds, where this used to mark
+        // the exporter running and stream every event into a closed file.
+        NS_LOG_WARN("NetSimulyzer exporter could not open " << m_path << "; export disabled");
+        return;
+    }
     m_running = true;
     m_firstEvent = true;
     WriteHeader();

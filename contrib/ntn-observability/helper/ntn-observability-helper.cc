@@ -71,6 +71,9 @@ NtnObservabilityHelper::InstallInfluxSink() const
     }
     sink->SetFlushPeriod(m_flushPeriod);
     sink->SetUseSimulationTime(true);
+    // The run id used to stay inside the helper; tag every point with it so
+    // two runs written to one database stay separable.
+    sink->SetDefaultTag("run", m_runId);
     return sink;
 }
 

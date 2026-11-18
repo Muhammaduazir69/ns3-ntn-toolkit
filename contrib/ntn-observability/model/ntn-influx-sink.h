@@ -127,6 +127,9 @@ class NtnInfluxSink : public Object
 
     /// Append a fully-formed Point to the buffer. The implementation is
     /// reentrant-safe across simulation time but not across threads.
+    /// Tag added to every point pushed after this call (e.g. run=<id>), unless
+    /// the point already carries that key.
+    void SetDefaultTag(const std::string& key, const std::string& value);
     void Push(const Point& p);
 
     /// Force immediate flush regardless of period.
@@ -149,7 +152,7 @@ class NtnInfluxSink : public Object
   private:
     void TickFlush();
     void SendUdp(const std::string& payload);
-    void AppendToFile(const std::string& payload);
+    bool AppendToFile(const std::string& payload);
 
     Transport m_transport{Transport::Udp};
     std::string m_udpHost{"127.0.0.1"};
@@ -161,6 +164,7 @@ class NtnInfluxSink : public Object
     Time m_baseEpoch{Seconds(0)}; ///< wall-clock/TLE epoch added to sim-time (set in ctor)
     uint32_t m_maxBufferPoints{1000000}; ///< MaxBufferPoints attribute
     std::vector<Point> m_buffer;
+    std::map<std::string, std::string> m_defaultTags; ///< added to every pushed point
     uint64_t m_emitted{0};
     uint64_t m_droppedPoints{0};
     bool m_dropWarned{false};

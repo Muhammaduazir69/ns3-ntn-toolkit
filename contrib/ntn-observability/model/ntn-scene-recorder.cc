@@ -124,6 +124,9 @@ std::string
 IsoFromUnix(double unixSec)
 {
     long total = static_cast<long>(std::floor(unixSec));
+    // Keep the millisecond part: availability intervals and handover arcs at
+    // sub-second times were truncated to the whole second.
+    const int ms = std::min(999, static_cast<int>(std::lround((unixSec - std::floor(unixSec)) * 1000.0)));
     long days = total / 86400;
     long rem = total % 86400;
     if (rem < 0)
@@ -139,7 +142,15 @@ IsoFromUnix(double unixSec)
     const int mm = static_cast<int>((rem % 3600) / 60);
     const int sscnd = static_cast<int>(rem % 60);
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "%04d-%02u-%02uT%02d:%02d:%02dZ", y, mo, d, hh, mm, sscnd);
+    if (ms > 0)
+    {
+        std::snprintf(buf, sizeof(buf), "%04d-%02u-%02uT%02d:%02d:%02d.%03dZ", y, mo, d, hh, mm,
+                      sscnd, ms);
+    }
+    else
+    {
+        std::snprintf(buf, sizeof(buf), "%04d-%02u-%02uT%02d:%02d:%02dZ", y, mo, d, hh, mm, sscnd);
+    }
     return std::string(buf);
 }
 
@@ -402,6 +413,12 @@ NtnSceneRecorder::RecordKpi(uint32_t seriesId, double value)
 {
     if (seriesId == 0 || seriesId > m_kpis.size())
     {
+        return;
+    }
+    if (!std::isfinite(value))
+    {
+        // A NaN would be written into the CZML and NetSimulyzer documents as
+        // "nan", which is not JSON and breaks the whole scene for a viewer.
         return;
     }
     auto& k = m_kpis[seriesId - 1];
@@ -688,7 +705,13 @@ NtnSceneRecorder::WriteCzml()
             }
             else if (!ev.up && open)
             {
-                intervals.emplace_back(curStart, off);
+                // An edge created down at t0 (a new serving edge) closes the
+                // default-open state at once; that is not an availability
+                // window, and a zero-length interval would be emitted for it.
+                if (off > curStart)
+                {
+                    intervals.emplace_back(curStart, off);
+                }
                 open = false;
             }
         }

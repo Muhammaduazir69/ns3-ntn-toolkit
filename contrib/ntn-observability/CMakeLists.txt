@@ -57,6 +57,7 @@ set(header_files
 
 set(test_sources
     test/ntn-observability-test-suite.cc
+    test/ntn-observability-indepth-test.cc
 )
 
 build_lib(
@@ -69,3 +70,18 @@ build_lib(
     ${libmobility}
   TEST_SOURCES ${test_sources}
 )
+
+# The in-depth suite (ntn-observability-indepth) feeds FlowMonitor KPIs from a
+# real IPv4/P2P data plane into the sinks and tracks SGP4 satellites, so its
+# test library links those stacks and ntn-constellation. The module library
+# keeps its own small dependency set.
+if(TARGET ntn-observability-test)
+  target_link_libraries(
+    ntn-observability-test
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+    ${libflow-monitor}
+    ntn-constellation
+  )
+endif()
