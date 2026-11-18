@@ -45,7 +45,9 @@ bad=$(cd "$CTX/ns-3-dev" && find . \( -iname '*paper*' -o -iname 'AUDIT_*' -o -i
         -o -iname 'ROADMAP*' -o -iname '*SCALING_PLAN*' -o -iname '*control-center*' -o -iname 'ntn_cc' -o -name '.env' \
         -o -name '*.pem' -o -name 'id_rsa*' -o -name '.venv' \) -not -path './contrib/satellite/*' | head -20)
 [ -z "$bad" ] || { echo "forbidden paths in context:"; echo "$bad"; exit 1; }
-if grep -rIl -E 'uzair_aerospace|89\.167\.96\.121|ADMIN_TOKEN|BEGIN (RSA|OPENSSH) PRIVATE' "$CTX/ns-3-dev" --exclude-dir=satellite 2>/dev/null | head -5 | grep .; then
+# (the public local-dev InfluxDB init token in the compose files is not a secret; this script names the patterns itself)
+if grep -rIn -E 'uzair_aerospace|89\.167\.96\.121|ADMIN_TOKEN|BEGIN (RSA|OPENSSH) PRIVATE' "$CTX/ns-3-dev" --exclude-dir=satellite \
+     --exclude=build-release.sh 2>/dev/null | grep -v 'DOCKER_INFLUXDB_INIT_ADMIN_TOKEN' | head -5 | grep .; then
   echo "secret-looking strings in context"; exit 1; fi
 du -sh "$CTX/ns-3-dev" "$CTX/ns-3-dev/contrib/satellite"
 
