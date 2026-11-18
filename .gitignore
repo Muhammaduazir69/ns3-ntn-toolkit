@@ -194,3 +194,11 @@ test-ntn-ran-kpm/
 test-ntn-seam-plugin/
 test-ntn-set1-zenith/
 test-ntn-ue-kpi/
+# Test and example outputs written into the tree root (any future test-ntn-* dir too)
+/test-ntn-*/
+/test-ntn-cho-*/
+*_kpm_series_units.csv
+/ntn-oran-monitor-*.csv
+/ntn-oran-monitor-*.xml
+/ntn-oran-monitor-*.lp
+/thz-ntn-absorption-sweep.csv
