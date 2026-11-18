@@ -6,7 +6,7 @@
  * Router selects the layered path every second and logs the per-hop elevation
  * /range, while the ACCESS hop (ground UE <-> UAV relay) is a REAL mmwave NR
  * cell (NtnRealStackHelper) carrying the TR 36.777 air-to-ground channel
- * (SaginA2gPropagationLossModel) — so the access SINR/TBLER/throughput are
+ * (SaginA2gPropagationLossModel), so the access SINR/TBLER/throughput are
  * MEASURED off the mmwave PHY trace, not a closed-form formula. The UAV/HAPS/LEO
  * backhaul layers remain ephemeris/geometry context for the router.
  *
@@ -58,7 +58,9 @@ main(int argc, char* argv[])
     double simTimeSec = 30.0;
     uint32_t numUes = 1;
     double uavAltM = 100.0;
-    double gnbTxDbm = -7.0; // short A2G range -> low Tx for a realistic SINR band
+    // UAV relay gNB conducted power: TS 38.104 Local Area BS class (24 dBm). The
+    // earlier -7 dBm left the A2G access at about 4 dB SINR and 19 % TBLER.
+    double gnbTxDbm = 24.0;
     std::string outputDir = "sagin-haps-leo-relay-output";
     std::string csvPath = "sagin-haps-leo-relay.csv";
     std::string radio = "nr"; // radio backend: "nr" (5G-LENA FR1) | "mmwave" (FR2)
@@ -67,7 +69,7 @@ main(int argc, char* argv[])
     cmd.AddValue("simTime", "Simulation duration (s)", simTimeSec);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("uavAlt", "UAV relay altitude AGL (m)", uavAltM);
-    cmd.AddValue("gnbTxDbm", "UAV relay Tx power (dBm)", gnbTxDbm);
+    cmd.AddValue("gnbTxDbm", "UAV relay gNB conducted Tx power (dBm); 24 = TS 38.104 Local Area BS", gnbTxDbm);
     cmd.AddValue("csv", "Output CSV path (router geometry)", csvPath);
     cmd.AddValue("outputDir", "Output directory", outputDir);
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
@@ -89,7 +91,7 @@ main(int argc, char* argv[])
     NodeContainer satNodes; // the "gNB" here is the UAV relay
     satNodes.Create(1);
     // Deterministic 25 m/s A<->B patrol leg at uavAltM from the module's own
-    // UAV mobility catalog (same pattern as sagin-multihop-traffic) — the UAV
+    // UAV mobility catalog (same pattern as sagin-multihop-traffic): the UAV
     // genuinely turns around instead of flying off on a straight line.
     Ptr<UavPatrolMobilityModel> uav = CreateObject<UavPatrolMobilityModel>();
     uav->SetAttribute("Speed", DoubleValue(25.0));
@@ -154,7 +156,7 @@ main(int argc, char* argv[])
     // NT-02: declared as CONDUCTED power at the array input. This carrier has
     // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
     // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(gnbTxDbm); // short-range A2G access gNB Tx (not a LEO link) — kept as-is
+    rs.SetSatConductedPowerDbm(gnbTxDbm); // short-range A2G access gNB Tx (not a LEO link)
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
