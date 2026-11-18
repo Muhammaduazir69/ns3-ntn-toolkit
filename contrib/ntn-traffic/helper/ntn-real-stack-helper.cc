@@ -4546,10 +4546,14 @@ NtnRealStackHelper::WriteHealthReport()
         {
             sum += m;
         }
-        out << "ho_robust_mcs_mean,"
-            << (m_hoRobustMcsList.empty() ? std::numeric_limits<double>::quiet_NaN()
-                                          : sum / m_hoRobustMcsList.size())
-            << ",-," << m_hoRobustMcsList.size() << ",nr-patch-20\n";
+        // Count always; the mean only when a target admitted a UE (no NaN row in
+        // runs without handovers).
+        out << "ho_robust_mcs_admissions," << m_hoRobustMcsList.size() << ",-,-,nr-patch-20\n";
+        if (!m_hoRobustMcsList.empty())
+        {
+            out << "ho_robust_mcs_mean," << sum / m_hoRobustMcsList.size() << ",-,"
+                << m_hoRobustMcsList.size() << ",nr-patch-20\n";
+        }
         out << "ho_aborted_dl_rx," << GetHandoverAbortedDlRxCount() << ",-,-,nr-patch-20\n";
         out << "ho_flushed_reports," << GetHandoverFlushedReportCount() << ",-,-,nr-patch-20\n";
     }
