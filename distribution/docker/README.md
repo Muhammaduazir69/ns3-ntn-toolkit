@@ -1,13 +1,23 @@
 # Docker distribution
 
-Pre-built ns-3.43 + 15 bundled modules + Python utilities, published as
+Pre-built ns-3.43 + 14 bundled modules + Python utilities, published as
 [`uzairdocker69/ns3-ntn-toolkit`](https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit).
 
 ## Build the image
 
-The Dockerfile copies `ns-3-dev/` from the build context, so the context must
-be the **parent directory of a clone named `ns-3-dev`** (a `.dockerignore` in
-that parent should keep run outputs and papers out of the context):
+Release images are built from committed source only, never from the working
+tree, so run outputs, virtualenvs and untracked files can not reach the image:
+
+```bash
+distribution/docker/build-release.sh 2.7.0     # tags 2.7.0 and latest
+```
+
+The script stages a context next to the clone (`git archive HEAD` of
+ns-3-dev, each nested module repository overlaid with its own `git archive`,
+the SNS3 satellite tree without its 1.4 GB of sample outputs), removes paper
+and draft folders, aborts on any forbidden path or secret-looking string, and
+runs `docker build`. By hand, the context is the **parent directory of a clone
+named `ns-3-dev`**:
 
 ```bash
 git clone https://github.com/Muhammaduazir69/ns3-ntn-toolkit.git ns-3-dev
@@ -16,8 +26,9 @@ docker build -t uzairdocker69/ns3-ntn-toolkit:latest \
     -f ns-3-dev/distribution/docker/Dockerfile .
 ```
 
-First build is **~15–40 minutes** (ns-3 compile time, hardware-dependent);
-rebuilds with a cached builder layer take ~8 minutes.
+The image is compiled with the `release` profile (-O3 without
+`-march=native`), so it runs on any x86-64 CPU, not only on the build host.
+A first build takes 15 to 40 minutes depending on the machine.
 
 The multi-stage build keeps `./ns3 run` working inside the runtime image:
 cmake/ninja/g++ and the same dev headers as the builder stage are installed in
@@ -34,7 +45,8 @@ every invocation and breaks without them.
 docker run --rm -it uzairdocker69/ns3-ntn-toolkit:latest bash
 # inside the container:
 ./ns3 show profile
-./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10 --numTnUes=4"
+./ns3 run "ntn-constellation-walker-traffic --simSeconds=10"   # 44-sat Walker shell, NR cell, ISL routes
+./ns3 run "ntn-real-stack-smoke"        # TR 38.821 Set-1 NR NTN cell, measured KPIs
 ./ns3 run "ntn-oran-qos-flows"          # 4 5QI flows + C&C on a real NR NTN cell
 ./ns3 run "oran-ntn-ric-placement-ab"   # measured RIC-placement reaction times
 ```
@@ -52,8 +64,7 @@ docker compose -f distribution/docker/docker-compose.yml up -d
 
 ```bash
 docker login
-docker tag uzairdocker69/ns3-ntn-toolkit:latest uzairdocker69/ns3-ntn-toolkit:2.1.0
-docker push uzairdocker69/ns3-ntn-toolkit:2.1.0
+docker push uzairdocker69/ns3-ntn-toolkit:2.7.0
 docker push uzairdocker69/ns3-ntn-toolkit:latest
 ```
 
@@ -70,6 +81,6 @@ constellation data accounts for most of it.
   separately on a GPU host; the toolkit talks to it over UDP.
 - **FlexRIC live mode**: has its own docker-compose at
   `contrib/oran-ntn/flexric-bridge/docker/`. Bring up alongside.
-- Papers, run outputs, and internal planning documents: excluded by
-  `.dockerignore`; the image contains only the published source tree plus the
-  SNS3 satellite dependency.
+- Papers, run outputs, and internal planning documents: `build-release.sh`
+  stages only committed source and aborts on any such path; the image contains
+  the published source tree plus the SNS3 satellite dependency.

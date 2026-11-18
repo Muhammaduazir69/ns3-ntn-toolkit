@@ -4,9 +4,9 @@
 
 # ns3-ntn-toolkit
 
-**Pre-integrated ns-3.43 simulation platform for 6G non-terrestrial network research.** 15 integrated modules covering LEO constellations, 3GPP Rel-17/18/19 NR-NTN procedures, O-RAN + FlexRIC, a measured NTN/O-RAN application layer, sub-THz physics, NVIDIA Sionna RT, SAGIN, V2X, slicing, AI/ML and a live digital twin: all building in a single `./ns3 build`.
+**Pre-integrated ns-3.43 simulation platform for 6G non-terrestrial network research.** 14 integrated modules covering LEO constellations, 3GPP Rel-17/18/19 NR-NTN procedures, O-RAN + FlexRIC, a measured NTN/O-RAN application layer, sub-THz physics, NVIDIA Sionna RT, SAGIN, V2X, slicing, AI/ML and a live digital twin: all building in a single `./ns3 build`.
 
-The C++ kernel, all 15 bundled modules, the SNS3 satellite stack, mmWave 5G NR, NetSimulyzer JSON sinks, InfluxDB observability bindings, and the FastAPI / Cesium-Live digital-twin server are baked in. Open the container and run any of the shipped reference scenarios immediately: no system-package wrangling, no missing protobuf, no Python-version drift.
+The C++ kernel, all 14 bundled modules, the SNS3 satellite stack, mmWave 5G NR, NetSimulyzer JSON sinks, InfluxDB observability bindings, and the FastAPI / Cesium-Live digital-twin server are baked in. Open the container and run any of the shipped reference scenarios immediately: no system-package wrangling, no missing protobuf, no Python-version drift.
 
 ---
 
@@ -22,24 +22,36 @@ docker pull uzairdocker69/ns3-ntn-toolkit:latest
 docker run --rm -it -p 8090:8090 -p 3000:3000 \
   uzairdocker69/ns3-ntn-toolkit:latest bash
 
-# Run the integrated multi-module reference scenario directly
+# Run a reference scenario directly (44-satellite Walker shell, 5G-LENA NR cell, ISL routes)
 docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
-  ./ns3 run "ntn-tn-integrated-analysis --algorithm=tte-aware --simTime=10"
+  ./ns3 run "ntn-constellation-walker-traffic --simSeconds=10"
 
 # Pin to a specific release
-docker pull uzairdocker69/ns3-ntn-toolkit:2.1.1
+docker pull uzairdocker69/ns3-ntn-toolkit:2.7.0
 ```
 
 ## Tags
 
 | Tag      | Notes |
 |----------|-------|
-| `latest` | Tracks the most recent tagged release (currently `2.1.1`) |
-| `2.1.1`  | **Current stable**: 2026-06-12 architecture-audit hardening on top of the AI-Native ORAN-NTN release: Rel-18 CondEventD2 handover trigger, E2 loop realism (return-path feeder delay + control-loop-aligned dispatch), KPM flow monitor wired across 40+ examples, mobility fixes, 13/13 standards gates |
+| `latest` | Tracks the most recent tagged release (currently `2.7.0`) |
+| `2.7.0`  | **Current stable**: 3GPP Rel-17 NTN radio procedures in 5G-LENA (paired FDD, UL power control, PHR, BSR triggers, HARQ for long RTT), TR 38.821 Set-1 default link budget, exact SGP4 propagation delay, ITU-R P.676/P.840/P.834 atmosphere, BPv7 + SABR delay-tolerant routing, E2AP over TCP. Portable build (no `-march=native`) |
+| `2.1.1`  | 2026-06-12 architecture-audit hardening: Rel-18 CondEventD2, E2 loop realism, KPM flow monitor across 40+ examples |
 | `2.1.0`  | AI-Native ORAN-NTN release: real measured NR NTN data plane, NTN/O-RAN application layer, E2SM-KPM flow monitor, multi-tier RIC, TR 38.821 calibration |
 | `2.0.x`  | Previous release line (May 2026 realism audit) |
 
-The `2.1.1` image is **~7.5 GB extracted** (`linux/amd64`); most of that is the SNS3 satellite module's antenna-pattern and constellation data.
+The `2.7.0` image (`linux/amd64`, compressed size on the Tags page) is compiled with the `release` profile (-O3, no host-specific CPU flags), so it runs on any x86-64 machine.
+
+## What's new in 2.7.0
+
+- **NR NTN radio procedures in 5G-LENA** (20 patches over nr v3.3.1, shipped in `contrib/nr/ntn-patches`): RAR window offset by the UE-gNB RTT, HARQ feedback disabling and HARQ process pools sized for LEO round trips, NTN DRX HARQ-RTT timers, TS 38.213 uplink power control with power headroom reports and a PHR-aware PUSCH PRB limit, TS 38.321 Regular / Periodic / Padding BSR triggers, real paired FDD on bands n255 and n256 (uplink and downlink scheduled independently), frequency reuse 3 among satellite cells per TR 38.821, an SSB beam sweep with best-beam cell quality (TS 38.213 4.1, TS 38.215), a UE-directed beam on the handover target, and a robust MCS on the target until the first CSI report.
+- **TR 38.821 Set-1 S-band handheld link budget is the default** in every real-stack example; `--NtnRealStackLinkBudget=Legacy` reproduces earlier releases bit for bit.
+- **Orbits and propagation**: exact per-packet SGP4 light-time delay with the Sagnac term, event-driven contact transitions, ITU-R P.676 Annex 1 ray-traced slant path, P.840 cloud and P.834 apparent elevation, Ka-band DVB-S2 ground-link error model.
+- **Conditional handover**: Rel-17 T1 and D1 conditions encoded in their 3GPP units.
+- **Delay-tolerant SAGIN**: BPv7 bundles with per-bundle expiry, Bundle Age block and CRC-16, SABR contact-graph routing with priorities.
+- **O-RAN**: per-hop E2 latency, RRU.PrbDl and uplink KPM names (TS 28.552), A1 ENFORCED / NOT_ENFORCED feedback, optional E2AP over TCP.
+- **THz**: packet companion runs over a DVB-S2 ACM link for the analytic THz examples.
+- **Per-UE and per-cell KPI datasets** (`ue_kpi.csv`, `cell_kpi.csv`) from the real-stack examples.
 
 ## What's new in 2.1.1: architecture-audit hardening
 
@@ -63,8 +75,8 @@ The `2.1.1` image is **~7.5 GB extracted** (`linux/amd64`); most of that is the 
 
 | Capability | Specifics |
 |---|---|
-| ns-3 base | **3.43** (patched LTE for dual connectivity) |
-| Custom modules contributed | **15** (see the list below) |
+| ns-3 base | **3.43** (patched LTE for dual connectivity) + 5G-LENA nr v3.3.1 with 17 NTN patches |
+| Custom modules contributed | **14** (see the list below) |
 | Data plane | real mmWave NR NTN cell under SGP4 mobility; all KPIs measured in-band |
 | Combined unit + integration tests | **100+**, all passing |
 | 3GPP NTN procedures | TS 38.213 TA · TS 38.331 SIB19 + UE Location Report · TS 38.321 NTN-DRX · TR 36.777 A2G · 5 NTN HO trigger classes |
@@ -83,7 +95,7 @@ The `2.1.1` image is **~7.5 GB extracted** (`linux/amd64`); most of that is the 
 
 ### Bundled modules
 
-`ntn-constellation` · `ntn-rrc` · `ntn-observability` · `ns3-ai` (fork) · `ntn-sagin` · `ntn-slice` · `ntn-v2x` · `flexric-bridge` · `ntn-sionna` · `ntn-digital-twin` · `ntn-cho` · `oran-ntn` · `thz-ntn` · `ntn-traffic` · `ntn-fapi`
+`ntn-constellation` · `ntn-rrc` · `ntn-observability` · `ns3-ai-ntn` · `ntn-sagin` · `ntn-slice` · `ntn-v2x` · `ntn-sionna` · `ntn-digital-twin` · `ntn-cho` · `oran-ntn` (with `flexric-bridge`) · `thz-ntn` · `ntn-traffic` · `ntn-fapi`
 
 Each module ships its own numerical verification harness: see the per-module READMEs linked from the [main README](https://github.com/Muhammaduazir69/ns3-ntn-toolkit#bundled-modules).
 
@@ -101,7 +113,7 @@ A few of the reproducible numbers shipped with the image:
 
 ## Image provenance
 
-- Built from <https://github.com/Muhammaduazir69/ns3-ntn-toolkit> (release line `2.1.1`, branch `ntn-integration-v2`) using `distribution/docker/Dockerfile`
+- Built from <https://github.com/Muhammaduazir69/ns3-ntn-toolkit> (release line `2.7.0`, branch `ntn-integration-v2`) with `distribution/docker/build-release.sh`, which stages committed source only
 - The image contains the published source tree plus the SNS3 satellite dependency: no papers, run outputs, or private documents
 
 ## Links
