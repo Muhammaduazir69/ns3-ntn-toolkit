@@ -640,7 +640,8 @@ class NtnRealStackHelper
         bool carrierInUplink{false};   //!< carrier sits in the band's UL block
         double blockWidthHz{0.0};      //!< width of the DL block
         bool bandwidthSupported{false}; //!< bw is in the band's Table 5.3.5-1 set
-        bool conformant{false};         //!< DL carrier AND supported bandwidth
+        bool channelInBlock{false};     //!< [fc - bw/2, fc + bw/2] inside the DL block
+        bool conformant{false};         //!< DL carrier, supported bandwidth, channel in block
     };
 
     /// Classify a carrier/bandwidth pair against TS 38.101-5. Static and pure,

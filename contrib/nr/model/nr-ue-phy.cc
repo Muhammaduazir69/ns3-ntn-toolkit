@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <iterator>
 #include <limits>
 
 namespace ns3
@@ -241,6 +242,15 @@ NrUePhy::GetTypeId()
                 UintegerValue(0),
                 MakeUintegerAccessor(&NrUePhy::m_ssbBeamsPerBurst),
                 MakeUintegerChecker<uint32_t>(0, 255))
+            .AddAttribute(
+                "SsbBeamResultLifetime",
+                "ntn-patch 21: how long a per-SSB-beam layer-1 result is kept when the beam is "
+                "not measured again (a sweep longer than the layer-1 period). The cell quality "
+                "is the best of the kept results (TS 38.331 5.5.3.3). 0 (default): only the "
+                "beams measured in the current period count (patch 19).",
+                TimeValue(Seconds(0)),
+                MakeTimeAccessor(&NrUePhy::m_ssbBeamResultLifetime),
+                MakeTimeChecker(Seconds(0)))
             .AddAttribute("DlHarqFeedbackDisabled",
                           "NTN (TS 38.331 downlinkHARQ-FeedbackDisabled-r17, TS 38.213 9.1.2): "
                           "bitmap over DL HARQ process IDs, bit i set = the UE does not report "
@@ -1599,7 +1609,48 @@ NrUePhy::ReportUeMeasurements()
     // beam measurement quantity, so the layer-1 result of the best SSB beam
     // (per-beam average over this period, TS 38.215 5.1.1) stands for the cell.
     m_bestSsbIndex.clear();
-    for (const auto& [cell, beams] : m_ueSsbMeasurementsMap)
+    // ntn-patch 21: a sweep longer than the layer-1 period (an Earth-moving
+    // grid of more SSB beams than one period visits) left some periods without
+    // a sample of the best beam, and the cell quality fell to the best beam
+    // that HAD been visited, 6 to 8 dB lower, about once a second. With
+    // SsbBeamResultLifetime > 0 each beam keeps its last layer-1 result until
+    // it is measured again or the lifetime expires, so the cell quality is the
+    // best of the most recent per-beam results (TS 38.331 5.5.3.3), whichever
+    // period they were taken in. 0 keeps the patch-19 behavior.
+    std::map<uint16_t, std::map<uint16_t, UeMeasurementsElement>> ssbView;
+    if (m_ssbBeamResultLifetime.IsStrictlyPositive())
+    {
+        const Time now = Simulator::Now();
+        for (const auto& [cell, beams] : m_ueSsbMeasurementsMap)
+        {
+            for (const auto& [idx, el] : beams)
+            {
+                if (el.rsrpNum != 0)
+                {
+                    m_ssbBeamLast[cell][idx] = {el, now};
+                }
+            }
+        }
+        for (auto cit = m_ssbBeamLast.begin(); cit != m_ssbBeamLast.end();)
+        {
+            for (auto bit = cit->second.begin(); bit != cit->second.end();)
+            {
+                if (now - bit->second.second > m_ssbBeamResultLifetime)
+                {
+                    bit = cit->second.erase(bit);
+                }
+                else
+                {
+                    ssbView[cit->first][bit->first] = bit->second.first;
+                    ++bit;
+                }
+            }
+            cit = cit->second.empty() ? m_ssbBeamLast.erase(cit) : std::next(cit);
+        }
+    }
+    const auto& ssbSource =
+        m_ssbBeamResultLifetime.IsStrictlyPositive() ? ssbView : m_ueSsbMeasurementsMap;
+    for (const auto& [cell, beams] : ssbSource)
     {
         double bestDbm = -std::numeric_limits<double>::infinity();
         const UeMeasurementsElement* best = nullptr;

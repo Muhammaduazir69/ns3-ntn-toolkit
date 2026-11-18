@@ -698,7 +698,18 @@ NtnRealStackHelper::ClassifyNtnFr1(double carrierHz, double bandwidthHz)
     // historical default, 2.0 GHz, sits in n256's UPLINK block and was used as
     // the downlink carrier, so it can never be conformant however the channel
     // is sized.
-    b.conformant = b.carrierInDownlink && b.bandwidthSupported;
+    // TS 38.101-5 section 5.4: the whole channel, not only its center, must
+    // lie in the band's block. A 20 MHz carrier centered at 2175 MHz spans
+    // 2165..2185 MHz and pokes 5 MHz below n256's 2170 MHz edge; it used to be
+    // reported conformant because only the center was tested.
+    if (b.carrierInDownlink)
+    {
+        const double lo = (std::string(b.name) == "n255") ? 1525.0e6 : 2170.0e6;
+        const double hi = (std::string(b.name) == "n255") ? 1559.0e6 : 2200.0e6;
+        b.channelInBlock = carrierHz - bandwidthHz / 2.0 >= lo - 1.0 &&
+                           carrierHz + bandwidthHz / 2.0 <= hi + 1.0;
+    }
+    b.conformant = b.carrierInDownlink && b.bandwidthSupported && b.channelInBlock;
     return b;
 }
 
@@ -2906,6 +2917,7 @@ NtnRealStackHelper::TriggerHandover(uint32_t ueIndex, uint16_t targetCellId, Tim
     {
         NS_LOG_WARN("TriggerHandover: no gNB device for serving cell " << servingCell
                                                                        << " — not actuated");
+        RecordHandoverRefusal("no gNB device for the serving cell");
         return false;
     }
     bool targetKnown = false;
@@ -2922,6 +2934,10 @@ NtnRealStackHelper::TriggerHandover(uint32_t ueIndex, uint16_t targetCellId, Tim
         NS_LOG_WARN("TriggerHandover: target cell " << targetCellId
                                                     << " is not a gNB in this scenario — not "
                                                        "actuated");
+        // Counted like every other refusal (WF-11): NS_LOG_WARN is compiled out
+        // of the optimized build, so an xApp or twin naming a cell that does not
+        // exist was silently dropped.
+        RecordHandoverRefusal("target cell is not a gNB in this scenario");
         return false;
     }
 
@@ -5808,12 +5824,23 @@ NtnRealStackHelper::BuildSsbBeamGrid()
         }
     }
     // The UE takes its uplink path-loss reference from the best SSB of a burst.
+    // nr patch 21: the sweep visits one SSB index per downlink control region,
+    // so a grid of a few hundred beams takes longer than the 200 ms layer-1
+    // period to come round, and periods that missed the best beam reported the
+    // cell 6 to 8 dB low (seen as dips about once a second on a fixed UE).
+    // Each beam's last result is therefore kept for two sweeps (at least two
+    // layer-1 periods) until the beam is measured again.
+    const Time slot = MilliSeconds(1) / (1 << m_numerology);
     for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
     {
         for (uint8_t b = 0; b < m_nrBwpTotal; ++b)
         {
-            m_nr->GetUePhy(m_ueDevs.Get(u), b)
-                ->SetAttribute("SsbBeamsPerBurst", UintegerValue(m_ssbGridSize));
+            Ptr<NrUePhy> uphy = m_nr->GetUePhy(m_ueDevs.Get(u), b);
+            uphy->SetAttribute("SsbBeamsPerBurst", UintegerValue(m_ssbGridSize));
+            TimeValue l1;
+            uphy->GetAttribute("UeMeasurementsFilterPeriod", l1);
+            uphy->SetAttribute("SsbBeamResultLifetime",
+                               TimeValue(std::max(2 * l1.Get(), 2 * m_ssbGridSize * slot)));
         }
     }
     m_ssbGridApplied = true;

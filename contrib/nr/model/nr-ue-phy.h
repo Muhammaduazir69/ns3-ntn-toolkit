@@ -893,6 +893,10 @@ class NrUePhy : public NrPhy
     std::map<uint16_t, std::map<uint16_t, UeMeasurementsElement>> m_ueSsbMeasurementsMap;
     /// ntn-patch 19: best SSB index per cell in the last layer-1 period.
     std::map<uint16_t, uint8_t> m_bestSsbIndex;
+    /// ntn-patch 21: last layer-1 result and its time, per cell and SSB index.
+    std::map<uint16_t, std::map<uint16_t, std::pair<UeMeasurementsElement, Time>>> m_ssbBeamLast;
+    /// ntn-patch 21 (attribute SsbBeamResultLifetime).
+    Time m_ssbBeamResultLifetime{Seconds(0)};
     /// ntn-patch 19 (attribute SsRsrpOnOccupiedRbs): average SS-RSRP over the
     /// RBs that carry the SSB only.
     bool m_ssRsrpOnOccupiedRbs{false};
