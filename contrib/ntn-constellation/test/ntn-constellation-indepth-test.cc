@@ -394,6 +394,85 @@ class ConVisVivaTest : public TestCase
 };
 
 // ---------------------------------------------------------------------------
+/// fixes-3b: the Kepler+J2 velocity is the time derivative of the propagated
+/// position. The node regresses (Omega_dot) and the perigee advances
+/// (omega_dot), so d(pos)/dt carries Omega_dot z x r + omega_dot h x r besides
+/// the in-orbit term; without them the reported velocity was about 5 m/s off on
+/// a 550 km, 53 deg shell. Inside a run, at 13 instants over an orbit, a central
+/// difference of GetEcefStateAt(+-h) with h = 2^-10 s (about 1 ms; a power of
+/// two keeps the Unix-second sums exact in double) must equal GetVelocity()
+/// (ECEF, what Doppler consumers read) within 1 cm/s, for a 53 deg shell, a
+/// sun-synchronous orbit, a polar orbit and an eccentric (e = 0.05) orbit.
+/// The truncation error of the difference is |jerk| h^2 / 6, about 1e-9 m/s.
+/// The omitted J2 terms are computed in closed form and shown to be more than
+/// 100 times the tolerance, so the check could not pass with them left out.
+class ConVelocityIsDerivativeTest : public TestCase
+{
+  public:
+    ConVelocityIsDerivativeTest()
+        : TestCase("Kepler+J2 velocity equals the 1 ms central difference of the position within 1 cm/s")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        const std::vector<KeplerianElements> orbits = {Circular(550.0, 53.0, 30.0, 10.0),
+                                                       Circular(550.0, 97.59, 30.0, 10.0),
+                                                       Circular(550.0, 90.0, 30.0, 10.0),
+                                                       [] {
+                                                           KeplerianElements e =
+                                                               Circular(1000.0, 53.0, 30.0, 10.0, 0.05);
+                                                           e.arg_perigee_rad = 40.0 * kDeg;
+                                                           return e;
+                                                       }()};
+        const Time h = NanoSeconds(976562); // rounds to exactly 2^-10 s in the Unix-second sum
+        const double hS = 1.0 / 1024.0;
+        double worst = 0.0;
+        uint32_t samples = 0;
+        for (const auto& el : orbits)
+        {
+            Ptr<Sgp4MobilityModel> m = CreateObject<Sgp4MobilityModel>();
+            m->SetElements(el);
+            for (int k = 0; k <= 12; ++k)
+            {
+                Simulator::Schedule(Seconds(500.0 * k), [&, m]() {
+                    Vector pp;
+                    Vector pm;
+                    Vector v;
+                    m->GetEcefStateAt(h, pp, v);
+                    m->GetEcefStateAt(NanoSeconds(-976562), pm, v);
+                    const Vector fd((pp.x - pm.x) / (2 * hS),
+                                    (pp.y - pm.y) / (2 * hS),
+                                    (pp.z - pm.z) / (2 * hS));
+                    const Vector rep = m->GetVelocity();
+                    worst = std::max(worst, CalculateDistance(fd, rep));
+                    Vector p0;
+                    Vector v0;
+                    m->GetEcefStateAt(Seconds(0), p0, v0);
+                    worst = std::max(worst, CalculateDistance(fd, v0));
+                    ++samples;
+                });
+            }
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+        NS_TEST_ASSERT_MSG_EQ(samples, 4u * 13u, "every sample taken");
+        NS_TEST_ASSERT_MSG_LT(worst, 0.01, "velocity = d(position)/dt within 1 cm/s");
+
+        // Sensitivity: the J2 rotation terms on the 53 deg shell at the node.
+        const KeplerianElements el = orbits[0];
+        const double a = el.semi_major_axis_m;
+        const double k = (kEarthRadiusM / a) * (kEarthRadiusM / a) * kEarthJ2 * el.MeanMotionRadS();
+        const double raanDot = -1.5 * k * std::cos(el.inclination_rad);
+        const double argpDot = 0.75 * k * (4.0 - 5.0 * std::pow(std::sin(el.inclination_rad), 2));
+        // At the node r is along the node line, so |z x r| = a and |h x r| = a.
+        const double omitted = a * std::hypot(raanDot, argpDot);
+        NS_TEST_ASSERT_MSG_GT(omitted, 100 * 0.01, "the omitted terms (about 5 m/s) exceed 100x the tolerance");
+    }
+};
+
+// ---------------------------------------------------------------------------
 /// XnAP over a real ISL (TS 38.423 clause 8.2): the four handover messages
 /// travel as UDP packets over NtnRangeDelayChannel between two SGP4
 /// satellites. The handover completes in 4 x (light time + serialization),
@@ -823,6 +902,7 @@ class NtnConstellationInDepthTestSuite : public TestSuite
         AddTestCase(new ConNodalPeriodTest, Duration::QUICK);
         AddTestCase(new ConJ2PrecessionTest, Duration::QUICK);
         AddTestCase(new ConVisVivaTest, Duration::QUICK);
+        AddTestCase(new ConVelocityIsDerivativeTest, Duration::QUICK);
         AddTestCase(new ConXnOverIslTest, Duration::QUICK);
         AddTestCase(new ConKaPassFlowMonitorTest, Duration::QUICK);
         AddTestCase(new ConContactPlanDeterminismTest, Duration::QUICK);

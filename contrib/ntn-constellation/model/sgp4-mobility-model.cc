@@ -88,11 +88,22 @@ GmstRad(double unix_s)
     // Days since J2000.0 (2000-01-01 12:00 UTC = Unix 946728000), formed from the Unix time
     // directly. Going through a full Julian date (about 2.46e6) first leaves only ~40 us of time
     // resolution in a double, which made the Earth-fixed frame jitter by centimeters.
-    const double d = (unix_s - 946728000.0) / 86400.0;
+    const double sec = unix_s - 946728000.0;
+    const double d = sec / 86400.0;
     const double T = d / 36525.0;
-    // IAU 1982 formula (degrees) -> rad.
-    double gmst_deg = 280.46061837 + 360.98564736629 * d + T * T * (0.000387933 - T / 38710000.0);
-    double gmst_rad = std::fmod(gmst_deg * kDegToRad, kTwoPi);
+    // IAU 1982 formula (degrees) -> rad. 360.98564736629 d is about 3.5e6 deg
+    // today, where a double resolves only 5e-10 deg (8e-12 rad): the ECEF
+    // position jittered by about 6e-5 m between nearby instants, enough for a
+    // 1 ms finite difference to read 3.6 cm/s off the reported velocity. Split
+    // the whole turns off exactly: 360 d = (sec mod 86400) / 240 deg for whole
+    // seconds, and keep only the small remainder terms in floating point.
+    const double sInt = std::floor(sec);
+    const double sFrac = sec - sInt;
+    double gmst_deg = 280.46061837 + std::fmod(sInt, 86400.0) / 240.0 +
+                      (0.98564736629 / 86400.0) * sInt + (360.98564736629 / 86400.0) * sFrac +
+                      T * T * (0.000387933 - T / 38710000.0);
+    gmst_deg = std::fmod(gmst_deg, 360.0);
+    double gmst_rad = gmst_deg * kDegToRad;
     if (gmst_rad < 0.0)
         gmst_rad += kTwoPi;
     return gmst_rad;
@@ -309,7 +320,22 @@ Sgp4MobilityModel::Propagate(double unix_s, Vector& pos_eci, Vector& vel_eci)
     };
 
     pos_eci = rotate(xp, yp);
-    vel_eci = rotate(vxp, vyp);
+    // The velocity is the time derivative of the position above. The plane
+    // and the apsides turn at the J2 secular rates, so besides the in-orbit
+    // term it carries raanDot z x r (the node regressing about the polar axis)
+    // and argpDot h x r (the perigee advancing about the orbit normal h). They
+    // were left out, and the reported velocity differed from d(pos)/dt by
+    // about 5 m/s on a 550 km, 53 deg shell (up to about 33 Hz of Doppler at
+    // 2 GHz).
+    const Vector inOrbit = rotate(vxp, vyp);
+    const Vector hHat(so * si, -co * si, ci); // orbit normal R_z(raan) R_x(i) z
+    const Vector& rv = pos_eci;
+    const Vector hxr(hHat.y * rv.z - hHat.z * rv.y,
+                     hHat.z * rv.x - hHat.x * rv.z,
+                     hHat.x * rv.y - hHat.y * rv.x);
+    vel_eci = Vector(inOrbit.x + argpDot * hxr.x - raanDot * rv.y,
+                     inOrbit.y + argpDot * hxr.y + raanDot * rv.x,
+                     inOrbit.z + argpDot * hxr.z);
     (void)r;
 }
 
