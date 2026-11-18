@@ -4,10 +4,12 @@
 # with. This makes the C++ half buildable and testable.
 set(source_files
     model/ntn-twin-agreement.cc
+    model/ntn-twin-replay.cc
 )
 
 set(header_files
     model/ntn-twin-agreement.h
+    model/ntn-twin-replay.h
 )
 
 set(test_sources
@@ -24,3 +26,10 @@ build_lib(
     ${libntn-constellation}
   TEST_SOURCES ${test_sources}
 )
+
+# The cross-module case drives a real NR handover (ntn-traffic) from the twin's
+# predictions through the O-RAN consumer (oran-ntn). Only the test library links
+# them; the twin library keeps its own small dependency set.
+if(TARGET ntn-digital-twin-test)
+  target_link_libraries(ntn-digital-twin-test ntn-traffic oran-ntn)
+endif()
