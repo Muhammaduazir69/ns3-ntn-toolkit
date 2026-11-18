@@ -213,6 +213,21 @@ ThzNtnMac::ComputeLinkGeometry(Ptr<MobilityModel> txMobility,
     double txR = std::sqrt(txPos.x * txPos.x + txPos.y * txPos.y + txPos.z * txPos.z);
     double rxR = std::sqrt(rxPos.x * rxPos.x + rxPos.y * rxPos.y + rxPos.z * rxPos.z);
 
+    // Local ENU scenario (both ends well inside the Earth radius from the
+    // origin): altitude is z and elevation is measured from the local
+    // horizontal. Treating such positions as geocentric clamped both
+    // altitudes to zero and evaluated a ground-to-satellite link as if it
+    // never left the ground.
+    if (std::max(txR, rxR) < 0.9 * EARTH_RADIUS_M)
+    {
+        altTx_km = std::max(0.0, txPos.z / 1000.0);
+        altRx_km = std::max(0.0, rxPos.z / 1000.0);
+        const double horiz = std::hypot(dx, dy);
+        elevationDeg = distanceM > 0.0 ? std::atan2(std::abs(dz), horiz) * 180.0 / M_PI : 90.0;
+        NS_LOG_DEBUG("LinkGeometry (ENU): dist=" << distanceM << " m, elev=" << elevationDeg);
+        return;
+    }
+
     altTx_km = std::max(0.0, (txR - EARTH_RADIUS_M) / 1000.0);
     altRx_km = std::max(0.0, (rxR - EARTH_RADIUS_M) / 1000.0);
 
@@ -220,17 +235,18 @@ ThzNtnMac::ComputeLinkGeometry(Ptr<MobilityModel> txMobility,
     double lowerR = std::min(txR, rxR);
     double higherR = std::max(txR, rxR);
 
-    // Using the triangle: Earth centre, lower node, higher node
-    // cos(nadir) = (lowerR^2 + d^2 - higherR^2) / (2 * lowerR * d)
+    // Triangle Earth centre, lower node, higher node: the angle at the lower
+    // node between the centre and the higher node is
+    //   cos(psi) = (lowerR^2 + d^2 - higherR^2) / (2 lowerR d),
+    // and elevation = psi - 90 deg (zenith: psi = 180, elevation 90). The
+    // former 90 - psi gave -90 deg at zenith: every link looked below the
+    // horizon.
     if (distanceM > 0.0 && lowerR > 0.0)
     {
-        double cosNadir = (lowerR * lowerR + distanceM * distanceM -
-                           higherR * higherR) /
-                          (2.0 * lowerR * distanceM);
-        cosNadir = std::max(-1.0, std::min(1.0, cosNadir));
-        // Elevation = 90 - nadir_angle
-        double nadirRad = std::acos(cosNadir);
-        elevationDeg = 90.0 - nadirRad * 180.0 / M_PI;
+        double cosPsi = (lowerR * lowerR + distanceM * distanceM - higherR * higherR) /
+                        (2.0 * lowerR * distanceM);
+        cosPsi = std::max(-1.0, std::min(1.0, cosPsi));
+        elevationDeg = std::acos(cosPsi) * 180.0 / M_PI - 90.0;
     }
     else
     {

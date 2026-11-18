@@ -124,7 +124,38 @@ ThzNtnPacketLink::DvbS2ModcodSet()
 double
 ThzNtnPacketLink::SpectralEfficiency(SatEnums::SatModcod_t m)
 {
-    return SatUtils::GetModulatedBits(m) * SatUtils::GetCodingRate(m);
+    // ETSI EN 302 307-1 Table 13, normal FECFRAME (64800 bits), no pilots: the
+    // efficiency after BCH/LDPC overhead and the 90-symbol PLHEADER. The
+    // nominal bits x code rate used before overstated every MODCOD (QPSK 1/2
+    // by 1.1%, 32APSK 3/4 by 1.3%), and with it the line rate the link set.
+    switch (m)
+    {
+    case SatEnums::SAT_MODCOD_QPSK_1_TO_2: return 0.988858;
+    case SatEnums::SAT_MODCOD_QPSK_3_TO_5: return 1.188304;
+    case SatEnums::SAT_MODCOD_QPSK_2_TO_3: return 1.322253;
+    case SatEnums::SAT_MODCOD_QPSK_3_TO_4: return 1.487473;
+    case SatEnums::SAT_MODCOD_QPSK_4_TO_5: return 1.587196;
+    case SatEnums::SAT_MODCOD_QPSK_5_TO_6: return 1.654663;
+    case SatEnums::SAT_MODCOD_QPSK_8_TO_9: return 1.766451;
+    case SatEnums::SAT_MODCOD_QPSK_9_TO_10: return 1.788612;
+    case SatEnums::SAT_MODCOD_8PSK_3_TO_5: return 1.779991;
+    case SatEnums::SAT_MODCOD_8PSK_2_TO_3: return 1.980636;
+    case SatEnums::SAT_MODCOD_8PSK_3_TO_4: return 2.228124;
+    case SatEnums::SAT_MODCOD_8PSK_5_TO_6: return 2.478562;
+    case SatEnums::SAT_MODCOD_8PSK_8_TO_9: return 2.646012;
+    case SatEnums::SAT_MODCOD_8PSK_9_TO_10: return 2.679207;
+    case SatEnums::SAT_MODCOD_16APSK_2_TO_3: return 2.637201;
+    case SatEnums::SAT_MODCOD_16APSK_3_TO_4: return 2.966728;
+    case SatEnums::SAT_MODCOD_16APSK_4_TO_5: return 3.165623;
+    case SatEnums::SAT_MODCOD_16APSK_5_TO_6: return 3.300184;
+    case SatEnums::SAT_MODCOD_16APSK_8_TO_9: return 3.523143;
+    case SatEnums::SAT_MODCOD_16APSK_9_TO_10: return 3.567342;
+    case SatEnums::SAT_MODCOD_32APSK_3_TO_4: return 3.703295;
+    case SatEnums::SAT_MODCOD_32APSK_4_TO_5: return 3.951571;
+    case SatEnums::SAT_MODCOD_32APSK_5_TO_6: return 4.119540;
+    case SatEnums::SAT_MODCOD_32APSK_8_TO_9: return 4.397854;
+    default: return SatUtils::GetModulatedBits(m) * SatUtils::GetCodingRate(m);
+    }
 }
 
 bool

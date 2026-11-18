@@ -13,6 +13,7 @@
 
 #include <ns3/double.h>
 #include <ns3/log.h>
+#include <ns3/simulator.h>
 #include <ns3/string.h>
 #include <ns3/uinteger.h>
 
@@ -88,6 +89,10 @@ ThzNtnIslLink::~ThzNtnIslLink()
 void
 ThzNtnIslLink::DoDispose()
 {
+    for (auto& [id, l] : m_links)
+    {
+        l.setupEvent.Cancel();
+    }
     NS_LOG_FUNCTION(this);
     m_links.clear();
     m_satMobilities.clear();
@@ -251,13 +256,38 @@ ThzNtnIslLink::EstablishLink(uint32_t srcSatId, uint32_t dstSatId)
 
     ml.dataRate_Gbps = std::min(ml.dataRate_Gbps, m_maxDataRate_Gbps);
     ml.dataRate_Gbps = std::max(ml.dataRate_Gbps, MIN_ISL_DATA_RATE_GBPS);
-    ml.status = ThzNtnIslLinkStatus::UP;
+    // LinkSetupTime used to be declared but ignored: the link went UP in the
+    // same instant it was requested, so routes used ISLs that a real terminal
+    // would still be acquiring (pointing, acquisition and tracking). The link
+    // now stays ESTABLISHING for the setup time; routing skips it until then.
+    if (m_linkSetupTime_ms > 0.0)
+    {
+        ml.status = ThzNtnIslLinkStatus::ESTABLISHING;
+        ml.setupEvent = Simulator::Schedule(MicroSeconds(static_cast<int64_t>(m_linkSetupTime_ms * 1e3)),
+                                            &ThzNtnIslLink::CompleteSetup,
+                                            this,
+                                            ml.linkId);
+    }
+    else
+    {
+        ml.status = ThzNtnIslLinkStatus::UP;
+    }
 
     m_links[ml.linkId] = ml;
     NS_LOG_INFO("Established ISL link " << ml.linkId << " between sat " << srcSatId
                                         << " and sat " << dstSatId << " at "
                                         << ml.dataRate_Gbps << " Gbps");
     return true;
+}
+
+void
+ThzNtnIslLink::CompleteSetup(uint32_t linkId)
+{
+    auto it = m_links.find(linkId);
+    if (it != m_links.end() && it->second.status == ThzNtnIslLinkStatus::ESTABLISHING)
+    {
+        it->second.status = ThzNtnIslLinkStatus::UP;
+    }
 }
 
 void
@@ -272,6 +302,7 @@ ThzNtnIslLink::TeardownLink(uint32_t linkId)
         return;
     }
 
+    it->second.setupEvent.Cancel();
     it->second.status = ThzNtnIslLinkStatus::TEARING_DOWN;
     NS_LOG_INFO("Tearing down ISL link " << linkId);
     it->second.status = ThzNtnIslLinkStatus::DOWN;

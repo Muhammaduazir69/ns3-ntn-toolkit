@@ -121,6 +121,7 @@ set(test_sources
     test/thz-ntn-test-suite.cc
     test/thz-ntn-spectrum-plugins-test.cc
     test/thz-ntn-wave7c-test.cc
+    test/thz-ntn-indepth-test.cc
 )
 
 build_lib(
@@ -140,3 +141,14 @@ build_lib(
         ${libpoint-to-point}
     TEST_SOURCES ${test_sources}
 )
+
+# The in-depth suite (thz-ntn-indepth) flies the packet link over an SGP4 pass
+# (ntn-constellation) and measures it with FlowMonitor. Only the test library
+# links them; ntn-constellation itself depends on thz-ntn, never the reverse.
+if(TARGET thz-ntn-test)
+  target_link_libraries(
+    thz-ntn-test
+    ${libflow-monitor}
+    ntn-constellation
+  )
+endif()

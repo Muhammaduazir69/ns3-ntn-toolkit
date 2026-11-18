@@ -31,6 +31,7 @@
 #include "thz-ntn-isl-channel.h"
 
 #include <ns3/mobility-model.h>
+#include <ns3/event-id.h>
 #include <ns3/object.h>
 #include <ns3/ptr.h>
 
@@ -211,7 +212,10 @@ class ThzNtnIslLink : public Object
         double distance_km;
         double dataRate_Gbps;
         double snr_dB;
+        EventId setupEvent; //!< ESTABLISHING -> UP after LinkSetupTime
     };
+
+    void CompleteSetup(uint32_t linkId);
 
     double m_maxLinkDistance_km;        ///< Maximum ISL distance (km)
     double m_minSnr_dB;                ///< Minimum SNR for link viability (dB)
