@@ -86,6 +86,11 @@ class NtnTdlSpectrumLossModel : public Object
     void ApplyTo(Ptr<SpectrumValue> psd, const std::vector<double>& freqsHz,
                  double elevDeg) const;
 
+    /// Fix the streams of the two normal variates that draw the tap
+    /// coefficients, so a run is reproducible whatever else the scenario
+    /// creates. \return the number of streams used (2).
+    int64_t AssignStreams(int64_t stream);
+
   private:
     std::vector<NtnTdlTap> m_taps;
     std::vector<std::pair<double, double>> m_kTable;

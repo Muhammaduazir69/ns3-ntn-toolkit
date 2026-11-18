@@ -183,6 +183,12 @@ CbrApplication::StopApplication() // Called at time specified by Stop
     }
 }
 
+uint64_t
+CbrApplication::GetRefused() const
+{
+    return m_txRefused;
+}
+
 uint32_t
 CbrApplication::GetSent(void) const
 {
@@ -196,6 +202,14 @@ CbrApplication::ScheduleNextTx()
 {
     NS_LOG_FUNCTION(this);
 
+    // The Interval attribute documents zero as "no sending". Scheduling a send
+    // every 0 s instead re-armed the event at the same instant forever, so
+    // simulated time never advanced and the run never ended.
+    if (!m_interval.IsStrictlyPositive())
+    {
+        NS_LOG_WARN("CbrApplication: Interval " << m_interval << " is not positive, not sending");
+        return;
+    }
     m_sendEvent = Simulator::Schedule(m_interval, &CbrApplication::SendPacket, this);
 }
 
@@ -229,8 +243,25 @@ CbrApplication::SendPacket()
         packet->AddPacketTag(TrafficTimeTag(Simulator::Now()));
     }
 
+    // Count and trace only what the socket accepted. A UDP socket with no
+    // route to the peer refuses the packet (Send returns -1, errno
+    // ERROR_NOROUTETOHOST); counting it anyway made GetSent() and the Tx
+    // trace report traffic that never left the node, so a delivery ratio
+    // computed from them blamed the link for a routing failure.
+    if (m_socket->Send(packet) < 0)
+    {
+        ++m_txRefused;
+        if (m_enableSeqTsSizeHeader)
+        {
+            --m_seq; // the receiver must not count a refused packet as lost on the link
+        }
+        NS_LOG_WARN("CbrApplication: socket refused a " << m_pktSize << " byte packet, errno "
+                                                        << m_socket->GetErrno());
+        m_lastStartTime = Simulator::Now();
+        ScheduleNextTx();
+        return;
+    }
     m_txTrace(packet);
-    m_socket->Send(packet);
     m_totTxBytes += m_pktSize;
     if (InetSocketAddress::IsMatchingType(m_peer))
     {

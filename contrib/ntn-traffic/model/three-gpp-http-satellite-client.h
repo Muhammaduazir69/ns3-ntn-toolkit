@@ -168,6 +168,22 @@ class ThreeGppHttpSatelliteClient : public Application
     static std::string GetStateString(State_t state);
 
     /**
+     * Number of connection attempts that failed (refused by the peer, no
+     * route, or an invalid server address). Each failure is retried after
+     * the `ConnectionRetryInterval` attribute unless it is zero.
+     * @return the number of failed connection attempts so far
+     */
+    uint32_t GetConnectionFailures() const;
+
+    /**
+     * Assign fixed random variable streams to the HTTP variables this client
+     * draws request sizes, parsing and reading times from.
+     * @param stream first stream index to use
+     * @return the number of stream indices assigned
+     */
+    int64_t AssignStreams(int64_t stream) override;
+
+    /**
      * Common callback signature for `ConnectionEstablished`, `RxMainObject`, and
      * `RxEmbeddedObject` trace sources.
      * @param httpClient Pointer to this instance of ThreeGppHttpSatelliteClient,
@@ -194,7 +210,10 @@ class ThreeGppHttpSatelliteClient : public Application
     void ConnectionSucceededCallback(Ptr<Socket> socket);
     /**
      * Invoked when #m_socket cannot establish a connection with the web server.
-     * Simulation will stop and error will be raised.
+     * The failure is counted, fired on the `ConnectionFailed` trace and, unless
+     * `ConnectionRetryInterval` is zero, a new connection is attempted after
+     * that interval. (It used to raise a fatal error, so one refused SYN, for
+     * example to a gateway that is not up yet, ended the whole simulation.)
      * @param socket Pointer to the socket where the event originates from.
      */
     void ConnectionFailedCallback(Ptr<Socket> socket);
@@ -371,6 +390,10 @@ class ThreeGppHttpSatelliteClient : public Application
     uint16_t m_remoteServerPort;
     /// Time of request for main object
     Time m_requestTime;
+    /// The `ConnectionRetryInterval` attribute.
+    Time m_connectionRetryInterval;
+    /// Failed connection attempts.
+    uint32_t m_connectionFailures{0};
 
     // TRACE SOURCES
 
@@ -378,6 +401,8 @@ class ThreeGppHttpSatelliteClient : public Application
     ns3::TracedCallback<Ptr<const ThreeGppHttpSatelliteClient>> m_connectionEstablishedTrace;
     /// The `ConnectionClosed` trace source.
     ns3::TracedCallback<Ptr<const ThreeGppHttpSatelliteClient>> m_connectionClosedTrace;
+    /// The `ConnectionFailed` trace source.
+    ns3::TracedCallback<Ptr<const ThreeGppHttpSatelliteClient>> m_connectionFailedTrace;
     /// The `Tx` trace source.
     ns3::TracedCallback<Ptr<const Packet>> m_txTrace;
     /// The `TxMainObjectRequest` trace source.
@@ -422,6 +447,8 @@ class ThreeGppHttpSatelliteClient : public Application
      * elapsed.
      */
     EventId m_eventParseMainObject;
+    /// A pending reconnection after a failed attempt.
+    EventId m_eventRetryConnection;
 
 }; // end of `class ThreeGppHttpSatelliteClient`
 

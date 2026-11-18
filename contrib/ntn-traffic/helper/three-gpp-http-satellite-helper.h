@@ -207,9 +207,12 @@ class ThreeGppHttpHelper
     void SetServerAttribute(std::string name, const AttributeValue& value);
 
     /**
-     * @brief Helper function used to set the ThreeGppHttpVariables attributes
-     *        used by this helper instance. Currently, only number of videos
-     *        specified in the Variables class is used.
+     * @brief Set a ThreeGppHttpVariables attribute (object sizes, reading and
+     *        parsing times, request size, ...) for every client and server
+     *        installed afterwards. Each installed application gets its own
+     *        ThreeGppHttpVariables instance carrying these values, so the
+     *        applications keep independent random streams. (This used to set
+     *        an object no application ever read, so it had no effect.)
      *
      * @param name the name of the application attribute to set
      * @param value the value of the application attribute to set
@@ -276,7 +279,8 @@ class ThreeGppHttpHelper
   private:
     ThreeGppHttpSatelliteServerHelper* m_serverHelper;
     ThreeGppHttpSatelliteClientHelper* m_clientHelper;
-    Ptr<ThreeGppHttpVariables> m_httpVariables;
+    ObjectFactory m_variablesFactory; ///< ThreeGppHttpVariables with the user's attributes
+    bool m_variablesConfigured{false}; ///< SetVariablesAttribute() was called
     ApplicationContainer m_lastInstalledClients;
     ApplicationContainer m_lastInstalledServer;
 

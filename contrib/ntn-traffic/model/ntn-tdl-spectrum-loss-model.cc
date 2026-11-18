@@ -174,6 +174,14 @@ NtnTdlSpectrumLossModel::ComputeGains(const std::vector<double>& freqsHz, double
     return gains;
 }
 
+int64_t
+NtnTdlSpectrumLossModel::AssignStreams(int64_t stream)
+{
+    m_reRng->SetStream(stream);
+    m_imRng->SetStream(stream + 1);
+    return 2;
+}
+
 void
 NtnTdlSpectrumLossModel::ApplyTo(Ptr<SpectrumValue> psd, const std::vector<double>& freqsHz,
                                  double elevDeg) const

@@ -31,6 +31,7 @@
 
 #include "ns3/ipv4.h"
 #include "ns3/names.h"
+#include "ns3/pointer.h"
 
 #include <string>
 
@@ -142,7 +143,7 @@ ThreeGppHttpHelper::ThreeGppHttpHelper()
     Address invalidAddr;
     m_clientHelper = new ThreeGppHttpSatelliteClientHelper(invalidAddr);
     m_serverHelper = new ThreeGppHttpSatelliteServerHelper(invalidAddr);
-    m_httpVariables = CreateObject<ThreeGppHttpVariables>();
+    m_variablesFactory.SetTypeId(ThreeGppHttpVariables::GetTypeId());
 }
 
 ThreeGppHttpHelper::~ThreeGppHttpHelper()
@@ -166,7 +167,8 @@ ThreeGppHttpHelper::SetServerAttribute(std::string name, const AttributeValue& v
 void
 ThreeGppHttpHelper::SetVariablesAttribute(std::string name, const AttributeValue& value)
 {
-    m_httpVariables->SetAttribute(name, value);
+    m_variablesFactory.Set(name, value);
+    m_variablesConfigured = true;
 }
 
 ApplicationContainer
@@ -193,6 +195,18 @@ ThreeGppHttpHelper::InstallUsingIpv4(Ptr<Node> serverNode, NodeContainer clientN
         m_clientHelper->SetAttribute("RemoteServerAddress", AddressValue(serverAddress));
         m_lastInstalledClients = m_clientHelper->Install(clientNodes);
         ret.Add(m_lastInstalledClients);
+
+        if (m_variablesConfigured)
+        {
+            // One variables object per application, so the server and each
+            // client draw from their own streams with the user's parameters.
+            for (auto it = ret.Begin(); it != ret.End(); ++it)
+            {
+                (*it)->SetAttribute(
+                    "Variables",
+                    PointerValue(m_variablesFactory.Create<ThreeGppHttpVariables>()));
+            }
+        }
     }
 
     return ret;

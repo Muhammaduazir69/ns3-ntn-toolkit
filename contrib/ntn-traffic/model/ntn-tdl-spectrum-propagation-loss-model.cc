@@ -108,10 +108,11 @@ NtnTdlSpectrumPropagationLossModel::DoCalcRxPowerSpectralDensity(
 int64_t
 NtnTdlSpectrumPropagationLossModel::DoAssignStreams(int64_t stream)
 {
-    // NtnTdlSpectrumLossModel owns its own normal variates and exposes no
-    // stream API, so there is nothing to hand down. Returning 0 is the honest
-    // answer rather than pretending a stream was assigned.
-    return 0;
+    // The tap coefficients are the only random draws. This used to return 0
+    // and leave them on automatically numbered streams, so AssignStreams()
+    // could not make a run reproducible: two adapters given the same stream
+    // shaped the same PSD differently.
+    return m_tdl ? m_tdl->AssignStreams(stream) : 0;
 }
 
 } // namespace ns3

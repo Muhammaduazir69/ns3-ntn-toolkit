@@ -70,6 +70,13 @@ class CbrApplication : public Application
     uint32_t GetSent(void) const;
 
     /**
+     * @brief Number of packets the socket refused (for example no route to the
+     *        peer). These are neither counted by GetSent() nor fired on "Tx".
+     * @return the number of refused packets
+     */
+    uint64_t GetRefused() const;
+
+    /**
      * @brief Get the destination address of the application
      * @return the destination address
      */
@@ -102,6 +109,7 @@ class CbrApplication : public Application
     bool m_isStatisticsTagsEnabled; ///< `EnableStatisticsTags` attribute.
     bool m_enableSeqTsSizeHeader{false}; ///< `EnableSeqTsSizeHeader` attribute.
     uint32_t m_seq{0};                   ///< next SeqTsSizeHeader sequence number
+    uint64_t m_txRefused{0};             ///< packets the socket refused
     TracedCallback<Ptr<const Packet>> m_txTrace;
 
     // inherited from Application base class.

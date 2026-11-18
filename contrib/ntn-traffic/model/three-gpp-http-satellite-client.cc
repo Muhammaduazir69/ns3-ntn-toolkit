@@ -21,7 +21,7 @@
 
 #include "three-gpp-http-satellite-client.h"
 
-#include "three-gpp-http-variables.h"
+#include "ns3/three-gpp-http-variables.h"
 
 #include "ns3/callback.h"
 #include "ns3/double.h"
@@ -80,6 +80,17 @@ ThreeGppHttpSatelliteClient::GetTypeId()
                           UintegerValue(80), // the default HTTP port
                           MakeUintegerAccessor(&ThreeGppHttpSatelliteClient::m_remoteServerPort),
                           MakeUintegerChecker<uint16_t>())
+            .AddAttribute("ConnectionRetryInterval",
+                          "Wait before a new connection attempt after one failed (peer "
+                          "refused, no route, invalid address). Zero disables the retry.",
+                          TimeValue(Seconds(1)),
+                          MakeTimeAccessor(&ThreeGppHttpSatelliteClient::m_connectionRetryInterval),
+                          MakeTimeChecker(Seconds(0)))
+            .AddTraceSource(
+                "ConnectionFailed",
+                "A connection attempt to the destination web server failed.",
+                MakeTraceSourceAccessor(&ThreeGppHttpSatelliteClient::m_connectionFailedTrace),
+                "ns3::ThreeGppHttpSatelliteClient::TracedCallback")
             .AddTraceSource(
                 "ConnectionEstablished",
                 "Connection to the destination web server has been established.",
@@ -155,6 +166,19 @@ ThreeGppHttpSatelliteClient::GetSocket() const
     return m_socket;
 }
 
+uint32_t
+ThreeGppHttpSatelliteClient::GetConnectionFailures() const
+{
+    return m_connectionFailures;
+}
+
+int64_t
+ThreeGppHttpSatelliteClient::AssignStreams(int64_t stream)
+{
+    NS_LOG_FUNCTION(this << stream);
+    return m_httpVariables ? m_httpVariables->AssignStreams(stream) : 0;
+}
+
 ThreeGppHttpSatelliteClient::State_t
 ThreeGppHttpSatelliteClient::GetState() const
 {
@@ -221,6 +245,9 @@ ThreeGppHttpSatelliteClient::StartApplication()
 
     if (m_state == NOT_STARTED)
     {
+        // As the upstream client does: apply attribute changes that only take
+        // effect at initialization.
+        m_httpVariables->Initialize();
         OpenConnection();
     }
     else
@@ -236,6 +263,11 @@ ThreeGppHttpSatelliteClient::StopApplication()
 
     SwitchToState(STOPPED);
     CancelAllPendingEvents();
+    Simulator::Cancel(m_eventRetryConnection);
+    if (!m_socket)
+    {
+        return;
+    }
     m_socket->Close();
     m_socket->SetConnectCallback(MakeNullCallback<void, Ptr<Socket>>(),
                                  MakeNullCallback<void, Ptr<Socket>>());
@@ -270,8 +302,30 @@ ThreeGppHttpSatelliteClient::ConnectionFailedCallback(Ptr<Socket> socket)
 
     if (m_state == CONNECTING)
     {
-        NS_FATAL_ERROR("Client failed to connect" << " to remote address " << m_remoteServerAddress
-                                                  << " port " << m_remoteServerPort << ".");
+        ++m_connectionFailures;
+        NS_LOG_WARN(this << " Client failed to connect to remote address " << m_remoteServerAddress
+                         << " port " << m_remoteServerPort << " (attempt failure "
+                         << m_connectionFailures << ").");
+        if (socket)
+        {
+            socket->SetConnectCallback(MakeNullCallback<void, Ptr<Socket>>(),
+                                       MakeNullCallback<void, Ptr<Socket>>());
+            socket->SetCloseCallbacks(MakeNullCallback<void, Ptr<Socket>>(),
+                                      MakeNullCallback<void, Ptr<Socket>>());
+            socket->SetRecvCallback(MakeNullCallback<void, Ptr<Socket>>());
+        }
+        m_connectionFailedTrace(this);
+        if (m_connectionRetryInterval.IsStrictlyPositive())
+        {
+            m_eventRetryConnection = Simulator::Schedule(m_connectionRetryInterval,
+                                                         &ThreeGppHttpSatelliteClient::OpenConnection,
+                                                         this);
+        }
+    }
+    else if (m_state == STOPPED)
+    {
+        // The application stopped while the attempt was in flight.
+        return;
     }
     else
     {
@@ -371,11 +425,14 @@ ThreeGppHttpSatelliteClient::OpenConnection()
     NS_LOG_FUNCTION(this);
 
     if (m_state == NOT_STARTED || m_state == EXPECTING_EMBEDDED_OBJECT ||
-        m_state == PARSING_MAIN_OBJECT || m_state == READING)
+        m_state == PARSING_MAIN_OBJECT || m_state == READING || m_state == CONNECTING)
     {
         m_socket = Socket::CreateSocket(GetNode(), TcpSocketFactory::GetTypeId());
 
-        int ret;
+        // -1 unless a Connect() below accepts the address: an empty or
+        // non-IP RemoteServerAddress used to leave the client in CONNECTING
+        // for ever with no sign of a problem.
+        int ret = -1;
 
         if (Ipv4Address::IsMatchingType(m_remoteServerAddress))
         {
@@ -420,6 +477,15 @@ ThreeGppHttpSatelliteClient::OpenConnection()
         m_socket->SetRecvCallback(
             MakeCallback(&ThreeGppHttpSatelliteClient::ReceivedDataCallback, this));
         m_socket->SetAttribute("MaxSegLifetime", DoubleValue(0.02)); // 20 ms.
+
+        if (ret != 0)
+        {
+            // Refused synchronously (no route, invalid address): take the same
+            // failure path as a refused SYN, after the callbacks are in place.
+            Simulator::ScheduleNow(&ThreeGppHttpSatelliteClient::ConnectionFailedCallback,
+                                   this,
+                                   m_socket);
+        }
 
     } // end of `if (m_state == {NOT_STARTED, EXPECTING_EMBEDDED_OBJECT, PARSING_MAIN_OBJECT,
       // READING})`
