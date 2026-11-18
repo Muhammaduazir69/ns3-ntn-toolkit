@@ -78,8 +78,17 @@ main(int argc, char* argv[])
     double duration = 12.0;
     uint32_t numUes = 4;
     double uavAltM = 100.0;
-    double gnbTxDbm = -7.0; // aerial-platform gNB Tx power; tuned so the short A2G
-                            // range lands in a realistic SINR band (error model active)
+    // Aerial-platform gNB conducted power: the TS 38.104 Table 6.2.1-1 Local Area
+    // BS class limit (24 dBm per carrier), the small-cell class a power-limited
+    // UAV or HAPS payload fits. It was -7 dBm (31 dB under that, and under a
+    // 23 dBm handset), "tuned" for an SINR band: with the TR 36.777 UMa_AV NLOS
+    // loss (about 110 dB at 540 m) the far UEs sat near 0 dB SINR, the cell
+    // carried about 6 Mb/s of the 20 Mb/s offered, the backlog grew to a 3.7 s
+    // mean one-way delay and 96 % of the packets missed a 1 s deadline.
+    double gnbTxDbm = 24.0;
+    // Per-UE eMBB rate. 4 x 5 Mb/s is within the cell; a larger value is the
+    // overload case (the backlog grows at offered minus capacity).
+    double offeredLoadMbps = 5.0;
     double freqGhz = 2.185; // TS 38.101-5 n256 downlink block (2170-2200 MHz). Was 2.0,
                               // which is n256 UPLINK and never conformant as a DL carrier.
     std::string linkStr = "NLOS";
@@ -91,7 +100,9 @@ main(int argc, char* argv[])
     cmd.AddValue("duration", "Simulation duration (s)", duration);
     cmd.AddValue("numUes", "Number of ground UEs", numUes);
     cmd.AddValue("uavAlt", "UAV/HAPS aerial gNB altitude AGL (m)", uavAltM);
-    cmd.AddValue("gnbTxDbm", "Aerial gNB Tx power (dBm)", gnbTxDbm);
+    cmd.AddValue("gnbTxDbm", "Aerial gNB conducted Tx power (dBm); 24 = TS 38.104 Local Area BS", gnbTxDbm);
+    cmd.AddValue("offeredLoadMbps", "Per-UE eMBB offered load (Mb/s); above the cell capacity it overloads",
+                 offeredLoadMbps);
     cmd.AddValue("freqGhz", "Carrier frequency (GHz)", freqGhz);
     cmd.AddValue("link", "TR 36.777 link branch: LOS | NLOS", linkStr);
     cmd.AddValue("scenario", "TR 36.777 scenario: UMa_AV | RMa_AV | UMi_AV", scenarioStr);
@@ -185,7 +196,8 @@ main(int argc, char* argv[])
     // NT-02: declared as CONDUCTED power at the array input. This carrier has
     // no TR 38.821 Set-1 reference in the toolkit, so the EIRP health gate
     // reports "not asserted" rather than certifying an uncalibrated budget.
-    rs.SetSatConductedPowerDbm(gnbTxDbm); // short-range A2G gNB Tx (not a LEO link) — kept as-is
+    rs.SetSatConductedPowerDbm(gnbTxDbm); // short-range A2G gNB Tx (not a LEO link)
+    rs.SetEmbbRate(DataRate(static_cast<uint64_t>(offeredLoadMbps * 1e6)));
     rs.SetRadioBackend(radio == "mmwave" ? NtnRealStackHelper::RadioBackend::Mmwave
                                          : NtnRealStackHelper::RadioBackend::Nr);
     if (radio != "mmwave")
