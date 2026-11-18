@@ -22,6 +22,9 @@
 #include "ns3/flow-monitor-helper.h"
 #include "ns3/internet-module.h"
 #include "ns3/oran-ntn-e2-interface.h"
+#include "ns3/ns3-ai-gym-interface.h"
+#include "ns3/oran-ntn-gym-handover.h"
+#include "ns3/oran-ntn-phy-kpm-extractor.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/simulator.h"
 #include "ns3/string.h"
@@ -432,6 +435,50 @@ class OranE2FlowMonitorKpmTest : public TestCase
     }
 };
 
+/**
+ * The gym env must expose the action an external agent chose (the Python path
+ * steps it through Notify(), so the scenario never sees the container), and
+ * the PHY-KPM extractor must report exactly the SINR it was fed for a
+ * registered RNTI while an unregistered UE reads as "no data" (sinrMeasured
+ * false). Both were silently wrong in the gym handover example until 18 Nov.
+ */
+class OranGymLastActionAndExtractorFeedTest : public TestCase
+{
+  public:
+    OranGymLastActionAndExtractorFeedTest()
+        : TestCase("gym env reports the last action; extractor reports the fed SINR")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        Ptr<OranNtnGymHandover> env = CreateObject<OranNtnGymHandover>();
+        NS_TEST_ASSERT_MSG_EQ(env->GetLastAction(), 0u, "no action yet reads as stay");
+        for (uint32_t a : {2u, 0u, 1u})
+        {
+            Ptr<OpenGymDiscreteContainer> act = CreateObject<OpenGymDiscreteContainer>(4);
+            act->SetValue(a);
+            env->ExecuteActions(act); // no xApp: nothing is routed, the action is still recorded
+            NS_TEST_ASSERT_MSG_EQ(env->GetLastAction(), a, "GetLastAction returns the executed action");
+        }
+
+        Ptr<OranNtnPhyKpmExtractor> ex = CreateObject<OranNtnPhyKpmExtractor>();
+        ex->SetRadioGeometry(20e6, 7.0);
+        const E2KpmReport none = ex->GetRealKpmReport(0);
+        NS_TEST_ASSERT_MSG_EQ(none.sinrMeasured, false, "an unfed UE is not labelled measured");
+        ex->RegisterRnti(7, 0, 1);
+        ex->IngestMeasuredSample(7, 18.25, 125000, 0.08);
+        ex->IngestMeasuredSample(99, 3.0, 1000, 0.5); // unknown RNTI: dropped
+        const E2KpmReport rep = ex->GetRealKpmReport(0);
+        NS_TEST_ASSERT_MSG_EQ(rep.sinrMeasured, true, "a fed UE is labelled measured");
+        NS_TEST_ASSERT_MSG_EQ_TOL(rep.sinr_dB, 18.25, 1e-9, "report carries the ingested SINR");
+        NS_TEST_ASSERT_MSG_EQ(rep.gnbId, 1u, "serving cell from RegisterRnti");
+        // RSRP = SINR + kTB + NF at 20 MHz: -174 + 73.01 + 7 = -93.99 dBm.
+        NS_TEST_ASSERT_MSG_EQ_TOL(rep.rsrp_dBm, 18.25 - 93.9897, 1e-3, "RSRP against the configured carrier");
+    }
+};
+
 class OranNtnInDepthTestSuite : public TestSuite
 {
   public:
@@ -443,6 +490,7 @@ class OranNtnInDepthTestSuite : public TestSuite
         AddTestCase(new OranE2EventTriggerTest, Duration::QUICK);
         AddTestCase(new OranE2FeederOutageBufferTest, Duration::QUICK);
         AddTestCase(new OranE2FlowMonitorKpmTest, Duration::QUICK);
+        AddTestCase(new OranGymLastActionAndExtractorFeedTest, Duration::QUICK);
     }
 };
 

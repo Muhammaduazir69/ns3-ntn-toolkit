@@ -447,6 +447,12 @@ OranNtnGymHandover::GetExtraInfo()
     return oss.str();
 }
 
+uint32_t
+OranNtnGymHandover::GetLastAction() const
+{
+    return m_lastAction;
+}
+
 bool
 OranNtnGymHandover::ExecuteActions(Ptr<OpenGymDataContainer> action)
 {
@@ -460,6 +466,7 @@ OranNtnGymHandover::ExecuteActions(Ptr<OpenGymDataContainer> action)
     }
 
     uint32_t chosenAction = discrete->GetValue();
+    m_lastAction = chosenAction;
     NS_LOG_DEBUG("Action=" << chosenAction << " for UE " << m_currentUeId);
 
     m_handoverExecuted = false;

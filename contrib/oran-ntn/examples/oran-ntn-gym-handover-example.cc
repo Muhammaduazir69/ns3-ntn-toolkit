@@ -303,6 +303,24 @@ main(int argc, char* argv[])
                         hoPredict->SetUeServingCell(ue, s + 1);
                     }
                 }
+                // D3 in the MEASURED mode too. The extractor feed lived only in
+                // the legacy branch below, so in the default mode
+                // GetRealKpmReport(0) found no UE state and every step printed
+                // kpmExtractorSINR = 0.00 dB, a live-looking number with nothing
+                // behind it.
+                const double sinr = rs.GetUeRecentSinrDb(ue);
+                const uint16_t rnti = rs.GetUeRnti(ue);
+                if (rnti == 0 || std::isnan(sinr))
+                {
+                    continue;
+                }
+                if (registeredRnti.insert(ue).second)
+                {
+                    kpmExtractor->RegisterRnti(rnti, ue, cell);
+                }
+                double tbler = rs.GetUeRecentTbler(ue);
+                kpmExtractor->IngestMeasuredSample(rnti, sinr, rs.GetUeRxBytes(ue),
+                                                   std::isnan(tbler) ? -1.0 : tbler);
             }
         });
     }
@@ -493,6 +511,13 @@ main(int argc, char* argv[])
         rs.RegisterPeriodicCallback(Seconds(1.0), [&](Time) {
             env->SetCurrentUe(0);
             env->Notify(); // observation -> Python, action -> ExecuteActions
+            // The summary line counted steps, handover actions and reward only
+            // in the in-process branch, so a 59-step Python episode printed
+            // "steps=0 ho_actions=0 episode_reward=0.000". Count them here from
+            // the env itself (GetReward() is a pure read of the step's state).
+            ++g_steps;
+            g_hoActions += env->GetLastAction() > 0 ? 1 : 0;
+            g_rewardSum += env->GetReward();
         });
         Simulator::Schedule(Seconds(duration - 0.01), [&]() { env->NotifySimulationEnd(); });
         std::printf("# --gym=1: stepping a Python ns3-ai RL agent every 1.0 s\n");

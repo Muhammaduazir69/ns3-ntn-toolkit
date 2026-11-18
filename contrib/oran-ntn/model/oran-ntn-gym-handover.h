@@ -71,6 +71,16 @@ class OranNtnGymHandover : public OpenGymEnv
      */
     void UpdatePostAction(double newSinr, double newTte, bool pingPongDetected);
 
+    /**
+     * \brief The discrete action most recently passed to ExecuteActions()
+     *        (0 = stay, i > 0 = hand over to candidate i - 1).
+     *
+     * Lets a scenario that steps an external (Python) agent through Notify()
+     * count the agent's handover requests; ExecuteActions() is called inside
+     * Notify(), so the caller never sees the action container itself.
+     */
+    uint32_t GetLastAction() const;
+
   protected:
     void DoDispose() override;
 
@@ -94,6 +104,7 @@ class OranNtnGymHandover : public OpenGymEnv
     uint32_t m_servingCellPrev{0};
     uint32_t m_servingCellPrevPrev{0};
     bool m_handoverExecuted;
+    uint32_t m_lastAction{0};
     double m_hoLeadTime;
 
     // Episode tracking
