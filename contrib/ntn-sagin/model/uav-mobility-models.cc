@@ -131,13 +131,19 @@ UavWaypointMobilityModel::Tick()
     }
     else
     {
-        m_position.x += m_velocity.x * dt;
-        m_position.y += m_velocity.y * dt;
-        m_position.z += m_velocity.z * dt;
+        // Arrive when the target is within one tick of flight. The check used
+        // to run AFTER the move, so the arrival tick could jump up to twice
+        // the configured speed (one full step plus the snap to the target).
         Vector d(m_target.x - m_position.x, m_target.y - m_position.y,
                  m_target.z - m_position.z);
         double remaining = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
-        if (remaining < m_speedMps * dt)
+        if (remaining > m_speedMps * dt)
+        {
+            m_position.x += m_velocity.x * dt;
+            m_position.y += m_velocity.y * dt;
+            m_position.z += m_velocity.z * dt;
+        }
+        else
         {
             m_position = m_target;
             m_paused = true;
@@ -397,13 +403,18 @@ UavSearchPatternMobilityModel::Tick()
         return;  // pattern complete
     }
     double dt = m_tickInterval.GetSeconds();
-    m_current.x += m_velocity.x * dt;
-    m_current.y += m_velocity.y * dt;
-    m_current.z += m_velocity.z * dt;
     Vector tgt = m_waypoints[m_wpIndex];
     Vector d(tgt.x - m_current.x, tgt.y - m_current.y, tgt.z - m_current.z);
     double remaining = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
-    if (remaining < m_speedMps * dt)
+    // Same arrival rule as the waypoint model: never step past the target
+    // (moving first and snapping after could cover up to twice v dt).
+    if (remaining > m_speedMps * dt)
+    {
+        m_current.x += m_velocity.x * dt;
+        m_current.y += m_velocity.y * dt;
+        m_current.z += m_velocity.z * dt;
+    }
+    else
     {
         m_current = tgt;
         m_wpIndex += 1;

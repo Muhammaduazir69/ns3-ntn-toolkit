@@ -120,7 +120,15 @@ HapsMobilityModel::Tick()
     // advancing phase at a rate that keeps |v_horiz| ≈ m_speedMps near the
     // longest portion of the curve.
     double dt = m_tickInterval.GetSeconds();
-    double dphi = m_speedMps * dt / m_radiusM;
+    // The track is a lemniscate of Bernoulli, x = R c / (1 + s^2),
+    // y = R s c / (1 + s^2), whose arc length element is
+    // ds = R dphi / sqrt(1 + s^2). Advancing the phase by v dt / R (the
+    // circle rule used before) flew the figure-eight at 0.83 of the configured
+    // HorizontalSpeed on average and unevenly; step the phase so each tick
+    // covers v dt of track (midpoint rule on the arc-length element).
+    const double s0 = std::sin(m_phase);
+    const double sMid = std::sin(m_phase + 0.5 * m_speedMps * dt * std::sqrt(1.0 + s0 * s0) / m_radiusM);
+    double dphi = m_speedMps * dt * std::sqrt(1.0 + sMid * sMid) / m_radiusM;
     m_phase += dphi;
     if (m_phase > 2.0 * M_PI)
     {

@@ -61,6 +61,7 @@ set(test_sources
     test/ntn-sagin-test-suite.cc
     test/sagin-bpv7-test.cc
     test/sagin-wave7b-test.cc
+    test/ntn-sagin-indepth-test.cc
 )
 
 build_lib(
@@ -81,3 +82,15 @@ build_lib(
     ${libapplications}
   TEST_SOURCES ${test_sources}
 )
+
+# The in-depth suite (ntn-sagin-indepth) routes over live SGP4 satellites
+# (ntn-constellation) projected into the scenario frame by ntn-cho, measured
+# with FlowMonitor. Only the test library links them.
+if(TARGET ntn-sagin-test)
+  target_link_libraries(
+    ntn-sagin-test
+    ${libflow-monitor}
+    ntn-constellation
+    ntn-cho
+  )
+endif()
