@@ -149,6 +149,19 @@ class NrGnbCmacSapProvider
      * \return  the newly allocated random access preamble
      */
     virtual AllocateNcRaPreambleReturnValue AllocateNcRaPreamble(uint16_t rnti) = 0;
+
+    /**
+     * \brief Reserve on this MAC a non-contention RA preamble that another
+     * BWP MAC of the same cell allocated (ntn-patch 17). Under paired FDD the
+     * UE sends its PRACH on the UL BWP while the RRC allocates the dedicated
+     * preamble on the primary (DL) BWP; the UL BWP's MAC must recognize it, or
+     * it answers the handover RACH as a new contention-based access.
+     * \param rnti the RNTI the preamble is allocated to
+     * \param raPreambleId the allocated preamble
+     */
+    virtual void ShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId)
+    {
+    }
 };
 
 /**

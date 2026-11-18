@@ -886,11 +886,22 @@ NrHelper::CreateGnbMac()
 }
 
 Ptr<NrMacScheduler>
-NrHelper::CreateGnbSched()
+NrHelper::CreateGnbSched(uint16_t bwpId)
 {
     NS_LOG_FUNCTION(this);
 
-    auto sched = m_schedFactory.Create<NrMacSchedulerNs3>();
+    Ptr<NrMacSchedulerNs3> sched;
+    auto perBwp = m_schedTypeIdPerBwp.find(bwpId);
+    if (perBwp != m_schedTypeIdPerBwp.end())
+    {
+        ObjectFactory f = m_schedFactory; // same attributes, another type
+        f.SetTypeId(perBwp->second);
+        sched = f.Create<NrMacSchedulerNs3>();
+    }
+    else
+    {
+        sched = m_schedFactory.Create<NrMacSchedulerNs3>();
+    }
     auto dlAmc = m_gnbDlAmcFactory.Create<NrAmc>();
     auto ulAmc = m_gnbUlAmcFactory.Create<NrAmc>();
 
@@ -961,7 +972,7 @@ NrHelper::InstallSingleGnbDevice(
         cc->SetMac(mac);
         phy->GetCam()->SetNrGnbMac(mac);
 
-        auto sched = CreateGnbSched();
+        auto sched = CreateGnbSched(bwpId);
         cc->SetNrMacScheduler(sched);
 
         if (bwpId == 0)
@@ -1441,6 +1452,13 @@ NrHelper::SetSchedulerTypeId(const TypeId& typeId)
 {
     NS_LOG_FUNCTION(this);
     m_schedFactory.SetTypeId(typeId);
+}
+
+void
+NrHelper::SetSchedulerTypeIdForBwp(uint16_t bwpId, const TypeId& typeId)
+{
+    NS_LOG_FUNCTION(this);
+    m_schedTypeIdPerBwp[bwpId] = typeId;
 }
 
 void

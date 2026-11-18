@@ -332,7 +332,8 @@ main(int argc, char* argv[])
             Ptr<NrGnbNetDevice> gnb = DynamicCast<NrGnbNetDevice>(gnbNodes.Get(0)->GetDevice(d));
             if (gnb)
             {
-                gnb->GetPhy(0)->GetSpectrumPhy()->TraceConnectWithoutContext(
+                // The PUSCH arrives on the UL BWP (BWP 1 under paired FDD).
+                gnb->GetPhy(rs.GetUlBwpIndex())->GetSpectrumPhy()->TraceConnectWithoutContext(
                     "RxPacketTraceGnb",
                     MakeCallback(&PuschStats::Rx, &pusch));
             }

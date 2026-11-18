@@ -54,6 +54,7 @@ class NrGnbMacMemberGnbCmacSapProvider : public NrGnbCmacSapProvider
     void UeUpdateConfigurationReq(UeConfig params) override;
     RachConfig GetRachConfig() override;
     AllocateNcRaPreambleReturnValue AllocateNcRaPreamble(uint16_t rnti) override;
+    void ShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId) override;
 
   private:
     NrGnbMac* m_mac;
@@ -116,6 +117,12 @@ NrGnbCmacSapProvider::AllocateNcRaPreambleReturnValue
 NrGnbMacMemberGnbCmacSapProvider::AllocateNcRaPreamble(uint16_t rnti)
 {
     return m_mac->DoAllocateNcRaPreamble(rnti);
+}
+
+void
+NrGnbMacMemberGnbCmacSapProvider::ShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId)
+{
+    m_mac->DoShareNcRaPreamble(rnti, raPreambleId);
 }
 
 // SAP interface between gNB PHY AND MAC
@@ -1610,6 +1617,17 @@ NrGnbMac::DoGetRachConfig()
     rc.raResponseWindowSize = m_raResponseWindowSize;
     rc.connEstFailCount = m_connEstFailCount;
     return rc;
+}
+
+void
+NrGnbMac::DoShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId)
+{
+    NcRaPreambleInfo preambleInfo;
+    const uint32_t expiryIntervalMs =
+        (uint32_t)m_preambleTransMax * ((uint32_t)m_raResponseWindowSize + 5);
+    preambleInfo.expiryTime = Simulator::Now() + MilliSeconds(expiryIntervalMs);
+    preambleInfo.rnti = rnti;
+    m_allocatedNcRaPreambleMap[raPreambleId] = preambleInfo;
 }
 
 NrGnbCmacSapProvider::AllocateNcRaPreambleReturnValue

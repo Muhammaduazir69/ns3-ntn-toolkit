@@ -995,6 +995,8 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     mutable uint64_t m_dlHarqFeedbackDisabledTx{0};
     /// ntn-patch 16: limit UL PRBs by the reported power headroom (attribute PhrUlRbLimit).
     bool m_phrUlRbLimit{false};
+    /// ntn-patch 17: MAC subheader bytes per UL grant not charged to the buffer.
+    uint32_t m_ulGrantSubheaderBytes{0};
     /// PHR MAC CEs received.
     uint64_t m_phrReceived{0};
     /// rnti, PH (dB, decoded), M_RB of the PUSCH carrying the PHR, resulting UL PRB limit.

@@ -665,6 +665,15 @@ NrUeManager::PrepareHandover(uint16_t cellId)
             uint16_t rnti = m_rrc->AddUe(NrUeManager::HANDOVER_JOINING, componentCarrierId);
             NrGnbCmacSapProvider::AllocateNcRaPreambleReturnValue anrcrv =
                 m_rrc->m_cmacSapProvider.at(componentCarrierId)->AllocateNcRaPreamble(rnti);
+            // ntn-patch 17: every BWP MAC of the cell recognizes the preamble
+            // (under paired FDD the PRACH arrives on the UL BWP).
+            for (std::size_t cc = 0; anrcrv.valid && cc < m_rrc->m_cmacSapProvider.size(); ++cc)
+            {
+                if (cc != componentCarrierId)
+                {
+                    m_rrc->m_cmacSapProvider.at(cc)->ShareNcRaPreamble(rnti, anrcrv.raPreambleId);
+                }
+            }
             if (!anrcrv.valid)
             {
                 NS_LOG_INFO(this << " failed to allocate a preamble for non-contention based RA => "
@@ -2778,6 +2787,15 @@ NrGnbRrc::DoRecvHandoverRequest(NrEpcX2SapUser::HandoverRequestParams req)
     ueManager->SetImsi(req.mmeUeS1apId);
     NrGnbCmacSapProvider::AllocateNcRaPreambleReturnValue anrcrv =
         m_cmacSapProvider.at(componentCarrierId)->AllocateNcRaPreamble(rnti);
+    // ntn-patch 17: every BWP MAC of the cell recognizes the preamble (under
+    // paired FDD the handover PRACH arrives on the UL BWP).
+    for (std::size_t cc = 0; anrcrv.valid && cc < m_cmacSapProvider.size(); ++cc)
+    {
+        if (cc != componentCarrierId)
+        {
+            m_cmacSapProvider.at(cc)->ShareNcRaPreamble(rnti, anrcrv.raPreambleId);
+        }
+    }
     if (!anrcrv.valid)
     {
         NS_LOG_INFO(

@@ -4513,8 +4513,8 @@ class RaWindowStartOffsetTest : public TestCase
                 Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(rig.ue.Get(0)->GetDevice(d));
                 if (dev)
                 {
-                    NrHelper::GetUeMac(dev, 0)->SetAttribute("RaResponseWindowStartOffset",
-                                                             TimeValue(forcedOffset));
+                    NrHelper::GetUeMac(dev, rs.GetUlBwpIndex())
+                        ->SetAttribute("RaResponseWindowStartOffset", TimeValue(forcedOffset));
                 }
             }
         }
@@ -4872,7 +4872,12 @@ class RetxBsrTimerTest : public TestCase
         rs.SetOutputDir("test-ntn-retx-bsr");
         // The timer is tested on the weak full-band PUSCH it was written for;
         // the Wave 8 PHR PRB limit (tested below) makes that uplink robust.
+        // Wave 9: and on the shared-slot carrier with nr's BSR in every TB,
+        // where a lost BSR stalled the uplink; paired FDD and BSR triggering
+        // are tested by FddPairingTest and BsrTriggeringTest.
         rs.SetUlPowerHeadroomPrbLimit(false);
+        rs.SetDuplexMode(NtnRealStackHelper::DuplexMode::Tdd);
+        rs.SetBsrTriggering(false);
         if (!timerOn)
         {
             rs.SetRetxBsrTimer(Time(0));
@@ -4985,6 +4990,11 @@ class UlPowerHeadroomPrbLimitTest : public TestCase
         rs.SetSimTime(Seconds(5.0));
         rs.SetOutputDir("test-ntn-ul-phr");
         rs.SetUlPowerHeadroomPrbLimit(limit);
+        // Wave 9: calibrated on the shared-slot carrier with nr's BSR in every
+        // TB (the zenith scene is static, so the margins below hold for this
+        // fading realization); FddPairingTest checks the PHR loop under FDD.
+        rs.SetDuplexMode(NtnRealStackHelper::DuplexMode::Tdd);
+        rs.SetBsrTriggering(false);
         rs.Build(sats, ues);
         o.active = rs.IsUlPowerHeadroomPrbLimitActive();
         o.p0 = rs.GetUlP0NominalPuschDbm();
@@ -4993,7 +5003,7 @@ class UlPowerHeadroomPrbLimitTest : public TestCase
             Ptr<NrGnbNetDevice> gnb = DynamicCast<NrGnbNetDevice>(sats.Get(0)->GetDevice(d));
             if (gnb)
             {
-                gnb->GetPhy(0)->GetSpectrumPhy()->TraceConnectWithoutContext(
+                gnb->GetPhy(rs.GetUlBwpIndex())->GetSpectrumPhy()->TraceConnectWithoutContext(
                     "RxPacketTraceGnb",
                     MakeCallback(&Out::Rx, &o));
             }
@@ -5004,7 +5014,7 @@ class UlPowerHeadroomPrbLimitTest : public TestCase
             ueDev = DynamicCast<NrUeNetDevice>(ues.Get(0)->GetDevice(d));
         }
         NS_ABORT_IF(!ueDev);
-        ueDev->GetPhy(0)->GetUplinkPowerControl()->TraceConnectWithoutContext(
+        ueDev->GetPhy(rs.GetUlBwpIndex())->GetUplinkPowerControl()->TraceConnectWithoutContext(
             "ReportPuschTxPower",
             MakeBoundCallback(+[](Out* out, uint16_t, uint16_t, double dbm) {
                                   out->maxPuschDbm = std::max(out->maxPuschDbm, dbm);
@@ -5092,6 +5102,381 @@ class UlPowerHeadroomPrbLimitTest : public TestCase
             Simulator::Destroy();
         }
         Config::SetGlobal("NtnRealStackLinkBudget", StringValue("Tr38821Set1"));
+    }
+};
+
+/// Wave 9: paired FDD on the n256 S-band carrier (TS 38.101-5 Table 5.2-1).
+/// Zenith pass of a Set-1 handheld with a downlink and an uplink CBR flow.
+/// Under FDD the DL BWP (2185 MHz) carries only DL slots and the UL BWP
+/// (1995 MHz) only UL slots, so DL and UL transport blocks occupy the same
+/// symbols of the same slot. Failure paths: forcing TDD (the pre-Wave 9
+/// single carrier) never puts a DL and a UL TB on the same symbol, a carrier
+/// outside an FDD NTN downlink block and the Legacy budget profile stay TDD.
+class FddPairingTest : public TestCase
+{
+  public:
+    FddPairingTest()
+        : TestCase("Wave 9: paired FDD (n256) schedules UL and DL in the same slot and symbol")
+    {
+    }
+
+  private:
+    struct Out
+    {
+        bool fdd{false};
+        double ulHz{0.0};
+        uint8_t ulBwp{0};
+        uint8_t nBwp{0};
+        // (frame, subframe, slot) -> symbol ranges
+        std::map<std::tuple<uint32_t, uint8_t, uint16_t>, std::vector<std::pair<int, int>>> dl;
+        std::map<std::tuple<uint32_t, uint8_t, uint16_t>, std::vector<std::pair<int, int>>> ul;
+        std::set<uint16_t> dlBwps;
+        std::set<uint16_t> ulBwps;
+        uint64_t dlSent{0};
+        uint64_t dlRx{0};
+        uint64_t ulSent{0};
+        uint64_t ulRx{0};
+        uint64_t phrSent{0};
+        uint64_t phrRx{0};
+        double ulSinrSum{0.0};
+        uint64_t ulTbs{0};
+
+        double UlSinrDb() const
+        {
+            return ulTbs ? 10.0 * std::log10(ulSinrSum / ulTbs) : -1e9;
+        }
+
+        void Dl(RxPacketTraceParams p)
+        {
+            dl[{p.m_frameNum, p.m_subframeNum, p.m_slotNum}].emplace_back(p.m_symStart,
+                                                                         p.m_symStart + p.m_numSym);
+            dlBwps.insert(p.m_bwpId);
+        }
+
+        void Ul(RxPacketTraceParams p)
+        {
+            ul[{p.m_frameNum, p.m_subframeNum, p.m_slotNum}].emplace_back(p.m_symStart,
+                                                                         p.m_symStart + p.m_numSym);
+            ulBwps.insert(p.m_bwpId);
+            ulSinrSum += p.m_sinr;
+            ++ulTbs;
+        }
+
+        uint64_t SameSlot() const
+        {
+            uint64_t n = 0;
+            for (const auto& [k, v] : dl)
+            {
+                n += ul.count(k) ? 1 : 0;
+            }
+            return n;
+        }
+
+        uint64_t SameSymbol() const
+        {
+            uint64_t n = 0;
+            for (const auto& [k, dv] : dl)
+            {
+                auto it = ul.find(k);
+                if (it == ul.end())
+                {
+                    continue;
+                }
+                bool overlap = false;
+                for (const auto& a : dv)
+                {
+                    for (const auto& b : it->second)
+                    {
+                        overlap = overlap || (a.first < b.second && b.first < a.second);
+                    }
+                }
+                n += overlap ? 1 : 0;
+            }
+            return n;
+        }
+    };
+
+    Out Run(int mode, const std::string& dir)
+    {
+        Out o;
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(3.0));
+        rs.SetOutputDir(dir);
+        if (mode == 1)
+        {
+            rs.SetDuplexMode(NtnRealStackHelper::DuplexMode::Tdd);
+        }
+        rs.Build(sats, ues);
+        o.fdd = rs.IsFddActive();
+        o.ulHz = rs.GetUlCarrierFrequencyHz();
+        o.ulBwp = rs.GetUlBwpIndex();
+        o.nBwp = rs.GetNrBwpCount();
+        for (uint32_t d = 0; d < sats.Get(0)->GetNDevices(); ++d)
+        {
+            if (Ptr<NrGnbNetDevice> gnb = DynamicCast<NrGnbNetDevice>(sats.Get(0)->GetDevice(d)))
+            {
+                gnb->GetPhy(rs.GetUlBwpIndex())
+                    ->GetSpectrumPhy()
+                    ->TraceConnectWithoutContext("RxPacketTraceGnb", MakeCallback(&Out::Ul, &o));
+            }
+        }
+        for (uint32_t d = 0; d < ues.Get(0)->GetNDevices(); ++d)
+        {
+            if (Ptr<NrUeNetDevice> ue = DynamicCast<NrUeNetDevice>(ues.Get(0)->GetDevice(d)))
+            {
+                ue->GetPhy(rs.GetDlBwpIndex())
+                    ->GetSpectrumPhy()
+                    ->TraceConnectWithoutContext("RxPacketTraceUe", MakeCallback(&Out::Dl, &o));
+            }
+        }
+        PacketSinkHelper dlSinkH("ns3::UdpSocketFactory",
+                                 InetSocketAddress(Ipv4Address::GetAny(), 4010));
+        ApplicationContainer dlSink = dlSinkH.Install(ues.Get(0));
+        CbrHelper dlCbr("ns3::UdpSocketFactory", InetSocketAddress(rs.GetUeIpv4Address(0), 4010));
+        dlCbr.SetConstantTraffic(MilliSeconds(2), 1000);
+        ApplicationContainer dlApp = dlCbr.Install(rs.GetRemoteHost());
+        PacketSinkHelper ulSinkH("ns3::UdpSocketFactory",
+                                 InetSocketAddress(Ipv4Address::GetAny(), 4011));
+        ApplicationContainer ulSink = ulSinkH.Install(rs.GetRemoteHost());
+        CbrHelper ulCbr("ns3::UdpSocketFactory",
+                        InetSocketAddress(rs.GetRemoteHostIpv4Address(), 4011));
+        ulCbr.SetConstantTraffic(MilliSeconds(20), 100);
+        ApplicationContainer ulApp = ulCbr.Install(ues.Get(0));
+        dlApp.Start(Seconds(0.8));
+        ulApp.Start(Seconds(0.8));
+        dlApp.Stop(Seconds(2.6));
+        ulApp.Stop(Seconds(2.6));
+        Simulator::Stop(Seconds(3.0));
+        Simulator::Run();
+        o.dlSent = DynamicCast<CbrApplication>(dlApp.Get(0))->GetSent() / 1000;
+        o.dlRx = DynamicCast<PacketSink>(dlSink.Get(0))->GetTotalRx() / 1000;
+        o.ulSent = DynamicCast<CbrApplication>(ulApp.Get(0))->GetSent() / 100;
+        o.ulRx = DynamicCast<PacketSink>(ulSink.Get(0))->GetTotalRx() / 100;
+        o.phrSent = rs.GetPhrSentCount();
+        o.phrRx = rs.GetPhrReceivedCount();
+        Simulator::Destroy();
+        return o;
+    }
+
+    void DoRun() override
+    {
+        // TS 38.101-5 duplex spacing.
+        NS_TEST_ASSERT_MSG_EQ_TOL(NtnRealStackHelper::PairedUlCarrierHz(2.185e9),
+                                  1.995e9,
+                                  1.0,
+                                  "n256: UL = DL - 190 MHz");
+        NS_TEST_ASSERT_MSG_EQ_TOL(NtnRealStackHelper::PairedUlCarrierHz(1.540e9),
+                                  1.6415e9,
+                                  1.0,
+                                  "n255: UL = DL + 101.5 MHz");
+        NS_TEST_ASSERT_MSG_EQ(NtnRealStackHelper::PairedUlCarrierHz(2.0e9),
+                              0.0,
+                              "2.0 GHz is n256's UPLINK block: no downlink to pair");
+
+        const Out fdd = Run(0, "test-ntn-fdd");
+        const Out tdd = Run(1, "test-ntn-fdd-tdd");
+        std::cout << "  [fdd] FDD: UL " << fdd.ulHz / 1e6 << " MHz on BWP " << +fdd.ulBwp << " of "
+                  << +fdd.nBwp << ", DL slots " << fdd.dl.size() << ", UL slots " << fdd.ul.size()
+                  << ", same slot " << fdd.SameSlot() << ", same symbol " << fdd.SameSymbol()
+                  << ", DL " << fdd.dlRx << "/" << fdd.dlSent << ", UL " << fdd.ulRx << "/"
+                  << fdd.ulSent << "; TDD: same slot " << tdd.SameSlot() << ", same symbol "
+                  << tdd.SameSymbol() << ", DL " << tdd.dlRx << "/" << tdd.dlSent << ", UL "
+                  << tdd.ulRx << "/" << tdd.ulSent << "\n";
+
+        NS_TEST_ASSERT_MSG_EQ(fdd.fdd, true, "Auto pairs the n256 carrier under the Set-1 budget");
+        NS_TEST_ASSERT_MSG_EQ_TOL(fdd.ulHz, 1.995e9, 1.0, "UL carrier at the n256 duplex spacing");
+        NS_TEST_ASSERT_MSG_EQ(+fdd.ulBwp, 1, "UL on the paired BWP");
+        NS_TEST_ASSERT_MSG_EQ(+fdd.nBwp, 2, "one DL and one UL BWP");
+        NS_TEST_ASSERT_MSG_EQ((fdd.dlBwps == std::set<uint16_t>{0}), true, "DL TBs on BWP 0 only");
+        NS_TEST_ASSERT_MSG_EQ((fdd.ulBwps == std::set<uint16_t>{1}), true, "UL TBs on BWP 1 only");
+        NS_TEST_ASSERT_MSG_GT(fdd.ul.size(), 50u, "the uplink was scheduled");
+        NS_TEST_ASSERT_MSG_GT(fdd.SameSymbol(), 10u, "UL and DL TBs share slot and symbols");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(fdd.dlRx * 100, fdd.dlSent * 95, "downlink delivered");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(fdd.ulRx * 100, fdd.ulSent * 80, "uplink delivered");
+        // The UL BWP's power control takes its path loss from the paired DL
+        // BWP's RSRP (TS 38.213 7.1.1). Without it the UE stayed at nr's
+        // initial 100 dB path loss: PUSCH near -44 dB SINR and no PHR at all.
+        std::cout << "  [fdd] PHR " << fdd.phrSent << "/" << fdd.phrRx << ", PUSCH SINR "
+                  << fdd.UlSinrDb() << " dB\n";
+        NS_TEST_ASSERT_MSG_GT(fdd.phrSent, 10u, "PHRs sent from the UL BWP");
+        NS_TEST_ASSERT_MSG_GT(fdd.phrRx, fdd.phrSent / 2, "and decoded by the UL BWP scheduler");
+        NS_TEST_ASSERT_MSG_GT(fdd.UlSinrDb(), -12.0, "the PUSCH is power-controlled on a real PL");
+
+        // Failure path: the shared-slot carrier never overlaps UL and DL.
+        NS_TEST_ASSERT_MSG_EQ(tdd.fdd, false, "Tdd honored");
+        NS_TEST_ASSERT_MSG_EQ(+tdd.nBwp, 1, "one shared BWP");
+        NS_TEST_ASSERT_MSG_GT(tdd.ul.size(), 50u, "the uplink was scheduled under TDD too");
+        NS_TEST_ASSERT_MSG_EQ(tdd.SameSymbol(), 0u, "TDD: no DL and UL TB on the same symbol");
+
+        // Failure paths: no FDD downlink to pair, and the Legacy profile.
+        for (int c = 0; c < 2; ++c)
+        {
+            if (c == 1)
+            {
+                Config::SetGlobal("NtnRealStackLinkBudget", StringValue("Legacy"));
+            }
+            NodeContainer sats;
+            NodeContainer ues;
+            BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+            NtnRealStackHelper rs;
+            rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+            rs.SetNumerology(1);
+            rs.SetSimTime(Seconds(0.2));
+            rs.SetOutputDir("test-ntn-fdd-off");
+            if (c == 0)
+            {
+                rs.SetCarrierFrequencyHz(2.0e9);
+            }
+            rs.Build(sats, ues);
+            NS_TEST_EXPECT_MSG_EQ(rs.IsFddActive(), false, "stays on the shared-slot carrier");
+            NS_TEST_EXPECT_MSG_EQ(+rs.GetNrBwpCount(), 1, "one BWP");
+            NS_TEST_EXPECT_MSG_EQ(+rs.GetUlBwpIndex(), 0, "UL on BWP 0");
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+        Config::SetGlobal("NtnRealStackLinkBudget", StringValue("Tr38821Set1"));
+    }
+};
+
+/// Wave 9 (nr patch 17): TS 38.321 5.4.5 BSR triggering. A Set-1 handheld
+/// at zenith sends a periodic uplink (200 B every 40 ms) on its PRB-limited
+/// PUSCH. With triggering the SHORT_BSR rides only a minority of the UL TBs
+/// (Regular on new data into an empty buffer, Periodic at the 20 ms timer,
+/// Padding when it fits), the periodic BSRs are at least one timer apart, and
+/// the uplink still arrives. Failure paths: nr's default puts a BSR in every
+/// new UL TB, and with periodicBSR-Timer infinity no Periodic BSR is sent.
+class BsrTriggeringTest : public TestCase
+{
+  public:
+    BsrTriggeringTest()
+        : TestCase("Wave 9: BSR only when triggered (TS 38.321 5.4.5, nr patch 17)")
+    {
+    }
+
+  private:
+    struct Out
+    {
+        bool active{false};
+        uint64_t grants{0};
+        uint64_t regular{0};
+        uint64_t periodic{0};
+        uint64_t padding{0};
+        uint64_t unconditional{0};
+        uint64_t sent{0};
+        uint64_t rx{0};
+        std::vector<Time> periodicAt;
+        Time minPeriodicGap{Seconds(100)};
+    };
+
+    static void OnBsr(Out* o, uint64_t, uint16_t, uint8_t type, uint32_t)
+    {
+        if (type == NrUeMac::BSR_PERIODIC)
+        {
+            if (!o->periodicAt.empty())
+            {
+                o->minPeriodicGap = std::min(o->minPeriodicGap, Simulator::Now() - o->periodicAt.back());
+            }
+            o->periodicAt.push_back(Simulator::Now());
+        }
+    }
+
+    Out Run(int mode)
+    {
+        Out o;
+        NodeContainer sats;
+        NodeContainer ues;
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(4.0));
+        rs.SetOutputDir("test-ntn-bsr-trigger");
+        if (mode == 1)
+        {
+            rs.SetBsrTriggering(false);
+        }
+        else if (mode == 2)
+        {
+            rs.SetBsrTriggering(true, Time(0));
+        }
+        rs.Build(sats, ues);
+        o.active = rs.IsBsrTriggeringActive();
+        for (uint32_t d = 0; d < ues.Get(0)->GetNDevices(); ++d)
+        {
+            if (Ptr<NrUeNetDevice> ue = DynamicCast<NrUeNetDevice>(ues.Get(0)->GetDevice(d)))
+            {
+                for (uint32_t b = 0; b < ue->GetCcMapSize(); ++b)
+                {
+                    ue->GetMac(b)->TraceConnectWithoutContext("BsrSent",
+                                                              MakeBoundCallback(&OnBsr, &o));
+                }
+            }
+        }
+        PacketSinkHelper sinkH("ns3::UdpSocketFactory",
+                               InetSocketAddress(Ipv4Address::GetAny(), 4012));
+        ApplicationContainer sink = sinkH.Install(rs.GetRemoteHost());
+        CbrHelper cbr("ns3::UdpSocketFactory",
+                      InetSocketAddress(rs.GetRemoteHostIpv4Address(), 4012));
+        cbr.SetConstantTraffic(MilliSeconds(40), 200);
+        ApplicationContainer app = cbr.Install(ues.Get(0));
+        app.Start(Seconds(1.0));
+        app.Stop(Seconds(3.5));
+        Simulator::Stop(Seconds(4.0));
+        Simulator::Run();
+        o.grants = rs.GetUlNewTxGrantCount();
+        o.regular = rs.GetBsrSentCount(NrUeMac::BSR_REGULAR);
+        o.periodic = rs.GetBsrSentCount(NrUeMac::BSR_PERIODIC);
+        o.padding = rs.GetBsrSentCount(NrUeMac::BSR_PADDING);
+        o.unconditional = rs.GetBsrSentCount(NrUeMac::BSR_UNCONDITIONAL);
+        o.sent = DynamicCast<CbrApplication>(app.Get(0))->GetSent() / 200;
+        o.rx = DynamicCast<PacketSink>(sink.Get(0))->GetTotalRx() / 200;
+        Simulator::Destroy();
+        return o;
+    }
+
+    void DoRun() override
+    {
+        const Out on = Run(0);
+        const Out off = Run(1);
+        const Out noPeriodic = Run(2);
+        auto print = [](const char* tag, const Out& o) {
+            std::cout << "  [bsr] " << tag << ": grants " << o.grants << ", regular " << o.regular
+                      << ", periodic " << o.periodic << ", padding " << o.padding
+                      << ", unconditional " << o.unconditional << ", min periodic gap "
+                      << (o.periodicAt.size() > 1 ? o.minPeriodicGap.GetMilliSeconds() : -1)
+                      << " ms, UL " << o.rx << "/" << o.sent << "\n";
+        };
+        print("triggered", on);
+        print("nr default", off);
+        print("no periodic", noPeriodic);
+
+        NS_TEST_ASSERT_MSG_EQ(on.active, true, "on by default under the Set-1 budget");
+        NS_TEST_ASSERT_MSG_GT(on.grants, 100u, "the uplink was granted");
+        NS_TEST_ASSERT_MSG_EQ(on.unconditional, 0u, "no untriggered BSR");
+        const uint64_t onBsr = on.regular + on.periodic + on.padding;
+        NS_TEST_ASSERT_MSG_LT(onBsr * 2, on.grants, "a BSR in fewer than half of the new UL TBs");
+        NS_TEST_ASSERT_MSG_GT(on.regular, 0u, "Regular BSR on new data into an empty buffer");
+        NS_TEST_ASSERT_MSG_GT(on.periodic, 0u, "Periodic BSR at the periodicBSR-Timer");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(on.minPeriodicGap, MilliSeconds(20),
+                                    "periodic BSRs at least one timer apart");
+        // A 200-byte SDU over 18-byte grants is about a dozen RLC UM segments
+        // at -7 dB PUSCH SINR, so delivery depends on the fading draw; what
+        // triggering must not do is deliver less than a BSR in every TB.
+        NS_TEST_ASSERT_MSG_GT(on.rx, 0u, "uplink delivered with triggering");
+        NS_TEST_ASSERT_MSG_GT_OR_EQ(on.rx + 2, off.rx, "and as well as with a BSR per TB");
+        // Failure path: nr default, a BSR in every new UL TB.
+        NS_TEST_ASSERT_MSG_EQ(off.active, false, "opt-out honored");
+        NS_TEST_ASSERT_MSG_EQ(off.regular + off.periodic + off.padding, 0u, "no triggered BSR");
+        NS_TEST_ASSERT_MSG_EQ((off.unconditional >= off.grants), true, "a BSR in every new UL TB");
+        // Failure path: periodicBSR-Timer infinity.
+        NS_TEST_ASSERT_MSG_EQ(noPeriodic.periodic, 0u, "no Periodic BSR with the timer at infinity");
+        NS_TEST_ASSERT_MSG_GT(noPeriodic.regular, 0u, "Regular BSRs still sent");
     }
 };
 
@@ -5278,6 +5663,8 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new RetxBsrTimerTest, Duration::QUICK);
         AddTestCase(new BwpPowerSplitTest, Duration::QUICK);
         AddTestCase(new UlPowerHeadroomPrbLimitTest, Duration::QUICK);
+        AddTestCase(new FddPairingTest, Duration::QUICK);
+        AddTestCase(new BsrTriggeringTest, Duration::QUICK);
         AddTestCase(new DefaultLinkBudgetIsSet1Test, Duration::QUICK);
         AddTestCase(new FeederGatewayDelayTest, Duration::QUICK);
         AddTestCase(new PeriodicMeasurementReportTest, Duration::QUICK);

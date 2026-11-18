@@ -264,6 +264,30 @@ NrUeMac::GetTypeId()
                           DoubleValue(1.0),
                           MakeDoubleAccessor(&NrUeMac::m_phrTxPowerFactorChange),
                           MakeDoubleChecker<double>(0.0))
+            .AddAttribute(
+                "BsrTriggering",
+                "TS 38.321 5.4.5 (ntn-patch 17): send the SHORT_BSR MAC CE only when a BSR is "
+                "triggered: a Regular BSR when UL data becomes available for a logical channel of "
+                "higher priority than any with data, or when no logical channel had data, and on "
+                "retxBSR-Timer expiry; a Periodic BSR on periodicBSR-Timer expiry; a Padding BSR "
+                "when the padding of a new transmission can hold the CE. A triggered BSR is "
+                "cancelled when the grant holds all pending data but not the CE as well. False "
+                "(default) keeps nr's behavior, a BSR in every UL transport block.",
+                BooleanValue(false),
+                MakeBooleanAccessor(&NrUeMac::m_bsrTriggering),
+                MakeBooleanChecker())
+            .AddAttribute("PeriodicBsrTimer",
+                          "TS 38.331 BSR-Config periodicBSR-Timer, used with BsrTriggering. "
+                          "Zero (default) is infinity: no Periodic BSR.",
+                          TimeValue(Time(0)),
+                          MakeTimeAccessor(&NrUeMac::m_periodicBsrTimer),
+                          MakeTimeChecker(Time(0)))
+            .AddTraceSource("BsrSent",
+                            "A SHORT_BSR MAC CE was multiplexed into a PUSCH: IMSI, RNTI, "
+                            "BsrType (0 regular, 1 periodic, 2 padding, 3 unconditional), "
+                            "reported bytes",
+                            MakeTraceSourceAccessor(&NrUeMac::m_bsrTrace),
+                            "ns3::NrUeMac::BsrTracedCallback")
             .AddTraceSource("PowerHeadroomReport",
                             "A Single Entry PHR MAC CE was multiplexed into a PUSCH (TS 38.321 "
                             "5.4.6): IMSI, RNTI, PH (dB), PH index, M_RB, path loss (dB)",
@@ -375,6 +399,19 @@ NrUeMac::GetTotalBufSize() const
     return ret;
 }
 
+uint32_t
+NrUeMac::GetPendingUlBytesWithHeaders() const
+{
+    uint32_t ret = 0;
+    for (const auto& it : m_ulBsrReceived)
+    {
+        ret += it.second.statusPduSize;
+        ret += it.second.txQueueSize > 0 ? it.second.txQueueSize + 3 : 0;
+        ret += it.second.retxQueueSize > 0 ? it.second.retxQueueSize + 3 : 0;
+    }
+    return ret;
+}
+
 /**
  * \brief Sets the number of HARQ processes
  * \param numHarqProcesses the maximum number of harq processes
@@ -452,6 +489,43 @@ NrUeMac::DoReportBufferStatus(NrMacSapProvider::ReportBufferStatusParameters par
 
     NS_LOG_INFO("Received BSR for LC Id" << static_cast<uint32_t>(params.lcid));
 
+    // ntn-patch 17: TS 38.321 5.4.5 Regular BSR trigger. UL data becomes
+    // available for a logical channel in an LCG (LCID 0 is in none) and either
+    // no logical channel in an LCG had data, or this one has a higher priority
+    // (a lower priority value) than every logical channel with data.
+    if (m_bsrTriggering && params.lcid != 0)
+    {
+        auto total = [](const NrMacSapProvider::ReportBufferStatusParameters& b) {
+            return b.txQueueSize + b.retxQueueSize + b.statusPduSize;
+        };
+        const uint32_t before = (it != m_ulBsrReceived.end()) ? total(it->second) : 0;
+        if (total(params) > before)
+        {
+            bool anyData = false;
+            uint8_t highest = UINT8_MAX;
+            for (const auto& b : m_ulBsrReceived)
+            {
+                if (b.first == 0 || total(b.second) == 0)
+                {
+                    continue;
+                }
+                anyData = true;
+                auto lc = m_lcInfoMap.find(b.first);
+                if (lc != m_lcInfoMap.end())
+                {
+                    highest = std::min(highest, lc->second.lcConfig.priority);
+                }
+            }
+            auto own = m_lcInfoMap.find(params.lcid);
+            const uint8_t prio = (own != m_lcInfoMap.end()) ? own->second.lcConfig.priority
+                                                            : UINT8_MAX;
+            if (!anyData || prio < highest)
+            {
+                m_regularBsrTriggered = true;
+            }
+        }
+    }
+
     if (it != m_ulBsrReceived.end())
     {
         // update entry
@@ -470,7 +544,7 @@ NrUeMac::DoReportBufferStatus(NrMacSapProvider::ReportBufferStatusParameters par
 }
 
 void
-NrUeMac::SendReportBufferStatus(const SfnSf& dataSfn, uint8_t symStart)
+NrUeMac::SendReportBufferStatus(const SfnSf& dataSfn, uint8_t symStart, uint8_t type)
 {
     NS_LOG_FUNCTION(this);
 
@@ -559,6 +633,33 @@ NrUeMac::SendReportBufferStatus(const SfnSf& dataSfn, uint8_t symStart)
     NS_ASSERT_MSG(m_ulDciTotalUsed <= m_ulDci->m_tbSize,
                   "We used more data than the DCI allowed us.");
 
+    if (type != BSR_UNCONDITIONAL)
+    {
+        // ntn-patch 17: the triggered BSR is part of this MAC PDU, so HARQ
+        // retransmits it with the PDU (nr regenerates its unconditional BSR on
+        // every retransmission instead).
+        auto& harq = m_miUlHarqProcessesPacket.at(m_ulDci->m_harqProcess);
+        if (!harq.m_pktBurst)
+        {
+            harq.m_pktBurst = CreateObject<PacketBurst>();
+        }
+        harq.m_pktBurst->AddPacket(p->Copy());
+        m_miUlHarqProcessesPacketTimer.at(m_ulDci->m_harqProcess) = GetNumHarqProcess();
+        // TS 38.321 5.4.5: a MAC PDU with a BSR cancels all triggered BSRs and
+        // (re)starts periodicBSR-Timer (the CE carries every LCG, never a
+        // truncated BSR); retxBSR-Timer restarts with the UL grant.
+        m_regularBsrTriggered = false;
+        m_periodicBsrTriggered = false;
+        m_periodicBsrExpiry = m_periodicBsrTimer.IsStrictlyPositive()
+                                  ? Simulator::Now() + m_periodicBsrTimer
+                                  : Time(0);
+    }
+    if (type < m_bsrSent.size())
+    {
+        ++m_bsrSent[type];
+    }
+    m_bsrTrace(m_imsi, m_rnti, type, queue.at(0) + queue.at(1) + queue.at(2) + queue.at(3));
+
     m_phySapProvider->SendMacPdu(p, dataSfn, symStart, m_ulDci->m_rnti);
 }
 
@@ -600,7 +701,7 @@ NrUeMac::PreparePhr()
     }
     NrMacSingleEntryPhrCe ce;
     const uint32_t ceBytes = ce.GetSerializedSize();
-    if (m_ulDciTotalUsed + statusBytes + 5 + ceBytes > m_ulDci->m_tbSize)
+    if (m_ulDciTotalUsed + statusBytes + m_bsrReservedBytes + ceBytes > m_ulDci->m_tbSize)
     {
         return 0; // stays triggered for the next grant
     }
@@ -710,6 +811,7 @@ NrUeMac::DoSlotIndication(const SfnSf& sfn)
     {
         NS_LOG_INFO("retxBSR-Timer expired with data buffered: ACTIVE -> TO_SEND");
         m_srState = TO_SEND;
+        m_regularBsrTriggered = true; // ntn-patch 17: a Regular BSR
         ++m_bsrRetriggers;
     }
 
@@ -851,11 +953,53 @@ NrUeMac::ProcessUlDci(const Ptr<NrUlDciMessage>& dciMsg)
         // This method will retransmit the data saved in the harq buffer
         TransmitRetx();
 
-        // This method will transmit a new BSR.
-        SendReportBufferStatus(dataSfn, m_ulDci->m_symStart);
+        // This method will transmit a new BSR. ntn-patch 17: with BSR
+        // triggering, a BSR the PDU carried is in the HARQ buffer already.
+        if (!m_bsrTriggering)
+        {
+            SendReportBufferStatus(dataSfn, m_ulDci->m_symStart);
+        }
     }
     else if (m_ulDci->m_ndi == 1)
     {
+        ++m_ulNewTxGrants;
+        // ntn-patch 17: TS 38.321 5.4.5. Decide whether this new transmission
+        // carries a Regular or Periodic BSR before LCP fills it.
+        constexpr uint32_t kShortBsrBytes = 5; // nr's SHORT_BSR subPDU
+        uint8_t bsrType = BSR_UNCONDITIONAL;
+        m_bsrReservedBytes = kShortBsrBytes;
+        if (m_bsrTriggering)
+        {
+            m_bsrReservedBytes = 0;
+            if (m_periodicBsrExpiry.IsStrictlyPositive() &&
+                Simulator::Now() >= m_periodicBsrExpiry)
+            {
+                m_periodicBsrTriggered = true; // periodicBSR-Timer expired
+                m_periodicBsrExpiry = Time(0);
+            }
+            if (m_regularBsrTriggered || m_periodicBsrTriggered)
+            {
+                const uint32_t pending = GetPendingUlBytesWithHeaders();
+                if (pending <= m_ulDci->m_tbSize && pending + kShortBsrBytes > m_ulDci->m_tbSize)
+                {
+                    // The grant holds all pending data but not the BSR as
+                    // well: all triggered BSRs may be cancelled.
+                    m_regularBsrTriggered = false;
+                    m_periodicBsrTriggered = false;
+                    bsrType = UINT8_MAX;
+                }
+                else
+                {
+                    bsrType = m_regularBsrTriggered ? BSR_REGULAR : BSR_PERIODIC;
+                    m_bsrReservedBytes = kShortBsrBytes;
+                }
+            }
+            else
+            {
+                bsrType = UINT8_MAX; // none triggered: padding BSR at most
+            }
+        }
+
         // ntn-patch 16: TS 38.321 5.4.6, a triggered PHR goes into a new
         // transmission when the grant can hold it (LCP: after the BSR, before
         // data, TS 38.321 5.4.3.1.3).
@@ -871,7 +1015,16 @@ NrUeMac::ProcessUlDci(const Ptr<NrUlDciMessage>& dciMsg)
 
         // Send a new BSR. SendNewData() already took into account the size of
         // the BSR.
-        SendReportBufferStatus(dataSfn, m_ulDci->m_symStart);
+        if (bsrType != UINT8_MAX)
+        {
+            SendReportBufferStatus(dataSfn, m_ulDci->m_symStart, bsrType);
+        }
+        else if (m_ulDci->m_tbSize >= m_ulDciTotalUsed + kShortBsrBytes)
+        {
+            // TS 38.321 5.4.5 Padding BSR: the padding holds the CE.
+            SendReportBufferStatus(dataSfn, m_ulDci->m_symStart, BSR_PADDING);
+        }
+        m_bsrReservedBytes = kShortBsrBytes;
 
         NS_LOG_INFO("UL DCI processing done, sent to PHY a total of "
                     << m_ulDciTotalUsed << " B out of " << m_ulDci->m_tbSize
@@ -1077,11 +1230,13 @@ NrUeMac::SendNewData()
     // where we didn't check much as it is the most important data, that has to go
     // out. For the rest that we have left, we can use only a part of it because of
     // the overhead of the SHORT_BSR, which is 5 bytes.
-    NS_ASSERT_MSG(m_ulDciTotalUsed + 5 + m_phrReservedBytes <= m_ulDci->m_tbSize,
+    NS_ASSERT_MSG(m_ulDciTotalUsed + m_bsrReservedBytes + m_phrReservedBytes <= m_ulDci->m_tbSize,
                   "The StatusPDU used " << m_ulDciTotalUsed
                                         << " B, we don't have any for the SHORT_BSR.");
-    // reserve some data for the SHORT_BSR (and the PHR MAC CE, ntn-patch 16)
-    uint32_t usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5 - m_phrReservedBytes;
+    // reserve some data for the SHORT_BSR (and the PHR MAC CE, ntn-patch 16);
+    // ntn-patch 17: nothing for the BSR when none is triggered
+    uint32_t usefulTbs =
+        m_ulDci->m_tbSize - m_ulDciTotalUsed - m_bsrReservedBytes - m_phrReservedBytes;
 
     // Now, we have 3 bytes of overhead for each subPDU. Let's try to serve all
     // the queues with some RETX data.
@@ -1114,9 +1269,9 @@ NrUeMac::SendNewData()
     // Remember that m_ulDciTotalUsed keep count of data and overhead that we
     // used till now.
     NS_ASSERT_MSG(
-        m_ulDciTotalUsed + 5 + m_phrReservedBytes <= m_ulDci->m_tbSize,
+        m_ulDciTotalUsed + m_bsrReservedBytes + m_phrReservedBytes <= m_ulDci->m_tbSize,
         "The StatusPDU and RETX sending required all space, we don't have any for the SHORT_BSR.");
-    usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5 -
+    usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - m_bsrReservedBytes -
                 m_phrReservedBytes; // Update the usefulTbs.
 
     // The last part is for the queues with some non-RETX data. If there is no space left,
@@ -1475,6 +1630,10 @@ NrUeMac::DoReset()
     m_phrTriggered = true;
     m_phrPeriodicExpiry = Time(0);
     m_phrProhibitExpiry = Time(0);
+    // ntn-patch 17: no BSR stays triggered across a MAC reset.
+    m_regularBsrTriggered = false;
+    m_periodicBsrTriggered = false;
+    m_periodicBsrExpiry = Time(0);
 }
 
 //////////////////////////////////////////////

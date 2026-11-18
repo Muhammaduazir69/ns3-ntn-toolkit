@@ -248,6 +248,19 @@ NrMacSchedulerNs3::GetTypeId()
                 BooleanValue(false),
                 MakeBooleanAccessor(&NrMacSchedulerNs3::m_phrUlRbLimit),
                 MakeBooleanChecker())
+            .AddAttribute(
+                "UlGrantSubheaderBytes",
+                "ntn-patch 17: bytes of each UL grant, per logical channel it is charged to, "
+                "that the scheduler takes off the bytes it removes from the UE's reported "
+                "buffer, for the MAC subheader of the data subPDU (TS 38.321 6.1.2: 2 or 3 "
+                "octets; the buffer size a BSR reports excludes the MAC subheaders, TS 38.321 "
+                "6.1.3.1). nr already takes off 2 bytes of RLC header. With a BSR in every UL "
+                "TB the error is corrected by the next BSR; with BSRs only when triggered "
+                "(NrUeMac::BsrTriggering) it builds up over a segmented SDU and leaves the UE "
+                "with data the gNB believes sent. 0 (default) is the nr behavior.",
+                UintegerValue(0),
+                MakeUintegerAccessor(&NrMacSchedulerNs3::m_ulGrantSubheaderBytes),
+                MakeUintegerChecker<uint32_t>(0, 3))
             .AddTraceSource("UlPhrPrbLimit",
                             "A PHR set a UE's UL PRB limit: RNTI, PH (dB), M_RB, limit",
                             MakeTraceSourceAccessor(&NrMacSchedulerNs3::m_ulPhrLimitTrace),
@@ -1866,8 +1879,15 @@ NrMacSchedulerNs3::DoScheduleUlData(PointInFTPlane* spoint,
             for (const auto& byteDistribution : distributedBytes)
             {
                 assignedToLC = true;
+                // ntn-patch 17: charge the buffer only the bytes left after the
+                // MAC subheader (and nr's 2-byte RLC header inside AssignedData).
+                uint32_t charged = byteDistribution.m_bytes;
+                if (m_ulGrantSubheaderBytes > 0 && charged > m_ulGrantSubheaderBytes + 2)
+                {
+                    charged -= m_ulGrantSubheaderBytes;
+                }
                 ue.first->m_ulLCG.at(byteDistribution.m_lcg)
-                    ->AssignedData(byteDistribution.m_lcId, byteDistribution.m_bytes, "UL");
+                    ->AssignedData(byteDistribution.m_lcId, charged, "UL");
                 NS_LOG_DEBUG("UL LCG " << static_cast<uint32_t>(byteDistribution.m_lcg)
                                        << " assigned bytes " << byteDistribution.m_bytes
                                        << " to LCID "

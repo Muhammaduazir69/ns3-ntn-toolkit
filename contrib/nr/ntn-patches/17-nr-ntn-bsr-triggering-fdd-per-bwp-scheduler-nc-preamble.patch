@@ -1,0 +1,622 @@
+--- a/helper/nr-helper.cc
++++ b/helper/nr-helper.cc
+@@ -886,11 +886,22 @@
+ }
+ 
+ Ptr<NrMacScheduler>
+-NrHelper::CreateGnbSched()
++NrHelper::CreateGnbSched(uint16_t bwpId)
+ {
+     NS_LOG_FUNCTION(this);
+ 
+-    auto sched = m_schedFactory.Create<NrMacSchedulerNs3>();
++    Ptr<NrMacSchedulerNs3> sched;
++    auto perBwp = m_schedTypeIdPerBwp.find(bwpId);
++    if (perBwp != m_schedTypeIdPerBwp.end())
++    {
++        ObjectFactory f = m_schedFactory; // same attributes, another type
++        f.SetTypeId(perBwp->second);
++        sched = f.Create<NrMacSchedulerNs3>();
++    }
++    else
++    {
++        sched = m_schedFactory.Create<NrMacSchedulerNs3>();
++    }
+     auto dlAmc = m_gnbDlAmcFactory.Create<NrAmc>();
+     auto ulAmc = m_gnbUlAmcFactory.Create<NrAmc>();
+ 
+@@ -961,7 +972,7 @@
+         cc->SetMac(mac);
+         phy->GetCam()->SetNrGnbMac(mac);
+ 
+-        auto sched = CreateGnbSched();
++        auto sched = CreateGnbSched(bwpId);
+         cc->SetNrMacScheduler(sched);
+ 
+         if (bwpId == 0)
+@@ -1444,6 +1455,13 @@
+ }
+ 
+ void
++NrHelper::SetSchedulerTypeIdForBwp(uint16_t bwpId, const TypeId& typeId)
++{
++    NS_LOG_FUNCTION(this);
++    m_schedTypeIdPerBwp[bwpId] = typeId;
++}
++
++void
+ NrHelper::SetUeBwpManagerAlgorithmTypeId(const TypeId& typeId)
+ {
+     NS_LOG_FUNCTION(this);
+--- a/helper/nr-helper.h
++++ b/helper/nr-helper.h
+@@ -564,6 +564,18 @@
+     void SetSchedulerTypeId(const TypeId& typeId);
+ 
+     /**
++     * \brief Use another scheduler type on one BWP (ntn-patch 17). Under paired
++     * FDD each BWP carries one direction and has its own scheduler, so the UL
++     * BWP can run an OFDMA scheduler (FDM of power-limited UEs in a symbol)
++     * while the DL BWP keeps the default. The attributes set with
++     * SetSchedulerAttribute apply to every BWP. Works only before the devices
++     * are installed.
++     * \param bwpId the BWP index on the gNB device
++     * \param typeId the scheduler type for that BWP
++     */
++    void SetSchedulerTypeIdForBwp(uint16_t bwpId, const TypeId& typeId);
++
++    /**
+      * \brief Set the TypeId of the GNB BWP Manager. Works only before it is created.
+      * \param typeId Type of the object
+      *
+@@ -987,7 +999,7 @@
+                                const std::unique_ptr<BandwidthPartInfo>& bwp,
+                                const Ptr<NrGnbNetDevice>& dev,
+                                const NrSpectrumPhy::NrPhyRxCtrlEndOkCallback& phyEndCtrlCallback);
+-    Ptr<NrMacScheduler> CreateGnbSched();
++    Ptr<NrMacScheduler> CreateGnbSched(uint16_t bwpId = UINT16_MAX);
+     Ptr<NrGnbMac> CreateGnbMac();
+     Ptr<NrFhControl> CreateNrFhControl();
+ 
+@@ -1022,6 +1034,7 @@
+     ObjectFactory m_ueChannelAccessManagerFactory;  //!< UE Channel access manager factory
+     ObjectFactory m_gnbChannelAccessManagerFactory; //!< GNB Channel access manager factory
+     ObjectFactory m_schedFactory;                   //!< Scheduler factory
++    std::map<uint16_t, TypeId> m_schedTypeIdPerBwp; //!< per-BWP scheduler type (ntn-patch 17)
+     ObjectFactory m_ueAntennaFactory;               //!< UE antenna factory
+     ObjectFactory m_gnbAntennaFactory;              //!< UE antenna factory
+     ObjectFactory m_gnbBwpManagerAlgoFactory;       //!< BWP manager algorithm factory
+--- a/model/nr-gnb-cmac-sap.h
++++ b/model/nr-gnb-cmac-sap.h
+@@ -149,6 +149,19 @@
+      * \return  the newly allocated random access preamble
+      */
+     virtual AllocateNcRaPreambleReturnValue AllocateNcRaPreamble(uint16_t rnti) = 0;
++
++    /**
++     * \brief Reserve on this MAC a non-contention RA preamble that another
++     * BWP MAC of the same cell allocated (ntn-patch 17). Under paired FDD the
++     * UE sends its PRACH on the UL BWP while the RRC allocates the dedicated
++     * preamble on the primary (DL) BWP; the UL BWP's MAC must recognize it, or
++     * it answers the handover RACH as a new contention-based access.
++     * \param rnti the RNTI the preamble is allocated to
++     * \param raPreambleId the allocated preamble
++     */
++    virtual void ShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId)
++    {
++    }
+ };
+ 
+ /**
+--- a/model/nr-gnb-mac.cc
++++ b/model/nr-gnb-mac.cc
+@@ -54,6 +54,7 @@
+     void UeUpdateConfigurationReq(UeConfig params) override;
+     RachConfig GetRachConfig() override;
+     AllocateNcRaPreambleReturnValue AllocateNcRaPreamble(uint16_t rnti) override;
++    void ShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId) override;
+ 
+   private:
+     NrGnbMac* m_mac;
+@@ -118,6 +119,12 @@
+     return m_mac->DoAllocateNcRaPreamble(rnti);
+ }
+ 
++void
++NrGnbMacMemberGnbCmacSapProvider::ShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId)
++{
++    m_mac->DoShareNcRaPreamble(rnti, raPreambleId);
++}
++
+ // SAP interface between gNB PHY AND MAC
+ // PHY is provider and MAC is user of its service following OSI model.
+ // However, PHY may request some information from MAC.
+@@ -1612,6 +1619,17 @@
+     return rc;
+ }
+ 
++void
++NrGnbMac::DoShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId)
++{
++    NcRaPreambleInfo preambleInfo;
++    const uint32_t expiryIntervalMs =
++        (uint32_t)m_preambleTransMax * ((uint32_t)m_raResponseWindowSize + 5);
++    preambleInfo.expiryTime = Simulator::Now() + MilliSeconds(expiryIntervalMs);
++    preambleInfo.rnti = rnti;
++    m_allocatedNcRaPreambleMap[raPreambleId] = preambleInfo;
++}
++
+ NrGnbCmacSapProvider::AllocateNcRaPreambleReturnValue
+ NrGnbMac::DoAllocateNcRaPreamble(uint16_t rnti)
+ {
+--- a/model/nr-gnb-mac.h
++++ b/model/nr-gnb-mac.h
+@@ -306,6 +306,12 @@
+     void UeUpdateConfigurationReq(NrGnbCmacSapProvider::UeConfig params);
+     NrGnbCmacSapProvider::RachConfig DoGetRachConfig();
+     NrGnbCmacSapProvider::AllocateNcRaPreambleReturnValue DoAllocateNcRaPreamble(uint16_t rnti);
++    /**
++     * \brief Reserve a non-contention preamble another BWP MAC allocated (ntn-patch 17).
++     * \param rnti the RNTI
++     * \param raPreambleId the preamble
++     */
++    void DoShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId);
+ 
+     /**
+      * \brief Process the newly received DL HARQ feedback
+--- a/model/nr-gnb-rrc.cc
++++ b/model/nr-gnb-rrc.cc
+@@ -665,6 +665,15 @@
+             uint16_t rnti = m_rrc->AddUe(NrUeManager::HANDOVER_JOINING, componentCarrierId);
+             NrGnbCmacSapProvider::AllocateNcRaPreambleReturnValue anrcrv =
+                 m_rrc->m_cmacSapProvider.at(componentCarrierId)->AllocateNcRaPreamble(rnti);
++            // ntn-patch 17: every BWP MAC of the cell recognizes the preamble
++            // (under paired FDD the PRACH arrives on the UL BWP).
++            for (std::size_t cc = 0; anrcrv.valid && cc < m_rrc->m_cmacSapProvider.size(); ++cc)
++            {
++                if (cc != componentCarrierId)
++                {
++                    m_rrc->m_cmacSapProvider.at(cc)->ShareNcRaPreamble(rnti, anrcrv.raPreambleId);
++                }
++            }
+             if (!anrcrv.valid)
+             {
+                 NS_LOG_INFO(this << " failed to allocate a preamble for non-contention based RA => "
+@@ -2778,6 +2787,15 @@
+     ueManager->SetImsi(req.mmeUeS1apId);
+     NrGnbCmacSapProvider::AllocateNcRaPreambleReturnValue anrcrv =
+         m_cmacSapProvider.at(componentCarrierId)->AllocateNcRaPreamble(rnti);
++    // ntn-patch 17: every BWP MAC of the cell recognizes the preamble (under
++    // paired FDD the handover PRACH arrives on the UL BWP).
++    for (std::size_t cc = 0; anrcrv.valid && cc < m_cmacSapProvider.size(); ++cc)
++    {
++        if (cc != componentCarrierId)
++        {
++            m_cmacSapProvider.at(cc)->ShareNcRaPreamble(rnti, anrcrv.raPreambleId);
++        }
++    }
+     if (!anrcrv.valid)
+     {
+         NS_LOG_INFO(
+--- a/model/nr-mac-scheduler-ns3.cc
++++ b/model/nr-mac-scheduler-ns3.cc
+@@ -248,6 +248,19 @@
+                 BooleanValue(false),
+                 MakeBooleanAccessor(&NrMacSchedulerNs3::m_phrUlRbLimit),
+                 MakeBooleanChecker())
++            .AddAttribute(
++                "UlGrantSubheaderBytes",
++                "ntn-patch 17: bytes of each UL grant, per logical channel it is charged to, "
++                "that the scheduler takes off the bytes it removes from the UE's reported "
++                "buffer, for the MAC subheader of the data subPDU (TS 38.321 6.1.2: 2 or 3 "
++                "octets; the buffer size a BSR reports excludes the MAC subheaders, TS 38.321 "
++                "6.1.3.1). nr already takes off 2 bytes of RLC header. With a BSR in every UL "
++                "TB the error is corrected by the next BSR; with BSRs only when triggered "
++                "(NrUeMac::BsrTriggering) it builds up over a segmented SDU and leaves the UE "
++                "with data the gNB believes sent. 0 (default) is the nr behavior.",
++                UintegerValue(0),
++                MakeUintegerAccessor(&NrMacSchedulerNs3::m_ulGrantSubheaderBytes),
++                MakeUintegerChecker<uint32_t>(0, 3))
+             .AddTraceSource("UlPhrPrbLimit",
+                             "A PHR set a UE's UL PRB limit: RNTI, PH (dB), M_RB, limit",
+                             MakeTraceSourceAccessor(&NrMacSchedulerNs3::m_ulPhrLimitTrace),
+@@ -1866,8 +1879,15 @@
+             for (const auto& byteDistribution : distributedBytes)
+             {
+                 assignedToLC = true;
++                // ntn-patch 17: charge the buffer only the bytes left after the
++                // MAC subheader (and nr's 2-byte RLC header inside AssignedData).
++                uint32_t charged = byteDistribution.m_bytes;
++                if (m_ulGrantSubheaderBytes > 0 && charged > m_ulGrantSubheaderBytes + 2)
++                {
++                    charged -= m_ulGrantSubheaderBytes;
++                }
+                 ue.first->m_ulLCG.at(byteDistribution.m_lcg)
+-                    ->AssignedData(byteDistribution.m_lcId, byteDistribution.m_bytes, "UL");
++                    ->AssignedData(byteDistribution.m_lcId, charged, "UL");
+                 NS_LOG_DEBUG("UL LCG " << static_cast<uint32_t>(byteDistribution.m_lcg)
+                                        << " assigned bytes " << byteDistribution.m_bytes
+                                        << " to LCID "
+--- a/model/nr-mac-scheduler-ns3.h
++++ b/model/nr-mac-scheduler-ns3.h
+@@ -995,6 +995,8 @@
+     mutable uint64_t m_dlHarqFeedbackDisabledTx{0};
+     /// ntn-patch 16: limit UL PRBs by the reported power headroom (attribute PhrUlRbLimit).
+     bool m_phrUlRbLimit{false};
++    /// ntn-patch 17: MAC subheader bytes per UL grant not charged to the buffer.
++    uint32_t m_ulGrantSubheaderBytes{0};
+     /// PHR MAC CEs received.
+     uint64_t m_phrReceived{0};
+     /// rnti, PH (dB, decoded), M_RB of the PUSCH carrying the PHR, resulting UL PRB limit.
+--- a/model/nr-ue-mac.cc
++++ b/model/nr-ue-mac.cc
+@@ -264,6 +264,30 @@
+                           DoubleValue(1.0),
+                           MakeDoubleAccessor(&NrUeMac::m_phrTxPowerFactorChange),
+                           MakeDoubleChecker<double>(0.0))
++            .AddAttribute(
++                "BsrTriggering",
++                "TS 38.321 5.4.5 (ntn-patch 17): send the SHORT_BSR MAC CE only when a BSR is "
++                "triggered: a Regular BSR when UL data becomes available for a logical channel of "
++                "higher priority than any with data, or when no logical channel had data, and on "
++                "retxBSR-Timer expiry; a Periodic BSR on periodicBSR-Timer expiry; a Padding BSR "
++                "when the padding of a new transmission can hold the CE. A triggered BSR is "
++                "cancelled when the grant holds all pending data but not the CE as well. False "
++                "(default) keeps nr's behavior, a BSR in every UL transport block.",
++                BooleanValue(false),
++                MakeBooleanAccessor(&NrUeMac::m_bsrTriggering),
++                MakeBooleanChecker())
++            .AddAttribute("PeriodicBsrTimer",
++                          "TS 38.331 BSR-Config periodicBSR-Timer, used with BsrTriggering. "
++                          "Zero (default) is infinity: no Periodic BSR.",
++                          TimeValue(Time(0)),
++                          MakeTimeAccessor(&NrUeMac::m_periodicBsrTimer),
++                          MakeTimeChecker(Time(0)))
++            .AddTraceSource("BsrSent",
++                            "A SHORT_BSR MAC CE was multiplexed into a PUSCH: IMSI, RNTI, "
++                            "BsrType (0 regular, 1 periodic, 2 padding, 3 unconditional), "
++                            "reported bytes",
++                            MakeTraceSourceAccessor(&NrUeMac::m_bsrTrace),
++                            "ns3::NrUeMac::BsrTracedCallback")
+             .AddTraceSource("PowerHeadroomReport",
+                             "A Single Entry PHR MAC CE was multiplexed into a PUSCH (TS 38.321 "
+                             "5.4.6): IMSI, RNTI, PH (dB), PH index, M_RB, path loss (dB)",
+@@ -375,6 +399,19 @@
+     return ret;
+ }
+ 
++uint32_t
++NrUeMac::GetPendingUlBytesWithHeaders() const
++{
++    uint32_t ret = 0;
++    for (const auto& it : m_ulBsrReceived)
++    {
++        ret += it.second.statusPduSize;
++        ret += it.second.txQueueSize > 0 ? it.second.txQueueSize + 3 : 0;
++        ret += it.second.retxQueueSize > 0 ? it.second.retxQueueSize + 3 : 0;
++    }
++    return ret;
++}
++
+ /**
+  * \brief Sets the number of HARQ processes
+  * \param numHarqProcesses the maximum number of harq processes
+@@ -452,6 +489,43 @@
+ 
+     NS_LOG_INFO("Received BSR for LC Id" << static_cast<uint32_t>(params.lcid));
+ 
++    // ntn-patch 17: TS 38.321 5.4.5 Regular BSR trigger. UL data becomes
++    // available for a logical channel in an LCG (LCID 0 is in none) and either
++    // no logical channel in an LCG had data, or this one has a higher priority
++    // (a lower priority value) than every logical channel with data.
++    if (m_bsrTriggering && params.lcid != 0)
++    {
++        auto total = [](const NrMacSapProvider::ReportBufferStatusParameters& b) {
++            return b.txQueueSize + b.retxQueueSize + b.statusPduSize;
++        };
++        const uint32_t before = (it != m_ulBsrReceived.end()) ? total(it->second) : 0;
++        if (total(params) > before)
++        {
++            bool anyData = false;
++            uint8_t highest = UINT8_MAX;
++            for (const auto& b : m_ulBsrReceived)
++            {
++                if (b.first == 0 || total(b.second) == 0)
++                {
++                    continue;
++                }
++                anyData = true;
++                auto lc = m_lcInfoMap.find(b.first);
++                if (lc != m_lcInfoMap.end())
++                {
++                    highest = std::min(highest, lc->second.lcConfig.priority);
++                }
++            }
++            auto own = m_lcInfoMap.find(params.lcid);
++            const uint8_t prio = (own != m_lcInfoMap.end()) ? own->second.lcConfig.priority
++                                                            : UINT8_MAX;
++            if (!anyData || prio < highest)
++            {
++                m_regularBsrTriggered = true;
++            }
++        }
++    }
++
+     if (it != m_ulBsrReceived.end())
+     {
+         // update entry
+@@ -470,7 +544,7 @@
+ }
+ 
+ void
+-NrUeMac::SendReportBufferStatus(const SfnSf& dataSfn, uint8_t symStart)
++NrUeMac::SendReportBufferStatus(const SfnSf& dataSfn, uint8_t symStart, uint8_t type)
+ {
+     NS_LOG_FUNCTION(this);
+ 
+@@ -559,6 +633,33 @@
+     NS_ASSERT_MSG(m_ulDciTotalUsed <= m_ulDci->m_tbSize,
+                   "We used more data than the DCI allowed us.");
+ 
++    if (type != BSR_UNCONDITIONAL)
++    {
++        // ntn-patch 17: the triggered BSR is part of this MAC PDU, so HARQ
++        // retransmits it with the PDU (nr regenerates its unconditional BSR on
++        // every retransmission instead).
++        auto& harq = m_miUlHarqProcessesPacket.at(m_ulDci->m_harqProcess);
++        if (!harq.m_pktBurst)
++        {
++            harq.m_pktBurst = CreateObject<PacketBurst>();
++        }
++        harq.m_pktBurst->AddPacket(p->Copy());
++        m_miUlHarqProcessesPacketTimer.at(m_ulDci->m_harqProcess) = GetNumHarqProcess();
++        // TS 38.321 5.4.5: a MAC PDU with a BSR cancels all triggered BSRs and
++        // (re)starts periodicBSR-Timer (the CE carries every LCG, never a
++        // truncated BSR); retxBSR-Timer restarts with the UL grant.
++        m_regularBsrTriggered = false;
++        m_periodicBsrTriggered = false;
++        m_periodicBsrExpiry = m_periodicBsrTimer.IsStrictlyPositive()
++                                  ? Simulator::Now() + m_periodicBsrTimer
++                                  : Time(0);
++    }
++    if (type < m_bsrSent.size())
++    {
++        ++m_bsrSent[type];
++    }
++    m_bsrTrace(m_imsi, m_rnti, type, queue.at(0) + queue.at(1) + queue.at(2) + queue.at(3));
++
+     m_phySapProvider->SendMacPdu(p, dataSfn, symStart, m_ulDci->m_rnti);
+ }
+ 
+@@ -600,7 +701,7 @@
+     }
+     NrMacSingleEntryPhrCe ce;
+     const uint32_t ceBytes = ce.GetSerializedSize();
+-    if (m_ulDciTotalUsed + statusBytes + 5 + ceBytes > m_ulDci->m_tbSize)
++    if (m_ulDciTotalUsed + statusBytes + m_bsrReservedBytes + ceBytes > m_ulDci->m_tbSize)
+     {
+         return 0; // stays triggered for the next grant
+     }
+@@ -710,6 +811,7 @@
+     {
+         NS_LOG_INFO("retxBSR-Timer expired with data buffered: ACTIVE -> TO_SEND");
+         m_srState = TO_SEND;
++        m_regularBsrTriggered = true; // ntn-patch 17: a Regular BSR
+         ++m_bsrRetriggers;
+     }
+ 
+@@ -851,11 +953,53 @@
+         // This method will retransmit the data saved in the harq buffer
+         TransmitRetx();
+ 
+-        // This method will transmit a new BSR.
+-        SendReportBufferStatus(dataSfn, m_ulDci->m_symStart);
++        // This method will transmit a new BSR. ntn-patch 17: with BSR
++        // triggering, a BSR the PDU carried is in the HARQ buffer already.
++        if (!m_bsrTriggering)
++        {
++            SendReportBufferStatus(dataSfn, m_ulDci->m_symStart);
++        }
+     }
+     else if (m_ulDci->m_ndi == 1)
+     {
++        ++m_ulNewTxGrants;
++        // ntn-patch 17: TS 38.321 5.4.5. Decide whether this new transmission
++        // carries a Regular or Periodic BSR before LCP fills it.
++        constexpr uint32_t kShortBsrBytes = 5; // nr's SHORT_BSR subPDU
++        uint8_t bsrType = BSR_UNCONDITIONAL;
++        m_bsrReservedBytes = kShortBsrBytes;
++        if (m_bsrTriggering)
++        {
++            m_bsrReservedBytes = 0;
++            if (m_periodicBsrExpiry.IsStrictlyPositive() &&
++                Simulator::Now() >= m_periodicBsrExpiry)
++            {
++                m_periodicBsrTriggered = true; // periodicBSR-Timer expired
++                m_periodicBsrExpiry = Time(0);
++            }
++            if (m_regularBsrTriggered || m_periodicBsrTriggered)
++            {
++                const uint32_t pending = GetPendingUlBytesWithHeaders();
++                if (pending <= m_ulDci->m_tbSize && pending + kShortBsrBytes > m_ulDci->m_tbSize)
++                {
++                    // The grant holds all pending data but not the BSR as
++                    // well: all triggered BSRs may be cancelled.
++                    m_regularBsrTriggered = false;
++                    m_periodicBsrTriggered = false;
++                    bsrType = UINT8_MAX;
++                }
++                else
++                {
++                    bsrType = m_regularBsrTriggered ? BSR_REGULAR : BSR_PERIODIC;
++                    m_bsrReservedBytes = kShortBsrBytes;
++                }
++            }
++            else
++            {
++                bsrType = UINT8_MAX; // none triggered: padding BSR at most
++            }
++        }
++
+         // ntn-patch 16: TS 38.321 5.4.6, a triggered PHR goes into a new
+         // transmission when the grant can hold it (LCP: after the BSR, before
+         // data, TS 38.321 5.4.3.1.3).
+@@ -871,7 +1015,16 @@
+ 
+         // Send a new BSR. SendNewData() already took into account the size of
+         // the BSR.
+-        SendReportBufferStatus(dataSfn, m_ulDci->m_symStart);
++        if (bsrType != UINT8_MAX)
++        {
++            SendReportBufferStatus(dataSfn, m_ulDci->m_symStart, bsrType);
++        }
++        else if (m_ulDci->m_tbSize >= m_ulDciTotalUsed + kShortBsrBytes)
++        {
++            // TS 38.321 5.4.5 Padding BSR: the padding holds the CE.
++            SendReportBufferStatus(dataSfn, m_ulDci->m_symStart, BSR_PADDING);
++        }
++        m_bsrReservedBytes = kShortBsrBytes;
+ 
+         NS_LOG_INFO("UL DCI processing done, sent to PHY a total of "
+                     << m_ulDciTotalUsed << " B out of " << m_ulDci->m_tbSize
+@@ -1077,11 +1230,13 @@
+     // where we didn't check much as it is the most important data, that has to go
+     // out. For the rest that we have left, we can use only a part of it because of
+     // the overhead of the SHORT_BSR, which is 5 bytes.
+-    NS_ASSERT_MSG(m_ulDciTotalUsed + 5 + m_phrReservedBytes <= m_ulDci->m_tbSize,
++    NS_ASSERT_MSG(m_ulDciTotalUsed + m_bsrReservedBytes + m_phrReservedBytes <= m_ulDci->m_tbSize,
+                   "The StatusPDU used " << m_ulDciTotalUsed
+                                         << " B, we don't have any for the SHORT_BSR.");
+-    // reserve some data for the SHORT_BSR (and the PHR MAC CE, ntn-patch 16)
+-    uint32_t usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5 - m_phrReservedBytes;
++    // reserve some data for the SHORT_BSR (and the PHR MAC CE, ntn-patch 16);
++    // ntn-patch 17: nothing for the BSR when none is triggered
++    uint32_t usefulTbs =
++        m_ulDci->m_tbSize - m_ulDciTotalUsed - m_bsrReservedBytes - m_phrReservedBytes;
+ 
+     // Now, we have 3 bytes of overhead for each subPDU. Let's try to serve all
+     // the queues with some RETX data.
+@@ -1114,9 +1269,9 @@
+     // Remember that m_ulDciTotalUsed keep count of data and overhead that we
+     // used till now.
+     NS_ASSERT_MSG(
+-        m_ulDciTotalUsed + 5 + m_phrReservedBytes <= m_ulDci->m_tbSize,
++        m_ulDciTotalUsed + m_bsrReservedBytes + m_phrReservedBytes <= m_ulDci->m_tbSize,
+         "The StatusPDU and RETX sending required all space, we don't have any for the SHORT_BSR.");
+-    usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - 5 -
++    usefulTbs = m_ulDci->m_tbSize - m_ulDciTotalUsed - m_bsrReservedBytes -
+                 m_phrReservedBytes; // Update the usefulTbs.
+ 
+     // The last part is for the queues with some non-RETX data. If there is no space left,
+@@ -1475,6 +1630,10 @@
+     m_phrTriggered = true;
+     m_phrPeriodicExpiry = Time(0);
+     m_phrProhibitExpiry = Time(0);
++    // ntn-patch 17: no BSR stays triggered across a MAC reset.
++    m_regularBsrTriggered = false;
++    m_periodicBsrTriggered = false;
++    m_periodicBsrExpiry = Time(0);
+ }
+ 
+ //////////////////////////////////////////////
+--- a/model/nr-ue-mac.h
++++ b/model/nr-ue-mac.h
+@@ -13,6 +13,7 @@
+ #include <ns3/traced-callback.h>
+ 
+ #include <limits>
++#include <array>
+ #include <unordered_map>
+ 
+ namespace ns3
+@@ -204,6 +205,29 @@
+                                       const double pathlossDb);
+ 
+     /**
++     * The kind of BSR a SHORT_BSR MAC CE was sent as (ntn-patch 17).
++     */
++    enum BsrType : uint8_t
++    {
++        BSR_REGULAR = 0,       ///< TS 38.321 5.4.5 Regular BSR (new data / retxBSR-Timer)
++        BSR_PERIODIC = 1,      ///< TS 38.321 5.4.5 Periodic BSR (periodicBSR-Timer)
++        BSR_PADDING = 2,       ///< TS 38.321 5.4.5 Padding BSR (padding holds the CE)
++        BSR_UNCONDITIONAL = 3, ///< nr default: a BSR in every UL TB, triggered or not
++    };
++
++    /**
++     * TracedCallback signature for a transmitted SHORT_BSR MAC CE (ntn-patch 17).
++     * \param [in] imsi the IMSI
++     * \param [in] rnti the C-RNTI
++     * \param [in] type the BsrType
++     * \param [in] bufferBytes the buffer the CE reports, summed over the LCGs
++     */
++    typedef void (*BsrTracedCallback)(const uint64_t imsi,
++                                      const uint16_t rnti,
++                                      const uint8_t type,
++                                      const uint32_t bufferBytes);
++
++    /**
+      * \brief Sets the number of HARQ processes.
+      * Called by the helper at the moment of UE attachment
+      * \param numHarqProcesses the maximum number of harq processes
+@@ -323,10 +347,16 @@
+      * \param dataSfn data slot
+      * \param symStart symStart
+      *
+-     * Please note that the BSR is not saved in the HARQ buffer, so it will
+-     * not get retransmitted.
+-     */
+-    void SendReportBufferStatus(const SfnSf& dataSfn, uint8_t symStart);
++     * \param type the BsrType (ntn-patch 17)
++     *
++     * Please note that with the nr default (BSR_UNCONDITIONAL) the BSR is not
++     * saved in the HARQ buffer, so it will not get retransmitted. A BSR sent
++     * because it was triggered (BsrTriggering, ntn-patch 17) is part of the
++     * MAC PDU and HARQ retransmits it.
++     */
++    void SendReportBufferStatus(const SfnSf& dataSfn,
++                                uint8_t symStart,
++                                uint8_t type = BSR_UNCONDITIONAL);
+     void RefreshHarqProcessesPacketBuffer();
+ 
+     /**
+@@ -545,6 +575,39 @@
+         return m_bsrRetriggers;
+     }
+ 
++    /**
++     * \param type a BsrType
++     * \return SHORT_BSR MAC CEs sent as that type (ntn-patch 17)
++     */
++    uint64_t GetBsrSentCount(uint8_t type) const
++    {
++        return type < m_bsrSent.size() ? m_bsrSent[type] : 0;
++    }
++
++    /// \return UL grants for a new transmission received (ntn-patch 17).
++    uint64_t GetUlNewTxGrantCount() const
++    {
++        return m_ulNewTxGrants;
++    }
++
++  private:
++    // ntn-patch 17: TS 38.321 5.4.5 BSR triggering (BSR-Config).
++    /**
++     * \brief Bytes the MAC needs to empty its buffers, with nr's per-LC subPDU
++     * header estimate (3 bytes per non-empty queue).
++     * \return the pending UL bytes
++     */
++    uint32_t GetPendingUlBytesWithHeaders() const;
++    bool m_bsrTriggering{false};      ///< BSR only when triggered (false: in every TB)
++    Time m_periodicBsrTimer{0};       ///< periodicBSR-Timer (0 = infinity)
++    bool m_regularBsrTriggered{false};  ///< a Regular BSR is triggered and not cancelled
++    bool m_periodicBsrTriggered{false}; ///< a Periodic BSR is triggered and not cancelled
++    Time m_periodicBsrExpiry{0};        ///< periodicBSR-Timer expiry (running if > 0)
++    uint32_t m_bsrReservedBytes{5};     ///< bytes this grant keeps for the SHORT_BSR
++    std::array<uint64_t, 4> m_bsrSent{}; ///< SHORT_BSR CEs sent, per BsrType
++    uint64_t m_ulNewTxGrants{0};         ///< UL grants with NDI toggled (new data)
++    TracedCallback<uint64_t, uint16_t, uint8_t, uint32_t> m_bsrTrace; ///< BsrSent trace
++
+   private:
+     /// RAR for this UE ignored because ra-ResponseWindow was not yet running.
+     TracedCallback<uint64_t> m_rarOutsideWindowTrace;

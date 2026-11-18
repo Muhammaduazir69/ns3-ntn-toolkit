@@ -361,6 +361,75 @@ class NtnRealStackHelper
     /// transmission (rv 0) arrived on a process the gNB never retransmitted
     /// (TS 38.321 5.3.2.2), summed over UEs and BWPs.
     uint64_t GetDlSoftBufferFlushCount() const;
+
+    /// Wave 9: duplex mode of the nr carrier.
+    ///  - Auto (default): paired FDD when the carrier is the downlink of an
+    ///    FDD NTN band (TS 38.101-5 Table 5.2-1: n255, n256), the link budget
+    ///    profile is Tr38821Set1, no TDD pattern was set, the air-interface
+    ///    delay is off and there are at most two slices (nr allows five BWPs
+    ///    per device); otherwise the single shared-slot carrier nr built
+    ///    before (TDD).
+    ///  - Fdd: paired FDD, abort if the uplink carrier cannot be derived.
+    ///  - Tdd: the single carrier whose slots UL and DL share (pre-Wave 9).
+    /// GlobalValue NtnRealStackDuplex (Auto | Fdd | Tdd) sets the default.
+    enum class DuplexMode
+    {
+        Auto,
+        Fdd,
+        Tdd
+    };
+    /// Call before Build().
+    void SetDuplexMode(DuplexMode m)
+    {
+        m_duplexMode = m;
+        m_duplexModeSet = true;
+    }
+    /// Explicit uplink carrier for FDD (Hz); 0 (default) derives it from the
+    /// band's duplex spacing (n256: DL - 190 MHz, n255: DL + 101.5 MHz).
+    void SetUlCarrierFrequencyHz(double f) { m_ulFreqHzExplicit = f; }
+    /// Whether Build() set up paired FDD.
+    bool IsFddActive() const { return m_fddApplied; }
+    /// Whether the UL BWPs run nr's OFDMA round-robin under FDD (GlobalValue
+    /// NtnRealStackFddUlOfdma, default true, when the scenario kept TDMA RR).
+    bool IsFddUlOfdmaActive() const { return m_fddUlOfdmaApplied; }
+    /// Uplink carrier (Hz) Build() used (the DL carrier under TDD).
+    double GetUlCarrierFrequencyHz() const { return m_fddApplied ? m_ulFreqHzApplied : m_freqHz; }
+    /// The uplink carrier TS 38.101-5 pairs with downlink carrier dlHz (the
+    /// default duplex spacing of n255/n256); 0 when dlHz is not in the
+    /// downlink block of an FR1 NTN FDD band.
+    static double PairedUlCarrierHz(double dlHz);
+    /// BWP index carrying slice s's downlink (FDD and TDD).
+    uint8_t GetDlBwpIndex(uint8_t slice = 0) const { return slice; }
+    /// BWP index carrying slice s's uplink (FDD: the paired UL BWP).
+    uint8_t GetUlBwpIndex(uint8_t slice = 0) const
+    {
+        return m_fddApplied ? static_cast<uint8_t>(m_nrDlBwpCount + slice) : slice;
+    }
+    /// Number of BWPs on each nr device (slices, times two under FDD).
+    uint8_t GetNrBwpCount() const
+    {
+        return m_nrBwpTotal > 0 ? m_nrBwpTotal
+                                : static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    }
+
+    /// Wave 9 (nr patch 17): TS 38.321 5.4.5 BSR triggering on every UE MAC
+    /// (Regular, Periodic and Padding BSR) instead of nr's SHORT_BSR in every
+    /// UL TB, with periodicBSR-Timer t (0 = infinity), and a gNB scheduler that
+    /// charges a UE's buffer estimate net of the MAC subheader. Default: on for
+    /// the Set-1 profile with a 20 ms timer, off under Legacy or with GlobalValue
+    /// NtnRealStackBsrTriggering=false. Call before Build().
+    void SetBsrTriggering(bool enable, Time periodicBsrTimer = MilliSeconds(20))
+    {
+        m_bsrTriggering = enable;
+        m_bsrTriggeringSet = true;
+        m_periodicBsrTimer = periodicBsrTimer;
+    }
+    /// Whether Build() enabled BSR triggering.
+    bool IsBsrTriggeringActive() const { return m_bsrTriggeringApplied; }
+    /// SHORT_BSR CEs the UEs sent as NrUeMac::BsrType t, summed over UEs and BWPs.
+    uint64_t GetBsrSentCount(uint8_t type) const;
+    /// UL grants for a new transmission the UEs received, summed over UEs and BWPs.
+    uint64_t GetUlNewTxGrantCount() const;
     bool GetKOffsetConsumption() const { return m_kOffsetConsumption; }
     /// The K_offset (in nr slots) actually applied to N2Delay after Build();
     /// 0 when consumption is off. Derived from the service-link round trip.
@@ -1762,6 +1831,19 @@ class NtnRealStackHelper
     bool m_ulPhrLimitApplied{false};
     double m_ulTargetSnrDb{3.0};
     double m_ulP0Applied{std::numeric_limits<double>::quiet_NaN()};
+    // Wave 9: paired FDD and BSR triggering (nr patch 17).
+    DuplexMode m_duplexMode{DuplexMode::Auto};
+    bool m_duplexModeSet{false};
+    double m_ulFreqHzExplicit{0.0};
+    bool m_fddApplied{false};
+    double m_ulFreqHzApplied{0.0};
+    uint8_t m_nrBwpTotal{0};
+    uint8_t m_nrDlBwpCount{1};
+    bool m_bsrTriggering{true};
+    bool m_bsrTriggeringSet{false};
+    Time m_periodicBsrTimer{MilliSeconds(20)};
+    bool m_bsrTriggeringApplied{false};
+    bool m_fddUlOfdmaApplied{false};
     std::string m_prevElevationModel;
     int m_prevRsrpLinear{-1};
     bool m_ssbCellBeam{false};

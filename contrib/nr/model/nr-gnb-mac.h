@@ -306,6 +306,12 @@ class NrGnbMac : public Object
     void UeUpdateConfigurationReq(NrGnbCmacSapProvider::UeConfig params);
     NrGnbCmacSapProvider::RachConfig DoGetRachConfig();
     NrGnbCmacSapProvider::AllocateNcRaPreambleReturnValue DoAllocateNcRaPreamble(uint16_t rnti);
+    /**
+     * \brief Reserve a non-contention preamble another BWP MAC allocated (ntn-patch 17).
+     * \param rnti the RNTI
+     * \param raPreambleId the preamble
+     */
+    void DoShareNcRaPreamble(uint16_t rnti, uint8_t raPreambleId);
 
     /**
      * \brief Process the newly received DL HARQ feedback

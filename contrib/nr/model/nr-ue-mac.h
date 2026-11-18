@@ -13,6 +13,7 @@
 #include <ns3/traced-callback.h>
 
 #include <limits>
+#include <array>
 #include <unordered_map>
 
 namespace ns3
@@ -204,6 +205,29 @@ class NrUeMac : public Object
                                       const double pathlossDb);
 
     /**
+     * The kind of BSR a SHORT_BSR MAC CE was sent as (ntn-patch 17).
+     */
+    enum BsrType : uint8_t
+    {
+        BSR_REGULAR = 0,       ///< TS 38.321 5.4.5 Regular BSR (new data / retxBSR-Timer)
+        BSR_PERIODIC = 1,      ///< TS 38.321 5.4.5 Periodic BSR (periodicBSR-Timer)
+        BSR_PADDING = 2,       ///< TS 38.321 5.4.5 Padding BSR (padding holds the CE)
+        BSR_UNCONDITIONAL = 3, ///< nr default: a BSR in every UL TB, triggered or not
+    };
+
+    /**
+     * TracedCallback signature for a transmitted SHORT_BSR MAC CE (ntn-patch 17).
+     * \param [in] imsi the IMSI
+     * \param [in] rnti the C-RNTI
+     * \param [in] type the BsrType
+     * \param [in] bufferBytes the buffer the CE reports, summed over the LCGs
+     */
+    typedef void (*BsrTracedCallback)(const uint64_t imsi,
+                                      const uint16_t rnti,
+                                      const uint8_t type,
+                                      const uint32_t bufferBytes);
+
+    /**
      * \brief Sets the number of HARQ processes.
      * Called by the helper at the moment of UE attachment
      * \param numHarqProcesses the maximum number of harq processes
@@ -323,10 +347,16 @@ class NrUeMac : public Object
      * \param dataSfn data slot
      * \param symStart symStart
      *
-     * Please note that the BSR is not saved in the HARQ buffer, so it will
-     * not get retransmitted.
+     * \param type the BsrType (ntn-patch 17)
+     *
+     * Please note that with the nr default (BSR_UNCONDITIONAL) the BSR is not
+     * saved in the HARQ buffer, so it will not get retransmitted. A BSR sent
+     * because it was triggered (BsrTriggering, ntn-patch 17) is part of the
+     * MAC PDU and HARQ retransmits it.
      */
-    void SendReportBufferStatus(const SfnSf& dataSfn, uint8_t symStart);
+    void SendReportBufferStatus(const SfnSf& dataSfn,
+                                uint8_t symStart,
+                                uint8_t type = BSR_UNCONDITIONAL);
     void RefreshHarqProcessesPacketBuffer();
 
     /**
@@ -544,6 +574,39 @@ class NrUeMac : public Object
     {
         return m_bsrRetriggers;
     }
+
+    /**
+     * \param type a BsrType
+     * \return SHORT_BSR MAC CEs sent as that type (ntn-patch 17)
+     */
+    uint64_t GetBsrSentCount(uint8_t type) const
+    {
+        return type < m_bsrSent.size() ? m_bsrSent[type] : 0;
+    }
+
+    /// \return UL grants for a new transmission received (ntn-patch 17).
+    uint64_t GetUlNewTxGrantCount() const
+    {
+        return m_ulNewTxGrants;
+    }
+
+  private:
+    // ntn-patch 17: TS 38.321 5.4.5 BSR triggering (BSR-Config).
+    /**
+     * \brief Bytes the MAC needs to empty its buffers, with nr's per-LC subPDU
+     * header estimate (3 bytes per non-empty queue).
+     * \return the pending UL bytes
+     */
+    uint32_t GetPendingUlBytesWithHeaders() const;
+    bool m_bsrTriggering{false};      ///< BSR only when triggered (false: in every TB)
+    Time m_periodicBsrTimer{0};       ///< periodicBSR-Timer (0 = infinity)
+    bool m_regularBsrTriggered{false};  ///< a Regular BSR is triggered and not cancelled
+    bool m_periodicBsrTriggered{false}; ///< a Periodic BSR is triggered and not cancelled
+    Time m_periodicBsrExpiry{0};        ///< periodicBSR-Timer expiry (running if > 0)
+    uint32_t m_bsrReservedBytes{5};     ///< bytes this grant keeps for the SHORT_BSR
+    std::array<uint64_t, 4> m_bsrSent{}; ///< SHORT_BSR CEs sent, per BsrType
+    uint64_t m_ulNewTxGrants{0};         ///< UL grants with NDI toggled (new data)
+    TracedCallback<uint64_t, uint16_t, uint8_t, uint32_t> m_bsrTrace; ///< BsrSent trace
 
   private:
     /// RAR for this UE ignored because ra-ResponseWindow was not yet running.

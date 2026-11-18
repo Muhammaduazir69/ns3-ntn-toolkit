@@ -564,6 +564,18 @@ class NrHelper : public Object
     void SetSchedulerTypeId(const TypeId& typeId);
 
     /**
+     * \brief Use another scheduler type on one BWP (ntn-patch 17). Under paired
+     * FDD each BWP carries one direction and has its own scheduler, so the UL
+     * BWP can run an OFDMA scheduler (FDM of power-limited UEs in a symbol)
+     * while the DL BWP keeps the default. The attributes set with
+     * SetSchedulerAttribute apply to every BWP. Works only before the devices
+     * are installed.
+     * \param bwpId the BWP index on the gNB device
+     * \param typeId the scheduler type for that BWP
+     */
+    void SetSchedulerTypeIdForBwp(uint16_t bwpId, const TypeId& typeId);
+
+    /**
      * \brief Set the TypeId of the GNB BWP Manager. Works only before it is created.
      * \param typeId Type of the object
      *
@@ -987,7 +999,7 @@ class NrHelper : public Object
                                const std::unique_ptr<BandwidthPartInfo>& bwp,
                                const Ptr<NrGnbNetDevice>& dev,
                                const NrSpectrumPhy::NrPhyRxCtrlEndOkCallback& phyEndCtrlCallback);
-    Ptr<NrMacScheduler> CreateGnbSched();
+    Ptr<NrMacScheduler> CreateGnbSched(uint16_t bwpId = UINT16_MAX);
     Ptr<NrGnbMac> CreateGnbMac();
     Ptr<NrFhControl> CreateNrFhControl();
 
@@ -1022,6 +1034,7 @@ class NrHelper : public Object
     ObjectFactory m_ueChannelAccessManagerFactory;  //!< UE Channel access manager factory
     ObjectFactory m_gnbChannelAccessManagerFactory; //!< GNB Channel access manager factory
     ObjectFactory m_schedFactory;                   //!< Scheduler factory
+    std::map<uint16_t, TypeId> m_schedTypeIdPerBwp; //!< per-BWP scheduler type (ntn-patch 17)
     ObjectFactory m_ueAntennaFactory;               //!< UE antenna factory
     ObjectFactory m_gnbAntennaFactory;              //!< UE antenna factory
     ObjectFactory m_gnbBwpManagerAlgoFactory;       //!< BWP manager algorithm factory

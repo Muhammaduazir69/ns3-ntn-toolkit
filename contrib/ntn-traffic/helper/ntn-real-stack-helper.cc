@@ -129,6 +129,32 @@ static GlobalValue g_ntnRealStackUlPhrPrbLimit(
     BooleanValue(true),
     MakeBooleanChecker());
 
+// Wave 9: paired FDD for the FDD NTN bands, and TS 38.321 BSR triggering (nr patch 17).
+static GlobalValue g_ntnRealStackDuplex(
+    "NtnRealStackDuplex",
+    "nr backend duplex mode: Auto (paired FDD when the carrier is the downlink of the FDD NTN "
+    "band n255 or n256 of TS 38.101-5 under the Tr38821Set1 budget, else the single shared-slot "
+    "carrier), Fdd, or Tdd (the single carrier whose slots UL and DL share, as before Wave 9)",
+    StringValue("Auto"),
+    MakeStringChecker());
+
+static GlobalValue g_ntnRealStackBsrTriggering(
+    "NtnRealStackBsrTriggering",
+    "nr backend: TS 38.321 5.4.5 BSR triggering (Regular, Periodic with periodicBSR-Timer 20 ms, "
+    "Padding) on every UE instead of a SHORT_BSR in every UL transport block (nr patch 17). Off "
+    "under NtnRealStackLinkBudget=Legacy; false turns it off everywhere unless a scenario calls "
+    "SetBsrTriggering(true)",
+    BooleanValue(true),
+    MakeBooleanChecker());
+
+static GlobalValue g_ntnRealStackFddUlOfdma(
+    "NtnRealStackFddUlOfdma",
+    "nr backend under paired FDD: the UL BWPs run nr's OFDMA round-robin scheduler when the "
+    "scenario kept the default TDMA round-robin, so PRB-limited UEs share a symbol (FDM) instead "
+    "of each taking whole symbols with most of the band idle; the DL BWPs keep the TDMA scheduler",
+    BooleanValue(true),
+    MakeBooleanChecker());
+
 static GlobalValue g_ntnRealStackUeKpiPeriod(
     "NtnRealStackUeKpiPeriod",
     "Sampling period (s) of the per-UE and per-cell KPI dataset NtnRealStackHelper writes to "
@@ -556,6 +582,23 @@ NtnRealStackHelper::BuildMmwaveRadio()
     }
 }
 
+double
+NtnRealStackHelper::PairedUlCarrierHz(double dlHz)
+{
+    // TS 38.101-5 Table 5.2-1 FDD NTN FR1 bands and their default duplex
+    // spacing: n256 UL 1980-2010 MHz / DL 2170-2200 MHz (UL = DL - 190 MHz),
+    // n255 UL 1626.5-1660.5 MHz / DL 1525-1559 MHz (UL = DL + 101.5 MHz).
+    if (dlHz >= 2170.0e6 && dlHz <= 2200.0e6)
+    {
+        return dlHz - 190.0e6;
+    }
+    if (dlHz >= 1525.0e6 && dlHz <= 1559.0e6)
+    {
+        return dlHz + 101.5e6;
+    }
+    return 0.0;
+}
+
 NtnRealStackHelper::NtnFr1Band
 NtnRealStackHelper::ClassifyNtnFr1(double carrierHz, double bandwidthHz)
 {
@@ -741,12 +784,130 @@ NtnRealStackHelper::BuildNrRadio()
 
     // ---- Enabler C: one BWP per slice (default 1 BWP) --------------------
     const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+
+    // ---- Wave 9: paired FDD ---------------------------------------------
+    // n255 and n256 are FDD bands (TS 38.101-5 Table 5.2-1). nr built them as
+    // one carrier whose slots UL and DL share (all slots flexible), so a
+    // backlogged narrow uplink, which needs whole slots for a few bytes,
+    // crowded out the downlink (ntn-v2x-canyon-relay DL OWD 11.6 ms -> 1.75 s
+    // with the PHR PRB limit). Under FDD every slot of the DL carrier is a DL
+    // slot and every slot of the UL carrier at the paired frequency is a UL
+    // slot, 5G-LENA's own FDD recipe (cttc-nr-notching, cttc-nr-traffic-ngmn-
+    // mixed): one DL BWP and one UL BWP per slice, the gNB routing UL control
+    // of BWP n+k to BWP k and the UE routing the control of BWP k to BWP n+k.
+    // Auto applies it only under the Set-1 budget, so the Legacy profile keeps
+    // reproducing the old numbers, and not when a scenario chose a TDD pattern.
+    {
+        DuplexMode mode = m_duplexMode;
+        if (!m_duplexModeSet)
+        {
+            StringValue gv;
+            GlobalValue::GetValueByName("NtnRealStackDuplex", gv);
+            if (gv.Get() == "Fdd")
+            {
+                mode = DuplexMode::Fdd;
+            }
+            else if (gv.Get() == "Tdd")
+            {
+                mode = DuplexMode::Tdd;
+            }
+            else
+            {
+                NS_ABORT_MSG_IF(gv.Get() != "Auto",
+                                "NtnRealStackDuplex must be Auto, Fdd or Tdd, got " << gv.Get());
+                mode = DuplexMode::Auto;
+            }
+        }
+        const double ulHz =
+            (m_ulFreqHzExplicit > 0.0) ? m_ulFreqHzExplicit : PairedUlCarrierHz(m_freqHz);
+        // nr allows at most nr::MAX_NO_CC (5) BWPs per device, so a DL/UL
+        // pair per slice fits up to two slices; three or more slices keep the
+        // shared-slot carrier.
+        const bool fitsRouting = 2 * nBwp <= static_cast<int>(nr::MAX_NO_CC);
+        bool fdd = false;
+        // The opt-in real air-interface delay (with K_offset consumption) was
+        // validated on the shared-slot carrier only; with paired FDD the UE
+        // did not complete random access in nr v3.3 (measured on the
+        // RaWindowStartOffsetTest geometry: no packet delivered). Auto keeps
+        // the validated carrier for that mode; open item in WAVE9_REPORT.md.
+        if (mode == DuplexMode::Auto)
+        {
+            fdd = ulHz > 0.0 && fitsRouting && m_tddPattern.empty() && !m_airIfaceDelayRequested &&
+                  GetLinkBudgetProfile() != LinkBudgetProfile::Legacy;
+        }
+        else if (mode == DuplexMode::Fdd)
+        {
+            NS_ABORT_MSG_IF(ulHz <= 0.0,
+                            "SetDuplexMode(Fdd): carrier " << m_freqHz / 1e6
+                                                           << " MHz is not the downlink of n255 or "
+                                                              "n256; call SetUlCarrierFrequencyHz");
+            NS_ABORT_MSG_IF(!fitsRouting, "SetDuplexMode(Fdd): at most 2 slices (nr allows 5 BWPs)");
+            NS_ABORT_MSG_IF(!m_tddPattern.empty(),
+                            "SetDuplexMode(Fdd) and SetTddPattern() exclude each other");
+            NS_ABORT_MSG_IF(m_airIfaceDelayRequested,
+                            "SetDuplexMode(Fdd) with SetAirInterfaceDelay(true): random access "
+                            "does not complete on paired FDD with a real air-interface delay in "
+                            "nr v3.3; use Tdd or Auto");
+            fdd = true;
+        }
+        m_fddApplied = fdd;
+        m_ulFreqHzApplied = fdd ? ulHz : 0.0;
+    }
+    // Wave 9: the UL BWP has a scheduler of its own under FDD. nr's default
+    // TDMA gives each UE whole symbols; a PHR-limited UE then uses a few PRBs
+    // of a symbol and the rest of the band idles, while a second UE waits
+    // for the next symbol. OFDMA shares the symbols between UEs (FDM), which
+    // is how a power-limited NR uplink is scheduled. The DL BWP keeps the
+    // scenario's scheduler, so the downlink is scheduled exactly as before.
+    m_fddUlOfdmaApplied = false;
+    if (m_fddApplied && m_schedulerTypeName.empty() && sched == Scheduler::TdmaRR)
+    {
+        BooleanValue gv;
+        GlobalValue::GetValueByName("NtnRealStackFddUlOfdma", gv);
+        if (gv.Get())
+        {
+            for (uint8_t k = 0; k < nBwp; ++k)
+            {
+                m_nr->SetSchedulerTypeIdForBwp(
+                    nBwp + k,
+                    TypeId::LookupByName("ns3::NrMacSchedulerOfdmaRR"));
+            }
+            m_fddUlOfdmaApplied = true;
+        }
+    }
+    m_nrDlBwpCount = nBwp;
+    const uint8_t nBwpAll = m_fddApplied ? static_cast<uint8_t>(2 * nBwp) : nBwp;
+    m_nrBwpTotal = nBwpAll;
+
     CcBwpCreator ccBwpCreator;
     CcBwpCreator::SimpleOperationBandConf bandConf(m_freqHz,
                                                    m_bwHz,
                                                    nBwp,
                                                    BandwidthPartInfo::UMi_StreetCanyon);
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+    OperationBandInfo ulBand;
+    if (m_fddApplied)
+    {
+        // The UL carrier has the DL channel bandwidth (symmetric FDD).
+        CcBwpCreator::SimpleOperationBandConf ulConf(m_ulFreqHzApplied,
+                                                     m_bwHz,
+                                                     nBwp,
+                                                     BandwidthPartInfo::UMi_StreetCanyon);
+        ulBand = ccBwpCreator.CreateOperationBandContiguousCc(ulConf);
+    }
+    // BWP i < nBwp: DL (or TDD) of slice i; BWP nBwp + i: UL of slice i (FDD).
+    std::vector<BandwidthPartInfoPtr*> bwpRefs;
+    for (uint8_t cc = 0; cc < nBwp; ++cc)
+    {
+        bwpRefs.push_back(&band.GetBwpAt(cc, 0));
+    }
+    if (m_fddApplied)
+    {
+        for (uint8_t cc = 0; cc < nBwp; ++cc)
+        {
+            bwpRefs.push_back(&ulBand.GetBwpAt(cc, 0));
+        }
+    }
 
     // NT-08. ThreeGppChannelModel gates cluster regeneration on
     // `!m_updatePeriod.IsZero()`, so pinning this to 0 froze the channel matrix
@@ -823,7 +984,7 @@ NtnRealStackHelper::BuildNrRadio()
     // head[0] meant a sliced run (N BWPs) left slices 1..N-1 on bare Friis with
     // no atmosphere, scintillation, shadowing or beam roll-off — biasing exactly
     // the per-slice SINR comparison the slicing feature exists to measure.
-    m_nrBaseLossPerBwp.assign(nBwp, nullptr);
+    m_nrBaseLossPerBwp.assign(nBwpAll, nullptr);
     if (m_channelModel == ChannelModel::Ns3Tr38811)
     {
         // C3: the ns-3 TR 38.811 NTN models need geocentric endpoints; check
@@ -855,9 +1016,9 @@ NtnRealStackHelper::BuildNrRadio()
             GlobalValue::Bind("GeocentricElevationModel", StringValue("Wgs84LowerEnd"));
         }
     }
-    for (uint8_t cc = 0; cc < nBwp; ++cc)
+    for (uint8_t cc = 0; cc < nBwpAll; ++cc)
     {
-        BandwidthPartInfoPtr& bwp = band.GetBwpAt(cc, 0);
+        BandwidthPartInfoPtr& bwp = *bwpRefs[cc];
         // Each BWP sits at its own centre frequency; using the band centre for
         // all of them mis-scales Friis across a wide multi-BWP band.
         const double bwpFreqHz = (bwp->m_centralFrequency > 0.0) ? bwp->m_centralFrequency : m_freqHz;
@@ -890,6 +1051,10 @@ NtnRealStackHelper::BuildNrRadio()
     }
 
     m_nr->InitializeOperationBand(&band);
+    if (m_fddApplied)
+    {
+        m_nr->InitializeOperationBand(&ulBand);
+    }
 
     // ---- GAP S4 FIX: NTN geometry is always line-of-sight ------------------
     // InitializeOperationBand attaches a UMi-StreetCanyon *probabilistic*
@@ -906,13 +1071,13 @@ NtnRealStackHelper::BuildNrRadio()
     // the toolkit gates candidates on elevation anyway). Force it, mirroring
     // what the mmwave backend already does, until a real TR 38.811 NTN-TDL
     // spectrum model exists.
-    for (uint8_t cc = 0; cc < nBwp; ++cc)
+    for (uint8_t cc = 0; cc < nBwpAll; ++cc)
     {
         if (m_channelModel != ChannelModel::Legacy || !m_smallScaleFading)
         {
             break; // C3: the TR 38.811 condition model / LOS-only model own this
         }
-        BandwidthPartInfoPtr& bwp = band.GetBwpAt(cc, 0);
+        BandwidthPartInfoPtr& bwp = *bwpRefs[cc];
         Ptr<ThreeGppSpectrumPropagationLossModel> sp =
             DynamicCast<ThreeGppSpectrumPropagationLossModel>(bwp->m_3gppChannel);
         if (sp)
@@ -956,9 +1121,9 @@ NtnRealStackHelper::BuildNrRadio()
     m_airIfaceDelayActive = false;
     if (m_airIfaceDelayRequested)
     {
-        for (uint8_t cc = 0; cc < nBwp; ++cc)
+        for (uint8_t cc = 0; cc < nBwpAll; ++cc)
         {
-            BandwidthPartInfoPtr& bwp = band.GetBwpAt(cc, 0);
+            BandwidthPartInfoPtr& bwp = *bwpRefs[cc];
             Ptr<SpectrumChannel> ch = bwp->m_channel;
             if (ch && !ch->GetPropagationDelayModel())
             {
@@ -985,7 +1150,8 @@ NtnRealStackHelper::BuildNrRadio()
         }
     }
 
-    BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
+    BandwidthPartInfoPtrVector allBwps =
+        m_fddApplied ? CcBwpCreator::GetAllBwps({band, ulBand}) : CcBwpCreator::GetAllBwps({band});
 
     // Enabler B seam: keep each BWP's spectrum channel so a caller can install
     // a frequency-selective / spatial SpectrumPropagationLossModel later.
@@ -1001,13 +1167,27 @@ NtnRealStackHelper::BuildNrRadio()
         1, static_cast<uint32_t>((m_bwHz / nBwp) / (12.0 * scsHz)));
 
     // ---- Enabler C: route each slice's 5QI to its BWP (gNB + UE mgr) ------
+    // Wave 9 FDD: the gNB sends a bearer on its slice's DL BWP and the UE on
+    // the paired UL BWP; every QCI the UE has goes to the UL BWP of slice 0
+    // unless a slice claims it.
+    if (m_fddApplied)
+    {
+        const TypeId algo = BwpManagerAlgorithmStatic::GetTypeId();
+        for (uint32_t a = 0; a < algo.GetAttributeN(); ++a)
+        {
+            m_nr->SetUeBwpManagerAlgorithmAttribute(algo.GetAttribute(a).name,
+                                                    UintegerValue(nBwp));
+        }
+    }
     for (uint8_t i = 0; i < m_slices.size(); ++i)
     {
         const std::string attr = QciAttrName(m_slices[i].fiveQi);
         if (!attr.empty())
         {
             m_nr->SetGnbBwpManagerAlgorithmAttribute(attr, UintegerValue(i));
-            m_nr->SetUeBwpManagerAlgorithmAttribute(attr, UintegerValue(i));
+            m_nr->SetUeBwpManagerAlgorithmAttribute(
+                attr,
+                UintegerValue(m_fddApplied ? static_cast<uint8_t>(nBwp + i) : i));
         }
     }
 
@@ -1105,9 +1285,77 @@ NtnRealStackHelper::BuildNrRadio()
         }
     }
 
+    // Wave 9 (nr patch 17): TS 38.321 5.4.5 BSR triggering (BSR-Config). nr
+    // put a 5-byte SHORT_BSR into every UL TB; a PRB-limited handheld's grant
+    // carries about 18 bytes, so that was more than a quarter of it. The gNB
+    // then charges the UE's buffer net of the MAC subheader, since the
+    // per-TB BSR that used to correct its estimate is gone.
+    {
+        bool on = m_bsrTriggering;
+        if (!m_bsrTriggeringSet)
+        {
+            BooleanValue gv;
+            GlobalValue::GetValueByName("NtnRealStackBsrTriggering", gv);
+            on = gv.Get() && GetLinkBudgetProfile() != LinkBudgetProfile::Legacy;
+        }
+        m_bsrTriggeringApplied = on;
+        if (on)
+        {
+            m_nr->SetUeMacAttribute("BsrTriggering", BooleanValue(true));
+            m_nr->SetUeMacAttribute("PeriodicBsrTimer", TimeValue(m_periodicBsrTimer));
+            m_nr->SetSchedulerAttribute("UlGrantSubheaderBytes", UintegerValue(2));
+        }
+    }
+
     // Install devices on the caller's mobility-carrying nodes.
     m_enbDevs = m_nr->InstallGnbDevice(m_gnb, allBwps);
     m_ueDevs = m_nr->InstallUeDevice(m_ue, allBwps);
+    if (m_fddApplied)
+    {
+        // Wave 9 FDD: every slot of a DL BWP is DL, every slot of a UL BWP is
+        // UL, and the control of each pair is routed across it.
+        const std::string kDl("DL|DL|DL|DL|DL|DL|DL|DL|DL|DL|");
+        const std::string kUl("UL|UL|UL|UL|UL|UL|UL|UL|UL|UL|");
+        for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+        {
+            for (uint8_t b = 0; b < nBwpAll; ++b)
+            {
+                m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
+                    ->SetAttribute("Pattern", StringValue(b < nBwp ? kDl : kUl));
+            }
+            for (uint8_t k = 0; k < nBwp; ++k)
+            {
+                m_nr->GetBwpManagerGnb(m_enbDevs.Get(i))->SetOutputLink(nBwp + k, k);
+            }
+        }
+        for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+        {
+            Ptr<NrUeNetDevice> ue = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
+            ue->SetAttribute("PrimaryUlIndex", UintegerValue(nBwp));
+            ue->GetRrc()->SetPrimaryUlIndex(nBwp);
+            for (uint8_t k = 0; k < nBwp; ++k)
+            {
+                m_nr->GetBwpManagerUe(m_ueDevs.Get(i))->SetOutputLink(k, nBwp + k);
+                // TS 38.213 7.1.1: the PUSCH path loss PL_b,f,c(q_d) is
+                // estimated on a DL reference signal. Under FDD the UL BWP's
+                // PHY receives no DL signal at all (the gNB routes the UL DCI
+                // out through the DL BWP), so its power control kept nr's
+                // initial 100 dB and transmitted about 50 dB too low (measured:
+                // PUSCH SINR -44 dB, no PHR). Feed it the RSRP the paired DL
+                // BWP measures; the SIB reference power it subtracts that from
+                // is the DL BWP's (NrGnbRrc broadcasts BWP 0's).
+                Ptr<NrUePhy> dlPhy = ue->GetPhy(k);
+                Ptr<NrUePhy> ulPhy = ue->GetPhy(nBwp + k);
+                Ptr<NrChunkProcessor> rs = Create<NrChunkProcessor>();
+                rs->AddCallback(MakeCallback(&NrUePhy::ReportRsReceivedPower, ulPhy));
+                dlPhy->GetSpectrumPhy()->AddRsPowerChunkProcessor(rs);
+            }
+        }
+        NS_LOG_INFO("NtnRealStackHelper: paired FDD, DL " << m_freqHz / 1e6 << " MHz, UL "
+                                                         << m_ulFreqHzApplied / 1e6 << " MHz, "
+                                                         << m_bwHz / 1e6 << " MHz each, "
+                                                         << +nBwp << " BWP pair(s)");
+    }
     int64_t stream = 1;
     stream += m_nr->AssignStreams(m_enbDevs, stream);
     stream += m_nr->AssignStreams(m_ueDevs, stream);
@@ -1238,7 +1486,7 @@ NtnRealStackHelper::BuildNrRadio()
     {
         if (m_ntnRachWindow && m_rachVerdict.appliedWindowSize > 0)
         {
-            for (uint8_t b = 0; b < nBwp; ++b)
+            for (uint8_t b = 0; b < nBwpAll; ++b)
             {
                 Ptr<NrGnbMac> gm = NrHelper::GetGnbMac(m_enbDevs.Get(i), b);
                 if (gm)
@@ -1248,12 +1496,15 @@ NtnRealStackHelper::BuildNrRadio()
                 }
             }
         }
-        for (uint8_t b = 0; b < nBwp; ++b)
+        for (uint8_t b = 0; b < nBwpAll; ++b)
         {
             m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
                 ->SetAttribute("Numerology", UintegerValue(m_numerology));
+            // Wave 9 FDD: the UL BWP's gNB PHY carries no DL signal of its
+            // own (its DCIs leave through the DL BWP); it gets the DL BWP's
+            // power so nothing it might send is out of budget.
             m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
-                ->SetAttribute("TxPower", DoubleValue(m_bwpPowerApplied[b]));
+                ->SetAttribute("TxPower", DoubleValue(m_bwpPowerApplied[b % nBwp]));
             if (m_kOffsetConsumption)
             {
                 m_nr->GetGnbPhy(m_enbDevs.Get(i), b)
@@ -1281,7 +1532,7 @@ NtnRealStackHelper::BuildNrRadio()
     }
     for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
     {
-        for (uint8_t b = 0; b < nBwp; ++b)
+        for (uint8_t b = 0; b < nBwpAll; ++b)
         {
             m_nr->GetUePhy(m_ueDevs.Get(i), b)->SetAttribute("TxPower", DoubleValue(m_ueTxDbm));
         }
@@ -1308,7 +1559,7 @@ NtnRealStackHelper::BuildNrRadio()
         m_ulP0Applied = std::clamp(p0, -202.0, 24.0); // TS 38.331 p0-NominalWithGrant
         for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
         {
-            for (uint8_t b = 0; b < nBwp; ++b)
+            for (uint8_t b = 0; b < nBwpAll; ++b)
             {
                 Ptr<NrUePhy> phy = m_nr->GetUePhy(m_ueDevs.Get(i), b);
                 Ptr<NrUePowerControl> pc = phy->GetUplinkPowerControl();
@@ -1545,7 +1796,7 @@ NtnRealStackHelper::BuildNrRadio()
     // BWPs 1..N-1 are measured too — not only the primary BWP 0.
     for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
     {
-        for (uint8_t b = 0; b < nBwp; ++b)
+        for (uint8_t b = 0; b < m_nrBwpTotal; ++b)
         {
             Ptr<NrSpectrumPhy> sp = m_nr->GetUePhy(m_ueDevs.Get(i), b)->GetSpectrumPhy();
             sp->TraceConnectWithoutContext("RxPacketTraceUe",
@@ -2638,7 +2889,7 @@ NtnRealStackHelper::SetBroadcastKOffsetSlots(uint32_t referenceSlots)
     // moment it is applied. See boundary A9 for the measured diagnosis.
     const uint32_t oldSlots = m_consumedKOffsetSlots;
     m_consumedKOffsetSlots = slots;
-    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    const uint8_t nBwp = GetNrBwpCount();
     const Time slotPeriod = MilliSeconds(1) / (1 << m_numerology);
     const Time guard = slotPeriod * static_cast<int64_t>(std::max(oldSlots, slots) + 1);
     Simulator::Schedule(guard, [this, slots, nBwp]() {
@@ -3995,7 +4246,7 @@ NtnRealStackHelper::WriteHealthReport()
         uint64_t dataDrops = 0;
         uint64_t srsDrops = 0;
         uint64_t dlCtrlDrops = 0;
-        const uint8_t nBwpHealth = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+        const uint8_t nBwpHealth = GetNrBwpCount();
         for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
         {
             for (uint8_t b = 0; b < nBwpHealth; ++b)
@@ -4028,6 +4279,16 @@ NtnRealStackHelper::WriteHealthReport()
         out << "halfduplex_dlctrl_drops," << dlCtrlDrops << ",-,-,measured\n";
     }
     out << "carrier_hz," << m_freqHz << ",-,-,config\n";
+    // Wave 9: the duplex the nr carrier ran, and the paired UL carrier.
+    out << "duplex," << (m_fddApplied ? "fdd" : "tdd") << ",-,-,"
+        << (m_fddApplied ? "ts38101-5-table-5.2-1 (paired UL BWP)" : "config (shared-slot carrier)")
+        << "\n";
+    if (m_fddApplied)
+    {
+        out << "ul_carrier_hz," << m_ulFreqHzApplied << ",-,-,ts38101-5-duplex-spacing\n";
+    }
+    out << "ul_bsr_triggering," << (m_bsrTriggeringApplied ? 1 : 0) << ",-,-,"
+        << (m_bsrTriggeringApplied ? "ts38321-5.4.5" : "nr-bsr-in-every-tb") << "\n";
     // WF-11: refusals reach the health file, so they are visible in the
     // release build where NS_LOG_WARN is compiled out. pass=0 when a decision
     // module asked for a handover the stack could not perform.
@@ -4269,6 +4530,7 @@ NtnRealStackHelper::WriteHealthReport()
             .AddExtra("radio_backend",
                       (m_backend == RadioBackend::Nr) ? "nr" : "mmwave")
             .AddExtra("carrier_hz", std::to_string(m_freqHz))
+            .AddExtra("duplex", m_fddApplied ? "fdd" : "tdd")
             .AddExtra("bandwidth_hz", std::to_string(m_bwHz))
             .AddExtra("numerology", std::to_string(m_numerology))
             .AddExtra("gnbs", std::to_string(m_gnb.GetN()))
@@ -4938,7 +5200,7 @@ NtnRealStackHelper::RefreshCellBeams()
     {
         return;
     }
-    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    const uint8_t nBwp = GetNrBwpCount();
     if (m_nadirCenters.size() != m_enbDevs.GetN())
     {
         m_nadirCenters.clear();
@@ -5106,7 +5368,7 @@ NtnRealStackHelper::ApplyRaWindowOffsets()
     {
         return;
     }
-    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    const uint8_t nBwp = GetNrBwpCount();
     for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
     {
         for (uint8_t b = 0; b < nBwp; ++b)
@@ -5135,7 +5397,7 @@ NtnRealStackHelper::ApplyRaWindowOffsets()
 void
 NtnRealStackHelper::RefreshRaWindowOffsets()
 {
-    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    const uint8_t nBwp = GetNrBwpCount();
     for (uint32_t u = 0; u < m_ueDevs.GetN(); ++u)
     {
         const Time rtt = ComputeUeGnbRtt(u);
@@ -5158,7 +5420,7 @@ NtnRealStackHelper::GetRaWindowStartOffset(uint32_t ueIndex) const
     {
         return Time();
     }
-    Ptr<NrUeMac> mac = NrHelper::GetUeMac(m_ueDevs.Get(ueIndex), 0);
+    Ptr<NrUeMac> mac = NrHelper::GetUeMac(m_ueDevs.Get(ueIndex), GetUlBwpIndex());
     if (!mac)
     {
         return Time();
@@ -5176,7 +5438,7 @@ NtnRealStackHelper::GetDlHarqFeedbackDisabledTxCount() const
     {
         return 0;
     }
-    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    const uint8_t nBwp = GetNrBwpCount();
     for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
     {
         for (uint8_t b = 0; b < nBwp; ++b)
@@ -5389,7 +5651,7 @@ NtnRealStackHelper::GetPhrReceivedCount() const
     {
         return 0;
     }
-    const uint8_t nBwp = static_cast<uint8_t>(std::max<size_t>(1, m_slices.size()));
+    const uint8_t nBwp = GetNrBwpCount();
     for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
     {
         for (uint8_t b = 0; b < nBwp; ++b)
@@ -5426,6 +5688,50 @@ NtnRealStackHelper::GetBsrRetriggerCount() const
             if (mac)
             {
                 n += mac->GetBsrRetriggerCount();
+            }
+        }
+    }
+    return n;
+}
+
+uint64_t
+NtnRealStackHelper::GetBsrSentCount(uint8_t type) const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr)
+    {
+        return 0;
+    }
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
+        for (uint32_t b = 0; dev && b < dev->GetCcMapSize(); ++b)
+        {
+            if (Ptr<NrUeMac> mac = DynamicCast<NrUeMac>(dev->GetMac(b)))
+            {
+                n += mac->GetBsrSentCount(type);
+            }
+        }
+    }
+    return n;
+}
+
+uint64_t
+NtnRealStackHelper::GetUlNewTxGrantCount() const
+{
+    uint64_t n = 0;
+    if (m_backend != RadioBackend::Nr)
+    {
+        return 0;
+    }
+    for (uint32_t i = 0; i < m_ueDevs.GetN(); ++i)
+    {
+        Ptr<NrUeNetDevice> dev = DynamicCast<NrUeNetDevice>(m_ueDevs.Get(i));
+        for (uint32_t b = 0; dev && b < dev->GetCcMapSize(); ++b)
+        {
+            if (Ptr<NrUeMac> mac = DynamicCast<NrUeMac>(dev->GetMac(b)))
+            {
+                n += mac->GetUlNewTxGrantCount();
             }
         }
     }
