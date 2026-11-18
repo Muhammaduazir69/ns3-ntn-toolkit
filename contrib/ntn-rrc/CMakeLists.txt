@@ -25,6 +25,7 @@ set(header_files
 
 set(test_sources
     test/ntn-rrc-test-suite.cc
+    test/ntn-rrc-depth-test.cc
 )
 
 build_lib(
@@ -37,3 +38,9 @@ build_lib(
     ${libmobility}
   TEST_SOURCES ${test_sources}
 )
+
+# The depth tests carry SIB19 over a point-to-point IP link. Only the test
+# library links internet and point-to-point.
+if(TARGET ntn-rrc-test)
+  target_link_libraries(ntn-rrc-test ${libinternet} ${libpoint-to-point})
+endif()

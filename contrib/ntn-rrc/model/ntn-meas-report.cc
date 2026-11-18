@@ -23,22 +23,34 @@ namespace
 /// the standard's "below the reporting range", and a wrap to 127 would turn
 /// the worst possible signal into the best.
 uint8_t
-Quantize(double value, double minValue, double step)
+Quantize(double value, double minValue, double step, uint8_t maxLevel)
 {
-    if (std::isnan(value))
+    // TS 38.133 Tables 10.1.6.1-1 (SS-RSRP), 10.1.11.1-1 (SS-RSRQ) and
+    // 10.1.16.1-1 (SS-SINR) are floor bins: level 0 is "below minValue",
+    // level n >= 1 is [minValue + (n - 1) step, minValue + n step), and the top
+    // level is open above. The former mapping rounded (value - min) / step to
+    // the nearest integer, which put -156 dBm in RSRP_0 (the table's "below
+    // -156" level) and -99.4 dBm in RSRP_57 instead of RSRP_57's neighbor:
+    // every report was off by one level, half the time by two half-bins.
+    if (std::isnan(value) || value < minValue)
     {
         return 0;
     }
-    const double raw = (value - minValue) / step;
-    if (raw <= 0.0)
+    const double raw = std::floor((value - minValue) / step + 1e-9) + 1.0;
+    if (raw >= static_cast<double>(maxLevel))
     {
-        return 0;
+        return maxLevel;
     }
-    if (raw >= static_cast<double>(NtnMeasQuantity::kLevelMax))
-    {
-        return NtnMeasQuantity::kLevelMax;
-    }
-    return static_cast<uint8_t>(std::lround(raw));
+    return static_cast<uint8_t>(raw);
+}
+
+/// Lower edge of a level's bin (the inverse used for reporting). Level 0 has
+/// no lower edge; it is reported one step below the range.
+double
+LowerEdge(uint8_t level, double minValue, double step, uint8_t maxLevel)
+{
+    const uint8_t l = std::min(level, maxLevel);
+    return minValue + step * (static_cast<double>(l) - 1.0);
 }
 
 void
@@ -125,40 +137,39 @@ uint8_t
 NtnMeasQuantity::RsrpToLevel(double rsrpDbm)
 {
     // TS 38.133 Table 10.1.6.1-1: 1 dB steps from -156 dBm.
-    return Quantize(rsrpDbm, static_cast<double>(kRsrpMinDbm), 1.0);
+    return Quantize(rsrpDbm, static_cast<double>(kRsrpMinDbm), 1.0, kRsrpLevelMax);
 }
 
 double
 NtnMeasQuantity::LevelToRsrpDbm(uint8_t level)
 {
-    return static_cast<double>(kRsrpMinDbm) +
-           static_cast<double>(std::min<uint8_t>(level, kLevelMax));
+    return LowerEdge(level, static_cast<double>(kRsrpMinDbm), 1.0, kRsrpLevelMax);
 }
 
 uint8_t
 NtnMeasQuantity::RsrqToLevel(double rsrqDb)
 {
     // TS 38.133 Table 10.1.11.1-1: 0.5 dB steps from -43 dB.
-    return Quantize(rsrqDb, kRsrqMinDb, 0.5);
+    return Quantize(rsrqDb, kRsrqMinDb, 0.5, kLevelMax);
 }
 
 double
 NtnMeasQuantity::LevelToRsrqDb(uint8_t level)
 {
-    return kRsrqMinDb + 0.5 * static_cast<double>(std::min<uint8_t>(level, kLevelMax));
+    return LowerEdge(level, kRsrqMinDb, 0.5, kLevelMax);
 }
 
 uint8_t
 NtnMeasQuantity::SinrToLevel(double sinrDb)
 {
     // TS 38.133 Table 10.1.16.1-1: 0.5 dB steps from -23 dB.
-    return Quantize(sinrDb, kSinrMinDb, 0.5);
+    return Quantize(sinrDb, kSinrMinDb, 0.5, kLevelMax);
 }
 
 double
 NtnMeasQuantity::LevelToSinrDb(uint8_t level)
 {
-    return kSinrMinDb + 0.5 * static_cast<double>(std::min<uint8_t>(level, kLevelMax));
+    return LowerEdge(level, kSinrMinDb, 0.5, kLevelMax);
 }
 
 std::size_t

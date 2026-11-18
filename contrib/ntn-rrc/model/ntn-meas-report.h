@@ -52,6 +52,8 @@ class NtnMeasQuantity
     // TS 38.133 Table 10.1.6.1-1: RSRP_LEV 0..127, dBm = index - 156.
     static constexpr int kRsrpMinDbm = -156;
     static constexpr uint8_t kLevelMax = 127;
+    /// SS-RSRP tops out at RSRP_126 (-31 dBm and above, TS 38.133 Table 10.1.6.1-1).
+    static constexpr uint8_t kRsrpLevelMax = 126;
     /// TS 38.133 Table 10.1.11.1-1: RSRQ_LEV 0..127, dB = index/2 - 43.
     static constexpr double kRsrqMinDb = -43.0;
     /// TS 38.133 Table 10.1.16.1-1: SINR_LEV 0..127, dB = index/2 - 23.

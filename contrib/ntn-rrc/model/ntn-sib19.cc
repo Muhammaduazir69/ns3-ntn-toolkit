@@ -183,7 +183,32 @@ Sib19Codec::Parse(const uint8_t* in, std::size_t len, Sib19Content& sib)
     sib.referencePosEcefM.y = GetF64(p);
     sib.referencePosEcefM.z = GetF64(p);
 
-    return true;
+    // The wire format carries no CRC of its own, and nothing below this layer
+    // in the toolkit's SIB19 path checks the fields either, so a corrupted or
+    // out-of-range block used to be accepted and applied: any byte became a
+    // PayloadMode, a NaN ephemeris propagated into the UE's TA. Refuse what
+    // TS 38.331 cannot encode (SIB19-r17: cellSpecificKoffset-r17 1..1023,
+    // kmac-r17 1..512 when present, ntn-UlSyncValidityDuration-r17 at most
+    // 900 s, ta-Common-r17 at most about 270 ms, which a 1 s bound covers)
+    // and any non-finite number.
+    const bool finite = std::isfinite(sib.taCommonDriftRate) &&
+                        std::isfinite(sib.taCommonDriftVariation) &&
+                        std::isfinite(sib.ephemeris.positionEcefM.x) &&
+                        std::isfinite(sib.ephemeris.positionEcefM.y) &&
+                        std::isfinite(sib.ephemeris.positionEcefM.z) &&
+                        std::isfinite(sib.ephemeris.velocityEcefMps.x) &&
+                        std::isfinite(sib.ephemeris.velocityEcefMps.y) &&
+                        std::isfinite(sib.ephemeris.velocityEcefMps.z) &&
+                        std::isfinite(sib.referencePosEcefM.x) &&
+                        std::isfinite(sib.referencePosEcefM.y) &&
+                        std::isfinite(sib.referencePosEcefM.z);
+    const bool enumsOk = static_cast<uint8_t>(sib.payloadMode) <= 2 &&
+                         static_cast<uint8_t>(sib.taFrame) <= 1;
+    const bool rangesOk = sib.cellSpecificKoffset >= 1 && sib.cellSpecificKoffset <= 1023 &&
+                          sib.kMac <= 512 && sib.taCommon >= Time() &&
+                          sib.taCommon <= Seconds(1) && sib.ulSyncValidity > Time() &&
+                          sib.ulSyncValidity <= Seconds(900);
+    return finite && enumsOk && rangesOk;
 }
 
 NS_OBJECT_ENSURE_REGISTERED(NtnSib19Broadcaster);

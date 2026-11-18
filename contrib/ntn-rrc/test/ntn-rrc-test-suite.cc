@@ -1136,32 +1136,41 @@ class NtnMeasQuantizationTest : public TestCase
     void DoRun() override
     {
         // ---- RSRP: TS 38.133 Table 10.1.6.1-1, 1 dB steps from -156 dBm ----
-        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-156.0), 0,
-                              "-156 dBm is the bottom of the RSRP reporting range");
-        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-100.0), 56,
-                              "RSRP_LEV = dBm + 156, so -100 dBm is level 56");
-        NS_TEST_ASSERT_MSG_EQ_TOL(NtnMeasQuantity::LevelToRsrpDbm(56), -100.0, 1e-9,
-                                  "and the inverse returns the dBm");
+        // Floor bins: RSRP_0 is below -156 dBm, RSRP_1 is [-156, -155), ...,
+        // RSRP_126 is -31 dBm and above.
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-156.0), 1,
+                              "-156 dBm opens RSRP_1, the first in-range level");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-156.01), 0,
+                              "below -156 dBm is RSRP_0");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-100.0), 57,
+                              "-100 dBm is in [-100, -99): RSRP_57");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-99.01), 57,
+                              "a floor bin, not rounding: -99.01 dBm is still RSRP_57");
+        NS_TEST_ASSERT_MSG_EQ_TOL(NtnMeasQuantity::LevelToRsrpDbm(57), -100.0, 1e-9,
+                                  "and the inverse returns the bin's lower edge");
         // Saturation, not wraparound. A UE deep in a fade must not report the
         // best possible signal.
         NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(-200.0), 0,
                               "below the range saturates at 0, it does not wrap to 127");
-        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(+50.0), NtnMeasQuantity::kLevelMax,
-                              "above the range saturates at 127");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(+50.0), NtnMeasQuantity::kRsrpLevelMax,
+                              "above the range saturates at RSRP_126 (-31 dBm and above)");
         NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrpToLevel(std::nan("")), 0,
                               "an unmeasured quantity must not become a confident level");
 
         // ---- RSRQ: Table 10.1.11.1-1, 0.5 dB steps from -43 dB ----
-        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrqToLevel(-43.0), 0, "RSRQ floor");
-        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrqToLevel(-20.0), 46,
-                              "RSRQ_LEV = (dB + 43) * 2");
-        NS_TEST_ASSERT_MSG_EQ_TOL(NtnMeasQuantity::LevelToRsrqDb(46), -20.0, 1e-9, "RSRQ inverse");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrqToLevel(-43.0), 1, "RSRQ_1 opens at -43 dB");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrqToLevel(-43.5), 0, "below -43 dB is RSRQ_0");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::RsrqToLevel(-20.0), 47,
+                              "RSRQ_LEV = floor((dB + 43) * 2) + 1");
+        NS_TEST_ASSERT_MSG_EQ_TOL(NtnMeasQuantity::LevelToRsrqDb(47), -20.0, 1e-9, "RSRQ inverse");
 
         // ---- SINR: Table 10.1.16.1-1, 0.5 dB steps from -23 dB ----
-        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::SinrToLevel(-23.0), 0, "SINR floor");
-        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::SinrToLevel(14.0), 74,
-                              "SINR_LEV = (dB + 23) * 2, so 14 dB is level 74");
-        NS_TEST_ASSERT_MSG_EQ_TOL(NtnMeasQuantity::LevelToSinrDb(74), 14.0, 1e-9, "SINR inverse");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::SinrToLevel(-23.0), 1, "SINR_1 opens at -23 dB");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::SinrToLevel(-23.5), 0, "below -23 dB is SINR_0");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::SinrToLevel(14.0), 75,
+                              "SINR_LEV = floor((dB + 23) * 2) + 1, so 14 dB is level 75");
+        NS_TEST_ASSERT_MSG_EQ(NtnMeasQuantity::SinrToLevel(40.0), 127, "SINR_127: 40 dB and above");
+        NS_TEST_ASSERT_MSG_EQ_TOL(NtnMeasQuantity::LevelToSinrDb(75), 14.0, 1e-9, "SINR inverse");
 
         // The step size must actually be a step: two values inside one 0.5 dB
         // bin land on the same level, and the next bin does not.

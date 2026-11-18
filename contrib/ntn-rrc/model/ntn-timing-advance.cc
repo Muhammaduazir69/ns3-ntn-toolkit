@@ -238,7 +238,11 @@ double
 NtnTimingAdvance::ComputeTaDriftRate(Time eps) const
 {
     NS_ASSERT_MSG(m_ue && m_sat, "Mobility models required for drift rate");
-    const Time t0 = ComputeTotalTa();
+    // Both ends in double seconds. The difference used to be taken between
+    // two ns3::Time values, each rounded to the 1 ns time resolution, so a
+    // 10 ms step quantized the drift to 0.1 us/s steps (0.25 % of a LEO
+    // drift, and the whole of a GEO one at 1 ns / 10 ms).
+    const double t0 = 2.0 * (GetSlantRangeMetres() + GetFeederRangeMetres()) / kSpeedOfLight;
     const Vector ue0 = m_ue->GetPosition();
     const Vector sat0 = m_sat->GetPosition();
     const Vector ueV = m_ue->GetVelocity();
@@ -264,8 +268,8 @@ NtnTimingAdvance::ComputeTaDriftRate(Time eps) const
     {
         feeder1 = CalculateDistance(sat1, m_gw->GetPosition());
     }
-    const Time t1 = Seconds(2.0 * (d1 + feeder1) / kSpeedOfLight);
-    const double dTa = (t1 - t0).GetSeconds();
+    const double t1 = 2.0 * (d1 + feeder1) / kSpeedOfLight;
+    const double dTa = t1 - t0;
     return (dt > 0.0) ? (dTa / dt) : 0.0;
 }
 
