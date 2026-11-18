@@ -13,6 +13,8 @@
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/constant-velocity-mobility-model.h"
 #include "ns3/double.h"
+#include "ns3/config.h"
+#include "ns3/uinteger.h"
 #include "ns3/node-container.h"
 #include "ns3/nr-gnb-mac.h"
 #include "ns3/nr-gnb-phy.h"
@@ -315,13 +317,127 @@ class ShannonBoundUnderOverloadTest : public TestCase
         NS_TEST_ASSERT_MSG_LT(thr, shannonMbps, "below the Shannon capacity at the measured SINR");
         NS_TEST_ASSERT_MSG_GT(thr, shannonMbps / 3.0, "and a realistic fraction of it");
         // The excess is not delivered: it queues behind the bottleneck (RLC)
-        // and is still queued when the run ends. GetAppLossRatio() counts
-        // sequence gaps among received packets only, so a tail backlog is not
-        // in it; the delivered share of the offered load is.
+        // and is still queued when the run ends. OverloadLossRfc7680Test below
+        // checks that GetAppLossRatio() now counts that backlog as loss.
         NS_TEST_ASSERT_MSG_LT(thr / 200.0, 0.5, "less than half of the offered 200 Mb/s delivered");
         NS_TEST_ASSERT_MSG_GT(rs.GetMeanDelayMs(), 50.0,
                               "and what is delivered waited in the queue (OWD floor is 2 ms)");
         Simulator::Destroy();
+    }
+};
+
+/// RFC 7680 one-way loss under overload (fixes-3). One zenith cell, 20 MHz,
+/// eMBB offered at O = 200 Mb/s (17857 packets/s of 1400 B) from 0.5 s, run to
+/// 4.0 s, Tmax = 1 s, so the loss population is every packet sent by
+/// Tend - Tmax = 3.0 s. The delivered rate C is measured on the live sink
+/// counter between 1 s and 3 s.
+///  - Finite RLC buffer (200 kB, about 27 ms at C): the excess is dropped at
+///    the RLC, delay stays far below Tmax, and the loss must equal
+///    (offered - delivered) / offered = (O - C) / O within 0.03, and the
+///    whole-run application counters within 0.05.
+///  - The helper's unbounded RLC buffer: nothing is dropped, the backlog grows
+///    at O - C and a packet sent at t waits (O / C - 1)(t - t0). It arrives
+///    within Tmax only if sent before t0 + Tmax C / (O - C), so the fluid
+///    prediction is loss = 1 - Tmax C / ((O - C)(3.0 - t0)); measured within
+///    0.03. The former sequence-gap ratio reads 0 here (every received packet
+///    is a contiguous prefix) although less than a third of the load arrives:
+///    that is the defect.
+/// Failure path: a run too short for any packet to have a full Tmax window is
+/// flagged as censored, and changing Tmax after arrivals were judged aborts
+/// (not exercised). Normal path: 1 Mb/s on the same cell loses nothing.
+class OverloadLossRfc7680Test : public TestCase
+{
+  public:
+    OverloadLossRfc7680Test()
+        : TestCase("RFC 7680 loss counts the backlog of an overloaded run: (offered - delivered) / offered")
+    {
+    }
+
+  private:
+    struct Out
+    {
+        double loss{0};
+        double seqGap{0};
+        double c{0};      ///< delivered packets/s, 1 s to 3 s
+        double byCount{0};
+        uint64_t sent{0};
+        uint64_t pending{0};
+        bool censored{true};
+    };
+
+    Out Run(const std::string& rate, uint32_t rlcBytes, double stopS, double simS, const std::string& dir)
+    {
+        NodeContainer sats;
+        NodeContainer ues;
+        Row(sats, ues, 1, 0.0);
+        NtnRealStackHelper rs;
+        NrSet1(rs, simS, CreateTempDirFilename(dir));
+        rs.SetEmbbRate(DataRate(rate));
+        rs.Build(sats, ues);
+        if (rlcBytes > 0)
+        {
+            // The RLC entities are created at bearer setup inside the run, so
+            // this overrides the helper's unbounded default for this cell.
+            Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(rlcBytes));
+        }
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(0.5),
+                          Seconds(stopS));
+        uint64_t rx1 = 0;
+        uint64_t rx3 = 0;
+        Simulator::Schedule(Seconds(1.0), [&]() { rx1 = rs.GetUeRxPackets(0); });
+        Simulator::Schedule(Seconds(3.0), [&]() { rx3 = rs.GetUeRxPackets(0); });
+        Simulator::Stop(Seconds(simS));
+        Simulator::Run();
+        rs.Collect();
+        Out o;
+        o.loss = rs.GetAppLossRatio();
+        o.seqGap = rs.GetAppSeqGapLossRatio();
+        o.c = static_cast<double>(rx3 - rx1) / 2.0;
+        o.byCount = 1.0 - static_cast<double>(rs.GetAppRxPackets()) /
+                              static_cast<double>(std::max<uint64_t>(1, rs.GetAppTxPackets()));
+        o.sent = rs.GetAppLossSentPackets();
+        o.pending = rs.GetAppLossPendingPackets();
+        o.censored = rs.GetAppLossCensored();
+        Simulator::Destroy();
+        return o;
+    }
+
+    void DoRun() override
+    {
+        const double o = 200e6 / (1400.0 * 8.0);
+        const double expectSent = o * 2.5;
+
+        const Out fin = Run("200Mb/s", 200000, 3.5, 4.0, "loss-finite");
+        NS_TEST_ASSERT_MSG_EQ_TOL(static_cast<double>(fin.sent), expectSent, 0.01 * expectSent,
+                                  "population = packets sent by Tend - Tmax = 3.0 s");
+        NS_TEST_ASSERT_MSG_EQ(fin.censored, false, "a full Tmax window exists");
+        NS_TEST_ASSERT_MSG_GT(fin.pending, 0u, "the last Tmax of sends is excluded");
+        NS_TEST_ASSERT_MSG_GT(fin.loss, 0.5, "more than half of the offered load is lost");
+        NS_TEST_ASSERT_MSG_EQ_TOL(fin.loss, (o - fin.c) / o, 0.03,
+                                  "loss = (offered - delivered) / offered, steady-state rates");
+        NS_TEST_ASSERT_MSG_EQ_TOL(fin.loss, fin.byCount, 0.05,
+                                  "loss = (offered - delivered) / offered, application counters");
+
+        const Out inf = Run("200Mb/s", 0, 3.5, 4.0, "loss-unbounded");
+        const double t0 = 0.5;
+        const double fluid = 1.0 - 1.0 * inf.c / ((o - inf.c) * (3.0 - t0));
+        NS_TEST_ASSERT_MSG_GT(inf.loss, 0.5, "the backlog is lost: less than half arrives in Tmax");
+        NS_TEST_ASSERT_MSG_EQ_TOL(inf.loss, fluid, 0.03,
+                                  "loss = fluid-queue prediction 1 - Tmax C / ((O - C)(cutoff - t0))");
+        NS_TEST_ASSERT_MSG_LT(inf.seqGap, 0.01,
+                              "the former sequence-gap ratio is blind to the backlog");
+        NS_TEST_ASSERT_MSG_GT(inf.byCount, 0.5, "the app counters agree that most never arrived");
+
+        const Out light = Run("1Mb/s", 0, 2.5, 3.0, "loss-light");
+        NS_TEST_ASSERT_MSG_GT(light.sent, 100u, "1.5 s of 1 Mb/s in the population");
+        NS_TEST_ASSERT_MSG_EQ(light.censored, false, "a full window");
+        NS_TEST_ASSERT_MSG_LT(light.loss, 0.01, "an unloaded cell loses nothing");
+
+        const Out shortRun = Run("1Mb/s", 0, 1.1, 1.2, "loss-short");
+        NS_TEST_ASSERT_MSG_EQ(shortRun.censored, true,
+                              "failure path: a run shorter than Tmax after the first packet is flagged");
+        NS_TEST_ASSERT_MSG_LT(shortRun.loss, 0.05, "and only the last packets in flight count as lost");
     }
 };
 
@@ -581,6 +697,7 @@ class NtnRealStackDepthTestSuite : public TestSuite
         AddTestCase(new FddBandEdgesTest, TestCase::Duration::QUICK);
         AddTestCase(new FrequencyReuseThreeCellsTest, TestCase::Duration::QUICK);
         AddTestCase(new ShannonBoundUnderOverloadTest, TestCase::Duration::QUICK);
+        AddTestCase(new OverloadLossRfc7680Test, TestCase::Duration::QUICK);
         AddTestCase(new LinkOutageRecoveryTest, TestCase::Duration::QUICK);
         AddTestCase(new SsbGridAlongPassTest, TestCase::Duration::QUICK);
         AddTestCase(new RealStackDeterminismTest, TestCase::Duration::QUICK);

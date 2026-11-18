@@ -2733,6 +2733,8 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
     m_dlSinkUe.push_back(ueIdx);
     sink->TraceConnectWithoutContext("Rx",
                                      MakeCallback(&NtnRealStackHelper::DlSinkRx, this));
+    sink->TraceConnectWithoutContext("Rx",
+                                     MakeCallback(&NtnRealStackHelper::DlOranSinkRx, this));
 
     Ptr<NtnOranApplication> client = CreateObject<NtnOranApplication>();
     client->SetRemote(InetSocketAddress(m_ueAddrs[ueIdx], dlPort));
@@ -2782,6 +2784,8 @@ NtnRealStackHelper::InstallOranFlow(uint32_t ueIdx,
     m_clientApps.Add(client);
     client->TraceConnectWithoutContext("Tx",
                                        MakeCallback(&NtnRealStackHelper::DlClientTx, this));
+    client->TraceConnectWithoutContext("Tx",
+                                       MakeCallback(&NtnRealStackHelper::DlOranClientTx, this));
 
     // Enabler C: activate a dedicated per-5QI EPS bearer so the QoS scheduler /
     // BWP manager actually differentiate this flow (instead of everything
@@ -4156,8 +4160,75 @@ NtnRealStackHelper::Collect()
     // m_appTxPackets / m_appRxPackets are accumulated live by the app traces.
     m_meanDelayMs = delaySamples ? sumDelayMs / delaySamples : 0.0;
     m_meanJitterMs = jitterFlows ? sumJitterMs / jitterFlows : 0.0;
-    m_appLossRatio =
+    m_appSeqGapLossRatio =
         expectedPkts ? static_cast<double>(lostPkts) / expectedPkts : 0.0;
+
+    // RFC 7680 one-way packet loss with waiting time Tmax (see GetAppLossRatio).
+    // Every term is keyed by the packet's SEND time, so the population and the
+    // on-time arrivals are counted over exactly the same packets. A bin enters
+    // the population only when all of it lies at or before Tend - Tmax.
+    {
+        Time tEnd = Simulator::Now();
+        if (tEnd.IsZero() || tEnd > m_simTime)
+        {
+            tEnd = m_simTime; // after Destroy(), or past the sinks' stop time
+        }
+        const double cutoffS = (tEnd - m_lossTmax).GetSeconds();
+        const int64_t nFull =
+            (cutoffS > 0.0) ? static_cast<int64_t>(std::floor(cutoffS / kLossBinS + 1e-9)) : 0;
+        auto tally = [&](const std::vector<uint32_t>& sent,
+                         const std::vector<uint32_t>& rx,
+                         int64_t nBins,
+                         uint64_t& pop,
+                         uint64_t& ok,
+                         uint64_t& pending) {
+            for (size_t b = 0; b < sent.size(); ++b)
+            {
+                const uint64_t r = (b < rx.size()) ? std::min(rx[b], sent[b]) : 0;
+                if (static_cast<int64_t>(b) < nBins)
+                {
+                    pop += sent[b];
+                    ok += r;
+                }
+                else
+                {
+                    pending += sent[b];
+                }
+            }
+        };
+        auto tallyAll = [&](int64_t nBins, uint64_t& pop, uint64_t& ok, uint64_t& pending) {
+            tally(m_lossSentBins, m_lossRxBins, nBins, pop, ok, pending);
+            for (const auto& f : m_extFlows)
+            {
+                // A flow without an in-band timestamp cannot say when its packets
+                // were sent or whether they were on time; it stays out, as before.
+                if (f.anySeq)
+                {
+                    tally(f.lossSentBins, f.lossRxBins, nBins, pop, ok, pending);
+                }
+            }
+        };
+        uint64_t pop = 0;
+        uint64_t ok = 0;
+        uint64_t pending = 0;
+        tallyAll(nFull, pop, ok, pending);
+        m_lossCensored = false;
+        if (pop == 0 && pending > 0)
+        {
+            // No packet had a full Tmax window before Tend: take every packet and
+            // Tend as the deadline, and say so.
+            pop = ok = pending = 0;
+            tallyAll(std::numeric_limits<int64_t>::max(), pop, ok, pending);
+            m_lossCensored = true;
+            NS_LOG_WARN("GetAppLossRatio: run shorter than Tmax = "
+                        << m_lossTmax.GetSeconds()
+                        << " s after the first packet; loss measured with deadline Tend");
+        }
+        m_lossSent = pop;
+        m_lossDelivered = ok;
+        m_lossPending = pending;
+        m_appLossRatio = pop ? static_cast<double>(pop - ok) / static_cast<double>(pop) : 0.0;
+    }
     if (ipdvN > 0)
     {
         m_ipdvMeanAbsMs = ipdvSumAbs / static_cast<double>(ipdvN);
@@ -4208,6 +4279,71 @@ void
 NtnRealStackHelper::DlSinkRx(Ptr<const Packet>, const Address&)
 {
     ++m_appRxPackets;
+}
+
+void
+NtnRealStackHelper::SetAppLossWaitTime(Time tmax)
+{
+    NS_ABORT_MSG_IF(m_lossRxJudged && tmax != m_lossTmax,
+                    "SetAppLossWaitTime: arrivals were already judged against Tmax = "
+                        << m_lossTmax.GetSeconds() << " s; set it before the run");
+    NS_ABORT_MSG_IF(!tmax.IsStrictlyPositive(), "SetAppLossWaitTime: Tmax must be > 0");
+    m_lossTmax = tmax;
+}
+
+void
+NtnRealStackHelper::LossBinAdd(std::vector<uint32_t>& bins, Time tx)
+{
+    const double t = std::max(0.0, tx.GetSeconds());
+    const size_t b = static_cast<size_t>(t / kLossBinS);
+    if (b >= bins.size())
+    {
+        bins.resize(b + 1, 0u);
+    }
+    ++bins[b];
+}
+
+void
+NtnRealStackHelper::LossRecordRx(std::vector<uint32_t>& rx, Time tx, Time delay)
+{
+    m_lossRxJudged = true;
+    // RFC 7680 section 2.4: a packet that arrives after Tmax is lost.
+    if (delay <= m_lossTmax)
+    {
+        LossBinAdd(rx, tx);
+    }
+}
+
+void
+NtnRealStackHelper::DlOranClientTx(Ptr<const Packet>)
+{
+    // NtnOranApplication fires "Tx" in the event that stamps the in-band
+    // header with Simulator::Now(), so this send time equals the timestamp
+    // the sink reads back.
+    LossBinAdd(m_lossSentBins, Simulator::Now());
+}
+
+void
+NtnRealStackHelper::DlOranSinkRx(Ptr<const Packet> p, const Address&)
+{
+    if (!p || p->GetSize() < NtnOranPayloadHeader::SERIALIZED_SIZE)
+    {
+        return;
+    }
+    NtnOranPayloadHeader hdr;
+    p->PeekHeader(hdr);
+    if (hdr.GetVersion() != NtnOranPayloadHeader::NTN_ORAN_PAYLOAD_VERSION)
+    {
+        return; // the sink discards it too
+    }
+    const Time tx = NanoSeconds(static_cast<int64_t>(hdr.GetTxTimestampNs()));
+    LossRecordRx(m_lossRxBins, tx, Simulator::Now() - tx);
+}
+
+void
+NtnRealStackHelper::ExtClientTx(uint32_t flow, Ptr<const Packet>)
+{
+    LossBinAdd(m_extFlows[flow].lossSentBins, Simulator::Now());
 }
 
 double
@@ -4646,20 +4782,18 @@ NtnRealStackHelper::WriteHealthReport()
     // with no floor asserted health that was never checked; "-" says plainly
     // that nothing is being judged.
     //
-    // app_loss_ratio is NOT the complement of the delivery ratio above, though
-    // this comment claimed it was and used that as the reason for leaving it
-    // ungated. They have different denominators. Delivery is rx/tx over every
-    // packet the application sent. Loss is gaps/(rx+gaps) from in-band sequence
-    // numbers at the sink, so a packet that never arrives at all after the last
-    // one that did leaves no gap to detect and is absent from BOTH terms.
-    // The residual is the tail still in flight, or dropped, when the run stops.
+    // app_loss_ratio is NOT the complement of the delivery ratio above. They
+    // have different populations. Delivery is rx/tx over every packet the
+    // application sent, whenever it arrived. Loss follows RFC 7680: over the
+    // packets sent by Tend - Tmax, the share not received within Tmax, so a
+    // late packet counts as lost and the last Tmax of sends is excluded.
     //
-    // Measured over the example sweep, delivery + loss lands at 0.9369 on
-    // thz-ntn-real-stack, 0.8956 on thz-ntn-isac-coexist-traffic and 0.6455 on
-    // sagin-a2g-real-stack, against the 1.0 the old claim required. The two rows
-    // answer different questions and the gap between them is informative: it
-    // sizes the tail. Gating loss separately would not double-count, but it
-    // would need its own floor rather than inheriting the delivery gate's.
+    // Until Nov 2026 the loss row counted sequence gaps among received packets
+    // (now app_seq_gap_loss_ratio), which could not see a tail that never
+    // arrived: an overloaded run delivering less than half its offered load
+    // reported 0 % loss, and delivery + loss summed to 0.65 on
+    // sagin-a2g-real-stack. Gating loss separately would need its own floor
+    // rather than inheriting the delivery gate's.
     // CVC-07: say WHERE the service-link flight time lives.
     //
     // The end-to-end user-plane OWD above is physically right on every path,
@@ -4692,7 +4826,8 @@ NtnRealStackHelper::WriteHealthReport()
     out << "app_owd_p95_ms," << owdField(m_owdP95Ms) << ",-,-,inband-timestamp-hist0.1ms\n";
     out << "app_owd_p99_ms," << owdField(m_owdP99Ms) << ",-,-,inband-timestamp-hist0.1ms\n";
     out << "app_owd_max_ms," << owdField(m_owdMaxMs) << ",-,-,inband-timestamp\n";
-    out << "app_loss_ratio," << m_appLossRatio << ",-,-,inband-seq\n";
+    out << "app_loss_ratio," << m_appLossRatio << ",-,-,rfc7680-tmax-"
+        << m_lossTmax.GetSeconds() << "s" << (m_lossCensored ? "-censored" : "") << "\n";
     // NT-02: real budget + real pass flag (was: floor "-", pass hard-coded 1,
     // which made a 20 dB link-budget error invisible to every gate).
     double eirpBudget = 0.0;
@@ -4782,6 +4917,14 @@ NtnRealStackHelper::WriteHealthReport()
             << (m_periodicMeas ? "rrc-periodical" : "rrc-event") << "\n";
         out << "handover_ping_pong_5s," << GetPingPongCount(Seconds(5)) << ",-,-,rrc-trace\n";
     }
+    // RFC 7680 loss breakdown (appended so the earlier row order is unchanged):
+    // the population sent by Tend - Tmax, its on-time arrivals, the packets
+    // sent later and excluded, and the former sequence-gap figure for
+    // comparison.
+    out << "app_loss_sent_pkts," << m_lossSent << ",-,-,rfc7680-population\n";
+    out << "app_loss_delivered_pkts," << m_lossDelivered << ",-,-,rfc7680-within-tmax\n";
+    out << "app_loss_pending_pkts," << m_lossPending << ",-,-,rfc7680-sent-after-cutoff\n";
+    out << "app_seq_gap_loss_ratio," << m_appSeqGapLossRatio << ",-,-,inband-seq\n";
     // Caller-supplied provenance rows, emitted last so they cannot displace a
     // gated row if a module picks a colliding name.
     for (const auto& [metric, value, prov] : m_extraHealthRows)
@@ -6157,6 +6300,12 @@ NtnRealStackHelper::AttachExternalDlFlow(uint32_t ueIdx,
         txOk = client->TraceConnectWithoutContext(
             "Tx",
             MakeCallback(&NtnRealStackHelper::DlClientTx, this));
+        if (txOk)
+        {
+            client->TraceConnectWithoutContext(
+                "Tx",
+                MakeCallback(&NtnRealStackHelper::ExtClientTx, this).Bind(flow));
+        }
     }
     if (m_backend == RadioBackend::Nr)
     {
@@ -6237,6 +6386,7 @@ NtnRealStackHelper::ExtSinkRxSeq(uint32_t flow,
             f.ipdvOverflow++;
         }
     }
+    LossRecordRx(f.lossRxBins, h.GetTs(), Simulator::Now() - h.GetTs());
     f.lastSeq = h.GetSeq();
     f.lastDelayMs = d;
     ++f.seqRx;

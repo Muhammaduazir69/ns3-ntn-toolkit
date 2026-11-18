@@ -1479,8 +1479,51 @@ class NtnRealStackHelper
     double GetMeanDelayMs() const { return m_meanDelayMs; }
     /// Measured RFC 3550 jitter (ms) across all DL flows.
     double GetMeanJitterMs() const { return m_meanJitterMs; }
-    /// Measured app-layer loss ratio (seq gaps) across all DL flows.
+    /// Measured app-layer one-way packet loss ratio across all DL flows, in
+    /// the sense of RFC 7680 (Type-P-One-way-Packet-Loss): a packet the
+    /// application sent is lost when it has not arrived within the waiting
+    /// time Tmax (SetAppLossWaitTime, default 1 s).
+    ///
+    /// The population is every packet sent up to the cutoff Tend - Tmax, where
+    /// Tend is the end of the measurement (the instant Collect() runs, capped
+    /// at the simulation time). Each of those packets had a full flush window
+    /// of Tmax to arrive, so a backlog still queued in RLC or the scheduler
+    /// when the run stops is counted as lost, and nothing sent in the last
+    /// Tmax (whose fate is not yet decided) is in either term:
+    ///
+    ///   loss = (sent by cutoff - received within Tmax) / sent by cutoff.
+    ///
+    /// The ratio used to count sequence gaps among RECEIVED packets only, so
+    /// an overloaded run whose excess sat in a queue at the end reported 0 %
+    /// while less than half of the offered load arrived. That figure is kept
+    /// as GetAppSeqGapLossRatio(). When the run is shorter than Tmax after the
+    /// first packet (no packet had a full window), the population falls back to
+    /// every packet sent and the deadline to Tend; GetAppLossCensored() says so.
     double GetAppLossRatio() const { return m_appLossRatio; }
+    /// RFC 7680 waiting time Tmax for GetAppLossRatio(). It is the largest
+    /// delay at which a packet still counts as delivered (1 s by default: above
+    /// every TS 23.501 Table 5.7.4-1 PDB but 5QI 10's, plus a GEO one-way path).
+    /// Each arrival is judged against Tmax when it happens, so set it before
+    /// the first packet arrives; a later change aborts.
+    void SetAppLossWaitTime(Time tmax);
+    Time GetAppLossWaitTime() const { return m_lossTmax; }
+    /// Packets in the loss population (sent by Tend - Tmax), and of those the
+    /// ones received within Tmax.
+    uint64_t GetAppLossSentPackets() const { return m_lossSent; }
+    uint64_t GetAppLossDeliveredPackets() const { return m_lossDelivered; }
+    /// Packets sent after the cutoff, excluded from the loss ratio because
+    /// their waiting time had not elapsed at Tend.
+    uint64_t GetAppLossPendingPackets() const { return m_lossPending; }
+    /// True when the run was too short for a full Tmax window and the fallback
+    /// population (everything sent, deadline Tend) was used.
+    bool GetAppLossCensored() const { return m_lossCensored; }
+    /// Application packets sent by the DL clients and received by the DL sinks
+    /// over the whole run (the app_tx_pkts / app_rx_pkts health rows).
+    uint64_t GetAppTxPackets() const { return m_appTxPackets; }
+    uint64_t GetAppRxPackets() const { return m_appRxPackets; }
+    /// The former sequence-gap loss: gaps / (highest seq + 1) among received
+    /// packets. Blind to a tail that never arrives.
+    double GetAppSeqGapLossRatio() const { return m_appSeqGapLossRatio; }
     /// Measured mean DL SINR (dB) for a given cellId, or NaN if no samples.
     double GetCellMeanSinrDb(uint16_t cellId) const;
 
@@ -1747,6 +1790,16 @@ class NtnRealStackHelper
     // App-layer measured counters (connected to OnOff "Tx" / PacketSink "Rx").
     void DlClientTx(Ptr<const Packet> p);
     void DlSinkRx(Ptr<const Packet> p, const Address& from);
+    /// RFC 7680 loss bookkeeping for helper-installed NtnOranApplication flows:
+    /// the send instant and, at the sink, the in-band TX timestamp and delay.
+    void DlOranClientTx(Ptr<const Packet> p);
+    void DlOranSinkRx(Ptr<const Packet> p, const Address& from);
+    /// Same for an attached external flow (sender side).
+    void ExtClientTx(uint32_t flow, Ptr<const Packet> p);
+    /// Add one packet sent at \p tx to \p sent, or, when \p delay is within
+    /// Tmax, one on-time arrival to \p rx. Bins are kLossBinS wide.
+    static void LossBinAdd(std::vector<uint32_t>& bins, Time tx);
+    void LossRecordRx(std::vector<uint32_t>& rx, Time tx, Time delay);
     void RunPeriodic(uint32_t idx);
     // Enabler A: NrGnbRrc "HandoverEndOk" trace sink (counts completed HOs).
     void NrHandoverEndOk(std::string ctx, uint64_t imsi, uint16_t cellId, uint16_t rnti);
@@ -2143,6 +2196,8 @@ class NtnRealStackHelper
         double maxDelayMs{0.0};
         std::vector<uint32_t> ipdvHistAbs;  //!< lazily sized to FlowStats::kIpdvBins
         uint64_t ipdvOverflow{0};
+        std::vector<uint32_t> lossSentBins; //!< RFC 7680: sends per kLossBinS
+        std::vector<uint32_t> lossRxBins;   //!< RFC 7680: on-time arrivals per send bin
     };
     std::vector<ExtFlowState> m_extFlows;
     void ExtSinkRx(uint32_t flow, Ptr<const Packet> p, const Address& from);
@@ -2194,6 +2249,19 @@ class NtnRealStackHelper
     double m_owdP99Ms{std::numeric_limits<double>::quiet_NaN()};
     double m_owdMaxMs{std::numeric_limits<double>::quiet_NaN()};
     double m_appLossRatio{0.0};
+    double m_appSeqGapLossRatio{0.0};
+    /// RFC 7680 one-way loss: per-10 ms counts keyed by SEND time of packets
+    /// sent and of packets received within Tmax (helper NtnOranApplication flows;
+    /// external flows keep their own in ExtFlowState).
+    static constexpr double kLossBinS = 0.01;
+    Time m_lossTmax{Seconds(1.0)};
+    std::vector<uint32_t> m_lossSentBins;
+    std::vector<uint32_t> m_lossRxBins;
+    uint64_t m_lossSent{0};
+    uint64_t m_lossDelivered{0};
+    uint64_t m_lossPending{0};
+    bool m_lossCensored{false};
+    bool m_lossRxJudged{false}; //!< an arrival was already judged against Tmax
     uint16_t m_nextDlPort{1234};
     uint16_t m_flowSeq{0}; ///< monotonic ORAN srcId allocator (never a recycled port)
     uint64_t m_appTxPackets{0};
