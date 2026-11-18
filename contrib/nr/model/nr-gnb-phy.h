@@ -233,6 +233,13 @@ class NrGnbPhy : public NrPhy
     bool RegisterUe(uint64_t imsi, const Ptr<NrUeNetDevice>& ueDevice);
 
     /**
+     * \brief Whether a registered UE device is the one a DCI for \p rnti
+     * addresses (ntn-patch 18): its C-RNTI on BWP \p ueBwp equals \p rnti
+     * and, with BeamLookupServingUeOnly, this cell serves it.
+     */
+    bool IsScheduledUe(const Ptr<NrUeNetDevice>& ueDev, uint16_t rnti, uint8_t ueBwp) const;
+
+    /**
      * \brief Receive a PHY data packet
      *
      * Connected by the helper to a callback of the spectrum.
@@ -833,6 +840,7 @@ class NrGnbPhy : public NrPhy
     bool m_isPrimary{false}; //!< Is this PHY a primary phy?
 
     Time m_lastBfChange; //!< Saves the timestamp when the beamforming vector changes.
+    bool m_beamLookupServingUeOnly{false}; //!< ntn-patch 18, see BeamLookupServingUeOnly
 };
 
 } // namespace ns3

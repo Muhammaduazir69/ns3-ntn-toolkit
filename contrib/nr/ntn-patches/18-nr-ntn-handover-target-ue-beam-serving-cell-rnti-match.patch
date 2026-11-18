@@ -1,0 +1,108 @@
+# NTN/ns-3.43 adaptation patch 18 - NrGnbPhy chooses a scheduled RNTI's beam only among the UEs this cell serves (BeamLookupServingUeOnly)
+# base: upstream 5g-lena v3.3.1 plus patches 01-17
+# apply from contrib/nr/ with: patch -p1 < ntn-patches/18-nr-ntn-handover-target-ue-beam-serving-cell-rnti-match.patch
+#
+--- a/model/nr-gnb-phy.cc
++++ b/model/nr-gnb-phy.cc
+@@ -184,6 +184,16 @@
+                 UintegerValue(14),
+                 MakeUintegerAccessor(&NrPhy::SetSymbolsPerSlot, &NrPhy::GetSymbolsPerSlot),
+                 MakeUintegerChecker<uint16_t>())
++            .AddAttribute(
++                "BeamLookupServingUeOnly",
++                "ntn-patch 18: when choosing the beam of a scheduled RNTI (PDSCH, PUSCH, SRS, "
++                "scheduler beam id), match only UE devices whose serving cell is this cell. "
++                "RegisterUe entries are never removed, so after handovers a UE that left keeps "
++                "its entry and can carry the same C-RNTI in its new cell. False (nr default) "
++                "matches the RNTI alone.",
++                BooleanValue(false),
++                MakeBooleanAccessor(&NrGnbPhy::m_beamLookupServingUeOnly),
++                MakeBooleanChecker())
+             .AddAttribute("Pattern",
+                           "The slot pattern",
+                           StringValue("F|F|F|F|F|F|F|F|F|F|"),
+@@ -613,9 +623,7 @@
+     for (const auto& i : m_deviceMap)
+     {
+         Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
+-        uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
+-
+-        if (ueRnti == rnti)
++        if (IsScheduledUe(ueDev, rnti, GetBwpId()))
+         {
+             NS_ASSERT(m_spectrumPhy->GetBeamManager());
+             return m_spectrumPhy->GetBeamManager()->GetBeamId(i);
+@@ -1411,8 +1419,7 @@
+     for (auto& i : m_deviceMap)
+     {
+         Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
+-        uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
+-        if (dci->m_rnti == ueRnti)
++        if (IsScheduledUe(ueDev, dci->m_rnti, GetBwpId()))
+         {
+             // Even if we change the beamforming vector, we hope that the scheduler
+             // has scheduled UEs within the same beam (and, therefore, have the same
+@@ -1467,8 +1474,7 @@
+     for (auto& i : m_deviceMap)
+     {
+         Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
+-        uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(0)))->GetRnti();
+-        if (dci->m_rnti == ueRnti)
++        if (IsScheduledUe(ueDev, dci->m_rnti, 0))
+         {
+             // Even if we change the beamforming vector, we hope that the scheduler
+             // has scheduled UEs within the same beam (and, therefore, have the same
+@@ -1594,8 +1600,7 @@
+         for (auto& i : m_deviceMap)
+         {
+             Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
+-            uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
+-            if (dci->m_rnti == ueRnti)
++            if (IsScheduledUe(ueDev, dci->m_rnti, GetBwpId()))
+             {
+                 ChangeBeamformingVector(i);
+                 found = true;
+@@ -1696,6 +1701,19 @@
+ }
+ 
+ bool
++NrGnbPhy::IsScheduledUe(const Ptr<NrUeNetDevice>& ueDev, uint16_t rnti, uint8_t ueBwp) const
++{
++    // ntn-patch 18: the C-RNTI is unique only within a cell (TS 38.321 7.1),
++    // so with BeamLookupServingUeOnly a registered UE matches only while this
++    // cell serves it (NrUeNetDevice::GetCellId follows handovers, patch 10).
++    if ((DynamicCast<NrUePhy>(ueDev->GetPhy(ueBwp)))->GetRnti() != rnti)
++    {
++        return false;
++    }
++    return !m_beamLookupServingUeOnly || ueDev->GetCellId() == GetCellId();
++}
++
++bool
+ NrGnbPhy::RegisterUe(uint64_t imsi, const Ptr<NrUeNetDevice>& ueDevice)
+ {
+     NS_LOG_FUNCTION(this << imsi);
+--- a/model/nr-gnb-phy.h
++++ b/model/nr-gnb-phy.h
+@@ -233,6 +233,13 @@
+     bool RegisterUe(uint64_t imsi, const Ptr<NrUeNetDevice>& ueDevice);
+ 
+     /**
++     * \brief Whether a registered UE device is the one a DCI for \p rnti
++     * addresses (ntn-patch 18): its C-RNTI on BWP \p ueBwp equals \p rnti
++     * and, with BeamLookupServingUeOnly, this cell serves it.
++     */
++    bool IsScheduledUe(const Ptr<NrUeNetDevice>& ueDev, uint16_t rnti, uint8_t ueBwp) const;
++
++    /**
+      * \brief Receive a PHY data packet
+      *
+      * Connected by the helper to a callback of the spectrum.
+@@ -833,6 +840,7 @@
+     bool m_isPrimary{false}; //!< Is this PHY a primary phy?
+ 
+     Time m_lastBfChange; //!< Saves the timestamp when the beamforming vector changes.
++    bool m_beamLookupServingUeOnly{false}; //!< ntn-patch 18, see BeamLookupServingUeOnly
+ };
+ 
+ } // namespace ns3

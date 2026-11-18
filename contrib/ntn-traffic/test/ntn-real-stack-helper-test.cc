@@ -5660,6 +5660,226 @@ class DefaultLinkBudgetIsSet1Test : public TestCase
     }
 };
 
+/// Wave 10: after a handover the target gNB must send the UE's PDSCH on a
+/// UE-directed beam. nr's NrGnbPhy chose the data beam among UE devices
+/// registered by NrHelper::AttachToGnb only, so the target of an X2 handover
+/// transmitted on its predefined (SSB cell) beam or quasi-omni: in
+/// ntn-netsimulyzer-official-demo the target's data path loss equalled its
+/// cell-beam path loss (161 dB, PDSCH SINR -8 dB) against 134 dB on the
+/// source. Two satellites, one UE at the first one's nadir, a commanded
+/// handover to the second (300 km off, 671 km slant): the target is about
+/// 1 dB weaker on geometry, so with the fix the post-handover SINR is within
+/// 3 dB of the source's; without it the 8x8 array gain (18 dB) is missing.
+class HandoverTargetBeamTest : public TestCase
+{
+  public:
+    HandoverTargetBeamTest()
+        : TestCase("Wave 10: the handover target serves the UE on a UE-directed beam")
+    {
+    }
+
+  private:
+    struct Result
+    {
+        double preDb{0.0};
+        double postDb{0.0};
+        uint16_t target{0};
+        uint16_t endCell{0};
+        uint32_t hoCount{0};
+        uint32_t registrations{0};
+        bool active{false};
+    };
+
+    static Result Run(int mode) // 0 default, 1 opt-out, 2 Legacy profile
+    {
+        NodeContainer sats;
+        sats.Create(2);
+        for (uint32_t i = 0; i < 2; ++i)
+        {
+            auto m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(Vector(i == 0 ? 0.0 : 300e3, 0.0, 600e3));
+            sats.Get(i)->AggregateObject(m);
+        }
+        NodeContainer ues;
+        ues.Create(1);
+        auto um = CreateObject<ConstantPositionMobilityModel>();
+        um->SetPosition(Vector(0.0, 0.0, 0.0));
+        ues.Get(0)->AggregateObject(um);
+
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(8.0));
+        rs.SetOutputDir("test-ntn-ho-target-beam");
+        rs.SetHandover(true, 3.0, MilliSeconds(256));
+        rs.SetAutonomousHandover(false);
+        if (mode == 2)
+        {
+            rs.SetLinkBudgetProfile(NtnRealStackHelper::LinkBudgetProfile::Legacy);
+        }
+        else
+        {
+            rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        }
+        if (mode == 1)
+        {
+            rs.SetHandoverTargetBeam(false);
+        }
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(7.8));
+        Result r;
+        Simulator::Schedule(Seconds(1.5), [&rs]() { rs.TakeUeSinrWindowMeanDb(0); });
+        Simulator::Schedule(Seconds(3.9), [&]() {
+            r.preDb = rs.TakeUeSinrWindowMeanDb(0);
+            const uint16_t source = rs.GetUeServingCellId(0);
+            r.target = (source == rs.GetGnbCellId(0)) ? rs.GetGnbCellId(1) : rs.GetGnbCellId(0);
+            rs.TriggerHandover(0, r.target);
+        });
+        Simulator::Schedule(Seconds(5.0), [&rs]() { rs.TakeUeSinrWindowMeanDb(0); });
+        Simulator::Schedule(Seconds(7.5), [&]() {
+            r.postDb = rs.TakeUeSinrWindowMeanDb(0);
+            r.endCell = rs.GetUeServingCellId(0);
+        });
+        Simulator::Stop(Seconds(8.0));
+        Simulator::Run();
+        r.hoCount = rs.GetHandoverCount();
+        r.registrations = rs.GetHandoverTargetBeamRegistrations();
+        r.active = rs.IsHandoverTargetBeamActive();
+        Simulator::Destroy();
+        return r;
+    }
+
+    void DoRun() override
+    {
+        const Result on = Run(0);
+        NS_TEST_ASSERT_MSG_EQ(on.active, true, "on by default under the Set-1 profile");
+        NS_TEST_ASSERT_MSG_EQ(on.hoCount, 1u, "one completed handover");
+        NS_TEST_ASSERT_MSG_EQ(on.endCell, on.target, "the UE is on the target");
+        NS_TEST_ASSERT_MSG_EQ(on.registrations, 1u, "the target registered the UE for its beam");
+        NS_TEST_ASSERT_MSG_EQ(std::isfinite(on.preDb) && std::isfinite(on.postDb), true,
+                              "SINR measured before and after");
+        NS_TEST_ASSERT_MSG_GT(on.postDb, on.preDb - 3.0,
+                              "the target's PDSCH keeps the array gain (geometry: about -1 dB)");
+        NS_TEST_ASSERT_MSG_GT(on.postDb, 10.0, "a usable post-handover SINR");
+
+        // Failure path: Wave 9 behavior, the target falls back to quasi-omni.
+        const Result off = Run(1);
+        NS_TEST_ASSERT_MSG_EQ(off.active, false, "SetHandoverTargetBeam(false) turns it off");
+        NS_TEST_ASSERT_MSG_EQ(off.hoCount, 1u, "the handover itself still completes");
+        NS_TEST_ASSERT_MSG_EQ(off.registrations, 0u, "nothing registered");
+        NS_TEST_ASSERT_MSG_LT(off.postDb, off.preDb - 10.0,
+                              "without it the target's PDSCH loses the array gain");
+        NS_TEST_ASSERT_MSG_LT(off.postDb, on.postDb - 10.0, "and is far below the fixed run");
+
+        // The Legacy profile keeps the old behavior (bit-for-bit reproducibility).
+        const Result legacy = Run(2);
+        NS_TEST_ASSERT_MSG_EQ(legacy.active, false, "off under the Legacy profile");
+        NS_TEST_ASSERT_MSG_EQ(legacy.registrations, 0u, "nothing registered under Legacy");
+    }
+};
+
+/// Wave 10 (nr patch 18): C-RNTIs are unique only within a cell (TS 38.321
+/// 7.1), but NrGnbPhy picked a scheduled RNTI's beam from every UE device ever
+/// registered with it, and a device that handed over away keeps its entry.
+/// Sat A serves U0 and U1, 300 km apart on the ground; U2 sits under sat B.
+/// U0 hands over to B and receives there the C-RNTI that U1 holds in A. Without
+/// the serving-cell match A finds U0's stale entry first and sends U1's PDSCH
+/// on U0's beam (a 28 deg miss for the 8x8 array); with it U1 keeps its beam.
+/// The UEs are spread along y: nr's UniformPlanarArray lies in the y-z plane
+/// (boresight +x), so it cannot tell directions that differ only in x.
+class ServingCellBeamLookupTest : public TestCase
+{
+  public:
+    ServingCellBeamLookupTest()
+        : TestCase("Wave 10 (nr patch 18): the gNB PHY matches a C-RNTI only among UEs it serves")
+    {
+    }
+
+  private:
+    struct Result
+    {
+        bool collided{false};
+        double u1PreDb{0.0};
+        double u1PostDb{0.0};
+        double u0PostDb{0.0};
+    };
+
+    static Result Run(bool fix)
+    {
+        NodeContainer sats;
+        sats.Create(2);
+        const double xs[2] = {0.0, 600e3};
+        for (uint32_t i = 0; i < 2; ++i)
+        {
+            auto m = CreateObject<ConstantPositionMobilityModel>();
+            m->SetPosition(Vector(0.0, xs[i], 600e3));
+            sats.Get(i)->AggregateObject(m);
+        }
+        NodeContainer ues;
+        ues.Create(3);
+        const double ux[3] = {150e3, -150e3, 600e3};
+        for (uint32_t u = 0; u < 3; ++u)
+        {
+            auto um = CreateObject<ConstantPositionMobilityModel>();
+            um->SetPosition(Vector(0.0, ux[u], 0.0));
+            ues.Get(u)->AggregateObject(um);
+        }
+        NtnRealStackHelper rs;
+        rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
+        rs.SetNumerology(1);
+        rs.SetSimTime(Seconds(8.0));
+        rs.SetOutputDir("test-ntn-ho-rnti-beam");
+        rs.SetHandover(true, 3.0, MilliSeconds(256));
+        rs.SetAutonomousHandover(false);
+        rs.SetSatEirpDensityDbwMhz(NtnRealStackHelper::kTr38821Set1SBandEirpDensityDbwMhz);
+        rs.SetHandoverTargetBeam(fix);
+        rs.Build(sats, ues);
+        rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,
+                          Seconds(1.0),
+                          Seconds(7.8));
+        Result r;
+        Simulator::Schedule(Seconds(1.5), [&rs]() { rs.TakeUeSinrWindowMeanDb(1); });
+        Simulator::Schedule(Seconds(3.9), [&]() {
+            r.u1PreDb = rs.TakeUeSinrWindowMeanDb(1);
+            rs.TriggerHandover(0, rs.GetGnbCellId(1));
+        });
+        Simulator::Schedule(Seconds(5.0), [&rs]() {
+            rs.TakeUeSinrWindowMeanDb(0);
+            rs.TakeUeSinrWindowMeanDb(1);
+        });
+        Simulator::Schedule(Seconds(7.5), [&]() {
+            r.collided = rs.GetUeServingCellId(0) == rs.GetGnbCellId(1) &&
+                         rs.GetUeServingCellId(1) == rs.GetGnbCellId(0) &&
+                         rs.GetUeRnti(0) == rs.GetUeRnti(1);
+            r.u0PostDb = rs.TakeUeSinrWindowMeanDb(0);
+            r.u1PostDb = rs.TakeUeSinrWindowMeanDb(1);
+        });
+        Simulator::Stop(Seconds(8.0));
+        Simulator::Run();
+        Simulator::Destroy();
+        return r;
+    }
+
+    void DoRun() override
+    {
+        const Result on = Run(true);
+        NS_TEST_ASSERT_MSG_EQ(on.collided, true,
+                              "precondition: U0's C-RNTI in B equals U1's C-RNTI in A");
+        NS_TEST_ASSERT_MSG_GT(on.u1PostDb, on.u1PreDb - 2.0,
+                              "U1 keeps its own beam after U0 left with a colliding C-RNTI");
+        NS_TEST_ASSERT_MSG_GT(on.u0PostDb, 5.0, "U0 is served on a UE-directed beam by B");
+
+        // Failure path: RNTI-only lookup and no registration (Wave 9).
+        const Result off = Run(false);
+        NS_TEST_ASSERT_MSG_EQ(off.collided, true, "the same collision without the fix");
+        NS_TEST_ASSERT_MSG_LT(off.u1PostDb, off.u1PreDb - 10.0,
+                              "A sends U1's data on U0's stale beam");
+        NS_TEST_ASSERT_MSG_LT(off.u1PostDb, on.u1PostDb - 10.0, "far below the fixed run");
+    }
+};
+
 class NtnRealStackHelperTestSuite : public TestSuite
 {
   public:
@@ -5691,6 +5911,8 @@ class NtnRealStackHelperTestSuite : public TestSuite
         AddTestCase(new KOffsetNotConsumedWhenOffTest, Duration::QUICK);
         AddTestCase(new KOffsetBroadcastUnitsTest, Duration::QUICK);
         AddTestCase(new HandoverStatsFollowServingCellTest, Duration::QUICK);
+        AddTestCase(new HandoverTargetBeamTest, Duration::QUICK);
+        AddTestCase(new ServingCellBeamLookupTest, Duration::QUICK);
         AddTestCase(new SeamPluginChangesMeasuredSinrTest, Duration::QUICK);
         AddTestCase(new EmbbRateHonoredTest, Duration::QUICK);
         AddTestCase(new ExcessLossP618AndIslTest, Duration::QUICK);

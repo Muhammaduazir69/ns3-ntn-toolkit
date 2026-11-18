@@ -60,6 +60,9 @@ main(int argc, char* argv[])
     // from: running it from the repo root left ntn-official.json and
     // ntn-official.json.scene.json sitting in the source tree.
     std::string outputDir = ".";
+    // Wave 10: SSB cell beam. "fixed" (default) is a quasi-Earth-fixed cell
+    // centred on the UE area; "moving" restores the Wave 9 Earth-moving nadir beam.
+    std::string cellBeam = "fixed";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("sats", "Satellites to render", sats);
@@ -69,6 +72,10 @@ main(int argc, char* argv[])
     cmd.AddValue("radio", "Radio backend: nr (FR1) or mmwave", radio);
     cmd.AddValue("out", "Official NetSimulyzer JSON output path", out);
     cmd.AddValue("outputDir", "Directory to write the JSON into", outputDir);
+    cmd.AddValue("cellBeam",
+                 "SSB cell beam: fixed (quasi-Earth-fixed cell on the UE area, TS 38.300 "
+                 "16.14) or moving (each satellite's nadir beam, the Wave 9 behavior)",
+                 cellBeam);
     cmd.Parse(argc, argv);
 
     // Only join when --out is a bare name, so an absolute or explicitly
@@ -167,7 +174,28 @@ main(int argc, char* argv[])
         // the UEs around all six satellites (94 cell changes in 30 s, out to
         // 1743 km slant). Each satellite now sends SSB on its own nadir
         // (Earth-moving) beam, as the payload's cell beam would.
-        rs.SetSsbCellBeam(true, nullptr);
+        //
+        // Wave 10: but one nadir beam per satellite is not the multi-beam
+        // footprint of TR 38.821 Table 6.1.1.1-1 (Set-1 LEO-600 S-band: many
+        // 50 km beams per satellite). The 8x8 array's nadir beam is 12.7 deg
+        // wide, about 60 km of radius on the ground; the serving satellite moves
+        // that far in about 9 s, after which every cell's SS-RSRP came from a
+        // sidelobe: the serving cell fell from -102 dBm to -125..-140 dBm while
+        // its UE-directed data beam stayed at a 134 dB path loss, the
+        // neighbours' sidelobes swung by 10 dB in 0.4 s, and A3 (3 dB) handed
+        // the UEs to the 57 deg satellite and back within 2 s (ping-pong). A
+        // Rel-17 quasi-Earth-fixed cell (TS 38.300 clause 16.14: the satellite
+        // steers its beam to keep covering a fixed area; TR 38.821 clause 7.3)
+        // centred on the UE area makes every satellite's SS-RSRP its main-lobe
+        // value, so A3 compares the path difference the data beam sees.
+        Ptr<ConstantPositionMobilityModel> cellCenter;
+        NS_ABORT_MSG_IF(cellBeam != "fixed" && cellBeam != "moving", "--cellBeam=fixed|moving");
+        if (cellBeam == "fixed")
+        {
+            cellCenter = CreateObject<ConstantPositionMobilityModel>();
+            cellCenter->SetPosition(NtnRealStackHelper::GeodeticToEcef(subLat, subLon, 0.0));
+        }
+        rs.SetSsbCellBeam(true, cellCenter);
     }
     rs.Build(satNodes, ueNodes);
     rs.InstallTraffic(NtnRealStackHelper::TrafficProfile::EmbbStreaming,

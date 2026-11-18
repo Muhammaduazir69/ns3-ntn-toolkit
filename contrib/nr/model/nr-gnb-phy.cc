@@ -184,6 +184,16 @@ NrGnbPhy::GetTypeId()
                 UintegerValue(14),
                 MakeUintegerAccessor(&NrPhy::SetSymbolsPerSlot, &NrPhy::GetSymbolsPerSlot),
                 MakeUintegerChecker<uint16_t>())
+            .AddAttribute(
+                "BeamLookupServingUeOnly",
+                "ntn-patch 18: when choosing the beam of a scheduled RNTI (PDSCH, PUSCH, SRS, "
+                "scheduler beam id), match only UE devices whose serving cell is this cell. "
+                "RegisterUe entries are never removed, so after handovers a UE that left keeps "
+                "its entry and can carry the same C-RNTI in its new cell. False (nr default) "
+                "matches the RNTI alone.",
+                BooleanValue(false),
+                MakeBooleanAccessor(&NrGnbPhy::m_beamLookupServingUeOnly),
+                MakeBooleanChecker())
             .AddAttribute("Pattern",
                           "The slot pattern",
                           StringValue("F|F|F|F|F|F|F|F|F|F|"),
@@ -613,9 +623,7 @@ NrGnbPhy::GetBeamId(uint16_t rnti) const
     for (const auto& i : m_deviceMap)
     {
         Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
-        uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
-
-        if (ueRnti == rnti)
+        if (IsScheduledUe(ueDev, rnti, GetBwpId()))
         {
             NS_ASSERT(m_spectrumPhy->GetBeamManager());
             return m_spectrumPhy->GetBeamManager()->GetBeamId(i);
@@ -1411,8 +1419,7 @@ NrGnbPhy::UlData(const std::shared_ptr<DciInfoElementTdma>& dci)
     for (auto& i : m_deviceMap)
     {
         Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
-        uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
-        if (dci->m_rnti == ueRnti)
+        if (IsScheduledUe(ueDev, dci->m_rnti, GetBwpId()))
         {
             // Even if we change the beamforming vector, we hope that the scheduler
             // has scheduled UEs within the same beam (and, therefore, have the same
@@ -1467,8 +1474,7 @@ NrGnbPhy::UlSrs(const std::shared_ptr<DciInfoElementTdma>& dci)
     for (auto& i : m_deviceMap)
     {
         Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
-        uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(0)))->GetRnti();
-        if (dci->m_rnti == ueRnti)
+        if (IsScheduledUe(ueDev, dci->m_rnti, 0))
         {
             // Even if we change the beamforming vector, we hope that the scheduler
             // has scheduled UEs within the same beam (and, therefore, have the same
@@ -1594,8 +1600,7 @@ NrGnbPhy::SendDataChannels(const Ptr<PacketBurst>& pb,
         for (auto& i : m_deviceMap)
         {
             Ptr<NrUeNetDevice> ueDev = DynamicCast<NrUeNetDevice>(i);
-            uint64_t ueRnti = (DynamicCast<NrUePhy>(ueDev->GetPhy(GetBwpId())))->GetRnti();
-            if (dci->m_rnti == ueRnti)
+            if (IsScheduledUe(ueDev, dci->m_rnti, GetBwpId()))
             {
                 ChangeBeamformingVector(i);
                 found = true;
@@ -1693,6 +1698,19 @@ NrGnbPhy::SendCtrlChannels(const Time& varTtiPeriod)
         m_spectrumPhy->StartTxDlControlFrames(m_ctrlMsgs, varTtiPeriod);
         m_ctrlMsgs.clear();
     }
+}
+
+bool
+NrGnbPhy::IsScheduledUe(const Ptr<NrUeNetDevice>& ueDev, uint16_t rnti, uint8_t ueBwp) const
+{
+    // ntn-patch 18: the C-RNTI is unique only within a cell (TS 38.321 7.1),
+    // so with BeamLookupServingUeOnly a registered UE matches only while this
+    // cell serves it (NrUeNetDevice::GetCellId follows handovers, patch 10).
+    if ((DynamicCast<NrUePhy>(ueDev->GetPhy(ueBwp)))->GetRnti() != rnti)
+    {
+        return false;
+    }
+    return !m_beamLookupServingUeOnly || ueDev->GetCellId() == GetCellId();
 }
 
 bool

@@ -426,6 +426,23 @@ class NtnRealStackHelper
     }
     /// Whether Build() enabled BSR triggering.
     bool IsBsrTriggeringActive() const { return m_bsrTriggeringApplied; }
+
+    /// Wave 10: after an X2 or conditional handover the target gNB serves the
+    /// UE on a UE-directed beam, as the source did, instead of its SSB cell
+    /// beam or quasi-omni (nr's NrGnbPhy chose the data beam only among UEs
+    /// registered at attach), and each gNB PHY matches a scheduled RNTI only
+    /// against the UEs it currently serves (nr patch 18). Default: on for the
+    /// Set-1 profile, off under Legacy or with GlobalValue
+    /// NtnRealStackHoTargetBeam=false. Call before Build().
+    void SetHandoverTargetBeam(bool enable)
+    {
+        m_hoTargetBeam = enable;
+        m_hoTargetBeamSet = true;
+    }
+    /// Whether Build() enabled the handover-target UE beam.
+    bool IsHandoverTargetBeamActive() const { return m_hoTargetBeamApplied; }
+    /// Handover targets that registered a UE for its UE-directed beam.
+    uint32_t GetHandoverTargetBeamRegistrations() const { return m_hoTargetBeamRegistrations; }
     /// SHORT_BSR CEs the UEs sent as NrUeMac::BsrType t, summed over UEs and BWPs.
     uint64_t GetBsrSentCount(uint8_t type) const;
     /// UL grants for a new transmission the UEs received, summed over UEs and BWPs.
@@ -1846,6 +1863,10 @@ class NtnRealStackHelper
     bool m_bsrTriggeringSet{false};
     Time m_periodicBsrTimer{MilliSeconds(20)};
     bool m_bsrTriggeringApplied{false};
+    bool m_hoTargetBeam{true};
+    bool m_hoTargetBeamSet{false};
+    bool m_hoTargetBeamApplied{false};
+    uint32_t m_hoTargetBeamRegistrations{0};
     bool m_fddUlOfdmaApplied{false};
     std::string m_prevElevationModel;
     int m_prevRsrpLinear{-1};

@@ -147,6 +147,19 @@ static GlobalValue g_ntnRealStackBsrTriggering(
     BooleanValue(true),
     MakeBooleanChecker());
 
+// Wave 10: after an X2/CHO handover the target gNB serves the UE on a
+// UE-directed beam (registers the UE device with the target's PHY) and looks the
+// scheduled RNTI up only among the UEs it currently serves (nr patch 18).
+static GlobalValue g_ntnRealStackHoTargetBeam(
+    "NtnRealStackHoTargetBeam",
+    "nr backend: after a handover the target gNB transmits the UE's PDSCH and receives its PUSCH "
+    "on the UE-directed beam (as the source did) instead of its SSB cell beam or quasi-omni, and "
+    "every gNB PHY matches the scheduled RNTI only against the UEs it serves (nr patch 18). Off "
+    "under NtnRealStackLinkBudget=Legacy; false restores the Wave 9 behavior unless a scenario "
+    "calls SetHandoverTargetBeam(true)",
+    BooleanValue(true),
+    MakeBooleanChecker());
+
 static GlobalValue g_ntnRealStackFddUlOfdma(
     "NtnRealStackFddUlOfdma",
     "nr backend under paired FDD: the UL BWPs run nr's OFDMA round-robin scheduler when the "
@@ -1307,6 +1320,22 @@ NtnRealStackHelper::BuildNrRadio()
         }
     }
 
+    // Wave 10: UE-directed beam on the handover target (see NrHandoverEndOk).
+    {
+        bool on = m_hoTargetBeam;
+        if (!m_hoTargetBeamSet)
+        {
+            BooleanValue gv;
+            GlobalValue::GetValueByName("NtnRealStackHoTargetBeam", gv);
+            on = gv.Get() && GetLinkBudgetProfile() != LinkBudgetProfile::Legacy;
+        }
+        m_hoTargetBeamApplied = on;
+        if (on)
+        {
+            m_nr->SetGnbPhyAttribute("BeamLookupServingUeOnly", BooleanValue(true));
+        }
+    }
+
     // Install devices on the caller's mobility-carrying nodes.
     m_enbDevs = m_nr->InstallGnbDevice(m_gnb, allBwps);
     m_ueDevs = m_nr->InstallUeDevice(m_ue, allBwps);
@@ -1980,6 +2009,26 @@ NtnRealStackHelper::NrHandoverEndOk(std::string /*ctx*/,
     if (m_nrBfPairs.insert({cellId, imsi}).second)
     {
         m_nrBeamforming->AddBeamformingTask(gnb, ue); // also points the UE beam at gnb
+        if (m_hoTargetBeamApplied)
+        {
+            // Wave 10: the beamforming task above stores the target's
+            // UE-directed vector, but NrGnbPhy picks the PDSCH/PUSCH beam by
+            // looking the scheduled RNTI up among the UE devices registered
+            // with NrGnbPhy::RegisterUe, which only NrHelper::AttachToGnb
+            // calls. After a reconfiguration with sync (TS 38.331 5.3.5.5.2)
+            // the target found no device, fell back to its predefined (SSB
+            // cell) beam or quasi-omni, and sent the UE's data without the
+            // array gain the source had given it (measured: data path loss
+            // 161 dB on the target vs 134 dB on the source, PDSCH SINR -8 dB).
+            // TS 38.214 5.1.6.1 / TS 38.300 10.9: after the handover the
+            // target serves the UE on the beam it acquired the UE on, i.e. a
+            // UE-specific beam, as the source did.
+            for (std::size_t cc = 0; cc < gnb->GetCcMapSize(); ++cc)
+            {
+                gnb->GetPhy(cc)->RegisterUe(imsi, ue);
+            }
+            ++m_hoTargetBeamRegistrations;
+        }
     }
     else
     {
@@ -4302,6 +4351,8 @@ NtnRealStackHelper::WriteHealthReport()
     }
     out << "ul_bsr_triggering," << (m_bsrTriggeringApplied ? 1 : 0) << ",-,-,"
         << (m_bsrTriggeringApplied ? "ts38321-5.4.5" : "nr-bsr-in-every-tb") << "\n";
+    out << "ho_target_ue_beam," << (m_hoTargetBeamApplied ? 1 : 0) << ",-,-,"
+        << (m_hoTargetBeamApplied ? "registered-on-handover" : "nr-attach-only") << "\n";
     // WF-11: refusals reach the health file, so they are visible in the
     // release build where NS_LOG_WARN is compiled out. pass=0 when a decision
     // module asked for a handover the stack could not perform.
