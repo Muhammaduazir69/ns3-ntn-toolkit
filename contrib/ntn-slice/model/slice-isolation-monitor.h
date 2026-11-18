@@ -58,7 +58,13 @@ class SliceIsolationMonitor : public Object
     /// Register a slice with the monitor.
     void RegisterSlice(const SliceProfile& profile);
 
-    /// Window size (number of samples per slice).
+    /// Latency window per slice, in delivered samples. 0 (the default) keeps
+    /// every delivery, so the p99 is the p99 of the run whatever order the
+    /// samples were recorded in; a positive value keeps the most recent
+    /// `window` (at least 10), which only means "recent" when packets are
+    /// recorded in time order: a delay histogram recorded bin by bin in
+    /// ascending delay into a 200-sample window keeps the 200 slowest packets,
+    /// and its p99 is the run's maximum.
     void SetWindow(uint32_t window);
 
     /// Record one observation. `delivered = false` counts as loss.
@@ -99,7 +105,7 @@ class SliceIsolationMonitor : public Object
     BreachEvent EvaluateSlice(const PerSlice& ps) const;
 
     std::map<Snssai, PerSlice> m_slices;
-    uint32_t m_window{200};
+    uint32_t m_window{0};
     BreachTrace m_traceBreach;
 };
 

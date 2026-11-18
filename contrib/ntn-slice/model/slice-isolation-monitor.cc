@@ -8,6 +8,7 @@
 #include "ns3/uinteger.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace ns3
 {
@@ -44,7 +45,8 @@ SliceIsolationMonitor::RegisterSlice(const SliceProfile& profile)
 void
 SliceIsolationMonitor::SetWindow(uint32_t window)
 {
-    m_window = std::max<uint32_t>(window, 10);
+    // 0 selects cumulative percentiles; a sliding window has at least 10.
+    m_window = (window == 0) ? 0 : std::max<uint32_t>(window, 10);
 }
 
 void
@@ -56,7 +58,15 @@ SliceIsolationMonitor::RecordPacket(const Snssai& s, double latencyMs, bool deli
         return;
     }
     PerSlice& ps = it->second;
-    ps.latencyMsWindow.push_back(latencyMs);
+    // A lost packet has no delivery latency. The examples record each lost
+    // packet with the flow's MEAN delay and record losses last, so on any
+    // flow with a few hundred losses the latency window held nothing but that
+    // mean and the reported "p99" was the mean. Only deliveries (with a finite
+    // latency) are latency samples; losses count toward reliability only.
+    if (delivered && std::isfinite(latencyMs))
+    {
+        ps.latencyMsWindow.push_back(latencyMs);
+    }
     ps.deliveredWindow.push_back(delivered);
     // SLICE-2: count every sample, not just the last m_window of them.
     if (delivered)
@@ -67,11 +77,12 @@ SliceIsolationMonitor::RecordPacket(const Snssai& s, double latencyMs, bool deli
     {
         ++ps.totalLost;
     }
-    while (ps.latencyMsWindow.size() > m_window)
+    // m_window == 0: cumulative percentiles over every delivery.
+    while (m_window > 0 && ps.latencyMsWindow.size() > m_window)
     {
         ps.latencyMsWindow.pop_front();
     }
-    while (ps.deliveredWindow.size() > m_window)
+    while (ps.deliveredWindow.size() > std::max<uint32_t>(m_window, 200))
     {
         ps.deliveredWindow.pop_front();
     }

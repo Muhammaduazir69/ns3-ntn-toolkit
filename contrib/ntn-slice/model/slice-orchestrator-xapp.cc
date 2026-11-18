@@ -108,93 +108,134 @@ SliceOrchestratorXapp::Allocate(const std::map<Snssai, double>& sharesOpt,
     }
 
     const double totalCapacity = m_totalPrb * m_mbpsPerPrb;
-
-    // Step 1: reserve PRBs to satisfy each slice's minThroughputMbps.
-    std::vector<double> reservedMbps(m_slices.size(), 0.0);
-    double reservedSum = 0.0;
-    for (std::size_t i = 0; i < m_slices.size(); ++i)
+    const std::size_t n = m_slices.size();
+    // What a slice can usefully take: its demand, under its throughput cap.
+    std::vector<double> ceilMbps(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
     {
-        // Reserve enough to meet min, but never more than demand or capacity.
-        double demand = GetDemand(m_slices[i].snssai);
-        double minRes = std::min({m_slices[i].minThroughputMbps,
-                                  demand,
-                                  totalCapacity - reservedSum});
-        minRes = std::max(0.0, minRes);
-        reservedMbps[i] = minRes;
+        ceilMbps[i] = GetDemand(m_slices[i].snssai);
+        if (m_slices[i].maxThroughputMbps > 0.0)
+        {
+            ceilMbps[i] = std::min(ceilMbps[i], m_slices[i].maxThroughputMbps);
+        }
+    }
+
+    // Step 1: reserve each slice's minimum, HIGHEST PRIORITY FIRST. The
+    // reservation used to run in registration order, so when the minimums did
+    // not all fit, whichever slice was registered first kept its guarantee and
+    // a priority-9 URLLC slice registered after eMBB could lose its own.
+    std::vector<std::size_t> order(n);
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        order[i] = i;
+    }
+    std::stable_sort(order.begin(), order.end(), [this](std::size_t a, std::size_t b) {
+        return m_slices[a].priority > m_slices[b].priority;
+    });
+    std::vector<double> alloc(n, 0.0);
+    double reservedSum = 0.0;
+    for (std::size_t i : order)
+    {
+        const double minRes = std::max(
+            0.0,
+            std::min({m_slices[i].minThroughputMbps, ceilMbps[i], totalCapacity - reservedSum}));
+        alloc[i] = minRes;
         reservedSum += minRes;
     }
 
-    // Step 2: distribute the remainder. Either by external shares or by
-    // priority-weighted unmet demand.
+    // Step 2: distribute the remainder by external shares or by priority x
+    // unmet demand, as water-filling: capacity a slice cannot use (its demand
+    // or cap is reached) is handed to the others in the next round instead of
+    // being dropped. The single pass this replaces discarded it, so a capped
+    // eMBB slice left PRBs idle while URLLC still had unmet demand.
     double remainder = std::max(0.0, totalCapacity - reservedSum);
-    std::vector<double> extraMbps(m_slices.size(), 0.0);
-
-    if (useShares && !sharesOpt.empty())
+    const bool shares = useShares && !sharesOpt.empty();
+    for (int round = 0; round < 16 && remainder > 1e-9; ++round)
     {
-        // Renormalise external shares.
-        double sum = 0.0;
-        for (auto& [k, v] : sharesOpt)
+        std::vector<double> w(n, 0.0);
+        double totalW = 0.0;
+        for (std::size_t i = 0; i < n; ++i)
         {
-            sum += std::max(0.0, v);
-        }
-        if (sum > 1e-9)
-        {
-            for (std::size_t i = 0; i < m_slices.size(); ++i)
+            const double head = ceilMbps[i] - alloc[i];
+            if (head <= 1e-12)
+            {
+                continue;
+            }
+            if (shares)
             {
                 auto it = sharesOpt.find(m_slices[i].snssai);
-                if (it != sharesOpt.end())
-                {
-                    double frac = std::max(0.0, it->second) / sum;
-                    extraMbps[i] = remainder * frac;
-                }
+                w[i] = (it != sharesOpt.end()) ? std::max(0.0, it->second) : 0.0;
             }
-        }
-    }
-    else
-    {
-        // Built-in policy: priority × unmet-demand weighted.
-        std::vector<double> w(m_slices.size(), 0.0);
-        double totalW = 0.0;
-        for (std::size_t i = 0; i < m_slices.size(); ++i)
-        {
-            double demand = GetDemand(m_slices[i].snssai);
-            double unmet = std::max(0.0, demand - reservedMbps[i]);
-            w[i] = unmet * (1.0 + m_slices[i].priority);
+            else
+            {
+                w[i] = head * (1.0 + m_slices[i].priority);
+            }
             totalW += w[i];
         }
-        if (totalW > 1e-9)
+        if (totalW <= 1e-12)
         {
-            for (std::size_t i = 0; i < m_slices.size(); ++i)
+            break;
+        }
+        double given = 0.0;
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            if (w[i] <= 0.0)
             {
-                extraMbps[i] = remainder * (w[i] / totalW);
+                continue;
             }
+            const double add = std::min(remainder * (w[i] / totalW), ceilMbps[i] - alloc[i]);
+            alloc[i] += add;
+            given += add;
+        }
+        remainder -= given;
+        if (given <= 1e-12)
+        {
+            break;
         }
     }
 
-    // Step 3: clamp by demand and by maxThroughputMbps cap.
+    // Step 3: PRBs. Each slice's PRB need was rounded up on its own, so the
+    // slices' PRBs could add up to more than the cell has. Largest-remainder
+    // rounding keeps the sum at or below m_totalPrb.
+    std::vector<uint32_t> prb(n, 0);
+    std::vector<std::pair<double, std::size_t>> frac;
+    uint32_t prbSum = 0;
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        const double exact = alloc[i] / std::max(m_mbpsPerPrb, 1e-9);
+        prb[i] = static_cast<uint32_t>(std::floor(exact + 1e-9));
+        prbSum += prb[i];
+        frac.emplace_back(exact - prb[i], i);
+    }
+    std::stable_sort(frac.begin(), frac.end(), [](const auto& a, const auto& b) {
+        return a.first > b.first;
+    });
+    for (const auto& [f, i] : frac)
+    {
+        if (f > 1e-9 && prbSum < m_totalPrb)
+        {
+            ++prb[i];
+            ++prbSum;
+        }
+    }
+
     double satSum = 0.0;
     int satCount = 0;
-    for (std::size_t i = 0; i < m_slices.size(); ++i)
+    for (std::size_t i = 0; i < n; ++i)
     {
         SliceTick t{};
         t.snssai = m_slices[i].snssai;
         t.demandMbps = GetDemand(m_slices[i].snssai);
-        double servedMbps = reservedMbps[i] + extraMbps[i];
-        // demand cap
-        servedMbps = std::min(servedMbps, t.demandMbps);
-        // max-throughput cap (0 means uncapped)
-        if (m_slices[i].maxThroughputMbps > 0.0)
-        {
-            servedMbps = std::min(servedMbps, m_slices[i].maxThroughputMbps);
-        }
-        t.servedMbps = servedMbps;
-        t.prbAllocated = static_cast<uint32_t>(
-            std::min(static_cast<double>(m_totalPrb),
-                     std::ceil(servedMbps / std::max(m_mbpsPerPrb, 1e-9))));
+        t.servedMbps = alloc[i];
+        t.prbAllocated = prb[i];
         t.satisfactionRatio = (t.demandMbps > 1e-9)
                                   ? std::min(1.0, t.servedMbps / t.demandMbps)
                                   : 1.0;
-        t.minThroughputMet = t.servedMbps + 1e-6 >= m_slices[i].minThroughputMbps;
+        // The guarantee is min(minimum, demand, cap): a slice asking for less
+        // than its minimum and getting all of it has had its guarantee met. It
+        // was reported as a violation.
+        t.minThroughputMet =
+            t.servedMbps + 1e-6 >= std::min(m_slices[i].minThroughputMbps, ceilMbps[i]);
         m_traceTick(t);
         ticks.push_back(t);
         satSum += t.satisfactionRatio;
