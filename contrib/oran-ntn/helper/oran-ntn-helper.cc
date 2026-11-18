@@ -1126,7 +1126,18 @@ OranNtnHelper::WriteKpmDataset(const std::string& filename) const
     {
         ofs << r.timestamp << "," << r.gnbId << "," << (r.isNtn ? 1 : 0) << ","
             << r.ueId << "," << v(r.rsrp_dBm) << "," << v(r.rsrq_dB) << ","
-            << v(r.sinr_dB) << "," << (int)r.cqi << "," << v(r.throughput_Mbps) << ","
+            << v(r.sinr_dB) << ","
+            // CQI 0 is the TS 38.214 code for "out of range". A report that
+            // carries no CQI at all (the real-stack binding: cqiMeasured false,
+            // cqi left 0) wrote that code on every row, so a 20 dB link read as
+            // out of range. A 0 next to a SINR at or above the CQI-1 threshold
+            // (-6.7 dB, the table the injector derives from) cannot be a real
+            // CQI, so it is written empty like every other missing field; a 0
+            // with a SINR below it is a genuine "out of range" and is kept.
+            << ((r.cqi == 0 && !r.cqiMeasured && !(std::isfinite(r.sinr_dB) && r.sinr_dB < -6.7))
+                    ? std::string()
+                    : std::to_string((int)r.cqi))
+            << "," << v(r.throughput_Mbps) << ","
             << v(r.latency_ms) << "," << v(r.elevation_deg) << "," << v(r.doppler_Hz) << ","
             << v(r.propagationDelay_ms) << "," << v(r.tte_s) << "," << r.beamId << ","
             << v(r.beamGain_dB) << "," << v(r.prbUtilization) << "," << r.activeUes << ","
