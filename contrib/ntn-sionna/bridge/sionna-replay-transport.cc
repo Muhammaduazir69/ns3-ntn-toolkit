@@ -303,6 +303,18 @@ SionnaReplayTransport::Query(const Request& req) const
     const double ue[3] = {req.rx_x, req.rx_y, req.rx_z};
     const size_t idx = m_reader.NearestIndex(t_s, sat, ue);
     const auto& r = m_reader.At(idx);
+    // A trace is valid only at the carrier it was traced for: path loss scales
+    // with frequency (20 log10 f in free space alone), so a record from another
+    // band is not an answer. Fail the query and let the caller fall back rather
+    // than return, say, a 2 GHz loss for a 28 GHz link.
+    if (req.freq_hz > 0.0 && r.freq_hz > 0.0 &&
+        std::abs(r.freq_hz - req.freq_hz) > 1e-6 * req.freq_hz)
+    {
+        out.path_loss_db = std::numeric_limits<double>::infinity();
+        out.ok = false;
+        ++m_failures;
+        return out;
+    }
     out.path_loss_db = r.path_loss_db;
     out.n_paths = r.n_paths;
     out.compute_ms = r.compute_ms;

@@ -197,7 +197,9 @@ NtnSionnaChannel::DoCalcRxPower(double txPowerDbm,
     if (m_transport != nullptr)
     {
         SionnaTransport::Response rsp = m_transport->Query(req);
-        if (rsp.ok && std::isfinite(rsp.path_loss_db))
+        // A passive channel cannot amplify: a negative path loss is a broken
+        // reply (sign error, unit mix-up), not a ray-traced answer.
+        if (rsp.ok && std::isfinite(rsp.path_loss_db) && rsp.path_loss_db >= 0.0)
         {
             pl = rsp.path_loss_db;
             ++m_rayTraced; // WF-12: an evaluation the tracer actually answered

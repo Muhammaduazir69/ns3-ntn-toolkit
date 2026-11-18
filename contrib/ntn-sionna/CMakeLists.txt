@@ -52,6 +52,7 @@ set(header_files
 
 set(test_sources
     test/ntn-sionna-test-suite.cc
+    test/ntn-sionna-indepth-test.cc
 )
 
 build_lib(
@@ -67,3 +68,17 @@ build_lib(
     ${libthz-ntn}
   TEST_SOURCES ${test_sources}
 )
+
+# The in-depth suite (ntn-sionna-indepth) puts the Sionna channel on a real
+# IPv4/P2P link measured with FlowMonitor and tracks SGP4 satellites from
+# ntn-constellation. Only the test library links them.
+if(TARGET ntn-sionna-test)
+  target_link_libraries(
+    ntn-sionna-test
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+    ${libflow-monitor}
+    ntn-constellation
+  )
+endif()

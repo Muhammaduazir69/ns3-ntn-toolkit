@@ -255,10 +255,27 @@ NtnAtmosphericLossChain::ComputeElevationDeg(const Vector& groundPos,
     double ux, uy, uz;
     if (rGround > kEcefThresholdM)
     {
-        // ECEF: up = radial unit from Earth center to ground.
-        ux = groundPos.x / rGround;
-        uy = groundPos.y / rGround;
-        uz = groundPos.z / rGround;
+        // ECEF: up = the WGS-84 ellipsoid normal at the station (geodetic
+        // latitude), as ITU-R P.618 and TR 38.811 define elevation. The
+        // geocentric radial used before tilts by up to 0.19 deg at
+        // mid-latitudes, which the cosecant slant-path terms amplify at low
+        // elevation.
+        constexpr double kA = 6378137.0;
+        constexpr double kE2 = 6.69437999014e-3;
+        const double lon = std::atan2(groundPos.y, groundPos.x);
+        const double p = std::hypot(groundPos.x, groundPos.y);
+        double lat = std::atan2(groundPos.z, p * (1.0 - kE2));
+        for (int it = 0; it < 5; ++it)
+        {
+            const double sl = std::sin(lat);
+            const double n = kA / std::sqrt(1.0 - kE2 * sl * sl);
+            const double h = std::abs(std::cos(lat)) > 1e-9 ? p / std::cos(lat) - n
+                                                            : std::abs(groundPos.z) / std::abs(sl) - n * (1.0 - kE2);
+            lat = std::atan2(groundPos.z, p * (1.0 - kE2 * n / (n + h)));
+        }
+        ux = std::cos(lat) * std::cos(lon);
+        uy = std::cos(lat) * std::sin(lon);
+        uz = std::sin(lat);
     }
     else
     {
