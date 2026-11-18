@@ -1315,7 +1315,10 @@ class NtnRealStackHelper
     void EnableUeStatsTrace(const std::string& csvPath, Time period = Seconds(1));
     /// Per-UE and per-cell KPI dataset (Wave 5), written by default to <outputDir>/ue_kpi.csv and
     /// cell_kpi.csv every \p period (GlobalValue NtnRealStackUeKpiPeriod, seconds; 0 disables).
-    /// Interval values: SS-RSRP/SS-RSRQ from the UE's measurement reports (TS 38.215 5.1.1/5.1.3),
+    /// Interval values: SS-RSRP/SS-RSRQ from the UE's measurement reports (TS 38.215 5.1.1/5.1.3);
+    /// both columns stay EMPTY when the scenario configures no RRC measurement reporting (the
+    /// single-cell examples: no neighbour, no A3/handover meas config), rather than being filled
+    /// with an L1 value of a different definition,
     /// SINR as the linear mean of the received DL TBs (L1M.RS-SINR), MCS, MIMO rank, DL PRB usage
     /// as a percentage (column prb_used_dl_pct; TS 28.552 5.1.1.2.1 names the percentage
     /// RRU.PrbDl, while RRU.PrbUsedDl and RRU.PrbAvailDl are PRB counts, its numerator and
