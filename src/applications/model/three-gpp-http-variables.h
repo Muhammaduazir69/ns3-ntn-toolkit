@@ -147,9 +147,11 @@ class ThreeGppHttpVariables : public Object
      *
      * The number of embedded objects in a main object is typically discovered
      * when the HTTP client is parsing the main object in question. This number
-     * is determined by a truncated Pareto distribution. The default distribution
-     * settings produces (after truncation) random integers within [0, 53)
-     * interval, with an actual mean of approximately 3.95.
+     * is determined by the 3GPP2 truncated Pareto distribution of TR 36.814
+     * Table A.2.1.3-1 (alpha 1.1, k 2, m 55: min(Pareto, m) - k, rounded). The
+     * default settings produce integers within [0, 53] with a mean of about
+     * 5.62 (the table's 5.64). The earlier rejection-sampled bounded Pareto with
+     * an integer floor gave a mean of about 3.95.
      *
      * \return The number of embedded objects.
      */

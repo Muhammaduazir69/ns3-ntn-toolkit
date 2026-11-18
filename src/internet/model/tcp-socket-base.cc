@@ -3261,6 +3261,16 @@ TcpSocketBase::SendDataPacket(SequenceNumber32 seq, uint32_t maxSize, bool withA
     header.SetFlags(flags);
     header.SetSequenceNumber(seq);
     header.SetAckNumber(m_tcb->m_rxBuffer->NextRxSequence());
+    // RFC 7323 section 4.3: Last.ACK.sent is the ACK field of the last segment
+    // sent, data segments included. Only SendEmptyPacket() advanced it, so a
+    // peer that piggybacks every ACK on data (an HTTP server answering
+    // requests) never refreshed TS.Recent: it kept echoing the first
+    // request's timestamp, the other side's RTT samples grew by the whole
+    // page time, and its RTO climbed to about 15 s on a 26 ms path.
+    if (withAck && m_highTxAck < header.GetAckNumber())
+    {
+        m_highTxAck = header.GetAckNumber();
+    }
     if (m_endPoint)
     {
         header.SetSourcePort(m_endPoint->GetLocalPort());

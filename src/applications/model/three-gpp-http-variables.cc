@@ -13,6 +13,8 @@
 #include <ns3/log.h>
 #include <ns3/uinteger.h>
 
+#include <algorithm>
+#include <cmath>
 #include <math.h>
 
 NS_LOG_COMPONENT_DEFINE("ThreeGppHttpVariables");
@@ -265,21 +267,22 @@ ThreeGppHttpVariables::GetNumOfEmbeddedObjects()
     }
 
     /*
-     * Repeatedly draw one new random value until it falls in the interval
-     * [scale, upperBound). The previous validation ensures this process does
-     * not loop indefinitely.
+     * 3GPP TR 36.814 Annex A.2.1.3 (Table A.2.1.3-1, after 3GPP2 C.R1002):
+     * the number of embedded objects is a TRUNCATED Pareto with alpha 1.1,
+     * k 2, m 55, mean 5.64 and max 53, "subtract k from the generated random
+     * value". The 3GPP2 truncated Pareto keeps the tail mass as a point mass
+     * at m, i.e. min(Pareto(k, alpha), m). Redrawing values above the bound
+     * (the BOUNDED Pareto the stream's Bound attribute gives) removes that
+     * mass and, with the integer floor, gave a mean of about 4.1 instead of
+     * 5.64. Draw the unbounded Pareto, clip it at m, round to the nearest
+     * integer (mean 5.62), and subtract k: the result is in [0, m - k].
      */
-    uint32_t value;
-    do
-    {
-        value = m_numOfEmbeddedObjectsRng->GetInteger();
-    } while ((value < m_numOfEmbeddedObjectsScale) || (value >= upperBound));
-
-    /*
-     * Normalize the random value with the scale parameter. The returned value
-     * shall now be within the interval [0, (upperBound - scale)).
-     */
-    return (value - m_numOfEmbeddedObjectsScale);
+    const double x = std::min(m_numOfEmbeddedObjectsRng->GetValue(m_numOfEmbeddedObjectsRng->GetScale(),
+                                                                 m_numOfEmbeddedObjectsRng->GetShape(),
+                                                                 0.0),
+                              static_cast<double>(upperBound));
+    const auto value = static_cast<uint32_t>(std::lround(x));
+    return (value > m_numOfEmbeddedObjectsScale) ? (value - m_numOfEmbeddedObjectsScale) : 0;
 }
 
 Time
