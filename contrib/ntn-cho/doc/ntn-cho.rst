@@ -63,7 +63,7 @@ The module exposes the following public classes:
   encodes the trigger condition, so ``SelectBestCandidate()`` returns
   the strongest measured candidate (maximum SINR); the TTE-aware path
   selects the maximum TTE with a SINR tie-break.
-* ``NtnTteEstimator`` — Time-to-Exit estimator: coarse forward search
+* ``NtnTteEstimator``: Time-to-Exit estimator, coarse forward search
   over the predicted orbit plus a bisection for the exit instant. With a
   line-of-sight probability table (``SetLosProbabilityTable``) it also
   returns the expected usable time to exit, the integral of P_LOS along the
@@ -73,7 +73,7 @@ The module exposes the following public classes:
   predictions when ``ChoConfig::tteCacheRefresh`` is positive (recomputed
   after that interval or 100 m of terminal motion, aged by the elapsed time
   in between; the serving cell is always recomputed).
-* ``NtnOrbitPredictor`` — the network's copy of each satellite's state:
+* ``NtnOrbitPredictor``: the network's copy of each satellite's state:
   the registered mobility model's state plus an optional fixed RTN
   ephemeris error per satellite (the along-track axis follows the inertial
   velocity), propagated two-body along the orbit plane and rotated with the
