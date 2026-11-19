@@ -42,7 +42,8 @@
   <img src="https://img.shields.io/badge/Sionna%20RT-ray%20tracing-red.svg" alt="Sionna RT"/>
   <img src="https://img.shields.io/badge/RL-Gymnasium%201.0-yellow.svg" alt="Gymnasium 1.0"/>
   <img src="https://img.shields.io/badge/modules-14%20custom-informational.svg" alt="14 custom modules"/>
-  <img src="https://img.shields.io/badge/examples-93-informational.svg" alt="93 examples"/>
+  <img src="https://img.shields.io/badge/examples-115-informational.svg" alt="115 examples"/>
+  <img src="https://img.shields.io/badge/tests-690%20cases%20in%2041%20suites-brightgreen.svg" alt="690 test cases in 41 suites"/>
   <a href="https://doi.org/10.1109/OJCOMS.2026.3745010"><img src="https://img.shields.io/badge/DOI-10.1109%2FOJCOMS.2026.3745010-00629B.svg" alt="DOI 10.1109/OJCOMS.2026.3745010"/></a>
 </p>
 
@@ -243,7 +244,7 @@ output directory, so check `--PrintHelp` before scripting a sweep.
 # 2. The full standards gate set
 python3 tools/check_ntn_standards.py
 
-# 3. All 23 module test suites
+# 3. Module test suites (41 suites, 690 test cases; a few shown here)
 ./test.py -s ntn-cho -s oran-ntn -s thz-ntn -s ntn-constellation
 ```
 
