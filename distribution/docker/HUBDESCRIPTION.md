@@ -27,20 +27,28 @@ docker run --rm uzairdocker69/ns3-ntn-toolkit:latest \
   ./ns3 run "ntn-constellation-walker-traffic --simSeconds=10"
 
 # Pin to a specific release
-docker pull uzairdocker69/ns3-ntn-toolkit:2.7.0
+docker pull uzairdocker69/ns3-ntn-toolkit:2.7.1
 ```
 
 ## Tags
 
 | Tag      | Notes |
 |----------|-------|
-| `latest` | Tracks the most recent tagged release (currently `2.7.0`) |
-| `2.7.0`  | **Current stable**: 3GPP Rel-17 NTN radio procedures in 5G-LENA (paired FDD, UL power control, PHR, BSR triggers, HARQ for long RTT), TR 38.821 Set-1 default link budget, exact SGP4 propagation delay, ITU-R P.676/P.840/P.834 atmosphere, BPv7 + SABR delay-tolerant routing, E2AP over TCP. Portable build (no `-march=native`) |
+| `latest` | Tracks the most recent tagged release (currently `2.7.1`) |
+| `2.7.1`  | **Current stable**: 2.7.0 plus the in-depth test campaign (690 test cases in 41 suites, every module) and the fixes it found: TCP timestamps on data segments (RFC 7323), TR 36.814 HTTP page model, CBR/HTTP robustness, slice-quota validation, NR PRB accounting, O-RAN gym and KPM dataset fields |
+| `2.7.0`  | 3GPP Rel-17 NTN radio procedures in 5G-LENA (paired FDD, UL power control, PHR, BSR triggers, HARQ for long RTT), TR 38.821 Set-1 default link budget, exact SGP4 propagation delay, ITU-R P.676/P.840/P.834 atmosphere, BPv7 + SABR delay-tolerant routing, E2AP over TCP. Portable build (no `-march=native`) |
 | `2.1.1`  | 2026-06-12 architecture-audit hardening: Rel-18 CondEventD2, E2 loop realism, KPM flow monitor across 40+ examples |
 | `2.1.0`  | AI-Native ORAN-NTN release: real measured NR NTN data plane, NTN/O-RAN application layer, E2SM-KPM flow monitor, multi-tier RIC, TR 38.821 calibration |
 | `2.0.x`  | Previous release line (May 2026 realism audit) |
 
-The `2.7.0` image (`linux/amd64`, compressed size on the Tags page) is compiled with the `release` profile (-O3, no host-specific CPU flags), so it runs on any x86-64 machine.
+The `2.7.1` image (`linux/amd64`, compressed size on the Tags page) is compiled with the `release` profile (-O3, no host-specific CPU flags), so it runs on any x86-64 machine.
+
+## What's new in 2.7.1
+
+- **In-depth tests for every module**: 690 test cases in 41 suites, each driving a running simulation with normal and failure paths and checking against published 3GPP, ITU, IETF and O-RAN reference values. All pass, and every example runs healthy with default and custom parameters.
+- **Fixes the tests found**: TCP data segments now advance the timestamp echo point (RFC 7323), so retransmission timeouts no longer grow on long links; the HTTP page model follows TR 36.814 Table A.2.1.3-1; a failed HTTP connection is retried instead of stopping the run; CBR applications count only accepted packets and handle a zero interval; reproducible TDL fading streams.
+- **Slicing and RAN accounting**: slice quotas refuse invalid values (NaN, negative, sum above 1); the PRB count follows the PHY, so measured downlink PRB usage can reach 100 %.
+- **O-RAN**: the gym handover example reports the Python agent's steps and reward and feeds the PHY-KPM extractor in measured mode; the KPM dataset leaves CQI empty when none was reported instead of writing the out-of-range code 0.
 
 ## What's new in 2.7.0
 
