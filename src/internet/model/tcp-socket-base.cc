@@ -103,6 +103,15 @@ TcpSocketBase::GetTypeId()
             //                   EnumValue (CLOSED),
             //                   MakeEnumAccessor (&TcpSocketBase::m_state),
             //                   MakeEnumChecker (CLOSED, "Closed"))
+            .AddAttribute("Rfc9293SynSentReset",
+                          "Honor an acceptable RST received in SYN-SENT (RFC 9293 3.10.7.3: "
+                          "\"connection reset\", enter CLOSED and report the failure). Off by "
+                          "default, which keeps the earlier ns-3 behavior: an RST+ACK is taken "
+                          "for a bare ACK and ignored, and the SYN is retried until ConnCount "
+                          "runs out.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&TcpSocketBase::m_rfc9293SynSentReset),
+                          MakeBooleanChecker())
             .AddAttribute("MaxSegLifetime",
                           "Maximum segment lifetime in seconds, use for TIME_WAIT state transition "
                           "to CLOSED state",
@@ -1425,7 +1434,13 @@ TcpSocketBase::DoForwardUp(Ptr<Packet> packet, const Address& fromAddress, const
     else if (tcpHeader.GetFlags() & TcpHeader::ACK)
     {
         NS_ASSERT(!(tcpHeader.GetFlags() & TcpHeader::SYN));
-        if (m_timestampEnabled)
+        // RFC 7323 3.2 recommends that an RST be accepted whatever its timestamp, and the
+        // stack's own refusal of a closed port carries none. Under Rfc9293SynSentReset the
+        // SYN-SENT reset is let through to ProcessSynSent (other states keep the earlier
+        // behavior, which drops a TS-less segment).
+        const bool synSentRst = m_rfc9293SynSentReset && m_state == SYN_SENT &&
+                                (tcpHeader.GetFlags() & TcpHeader::RST);
+        if (m_timestampEnabled && !synSentRst)
         {
             if (!tcpHeader.HasOption(TcpOption::TS))
             {
@@ -2328,6 +2343,19 @@ TcpSocketBase::ProcessSynSent(Ptr<Packet> packet, const TcpHeader& tcpHeader)
         m_delAckCount = m_delAckMaxCount;
         ReceivedData(packet, tcpHeader);
         Simulator::ScheduleNow(&TcpSocketBase::ConnectionSucceeded, this);
+    }
+    else if (m_rfc9293SynSentReset && (tcpflags & TcpHeader::RST) &&
+             (!(tcpflags & TcpHeader::ACK) ||
+              tcpHeader.GetAckNumber() == m_tcb->m_nextTxSequence + SequenceNumber32(1)))
+    { // RFC 9293 3.10.7.3, SYN-SENT: an RST whose ACK (if any) acknowledges our SYN means
+      // "connection reset" (e.g. no listener on the port). Close and report the failure
+      // instead of retrying the SYN.
+        NS_LOG_DEBUG("SYN_SENT -> CLOSED (connection refused)");
+        m_retxEvent.Cancel();
+        m_rtt->Reset();
+        m_state = CLOSED;
+        NotifyConnectionFailed();
+        DeallocateEndPoint();
     }
     else if (tcpflags & TcpHeader::ACK && !(tcpflags & TcpHeader::SYN))
     { // Ignore ACK in SYN_SENT

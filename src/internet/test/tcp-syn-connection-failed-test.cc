@@ -85,6 +85,79 @@ TcpSynConnectionFailedTest::DoRun()
 /**
  * \ingroup internet-test
  *
+ * \brief A connection to a port with no listener is refused with RST+ACK
+ * (RFC 9293 3.10.7.1). With Rfc9293SynSentReset the client takes the reset
+ * (3.10.7.3, SYN-SENT: "connection reset") and fails after one SYN; by default
+ * it keeps the earlier behavior and fails only when its SYN retries run out.
+ */
+class TcpSynSentResetTest : public TestCase
+{
+  public:
+    /**
+     * Constructor.
+     * \param honorRst Value of the Rfc9293SynSentReset attribute.
+     */
+    TcpSynSentResetTest(bool honorRst)
+        : TestCase(honorRst ? "RST in SYN-SENT refuses the connection after one SYN (RFC 9293)"
+                            : "Default: RST in SYN-SENT ignored, SYN retried until ConnCount"),
+          m_honorRst(honorRst)
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        m_failedAt = Seconds(-1);
+        m_syns = 0;
+        Ptr<Node> node = CreateObject<Node>();
+        InternetStackHelper internet;
+        internet.Install(node);
+        Ptr<Socket> socket = Socket::CreateSocket(node, TcpSocketFactory::GetTypeId());
+        socket->SetAttribute("Rfc9293SynSentReset", BooleanValue(m_honorRst));
+        socket->SetAttribute("ConnCount", UintegerValue(3));
+        socket->TraceConnectWithoutContext("Tx", MakeCallback(&TcpSynSentResetTest::Tx, this));
+        socket->Bind();
+        socket->SetConnectCallback(MakeNullCallback<void, Ptr<Socket>>(),
+                                   MakeCallback(&TcpSynSentResetTest::Failed, this));
+        socket->Connect(InetSocketAddress(Ipv4Address::GetLoopback(), 9));
+        Simulator::Stop(Seconds(60));
+        Simulator::Run();
+        Simulator::Destroy();
+
+        NS_TEST_ASSERT_MSG_EQ((m_failedAt >= Seconds(0)), true, "ConnectionFailed reported");
+        if (m_honorRst)
+        {
+            NS_TEST_ASSERT_MSG_EQ(m_syns, 1u, "one SYN, then the reset closes the socket");
+            NS_TEST_ASSERT_MSG_LT(m_failedAt, MilliSeconds(1), "refused at once over loopback");
+        }
+        else
+        {
+            NS_TEST_ASSERT_MSG_EQ(m_syns, 3u, "ConnCount = 3 connection attempts");
+            NS_TEST_ASSERT_MSG_GT(m_failedAt, Seconds(1), "fails only after the retries time out");
+        }
+    }
+
+    void Tx(Ptr<const Packet>, const TcpHeader& h, Ptr<const TcpSocketBase>)
+    {
+        if (h.GetFlags() & TcpHeader::SYN)
+        {
+            ++m_syns;
+        }
+    }
+
+    void Failed(Ptr<Socket>)
+    {
+        m_failedAt = Simulator::Now();
+    }
+
+    bool m_honorRst;          //!< Rfc9293SynSentReset value under test
+    Time m_failedAt;          //!< When ConnectionFailed was reported
+    uint32_t m_syns{0};       //!< SYN segments the client sent
+};
+
+/**
+ * \ingroup internet-test
+ *
  * \brief TestSuite
  */
 class TcpSynConnectionFailedTestSuite : public TestSuite
@@ -97,6 +170,8 @@ class TcpSynConnectionFailedTestSuite : public TestSuite
                     TestCase::Duration::QUICK);
         AddTestCase(new TcpSynConnectionFailedTest("TCP SYN connection failed test with ECN", true),
                     TestCase::Duration::QUICK);
+        AddTestCase(new TcpSynSentResetTest(true), TestCase::Duration::QUICK);
+        AddTestCase(new TcpSynSentResetTest(false), TestCase::Duration::QUICK);
     }
 };
 

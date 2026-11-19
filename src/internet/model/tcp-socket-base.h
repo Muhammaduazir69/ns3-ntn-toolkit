@@ -1361,6 +1361,7 @@ class TcpSocketBase : public TcpSocket
     // Retries
     uint32_t m_synCount{0};      //!< Count of remaining connection retries
     uint32_t m_synRetries{0};    //!< Number of connection attempts
+    bool m_rfc9293SynSentReset{false}; //!< Honor an acceptable RST in SYN-SENT (RFC 9293)
     uint32_t m_dataRetrCount{0}; //!< Count of remaining data retransmission attempts
     uint32_t m_dataRetries{0};   //!< Number of data retransmission attempts
 
