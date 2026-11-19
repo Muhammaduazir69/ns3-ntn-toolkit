@@ -354,6 +354,9 @@ struct Params
     double tleAltMinKm = 455.0;
     double tleAltMaxKm = 485.0;
     double tleStartSpreadH = 1.0;     // start at the median truth epoch +- this
+    double tleStartOffsetH = 0.0;     // M5: shift the real-shell start by this (h)
+    double softEdgeDeg = 0.0;         // M7: serving link kept this far below e_min (0 = hard edge)
+    double softRollDbPerDeg = 2.0;    //     extra roll-off loss per degree below e_min
     // m9 (round 3): co-channel inter-satellite interference sensitivity. 0 = off
     // (orthogonal resources, quality is SNR). K > 0: satellite s uses carrier
     // s mod K and every other covering satellite on that carrier interferes at
@@ -709,16 +712,28 @@ MeasureUe(UeCtx& u, const Vector& uePos)
         {
             continue;
         }
+        bool soft = false;
         if (!Covers(uePos, sp))
         {
-            continue;
+            // M7: soft edge for the serving link only (off by default): it is
+            // kept down to softEdgeDeg below e_min with an extra roll-off loss.
+            if (g_p.softEdgeDeg > 0.0 && static_cast<int32_t>(s) == u.serving &&
+                ntngeo::GeodeticElevationDeg(uePos, sp) >= g_p.minElevDeg - g_p.softEdgeDeg)
+            {
+                soft = true;
+            }
+            else
+            {
+                continue;
+            }
         }
         const double elev = ntngeo::GeodeticElevationDeg(uePos, sp);
         LinkState& ls = u.links[static_cast<uint32_t>(s)];
         ls.covered = true;
         ls.elevDeg = elev;
         ls.slantM = ntngeo::SlantRangeM(uePos, sp);
-        ls.scanLossDb = ScanLossDb(uePos, sp);
+        ls.scanLossDb = ScanLossDb(uePos, sp) -
+                        (soft ? g_p.softRollDbPerDeg * (g_p.minElevDeg - elev) : 0.0);
         // line-of-sight state (blockage channels only)
         bool losChanged = false;
         const EnvTables& et = g_env[u.env];
@@ -2230,6 +2245,9 @@ main(int argc, char* argv[])
     cmd.AddValue("prepStrongestStd", "alias kept for scripts: same as prepStrongest", p.prepStrongest);
     cmd.AddValue("tleTruthFile", "R2: truth element sets (real constellation)", p.tleTruthFile);
     cmd.AddValue("tleNetFile", "R2: network element sets", p.tleNetFile);
+    cmd.AddValue("tleStartOffsetH", "M5: shift the real-shell start by this (h)", p.tleStartOffsetH);
+    cmd.AddValue("softEdgeDeg", "M7: serving link kept this far below e_min (0 = hard edge)", p.softEdgeDeg);
+    cmd.AddValue("softRollDbPerDeg", "M7: roll-off below e_min (dB/deg)", p.softRollDbPerDeg);
     cmd.AddValue("tleInclMinDeg", "R2: TLE shell filter, inclination min", p.tleInclMinDeg);
     cmd.AddValue("tleInclMaxDeg", "R2: TLE shell filter, inclination max", p.tleInclMaxDeg);
     cmd.AddValue("tleAltMinKm", "R2: TLE shell filter, mean altitude min", p.tleAltMinKm);
@@ -2346,7 +2364,7 @@ main(int argc, char* argv[])
         }
         NS_ABORT_MSG_IF(tlePairs.empty(), "no element sets in the TLE shell filter");
         std::sort(epochs.begin(), epochs.end());
-        tleStartUnix = epochs[epochs.size() / 2] +
+        tleStartUnix = epochs[epochs.size() / 2] + 3600.0 * p.tleStartOffsetH +
                        3600.0 * epochDraw->GetValue(-p.tleStartSpreadH, p.tleStartSpreadH);
     }
     else
