@@ -1,6 +1,5 @@
-<p align="center">
-  <img src="docs/logo_lockup.png" alt="ns3-ntn-toolkit logo" width="780"/>
-</p>
+<!-- hero-banner -->
+<p align="center"><a href="https://6g-ntn.live"><img src="docs/ns3-ntn-toolkit-banner.jpg" alt="ns3-ntn-toolkit: 14 modules, 115 examples, one data plane for orbits, radios, controllers and terahertz links. The banner shows Fig. 1 of the toolkit article (IEEE OJ-COMS 2026); click to run it live at 6g-ntn.live." width="100%"/></a></p>
 
 <h1 align="center">ns3-ntn-toolkit</h1>
 
@@ -16,6 +15,10 @@
   <a href="https://6g-ntn.live"><img src="https://img.shields.io/badge/Live-6g--ntn.live-2ea44f?logo=googlechrome&logoColor=white" alt="Open the live NTN Control Center"/></a><br/>
   <sub><b>Try it live:</b> <a href="https://6g-ntn.live">6g-ntn.live</a> runs the toolkit's examples in the browser, with open datasets, a scenario gallery and a research forum.</sub><br/>
   <sub>Watch the NTN Control Center run, visualize and export every module of the toolkit, end to end (5 min).</sub>
+  <a href="https://github.com/Muhammaduazir69/ns3-ntn-toolkit/releases/latest"><img src="https://img.shields.io/github/v/release/Muhammaduazir69/ns3-ntn-toolkit?label=release&color=3424d6" alt="Latest release"/></a>
+  <a href="https://hub.docker.com/r/uzairdocker69/ns3-ntn-toolkit"><img src="https://img.shields.io/docker/v/uzairdocker69/ns3-ntn-toolkit?sort=semver&label=docker&logo=docker&logoColor=white" alt="Docker image version"/></a>
+  <a href="https://www.linkedin.com/in/muhammad-uzair-285331185/"><img src="https://img.shields.io/badge/LinkedIn-Muhammad%20Uzair-0A66C2?logo=linkedin&logoColor=white" alt="LinkedIn"/></a><br/>
+  <sub><b>New on 6g-ntn.live:</b> a live ns-3 console, 115 examples with editable parameters, a 3D globe of real constellations, open datasets (CC BY 4.0) and a validation page with 690 test cases in 41 suites.</sub><br/>
 </p>
 
 
@@ -131,20 +134,20 @@ it can be dropped into an existing ns-3 tree on its own. `ntn-traffic` and
 
 | Module | Layer | What it gives you | Repository |
 |---|---|---|---|
-| **[`ntn-constellation`](contrib/ntn-constellation)** | Orbital and mobility | SGP4 from TLEs, Kepler + J2 for generated Walker shells, ISL contact-graph routing, constellation presets | [ntn-constellation](https://github.com/Muhammaduazir69/ntn-constellation) |
-| **[`ntn-sagin`](contrib/ntn-sagin)** | Orbital and mobility | ground, UAV, HAPS and LEO layers, TR 36.777 air-to-ground channel, store and forward across contact gaps | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) |
-| **[`ntn-v2x`](contrib/ntn-v2x)** | Orbital and mobility | NR sidelink PC5 Mode 2, SAE J2735 basic safety messages, SUMO traces, a relay decision that gates the flow | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) |
+| **[`ntn-constellation`](contrib/ntn-constellation)** | Orbital and mobility | SGP4 from TLEs, Kepler + J2 for generated Walker shells, ISL contact-graph routing, constellation presets | [ntn-constellation](https://github.com/Muhammaduazir69/ntn-constellation) · [page](https://muhammaduazir69.github.io/ntn-constellation/) · [release](https://github.com/Muhammaduazir69/ntn-constellation/releases/latest) |
+| **[`ntn-sagin`](contrib/ntn-sagin)** | Orbital and mobility | ground, UAV, HAPS and LEO layers, TR 36.777 air-to-ground channel, store and forward across contact gaps | [ntn-sagin](https://github.com/Muhammaduazir69/ntn-sagin) · [page](https://muhammaduazir69.github.io/ntn-sagin/) · [release](https://github.com/Muhammaduazir69/ntn-sagin/releases/latest) |
+| **[`ntn-v2x`](contrib/ntn-v2x)** | Orbital and mobility | NR sidelink PC5 Mode 2, SAE J2735 basic safety messages, SUMO traces, a relay decision that gates the flow | [ntn-v2x](https://github.com/Muhammaduazir69/ntn-v2x) · [page](https://muhammaduazir69.github.io/ntn-v2x/) · [release](https://github.com/Muhammaduazir69/ntn-v2x/releases/latest) |
 | **[`ntn-traffic`](contrib/ntn-traffic)** | Protocol, L1 to L3 | `NtnRealStackHelper`: the measured NR NTN data plane (PHY, HARQ, RLC, PDCP, RRC, EPC) every module builds on | [toolkit only](https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-traffic) |
-| **[`ntn-cho`](contrib/ntn-cho)** | Protocol, L1 to L3 | conditional handover with time-to-exit and the TS 38.331 NTN trigger set (A3, D1, D2, T1) | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) |
-| **[`ntn-rrc`](contrib/ntn-rrc)** | Protocol, L1 to L3 | SIB19 with `cellSpecificKoffset` consumed by the scheduler, payload-aware timing advance, DRX that gates a flow | [ntn-rrc](https://github.com/Muhammaduazir69/ntn-rrc) |
+| **[`ntn-cho`](contrib/ntn-cho)** | Protocol, L1 to L3 | conditional handover with time-to-exit and the TS 38.331 NTN trigger set (A3, D1, D2, T1) | [ntn-cho-framework](https://github.com/Muhammaduazir69/ntn-cho-framework) · [page](https://muhammaduazir69.github.io/ntn-cho-framework/) · [release](https://github.com/Muhammaduazir69/ntn-cho-framework/releases/latest) |
+| **[`ntn-rrc`](contrib/ntn-rrc)** | Protocol, L1 to L3 | SIB19 with `cellSpecificKoffset` consumed by the scheduler, payload-aware timing advance, DRX that gates a flow | [ntn-rrc](https://github.com/Muhammaduazir69/ntn-rrc) · [page](https://muhammaduazir69.github.io/ntn-rrc/) · [release](https://github.com/Muhammaduazir69/ntn-rrc/releases/latest) |
 | **[`ntn-fapi`](contrib/ntn-fapi)** | Protocol, L1 to L3 | SCF-222 FAPI MAC-PHY adapter on a live NR SAP with per-UE HARQ state | [toolkit only](https://github.com/Muhammaduazir69/ns3-ntn-toolkit/tree/ntn-integration-v2/contrib/ntn-fapi) |
-| **[`ntn-slice`](contrib/ntn-slice)** | Protocol, L1 to L3 | eMBB, URLLC and mMTC with per-5QI bearers and SLA percentiles from a delay histogram | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) |
-| **[`thz-ntn`](contrib/thz-ntn)** | Physical | 100 GHz to 1 THz on ITU-R P.676-13, P.618-13, P.838-3 and P.840, pointing error, RIS | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) |
-| **[`ntn-sionna`](contrib/ntn-sionna)** | Physical | NVIDIA Sionna RT ray tracing with per-query provenance and a TR 38.811 calibrator | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) |
-| **[`oran-ntn`](contrib/oran-ntn)** | Control and learning | Space O-RAN: E2 and A1 loops on a measured radio, RIC placement from live slant geometry, A1 intent leases | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) |
-| **[`ns3-ai-ntn`](contrib/ns3-ai-ntn)** | Control and learning | ns3-ai fork: Gymnasium 1.0 over versioned shared memory, AI-RAN inference contract | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) |
-| **[`ntn-observability`](contrib/ntn-observability)** | Operations | one scene recorder feeding InfluxDB, Grafana, NetSimulyzer and Cesium, with a reproducibility manifest | [ntn-observability](https://github.com/Muhammaduazir69/ntn-observability) |
-| **[`ntn-digital-twin`](contrib/ntn-digital-twin)** | Operations | FastAPI constellation twin whose handover schedule ns-3 actuates; one shared A3 guard | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) |
+| **[`ntn-slice`](contrib/ntn-slice)** | Protocol, L1 to L3 | eMBB, URLLC and mMTC with per-5QI bearers and SLA percentiles from a delay histogram | [ntn-slice](https://github.com/Muhammaduazir69/ntn-slice) · [page](https://muhammaduazir69.github.io/ntn-slice/) · [release](https://github.com/Muhammaduazir69/ntn-slice/releases/latest) |
+| **[`thz-ntn`](contrib/thz-ntn)** | Physical | 100 GHz to 1 THz on ITU-R P.676-13, P.618-13, P.838-3 and P.840, pointing error, RIS | [ns3-thz-ntn](https://github.com/Muhammaduazir69/ns3-thz-ntn) · [page](https://muhammaduazir69.github.io/ns3-thz-ntn/) · [release](https://github.com/Muhammaduazir69/ns3-thz-ntn/releases/latest) |
+| **[`ntn-sionna`](contrib/ntn-sionna)** | Physical | NVIDIA Sionna RT ray tracing with per-query provenance and a TR 38.811 calibrator | [ntn-sionna](https://github.com/Muhammaduazir69/ntn-sionna) · [page](https://muhammaduazir69.github.io/ntn-sionna/) · [release](https://github.com/Muhammaduazir69/ntn-sionna/releases/latest) |
+| **[`oran-ntn`](contrib/oran-ntn)** | Control and learning | Space O-RAN: E2 and A1 loops on a measured radio, RIC placement from live slant geometry, A1 intent leases | [oran-ntn](https://github.com/Muhammaduazir69/oran-ntn) · [page](https://muhammaduazir69.github.io/oran-ntn/) · [release](https://github.com/Muhammaduazir69/oran-ntn/releases/latest) |
+| **[`ns3-ai-ntn`](contrib/ns3-ai-ntn)** | Control and learning | ns3-ai fork: Gymnasium 1.0 over versioned shared memory, AI-RAN inference contract | [ns3-ai](https://github.com/Muhammaduazir69/ns3-ai) · [page](https://muhammaduazir69.github.io/ns3-ai/) · [release](https://github.com/Muhammaduazir69/ns3-ai/releases/latest) |
+| **[`ntn-observability`](contrib/ntn-observability)** | Operations | one scene recorder feeding InfluxDB, Grafana, NetSimulyzer and Cesium, with a reproducibility manifest | [ntn-observability](https://github.com/Muhammaduazir69/ntn-observability) · [page](https://muhammaduazir69.github.io/ntn-observability/) · [release](https://github.com/Muhammaduazir69/ntn-observability/releases/latest) |
+| **[`ntn-digital-twin`](contrib/ntn-digital-twin)** | Operations | FastAPI constellation twin whose handover schedule ns-3 actuates; one shared A3 guard | [ntn-digital-twin](https://github.com/Muhammaduazir69/ntn-digital-twin) · [page](https://muhammaduazir69.github.io/ntn-digital-twin/) · [release](https://github.com/Muhammaduazir69/ntn-digital-twin/releases/latest) |
 | **[`satellite (SNS3)`](contrib/satellite)** | Vendored upstream | SGP4 mobility, DVB-S2 and RCS2 link results, antenna patterns, TLE corpus | [sns3-satellite](https://github.com/sns3/sns3-satellite) |
 
 ---
