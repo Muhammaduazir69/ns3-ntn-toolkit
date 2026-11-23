@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ntn-real-stack-helper.h"
+#include "ns3/node-list.h"
 
 #include "ns3/ntn-spectrum-seam-model.h"
 
@@ -4975,10 +4976,62 @@ NtnRealStackHelper::WriteHealthReport()
         // would make this helper depend on ntn-constellation, which closes a
         // build cycle, so the scenario declares it through
         // SetTleProvenance() and the helper carries it into the manifest.
+        // ntn-dataset@1: when the scenario did not declare its element sets, read them
+        // off every node's SGP4 mobility through its read-only attributes (FromRealTle,
+        // NoradId, ElementEpochUnix), so every example records them without code changes.
+        // A generated (Walker) shell is recorded as such.
+        std::string tleSource = m_tleEpochUtc.empty() ? "none" : "declared";
+        if (m_tleEpochUtc.empty() && m_noradIds.empty())
+        {
+            std::vector<double> epochs;
+            uint32_t generated = 0;
+            for (uint32_t n = 0; n < NodeList::GetNNodes(); ++n)
+            {
+                Ptr<MobilityModel> mob = NodeList::GetNode(n)->GetObject<MobilityModel>();
+                if (!mob)
+                {
+                    continue;
+                }
+                BooleanValue real;
+                if (!mob->GetAttributeFailSafe("FromRealTle", real))
+                {
+                    continue;
+                }
+                if (!real.Get())
+                {
+                    ++generated;
+                    continue;
+                }
+                UintegerValue id;
+                DoubleValue ep;
+                mob->GetAttributeFailSafe("NoradId", id);
+                mob->GetAttributeFailSafe("ElementEpochUnix", ep);
+                m_noradIds.push_back(static_cast<uint32_t>(id.Get()));
+                epochs.push_back(ep.Get());
+            }
+            if (!epochs.empty())
+            {
+                std::sort(epochs.begin(), epochs.end());
+                const auto iso = [](double u) {
+                    std::time_t t = static_cast<std::time_t>(u);
+                    char b[32];
+                    std::strftime(b, sizeof b, "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&t));
+                    return std::string(b);
+                };
+                m_tleEpochUtc = iso(epochs[epochs.size() / 2]);
+                tleSource = "sgp4-mobility (median of " + std::to_string(epochs.size()) +
+                            " element sets, " + iso(epochs.front()) + " to " + iso(epochs.back()) + ")";
+            }
+            else if (generated > 0)
+            {
+                tleSource = "generated shell (" + std::to_string(generated) + " satellites, no real TLE)";
+            }
+        }
         if (!m_tleEpochUtc.empty())
         {
             manifest.SetTleEpoch(m_tleEpochUtc);
         }
+        manifest.AddExtra("element_sets", tleSource);
         for (uint32_t id : m_noradIds)
         {
             manifest.AddNoradId(id);
