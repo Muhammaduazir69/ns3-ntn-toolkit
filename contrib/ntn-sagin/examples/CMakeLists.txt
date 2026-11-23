@@ -54,6 +54,7 @@ build_lib_example(
   NAME sagin-multihop-traffic
   SOURCE_FILES sagin-multihop-traffic.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-sagin}
     ${libntn-cho}
     ${libntn-constellation}
@@ -71,6 +72,7 @@ build_lib_example(
   NAME sagin-slice-traffic
   SOURCE_FILES sagin-slice-traffic.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-sagin}
     ${libntn-cho}
     ${libntn-constellation}
@@ -109,6 +111,7 @@ build_lib_example(
   NAME sagin-sgp4-routed-traffic
   SOURCE_FILES sagin-sgp4-routed-traffic.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-sagin}
     ${libntn-constellation}
     ${libcore}

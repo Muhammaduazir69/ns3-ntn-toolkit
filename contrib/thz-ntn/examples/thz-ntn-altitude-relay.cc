@@ -25,6 +25,7 @@
 
 #include "thz-ntn-pass-kit.h"
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/core-module.h"
 #include "ns3/thz-ntn-molecular-absorption.h"
 
@@ -178,5 +179,8 @@ main(int argc, char* argv[])
                     res[0].meanOwdMs, relayAltKm, res[1].pdr, res[1].goodputMbps,
                     res[1].meanLineRateMbps, res[1].meanOwdMs);
     }
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "thz-ntn-altitude-relay", "analytic", argc, argv);
     return 0;
 }

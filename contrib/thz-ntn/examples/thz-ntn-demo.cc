@@ -23,6 +23,7 @@
 
 #include "thz-ntn-pass-kit.h"
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/command-line.h>
 #include <ns3/constant-position-mobility-model.h>
 #include <ns3/constant-velocity-mobility-model.h>
@@ -649,5 +650,8 @@ main(int argc, char* argv[])
         pc.link.bandwidthHz = 1e9;
         thzkit::RunPass(pc);
     }
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "thz-ntn-demo", "analytic", argc, argv);
     return 0;
 }

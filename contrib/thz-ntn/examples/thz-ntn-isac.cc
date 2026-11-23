@@ -25,6 +25,7 @@
 
 #include "thz-ntn-pass-kit.h"
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
 #include <ns3/mobility-module.h>
@@ -270,6 +271,9 @@ main(int argc, char* argv[])
     // ---- Run simulation ----
     Simulator::Stop(Seconds(1.0));
     Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "thz-ntn-isac", "analytic", argc, argv);
     Simulator::Destroy();
 
     std::cout << "\n  Simulation complete.\n";

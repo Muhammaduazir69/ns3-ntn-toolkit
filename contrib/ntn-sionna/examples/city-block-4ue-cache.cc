@@ -23,6 +23,7 @@
  *   python3 contrib/ntn-sionna/bridge/sionna-server.py --port 8765 &
  *   ./ns3 run "city-block-4ue-cache --freqHz=2e9 --steps=60"
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -227,6 +228,9 @@ main(int argc, char* argv[])
     }
     Simulator::Stop(MilliSeconds(100 * steps + 200));
     Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "city-block-4ue-cache", "analytic", argc, argv);
     Simulator::Destroy();
 
     std::printf("# city-block-4ue-cache: freq=%.3f GHz alt=%.0f km rain=%.1f mm/h "

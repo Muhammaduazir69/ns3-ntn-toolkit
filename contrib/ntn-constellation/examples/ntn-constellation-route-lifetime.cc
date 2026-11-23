@@ -34,6 +34,7 @@
  *   ./ns3 run "ntn-constellation-route-lifetime --policy=life --eps=0.05"
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/contact-graph-router.h"
 #include "ns3/contact-graph-scheduler.h"
@@ -1692,6 +1693,9 @@ main(int argc, char* argv[])
     }
     js << "}";
     std::cout << js.str() << std::endl;
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "ntn-constellation-route-lifetime", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

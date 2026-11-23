@@ -27,6 +27,7 @@
  * (ntn-cho geodesy) at elevations of 10 deg and up. --grid=fixed restores the
  * previous 1 to 1000 km list.
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
 #include "ns3/core-module.h"
 #include "ns3/mobility-model.h"
@@ -253,8 +254,15 @@ main(int argc, char* argv[])
                          all.size());
             return 2;
         }
+        ns3::ntnobs::WriteDatasetRecord(".", "sionna-calibration-harness", "analytic", argc, argv,
+                                        {{"raytrace_live", "0", "config"}},
+                                        {{"note", "no Sionna RT server reachable; no calibration result"}});
         return 0;
     }
     std::printf("raytrace_live=%d\n", sionna_ok == all.size() ? 1 : 0);
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "sionna-calibration-harness", "analytic", argc, argv,
+                                    {{"raytrace_live", sionna_ok == all.size() ? "1" : "0", "measured"}});
     return 0;
 }

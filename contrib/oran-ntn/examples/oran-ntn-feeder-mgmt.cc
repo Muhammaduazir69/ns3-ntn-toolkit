@@ -113,6 +113,7 @@
 // dwell times and accuracy gaps in one run (the decision does not feed back
 // into anything else, so all variants see the same dynamics).
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/constant-position-mobility-model.h"
 #include "ns3/flow-monitor-helper.h"
@@ -4021,6 +4022,9 @@ main(int argc, char* argv[])
     {
         WriteUserPlane();
     }
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(g.outDir, "oran-ntn-feeder-mgmt", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

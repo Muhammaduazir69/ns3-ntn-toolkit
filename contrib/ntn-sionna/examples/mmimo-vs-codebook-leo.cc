@@ -20,6 +20,7 @@
  * Output: per-sample table of (t, elevation, PL_siso, PL_mmimo, delta_db,
  * rain_db, gas_db) followed by aggregate min/max/mean of each column.
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -227,6 +228,9 @@ main(int argc, char* argv[])
     }
     Simulator::Stop(totalSpan + Seconds(1));
     Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "mmimo-vs-codebook-leo", "analytic", argc, argv);
     Simulator::Destroy();
 
     std::printf("# mmimo-vs-codebook-leo: freq=%.3f GHz alt=%.0f km rain=%.1f mm/h "

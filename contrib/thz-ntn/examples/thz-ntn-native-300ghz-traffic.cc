@@ -43,6 +43,7 @@
 
 #include "thz-ntn-pass-kit.h"
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/command-line.h"
 
 #include <cmath>
@@ -135,5 +136,8 @@ main(int argc, char* argv[])
               << "  -> this is a THz data plane, not an NR-at-THz result: no SpectrumPhy,\n"
               << "     no HARQ. Packets are carried at " << freqGhz
               << " GHz on real physics, which the 3GPP bridge refuses.\n";
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "thz-ntn-native-300ghz-traffic", "analytic", argc, argv);
     return 0;
 }

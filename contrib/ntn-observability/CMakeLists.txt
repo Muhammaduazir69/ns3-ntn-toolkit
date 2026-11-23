@@ -50,6 +50,7 @@ set(header_files
     model/ntn-influx-sink.h
     model/ntn-netsimulyzer-exporter.h
     model/ntn-repro-manifest.h
+    model/ntn-dataset-writer.h
     model/ntn-scene-recorder.h
     helper/ntn-observability-helper.h
     helper/ntn-scene-helper.h

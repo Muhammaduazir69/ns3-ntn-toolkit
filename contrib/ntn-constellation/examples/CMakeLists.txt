@@ -4,6 +4,7 @@ build_lib_example(
   NAME ntn-constellation-isl-routed-traffic
   SOURCE_FILES ntn-constellation-isl-routed-traffic.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-constellation}
     ${libntn-cho}
     ${libcore}
@@ -62,6 +63,7 @@ build_lib_example(
   NAME ntn-constellation-real-routed
   SOURCE_FILES ntn-constellation-real-routed.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libntn-constellation}
     ${libntn-cho}
     ${libcore}

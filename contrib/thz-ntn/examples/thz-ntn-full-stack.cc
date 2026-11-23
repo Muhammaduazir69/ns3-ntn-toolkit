@@ -24,6 +24,7 @@
  * orbital dynamics rather than the old sin()-shaped pass.
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/command-line.h>
 #include <ns3/core-module.h>
 #include <ns3/mobility-module.h>
@@ -522,6 +523,9 @@ main(int argc, char* argv[])
     std::cout << "    Polarization: Dual-circular\n";
     std::cout << "    Sensitivity:  " << std::setprecision(1)
               << rxSensitivity << " dBm\n";
+    // ntn-dataset@1: standard manifest + sim_health for this analytic example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "thz-ntn-full-stack", "analytic", argc, argv);
 
     Simulator::Destroy();
 

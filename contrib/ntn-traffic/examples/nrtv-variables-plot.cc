@@ -49,6 +49,7 @@
  *
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
@@ -197,6 +198,9 @@ main(int argc, char* argv[])
 
         Simulator::Stop(Seconds(simTime));
         Simulator::Run();
+    // ntn-dataset@1: standard manifest + sim_health for this measured example
+    // (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md).
+    ns3::ntnobs::WriteDatasetRecord(".", "nrtv-variables-plot", "measured", argc, argv);
         Simulator::Destroy();
 
         double meanDelayMs = (g_delaySamples > 0) ? g_delaySumMs / g_delaySamples : 0.0;
