@@ -47,6 +47,7 @@
 #ifndef NTN_REAL_STACK_HELPER_H
 #define NTN_REAL_STACK_HELPER_H
 
+#include "ns3/ntn-scene-recorder.h"
 #include "ns3/application-container.h"
 #include "ns3/data-rate.h"
 #include "ns3/event-id.h"
@@ -2103,6 +2104,13 @@ class NtnRealStackHelper
     double m_ipdvP95AbsMs{std::numeric_limits<double>::quiet_NaN()};
     int32_t UeIndexOfImsi(uint64_t imsi) const;
     int32_t UeIndexOfCellRnti(uint16_t cellId, uint16_t rnti) const;
+    /// ntn-dataset@1 / globe plan L4: a scene recorder started automatically at t=0 when the
+    /// scenario did not start its own; writes <outputDir>/scene.czml and, when the environment
+    /// sets NTN_LIVE_SCENE=1 (the control-center backend does), streams ##NTNSCENE## frames.
+    void StartAutoScene();
+    void StopAutoScene();
+    uint32_t GnbNodeIdOfCell(uint16_t cellId) const;
+    Ptr<ntnobs::NtnSceneRecorder> m_autoScene;
     void NrUePhyMeas(uint32_t ueIndex,
                      uint16_t rnti,
                      uint16_t cellId,

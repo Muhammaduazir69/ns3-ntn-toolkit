@@ -233,6 +233,8 @@ main(int argc, char* argv[])
     std::printf("#   slice→layer transitions (chosen by SaginSliceRouter on live geometry):\n");
 
     Simulator::Stop(Seconds(simSeconds + 0.1));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 
     std::printf("# === per-slice measured results (in-band header) ===\n");

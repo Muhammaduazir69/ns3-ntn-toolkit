@@ -1554,6 +1554,8 @@ main(int argc, char* argv[])
         gsNodes.Add(g.nodes.Get(g.gsB));
         scene = sh.Build(satNodes, gsNodes);
     }
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
     if (scene)
     {

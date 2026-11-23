@@ -662,6 +662,20 @@ main(int argc, char* argv[])
     sched->Start();
     Simulator::Schedule(Seconds(2.0), &Report, simSeconds);
     Simulator::Stop(Seconds(simSeconds + 0.1));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4). The link budgets use
+    // free-standing mobility models; attach them to their nodes so the scene (and any other
+    // node-level observer) sees the same SGP4 / WGS-84 positions. Nothing else reads them.
+    nSatA.Get(0)->AggregateObject(satA);
+    nSatB.Get(0)->AggregateObject(satB);
+    if (hapsMob)
+    {
+        haps.Get(0)->AggregateObject(hapsMob);
+    }
+    if (gwMob)
+    {
+        gw.Get(0)->AggregateObject(gwMob);
+    }
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
     sched->Stop();
 

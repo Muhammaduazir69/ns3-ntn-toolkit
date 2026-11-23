@@ -7,6 +7,7 @@
 
 #include "ns3/geocentric-constant-position-mobility-model.h"
 
+#include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/simulator.h"
 
@@ -163,7 +164,17 @@ NtnEnuProjectionMobilityModel::GetTypeId()
     static TypeId tid = TypeId("ns3::NtnEnuProjectionMobilityModel")
                             .SetParent<MobilityModel>()
                             .SetGroupName("NtnCho")
-                            .AddConstructor<NtnEnuProjectionMobilityModel>();
+                            .AddConstructor<NtnEnuProjectionMobilityModel>()
+            // Read-only: observers (the globe scene recorder) map ENU back to the Earth.
+            .AddAttribute("ReferenceLatitude", "ENU origin geodetic latitude (deg).", TypeId::ATTR_GET,
+                          DoubleValue(0.0), MakeDoubleAccessor(&NtnEnuProjectionMobilityModel::m_lat0),
+                          MakeDoubleChecker<double>())
+            .AddAttribute("ReferenceLongitude", "ENU origin geodetic longitude (deg).", TypeId::ATTR_GET,
+                          DoubleValue(0.0), MakeDoubleAccessor(&NtnEnuProjectionMobilityModel::m_lon0),
+                          MakeDoubleChecker<double>())
+            .AddAttribute("ReferenceAltitude", "ENU origin height above WGS-84 (m).", TypeId::ATTR_GET,
+                          DoubleValue(0.0), MakeDoubleAccessor(&NtnEnuProjectionMobilityModel::m_alt0),
+                          MakeDoubleChecker<double>());
     return tid;
 }
 

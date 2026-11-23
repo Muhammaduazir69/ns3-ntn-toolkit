@@ -1688,6 +1688,8 @@ main(int argc, char* argv[])
     }
     Simulator::Schedule(Seconds(0), &Tick);
     Simulator::Stop(Seconds(horizon));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(std::filesystem::path(out).parent_path().string());
     Simulator::Run();
     if (sceneRec)
     {

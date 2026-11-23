@@ -430,6 +430,8 @@ main(int argc, char* argv[])
 
     Simulator::Schedule(Seconds(0.5), &Tick);
     Simulator::Stop(Seconds(duration));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
 
     g_sched->Stop();

@@ -372,6 +372,8 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(5.0), &LinkProbe);
     Simulator::Schedule(MilliSeconds(100), &TrackHapsLeoDelay);
     Simulator::Stop(Seconds(duration));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
 
     // ---- Measured KPIs: in-band sink primitives + FlowMonitor ----

@@ -159,8 +159,14 @@ class NtnSceneRecorder : public Object
     // ---- lifecycle -------------------------------------------------------
     /// Position sampling interval (default 1 s).
     void SetSampleInterval(Time dt) { m_sampleDt = dt; }
+    /// Long-horizon runs (store-and-forward spans days): after every `frames` samples the
+    /// interval doubles, so frame count grows with the log of the simulated span instead of
+    /// linearly. 0 (default) keeps a fixed interval.
+    void SetFrameBudget(uint32_t frames) { m_frameBudget = frames; }
     /// Begin recording (registers nodes/series with the sinks, schedules polls).
     void Start();
+    /// Number of recorders currently running in this process (Start minus Stop).
+    static uint32_t ActiveCount();
     /// Stop recording and finalize the sink files.
     void Stop();
 
@@ -297,6 +303,8 @@ class NtnSceneRecorder : public Object
 
     double m_sceneEpochUnix{kDefaultSceneEpochUnix}; //!< CZML t=0
     Time m_sampleDt{Seconds(1.0)};
+    uint32_t m_frameBudget{0};
+    uint32_t m_framesAtDt{0};
     bool m_running{false};
     double m_t0Sec{0.0};
     double m_tLastSec{0.0};

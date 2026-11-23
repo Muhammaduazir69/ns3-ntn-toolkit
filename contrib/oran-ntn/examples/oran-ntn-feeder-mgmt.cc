@@ -3810,6 +3810,8 @@ main(int argc, char* argv[])
     }
 
     Simulator::Stop(Seconds(g.simS));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(g.outDir);
     Simulator::Run();
 
     // Close an outage still open at the end.

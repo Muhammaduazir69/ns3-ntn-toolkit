@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ntn-real-stack-helper.h"
+#include <cstdlib>
 #include "ns3/node-list.h"
 
 #include "ns3/ntn-spectrum-seam-model.h"
@@ -479,6 +480,73 @@ NtnRealStackHelper::Build(NodeContainer gnbNodes, NodeContainer ueNodes)
     //      terms (and optional sat beam) onto whichever backend's base loss, so
     //      the MEASURED SINR carries the elevation-dependent physics on both. ----
     ApplyNtnChannelExtras();
+
+    // Globe plan L4: every helper-built run records its own scene (see StartAutoScene).
+    Simulator::ScheduleNow(&NtnRealStackHelper::StartAutoScene, this);
+    Simulator::ScheduleDestroy(&NtnRealStackHelper::StopAutoScene, this);
+}
+
+void
+NtnRealStackHelper::StartAutoScene()
+{
+    if (std::getenv("NTN_SCENE_OFF") || ntnobs::NtnSceneRecorder::ActiveCount() > 0 || m_autoScene)
+    {
+        return; // the scenario records its own scene, or recording is switched off
+    }
+    m_autoScene = CreateObject<ntnobs::NtnSceneRecorder>();
+    m_autoScene->SetFrame(ntnobs::NtnSceneRecorder::EcefGlobal);
+    m_autoScene->SetSampleInterval(Seconds(1.0));
+    m_autoScene->SetFrameBudget(150);
+    for (uint32_t i = 0; i < m_gnb.GetN(); ++i)
+    {
+        m_autoScene->TrackNode(m_gnb.Get(i), ntnobs::NtnSceneRecorder::Sat, "sat-" + std::to_string(i));
+    }
+    for (uint32_t i = 0; i < m_ue.GetN(); ++i)
+    {
+        m_autoScene->TrackNode(m_ue.Get(i), ntnobs::NtnSceneRecorder::Ue, "ue-" + std::to_string(i));
+    }
+    // Serving edges from the initial attachment: every UE starts on gNB 0's cell in the
+    // single-cell scenarios; handovers move the edge (OnHandover in NrHandoverEndOk).
+    if (m_gnb.GetN() > 0)
+    {
+        for (uint32_t i = 0; i < m_ue.GetN(); ++i)
+        {
+            m_autoScene->SetServingEdge(m_ue.Get(i)->GetId(), 0, m_gnb.Get(0)->GetId());
+        }
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(m_outputDir, ec);
+    m_autoScene->EnableCzml(m_outputDir + "/scene.czml");
+    const char* live = std::getenv("NTN_LIVE_SCENE");
+    if (live && std::string(live) == "1")
+    {
+        m_autoScene->EnableLiveStdout(true);
+    }
+    m_autoScene->Start();
+}
+
+void
+NtnRealStackHelper::StopAutoScene()
+{
+    if (m_autoScene)
+    {
+        m_autoScene->Stop();
+        m_autoScene = nullptr;
+    }
+}
+
+uint32_t
+NtnRealStackHelper::GnbNodeIdOfCell(uint16_t cellId) const
+{
+    for (uint32_t i = 0; i < m_enbDevs.GetN(); ++i)
+    {
+        Ptr<NrGnbNetDevice> d = DynamicCast<NrGnbNetDevice>(m_enbDevs.Get(i));
+        if (d && d->GetCellId() == cellId)
+        {
+            return d->GetNode()->GetId();
+        }
+    }
+    return 0;
 }
 
 void
@@ -2162,6 +2230,11 @@ NtnRealStackHelper::NrHandoverEndOk(std::string /*ctx*/,
         const uint16_t src = (it == m_lastCellOfImsi.end()) ? 0 : it->second;
         m_hoRecords.push_back({Simulator::Now(), static_cast<uint32_t>(std::max(ue, 0)), src, cellId});
         m_lastCellOfImsi[imsi] = cellId;
+        if (m_autoScene && ue >= 0 && static_cast<uint32_t>(ue) < m_ue.GetN())
+        {
+            m_autoScene->OnHandover(m_ue.Get(ue)->GetId(), src ? GnbNodeIdOfCell(src) : 0,
+                                    GnbNodeIdOfCell(cellId));
+        }
     }
     // 5G-LENA registers an ideal-beamforming task only at attach
     // (NrHelper::AttachToGnb), so after an X2 handover the TARGET gNB had no
@@ -4901,7 +4974,7 @@ NtnRealStackHelper::WriteHealthReport()
     if (m_blockageModel)
     {
         out << "earth_blockage_blocked_evals," << m_blockageModel->GetBlockedCount() << ",-,-,"
-            << "geometry-wgs84 (clear " << m_blockageModel->GetClearCount() << ", non-geocentric "
+            << "geometry-wgs84 (clear " << m_blockageModel->GetClearCount() << "; non-geocentric "
             << m_blockageModel->GetNonGeocentricCount() << ")\n";
     }
     else
@@ -4916,7 +4989,7 @@ NtnRealStackHelper::WriteHealthReport()
         out << "ue_element_gain_dbi," << gUe << ",-,-,config\n";
         // G/T of one branch with T_ant = 290 K (the stack's noise model).
         out << "ue_g_over_t_dbk," << (gUe - nf - 10.0 * std::log10(290.0)) << ",-,-,"
-            << "derived (NF " << nf << " dB, T0 290 K)\n";
+            << "derived (NF " << nf << " dB; T0 290 K)\n";
     }
     if (m_feederGw && m_feederSat)
     {
@@ -4948,9 +5021,15 @@ NtnRealStackHelper::WriteHealthReport()
     out << "app_seq_gap_loss_ratio," << m_appSeqGapLossRatio << ",-,-,inband-seq\n";
     // Caller-supplied provenance rows, emitted last so they cannot displace a
     // gated row if a module picks a colliding name.
+    // Caller text is free-form: keep the file at exactly five fields per row (ntn-dataset@1).
+    auto cell = [](std::string v) {
+        std::replace(v.begin(), v.end(), ',', ';');
+        std::replace(v.begin(), v.end(), '\n', ' ');
+        return v;
+    };
     for (const auto& [metric, value, prov] : m_extraHealthRows)
     {
-        out << metric << "," << value << ",-,-," << prov << "\n";
+        out << cell(metric) << "," << cell(value) << ",-,-," << cell(prov) << "\n";
     }
     out.close();
 

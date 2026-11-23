@@ -504,6 +504,8 @@ main(int argc, char* argv[])
 
     Simulator::Schedule(Seconds(1.0), &SaginProbe, simSeconds);
     Simulator::Stop(Seconds(simSeconds + 0.1));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(".");
     Simulator::Run();
 
     const uint64_t txP = client->GetTxPackets();

@@ -485,6 +485,8 @@ RunPc5Nr(double simSeconds,
                 "server; %u background PC5 vehicles, BSM %.0f Hz x %u B, SPS %u ms\n",
                 nBackground, bsmHz, bsmBytes, prsvp);
     Simulator::Stop(Seconds(simSeconds + 1.0));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
@@ -803,6 +805,8 @@ main(int argc, char* argv[])
     // delay and ungated links.
     Simulator::Schedule(Seconds(0.0), &Tick);
     Simulator::Stop(Seconds(simSeconds + 1));
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    ns3::ntnobs::StartSceneFromNodeList(outputDir);
     Simulator::Run();
 
     // KPIs measured from in-band NtnOranPayloadHeader primitives at the sink.

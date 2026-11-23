@@ -22,6 +22,7 @@ build_lib_example(
   NAME thz-ntn-leo-ground
   SOURCE_FILES thz-ntn-leo-ground.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libthz-ntn}
     ${libntn-cho}
     ${libntn-constellation}
@@ -59,6 +60,7 @@ build_lib_example(
   NAME thz-ntn-isl
   SOURCE_FILES thz-ntn-isl.cc
   LIBRARIES_TO_LINK
+    ${libntn-observability}
     ${libthz-ntn}
     ${libntn-cho}
     ${libntn-constellation}
