@@ -1771,8 +1771,12 @@ NrUeRrc::ApplyMeasConfig(NrRrcSap::MeasConfig mc)
          ++it)
     {
         // simplifying assumptions
-        NS_ASSERT_MSG(it->reportConfigEutra.triggerType == NrRrcSap::ReportConfigEutra::EVENT,
-                      "only trigger type EVENT is supported");
+        // ntn-patch 22: patch 08 supports PERIODICAL reports (TS 38.331 5.5.4.1) but left this
+        // assert, so a periodical report config aborted assert-enabled builds.
+        NS_ASSERT_MSG(it->reportConfigEutra.triggerType == NrRrcSap::ReportConfigEutra::EVENT ||
+                          it->reportConfigEutra.triggerType ==
+                              NrRrcSap::ReportConfigEutra::PERIODICAL,
+                      "trigger type must be EVENT or PERIODICAL");
 
         uint8_t reportConfigId = it->reportConfigId;
         auto reportConfigIt = m_varMeasConfig.reportConfigList.find(reportConfigId);

@@ -1157,8 +1157,11 @@ UeManager::ForwardRlcBuffers(Ptr<LteRlc> rlc,
         params.targetCellId = m_targetCellId;
         params.gtpTeid = gtpTeid;
         // Remove tags to get PDCP SDU from PDCP PDU.
-        // Ptr<Packet> rlcSdu =  (*(m_x2forwardingBuffer.begin()))->Copy();
-        Ptr<Packet> rlcSdu = m_x2forwardingBuffer.at(0);
+        // Forward a COPY: the buffer holds the same Packet objects as the source RLC's
+        // transmit buffer, and the tag/PDCP-header removal below must not mutate an SDU
+        // the source cell may still transmit (it then asserted "LteRlcSduStatusTag is
+        // missing" and would otherwise send a header-stripped SDU). ns3-ntn-toolkit fix.
+        Ptr<Packet> rlcSdu = m_x2forwardingBuffer.at(0)->Copy();
         // Tags to be removed from rlcSdu (from outer to inner)
         // LteRlcSduStatusTag rlcSduStatusTag;
         // RlcTag  rlcTag; //rlc layer timestamp
