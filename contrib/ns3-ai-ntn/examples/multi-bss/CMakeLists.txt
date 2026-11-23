@@ -8,6 +8,7 @@ build_lib_example(
             auto-mcs-wifi-manager.cc
             tgax-residential-propagation-loss-model.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
             ${libns3-ai-ntn}
             ${libcore}
             ${libwifi}

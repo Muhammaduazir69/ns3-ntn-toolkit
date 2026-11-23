@@ -1,7 +1,8 @@
 build_lib_example(
         NAME ns3ai_apb_msg_vec
         SOURCE_FILES use-msg-vec/apb.cc
-        LIBRARIES_TO_LINK ${libns3-ai-ntn}
+        LIBRARIES_TO_LINK
+    ${libntn-observability} ${libns3-ai-ntn}
 )
 ns3ai_add_pybind_module(ns3ai_apb_py_vec use-msg-vec/apb_py.cc)
 set_target_properties(ns3ai_apb_py_vec PROPERTIES
@@ -10,7 +11,8 @@ set_target_properties(ns3ai_apb_py_vec PROPERTIES
 build_lib_example(
         NAME ns3ai_apb_msg_stru
         SOURCE_FILES use-msg-stru/apb.cc
-        LIBRARIES_TO_LINK ${libns3-ai-ntn}
+        LIBRARIES_TO_LINK
+    ${libntn-observability} ${libns3-ai-ntn}
 )
 ns3ai_add_pybind_module(ns3ai_apb_py_stru use-msg-stru/apb_py.cc)
 set_target_properties(ns3ai_apb_py_stru PROPERTIES
@@ -23,5 +25,6 @@ add_dependencies(ns3ai_apb_msg_stru ns3ai_apb_py_stru)
 build_lib_example(
         NAME ns3ai_apb_gym
         SOURCE_FILES use-gym/apb.cc
-        LIBRARIES_TO_LINK ${libns3-ai-ntn} ${libcore}
+        LIBRARIES_TO_LINK
+    ${libntn-observability} ${libns3-ai-ntn} ${libcore}
 )

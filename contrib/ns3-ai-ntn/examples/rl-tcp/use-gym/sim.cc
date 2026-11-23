@@ -30,6 +30,8 @@
  *
  */
 
+#include "ns3/ntn-dataset-writer.h"
+#include <filesystem>
 #include "ns3/ns3-ai-ntn-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
@@ -299,6 +301,8 @@ main(int argc, char* argv[])
     }
 
     PrintRxCount();
+    // ntn-dataset@1: standard manifest + sim_health (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md)
+    ns3::ntnobs::WriteDatasetRecord(".", std::filesystem::path(argv[0]).filename().string(), "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

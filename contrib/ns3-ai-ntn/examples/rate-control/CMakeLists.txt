@@ -4,6 +4,7 @@ build_lib_example(
             rate-control.cc
             constant/ai-constant-rate-wifi-manager.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
             ${libns3-ai-ntn}
             ${libcore}
             ${libpoint-to-point}
@@ -22,6 +23,7 @@ build_lib_example(
         rate-control.cc
         thompson-sampling/ai-thompson-sampling-wifi-manager.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
         ${libns3-ai-ntn}
         ${libcore}
         ${libpoint-to-point}

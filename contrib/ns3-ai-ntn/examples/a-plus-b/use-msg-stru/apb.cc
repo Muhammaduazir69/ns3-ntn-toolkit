@@ -21,6 +21,7 @@
 
 #include "apb.h"
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/ns3-ai-ntn-module.h>
 
 #include <chrono>
@@ -63,4 +64,6 @@ main()
         std::cout << "\n";
         msgInterface->CppRecvEnd();
     }
+    // ntn-dataset@1: standard manifest + sim_health (shared-memory IPC demo, no network)
+    ns3::ntnobs::WriteDatasetRecord(".", "ns3ai_apb_msg_stru", "analytic", 0, nullptr);
 }

@@ -5,6 +5,7 @@ build_lib_example(
             use-msg/cqi-dl-env.cc
             use-msg/my-rr-sched.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
             ${libns3-ai-ntn}
             ${libcore}
             ${libpoint-to-point}

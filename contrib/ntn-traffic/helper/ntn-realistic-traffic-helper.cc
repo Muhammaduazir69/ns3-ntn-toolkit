@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ntn-realistic-traffic-helper.h"
 
+#include "ns3/ntn-repro-manifest.h"
+#include "ns3/rng-seed-manager.h"
 #include "ns3/abort.h"
 #include "ns3/boolean.h"
 #include "ns3/data-rate.h"
@@ -296,23 +298,37 @@ NtnRealisticTrafficHelper::WriteHealthReport()
 
     EnsureDir(m_outputDir);
     std::ofstream out(m_outputDir + "/sim_health.csv");
-    out << "metric,value,floor,pass\n"
-        << "sim_time_s," << simSec << "," << simSec << ",1\n"
-        << "wall_clock_s," << wallSec << ",-,1\n"
-        << "packets_tx," << m_txPackets << "," << minTx << ","
-            << (gateTx ? 1 : 0) << "\n"
-        << "packets_rx," << m_rxPackets << ",-,1\n"
-        << "tx_per_sim_sec," << txPerSec << ","
-            << m_gates.minPacketsPerSimSec << ","
-            << (gateTx ? 1 : 0) << "\n"
-        << "rx_over_tx," << rxRatio << "," << m_gates.minRxOverTxRatio
-            << "," << (gateRx ? 1 : 0) << "\n"
-        << "analytical_events," << m_analyticalEvents << ","
-            << m_gates.minAnalyticalCallbacks << ","
-            << (gateAnalytical ? 1 : 0) << "\n"
-        << "heartbeat_ticks," << m_heartbeatTicks << ",-,1\n"
-        << "ues," << m_ues.GetN() << ",-,1\n"
-        << "run_tag," << m_runTag << ",-,1\n";
+    // ntn-dataset@1: the standard five-column health file (provenance per row) and the
+    // repro manifest. The KPIs here come from analytical link budgets carried by real packet
+    // traffic, so the run's provenance class is "analytic" (packet counts are measured).
+    out << "metric,value,floor,pass,provenance\n"
+        << "sim_time_s," << simSec << "," << simSec << ",1,config\n"
+        << "wall_clock_s," << wallSec << ",-,1,measured\n"
+        << "packets_tx," << m_txPackets << "," << minTx << "," << (gateTx ? 1 : 0) << ",measured\n"
+        << "packets_rx," << m_rxPackets << ",-,1,measured\n"
+        << "tx_per_sim_sec," << txPerSec << "," << m_gates.minPacketsPerSimSec << ","
+            << (gateTx ? 1 : 0) << ",measured\n"
+        << "rx_over_tx," << rxRatio << "," << m_gates.minRxOverTxRatio << "," << (gateRx ? 1 : 0)
+            << ",measured\n"
+        << "analytical_events," << m_analyticalEvents << "," << m_gates.minAnalyticalCallbacks << ","
+            << (gateAnalytical ? 1 : 0) << ",analytic\n"
+        << "heartbeat_ticks," << m_heartbeatTicks << ",-,1,measured\n"
+        << "ues," << m_ues.GetN() << ",-,1,config\n"
+        << "run_tag," << m_runTag << ",-,1,config\n"
+        << "provenance_class,analytic,-,-,config\n"
+        << "rng_run," << RngSeedManager::GetRun() << ",-,-,config\n";
+    {
+        ntnobs::NtnReproManifest manifest;
+        manifest.SetScenarioName(m_runTag.empty() ? "ntn-realistic-traffic" : m_runTag)
+            .SetScenarioDuration(simSec)
+            .SetRng(RngSeedManager::GetSeed(), RngSeedManager::GetRun())
+            .AddExtra("dataset_schema", "ntn-dataset@1")
+            .AddExtra("provenance_class", "analytic")
+            .AddExtra("built_on", "NtnRealisticTrafficHelper (analytical link budget, real packet traffic)")
+            .AddExtra("packets_tx", std::to_string(m_txPackets))
+            .AddExtra("packets_rx", std::to_string(m_rxPackets));
+        manifest.WriteJson(m_outputDir + "/repro-manifest.json");
+    }
     out.close();
 
     std::cout << "[sim_health] wall=" << wallSec << "s (informational"

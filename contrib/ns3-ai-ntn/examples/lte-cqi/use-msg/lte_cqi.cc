@@ -21,6 +21,8 @@
  *          Muyuan Shen <muyuan_shen@hust.edu.cn>
  */
 
+#include "ns3/ntn-dataset-writer.h"
+#include <filesystem>
 #include "ns3/applications-module.h"
 #include "ns3/config-store-module.h"
 #include "ns3/core-module.h"
@@ -230,6 +232,8 @@ main(int argc, char* argv[])
 
     cout << "End Simulation Results" << endl;
 
+    // ntn-dataset@1: standard manifest + sim_health (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md)
+    ns3::ntnobs::WriteDatasetRecord(".", std::filesystem::path(argv[0]).filename().string(), "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

@@ -44,6 +44,7 @@
  * Quick test:  --simSeconds=60 --bsmHz=10 --fcdTrace=<path/to/fcd.csv>
  *              --simSeconds=30 --v2v=pc5 --uplink=nr
  */
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/ntn-tr38811-mobility-model.h"
 #include "ns3/sgp4-mobility-model.h"
@@ -833,6 +834,8 @@ main(int argc, char* argv[])
     {
         g_csv.close();
     }
+    // ntn-dataset@1: the default (geometric relay) path is not built on the real-stack helper.
+    ns3::ntnobs::WriteDatasetRecord(outputDir, "ntn-v2x-leo-relay-traffic", "measured", argc, argv);
     Simulator::Destroy();
     return 0;
 }

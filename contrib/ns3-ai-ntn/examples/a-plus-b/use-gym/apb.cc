@@ -17,6 +17,7 @@
  * Author:  Muyuan Shen <muyuan_shen@hust.edu.cn>
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include <ns3/ns3-ai-ntn-module.h>
 #include <ns3/core-module.h>
 
@@ -169,5 +170,7 @@ main(int argc, char* argv[])
 
     apb->NotifySimulationEnd();
 
+    // ntn-dataset@1: standard manifest + sim_health (Gym loop over the simulator)
+    ns3::ntnobs::WriteDatasetRecord(".", "ns3ai_apb_gym", "measured", argc, argv);
     return 0;
 }

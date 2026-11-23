@@ -5,6 +5,7 @@ build_lib_example(
             use-gym/tcp-rl-env.cc
             use-gym/tcp-rl.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
             ${libns3-ai-ntn}
             ${libcore}
             ${libpoint-to-point}
@@ -25,6 +26,7 @@ build_lib_example(
             use-msg/tcp-rl.cc
             use-msg/tcp-rl-env.cc
         LIBRARIES_TO_LINK
+    ${libntn-observability}
             ${libns3-ai-ntn}
             ${libcore}
             ${libpoint-to-point}
