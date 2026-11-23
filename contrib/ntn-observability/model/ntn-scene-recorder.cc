@@ -186,6 +186,9 @@ NtnSceneRecorder::DoDispose()
 void
 NtnSceneRecorder::SetEnuReference(double lat0Deg, double lon0Deg, double alt0M)
 {
+    // A reference only has meaning in the ENU frame; setting one without SetFrame(LocalEnu)
+    // used to leave positions in ENU metres written as ECEF (a scene at the Earth's centre).
+    m_frame = LocalEnu;
     m_lat0 = lat0Deg;
     m_lon0 = lon0Deg;
     m_alt0 = alt0M;

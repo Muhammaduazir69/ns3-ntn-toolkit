@@ -3121,14 +3121,15 @@ main(int argc, char* argv[])
     // Create a csv file to store the results
     std::ofstream out;
     out.open("results.csv", std::ios::trunc);
+    // One numeric value per column (ntn-dataset@1): times in ms, no trailing separator.
     out << "srcNodeId,"
-        << "pktSize,"
-        << "lastPacketTime,"
-        << "dequeueTime,"
-        << "HOL,"
-        << "queuingDelay,"
-        << "accessDelay,"
-        << "txDelay"
+        << "pktSize_bytes,"
+        << "holTime_ms,"
+        << "dequeueTime_ms,"
+        << "HOL_ms,"
+        << "queuingDelay_ms,"
+        << "accessDelay_ms,"
+        << "txDelay_ms"
         << "\n";
 
     for (auto mapIt : m_inFlightPacketMap)
@@ -3139,12 +3140,12 @@ main(int argc, char* argv[])
             {
                 uint32_t srcNodeId = MacAddressToNodeId(listIt.m_srcAddress);
                 out << srcNodeId << "," << listIt.m_ptrToPacket->GetSize() << ","
-                    << listIt.m_HoLTime << "," << listIt.m_edcaDequeueTime << ","
+                    << listIt.m_HoLTime.ToDouble(Time::MS) << ","
+                    << listIt.m_edcaDequeueTime.ToDouble(Time::MS) << ","
                     << (listIt.m_edcaDequeueTime - listIt.m_HoLTime).ToDouble(Time::MS) << ","
                     << (listIt.m_HoLTime - listIt.m_edcaEnqueueTime).ToDouble(Time::MS) << ","
                     << (listIt.m_phyTxTime - listIt.m_HoLTime).ToDouble(Time::MS) << ","
-                    << (listIt.m_edcaDequeueTime - listIt.m_phyTxTime).ToDouble(Time::MS) << ","
-                    << std::endl;
+                    << (listIt.m_edcaDequeueTime - listIt.m_phyTxTime).ToDouble(Time::MS) << "\n";
             }
         }
     }

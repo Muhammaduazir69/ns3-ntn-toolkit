@@ -19,6 +19,7 @@
 #include "ns3/lte-ue-rrc.h"
 #include "ns3/mmwave-enb-net-device.h"
 #include "ns3/mmwave-ue-net-device.h"
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/ntn-repro-manifest.h"
 #include "ns3/rng-seed-manager.h"
 #include "ns3/ipv4-static-routing-helper.h"
@@ -494,24 +495,54 @@ NtnRealStackHelper::StartAutoScene()
         return; // the scenario records its own scene, or recording is switched off
     }
     m_autoScene = CreateObject<ntnobs::NtnSceneRecorder>();
-    m_autoScene->SetFrame(ntnobs::NtnSceneRecorder::EcefGlobal);
+    double lat0 = 0, lon0 = 0, alt0 = 0;
+    const bool enu = ntnobs::ConfigureSceneFrame(m_autoScene, lat0, lon0, alt0); // ECEF, or ENU about the projection origin
     m_autoScene->SetSampleInterval(Seconds(1.0));
     m_autoScene->SetFrameBudget(150);
+    // Only positions that can be placed on the Earth: in the ECEF frame a node must sit
+    // between 6,200 and 50,000 km from the geocentre (a local Cartesian scenario without a
+    // geographic anchor records no scene rather than one at the Earth's centre).
+    auto placeable = [enu](Ptr<Node> n) {
+        Ptr<MobilityModel> mm = n->GetObject<MobilityModel>();
+        if (!mm)
+        {
+            return false;
+        }
+        const Vector p = mm->GetPosition();
+        const double r = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+        return enu ? r < 5.0e7 : (r > 6.2e6 && r < 5.0e7);
+    };
+    uint32_t sats = 0;
     for (uint32_t i = 0; i < m_gnb.GetN(); ++i)
     {
-        m_autoScene->TrackNode(m_gnb.Get(i), ntnobs::NtnSceneRecorder::Sat, "sat-" + std::to_string(i));
+        if (placeable(m_gnb.Get(i)))
+        {
+            m_autoScene->TrackNode(m_gnb.Get(i), ntnobs::NtnSceneRecorder::Sat, "sat-" + std::to_string(i));
+            ++sats;
+        }
+    }
+    if (sats == 0)
+    {
+        m_autoScene = nullptr;
+        return;
     }
     for (uint32_t i = 0; i < m_ue.GetN(); ++i)
     {
-        m_autoScene->TrackNode(m_ue.Get(i), ntnobs::NtnSceneRecorder::Ue, "ue-" + std::to_string(i));
+        if (placeable(m_ue.Get(i)))
+        {
+            m_autoScene->TrackNode(m_ue.Get(i), ntnobs::NtnSceneRecorder::Ue, "ue-" + std::to_string(i));
+        }
     }
     // Serving edges from the initial attachment: every UE starts on gNB 0's cell in the
     // single-cell scenarios; handovers move the edge (OnHandover in NrHandoverEndOk).
-    if (m_gnb.GetN() > 0)
+    if (m_gnb.GetN() > 0 && placeable(m_gnb.Get(0)))
     {
         for (uint32_t i = 0; i < m_ue.GetN(); ++i)
         {
-            m_autoScene->SetServingEdge(m_ue.Get(i)->GetId(), 0, m_gnb.Get(0)->GetId());
+            if (placeable(m_ue.Get(i)))
+            {
+                m_autoScene->SetServingEdge(m_ue.Get(i)->GetId(), 0, m_gnb.Get(0)->GetId());
+            }
         }
     }
     std::error_code ec;
@@ -4964,10 +4995,12 @@ NtnRealStackHelper::WriteHealthReport()
     out << "gnbs," << m_gnb.GetN() << ",-,-,config\n";
     out << "run_tag," << m_runTag << ",-,-,config\n";
     // ---- Wave 1 rows (appended so existing row order is unchanged) ----
-    out << "app_ipdv_mean_abs_ms," << (std::isnan(m_ipdvMeanAbsMs) ? std::string("nan") : std::to_string(m_ipdvMeanAbsMs))
-        << ",-,-,rfc3393-consecutive-seq\n";
-    out << "app_ipdv_p95_abs_ms," << (std::isnan(m_ipdvP95AbsMs) ? std::string("nan") : std::to_string(m_ipdvP95AbsMs))
-        << ",-,-,rfc3393-consecutive-seq-hist0.01ms\n";
+    // Undefined when no flow carries consecutive sequence numbers (e.g. NR-TV video): an
+    // empty value with a "not-measured" provenance, not a NaN that reads as a broken number.
+    out << "app_ipdv_mean_abs_ms," << (std::isnan(m_ipdvMeanAbsMs) ? std::string("") : std::to_string(m_ipdvMeanAbsMs))
+        << ",-,-," << (std::isnan(m_ipdvMeanAbsMs) ? "not-measured (no consecutive-sequence flows)" : "rfc3393-consecutive-seq") << "\n";
+    out << "app_ipdv_p95_abs_ms," << (std::isnan(m_ipdvP95AbsMs) ? std::string("") : std::to_string(m_ipdvP95AbsMs))
+        << ",-,-," << (std::isnan(m_ipdvP95AbsMs) ? "not-measured (no consecutive-sequence flows)" : "rfc3393-consecutive-seq-hist0.01ms") << "\n";
     out << "channel_model,"
         << (m_channelModel == ChannelModel::Ns3Tr38811 ? "ns3-tr38811-ntn" : "legacy-friis+excess")
         << ",-,-," << (m_smallScaleFading ? "fading-on" : "los-only-no-fading") << "\n";

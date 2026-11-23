@@ -89,7 +89,7 @@ QoeRxDelay(const Time& delay, const Address&)
     if (g_qoeCsv.is_open())
     {
         g_qoeCsv << Simulator::Now().GetSeconds() << ",delay," << delay.GetSeconds() * 1000.0
-                 << std::endl;
+                 << ",\n"; // empty extra: four fields per row
     }
 }
 
@@ -101,7 +101,7 @@ QoeRxJitter(const Time& jitter, const Address&)
     if (g_qoeCsv.is_open())
     {
         g_qoeCsv << Simulator::Now().GetSeconds() << ",jitter," << jitter.GetSeconds() * 1000.0
-                 << std::endl;
+                 << ",\n"; // empty extra: four fields per row
     }
 }
 
@@ -111,7 +111,7 @@ QoeRxSlice(Ptr<const Packet> slice)
     ++g_sliceCount;
     if (g_qoeCsv.is_open())
     {
-        g_qoeCsv << Simulator::Now().GetSeconds() << ",slice," << slice->GetSize() << std::endl;
+        g_qoeCsv << Simulator::Now().GetSeconds() << ",slice," << slice->GetSize() << ",\n"; // empty extra: four fields per row
     }
 }
 

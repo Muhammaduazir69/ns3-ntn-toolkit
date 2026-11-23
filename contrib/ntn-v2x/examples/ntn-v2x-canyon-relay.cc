@@ -87,6 +87,21 @@
 
 using namespace ns3;
 
+namespace
+{
+/// ntn-dataset@1: an undefined value (no SINR report yet, no samples) is an empty CSV cell.
+std::string
+CsvNumV2x(double v)
+{
+    std::ostringstream o;
+    if (std::isfinite(v))
+    {
+        o << v;
+    }
+    return o.str();
+}
+} // namespace
+
 NS_LOG_COMPONENT_DEFINE("NtnV2xCanyonRelay");
 
 namespace
@@ -1116,7 +1131,7 @@ RunNrCheck(double T, const std::string& dir, uint32_t periodMs)
             (los ? nLos : nBlk) += 1;
         }
         csv << Simulator::Now().GetSeconds() << "," << vm->X() << "," << (los ? 1 : 0) << ","
-            << elev << "," << sinr << "," << dl.rxThisSecond << "," << ul.rxThisSecond << "\n";
+            << elev << "," << CsvNumV2x(sinr) << "," << dl.rxThisSecond << "," << ul.rxThisSecond << "\n";
         dl.rxThisSecond = 0;
         ul.rxThisSecond = 0;
         if (Simulator::Now() + Seconds(1) < Seconds(T))
@@ -1139,8 +1154,8 @@ RunNrCheck(double T, const std::string& dir, uint32_t periodMs)
         << "elevation_t0_deg," << best->e * 180.0 / M_PI << "\n"
         << "los_seconds," << losSeconds << "\n"
         << "blocked_seconds," << blockedSeconds << "\n"
-        << "sinr_los_mean_db," << (nLos ? sinrLos / nLos : std::nan("")) << "\n"
-        << "sinr_blocked_mean_db," << (nBlk ? sinrBlk / nBlk : std::nan("")) << "\n"
+        << "sinr_los_mean_db," << CsvNumV2x(nLos ? sinrLos / nLos : std::nan("")) << "\n"
+        << "sinr_blocked_mean_db," << CsvNumV2x(nBlk ? sinrBlk / nBlk : std::nan("")) << "\n"
         << "dl_sent," << dlSent << "\n"
         << "dl_rx," << dl.rx << "\n"
         << "dl_owd_mean_ms," << (dl.rx ? dl.sumDelayMs / dl.rx : 0.0) << "\n"

@@ -83,6 +83,35 @@ WriteDatasetRecord(const std::string& outDir,
 }
 
 /**
+ * Frame of a scene: a scenario that projects SGP4 into a local east-north-up frame
+ * (NtnEnuProjectionMobilityModel, read through its read-only Reference* attributes) records an
+ * ENU scene about that model's origin; otherwise node positions are taken as Earth-fixed (ECEF).
+ * Returns true and the origin when the scene is ENU.
+ */
+inline bool
+ConfigureSceneFrame(Ptr<NtnSceneRecorder> rec, double& lat0, double& lon0, double& alt0)
+{
+    for (uint32_t i = 0; i < NodeList::GetNNodes(); ++i)
+    {
+        Ptr<MobilityModel> mm = NodeList::GetNode(i)->GetObject<MobilityModel>();
+        DoubleValue la, lo, al;
+        if (mm && mm->GetAttributeFailSafe("ReferenceLatitude", la) &&
+            mm->GetAttributeFailSafe("ReferenceLongitude", lo) &&
+            mm->GetAttributeFailSafe("ReferenceAltitude", al))
+        {
+            lat0 = la.Get();
+            lon0 = lo.Get();
+            alt0 = al.Get();
+            rec->SetFrame(NtnSceneRecorder::LocalEnu);
+            rec->SetEnuReference(lat0, lon0, alt0);
+            return true;
+        }
+    }
+    rec->SetFrame(NtnSceneRecorder::EcefGlobal);
+    return false;
+}
+
+/**
  * Globe scene for examples not built on NtnRealStackHelper: at t = 0, track every node whose
  * mobility model reports an Earth-fixed (ECEF) position, classify it by geodetic altitude
  * (satellite above 160 km, HAPS 15-60 km, aircraft 1-15 km, ground terminal below), write
@@ -91,8 +120,9 @@ WriteDatasetRecord(const std::string& outDir,
  * a scenario without real geography records nothing. Call once, before Simulator::Run().
  */
 inline void
-StartSceneFromNodeList(const std::string& outDir)
+StartSceneFromNodeList(const std::string& outDirIn)
 {
+    const std::string outDir = outDirIn.empty() ? std::string(".") : outDirIn;
     Simulator::ScheduleNow([outDir]() {
         if (std::getenv("NTN_SCENE_DEBUG"))
         {
@@ -106,33 +136,8 @@ StartSceneFromNodeList(const std::string& outDir)
         Ptr<NtnSceneRecorder> rec = CreateObject<NtnSceneRecorder>();
         rec->SetSampleInterval(Seconds(1.0));
         rec->SetFrameBudget(150);
-        // Frame: a scenario that projects SGP4 into a local east-north-up frame
-        // (NtnEnuProjectionMobilityModel) records an ENU scene about that model's origin;
-        // otherwise positions must be Earth-fixed (ECEF).
-        bool enu = false;
         double lat0 = 0, lon0 = 0, alt0 = 0;
-        for (uint32_t i = 0; i < NodeList::GetNNodes() && !enu; ++i)
-        {
-            Ptr<MobilityModel> mm = NodeList::GetNode(i)->GetObject<MobilityModel>();
-            DoubleValue la, lo, al;
-            if (mm && mm->GetAttributeFailSafe("ReferenceLatitude", la) &&
-                mm->GetAttributeFailSafe("ReferenceLongitude", lo) &&
-                mm->GetAttributeFailSafe("ReferenceAltitude", al))
-            {
-                enu = true;
-                lat0 = la.Get();
-                lon0 = lo.Get();
-                alt0 = al.Get();
-            }
-        }
-        if (enu)
-        {
-            rec->SetEnuReference(lat0, lon0, alt0);
-        }
-        else
-        {
-            rec->SetFrame(NtnSceneRecorder::EcefGlobal);
-        }
+        const bool enu = ConfigureSceneFrame(rec, lat0, lon0, alt0);
         uint32_t tracked = 0;
         for (uint32_t i = 0; i < NodeList::GetNNodes(); ++i)
         {

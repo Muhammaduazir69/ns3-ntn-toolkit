@@ -77,6 +77,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -86,6 +87,21 @@
 #include <vector>
 
 using namespace ns3;
+
+namespace
+{
+/// ntn-dataset@1: an undefined value is an empty CSV cell, never "nan".
+std::string
+csvNum(double v)
+{
+    std::ostringstream o;
+    if (std::isfinite(v))
+    {
+        o << v;
+    }
+    return o.str();
+}
+} // namespace
 
 NS_LOG_COMPONENT_DEFINE("NtnTr38821ArrayGainCalibration");
 
@@ -503,10 +519,7 @@ main(int argc, char* argv[])
                 {
                     f << (*err)[i];
                 }
-                else
-                {
-                    f << "nan";
-                }
+                // else: empty cell (undefined: not a paired in-lobe sample)
                 f << '\n';
             }
         };
@@ -571,11 +584,11 @@ main(int argc, char* argv[])
              "pattern_max_abs_err_db,pattern_rms_err_db,pattern_mean_err_db\n";
         f << a.name << ',' << a.boresight << ',' << a.s.size() << ',' << sa.thMin << ','
           << sa.thMax << ',' << sa.resMean << ',' << sa.resStd << ','
-          << (sa.resMax - sa.resMin) << ',' << sa.maxAbsRolloff << ",0,nan,nan,nan\n";
+          << (sa.resMax - sa.resMin) << ',' << sa.maxAbsRolloff << ",0,,,\n"; // no paired samples
         f << b.name << ',' << b.boresight << ',' << b.s.size() << ',' << sb.thMin << ','
           << sb.thMax << ',' << sb.resMean << ',' << sb.resStd << ','
           << (sb.resMax - sb.resMin) << ',' << sb.maxAbsRolloff << ',' << pairedErr.size()
-          << ',' << errMaxAbs << ',' << errRms << ',' << errMean << '\n';
+          << ',' << csvNum(errMaxAbs) << ',' << csvNum(errRms) << ',' << csvNum(errMean) << '\n';
     }
 
     // ---- stdout summary ----
