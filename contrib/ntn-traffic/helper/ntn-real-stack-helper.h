@@ -2111,6 +2111,7 @@ class NtnRealStackHelper
     void StopAutoScene();
     uint32_t GnbNodeIdOfCell(uint16_t cellId) const;
     Ptr<ntnobs::NtnSceneRecorder> m_autoScene;
+    std::map<uint32_t, uint32_t> m_autoServing; ///< UE node id -> serving satellite node id (scene)
     void NrUePhyMeas(uint32_t ueIndex,
                      uint16_t rnti,
                      uint16_t cellId,

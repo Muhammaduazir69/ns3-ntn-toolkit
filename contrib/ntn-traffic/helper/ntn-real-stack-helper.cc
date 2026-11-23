@@ -541,7 +541,8 @@ NtnRealStackHelper::StartAutoScene()
         {
             if (placeable(m_ue.Get(i)))
             {
-                m_autoScene->SetServingEdge(m_ue.Get(i)->GetId(), 0, m_gnb.Get(0)->GetId());
+                m_autoScene->TrackBeam(m_gnb.Get(0)->GetId(), m_ue.Get(i)->GetId());
+                m_autoServing[m_ue.Get(i)->GetId()] = m_gnb.Get(0)->GetId();
             }
         }
     }
@@ -2263,8 +2264,17 @@ NtnRealStackHelper::NrHandoverEndOk(std::string /*ctx*/,
         m_lastCellOfImsi[imsi] = cellId;
         if (m_autoScene && ue >= 0 && static_cast<uint32_t>(ue) < m_ue.GetN())
         {
-            m_autoScene->OnHandover(m_ue.Get(ue)->GetId(), src ? GnbNodeIdOfCell(src) : 0,
-                                    GnbNodeIdOfCell(cellId));
+            // Source = the node this UE was last drawn on (not cell 0 -> node 0, which
+            // collides with the first satellite's node id).
+            const uint32_t ueNode = m_ue.Get(ue)->GetId();
+            const uint32_t to = GnbNodeIdOfCell(cellId);
+            auto sv = m_autoServing.find(ueNode);
+            const uint32_t from = sv != m_autoServing.end() ? sv->second : GnbNodeIdOfCell(src);
+            if (from != to)
+            {
+                m_autoScene->OnHandover(ueNode, from, to);
+            }
+            m_autoServing[ueNode] = to;
         }
     }
     // 5G-LENA registers an ideal-beamforming task only at attach
