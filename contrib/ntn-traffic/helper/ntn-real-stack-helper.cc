@@ -3331,7 +3331,16 @@ NtnRealStackHelper::ExportAiFlowMonitor()
     {
         return;
     }
-    const std::filesystem::path prefix(m_aiMonitorPrefix);
+    // A bare prefix ("sagin-aeronautical") used to land in the process working
+    // directory, outside the run's output directory, so the KPM series never
+    // reached the dataset. A prefix without a directory part now goes into the
+    // helper's output directory, like sim_health.csv.
+    std::filesystem::path prefix(m_aiMonitorPrefix);
+    if (!prefix.has_parent_path() && !m_outputDir.empty())
+    {
+        prefix = std::filesystem::path(m_outputDir) / prefix;
+        m_aiMonitorPrefix = prefix.string();
+    }
     if (prefix.has_parent_path())
     {
         std::error_code ec;
@@ -4992,7 +5001,21 @@ NtnRealStackHelper::WriteHealthReport()
                                                  : std::to_string(m_dlSinrDbMean))
             .AddExtra("mean_dl_tbler", std::to_string(m_dlTblerMean))
             .AddExtra("phy_rx_tb", std::to_string(m_phyRxTb))
-            .AddExtra("air_interface", airTag);
+            .AddExtra("air_interface", airTag)
+            // ntn-dataset@1 (plan/MASTER_PLAN_GLOBE_DATASET_E2E_2026-11.md): the standard
+            // release and the specifications the data plane follows, recorded per run.
+            .AddExtra("dataset_schema", "ntn-dataset@1")
+            .AddExtra("threegpp_release", "Rel-17 NR-NTN")
+            .AddExtra("standards",
+                      "TS 38.300; TS 38.211; TS 38.213; TS 38.214; TS 38.321; TS 38.331; "
+                      "TR 38.811; TR 38.821; RFC 7680")
+            .AddExtra("kpm_series",
+                      m_aiMonitorPrefix.empty()
+                          ? std::string("none")
+                          : (std::filesystem::path(m_aiMonitorPrefix).has_parent_path()
+                                 ? m_aiMonitorPrefix
+                                 : (std::filesystem::path(m_outputDir) / m_aiMonitorPrefix).string()) +
+                                "_kpm_series.csv");
         if (!manifest.WriteJson(m_outputDir + "/repro-manifest.json"))
         {
             NS_LOG_WARN("could not write " << m_outputDir << "/repro-manifest.json");

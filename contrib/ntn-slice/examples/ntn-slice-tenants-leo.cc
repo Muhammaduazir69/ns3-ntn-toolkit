@@ -416,6 +416,9 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(duration));
     Simulator::Run();
     rs.Collect();
+    // ntn-dataset@1: sim_health.csv, ue_kpi/cell_kpi and repro-manifest.json like every
+    // other helper-built example (this example used to skip them).
+    rs.WriteHealthReport();
 
     auto bytesIn = [](const std::vector<Rx>& r, double a, double b) {
         double s = 0;
