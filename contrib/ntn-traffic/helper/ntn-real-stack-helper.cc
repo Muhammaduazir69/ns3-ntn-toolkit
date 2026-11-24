@@ -79,6 +79,7 @@
 #include "ns3/integer.h"
 
 #include <algorithm>
+#include <set>
 #include <chrono>
 #include <cmath>
 #include <sstream>
@@ -513,12 +514,23 @@ NtnRealStackHelper::StartAutoScene()
         return enu ? r < 5.0e7 : (r > 6.2e6 && r < 5.0e7);
     };
     uint32_t sats = 0;
+    std::vector<std::pair<uint32_t, uint16_t>> cellSeries; // (series id, cell id) per gNB satellite
     for (uint32_t i = 0; i < m_gnb.GetN(); ++i)
     {
         if (placeable(m_gnb.Get(i)))
         {
             m_autoScene->TrackNode(m_gnb.Get(i), ntnobs::NtnSceneRecorder::Sat, "sat-" + std::to_string(i));
             ++sats;
+            // The cell id this satellite serves, so traces keyed by cell id (CHO decisions,
+            // SIB19 broadcasts, RIC actions) can be placed on the right satellite.
+            const uint16_t cell = GetGnbCellId(i);
+            if (cell != 0)
+            {
+                cellSeries.emplace_back(m_autoScene->TrackKpiSeries(m_gnb.Get(i)->GetId(),
+                                                                    ntnobs::NtnSceneRecorder::Info,
+                                                                    "cell_id"),
+                                        cell);
+            }
         }
     }
     if (sats == 0)
@@ -531,6 +543,38 @@ NtnRealStackHelper::StartAutoScene()
         if (placeable(m_ue.Get(i)))
         {
             m_autoScene->TrackNode(m_ue.Get(i), ntnobs::NtnSceneRecorder::Ue, "ue-" + std::to_string(i));
+        }
+    }
+    // Context satellites: other orbiting nodes the scenario created but did not hand to the radio
+    // stack (O-RAN handover candidates, constellation neighbours) are part of what the run
+    // reasons about, so they are drawn too. ECEF only (a local frame cannot tell an orbit), at
+    // least 150 km above the Earth's surface. Named "ctx-sat-<node id>": the globe draws them as
+    // satellites, while the cell-id -> satellite mapping (gNB order) never counts them.
+    if (!enu)
+    {
+        std::set<uint32_t> tracked;
+        for (uint32_t i = 0; i < m_gnb.GetN(); ++i)
+        {
+            tracked.insert(m_gnb.Get(i)->GetId());
+        }
+        for (uint32_t i = 0; i < m_ue.GetN(); ++i)
+        {
+            tracked.insert(m_ue.Get(i)->GetId());
+        }
+        uint32_t ctx = 0;
+        for (uint32_t id = 0; id < NodeList::GetNNodes() && ctx < 400; ++id)
+        {
+            Ptr<Node> n = NodeList::GetNode(id);
+            if (tracked.count(id) || !placeable(n))
+            {
+                continue;
+            }
+            const Vector p = n->GetObject<MobilityModel>()->GetPosition();
+            if (std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z) > 6.371e6 + 1.5e5)
+            {
+                m_autoScene->TrackNode(n, ntnobs::NtnSceneRecorder::Sat, "ctx-sat-" + std::to_string(id));
+                ++ctx;
+            }
         }
     }
     // Serving edges from the initial attachment: every UE starts on gNB 0's cell in the
@@ -555,6 +599,10 @@ NtnRealStackHelper::StartAutoScene()
         m_autoScene->EnableLiveStdout(true);
     }
     m_autoScene->Start();
+    for (const auto& [sid, cell] : cellSeries)
+    {
+        m_autoScene->RecordKpi(sid, cell);
+    }
 }
 
 void

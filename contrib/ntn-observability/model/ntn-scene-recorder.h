@@ -96,7 +96,8 @@ class NtnSceneRecorder : public Object
         Sinr,
         Throughput,
         Tbler,
-        Delay
+        Delay,
+        Info //!< a static identifier recorded once (e.g. the cell id a satellite serves)
     };
 
     static TypeId GetTypeId();
