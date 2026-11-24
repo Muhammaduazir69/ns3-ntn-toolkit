@@ -391,7 +391,12 @@ NtnOrbitPredictor::GetBeamSnapshot(uint32_t satId,
                                    GeoCoordinate uePosition) const
 {
     NS_LOG_FUNCTION(this << satId << beamId);
-    NS_ASSERT_MSG(m_initialized, "NtnOrbitPredictor not initialized. Call Initialize() first.");
+    // Either Initialize() (SNS3 constellation + antenna patterns) or a kinematics source for
+    // this satellite with the analytic beam, which needs neither. (Release builds compile this
+    // assert out, so only assert-enabled builds ever rejected the kinematics mode.)
+    NS_ASSERT_MSG(m_initialized || (m_geometricBeam && m_kinematics.count(satId) > 0),
+                  "NtnOrbitPredictor not initialized: call Initialize(), or SetKinematicsSource() "
+                  "for this satellite together with SetGeometricBeam().");
 
     BeamSnapshot snap;
     snap.satId = satId;
@@ -465,7 +470,12 @@ NtnOrbitPredictor::GetBeamSnapshotAtTime(uint32_t satId,
                                           Time timeOffset) const
 {
     NS_LOG_FUNCTION(this << satId << beamId << timeOffset.GetSeconds());
-    NS_ASSERT_MSG(m_initialized, "NtnOrbitPredictor not initialized.");
+    // Either Initialize() (SNS3 constellation + antenna patterns) or a kinematics source for
+    // this satellite with the analytic beam, which needs neither. (Release builds compile this
+    // assert out, so only assert-enabled builds ever rejected the kinematics mode.)
+    NS_ASSERT_MSG(m_initialized || (m_geometricBeam && m_kinematics.count(satId) > 0),
+                  "NtnOrbitPredictor not initialized: call Initialize(), or SetKinematicsSource() "
+                  "for this satellite together with SetGeometricBeam().");
 
     BeamSnapshot snap;
     snap.satId = satId;
@@ -782,7 +792,12 @@ NtnOrbitPredictor::PredictBeamTrack(uint32_t satId,
                                     Time step) const
 {
     NS_LOG_FUNCTION(this << satId << beamId);
-    NS_ASSERT_MSG(m_initialized, "NtnOrbitPredictor not initialized.");
+    // Either Initialize() (SNS3 constellation + antenna patterns) or a kinematics source for
+    // this satellite with the analytic beam, which needs neither. (Release builds compile this
+    // assert out, so only assert-enabled builds ever rejected the kinematics mode.)
+    NS_ASSERT_MSG(m_initialized || (m_geometricBeam && m_kinematics.count(satId) > 0),
+                  "NtnOrbitPredictor not initialized: call Initialize(), or SetKinematicsSource() "
+                  "for this satellite together with SetGeometricBeam().");
 
     std::vector<std::pair<Time, GeoCoordinate>> track;
     Ptr<SatMobilityModel> satMob = GetSatelliteMobility(satId);
