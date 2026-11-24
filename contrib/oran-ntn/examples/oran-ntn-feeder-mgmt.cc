@@ -3810,7 +3810,17 @@ main(int argc, char* argv[])
     }
 
     Simulator::Stop(Seconds(g.simS));
-    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4).
+    // Globe scene of this run's own geometry (ntn-dataset@1, plan L4). The satellites that serve
+    // the cell over the run exist only as mobility models feeding the contact plans; give them
+    // device-less nodes so the scene shows them (the full shell is not drawn).
+    {
+        std::vector<Ptr<ntncon::Sgp4MobilityModel>> servingMobs;
+        for (const auto& s : sats)
+        {
+            servingMobs.push_back(s.mob);
+        }
+        ns3::ntnobs::AddContextSatelliteNodes(servingMobs);
+    }
     ns3::ntnobs::StartSceneFromNodeList(g.outDir);
     Simulator::Run();
 

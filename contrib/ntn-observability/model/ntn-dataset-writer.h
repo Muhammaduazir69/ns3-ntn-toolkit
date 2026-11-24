@@ -15,6 +15,8 @@
 #include "ns3/double.h"
 #include "ns3/mobility-model.h"
 #include "ns3/node-list.h"
+#include "ns3/node-container.h"
+#include "ns3/node.h"
 
 #include "ns3/rng-seed-manager.h"
 #include "ns3/simulator.h"
@@ -26,6 +28,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace ns3
 {
@@ -80,6 +83,33 @@ WriteDatasetRecord(const std::string& outDir,
         h << x.metric << "," << x.value << ",-,-," << x.provenance << "\n";
     }
     return ok && h.good();
+}
+
+/**
+ * Give every satellite mobility model that is not attached to a node its own device-less node, so
+ * a recorded scene can draw it (the auto scene of NtnRealStackHelper draws orbiting nodes the radio
+ * stack does not own as context satellites, "ctx-sat-<id>"). For constellation members that only
+ * feed a contact-graph scheduler, an O-RAN candidate list or a TTE predictor. The nodes carry no
+ * devices, so the network and its measurements are unchanged; call it after the scenario created
+ * its own nodes so their ids do not shift. Models already aggregated to a node are skipped.
+ * Returns the new nodes.
+ */
+template <typename MobPtr>
+inline NodeContainer
+AddContextSatelliteNodes(const std::vector<MobPtr>& mobs)
+{
+    NodeContainer out;
+    for (const auto& m : mobs)
+    {
+        if (!m || m->template GetObject<Node>())
+        {
+            continue;
+        }
+        Ptr<Node> n = CreateObject<Node>();
+        n->AggregateObject(m);
+        out.Add(n);
+    }
+    return out;
 }
 
 /**

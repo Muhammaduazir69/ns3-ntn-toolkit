@@ -62,6 +62,7 @@
  * elevation, SINR, DL/UL packets), nr_check_summary.csv, ue_kpi.csv, cell_kpi.csv, sim_health.csv.
  */
 
+#include "ns3/ntn-dataset-writer.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
 #include "ns3/internet-module.h"
@@ -1141,6 +1142,9 @@ RunNrCheck(double T, const std::string& dir, uint32_t periodMs)
     };
     Simulator::Schedule(Seconds(1), sample);
     Simulator::Stop(Seconds(T));
+    // The rest of the constellation (visibility / best-satellite selection) as device-less nodes,
+    // so the run's globe scene shows it next to the serving satellite.
+    ns3::ntnobs::AddContextSatelliteNodes(g_sats);
     Simulator::Run();
     rs.Collect();
     rs.WriteHealthReport();
