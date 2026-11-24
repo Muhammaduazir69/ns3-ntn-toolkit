@@ -3597,15 +3597,36 @@ class EarthBlockageGeometryTest : public TestCase
 
 /// Zenith geometry in ECEF for the closed-form and feeder tests.
 static void
-BuildZenithScene(NodeContainer& sats, NodeContainer& ues, double lat, double lon, double altM)
+BuildZenithScene(NodeContainer& sats,
+                 NodeContainer& ues,
+                 double lat,
+                 double lon,
+                 double altM,
+                 bool moving = false,
+                 double ueLonOffsetDeg = 0.0)
 {
+    // moving: the satellite starts over (lat, lon) and flies east at LEO-600 orbital speed
+    // (7.56 km/s, LeoRig's), so the 3GPP channel takes a new draw every update period as it does
+    // on a real pass; a static pair froze the channel on ns-3.48 (spatial consistency).
     sats.Create(1);
     ues.Create(1);
-    auto sm = CreateObject<ConstantPositionMobilityModel>();
-    sm->SetPosition(NtnRealStackHelper::GeodeticToEcef(lat, lon, altM));
-    sats.Get(0)->AggregateObject(sm);
+    const Vector p0 = NtnRealStackHelper::GeodeticToEcef(lat, lon, altM);
+    if (moving)
+    {
+        const double lonRad = lon * M_PI / 180.0;
+        auto sm = CreateObject<ConstantVelocityMobilityModel>();
+        sm->SetPosition(p0);
+        sm->SetVelocity(Vector(-7560.0 * std::sin(lonRad), 7560.0 * std::cos(lonRad), 0.0));
+        sats.Get(0)->AggregateObject(sm);
+    }
+    else
+    {
+        auto sm = CreateObject<ConstantPositionMobilityModel>();
+        sm->SetPosition(p0);
+        sats.Get(0)->AggregateObject(sm);
+    }
     auto um = CreateObject<ConstantPositionMobilityModel>();
-    um->SetPosition(NtnRealStackHelper::GeodeticToEcef(lat, lon, 0.0));
+    um->SetPosition(NtnRealStackHelper::GeodeticToEcef(lat, lon + ueLonOffsetDeg, 0.0));
     ues.Get(0)->AggregateObject(um);
 }
 
@@ -4591,8 +4612,13 @@ class DlHarqFeedbackDisabledTest : public TestCase
     {
         NodeContainer sats;
         NodeContainer ues;
-        // Zenith, default fading and excess loss: OLLA targets 10 % BLER, so some TBs fail.
-        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
+        // Default fading and excess loss, UE at about 30 deg elevation (10 deg of longitude east of
+        // the sub-satellite point, ~1,075 km slant) and the satellite moving east at LEO-600 speed:
+        // the 3GPP channel takes a new draw every update period (100 ms) as the satellite moves,
+        // so the CSI the gNB adapts to ages between reports and some TBs fail, with or without
+        // HARQ feedback. (A static zenith pair froze the channel on ns-3.48 and saturated at
+        // CQI 15 / MCS 28: no TB failed, so the test checked nothing.)
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3, true, 10.0);
         NtnRealStackHelper rs;
         rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
         rs.SetNumerology(1);
@@ -4875,9 +4901,9 @@ class RetxBsrTimerTest : public TestCase
     {
         NodeContainer sats;
         NodeContainer ues;
-        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3);
-        // Zenith, 600 km: the full-band PUSCH of a 23 dBm handheld runs near
-        // -10 dB SINR, so PUSCH TBs carrying the BSR are often lost.
+        // Zenith pass (satellite moving), 600 km: the full-band PUSCH of a 23 dBm handheld runs
+        // near -10 dB SINR, so PUSCH TBs carrying the BSR are often lost.
+        BuildZenithScene(sats, ues, 40.0, -3.0, 600e3, true);
         NtnRealStackHelper rs;
         rs.SetRadioBackend(NtnRealStackHelper::RadioBackend::Nr);
         rs.SetNumerology(1);
@@ -5358,8 +5384,10 @@ class FddPairingTest : public TestCase
 };
 
 /// Wave 9 (nr patch 17): TS 38.321 5.4.5 BSR triggering. A Set-1 handheld
-/// at zenith sends a periodic uplink (200 B every 40 ms) on its PRB-limited
-/// PUSCH. With triggering the SHORT_BSR rides only a minority of the UL TBs
+/// at zenith sends a periodic uplink (400 B every 40 ms, so each SDU takes longer
+/// than the 20 ms periodicBSR-Timer to drain and the timer can expire with data
+/// pending; a 200 B SDU drained in ~11 ms once the UL retransmission queue stopped
+/// dropping NACKed processes) on its PRB-limited PUSCH. With triggering the SHORT_BSR rides only a minority of the UL TBs
 /// (Regular on new data into an empty buffer, Periodic at the 20 ms timer,
 /// Padding when it fits), the periodic BSRs are at least one timer apart, and
 /// the uplink still arrives. Failure paths: nr's default puts a BSR in every
@@ -5436,7 +5464,7 @@ class BsrTriggeringTest : public TestCase
         ApplicationContainer sink = sinkH.Install(rs.GetRemoteHost());
         CbrHelper cbr("ns3::UdpSocketFactory",
                       InetSocketAddress(rs.GetRemoteHostIpv4Address(), 4012));
-        cbr.SetConstantTraffic(MilliSeconds(40), 200);
+        cbr.SetConstantTraffic(MilliSeconds(40), 400);
         ApplicationContainer app = cbr.Install(ues.Get(0));
         app.Start(Seconds(1.0));
         app.Stop(Seconds(3.5));
@@ -5447,8 +5475,8 @@ class BsrTriggeringTest : public TestCase
         o.periodic = rs.GetBsrSentCount(NrUeMac::BSR_PERIODIC);
         o.padding = rs.GetBsrSentCount(NrUeMac::BSR_PADDING);
         o.unconditional = rs.GetBsrSentCount(NrUeMac::BSR_UNCONDITIONAL);
-        o.sent = DynamicCast<CbrApplication>(app.Get(0))->GetSent() / 200;
-        o.rx = DynamicCast<PacketSink>(sink.Get(0))->GetTotalRx() / 200;
+        o.sent = DynamicCast<CbrApplication>(app.Get(0))->GetSent() / 400;
+        o.rx = DynamicCast<PacketSink>(sink.Get(0))->GetTotalRx() / 400;
         Simulator::Destroy();
         return o;
     }
@@ -5478,7 +5506,7 @@ class BsrTriggeringTest : public TestCase
         NS_TEST_ASSERT_MSG_GT(on.periodic, 0u, "Periodic BSR at the periodicBSR-Timer");
         NS_TEST_ASSERT_MSG_GT_OR_EQ(on.minPeriodicGap, MilliSeconds(20),
                                     "periodic BSRs at least one timer apart");
-        // A 200-byte SDU over 18-byte grants is about a dozen RLC UM segments
+        // A 400-byte SDU over 18-byte grants is about two dozen RLC UM segments
         // at -7 dB PUSCH SINR, so delivery depends on the fading draw; what
         // triggering must not do is deliver less than a BSR in every TB.
         NS_TEST_ASSERT_MSG_GT(on.rx, 0u, "uplink delivered with triggering");

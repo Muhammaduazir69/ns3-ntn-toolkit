@@ -40,18 +40,31 @@ namespace
 {
 
 /// `n` satellites at 600 km in a row along the equator `spacingKm` apart, and
-/// one UE at each satellite's nadir.
+/// one UE at each satellite's (initial) nadir. `moving`: the satellites fly east at
+/// LEO-600 orbital speed (7.56 km/s), so the 3GPP channel takes a new draw every
+/// update period as on a real pass (ns-3.48 freezes the channel of a static link).
 void
-Row(NodeContainer& sats, NodeContainer& ues, uint32_t n, double spacingKm)
+Row(NodeContainer& sats, NodeContainer& ues, uint32_t n, double spacingKm, bool moving = false)
 {
     sats.Create(n);
     ues.Create(n);
     for (uint32_t i = 0; i < n; ++i)
     {
         const double lon = i * spacingKm / 111.195;
-        auto sm = CreateObject<ConstantPositionMobilityModel>();
-        sm->SetPosition(NtnRealStackHelper::GeodeticToEcef(0.0, lon, 600e3));
-        sats.Get(i)->AggregateObject(sm);
+        if (moving)
+        {
+            const double lonRad = lon * M_PI / 180.0;
+            auto sm = CreateObject<ConstantVelocityMobilityModel>();
+            sm->SetPosition(NtnRealStackHelper::GeodeticToEcef(0.0, lon, 600e3));
+            sm->SetVelocity(Vector(-7560.0 * std::sin(lonRad), 7560.0 * std::cos(lonRad), 0.0));
+            sats.Get(i)->AggregateObject(sm);
+        }
+        else
+        {
+            auto sm = CreateObject<ConstantPositionMobilityModel>();
+            sm->SetPosition(NtnRealStackHelper::GeodeticToEcef(0.0, lon, 600e3));
+            sats.Get(i)->AggregateObject(sm);
+        }
         auto um = CreateObject<ConstantPositionMobilityModel>();
         um->SetPosition(NtnRealStackHelper::GeodeticToEcef(0.0, lon, 0.0));
         ues.Get(i)->AggregateObject(um);
@@ -587,7 +600,7 @@ class RealStackDeterminismTest : public TestCase
         RngSeedManager::ResetNextStreamIndex();
         NodeContainer sats;
         NodeContainer ues;
-        Row(sats, ues, 1, 0.0);
+        Row(sats, ues, 1, 0.0, true); // a pass: the fading varies, so runs average it out
         NtnRealStackHelper rs;
         NrSet1(rs, 2.0, CreateTempDirFilename("det"));
         rs.SetEmbbRate(DataRate("10Mb/s"));
@@ -611,7 +624,10 @@ class RealStackDeterminismTest : public TestCase
         NS_TEST_ASSERT_MSG_EQ(a.bytes, b.bytes, "identical bytes");
         NS_TEST_ASSERT_MSG_EQ(a.sinr, b.sinr, "identical SINR");
         NS_TEST_ASSERT_MSG_EQ_TOL(1.0 * c.rx, 1.0 * a.rx, 0.1 * a.rx, "another run: packets within 10 %");
-        NS_TEST_ASSERT_MSG_EQ_TOL(c.sinr, a.sinr, 2.0, "and SINR within 2 dB");
+        // Run-to-run spread of the mean SINR on this pass (ns-3.48, RngRun 1-9): 16.9-20.1 dB,
+        // sigma ~0.95 dB (the per-run TR 38.811 excess-loss draw does not average out over a
+        // 2 s pass), so two runs differ with sigma ~1.35 dB; 3 dB is ~2.2 sigma.
+        NS_TEST_ASSERT_MSG_EQ_TOL(c.sinr, a.sinr, 3.0, "and SINR within 3 dB");
     }
 };
 
